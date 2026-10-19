@@ -145,6 +145,14 @@ export interface MetaReadGateListSource {
      * an empty doc corpus is "every doc unclaimed, so `org`" — both GRANT.
      */
     listMetaItems(type: 'book' | 'doc' | 'object'): Promise<unknown> | undefined;
+    /**
+     * [#24031] One `getMetaItem` BY-NAME read of the object `name`, env-scoped
+     * the way {@link listMetaItems} is — absent when this transport's protocol
+     * has no by-name read, and then {@link loadObjectItem} asks the list as
+     * before. Answers the read's envelope (`{ item }`). A THROW is a fault,
+     * ⛔ never "no such object".
+     */
+    getObjectItem?(name: string): Promise<unknown>;
 }
 
 /** Everything {@link createMetaItemReadGate} reads, supplied by the transport. */
@@ -157,6 +165,23 @@ export interface MetaItemReadGateSources extends MetaReadGateAudienceSources, Me
     serviceProbe(caller: MetaReadGateCaller | undefined): ((name: string) => Promise<boolean>) | null;
     /** Where the nav-servability prune log records what it has already said (one line per key). */
     readonly navPruneLogged: Set<string>;
+    /**
+     * [#7557, #24210] Does the by-name read withhold this item because its
+     * owning package is disabled? Withheld means the plain read, under the
+     * same `?package=` scope, serves no `item` while its kept protection
+     * envelope names an owner (`packageId`, the served item's `_packageId`)
+     * the engine registry's `isPackageDisabled` answers `true` for: the field
+     * and predicate the protocol's list and by-name reads ask, and the
+     * protocol's own decision of which types it hides (`package` never is).
+     * The layered answer cannot say it itself: a runtime-saved item's layers
+     * carry no owner.
+     *
+     * Read by the layered chain ({@link createMetaLayeredAnswer}) only.
+     * Absent, or a registry that cannot answer, is "not withheld": the answer
+     * before #24210. A REJECTION is a fault and propagates, ⛔ never "not
+     * withheld".
+     */
+    isItemOfDisabledPackage?(item: { type: string; name: string; packageId?: string }): Promise<boolean>;
 }
 
 // ── The caller's organization ─────────────────────────────────────────────────
@@ -402,9 +427,9 @@ export type NavDocAudienceGate = (entry: any) => boolean;
  * Load the object metadata items for the current protocol/environment,
  * coerced to a plain array. Returns `[]` when metadata is unavailable so
  * callers fail OPEN (the data call itself needs the same metadata and will
- * surface any real error). Shared by `enforceApiAccess` (one object), the
- * cross-object batch route (all ops, fetched once) and the nav-servability
- * gate.
+ * surface any real error). Shared by the cross-object batch route (all ops,
+ * fetched once) and the nav-servability gate; the single-object exposure gate
+ * reads its one object by name ({@link loadObjectItem}).
  */
 export async function loadObjectItems(source: MetaReadGateListSource): Promise<any[]> {
     try {
@@ -428,6 +453,54 @@ export async function loadObjectItems(source: MetaReadGateListSource): Promise<a
             (err as Error)?.message ?? err,
         );
         return [];
+    }
+}
+
+/**
+ * [#24031] The ONE object the API-exposure gate judges, read by name — or
+ * `undefined` when no object is behind the name (no declared exposure policy,
+ * so the gate passes the request on, #3770).
+ *
+ * The gate used to ask {@link loadObjectItems} and search the list for the
+ * name. The list read serves every object decorated, and the decoration is a
+ * full schema diagnostic of each one, so every `/data` request paid a
+ * diagnostic pass over the whole registry to read one object's `enable`. The
+ * by-name read decorates only the object it serves.
+ *
+ * The answers are the list's:
+ *
+ *  - The item counts only under its own name, the match the list search made,
+ *    so a name the by-name read resolves to some other object is still "no
+ *    object here".
+ *  - A THROWN read fails OPEN and logs, as {@link loadObjectItems} does and
+ *    for the reason it records (#3545); "no object" is an answer, not a fault,
+ *    and logs nothing.
+ *  - A source with no by-name read (`getObjectItem` absent) asks the list, as
+ *    before.
+ *  - [#7557, #24097] A read refused `OBJECT_PACKAGE_DISABLED` is "no object
+ *    here", as the list read omits that object: no declared exposure policy to
+ *    judge, nothing failed, so nothing is logged. The data plane then refuses
+ *    the request with that same code.
+ *
+ * ⛔ Nothing here is cached: each request reads the object's current
+ * document, so a metadata change is honoured on the next request.
+ */
+export async function loadObjectItem(source: MetaReadGateListSource, name: string): Promise<any | undefined> {
+    if (typeof source.getObjectItem !== 'function') {
+        return (await loadObjectItems(source)).find((o: any) => o?.name === name);
+    }
+    try {
+        const envelope: any = await source.getObjectItem(name);
+        const item = envelope?.item;
+        return item !== null && typeof item === 'object' && item.name === name ? item : undefined;
+    } catch (err) {
+        if ((err as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED') return undefined;
+        logWarn(
+            '[REST] api-exposure gate: object metadata read failed — failing open ' +
+                '(auth + CRUD/FLS/RLS still enforce on the data call)',
+            (err as Error)?.message ?? err,
+        );
+        return undefined;
     }
 }
 
@@ -2794,6 +2867,10 @@ export interface MetaListTranslationSources {
  * applies built-in fallbacks (the injected system-field labels on custom
  * objects). No locale is: nothing is translated then.
  *
+ * [#23967] A `view` element is served without the `label` the translator
+ * falls back to when the view stored none ({@link withoutInventedViewLabel}),
+ * the rule the item read and the container read apply.
+ *
  * `RestServer.translateMetaItems` delegates here, and the list chain
  * ({@link createMetaListAnswer}) runs it as its last step on both transports.
  */
@@ -2820,10 +2897,13 @@ export async function translateMetaList(
     const p = PACKAGED_BASE_ACCESSORS.has(metaType) ? await sources.resolveProtocol() : undefined;
     // `getMetaItems` elements are metadata documents (the list envelope is the
     // OUTER `{ type, items }`), so every element translates directly (#5563).
-    const translated = arr.map((item) => translateMetadataDocument(metaType, item, bundle, {
-        ...metaTranslateOptions(i18n, locale),
-        packagedBase: packagedObjectBaseOf(p, metaType, item?.name),
-    }));
+    const translated = arr.map((item) => {
+        const out = translateMetadataDocument(metaType, item, bundle, {
+            ...metaTranslateOptions(i18n, locale),
+            packagedBase: packagedObjectBaseOf(p, metaType, item?.name),
+        });
+        return metaType === 'view' && item && typeof item === 'object' ? withoutInventedViewLabel(item, out) : out;
+    });
     return Array.isArray(raw) ? translated : { ...raw, items: translated };
 }
 
@@ -2851,6 +2931,10 @@ export async function translateMetaList(
  * type `view` — the registry files a `defineView` container under the object
  * it binds and serves it on that key's by-name read — and the spec translator
  * the table dispatches `view` to reads a single view's `name`.
+ *
+ * [#23967] A single view is served without the `label` that translator falls
+ * back to when the view stored none ({@link withoutInventedViewLabel}) — the
+ * rule the container read and the list read apply.
  */
 export async function translateMetaDocument(
     sources: MetaListTranslationSources,
@@ -2878,10 +2962,11 @@ export async function translateMetaDocument(
     const packagedBase = PACKAGED_BASE_ACCESSORS.has(metaType)
         ? packagedObjectBaseOf(await sources.resolveProtocol(), metaType, (document as any)?.name)
         : undefined;
-    return translateMetadataDocument(metaType, document as any, bundle, {
+    const translated = translateMetadataDocument(metaType, document as any, bundle, {
         ...metaTranslateOptions(i18n, locale),
         packagedBase,
     });
+    return metaType === 'view' ? withoutInventedViewLabel(document as Record<string, unknown>, translated) : translated;
 }
 
 /**
@@ -2912,8 +2997,9 @@ export async function translateMetaDocument(
  *
  * A string the catalog does not carry is never invented: the translator falls
  * back to a view's `name` for a missing label, and that fallback is not a
- * translation ({@link projectViewTranslation}). With no bundle, nothing
- * changes and the SAME container is returned.
+ * translation ({@link withoutInventedViewLabel}, through
+ * {@link projectViewTranslation}). With no bundle, nothing changes and the SAME
+ * container is returned.
  *
  * Known limit: a container saved at runtime on ANOTHER package's object is
  * expanded by the metadata protocol under its own name (`<object>.<name>.<key>`),
@@ -3004,8 +3090,8 @@ async function translateMetaViewContainer(
  * lands on `target`, and so does every key it replaced in the view's `config`
  * (`bulkActionDefs`): an expanded view nests its whole list or form body under
  * `config`, and the slot IS that body. The expansion's own identity keys are
- * never copied. A `label` that equals `input.name` where `input` had none is
- * the translator's fallback, not a translation, and is dropped.
+ * never copied. The translator's `label` fallback is not a translation and
+ * never lands ({@link withoutInventedViewLabel}).
  */
 function projectViewTranslation(
     target: Record<string, unknown>,
@@ -3018,9 +3104,8 @@ function projectViewTranslation(
         if (out === target) out = { ...target };
         out[key] = value;
     };
-    for (const [key, value] of Object.entries(translated)) {
+    for (const [key, value] of Object.entries(withoutInventedViewLabel(input, translated))) {
         if (key === 'config' || VIEW_EXPANSION_IDENTITY_KEYS.has(key) || value === input[key]) continue;
-        if (key === 'label' && input.label == null && value === input.name) continue;
         set(key, value);
     }
     const config = translated.config;
@@ -3031,6 +3116,38 @@ function projectViewTranslation(
         }
     }
     return out;
+}
+
+/**
+ * [#22614 · #23967] `translated` — what the spec's `translateView` answered for
+ * the view `input` — without the `label` that translator invents. It answers
+ * `input.label ?? input.name` when the catalog carries no string for the view,
+ * so a view stored with no `label` comes back carrying its own name, and the
+ * spec declares a view's `label` optional with no default: that value was
+ * authored by nobody and translated from nothing, and a reader could tell it
+ * from a real label only by comparing it to `name`.
+ *
+ * The rule: a `label` equal to `input.name` where `input` carried none (absent
+ * or nullish) is the fallback, and `input`'s own value takes its place — no
+ * `label` key when `input` had none. An authored `label`, even one equal to the
+ * view's name, and a catalog string that differs from the name are served
+ * unchanged; a catalog string equal to the name cannot be told from the
+ * fallback and goes with it.
+ *
+ * ONE rule for every `view` read this module translates: the item read
+ * ({@link translateMetaDocument}), the list read ({@link translateMetaList})
+ * and each part of a container ({@link projectViewTranslation}). Returns
+ * `translated` itself when nothing is dropped.
+ */
+function withoutInventedViewLabel(
+    input: Record<string, unknown>,
+    translated: Record<string, unknown>,
+): Record<string, unknown> {
+    if (input.label != null || translated.label !== input.name) return translated;
+    const served: Record<string, unknown> = { ...translated };
+    if ('label' in input) served.label = input.label;
+    else delete served.label;
+    return served;
 }
 
 /** The keys `expandViewContainer` stamps on an item — its identity, never the view's own content. */
@@ -3571,6 +3688,12 @@ export interface MetaLayeredRequest {
     readonly metaType: string;
     readonly name: string;
     /**
+     * [ADR-0048] The `?package=` scope the transport read the layers under,
+     * absent for none. The same name can be stored in two packages, so the
+     * owner step 1b asks about is the one this scope resolves.
+     */
+    readonly packageId?: string;
+    /**
      * [ADR-0106 D2/D3] The caller's field-visibility posture for this item,
      * resolved by the transport BEFORE the read, the not-applicable passthrough
      * for every type but `object`. A tier-3 fault is the transport's to answer
@@ -3638,6 +3761,18 @@ export type MetaLayeredAnswer =
  *     that difference told a member which unpublished apps exist. The
  *     protocol's `effective` is never null while another layer is present, so
  *     this is the name resolving to nothing at all, for every caller.
+ *  1b. [#7557, #24210] A disabled package's item — every type the by-name
+ *     read withholds for it — is that same `absent`: the list read omits it
+ *     and the by-name read answers it as a name with nothing behind it, so
+ *     both spellings on both transports take the missing name's exit. Asked
+ *     of {@link MetaItemReadGateSources.isItemOfDisabledPackage}, BEFORE the
+ *     gate, so an author who may write the item is not served it whole
+ *     either. An object is the protocol's own `OBJECT_PACKAGE_DISABLED`
+ *     refusal, thrown by the read before this chain; which other types are
+ *     hidden is the plain read's decision, never restated here. The
+ *     protocol's layered read keeps serving every layer, because
+ *     its resolution readers (the security catalog echo, the
+ *     packaged-permission-set lock gate) need them: the door answers here.
  *  2. [#20156] THE per-caller gate on EVERY present layer, `effective` first
  *     (it is what the plain read serves, so its refusal is the plain read's
  *     own), under {@link STORED_VERSION_DOOR_POLICY}: per-caller arms only
@@ -3663,7 +3798,7 @@ export function createMetaLayeredAnswer(
     sources: MetaItemReadGateSources,
     request: MetaLayeredRequest,
 ): (layered: unknown) => Promise<MetaLayeredAnswer> {
-    const { metaType, name, maskPosture } = request;
+    const { metaType, name, packageId, maskPosture } = request;
     return async (raw) => {
         const layered = raw as Record<string, unknown> | null | undefined;
         const present = META_ITEM_LAYERS.filter((layer) => layered?.[layer] != null);
@@ -3671,6 +3806,13 @@ export function createMetaLayeredAnswer(
         // 1. [#20507] Absence — ADR-0045 §3: a name with no layer behind it is
         //    the plain read's absence, answered before the gate.
         if (present.length === 0) return { kind: 'refuse', refusal: { reason: 'absent' } };
+
+        // 1b. [#7557, #24210] A disabled package's item is that same absence,
+        //     for every caller: before the gate, so no author is served it.
+        if (metaType !== 'object'
+            && await sources.isItemOfDisabledPackage?.({ type: metaType, name, ...(packageId ? { packageId } : {}) }) === true) {
+            return { kind: 'refuse', refusal: { reason: 'absent' } };
+        }
 
         // 2. [#20156] THE per-caller gate, on every present layer.
         const served = new Map<string, unknown>();

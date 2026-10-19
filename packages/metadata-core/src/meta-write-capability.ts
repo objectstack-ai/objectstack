@@ -181,9 +181,12 @@ export const PLATFORM_OPERATOR_POSTURE = 'PLATFORM_ADMIN';
  * `/meta` item write doors on both transports (save, reset, publish,
  * rollback), `POST /meta/_migrate-stored` on both transports, the `/packages`
  * write doors, the `/automation` definition writes,
- * `install-local` (install, upgrade, uninstall), the permission-set clone
- * door and the security plugin's data door on the catalog objects. Under
- * `single` it is inert: the organization is the environment, and the
+ * `install-local` (install, upgrade, uninstall) and the permission-set clone
+ * door. (The security plugin's data door on the catalog objects asked it too,
+ * until those objects retired — ADR-0131 D3, C3 stage 8: no `sys_position`,
+ * `sys_permission_set` or `sys_capability` write reaches the engine, so a
+ * position, set or capability is written through the `/meta` doors above.)
+ * Under `single` it is inert: the organization is the environment, and the
  * capability gate decides alone.
  *
  * Admitted under a wall: `isSystem` (the engine's own writes: seeders,

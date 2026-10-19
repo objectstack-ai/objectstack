@@ -40,12 +40,14 @@ import Database from 'better-sqlite3';
  *    included) — with `pending` empty, equal counts are equal sets;
  *  - the unmanaged-tables sweep RUNS on every shape — the composition says it
  *    mirrors the served boot, the compiled-artifact project with no config
- *    included (#22580) — and names nothing but `sys_packages`.
+ *    included (#22580) — and names nothing: [#24059] not even `sys_packages`,
+ *    which the composed package registry declares outside the object set.
  *
  * `sys_packages` is the one table outside the object set, by construction:
  * `PackageServicePlugin.start()` creates it with raw DDL (`package-table.ts`),
- * and no object declares it. A new raw-DDL table fails this pin and has to be
- * named here with the same reason.
+ * and no object declares it — its `package.storage` declaration does, and the
+ * sweep reads that declaration. A new raw-DDL table fails this pin and has to
+ * be named here with the same reason.
  *
  * Both sides run with `OS_TELEMETRY_DB=0`, so the pin compares object sets on
  * one database. A development boot's `telemetry` sibling (ADR-0057 §3.6) — a
@@ -145,10 +147,11 @@ function expectParity(r: Reading): void {
   // … and platform tables by name: [#22580] the unmanaged sweep runs on every
   // shape, because the composition records that it mirrors the served boot —
   // the compiled artifact with no config included, which it used to withhold
-  // with a reason that no longer held.
+  // with a reason that no longer held. [#24059] It reports nothing: the
+  // raw-DDL table above exists, and its declaration accounts for it.
   expect(r.plan.unmanagedTables?.status, JSON.stringify(r.plan.unmanagedTables)).toBe('read');
   const unmanaged = (r.plan.unmanagedTables.tables ?? []).map((t: any) => t.table);
-  expect(unmanaged).toEqual(NOT_AN_OBJECT);
+  expect(unmanaged).toEqual([]);
 }
 
 describe('os migrate plan examines exactly what os serve registers, per app shape (#22506)', () => {

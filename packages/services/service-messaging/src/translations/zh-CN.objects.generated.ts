@@ -116,7 +116,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_delivery: {
     label: "通知投递",
     pluralLabel: "通知投递",
-    description: "持久化的按接收人 × 通道投递发件箱(ADR-0030 第 4 层)。",
+    description: "持久化的按接收人 × 通道投递发件箱。",
     fields: {
       id: {
         label: "投递 ID"
@@ -190,7 +190,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_preference: {
     label: "通知偏好",
     pluralLabel: "通知偏好",
-    description: "按用户 × 主题 × 通道的通知开关(静音/允许),支持管理员全局默认值。",
+    description: "每位用户接收哪些通知主题和通道;默认值由管理员设置。",
     fields: {
       id: {
         label: "偏好 ID"
@@ -234,6 +234,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       updated_at: {
         label: "更新时间"
       }
+    },
+    _views: {
+      all: {
+        label: "全部",
+        emptyState: {
+          title: "尚无通知偏好",
+          message: "添加偏好之前，任何通知都不会被静音；添加一条偏好，即可为某个用户或作为所有人的默认值，静音或允许某个主题在某个通道上的通知。"
+        }
+      }
     }
   },
   sys_notification_subscription: {
@@ -263,12 +272,21 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       created_at: {
         label: "创建时间"
       }
+    },
+    _views: {
+      all: {
+        label: "全部",
+        emptyState: {
+          title: "尚无通知订阅",
+          message: "订阅记录某个角色、团队或用户关注某个通知主题。"
+        }
+      }
     }
   },
   sys_notification_template: {
     label: "通知模板",
     pluralLabel: "通知模板",
-    description: "按(主题 × 通道 × 语言)的通知渲染模板。",
+    description: "每个通知主题在各通道、各语言下发送的标题和正文。",
     fields: {
       id: {
         label: "模板 ID"
@@ -314,12 +332,21 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       updated_at: {
         label: "更新时间"
       }
+    },
+    _views: {
+      all: {
+        label: "全部",
+        emptyState: {
+          title: "尚无通知模板",
+          message: "按主题、通道和语言添加模板；在此之前，通知会使用发送方提供的标题和正文发送。"
+        }
+      }
     }
   },
   sys_http_delivery: {
     label: "HTTP 投递",
     pluralLabel: "HTTP 投递",
-    description: "单次出站 HTTP 调用的持久化发件箱行(ADR-0018)。由 @objectstack/service-messaging 管理,请勿直接写入。",
+    description: "由 Webhook 和流程发出的 HTTP 调用,每次调用一行,并记录其投递状态。",
     fields: {
       id: {
         label: "投递 ID",

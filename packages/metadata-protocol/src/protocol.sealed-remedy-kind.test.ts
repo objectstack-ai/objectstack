@@ -1,31 +1,34 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#22591] The sealed-item refusal's REMEDY follows what the caller did — the
- * family close-out after #20819 (flow) and #20910 (action, permission), which
- * each fixed one type's sentence for an edit.
+ * [#23577] A write over a sealed, package-held name reads ONE sentence, whatever
+ * the write meant to do. It replaces [#22591]'s two remedies (a create was told
+ * to choose another name, an edit to edit the source artifact and redeploy) and
+ * [#23406]'s draft/publish split of them: the door cannot tell a create from an
+ * edit, because the one fact it read as a create, the first-write pin
+ * (`If-None-Match: *`), is also what the console sends for a first draft, and
+ * each remedy was wrong for the other caller.
  *
- * One refusal answers two different acts on a name a managed package or a
- * built-in holds, and each act has its own remedy KIND:
+ * The sentence states what the door knows and where the names are listed:
+ * "'TYPE/NAME' is provided by a managed package and is sealed: it cannot be
+ * written here. GET /api/v1/meta/TYPE lists the names in use." The wording is
+ * the ruled text, so it is pinned whole for a type with no regime row. A type
+ * with a regime row keeps its regime sentence (ADR-0126 §2: a Regime C refusal
+ * names its sanctioned path; the origin-gated row names the source a
+ * code-defined datasource is declared in).
  *
- *  - an EDIT of the item under the name (`save`) is told where that item can
- *    change — its regime row's sanctioned path or source, or, with no row, its
- *    source artifact;
- *  - a CREATE of an item of the caller's own under the name, or a rename into
- *    it (`create`), is told to choose a name no package or built-in holds.
+ * THE ENUMERATION iterates every type the refusal can reach — read from the
+ * registry, plus a type no static entry declares (a plugin-registered type) — so
+ * a type added later is held to the one sentence the day it lands.
  *
- * THE ENUMERATION PIN iterates every type the refusal can reach — read from the
- * registry, plus a type no static entry declares (a plugin-registered type) —
- * for both acts, and asserts the remedy KIND, never the wording. A type added to
- * the registry later is iterated the day it lands, so its create cannot keep the
- * edit remedy unnoticed. The kind is read off what the sentence POINTS AT: the
- * row's own routes and source (read from the table, never transcribed), the
- * source/redeploy remedy, or the type's listing route.
- *
- * The control half: the verdict does not move — the same code and status on
- * every row, and a create is refused exactly where a save is, on every type.
+ * THE DOOR PINS send the requests that reach it: the console's generic create
+ * over a held name (`mode: 'draft'` + `If-None-Match: *`), a publish-mode `*`,
+ * and the unpinned and pinned saves. All read one sentence, with one code and
+ * status. The control: an overlay type's first overlay write (`view`) is not
+ * refused at all.
  */
 import { describe, expect, it } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { PACKAGED_BASE_REGIME } from './packaged-base-regime.js';
@@ -58,36 +61,19 @@ const shape = (e: any) => (e ? { code: e.code, status: e.status } : null);
 /** Every type the iteration covers: the whole registry, and a plugin-registered type. */
 const TYPES = [...DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type), PLUGIN_TYPE];
 
-/** The type's listing route — where the names in use are read. A create's remedy points here. */
+/** The type's listing route — where the names in use are read. */
 const listingOf = (type: string) => `GET /api/v1/meta/${type}`;
 
-/**
- * What an EDIT remedy points at for `type`: the routes or the source its regime
- * row names (read from the row), and the source/redeploy remedy every row-less
- * type reads. None of these acts on an item of the caller's own.
- */
-function editSigns(type: string): Array<string | RegExp> {
-    const row = PACKAGED_BASE_REGIME[type];
-    const fromRow: string[] = row === undefined
-        ? []
-        : row.regime === 'C'
-            ? Object.values(row.routes).filter((route): route is string => typeof route === 'string')
-            : [row.source, ...Object.values(row.hostOwned ?? {})];
-    return [...fromRow, /\bredeploy\b/, /\bsource\b/];
-}
+/** The ruled sentence, for a type with no regime row. */
+const oneSentence = (type: string, name: string) =>
+    `'${type}/${name}' is provided by a managed package and is sealed: it cannot be written here. `
+    + `${listingOf(type)} lists the names in use.`;
 
-type RemedyKind = 'new-name' | 'edit' | 'both' | 'none';
+/** Advice the door cannot give truthfully: a create's, and the source artifact's. */
+const CREATE_ADVICE = /choose a name|name no package|author your own/i;
+const SOURCE_ADVICE = /source artifact|redeploy/i;
 
-/** The remedy KIND a sentence names for `type` — read off what it points at, not off its wording. */
-function remedyKind(message: string, type: string): RemedyKind {
-    const newName = message.includes(listingOf(type));
-    const edit = editSigns(type).some((sign) => (typeof sign === 'string' ? message.includes(sign) : sign.test(message)));
-    if (newName && edit) return 'both';
-    if (newName) return 'new-name';
-    return edit ? 'edit' : 'none';
-}
-
-describe('[#22591] the sealed-item refusal names the remedy the caller\'s ACT has — every reachable type, edit and create', () => {
+describe('[#23577] every write over a sealed, package-held name reads one sentence — every reachable type', () => {
     for (const environmentId of [undefined, 'env_1']) {
         const kernel = environmentId ? 'environment' : 'host-config';
 
@@ -101,61 +87,61 @@ describe('[#22591] the sealed-item refusal names the remedy the caller\'s ACT ha
                 PLUGIN_TYPE,
             ];
             expect(reached.sort()).toEqual(expected.sort());
-            // Every regime row is on a type the refusal reaches — a row on an
-            // unreachable type would be a sentence no door can serve.
             for (const type of Object.keys(PACKAGED_BASE_REGIME)) expect(reached, type).toContain(type);
             // A floor, so an iteration that silently shrank cannot read green.
             expect(reached.length).toBeGreaterThanOrEqual(20);
         });
 
-        it(`an EDIT names the edit remedy, and a CREATE names a name no package or built-in holds — on every reachable type (${kernel} kernel)`, () => {
+        it(`a row-less type reads the one sentence; no package-held item is told to create or to edit its source (${kernel} kernel)`, () => {
             const p = protocolOn(environmentId);
-            const kinds: Record<string, { edit: RemedyKind; create: RemedyKind }> = {};
+            let rowless = 0;
             for (const type of TYPES) {
-                const edit: any = p.packagedBaseRefusal({ type, name: HELD, operation: 'save' });
-                if (edit === null) continue;
-                const create: any = p.packagedBaseRefusal({ type, name: HELD, operation: 'create' });
-                kinds[type] = { edit: remedyKind(String(edit.message), type), create: remedyKind(String(create?.message), type) };
+                const refusal: any = p.packagedBaseRefusal({ type, name: HELD, operation: 'save' });
+                if (refusal === null) continue;
+                expect(shape(refusal), type).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+                const message = String(refusal.message);
+                expect(message, type).not.toMatch(CREATE_ADVICE);
+                const row = PACKAGED_BASE_REGIME[type];
+                if (row === undefined) {
+                    expect(message, type).toBe(oneSentence(type, HELD));
+                    rowless += 1;
+                } else if (row.regime === 'C') {
+                    // ADR-0126 §2: the sanctioned path, read from the row.
+                    for (const route of Object.values(row.routes)) if (route) expect(message, type).toContain(route);
+                    expect(message, type).not.toMatch(SOURCE_ADVICE);
+                } else {
+                    // The origin-gated row: a code-defined datasource, whose one
+                    // remedy is the source it is declared in.
+                    expect(message, type).toContain(row.source);
+                }
+                // A name nothing holds is no question for this verdict.
+                expect(p.packagedBaseRefusal({ type, name: FREE, operation: 'save' }), type).toBeNull();
             }
-            const expected = Object.fromEntries(Object.keys(kinds).map((type) => [type, { edit: 'edit', create: 'new-name' }]));
-            expect(kinds).toEqual(expected);
-        });
-
-        it(`control: the verdict does not move — a create is refused exactly where a save is, with the same code and status (${kernel} kernel)`, () => {
-            const p = protocolOn(environmentId);
-            for (const type of TYPES) {
-                const save = shape(p.packagedBaseRefusal({ type, name: HELD, operation: 'save' }));
-                const create = shape(p.packagedBaseRefusal({ type, name: HELD, operation: 'create' }));
-                expect(create, type).toEqual(save);
-                if (save !== null) expect(save, type).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
-                // A name nothing holds is no question for this verdict, either act.
-                expect(p.packagedBaseRefusal({ type, name: FREE, operation: 'create' }), type).toBeNull();
-            }
+            expect(rowless).toBeGreaterThanOrEqual(15);
         });
     }
 
-    it('a create\'s sentence points at nothing that acts on the held item — no hatch, no clone, no switch — and arrives whole through the REST door', () => {
+    it('the one sentence arrives whole through the REST door, and names neither the hatch nor a clone or switch', () => {
         // `truncateClientMessage` (packages/rest/src/error-response.ts) keeps a
-        // message only while it is SHORTER than 500 characters; past that the
-        // tail is cut. An 88-character name on every type, the bound the
-        // edit sentences are held to.
+        // message only while it is SHORTER than 500 characters. An 88-character
+        // name on every type, the bound the regime sentences are held to.
         const longName = `pkg_${'x'.repeat(84)}`;
         expect(longName).toHaveLength(88);
         const registry = { getArtifactItem: (_t: string, name: string) => (name === longName ? shipped(name) : undefined) };
         const p = new ObjectStackProtocolImplementation({ registry } as never, () => new Map(), 'env_1');
         for (const type of TYPES) {
-            const refusal: any = p.packagedBaseRefusal({ type, name: longName, operation: 'create' });
+            if (PACKAGED_BASE_REGIME[type] !== undefined) continue;
+            const refusal: any = p.packagedBaseRefusal({ type, name: longName, operation: 'save' });
             if (refusal === null) continue;
             const message = String(refusal.message);
             expect(message.length, type).toBeLessThan(500);
-            expect(message, type).toContain(listingOf(type));
+            expect(message, type).toBe(oneSentence(type, longName));
             expect(message, type).not.toContain('OS_METADATA_WRITABLE');
             expect(message.toLowerCase(), type).not.toMatch(/clone it|switch it off/);
-            expect(message.endsWith('.md.'), type).toBe(true);
         }
     });
 
-    it('a removal is no create: it keeps its own sentence, which names no new name', () => {
+    it('a removal is no write: it keeps its own sentence, which names no listing route', () => {
         const p = protocolOn('env_1');
         for (const type of TYPES) {
             const removal: any = p.packagedBaseRefusal({ type, name: HELD, operation: 'delete' });
@@ -166,30 +152,90 @@ describe('[#22591] the sealed-item refusal names the remedy the caller\'s ACT ha
 });
 
 /**
- * The `/meta` save door says which act a save is from the one fact its caller
- * sends about the name: a present `null` parent (`If-None-Match: *` on the REST
- * door) is the first-write pin — the caller holds no row under the name and is
- * writing one of its own, a create. Every other save is an edit, as before.
- * Pinned on a row-less type (`position`, the card's own) and on a Regime C type
- * (`flow`, which the flow authoring rule answers before the package door).
+ * The `/meta` save door: every request that reaches the seal reads the one
+ * sentence, pinned or not, draft or publish. `position` is the console's
+ * generic create (Setup positions); `object` is a row-less type with a draft
+ * lifecycle; `flow` is a Regime C type, answered by the flow authoring rule
+ * before the package door, and reads its one regime sentence for every request.
  */
-describe('[#22591] the /meta save door reads its first-write pin as a create', () => {
+describe('[#23577] the /meta save door reads every write over a held name the same way', () => {
     const thrownBy = (run: Promise<unknown>) => run.then(() => undefined, (e: any) => e);
 
-    for (const type of ['position', 'flow'] as const) {
-        it(`\`${type}\`: a first-write save names a free name; an unpinned or pinned save keeps the edit remedy — same code and status`, async () => {
-            const p = protocolOn('env_1');
-            const item = { name: HELD, label: 'Mine' };
-            const first: any = await thrownBy(p.saveMetaItem({ type, name: HELD, item, parentVersion: null }));
-            const unpinned: any = await thrownBy(p.saveMetaItem({ type, name: HELD, item }));
-            const pinned: any = await thrownBy(p.saveMetaItem({ type, name: HELD, item, parentVersion: 'v1' }));
-            for (const refusal of [first, unpinned, pinned]) expect(shape(refusal)).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
-            expect(remedyKind(String(first.message), type)).toBe('new-name');
-            expect(remedyKind(String(unpinned.message), type)).toBe('edit');
-            expect(remedyKind(String(pinned.message), type)).toBe('edit');
-            // One emitter: the door's first write throws the verdict a create is handed.
-            expect(first.message).toBe((p.packagedBaseRefusal({ type, name: HELD, operation: 'create' }) as any).message);
-            expect(unpinned.message).toBe((p.packagedBaseRefusal({ type, name: HELD, operation: 'save' }) as any).message);
-        });
+    for (const environmentId of [undefined, 'env_1']) {
+        const kernel = environmentId ? 'environment' : 'host-config';
+        for (const type of ['position', 'object', 'flow'] as const) {
+            it(`\`${type}\`: the console's create (draft + If-None-Match: *), a publish-mode *, and the unpinned and pinned saves read one sentence (${kernel} kernel)`, async () => {
+                const p = protocolOn(environmentId);
+                const item = { name: HELD, label: 'Mine' };
+                const requests = {
+                    consoleCreate: await thrownBy(p.saveMetaItem({ type, name: HELD, item, parentVersion: null, mode: 'draft' })),
+                    publishPin: await thrownBy(p.saveMetaItem({ type, name: HELD, item, parentVersion: null, mode: 'publish' })),
+                    unpinnedDraft: await thrownBy(p.saveMetaItem({ type, name: HELD, item, mode: 'draft' })),
+                    unpinned: await thrownBy(p.saveMetaItem({ type, name: HELD, item })),
+                    pinned: await thrownBy(p.saveMetaItem({ type, name: HELD, item, parentVersion: 'v1' })),
+                };
+                const expected = (p.packagedBaseRefusal({ type, name: HELD, operation: 'save' }) as any).message;
+                if (type !== 'flow') expect(expected).toBe(oneSentence(type, HELD));
+                for (const [request, refusal] of Object.entries(requests) as Array<[string, any]>) {
+                    expect(shape(refusal), `${request}: ${String(refusal?.message)}`).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+                    expect(refusal.message, request).toBe(expected);
+                }
+            });
+        }
     }
+});
+
+/**
+ * The control: an overlay type's first overlay write over a packaged item is
+ * an overlay row, never a sealed write — the real write path over a stub
+ * engine (the `protocol.flow-org-override-closed.test.ts` harness shape), so a
+ * harness that could save nothing cannot pass it.
+ */
+describe('[#23577] control: an overlay type\'s first overlay write still succeeds', () => {
+    function makeProtocol(artifacts: Array<{ type: string; name: string }>) {
+        const rows: Array<Record<string, unknown>> = [];
+        const artifactKeys = new Set(artifacts.map((a) => `${a.type}|${a.name}`));
+        const engine: any = {
+            async findOne(_t: string, opts: { where: Record<string, unknown> }) {
+                assertEngineFindOnePredicate(_t, opts);
+                return null;
+            },
+            async find() { return []; },
+            async insert(_t: string, data: Record<string, unknown>) {
+                if (_t !== 'sys_metadata') return { id: 'side_effect_skip' };
+                rows.push(data);
+                return { id: `r_${rows.length}` };
+            },
+            async update(_t: string, data: Record<string, unknown>, opts?: Record<string, unknown>) {
+                assertEngineUpdateDispatch(data, opts);
+                return { id: null };
+            },
+            async delete(_t: string, opts?: Record<string, unknown>) {
+                assertEngineDeleteDispatch(opts);
+                return { deleted: 0 };
+            },
+            registry: {
+                registerItem: () => {},
+                registerObject: () => {},
+                listItems: () => [],
+                getItem: () => undefined,
+                getArtifactItem: (type: string, name: string) =>
+                    artifactKeys.has(`${type}|${name}`) ? { name, _packageId: PACKAGE_ID } : undefined,
+            },
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_prod') as any;
+        return { protocol, rows };
+    }
+
+    it('`view`: a first write pinned If-None-Match: * over a packaged view lands an overlay row', async () => {
+        const { protocol, rows } = makeProtocol([{ type: 'view', name: 'overdue_grid' }]);
+        const result = await protocol.saveMetaItem({
+            type: 'view',
+            name: 'overdue_grid',
+            item: { name: 'overdue_grid', label: 'Overdue', object: 'task', viewKind: 'list', columns: [{ field: 'name', label: 'Name' }] },
+            parentVersion: null,
+        });
+        expect(result.success).toBe(true);
+        expect(rows.filter((r) => r.type === 'view' && r.name === 'overdue_grid')).toHaveLength(1);
+    });
 });

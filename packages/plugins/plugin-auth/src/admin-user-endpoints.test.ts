@@ -1032,9 +1032,11 @@ describe('set-user-password: the revoke-sessions-and-keys switch (#23287)', () =
       expect(doc.expires_at instanceof Date && doc.expires_at.getTime() < Date.now()).toBe(true);
       expect(doc.revoked_at instanceof Date).toBe(true);
     }
+    // Each key carries the reason beside the flag: it is what restricts the
+    // restore to a platform administrator (`api-key-restore-guard.ts`).
     expect(writesTo(m, 'sys_api_key')).toEqual([
-      { id: 'key_1', revoked: true },
-      { id: 'key_2', revoked: true },
+      { id: 'key_1', revoked: true, revoked_reason: 'admin_password_reset' },
+      { id: 'key_2', revoked: true, revoked_reason: 'admin_password_reset' },
     ]);
     // The new password landed BEFORE anything was revoked.
     const pw = m.authCtx.internalAdapter.updatePassword.mock.invocationCallOrder[0];

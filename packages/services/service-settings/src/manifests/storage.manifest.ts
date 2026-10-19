@@ -12,11 +12,7 @@ const manifest = {
   version: 1,
   label: 'File Storage',
   icon: 'HardDrive',
-  description:
-    'Backend used for attachments, exports, and user uploads. ' +
-    '⚠ Switching adapter does not migrate existing files — files ' +
-    'uploaded under the previous adapter become unreachable through ' +
-    'the new one.',
+  description: 'Backend used for attachments, exports, and user uploads.',
   scope: 'global',
   readPermission: 'manage_platform_settings',
   writePermission: 'manage_platform_settings',
@@ -31,6 +27,15 @@ const manifest = {
         { value: 's3', label: 'S3 / S3-compatible' },
       ],
     },
+    // The adapter-switch warning is a structured callout, not a sentence in
+    // the namespace description: `bannerSeverity` carries the severity an
+    // inline warning glyph used to spell by hand, and `id` addresses its copy
+    // under `settings.storage.banners.adapter_switch_warning` in each bundle.
+    { type: 'info_banner', id: 'adapter_switch_warning', label: 'Existing files are not migrated',
+      required: false, bannerSeverity: 'warning',
+      bannerText:
+        'Switching adapter does not migrate existing files — files uploaded under the ' +
+        'previous adapter become unreachable through the new one.' },
 
     { type: 'group', id: 'local', label: 'Local', required: false,
       visible: "${data.adapter === 'local'}" },

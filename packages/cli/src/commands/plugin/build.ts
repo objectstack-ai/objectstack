@@ -21,7 +21,7 @@
  * unsigned artifact whose `SIGNATURE` is a placeholder.
  */
 
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, relative, resolve as resolvePath, sep as PATH_SEP } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
@@ -43,6 +43,7 @@ import {
   createTarGz,
   sha256Hex,
 } from '../../utils/osplugin.js';
+import { makeDirectorySync } from '../../utils/make-directory.js';
 
 const ENTRY_CANDIDATES = ['src/index.ts', 'src/index.tsx', 'src/index.mjs', 'src/index.js'];
 
@@ -218,7 +219,10 @@ export default class PluginBuild extends Command {
     // 4. Pack the artifact. ─────────────────────────────────────────────
     const blob = createTarGz(files);
     const outPath = resolvePath(cwd, flags.out ?? `${id}-${version}${OSPLUGIN_EXT}`);
-    await mkdir(resolvePath(outPath, '..'), { recursive: true });
+    // Bounded (#23858): an `--out` directory that can never be made is refused
+    // at once with the OS's code and the path. Node's recursive mkdir, async
+    // as here too, never settled on it.
+    makeDirectorySync(resolvePath(outPath, '..'));
     await writeFile(outPath, blob);
 
     printSuccess('Plugin built');

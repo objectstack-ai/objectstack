@@ -1,5 +1,268 @@
 # @objectstack/driver-turso
 
+## 18.0.0-next.4
+
+### Patch Changes
+
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/driver-sql@18.0.0-next.4
+
+## 18.0.0-next.3
+
+### Minor Changes
+
+- ae4dfaf: feat(driver-turso,cli): the v18 organization-ownership ceremony runs on a Turso remote database
+  
+  Clause-②: yes (widening)
+  
+  `os migrate organization-ownership`, the plan and `--apply --backup-taken`, now completes against a Turso database reached over the remote transport (`libsql://…`), the transport hosted environments use. Before, the plan stopped at its boot with `Deferred schema DDL is not supported by the Turso REMOTE transport`, and the apply's column drops had no remote path either.
+  
+  - **`@objectstack/driver-turso`**, remote face:
+    - `detectManagedDrift()` answers instead of refusing with `NOT_IMPLEMENTED` / 501. The verdict is the shared differ's, the one the local face runs; the physical schema it diffs is read from the remote catalog (`pragma_table_info`, `sqlite_master`, `pragma_index_list` / `pragma_index_info`, and the ADR-0120 D4 duplicate probe). The declarations it diffs against are recorded by every remote schema door and by the DDL-free `registerObjectMetadata`, so a boot that skipped schema sync is covered too.
+    - `applyMigrationEntries()` applies `drop_index`, `create_index`, `recreate_index`, `replace_unique_index` and `drop_column` instead of refusing. Each entry runs as one libSQL `write` batch, so it lands whole or not at all: a `drop_column` drops the column's indexes with it in the same transaction, and a re-created index that fails to build leaves the old one in place. An entry is reported `applied` only once a read-back shows its target state. Every other column entry (nullability, width, a dropped DEFAULT) needs the SQLite table rebuild, which this transport does not run, so it is reported `skipped` and logged, as the in-place dialects report an op they cannot perform.
+    - The remote face declares `driftReportCaveat`: a sentence saying its drift report is for reading only and naming the reason. The OS_ARTIFACT_URL boot gate reads it (below). The local and embedded-replica faces declare `null`.
+    - The remote driver's `config` now carries its `url`, so the CLI labels a remote database by its URL (credential-free) instead of `better-sqlite3`. The ceremony writes that label into its plan and refuses an apply whose plan names another database; that refusal can now tell two remote databases apart.
+  - **`@objectstack/cli`**: the ceremony's plan and apply boots skip schema sync, instead of arming deferred DDL, when the primary datasource is a Turso remote one. No DDL is attempted, so the plan stays read-only, and every other datasource the boot connects is still deferred. The environment's own boot has already run the additive sync the ceremony reads. Every other `os migrate` command keeps refusing on that transport: their dry runs list held-back schema work, which a boot that holds nothing back cannot list.
+  - **`@objectstack/runtime`**: `createStandaloneStack` takes `skipSchemaSync`, passed to `ObjectQLPlugin` as the option `OS_SKIP_SCHEMA_SYNC=1` names. Unset, the plugin reads the variable as before.
+  
+  On a Turso remote primary, the `OS_ARTIFACT_URL` boot migration gate on `os serve` keeps its earlier answer: cannot judge, warn and boot. It applies no drift and refuses no boot. Only its warning's wording changes, from `Could not check the physical schema` to `Did not check the physical schema against the artifact: …`, followed by the driver's reason. The gate now decides this from a capability the driver declares (`driftReportCaveat`, a string on the remote face and `null` on the local and embedded-replica faces), not from a refusal it catches. Two follow-ups, filed separately and not closed by this change, have to land before that gate may act on a remote report:
+  - #23847: the remote transport's schema sync honours `storage.notNull` on create and add column, so the report stops naming a tightening its own sync produced;
+  - #23848: `os migrate apply` works on a Turso remote database, so the destructive drift the gate would refuse on has a remedy there.
+- 61e5ee9: fix(cli,driver-turso): `os migrate plan` and `os migrate apply` run on a Turso REMOTE database, and the apply names every drift entry it could not apply
+  
+  Clause-②: yes
+  
+  On a primary reached over the Turso REMOTE transport (`libsql://…`, every hosted tenant), `os migrate plan` and `os migrate apply` used to stop at their boot with `Deferred schema DDL is not supported by the Turso REMOTE transport`, so the remedy the drift report and the `OS_ARTIFACT_URL` boot gate print for destructive drift, `os migrate apply --allow-destructive`, could not run there at all. Both commands now boot the way `os migrate organization-ownership` does on that transport: with schema sync skipped instead of deferred. What an operator on a remote primary now sees:
+  
+  - **The drift half runs.** `os migrate plan` lists the drift; `os migrate apply` applies what the transport can express, after the same confirmation: a column drop (with the indexes keyed on it, in one transaction) and every index entry. Nothing is written before the prompt, as before.
+  - **The additive half is reported as NOT examined, never as "nothing to create".** Both commands print a warning under the database line saying that tables and columns the metadata declares and the database lacks are neither listed nor created by this run, and that the serving boot (`os serve` / `os start`) creates them on this transport. The `--json` documents carry `schemaSync: "skipped"`, so their `pending: []` reads as not examined; an apply with no drift answers `message: "in_sync_partial"`, not `"in_sync"`.
+  - **Every entry the driver did not apply is named,** by table, column and kind, in both faces (`--json`: a new `notApplied` array on the post-apply document). The REMOTE transport runs no SQLite table rebuild, so a tightening, a relaxed NOT NULL, a width change or a dropped DEFAULT is not applied there.
+  - **A destructive entry confirmed with `--allow-destructive` that was not applied makes the run PARTIAL:** the human face ends `PARTIAL apply: …` and the command exits `1`; `--json` carries `message: "partial"` and exits `1`. A non-destructive entry that was not applied is named and the exit stays `0`.
+  
+  On every other database the apply behaves as before, with one difference in the same direction: a destructive change confirmed with `--allow-destructive` that the driver could not apply (its DDL failed, or the dialect cannot perform it) now exits `1` and is named, where the run used to exit `0` with a count. Its human line for the entries held back without `--allow-destructive` now reads `Skipped N destructive change(s) (re-run with --allow-destructive to include them)`.
+  
+  `@objectstack/driver-turso`: the REMOTE face's `driftReportCaveat` no longer says a destructive entry has no remedy on this transport; it says `os migrate apply --allow-destructive` applies a column drop or an index change there and names the rest.
+  
+  The other `os migrate` commands whose dry run arms deferred DDL (`duplicates`, `account-issuer`, `unmapped-columns`, `multi-value-columns`, and the dry runs of the data commands) still refuse on the REMOTE transport, unchanged.
+- c4111c6: fix(cli,driver-turso): `os migrate plan` and `os migrate apply` on a Turso REMOTE database no longer offer `--allow-destructive` for a change that database cannot apply
+  
+  Clause-②: yes (widening)
+  
+  On a primary reached over the Turso REMOTE transport (`libsql://…`), `os migrate plan` listed a NOT NULL tightening with the remedy `Run "os migrate apply --allow-destructive".` and closed with `(add --allow-destructive for drops / tightenings)`. That transport runs no SQLite table rebuild, so the apply then named the tightening as not applied and exited 1. The plan now says so before the apply: each change the database cannot apply (a tightened or relaxed NOT NULL, a dropped DEFAULT) is still listed, with its finding and `"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE transport does not run.` in place of the remedy. The footer offers `--allow-destructive` only for the destructive changes the database can apply (a column drop, an index change) and says how many listed changes remain drift after the apply. The listing `os migrate apply` prints before its prompt reads the same way. Its counts of held-back destructive changes, before the prompt and after the run, offer a re-run with `--allow-destructive` only for the ones that re-run could apply, and name the rest as drift it cannot apply either. On every other database both commands read exactly as before, and their `--json` documents are unchanged on every database.
+  
+  `@objectstack/driver-turso`: `TursoDriver.driftApplyLimit(opType)` is new. It returns why the driver's `applyMigrationEntries` cannot perform a drift op of that type on this face, or `null` when it can. It answers from the same per-op declaration the REMOTE apply door dispatches by, and returns `null` for every op on the local and embedded-replica faces. A driver that does not implement it is read as applying every op the differ means it to.
+  
+  `@objectstack/driver-sql`: `driftFindingWithoutRemedy(entry)` is a new export. It returns a drift entry's finding without the `os migrate apply --allow-destructive` sentence that a destructive column entry's message ends with, and returns every other message unchanged; the messages themselves keep their exact text.
+
+### Patch Changes
+
+- 2034975: fix(driver-turso): a Turso remote database enforces the `storage.notNull` a field declares, on the tables and columns its schema sync creates
+  
+  Clause-②: no
+  
+  **What was wrong.** On a Turso database reached over the remote transport (`libsql://…`, the transport hosted environments use), schema sync created every declared column nullable. A field declared `storage: { notNull: true }` was not enforced there: an insert that left it empty was stored. The same declaration on a local SQLite file (`file:`) has always produced a `NOT NULL` column. The drift report, which compares the database with the declarations through the shared differ, also read each such column as destructive `tighten_not_null` drift on a database the remote sync had just created.
+  
+  **What changes.** The remote face's `CREATE TABLE` and `ALTER TABLE … ADD COLUMN` add `NOT NULL` to a column whose field declares `storage.notNull`, wherever the local face adds it: on every field type, multi-value fields included, and never for `required` alone. On a remote database synced after this release, an insert that leaves such a field empty is refused by the database, and the drift report names no `tighten_not_null` for it.
+  
+  **What does not change.**
+  
+  - A column that already exists is not touched. A remote database synced by an earlier release keeps its nullable columns, and its drift report still names them `tighten_not_null`; no data at rest is migrated. So the remote face still declares its drift-report caveat (reworded to say this), and the `OS_ARTIFACT_URL` boot gate still does not act on a remote report.
+  - Adding a `storage.notNull` field to a remote table that already holds rows is refused by SQLite (`Cannot add a NOT NULL column with default value NULL`), as it is on a local SQLite file, and that object's schema sync fails loudly. The remote error now names the refused statement. One case still differs: when the field also declares a literal `defaultValue`, the local face creates the column with that DEFAULT and accepts it, while the remote face emits no declared column DEFAULT and refuses it.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [c4111c6]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/driver-sql@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+
+## 18.0.0-next.2
+
+### Minor Changes
+
+- dd29bbe: feat(metadata-core,metadata-protocol)!: the `sys_metadata` family declares no organization column — `sys_metadata`, `sys_metadata_audit`, `sys_metadata_commit` and `sys_metadata_history` (ADR-0131 D6/D7)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered sys-metadata-organization-column-retired, sys-metadata-audit-organization-column-retired, sys-metadata-commit-organization-column-retired, sys-metadata-history-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Metadata is the environment's (ADR-0131 D6). The four tables of the metadata family no longer declare `organization_id`, and each sets `systemFields.tenant: false`, so the engine injects none back. The engine refuses an undeclared field, so nothing reads or writes the column any more.
+  
+  FROM → TO:
+  
+  - An authored filter, list-view column, report grouping, formula or seed key naming `organization_id` on one of the four tables → delete it; no organization owns a row. The field resolver answers it as an unknown field.
+  - `new SysMetadataRepository({ engine, organizationId, orgLabel })` → `new SysMetadataRepository({ engine, orgLabel })`. The `organizationId` option is gone: every repository reads and writes the environment's rows.
+  - `DatabaseLoader`'s `organizationId` option (and so `MetadataManager.setDatabaseDriver` / `setDataEngine`'s `organizationId` argument) → accepted and ignored, like `environmentId`: no write stamps it and no read filters on it. Drop the argument.
+  - `@objectstack/spec`: the published `ApiError.code` / `ErrorCode` enum widens by `LEGACY_ORGANIZATION_ROWS_UNREADABLE`, registered under `@objectstack/metadata-core`.
+  - `isLegacyOrganizationRow(row)` (`@objectstack/metadata-core`) → `readLegacyOrganizationRows(driver, table?)`. The row-value test read a key the engine no longer returns, so it is removed. The new read answers from the physical column, through the table's driver (`engine.getDriverForObject`): id → organization, empty on a migrated or fresh database. A seam that cannot answer is refused (`LegacyOrganizationRowsUnreadable`), never read as "none".
+  - An existing database → run `os migrate organization-ownership` (review its plan), then `os migrate organization-ownership --apply --plan-file FILE` with that plan file. The ceremony promotes or reports the legacy organization rows, then drops the physical column. Until it has run, the v18 runtime refuses to start against the database.
+  
+  The indexes are re-keyed with the column:
+  
+  - The overlay unique key is (`type`, `name`, `package_id`, `bundle_member`): the declared `idx_sys_metadata_overlay_active` and the runtime partial indexes of the same names. Removing the organization TIGHTENS uniqueness. On a database the ceremony has not cleared, two legacy organizations' rows, or an organization's row and the environment's, can share a key. There the runtime index migration keeps the previous index and names the duplicates (ADR-0120 D4); it never drops a row. `os migrate duplicates` and the boot report group by the same key.
+  - `sys_metadata_history` is unique on (`event_seq`) and on (`type`, `name`, `version`). Its other indexes, and those of `sys_metadata_audit` and `sys_metadata_commit`, lose their organization prefix.
+  - `idx_sys_metadata_org_type` is gone.
+  
+  What else changes:
+  
+  - The boot line `[metadata_org_scoped_unserved]` is gone with the column it read. A database still holding legacy organization rows is refused at boot instead, until the ceremony has run.
+  - The package uninstall no longer removes a legacy organization's row of the package's name: no row carries an organization.
+  - Who reads the family through the generic data door (`/data/sys_metadata_*`), before → after:
+    - `sys_metadata_audit`, `sys_metadata_history`, `sys_metadata_commit`, **under a wall** (`isolated` / `group`): before, the tenant wall filtered each caller to its own organization's rows, and an `organization_admin` read its organization's. With the column gone the wall has nothing to filter on, so without a gate that admin would read every organization's trail, history bodies and commit ranges. After: each requires `studio.access` (`requiredPermissions`, the #22107 precedent). The capability is platform-scoped, so an `organization_admin` holding it by role does not exist, and that admin is refused.
+    - The same three, **under `single`**: before, any caller whose grant covered the table (a read wildcard) read it. After: `studio.access` is required there too. A Studio author (the platform admin among them) reads as before; a plain member is refused.
+    - Every `/meta` door serving these rows admits `studio.access`: `/meta/:type/:name/history`, `/audit` and `/diff` admit `studio.access` or `manage_metadata`, and `/packages/:id/commits` admits `studio.access` alone; `setup.access` alone is refused at all four. `requiredPermissions` is an AND-gate and cannot name an any-of set, and `setup.access` is held by organization admins, so it could not be the gate. A caller holding only `manage_metadata` therefore still reads the history and audit rows through `/meta`, but not the commit rows, and none of them through the data door.
+    - `sys_metadata` stays ungated, before and after: its rows are what `/meta` already serves to every organization.
+  - On a database the ceremony has not migrated (which `os serve` refuses, but every `os migrate` boot opens, the ceremony's own among them), the legacy organization rows are still told apart, off the physical column:
+    - every read the metadata protocol makes of the family goes through one seam that leaves them out. That covers boot hydration; the `/meta` list, by-name, layered and draft-preview reads; the item lock (`_lock`) the reads report and the save and delete gates enforce; the package-less write and read address; and the package, commit, audit, history and diff reads. Two reads keep them on purpose and read the column themselves: `os migrate meta --stored` reports such a row, and the commit revert refuses a legacy commit by name. The authored hook and action binders leave them out too;
+    - the metadata repository's write never resolves to one: before, a save of an address that only a legacy organization's row held rewrote that row in place (measured on the ceremony's template promotion). Now the write targets the environment's row, and with none it creates one, which the re-keyed unique index refuses beside the organization's row until the ceremony settles it;
+    - `os migrate meta --stored` reports such a row `skipped` and never re-saves it;
+    - `os migrate security-catalog-overlays` neither lists nor deletes it;
+    - a commit recorded in a legacy organization's layer is still refused by the revert;
+    - the runtime-datasource reads, the packaged permission-set overlay reading, the kernel:ready security-catalog echo, the stored flow-credential move and a `DatabaseLoader` (engine- or driver-backed) leave them out.
+  - `SqlDriver.listPhysicalColumns(object, options?)` (new, read-only): a table's physical column names, from the catalog, joining `options.transaction`. `TursoDriver`'s remote face answers it from the remote catalog. Every boot asks whether the family still carries the retired column, and it asks this way, not through `execute()`. So `os migrate plan` keeps its "a plan writes nothing" line on a migrated or fresh database. The legacy rows themselves are read with a raw statement only where the column exists.
+  - `GET /forms/:slug` and `POST /forms/:slug/submit` no longer read the Default Organization's legacy layer. Every metadata read is now environment → code. The doors judge each candidate against the environment's view list, which holds one item per package of a view name. So a withdrawal in one package still closes that name's form in every package. On a deployment with no organization this closes more than before, which is the fail-closed direction. A withdrawal saved only at the organization layer is carried onto the environment by the ceremony's `metadata-promotion` step, which the runtime requires before it starts.
+  - The protocol's `getMetaItems` drops its undocumented `legacyFormOrganizationId` request key. It was never in the spec's `GetMetaItemsRequest`, and only those doors passed it. A caller that still passes it now gets the environment's list.
+- 462dff3: feat(drivers): the five drivers compile the composed `ReadableIds` leaf or refuse it with one envelope, and the leaf's conformance case-set lands with the suites that run it (ADR-0139 D3)
+  
+  Clause-②: yes
+  
+  The engine already composes every `ReadableIds` leaf at its executor boundary (ADR-0139 D2). Until now no driver evaluated the composed leaf; each driver now either compiles it or refuses it.
+  
+  - **`@objectstack/driver-sql`** compiles `{ field: { $in: <composed leaf> } }` to `field IN (SELECT id FROM <parent table> WHERE <scope> AND <tenant wall>)`. The subquery's tenant wall is `applyTenantScope` on the parent table with the outer read's own options. `find`, `count`, `aggregate` and the other read doors issue one statement, so they agree. The statement binds only the scope's own values and the two walls, never one parameter per readable parent: a reader with more than 2,000 readable parents gets every row they may see. `applyFilters` and `applyFilterCondition` (both `protected`) take the read's `DriverOptions` as a new optional last parameter, which the subquery needs.
+  - **`@objectstack/driver-sqlite-wasm`** and the local face of **`@objectstack/driver-turso`** inherit that compile. **Turso's remote face** has a compiler of its own. `TursoDriver` resolves the leaf into the parent's remote table, its scope and its tenant wall, using the same chokepoint, and `RemoteTransport` compiles the same semi-join.
+  - **`@objectstack/driver-memory`** evaluates the leaf in process. It reads the parent under the composed scope, then tests membership. It owes no tenant wall, because it refuses every tenant-scoped call.
+  - **`@objectstack/driver-mongodb`** refuses the leaf, composed or not, until a pipeline form is measured (ADR-0139 open item O3).
+  - **The refusal is the same on every driver**: `INTERNAL_ERROR` / 500, never `INVALID_FILTER`. A driver gives it for an uncomposed leaf at any position (the direct driver call that bypassed the engine), a composed leaf outside a `$in` comparand, and every leaf on `driver-mongodb`. The message names the driver, the leaf and the remedy. It is logged at `error` once per driver. No `DriverCapabilities` bit is added.
+  - **`@objectstack/core`** exports the shared pieces: `findMisplacedReadableIds`, `replaceComposedReadableIds`, `readableIdsDriverRefusal`, `refuseReadableIdsOnce` and the `MisplacedReadableIds`, `ReadableIdsDriverRefusalError` and `ReadableIdsRefusalLog` types.
+  - **`@objectstack/spec`** exports the leaf's driver conformance case-set from `@objectstack/spec/data`: `READABLE_IDS_CASES`, the fixture (`READABLE_IDS_PARENT_OBJECT`, `READABLE_IDS_CHILD_OBJECT`, `READABLE_IDS_PARENT_ROWS`, `READABLE_IDS_CHILD_ROWS`), the refusal envelope `READABLE_IDS_REFUSAL`, and their types. Every driver package runs the case-set, and the driver conformance gate records that with no ledger rows.
+
+### Patch Changes
+
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [c03077e]
+- Updated dependencies [53646fc]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/driver-sql@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Patch Changes

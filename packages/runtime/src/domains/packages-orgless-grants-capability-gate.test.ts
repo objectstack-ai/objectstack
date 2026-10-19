@@ -133,7 +133,7 @@ const SESSIONS: Record<Who, { id: string; token: string; userId: string; activeO
 function rig() {
     const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
     (registry as any).logLevel = 'silent';
-    registry.installPackage({ id: PKG, namespace: 'crm', name: 'CRM', version: '1.0.0', type: 'app', scope: 'project' } as any);
+    registry.installPackage({ id: PKG, namespace: 'crm', name: 'CRM', version: '1.0.0', type: 'app', scope: 'project' } as any, 'code');
     registry.registerObject({ name: 'crm_lead', fields: { title: { type: 'text' } } } as any, PKG, 'crm', 'own');
 
     const deleteRequests: any[] = [];

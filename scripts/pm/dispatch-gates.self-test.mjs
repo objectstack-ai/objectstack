@@ -66,6 +66,7 @@ import {
   DEFAULT_BASE_BRANCH,
   DEFAULT_BASE_REF,
   DEFAULT_BASE_REMOTE,
+  DURABILITY_SEAM_GATE,
   ESCAPABLE_LITERAL_LEDGER,
   GENERATED_MODULE_SOURCES,
   HARVEST_SNIPPET,
@@ -124,6 +125,7 @@ import {
   deadHintSweep,
   deadNamesNote,
   declaredArgvDefaults,
+  declaredMapKeys,
   declaredFileTarget,
   declaredInheritedPopulation,
   declaredLocalEnv,
@@ -141,6 +143,7 @@ import {
   discoverFamilies,
   discoveryPassCount,
   driftLines,
+  durabilityCriticalCallees,
   emitsAnHttpStatus,
   escapableLiteralKey,
   escapableLiteralRows,
@@ -159,12 +162,14 @@ import {
   firstPartyImportBindings,
   firstPartyImportTargets,
   followCompositeActions,
+  fullBatteryOnlyClause,
   gateFamilyFiles,
   generatedModuleSources,
   globCarriesLiteralSuffix,
   globInNonFinalSegment,
   governedReadCensus,
   governedSisterRepo,
+  guardsADurabilityCriticalCall,
   hashCommentProgram,
   hintCovers,
   hintReachesTree,
@@ -180,8 +185,10 @@ import {
   isTypeCheckInvocation,
   jobFilterOutputRefs,
   jobFilterPopulation,
+  jobFilteredNotMeasuredLine,
   jobFilteredStepLines,
   jobFilteredSteps,
+  jobIfReading,
   jobPathPopulations,
   joinLineContinuations,
   judgedAsPattern,
@@ -3847,6 +3854,52 @@ export function selfTest({ tier = 'full' } = {}) {
     );
   }
 
+  // ── The name-fold loader gate's WALKED roots, declared (#24037) ───────────
+  //
+  // `check-position-name-fold-loaders.mjs` reads every text file under its
+  // roots, and kept them as a private list of bare words, which the extractor
+  // admits as nothing. A card editing a file under those roots therefore
+  // derived no command for it: PR #24028 reconciled its local union complete
+  // and met this gate red in CI, over a line it added to
+  // `scripts/cross-package-test-inputs.mjs`. The gate now declares the roots
+  // with the ROOT_DIR_WATCH_HINTS idiom and derives its walk from that literal,
+  // with no change to the extractor.
+  //
+  // Pinned against the LIVE tree, for the reason the scripts/** case above
+  // states. The probes are read off the family's own extracted hints rather
+  // than retyped here, so every root the gate declares gets one, and the first
+  // probe is the exact path the measured miss edited. The ablation strips the
+  // subtree hints and the verdict must leave MATCHED, so these cases cannot pass
+  // through another literal that happens to cover a probe.
+  const NAME_FOLD = 'scripts/check-position-name-fold-loaders.mjs';
+  const nameFoldFamilies = discoverFamilies().byCheck;
+  for (const key of [NAME_FOLD, `${NAME_FOLD} --self-test`]) {
+    const entry = nameFoldFamilies.get(key);
+    t(`${key} is discovered at all — the pins below mean nothing without this`, Boolean(entry));
+    const roots = (entry?.hints ?? []).filter((h) => h.endsWith('/**')).map((h) => h.slice(0, -'/**'.length));
+    // The floor: the five roots the walk reads at this commit. A loop over an
+    // emptied hint set runs zero cases and prints nothing, which reads as a pass.
+    t(`${key} declares at least the five subtree roots its walk reads — read: [${roots.join(', ')}]`, roots.length >= 5);
+    const probes = ['scripts/cross-package-test-inputs.mjs', ...roots.map((r) => `${r}/the-one-nobody-has-written-yet.ts`)];
+    for (const probe of probes) {
+      const verdict = entry ? classifyEntry(entry, [probe]).verdict : null;
+      t(`a change to ${probe}, under a root this gate walks, derives ${key} — read: ${verdict}`, verdict === 'matched');
+    }
+    const undeclared = entry ? { ...entry, hints: entry.hints.filter((h) => !h.endsWith('/**')) } : null;
+    const residual = undeclared
+      ? ['scripts/cross-package-test-inputs.mjs', 'packages/the-one-nobody-has-written-yet/src/index.ts']
+        .map((p) => classifyEntry(undeclared, [p]).verdict)
+      : [];
+    t(
+      `…and it is the subtree declaration doing it: strip it and ${key} is NOT MATCHED for the measured miss `
+        + `or a brand-new package file — read: [${residual.join(', ')}]`,
+      Boolean(undeclared)
+        && undeclared.hints.length < entry.hints.length
+        && residual.length === 2
+        && residual.every((v) => ['silent', 'undetermined'].includes(v)),
+    );
+  }
+
   // ── The MANIFEST population of check:merge-driver (#15501) ────────────────
   //
   // That family's `git-merge-regen --self-test` refuses a generator with no
@@ -4691,6 +4744,117 @@ export function selfTest({ tier = 'full' } = {}) {
   t('an undiscoverable status gate renders STALE for this entry',
     statusStale.filter((l) => l.includes('⚠ check:error-status-conformance: STALE')).length === 1);
 
+  // ── The durability-seam CONTENT kind (#23584) ────────────────────────────
+  //
+  // The third content entry, pinned in the shape of the two above, plus the
+  // half they do not have: its vocabulary is READ out of the guard's source,
+  // so the reader gets its own cases first (the layouts, a phantom key, the
+  // refusals). Then the predicate is driven through an INJECTED vocabulary,
+  // then the live tree, then the rendered section. The specimen is the seam
+  // PR #23567 lost a CI round on.
+  const throwsNaming = (fn, needle) => {
+    try {
+      fn();
+      return false;
+    } catch (error) {
+      return String(error.message).includes(needle);
+    }
+  };
+  const TABLE = (body) => `const OTHER = new Map([['decoy', 'x']]);\nconst T = new Map([\n${body}\n]);\nconst AFTER = new Map([['after', 'y']]);\n`;
+  t("declaredMapKeys: the guard's multi-line tuple layout reads every key, in order",
+    JSON.stringify(declaredMapKeys(TABLE("    [\n        'recordLog',\n        \"why one\",\n    ],\n    [\n        'tryInsert',\n        'why two',\n    ],"), 'T')) === '["recordLog","tryInsert"]');
+  t('declaredMapKeys: one-line tuples, and an object value, read the same way',
+    JSON.stringify(declaredMapKeys(TABLE("['a', 'x'], ['b', { via: 'return', why: 'w' }]"), 'T')) === '["a","b"]');
+  t('declaredMapKeys: a bracket inside a reason string opens no phantom key',
+    JSON.stringify(declaredMapKeys(TABLE("['a', \"see ['b', 1] there\"]"), 'T')) === '["a"]');
+  t('declaredMapKeys: a commented-out tuple is not a key',
+    JSON.stringify(declaredMapKeys(TABLE("// ['ghost', 'x'],\n['a', 'x']"), 'T')) === '["a"]');
+  t("declaredMapKeys: the read stops at the table's own close, so a later Map's keys are not its",
+    JSON.stringify(declaredMapKeys(TABLE("['a', 'x']"), 'T')) === '["a"]');
+  t('declaredMapKeys: a module that declares no such table answers null', declaredMapKeys('const T = new Set([1]);', 'T') === null);
+  t('declaredMapKeys: a key that is not a quoted identifier THROWS rather than reading fewer names',
+    throwsNaming(() => declaredMapKeys(TABLE('[NAME_CONST, "x"]'), 'T'), 'has no quoted identifier'));
+  const famWith = (files) => ({ byCheck: new Map([[DURABILITY_SEAM_GATE, { files }]]) });
+  t('durabilityCriticalCallees: a gate no workflow runs THROWS, naming the gate',
+    throwsNaming(() => durabilityCriticalCallees({ byCheck: new Map() }), `no workflow runs ${DURABILITY_SEAM_GATE}`));
+  t('durabilityCriticalCallees: a family whose files declare no table THROWS, naming the table',
+    throwsNaming(() => durabilityCriticalCallees(famWith(['package.json'])), 'declares a non-empty DURABILITY_CRITICAL_CALLEES'));
+
+  const VOCAB = () => ['saveMetaItem', 'syncSchema'];
+  const seams = (text, path = 'packages/x/src/a.ts', callees = VOCAB) => guardsADurabilityCriticalCall(path, codeSrc(text), callees);
+  const SEAM_STMT = 'try { await store.saveMetaItem(item); } catch (e) { log.warn(e); }';
+  t('a catch around a declared callee is a hit', seams(SEAM_STMT));
+  t('a binding-less catch is a hit too', seams('try { await engine.syncSchema(o); } catch { return; }'));
+  t('a const alias spells the name, so a call through it is a hit',
+    seams('const sync = engine.syncSchema;\ntry { await sync.call(engine, o); } catch (e) { log.warn(e); }'));
+  t('a declared callee with no catch clause anywhere is not a hit', !seams('export async function save(store) { await store.saveMetaItem(item); }'));
+  t('a promise .catch( is not a clause, so it is not a hit', !seams('store.saveMetaItem(item).catch(() => undefined);'));
+  t('…nor when the .catch( sits on its own line', !seams('store\n  .saveMetaItem(item)\n  .catch(() => undefined);'));
+  t('a catch clause with no declared callee is not a hit: the shape the clause-alone net fires on',
+    !seams('try { JSON.parse(raw); } catch (e) { return null; }'));
+  t('a callee named only in a comment is not a hit', !seams('// saveMetaItem is guarded elsewhere\ntry { x(); } catch (e) { log.warn(e); }'));
+  t('a catch written only in a comment is not a hit', !seams('// try { x(); } catch (e) { }\nawait store.saveMetaItem(item);'));
+  t('a name that merely CONTAINS a declared callee is not a hit',
+    !seams('try { await store.saveMetaItemDraft(item); } catch (e) { log.warn(e); }'));
+  t('an EMPTIED vocabulary reaches nothing, so the vocabulary limb is consulted', !seams(SEAM_STMT, 'packages/x/src/a.ts', () => []));
+  t('a test file holding a seam is not a hit', !seams(SEAM_STMT, 'packages/x/src/a.test.ts'));
+  t('a d.ts holding a seam is not a hit', !seams(SEAM_STMT, 'packages/x/src/a.d.ts'));
+  t('a non-TS file holding a seam is not a hit', !seams(SEAM_STMT, 'packages/x/README.md'));
+  t('a path with nothing to read is not a hit, and does not throw', !guardsADurabilityCriticalCall('packages/x/src/a.ts', () => null, VOCAB));
+  let vocabularyReads = 0;
+  const countingVocab = () => {
+    vocabularyReads += 1;
+    return VOCAB();
+  };
+  guardsADurabilityCriticalCall('packages/x/src/a.ts', codeSrc('export const x = 1;'), countingVocab);
+  guardsADurabilityCriticalCall('packages/x/src/a.test.ts', codeSrc(SEAM_STMT), countingVocab);
+  t('the vocabulary is never read for a file with no catch clause, nor for a test file', vocabularyReads === 0);
+
+  // The live tree: the vocabulary is read off the guard, the specimen is
+  // reached, the control is not, and the trigger discriminates. Spelled rather
+  // than discovered, like the two specimens above.
+  const liveCallees = durabilityCriticalCallees();
+  t(`the live guard's vocabulary is read: ${liveCallees.length} declared callee name(s), every one an identifier`,
+    liveCallees.length > 10 && liveCallees.every((n) => /^[A-Za-z_$][\w$]*$/.test(n)));
+  t('…and a second ask is the memoised read, not a second parse', durabilityCriticalCallees() === liveCallees);
+  const SEAM_SPECIMEN = 'packages/runtime/src/domains/automation.ts';
+  t('the live tree still carries the PR #23567 seam, and the predicate reaches it', guardsADurabilityCriticalCall(SEAM_SPECIMEN));
+  const SEAM_CONTROL = 'packages/services/service-storage/src/storage-routes.ts';
+  t('a live .ts holding catch clauses and no declared callee is not reached',
+    !guardsADurabilityCriticalCall(SEAM_CONTROL) && /\bcatch\s*\(/.test(readFileSync(nodePath.join(ROOT, SEAM_CONTROL), 'utf8')));
+  // The discrimination pin, held at a TENTH rather than the quarter the two
+  // entries above use: a catch clause alone matched a fifth of this corpus
+  // when the entry landed, so a widening back to that net fails here.
+  const seamHits = codeCorpus.filter((f) => guardsADurabilityCriticalCall(f));
+  t(`the durability trigger discriminates: ${seamHits.length} of ${codeCorpus.length} non-test TS files (neither vacuous nor tree-wide)`,
+    seamHits.length > 10 && seamHits.length < codeCorpus.length / 10);
+
+  // The rendered section, through this entry alone, then through the whole
+  // table and the runnable union, which is where the card's acceptance holds.
+  const seamEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === DURABILITY_SEAM_GATE));
+  t('exactly one entry in the table names the durability guard', seamEntry.length === 1);
+  t("…and it is the entry whose predicate reads that same gate's vocabulary",
+    seamEntry[0]?.matches === guardsADurabilityCriticalCall && seamEntry[0]?.gates.length === 1);
+  const seamKind = changeKindLines([SEAM_SPECIMEN], resolved, seamEntry);
+  t('the seam path emits the durability convention section',
+    seamKind.length === 2 && seamKind[0].includes('durability-critical callee') && seamKind[0].includes('judged from CONTENT'));
+  t('and it names the guard runnably, anchored on the delimiter', seamKind.some((l) => l.includes(`- pnpm ${DURABILITY_SEAM_GATE}   —`)));
+  const seamLine = seamKind.find((l) => l.includes(`- pnpm ${DURABILITY_SEAM_GATE}   —`)) ?? '';
+  t('the durability line states why no path derivation reaches it', /bare package root/.test(seamLine) && /wide-population ruling/.test(seamLine));
+  t('…and pushes the repair to error, a rethrow or the caller, never the optional call or a baseline entry',
+    /CONSEQUENCE/.test(seamLine) && /logger\.error\?\./.test(seamLine) && /never by baselining correct code/.test(seamLine));
+  t('…and says it needs no build', /needs NO build/.test(seamLine));
+  t('…and writes the false-positive trade down', /not only one whose seam changed/.test(seamLine) && /CI round trip/.test(seamLine));
+  const throughTableSeam = (p) => changeKindLines([p], resolved).some((l) => l.includes(`- pnpm ${DURABILITY_SEAM_GATE}   —`));
+  t('through the whole table, the specimen derives the durability guard', throughTableSeam(SEAM_SPECIMEN));
+  t('…the control does not', !throughTableSeam(SEAM_CONTROL));
+  t('…and a docs-only path does not', !throughTableSeam('content/docs/ai/agents.mdx'));
+  t('the runnable union carries the durability guard for the specimen',
+    commandsFor({ kindGroups: changeKindGates([SEAM_SPECIMEN], resolved) }).includes(`pnpm ${DURABILITY_SEAM_GATE}`));
+  const seamStale = changeKindLines([SEAM_SPECIMEN], () => null, seamEntry);
+  t('an undiscoverable durability guard renders STALE for this entry',
+    seamStale.filter((l) => l.includes(`⚠ ${DURABILITY_SEAM_GATE}: STALE`)).length === 1);
+
   // ── The metadata-form edge (#9116) ────────────────────────────────────────
   //
   // The bundles' OTHER producer, and the half no owning-package test can reach:
@@ -5508,6 +5672,17 @@ export function selfTest({ tier = 'full' } = {}) {
   t(
     '...and the clause in front of the filter output is not the stripped spelling either',
     jobFilterOutputRefs(`\${{ ${FULL_BATTERY} && needs.f.outputs.a != 'false' }}`) === null,
+  );
+  // #24073: stripped is not FORGOTTEN. The reading returns the event fact beside
+  // the refs it shares with `jobFilterOutputRefs`, and only when it stripped it.
+  const fullBatteryReading = jobIfReading(`\${{ !cancelled() && needs.filter.outputs.console != 'false' && ${FULL_BATTERY} }}`);
+  t(
+    'jobIfReading: the stripped full-battery clause is RETURNED as fullBatteryOnly, beside the same refs',
+    fullBatteryReading?.fullBatteryOnly === true && fullBatteryReading?.refs.map((r) => `${r.job}.${r.output}`).join() === 'filter.console',
+  );
+  t(
+    '...and an if: with no event clause reads fullBatteryOnly FALSE — the fact is read off the text, never defaulted on',
+    jobIfReading("${{ !cancelled() && needs.filter.outputs.console != 'false' }}")?.fullBatteryOnly === false,
   );
 
   const fixturePops = jobPathPopulations(jobFilterWf, 'fixture.yml');
@@ -8613,7 +8788,7 @@ export function selfTest({ tier = 'full' } = {}) {
     "const r1 = spawnSync(process.execPath, [join(ROOT, TOOL), '--self-test'], { stdio: 'inherit' });", // followed: argv array, component NAMED
     "const r2 = execFileSync('node', [join(ROOT, 'scripts/invoked-as.mjs')]);", // followed: component written out
     "const r3 = spawnSync('git', ['ls-files'], { cwd: ROOT });", // a program that is not in this tree
-    'const r4 = execSync(`pnpm -s ${script}`);', // shell form: a command STRING, never scanned
+    'const r4 = execSync(`pnpm --silent ${script}`);', // shell form: a command STRING, never scanned
     "const r5 = spawnSync(process.execPath, [join(ROOT, 'package.json')]);", // tracked, but not program text
     "const r6 = spawnSync(process.execPath, [join(ROOT, 'scripts/does-not-exist.mjs')]);", // resolves, untracked
     "const r7 = spawnSync(process.execPath, [join(ROOT, 'scripts/fixture.mjs')]);", // itself: the identity key owns it
@@ -11765,6 +11940,63 @@ export function selfTest({ tier = 'full' } = {}) {
   t(
     'and the count reaches that enumeration off the ARRAY that renders the block, never a recount of it',
     outsideBlockCounts(familyReconciliation({ jobFilteredRows: [{}, {}] })).jobFilteredJobs === 2,
+  );
+
+  // ── WHEN a path-scheduled job runs, on the row the reader reads (#24073) ──
+  //
+  // The measured case: a `packages/runtime/src/route-ledger.ts` change derived
+  // the Dogfood Regression Gate as "scheduled BY YOUR PATHS", and nothing said
+  // its `if:` skips pull_request and merge_group — so the PR never ran the two
+  // dogfood pins that read that file, and their first run was `main`'s push
+  // battery, red. Pinned LIVE on ci.yml for both dogfood jobs (they carry the
+  // same `if:`), against a NEGATIVE control on a job that does run on the PR,
+  // and with an in-place ABLATION of the carried flag on every row, so the
+  // statement cannot pass as a string typed per job. If ci.yml moves either job
+  // back onto the PR, these go red: re-point them to whichever path-scheduled
+  // job still carries the clause — ⛔ do not delete them.
+  const ledgerCard = 'packages/runtime/src/route-ledger.ts';
+  const ledgerJobs = jobFilteredSteps(liveWorkflows, [ledgerCard]);
+  const ledgerRow = (prefix) => ledgerJobs.rows.find((r) => r.job.startsWith(prefix)) ?? null;
+  const NOT_ON_PR = 'does NOT run on this PR or in the merge queue';
+  // The plain rendering of ONE row, with counts that satisfy the renderer's own
+  // refusals, so the ablated copy below is rendered by the same function.
+  const plainRowLine = (row) => {
+    if (!row) return '';
+    const n = row.steps.length;
+    const lines = jobFilteredStepLines([row], { covering: 1, named: 1, steps: n, accounted: 0, unaccounted: n, conditionalSteps: 0 });
+    return lines.find((l) => l.startsWith(`  - [${row.workflow} · ${row.job}]`)) ?? '';
+  };
+  for (const prefix of ['Dogfood Regression Gate', 'Dogfood Verify CLI']) {
+    const row = ledgerRow(prefix);
+    t(
+      `LIVE: a route-ledger.ts change schedules '${prefix}', and its row carries the full-battery fact read off its own if:`,
+      row?.fullBatteryOnly === true,
+    );
+    t(
+      '...its --commands line SAYS the job does not run on this PR or in the merge queue, ahead of the step list',
+      Boolean(row) && jobFilteredNotMeasuredLine(row).indexOf(NOT_ON_PR) > -1
+        && jobFilteredNotMeasuredLine(row).indexOf(NOT_ON_PR) < jobFilteredNotMeasuredLine(row).indexOf(' step(s):'),
+    );
+    t("...and so does its row in the plain rendering, on the row's own line", plainRowLine(row).includes(NOT_ON_PR));
+    // ABLATION, in place: the same row with the carried fact stripped. The
+    // statement must vanish from both lines — rendered from the flag, or not at all.
+    const stripped = row ? Object.fromEntries(Object.entries(row).filter(([k]) => k !== 'fullBatteryOnly')) : null;
+    t(
+      '...ABLATED — the carried fact stripped from the row — the statement disappears from BOTH lines',
+      Boolean(stripped)
+        && fullBatteryOnlyClause(stripped) === ''
+        && !jobFilteredNotMeasuredLine(stripped).includes(NOT_ON_PR)
+        && plainRowLine(stripped) !== ''
+        && !plainRowLine(stripped).includes(NOT_ON_PR),
+    );
+  }
+  const prJobRow = ledgerRow('Build Core');
+  t(
+    'LIVE NEGATIVE CONTROL: Build Core, scheduled by the same path and run on the PR, carries the fact as FALSE and no statement',
+    prJobRow?.fullBatteryOnly === false
+      && !jobFilteredNotMeasuredLine(prJobRow).includes(NOT_ON_PR)
+      && plainRowLine(prJobRow) !== ''
+      && !plainRowLine(prJobRow).includes(NOT_ON_PR),
   );
 
   // ── Type-check lanes (#19172): the negatives are the live over-matches a SUBSTRING reading produces here ──

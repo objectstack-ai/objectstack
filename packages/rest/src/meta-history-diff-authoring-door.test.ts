@@ -51,6 +51,15 @@
  * one refusal (`refuseNonAuthoringCaller`), and every pin below runs over all
  * three. The draft saves here are made by the `author` caller, so the actor a
  * refusal must never carry is a real one.
+ *
+ * ## [#23546] The trail drops `setup.access`
+ *
+ * Ruling 6187280122 (letter A), amended by 6190477105: the three doors admit
+ * `isSystem`, `studio.access` and `manage_metadata`, and no longer
+ * `setup.access`, which organization admins hold. `GET /meta/_drafts` and the
+ * other draft switches keep `mayReadPendingDrafts`, so the `setupAdmin` caller
+ * below is refused the trail and still lists drafts. The walled pin on a real
+ * booted stack is `packages/qa/dogfood/test/wall-authoring-trail-doors.dogfood.test.ts`.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -74,11 +83,13 @@ const CALLERS = {
     member: { userId: 'u_member', systemPermissions: [] as string[] },
     /** The three authoring capabilities `/meta/_drafts` admits, one each. */
     studioBuilder: { userId: 'u_studio', systemPermissions: ['studio.access'] },
+    /** [#23546] The organization admin's capability: `/meta/_drafts` admits it, the trail does not. */
     setupAdmin: { userId: 'u_setup', systemPermissions: ['setup.access'] },
     author: { userId: 'u_author', systemPermissions: ['manage_metadata'] },
 } as const;
 type CallerName = keyof typeof CALLERS;
-const BUILDERS = ['studioBuilder', 'setupAdmin', 'author'] as const satisfies readonly CallerName[];
+/** [#23546] The callers the trail admits: `/meta/_drafts`'s builders minus `setupAdmin`. */
+const BUILDERS = ['studioBuilder', 'author'] as const satisfies readonly CallerName[];
 /** Of the builders, the one the app's save door admits: ruling 5856774816's author exemption. */
 const SAVES_APPS: readonly CallerName[] = ['author'];
 
@@ -406,16 +417,59 @@ describe('[#20378] /layers and ?layers=true are unchanged for the member — the
     }, 60_000);
 });
 
-describe('[#20378 · #20441] one predicate: /diff, /history and /audit refuse exactly the callers /meta/_drafts refuses', () => {
-    it('for each caller, the four doors agree', async () => {
+describe('[#23546] a setup.access-only caller is refused /diff, /history and /audit, and still lists /meta/_drafts', () => {
+    for (const suffix of AUTHORING_DOORS) {
+        it(`${suffix}: 403 FORBIDDEN in the /meta/_drafts envelope, before any read; /meta/_drafts still answers 200`, async () => {
+            const { door, drafts, spies, resetSpies } = await boot();
+            const listing = await drafts('setupAdmin');
+            expect(listing.statusCode).toBe(200);
+            const refusal = await drafts('member');
+            expect(envelope(refusal)).toEqual({ status: 403, code: 'FORBIDDEN' });
+            for (const type of Object.keys(SUBJECTS) as SubjectType[]) {
+                const names = SUBJECTS[type];
+                resetSpies();
+                const answers = [
+                    await door('setupAdmin', suffix, type, names.published),
+                    await door('setupAdmin', suffix, type, names.draftOnly),
+                    await door('setupAdmin', suffix, type, names.missing),
+                ];
+                for (const res of answers) {
+                    expect(envelope(res), `${type}`).toEqual({ status: 403, code: 'FORBIDDEN' });
+                    expect(shape(res), `${type}`).toEqual(shape(refusal));
+                    for (const name of Object.values(names)) expect(text(res)).not.toContain(name);
+                    for (const k of ANSWER_KEYS) expect(text(res)).not.toContain(k);
+                }
+                expect(answers[1].body).toEqual(answers[0].body);
+                expect(answers[2].body).toEqual(answers[0].body);
+                for (const [member, spy] of Object.entries(spies)) expect(spy, `${type} ${member}`).not.toHaveBeenCalled();
+            }
+            // The control: the same door, the same item, a `studio.access` caller.
+            const builder = await door('studioBuilder', suffix, 'view', 'opportunity.pipeline');
+            expect(builder.statusCode).toBe(200);
+            expect(spies[DOOR_READ[suffix]]).toHaveBeenCalled();
+        }, 60_000);
+    }
+});
+
+describe('[#23546] the trail admits a strict subset of the callers /meta/_drafts admits', () => {
+    it('every caller the trail admits lists drafts; setup.access alone lists drafts and is refused the trail', async () => {
         const { door, drafts } = await boot();
-        for (const who of ['member', ...BUILDERS] as const) {
-            const refused = (await drafts(who)).statusCode === 403;
+        const admitted: Record<string, boolean> = {};
+        for (const who of Object.keys(CALLERS) as CallerName[]) {
+            const lists = (await drafts(who)).statusCode === 200;
+            const reads: boolean[] = [];
             for (const suffix of AUTHORING_DOORS) {
                 const res = await door(who, suffix, 'view', 'opportunity.pipeline');
-                expect(res.statusCode === 403, `${who} ${suffix}`).toBe(refused);
+                expect([200, 403], `${who} ${suffix}`).toContain(res.statusCode);
+                reads.push(res.statusCode === 200);
             }
+            // The three doors share one refusal, so they agree for every caller.
+            expect(new Set(reads).size, who).toBe(1);
+            // The trail never admits a caller /meta/_drafts refuses.
+            if (reads[0]) expect(lists, who).toBe(true);
+            admitted[who] = reads[0];
         }
-        expect((await drafts('member')).statusCode).toBe(403);
+        expect(admitted).toEqual({ system: true, member: false, studioBuilder: true, setupAdmin: false, author: true });
+        expect((await drafts('setupAdmin')).statusCode).toBe(200);
     }, 60_000);
 });

@@ -145,6 +145,10 @@ const TIERS: readonly Tier[] = ['native', 'in-memory'];
 async function makeEngine(tier: Tier) {
     const { driver, reads } = makeDriver(tier === 'native');
     const engine = new ObjectQL();
+    // [ADR-0131 D8] The `context` proof is that the caller's organization
+    // reaches the driver as its read scope — which it does only under a wall;
+    // under `single` (the env default) the scope is none.
+    engine.setTenancyPostureProvider(() => 'isolated');
     engine.registerDriver(driver, true);
     await engine.init();
     (engine.registry as any).registerObject(account);

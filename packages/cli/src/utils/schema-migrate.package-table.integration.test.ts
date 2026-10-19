@@ -32,7 +32,10 @@
  *     still absent while the plan is on screen), the flush creates it and
  *     reports it, and the table is the one the boot's own DDL creates —
  *     `PRIMARY KEY (id, version)`, `TEXT` timestamps, `idx_packages_latest`;
- *  3. a plan over the migrated database lists nothing for it.
+ *  3. a plan over the migrated database lists nothing for it — and [#24059]
+ *     still names it among the tables the composition declares outside the
+ *     object set (`nonObjectTables`), which is what keeps `os migrate plan`'s
+ *     unmanaged-table sweep from reporting the table this apply created.
  *
  * The flag is SET for every boot here: the documented path must not depend on
  * it. That the boot itself creates nothing under the flag is
@@ -125,6 +128,7 @@ describe('os migrate plan / apply cover sys_packages, flag set (#23022)', () => 
     stack = await boot('plan');
     expect(stack.composition.servedBoot).toEqual({ mirrored: true });
     expect(packageWork(stack)).toEqual([{ table: 'sys_packages', kind: 'create_table', columns: COLUMNS }]);
+    expect(stack.nonObjectTables).toEqual(['sys_packages']);
     await stack.shutdown();
     stack = null;
     expect(existsSync(dbFile), 'a dry run brought the database into existence').toBe(false);
@@ -150,8 +154,10 @@ describe('os migrate plan / apply cover sys_packages, flag set (#23022)', () => 
       index: [{ name: 'id' }, { name: 'created_at' }],
     });
 
-    // 3. plan again — the table is there, so nothing is pending for it.
+    // 3. plan again — the table is there, so nothing is pending for it…
     stack = await boot('plan');
     expect(packageWork(stack)).toEqual([]);
+    // …and [#24059] the declaration still names it, from the same service.
+    expect(stack.nonObjectTables).toEqual(['sys_packages']);
   }, 300_000);
 });

@@ -38,10 +38,17 @@
  * ## What counts as a loader
  *
  * Anything that names the artifact — an `import`, a `readFileSync`, a glob
- * whose pattern names the file or its directory. All of them must SPELL the
- * file or the fixtures directory somewhere in source, so a text scan over the
- * tracked tree is a sound instrument for the question. Two dispositions are
- * allowed and every other reference fails:
+ * whose pattern names the file or its directory. The scan reads source TEXT,
+ * so what it checks is a spelling ({@link referencesArtifact}): the file's
+ * basename; a path that resolves to the fixtures directory once case, `\`,
+ * `.`, `..` and `//` are folded and a relative path is joined to the
+ * directory of the file that holds it; or `__fixtures__` with `hotcrm` or
+ * `.artifact` on one line. A text scan cannot follow a COMPUTED path — a
+ * concatenation, a `.replace`, a variable, a base other than the holding
+ * file's directory or the repository root — and this one does not expand a
+ * wildcard in a directory segment, so a loader that reaches the artifact only
+ * that way, with neither marker on its line, is outside what this gate sees.
+ * Two dispositions are allowed and every other reference fails:
  *
  *   TEST       a `*.test.ts` / `*.spec.ts` file, or a file under a `test/`,
  *              `tests/` or `__tests__/` directory. A test composes nothing.
@@ -70,7 +77,7 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
@@ -83,6 +90,9 @@ const ARTIFACT_BASENAME = 'hotcrm-17.1-built-permissions.artifact.json';
 
 /** The directory the artifact lives in: a reference to it is a reference to the artifact. */
 const FIXTURES_DIR = 'packages/metadata/src/__fixtures__';
+
+/** {@link FIXTURES_DIR} in the form rule 2 compares a folded spelling against. */
+const FIXTURES_DIR_FOLDED = FIXTURES_DIR.toLowerCase();
 
 /** The two permission-set names that make this artifact load-bearing for #13419. */
 const FOLDED_NAMES = ['sales_rep', 'sales_manager'];
@@ -101,7 +111,27 @@ const DECLARED_INSTRUMENTS = [
   'scripts/check-position-name-fold-loaders.mjs',
 ];
 
-const SCAN_ROOTS = ['packages', 'examples', 'apps', 'scripts', 'tools', '.github'];
+/**
+ * The roots the walk visits, spelled as the subtree population this gate
+ * DECLARES to `scripts/pm/dispatch-gates.mjs` (the `ROOT_DIR_WATCH_HINTS`
+ * idiom; `check:watch-hint-literal` holds it to a literal array the extractor
+ * admits). A literal is how the declaration reaches the derivation: the
+ * extractor reads source text, and a bare single-segment word (`'packages'`)
+ * yields no hint at all, so while the walk read a private list of bare words a
+ * card editing any file under these roots was told nothing about this gate and
+ * met it first in CI (#24037).
+ *
+ * ONE list, two readers: {@link SCAN_ROOTS} is DERIVED from it, so the walk and
+ * the declaration cannot drift apart. ⛔ Never hand-copy the roots back into a
+ * second literal — the declaration would then be free to say one thing while
+ * the walk does another, which is the silent-green shape the derivation exists
+ * to refuse. Every root is live in the tree: a root the tree does not have
+ * scans nothing and would be printed by the derivation as a dead lead.
+ */
+export const ROOT_DIR_WATCH_HINTS = ['packages/**', 'examples/**', 'apps/**', 'scripts/**', '.github/**'];
+
+/** The directories the walk descends from, read off {@link ROOT_DIR_WATCH_HINTS}. */
+const SCAN_ROOTS = ROOT_DIR_WATCH_HINTS.map((hint) => hint.replace(/\/\*\*$/, ''));
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.turbo', '.next', 'coverage', '.git']);
 
@@ -137,7 +167,9 @@ export function classifyReference(relPath) {
  * only one of them is a literal path:
  *
  *   1. the basename — an `import`, a `readFileSync`, a `join(HERE, '…')`;
- *   2. the repo-relative fixtures directory — a config or workflow path;
+ *   2. the fixtures directory in any spelling that RESOLVES to it
+ *      ({@link namesFixturesDir}) — a config or workflow path, a relative
+ *      climb from the file that holds it, a case variant;
  *   3. `__fixtures__` on the SAME LINE as `hotcrm` or `.artifact` — the glob
  *      shape (`__fixtures__/*.artifact.json`), which names neither the file nor
  *      the full directory and is invisible to 1 and 2.
@@ -146,10 +178,114 @@ export function classifyReference(relPath) {
  * long file that happens to mention `__fixtures__` in one place and `hotcrm` in
  * another, and a gate whose red is a coincidence gets weakened rather than
  * obeyed.
+ *
+ * Rule 3 does not count a fully spelled path to ANOTHER package's fixtures
+ * directory: `packages/objectql/src/__fixtures__/hotcrm-4.0.1-published-pages.artifact.json`
+ * names one file in one other directory and cannot reach this artifact, while
+ * the glob shape would red on it. The unit judged is a whole PATH TOKEN
+ * ({@link PATH_TOKEN}): it starts with `packages/` at the start of the line or
+ * after a quote, backtick, whitespace, `,`, `[` or `(`, and it runs to the
+ * next quote, backtick, whitespace, `,`, `]`, `)` or the end of the line, so a
+ * glob character or `${` inside it stays part of the token. A token is set
+ * aside only when {@link isOtherPackageFixturePath} says so, which needs all
+ * three:
+ *
+ *   - no `..` segment;
+ *   - after `path.posix.normalize` (so `packages/./metadata/…` and
+ *     `packages/metadata/./src/…` are read as the directories they are), it
+ *     does not lie in this package's fixtures directory, judged by the one
+ *     folded comparison rule 2 uses ({@link liesInFixturesDir});
+ *   - the normalized token is one literal file path, `packages/<dirs>/src/
+ *     __fixtures__/<file>` with only word characters, `.` and `-` in its
+ *     segments — so a token carrying `*`, `?`, `[`, `{` or `${` is never set
+ *     aside.
+ *
+ * Only such a token leaves the line; the rest of the line is still judged, so
+ * a bare glob beside it still counts. This package's own directory, in any
+ * spelling rule 2 resolves, is rule 2's, before rule 3 is asked at all.
  */
-export function referencesArtifact(text) {
-  if (text.includes(ARTIFACT_BASENAME) || text.includes(FIXTURES_DIR)) return true;
+const PATH_TOKEN = /(?<=^|[\s'"`,[(])packages\/[^\s'"`,\])]*/g;
+const LITERAL_OTHER_FIXTURE_FILE = /^packages\/(?:[\w.-]+\/)+src\/__fixtures__\/[\w.-]+(?:\/[\w.-]+)*$/;
+
+export function isOtherPackageFixturePath(token) {
+  if (token.split('/').includes('..')) return false;
+  const normalized = posix.normalize(token);
+  if (liesInFixturesDir(foldPath(normalized))) return false;
+  return LITERAL_OTHER_FIXTURE_FILE.test(normalized);
+}
+
+function withoutOtherPackageFixturePaths(line) {
+  return line.replace(PATH_TOKEN, (token) => (isOtherPackageFixturePath(token) ? '' : token));
+}
+
+/**
+ * Rule 2: does this text spell a path that resolves to the fixtures directory,
+ * or into it?
+ *
+ * The repo-relative literal is one spelling of the directory among several,
+ * and the others reach it just the same: `../../metadata/src/__fixtures__`
+ * from a file in `packages/objectql/src/`, `packages/Metadata/src/__fixtures__`
+ * on a case-insensitive filesystem, `packages\metadata\src\__fixtures__` on
+ * Windows. So every path spelling ({@link PATH_SPELLING}) on a line that
+ * carries `__fixtures__` is FOLDED ({@link foldPath}) and read two ways:
+ *
+ *   - as written: the folded spelling holds the directory's four segments in a
+ *     row — a repo-relative path, `ROOT + '/packages/…'`, a URL, a vendored
+ *     prefix, a climb that comes back in;
+ *   - from the file that holds it: a relative spelling, joined to that file's
+ *     own directory, lands on the directory or under it. A relative climb can
+ *     only be resolved against the file that contains it, which is why this
+ *     rule takes `relPath`.
+ *
+ * Segments are compared, never substrings:
+ * `packages/services/service-metadata/src/__fixtures__` contains the string
+ * `metadata/src/__fixtures__` and is another package's directory. The literal
+ * repo-relative substring is still asked first, unchanged, so the rule counts
+ * every file it counted before it learned to fold.
+ */
+const PATH_SPELLING = /[^\s'"`,;:=+()[\]{}<>|&]+/g;
+
+/** One path spelling in the form rule 2 compares: `\` read as `/`, `.`, `..` and `//` resolved, case folded. */
+function foldPath(spelling) {
+  return posix.normalize(spelling.replace(/\\+/g, '/')).toLowerCase();
+}
+
+/** Is this folded path the fixtures directory, or something under it? */
+function liesInFixturesDir(folded) {
+  return folded === FIXTURES_DIR_FOLDED || folded.startsWith(`${FIXTURES_DIR_FOLDED}/`);
+}
+
+function namesFixturesDir(text, relPath) {
+  if (text.includes(FIXTURES_DIR)) return true;
+  if (!/__fixtures__/i.test(text)) return false;
+  const holder = posix.dirname(relPath);
   for (const line of text.split('\n')) {
+    if (!line.toLowerCase().includes('__fixtures__')) continue;
+    for (const spelling of line.match(PATH_SPELLING) ?? []) {
+      const folded = foldPath(spelling);
+      if (`/${folded}/`.includes(`/${FIXTURES_DIR_FOLDED}/`)) return true;
+      if (!folded.startsWith('/') && liesInFixturesDir(foldPath(`${holder}/${spelling}`))) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * `relPath` is the repo-relative path of the file `text` was read from, and it
+ * is required: rule 2 resolves a relative spelling against it, so a caller
+ * that dropped it would lose every relative climb without a word.
+ */
+export function referencesArtifact(text, relPath) {
+  if (typeof relPath !== 'string' || relPath === '') {
+    throw new TypeError(
+      'referencesArtifact(text, relPath): relPath, the repo-relative path of the file holding the text, '
+      + 'is required. A relative climb can only be resolved against the file that contains it.',
+    );
+  }
+  if (text.includes(ARTIFACT_BASENAME) || namesFixturesDir(text, relPath)) return true;
+  for (const raw of text.split('\n')) {
+    if (!raw.includes('__fixtures__')) continue;
+    const line = withoutOtherPackageFixturePaths(raw);
     if (!line.includes('__fixtures__')) continue;
     if (line.includes('hotcrm') || line.includes('.artifact')) return true;
   }
@@ -191,8 +327,8 @@ export function scanTree(root = REPO_ROOT) {
     } catch {
       continue;
     }
-    if (!referencesArtifact(text)) continue;
     const rel = relative(root, abs).split(sep).join('/');
+    if (!referencesArtifact(text, rel)) continue;
     references.push({ file: rel, disposition: classifyReference(rel) });
   }
   references.sort((a, b) => a.file.localeCompare(b.file));
@@ -316,7 +452,7 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'REVERSE CONTROL. A zero from a scan that cannot report anything is not a': 3,
   'The allowed dispositions, each for its own stated reason.': 5,
-  'The text matcher, both directions. A matcher that never matches turns': 5,
+  'The text matcher, both directions. A matcher that never matches turns': 29,
   'The permission-set extractor, on the real artifact shape.': 2,
 });
 
@@ -390,14 +526,144 @@ function selfTest() {
   //    every loader into a silent pass, and it is the half a clean tree cannot
   //    exercise from the negative side alone.
   battery('The text matcher, both directions. A matcher that never matches turns');
-  check('matcher sees the basename', referencesArtifact(`join(HERE, '__fixtures__/${ARTIFACT_BASENAME}')`), true);
-  check('matcher sees a fixtures-directory glob', referencesArtifact(`glob('${FIXTURES_DIR}/*.artifact.json')`), true);
-  check('matcher ignores an unrelated hotcrm mention', referencesArtifact("// the HotCRM shape from hotcrm#788"), false);
-  check('matcher sees a bare glob sweep of the fixtures dir', referencesArtifact("await glob('**/__fixtures__/*.artifact.json')"), true);
+  // The file a case's text is read as coming from. Rule 2 resolves a relative
+  // spelling against it, so a case that is ABOUT where the text lives names its
+  // own file instead.
+  const PROBE_FILE = 'packages/objectql/src/loader.ts';
+  check('matcher sees the basename', referencesArtifact(`join(HERE, '__fixtures__/${ARTIFACT_BASENAME}')`, PROBE_FILE), true);
+  check('matcher sees a fixtures-directory glob', referencesArtifact(`glob('${FIXTURES_DIR}/*.artifact.json')`, PROBE_FILE), true);
+  check('matcher ignores an unrelated hotcrm mention', referencesArtifact("// the HotCRM shape from hotcrm#788", PROBE_FILE), false);
+  check('matcher sees a bare glob sweep of the fixtures dir', referencesArtifact("await glob('**/__fixtures__/*.artifact.json')", PROBE_FILE), true);
   check(
     'matcher does NOT credit __fixtures__ and hotcrm on separate lines',
-    referencesArtifact("import x from './__fixtures__/widget.json';\n// unrelated: hotcrm#788\n"),
+    referencesArtifact("import x from './__fixtures__/widget.json';\n// unrelated: hotcrm#788\n", PROBE_FILE),
     false,
+  );
+  check(
+    "matcher does NOT count a full path to another package's fixture",
+    referencesArtifact("      'packages/objectql/src/__fixtures__/hotcrm-4.0.1-published-pages.artifact.json',", PROBE_FILE),
+    false,
+  );
+  check(
+    "matcher does NOT count a full path to a nested package's fixture",
+    referencesArtifact("readFileSync('packages/services/service-x/src/__fixtures__/hotcrm-1.artifact.json')", PROBE_FILE),
+    false,
+  );
+  check(
+    'matcher still sees a bare fixtures glob',
+    referencesArtifact("globs: ['__fixtures__/*.artifact.json'],", PROBE_FILE),
+    true,
+  );
+  check(
+    'matcher still sees a path into this package\'s own fixtures directory',
+    referencesArtifact("readFileSync('packages/metadata/src/__fixtures__/x.json')", PROBE_FILE),
+    true,
+  );
+  check(
+    'matcher still sees a bare glob beside another package\'s fixture path on one line',
+    referencesArtifact("['packages/objectql/src/__fixtures__/a.json', '**/__fixtures__/*.artifact.json']", PROBE_FILE),
+    true,
+  );
+  check(
+    'matcher still sees another package\'s path that climbs back toward this directory',
+    referencesArtifact("glob('packages/objectql/src/__fixtures__/../../../metadata/src/__fixtures__/*.artifact.json')", PROBE_FILE),
+    true,
+  );
+  check(
+    'matcher still sees a wildcard package path',
+    referencesArtifact("glob('packages/*/src/__fixtures__/*.artifact.json')", PROBE_FILE),
+    true,
+  );
+  check(
+    'matcher still sees a `.`-segment path to this directory, in a template literal',
+    referencesArtifact("readFileSync(`packages/./metadata/src/__fixtures__/hotcrm-17.1-${kind}.artifact.json`)", PROBE_FILE),
+    true,
+  );
+  check(
+    'matcher still sees a `.`-segment glob into this directory (package segment)',
+    referencesArtifact("glob('packages/./metadata/src/__fixtures__/hotcrm-*.artifact.json')", PROBE_FILE),
+    true,
+  );
+  check(
+    'matcher still sees a `.`-segment glob into this directory (src segment)',
+    referencesArtifact("glob('packages/metadata/./src/__fixtures__/hotcrm-*.artifact.json')", PROBE_FILE),
+    true,
+  );
+  check(
+    'matcher still sees another package\'s fixtures path that a glob continues',
+    referencesArtifact("glob('packages/objectql/src/__fixtures__/a*.artifact.json')", PROBE_FILE),
+    true,
+  );
+  check(
+    'matcher still sees another package\'s fixtures path that a template continues',
+    referencesArtifact("readFileSync(`packages/objectql/src/__fixtures__/${name}.artifact.json`)", PROBE_FILE),
+    true,
+  );
+  check(
+    'matcher still sees a fixtures path that does not START a token',
+    referencesArtifact("readFileSync('vendor/packages/objectql/src/__fixtures__/hotcrm.artifact.json')", PROBE_FILE),
+    true,
+  );
+  check(
+    'matcher still sees a `.`-segment LITERAL path into this directory (only normalization reads it)',
+    referencesArtifact("readFileSync('packages/./metadata/src/__fixtures__/hotcrm-17.1-built-bare-root-predicates.artifact.json')", PROBE_FILE),
+    true,
+  );
+  check(
+    "matcher does NOT count a `.`-segment literal path to another package's fixture",
+    referencesArtifact("      'packages/./objectql/src/__fixtures__/hotcrm-4.0.1-published-pages.artifact.json',", PROBE_FILE),
+    false,
+  );
+  check(
+    'matcher sees a relative climb into this directory, resolved from the file that holds it',
+    referencesArtifact("readdirSync(resolve(HERE, '../../../metadata/src/__fixtures__'))", 'packages/objectql/src/loaders/catalog.ts'),
+    true,
+  );
+  check(
+    'matcher does NOT count the same climb from a file where it lands in another directory',
+    referencesArtifact("readdirSync(resolve(HERE, '../../../metadata/src/__fixtures__'))", 'packages/services/service-metadata/src/loaders/catalog.ts'),
+    false,
+  );
+  check(
+    'matcher sees a case variant of this directory',
+    referencesArtifact("readdirSync('packages/Metadata/src/__fixtures__')", PROBE_FILE),
+    true,
+  );
+  check(
+    'matcher sees a backslash-separated spelling of this directory',
+    referencesArtifact("readdirSync('packages\\\\metadata\\\\src\\\\__fixtures__')", PROBE_FILE),
+    true,
+  );
+  check(
+    "matcher does NOT count service-metadata's fixtures directory, whose path contains the string metadata/src/__fixtures__",
+    referencesArtifact("readdirSync('packages/services/service-metadata/src/__fixtures__')", PROBE_FILE),
+    false,
+  );
+  // Rule 3's token runs PAST `${`, `?`, `[` and `{`. Each of the four below
+  // puts its character in the MIDDLE of a file name: cut there, the token is
+  // `…/__fixtures__/hotcrm-` (or `x-`), a literal file path that is set aside,
+  // and the marker left behind has no `__fixtures__` beside it. Right after
+  // `__fixtures__/` a cut would leave a token ending in `/`, which the literal
+  // test keeps anyway, so the case would pin nothing.
+  check(
+    "matcher still sees a `${kind}` in the middle of a file name in another package's fixtures path",
+    referencesArtifact("readFileSync(`packages/objectql/src/__fixtures__/hotcrm-${kind}.artifact.json`)", PROBE_FILE),
+    true,
+  );
+  check(
+    "matcher still sees a `hotcrm-?` glob in another package's fixtures path",
+    referencesArtifact("glob('packages/objectql/src/__fixtures__/hotcrm-?.artifact.json')", PROBE_FILE),
+    true,
+  );
+  check(
+    "matcher still sees a `hotcrm-[ab]` glob in another package's fixtures path",
+    referencesArtifact("glob('packages/objectql/src/__fixtures__/hotcrm-[ab].artifact.json')", PROBE_FILE),
+    true,
+  );
+  check(
+    "matcher still sees a `{a,hotcrm}` glob in another package's fixtures path",
+    referencesArtifact("glob('packages/objectql/src/__fixtures__/x-{a,hotcrm}.artifact.json')", PROBE_FILE),
+    true,
   );
 
   // ── The permission-set extractor, on the real artifact shape.

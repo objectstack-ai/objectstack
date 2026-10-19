@@ -249,10 +249,16 @@ const CEL_RESERVED_WORDS: ReadonlySet<string> = new Set([
   'let', 'loop', 'package', 'namespace', 'return', 'var', 'void', 'while',
 ]);
 
-/** The predicate keys a form view carries. `visibleOn` is the ADR-0089 alias,
- *  folded onto `visibleWhen` AT PARSE — so a raw artifact, which reaches this
- *  scan before any parse, can still spell either. */
-const FORM_PREDICATE_KEYS: readonly string[] = ['visibleWhen', 'visibleOn'];
+/** The predicate keys a form view carries.
+ *
+ *  The retired ADR-0089 alias `visibleOn` is not read (#23543 F4). The one
+ *  caller runs this scan on the artifact's definition AFTER
+ *  `applyArtifactForwardConversions`, and only inside a window that call
+ *  opened — a replay of the whole chain, retired entries included, so a
+ *  legacy artifact's `visibleOn` has already been renamed by
+ *  `view-visibleOn-to-visibleWhen` when it arrives here; an artifact outside
+ *  every window answers to the strict parse, which refuses the key. */
+const FORM_PREDICATE_KEYS: readonly string[] = ['visibleWhen'];
 
 /**
  * Root identifiers named by one CEL source, minus every bound root, reserved
@@ -383,8 +389,8 @@ function scanFormSection(
 
 /**
  * One form view. Sections live under `sections`, or under the legacy `groups`
- * alias that the parse folds onto `sections` — both are read here for the same
- * reason `visibleOn` is: this scan runs BEFORE the parse.
+ * alias that the parse folds onto `sections` — both are read here because this
+ * scan runs BEFORE the parse (the forward conversions leave `groups` alone).
  */
 function scanFormView(
   formView: unknown,

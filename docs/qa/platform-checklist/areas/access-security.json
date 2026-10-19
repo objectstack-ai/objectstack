@@ -132,7 +132,7 @@
       "title": "Write-path guards: readonly strip, owner_id forge/transfer denied, bulk validation",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -152,9 +152,9 @@
         "as admin (contact create is admin-side in the stock matrix): POST /api/v1/data/showcase_contact {\"name\": \"RO probe\", \"email\": \"ro-probe@verify.test\", \"lead_score\": 10} — forging the readonly field on INSERT; GET the row back",
         "PATCH the same contact with {\"lead_score\": 99}; GET again",
         "as Alice: POST /api/v1/data/showcase_private_note {\"title\": \"planted\", \"owner_id\": \"<Bob's id>\"} (insert forge); then POST a note with {\"owner_id\": \"<Alice's own id>\"} (explicit self-owner); then PATCH her own note with {\"owner_id\": \"<Bob's id>\"} (transfer) and with {\"owner_id\": null} (disown)",
-        "as Alice: POST /api/v1/data/showcase_private_note/createMany with 3 records carrying no owner_id; GET them back and read owner_id on each",
-        "as admin: set an invoice to status 'paid', then PATCH its tax_rate and a line's quantity — the readonlyWhen lock (#3042 bulk half: updateMany over a set including the paid invoice's line)",
-        "bulk-update a set where some rows violate a validation rule (e.g. showcase_invoice_line quantity below min 0 on some rows only) via POST /api/v1/data/showcase_invoice_line/updateMany; read the per-row outcome"
+        "as Alice: POST /api/v1/data/showcase_private_note/createMany with a BARE JSON ARRAY of 3 records carrying no owner_id (e.g. [{\"title\": \"bulk 1\"}, …]) — the body is the array itself; a {\"records\": […]} wrapper answers 400 VALIDATION_FAILED ('the body must be a JSON array of record objects'); GET them back and read owner_id on each",
+        "as admin: set an invoice to status 'paid', then PATCH its tax_rate and a line's quantity — the readonlyWhen lock (#3042 bulk half: updateMany over a set including the paid invoice's line). updateMany is id-based: the body is {\"records\": [{\"id\": \"<line id>\", \"data\": {…}}, …]} — a {where, data} body answers 400 VALIDATION_FAILED naming `records`",
+        "bulk-update a set where some rows violate a validation rule (e.g. showcase_invoice_line quantity below min 0 on some rows only) via POST /api/v1/data/showcase_invoice_line/updateMany {\"records\": [{\"id\", \"data\"}, …], \"options\": {\"continueOnError\": true}}; read the per-row outcome. ⚠️ Without options.continueOnError the bulk run stops at the FIRST failure (the BatchOptionsSchema default): rows before it are applied, the failing row carries its own error and every later row reports errors[0].code NOT_ATTEMPTED — so put a compliant row AFTER the violating one and send continueOnError true for the mixed-outcome leg; the default run is the stop-at-first-failure shape, also worth one capture"
       ],
       "acceptance": [
         {
@@ -196,7 +196,7 @@
         {
           "clause": "bulk update evaluates validation rules PER ROW (the #3106 updateMany gap must not reproduce): violating rows rejected/skipped, compliant rows applied — one mixed batch shows both outcomes",
           "oracle": "api",
-          "verify": "updateMany response distinguishes per-row results; re-reads confirm compliant rows changed and violating rows did not",
+          "verify": "updateMany response distinguishes per-row results; re-reads confirm compliant rows changed and violating rows did not — measured with options.continueOnError true (rows before and after the violating one applied, the violating row VALIDATION_FAILED and unchanged); the default stop (later rows NOT_ATTEMPTED and unchanged) is a different shape and does not satisfy this clause on its own",
           "evidence": "bulk response + row reads"
         }
       ],
@@ -243,6 +243,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21720 parked on #22017 (row 12). N2 was not runnable: there is no REST door for an in-process isSystem write, and no pin targeted it. Disposition: pin. engine-insert-static-readonly-strip.test.ts and engine-readonly-strip-caller-values.test.ts already prove the isSystem exemption on a real engine, on INSERT and UPDATE. `automated` names them for negative[1], and the negative says to score it from them",
           "ref": "#22017"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-16",
+          "change": "wire shapes the steps left out (#23878 checklist-accuracy findings, re-measured on main c91af8ed6). createMany takes a bare JSON array (a {records} wrapper answers 400 VALIDATION_FAILED); updateMany takes {records:[{id,data}]} (a where body answers 400 naming records); and a bulk run stops at the first validation failure by default, marking later rows NOT_ATTEMPTED, so clause 7's mixed-outcome step now sends options.continueOnError true. Measured on showcase_invoice_line [valid, quantity -1, valid]: default → succeeded 1, failed 2 (VALIDATION_FAILED, NOT_ATTEMPTED), only row 0 changed; continueOnError → succeeded 2, failed 1, rows 0 and 2 changed, row 1 unchanged",
+          "ref": "#24036"
         }
       ]
     },
@@ -342,7 +348,7 @@
       "title": "A read-only package actually locks Studio editing surfaces",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -359,7 +365,7 @@
         "screenshot the surface; then read the DOM state of the edit affordances (checkboxes, Save)",
         "attempt the edit through the UI anyway (click a checkbox / Save) and capture what the client does",
         "forge the write directly: PUT /api/v1/meta/object/<packaged object name> with a trivial field change, as the same admin session",
-        "POST /api/v1/packages to create a scratch writable base package, author an object into it (PUT /api/v1/meta/object/<scratch object>?package=<scratch id>), then repeat the same trivial-change PUT against that object to prove the guard discriminates by package writability, not by blanket denial. ⛔ Do not duplicate com.example.showcase: POST /packages/com.example.showcase/duplicate answers 422 DUPLICATE_SOURCE_NOT_A_BASE, because the source must be a base (#14451)"
+        "POST /api/v1/packages to create a scratch writable base package — the manifest needs a `type` (e.g. {\"manifest\": {\"id\": \"com.example.qa-base\", \"name\": \"QA Base\", \"version\": \"1.0.0\", \"scope\": \"project\", \"type\": \"app\"}}; without it the install door answers 400 VALIDATION_ERROR naming manifest.type, and scope must be one of cloud | system | project), author an object into it (PUT /api/v1/meta/object/<namespace>_<name>?package=<scratch id>, the namespace being the one the install echoes back) — the object needs a `sharingModel` (e.g. 'private'), or the save answers 422 INVALID_METADATA with rule security-owd-unset — then repeat the same trivial-change PUT against that object to prove the guard discriminates by package writability, not by blanket denial. ⛔ Do not duplicate com.example.showcase: POST /packages/com.example.showcase/duplicate answers 422 DUPLICATE_SOURCE_NOT_A_BASE, because the source must be a base (#14451)"
       ],
       "acceptance": [
         {
@@ -425,6 +431,12 @@
           "date": "2026-10-05",
           "change": "clause 3, step 5, the fixture line and clause 2's code set re-pointed (stale, #21784 VF4; the lane had it as an assertion defect, and the verifier's disposition is used). POST /packages/com.example.showcase/duplicate answers 422 DUPLICATE_SOURCE_NOT_A_BASE: requireDuplicableSource (runtime/src/domains/packages.ts, #14451) refuses a code-package source. This predates 17.6.0 (and 17.5.0), and it supersedes the duplicate route revision 3 adopted under the #9788 ruling. The clause uses the verifier's wording: the writable contrast is a scratch base created through POST /api/v1/packages. Clause 2's code set adds NOT_OVERRIDABLE, the bare PUT's answer, per the run's FE7 (ITEM_LOCKED only with ?package=)",
           "ref": "#21797"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-16",
+          "change": "step 5 names the two shapes the writable contrast needs (#23878 checklist-accuracy finding, re-measured on main c91af8ed6): POST /api/v1/packages answers 400 VALIDATION_ERROR ('manifest.type: Invalid option …') without a manifest `type` and 201 with type 'app' (scope project; the install echoes a derived namespace), and an object authored into the scratch base answers 422 INVALID_METADATA, rule security-owd-unset, without a sharingModel and 200 with one. The forged write on the packaged object still answers 403 (NOT_OVERRIDABLE bare, ITEM_LOCKED with ?package=com.example.showcase) and leaves its document byte-identical",
+          "ref": "#24036"
         }
       ]
     },
@@ -433,7 +445,7 @@
       "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -444,15 +456,14 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "examples/app-showcase/access-matrix.json — it IS the expectation table (47 permission-set × object rows at revision 4: 41 showcase_* rows plus 6 showcase_field_ops_delegate × sys_* rows; recount from the file each run)",
+          "examples/app-showcase/access-matrix.json — it IS the expectation table (45 permission-set × object rows, measured on main c91af8ed6: 41 showcase_* rows plus 4 showcase_field_ops_delegate × sys_* rows — sys_business_unit, sys_business_unit_member, sys_user, sys_user_position; the two delegate rows on the security-catalog objects left with #23222; recount from the file each run)",
           "seeded permission sets showcase_contributor/manager/executive/auditor/ops/member_default/guest_portal/field_ops_delegate/client_liaison (security bootstrap)"
         ],
         "knownGaps": [
           "every authenticated member ALSO holds the everyone baseline showcase_member_default additively (ADR-0090 D5) — the effective expectation per cell is the UNION of the tested set's row and the baseline's row for that object; compute the union before judging a cell, or a baseline-granted read will look like a matrix violation. Measured on the committed table: 9 of the 164 showcase_* cells (41 rows × 4 verbs at revision 4) are granted ONLY by the baseline (showcase_auditor and showcase_executive can CREATE an inquiry and create+edit a private note; guest_portal can READ an inquiry; showcase_manager and showcase_ops can CREATE an inquiry). showcase-crud-persona-matrix.dogfood.test.ts computes the union and asserts those 9 as allowed.",
           "access-matrix.json is the APP's declared matrix; the platform's own baseline permission sets are additionally in force and grant some sys_* surface the app matrix never mentions (measured: a plain member reads /data/sys_user 200, self-scoped). So the absence of a row is NOT a prediction of denial on sys_* objects, and the automated sweep judges the showcase_* rows only — see automated.ref.",
           "clause 5 (guest_portal create-without-read) is UNOBSERVABLE on a stock boot — record it blocked(fixture), never pass or fail. The guest anchor ships unbound (binding guest → showcase_guest_portal is an admin action; the app only ships the capability, permission-sets.ts GuestPortalPermissionSet), a member persona holding the set also holds the baseline's read on showcase_inquiry, and QA run #21056 measured REST anonymous create AND read both answering 401 even with the anchor bound. The only anonymous create lane is the public form (publicFormGrant on the inquiry form view, ADR-0056 Option A), whose grant is create plus read-back of the row it created — a different contract from this clause's",
-          "sys_user create and delete answer 405 OBJECT_API_METHOD_NOT_ALLOWED for EVERY caller, admin included: sys_user declares apiMethods ['get','list','update','bulk'] (identity writes belong to better-auth, ADR-0092), and the API-exposure gate answers before any permission is judged. Score those two delegate × sys_user cells against 405, not 403",
-          "A1 (acceptance[0], every allowed cell succeeds) is a KNOWN FAIL on 17.x until the v18 ADR-0131 C1 business-unit leg lands (#21057, target:v18, gated by #15193): the seeded sys_business_unit rows carry organization_id null, so the showcase_field_ops_delegate × sys_user_position in-subtree create (bu_west_coast under bu_field_ops) answers 403 PERMISSION_DENIED \"outside the delegated subtree\" and the delegate's scope resolves to an empty subtree (the gate fails closed: over-refusal, never exposure). Measured discriminator (#21057 comments 5927366808 and 5979438043): once the organization is stamped on the seeded units, the in-subtree create flips to 201 while the out-of-subtree create (bu_hq_finance) stays 403 — so the cause is the unstamped seed, not the gate. Score A1 FAIL in the run table and read it as known (#21057), not new; do NOT re-derive it, do NOT weaken the clause, do NOT stamp the units to make it pass (that would hide the very gap this entry tracks). It turns green when the v18 C1 leg lands — that flip is the signal the gap closes, and this entry is then removed (ruling: #21057 comment 5980557328, ADR-0131 D3/D14)"
+          "sys_user create and delete answer 405 OBJECT_API_METHOD_NOT_ALLOWED for EVERY caller, admin included: sys_user declares apiMethods ['get','list','update','bulk'] (identity writes belong to better-auth, ADR-0092), and the API-exposure gate answers before any permission is judged. Score those two delegate × sys_user cells against 405, not 403"
         ]
       },
       "steps": [
@@ -462,7 +473,7 @@
         "for rows with viewAllRecords:true (auditor on showcase_inquiry/showcase_invoice/showcase_invoice_line/showcase_private_note): GET the foreign probe by id and list; for the SAME objects re-run as a persona whose row says viewAllRecords:false",
         "for rows with modifyAllRecords:true (ops on showcase_announcement): PATCH the foreign-owned announcement; re-run the same PATCH as member_default (modifyAllRecords:false)",
         "for the guest_portal row pair on showcase_inquiry (create:true, read:false): record clause 5 blocked(fixture) per knownGaps — a member holding the set reads inquiries through the baseline, and REST anonymous answers 401 to both verbs",
-        "for the 6 showcase_field_ops_delegate × sys_* rows, drive the delegate by hand; for its sys_user_position edit and delete cells, probe a row the DELEGATE created — a row another principal created meets the platform's write ownership floor (member_default owner_only_writes / owner_only_deletes, created_by == current_user.id), so its verdict does not read the delegate's grant",
+        "for the 4 showcase_field_ops_delegate × sys_* rows, drive the delegate by hand; for its sys_user_position edit and delete cells, probe a row the DELEGATE created — a row another principal created meets the platform's write ownership floor (member_default owner_only_writes / owner_only_deletes, created_by == current_user.id), so its verdict does not read the delegate's grant",
         "record the full verb × set × object verdict matrix and diff it against access-matrix.json (unioned with the baseline per the known gap above)"
       ],
       "acceptance": [
@@ -505,7 +516,7 @@
         {
           "clause": "every variant (permission set) is driven over EVERY object row access-matrix.json lists for it, and the run record carries one verdict per cell — a set skipped or an object row skipped makes the item at best partial",
           "oracle": "api",
-          "verify": "verdict matrix dimensions match access-matrix.json entries (47 rows × 4 verbs at revision 4: the 41 showcase_* rows are 164 cells, 87 effective-allow and 77 effective-deny after the baseline union; recount from the file each run)",
+          "verify": "verdict matrix dimensions match access-matrix.json entries (45 rows × 4 verbs at revision 6: the 41 showcase_* rows are 164 cells, 87 effective-allow and 77 effective-deny after the baseline union; recount from the file each run)",
           "evidence": "the matrix artifact"
         }
       ],
@@ -526,7 +537,7 @@
       ],
       "automated": {
         "kind": "verify",
-        "ref": "packages/verify/src/verify.ts (runCrudVerification) + packages/verify/src/rls.ts (runRlsProofs) — `objectstack verify --rls` for the OBJECT-level CRUD and cross-owner RLS half (the flag is load-bearing: bare verify prints no RLS section) + packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts for the PERSONA-grained cells: every showcase_* row of access-matrix.json (41 at revision 4) driven over all four verbs by one fresh member per permission set — 164 cells, 87 effective-allow and 77 effective-deny, each judged against the BASELINE-UNIONED expectation (row OR showcase_member_default row, ADR-0090 D5), which is also asserted as load-bearing on the 9 cells whose only grant is the baseline. Reaches clauses 0, 1, 2, 3, 4 and 6 for those rows; every denial is checked to be 403 PERMISSION_DENIED specifically, every allow to persist, and an admin payload control runs first so a persona 403 cannot be a 400 in disguise. STILL MANUAL: (a) the 6 showcase_field_ops_delegate x sys_* rows — the platform's OWN baseline sets grant part of that surface independently of the app matrix (measured: a member holding nothing but the app baseline reads /data/sys_user 200, self-scoped, though the matrix lists sys_user read only for the delegate), and the delegate's sys_user_position writes are decided by the ADR-0090 D12 adminScope subtree gate that showcase-permission-zoo.dogfood.test.ts pins on both sides ON THE VERIFY HARNESS — a raw cell verdict there would be false in one direction or the other. ⚠️ That pin does not vouch for a dev boot: QA run #21056 measured the same in-subtree assignment answering 403 'outside the delegated subtree' on a stock dev boot (verifier-confirmed product defect, tracked at #21057), so drive those cells by hand and score them against the live answer; (b) clause 5's guest-anchor intake asymmetry (guest_portal create-without-read) — NOT observable on a member persona at all, because the everyone baseline grants read on showcase_inquiry and capability is a union, so the member-persona expectation is READ ALLOWED; the asymmetry lives on the unauthenticated guest anchor, a different admission lane."
+        "ref": "packages/verify/src/verify.ts (runCrudVerification) + packages/verify/src/rls.ts (runRlsProofs) — `objectstack verify --rls` for the OBJECT-level CRUD and cross-owner RLS half (the flag is load-bearing: bare verify prints no RLS section) + packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts for the PERSONA-grained cells: every showcase_* row of access-matrix.json (41 at revision 4) driven over all four verbs by one fresh member per permission set — 164 cells, 87 effective-allow and 77 effective-deny, each judged against the BASELINE-UNIONED expectation (row OR showcase_member_default row, ADR-0090 D5), which is also asserted as load-bearing on the 9 cells whose only grant is the baseline. Reaches clauses 0, 1, 2, 3, 4 and 6 for those rows; every denial is checked to be 403 PERMISSION_DENIED specifically, every allow to persist, and an admin payload control runs first so a persona 403 cannot be a 400 in disguise. STILL MANUAL: (a) the 4 showcase_field_ops_delegate x sys_* rows — the platform's OWN baseline sets grant part of that surface independently of the app matrix (measured: a member holding nothing but the app baseline reads /data/sys_user 200, self-scoped, though the matrix lists sys_user read only for the delegate), and the delegate's sys_user_position writes are decided by the ADR-0090 D12 adminScope subtree gate that showcase-permission-zoo.dogfood.test.ts pins on both sides ON THE VERIFY HARNESS — a raw cell verdict there would be false in one direction or the other. That pin runs on the verify harness, so drive those cells by hand on the dev boot and score them against the live answer: since #21057 closed (2026-10-08) the seeded business units carry organization_id and the delegate's in-subtree sys_user_position create answers 201 while the out-of-subtree create (bu_hq_finance) answers 403 PERMISSION_DENIED 'outside the delegated subtree'; (b) clause 5's guest-anchor intake asymmetry (guest_portal create-without-read) — NOT observable on a member persona at all, because the everyone baseline grants read on showcase_inquiry and capability is a union, so the member-persona expectation is READ ALLOWED; the asymmetry lives on the unauthenticated guest anchor, a different admission lane."
       },
       "traps": [
         "wrong-persona",
@@ -563,6 +574,12 @@
           "date": "2026-10-04",
           "change": "knownGaps records that A1 is a known FAIL on 17.x: #21057 (seeded business units carry no organization, so the field-ops delegate's in-subtree create is refused) is ruled to wait for ADR-0131 C1's business-unit leg in v18 (target:v18, gated by #15193). The clause, the priority and every other item are unchanged; A1 stays a FAIL in the run table and goes green when the v18 leg lands",
           "ref": "#21747 (maintainer ruling: #21057 comment 5980557328)"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-16",
+          "change": "counts and the known gap re-measured on main c91af8ed6 (#23878 checklist-accuracy findings). access-matrix.json now has 45 rows: 41 showcase_* plus 4 delegate × sys_* (sys_business_unit, sys_business_unit_member, sys_user, sys_user_position), so the fixture line, steps[6], acceptance[6] and automated.ref say 45 / 4 instead of 47 / 6; the 164 showcase cells and their 87 allow / 77 deny / 9 baseline-only split are unchanged. knownGaps[4] (A1 a KNOWN FAIL until #21057) is removed, as its own ruling prescribed once the C1 business-unit leg landed: #21057 closed on 2026-10-08, the five seeded sys_business_unit rows carry organization_id, and the delegate's in-subtree create answers 201 while bu_hq_finance stays 403. A1 is therefore expected to pass; a 403 on the in-subtree create is now a fail, not a known one",
+          "ref": "#24036"
         }
       ]
     },
@@ -692,7 +709,7 @@
       "title": "Field-level security: editable:false strips/denies writes API-side and renders read-only in the UI; masked-read half needs an authored readable:false grant",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -717,7 +734,7 @@
         "as contributor over the API: PATCH /api/v1/data/showcase_project/<id> {\"name\": \"<name> (edited)\"} — an editable field, then PATCH {\"budget\": 999999999} — the FLS-locked field",
         "re-read the project system-side; compare budget before/after",
         "as admin: PATCH the same budget field to a new value and re-read (the entitled side)",
-        "in the console as the contributor: open the project's detail/edit form; screenshot; inspect the budget/spent/budget_remaining controls' state",
+        "in the console as the contributor: open the project's detail/edit form; screenshot; inspect the state of the budget and spent controls — the two budget figures the edit form renders (project.view.ts form section 'Budget & Schedule': budget, spent, start_date, end_date). budget_remaining is a formula field and is not on the edit form at all",
         "read-mask half (see knownGaps): grant a scratch readable:false set to a fresh member, then GET the project as that member and inspect whether the masked field is absent/nulled in the API body AND blank in the UI render",
         "as admin GET the same row — the unmasked contrast"
       ],
@@ -741,9 +758,9 @@
           "evidence": "trace + re-read"
         },
         {
-          "clause": "the UI renders the FLS state faithfully for the contributor: budget figures visible (readable:true) but not editable — input disabled/read-only on the edit form",
+          "clause": "the UI renders the FLS state faithfully for the contributor: the budget figures the edit form carries (budget and spent) are visible (readable:true) but not editable — input disabled/read-only on the edit form. budget_remaining is a formula: it is never on the edit form and never editable for anyone, so it cannot discriminate the FLS lock and is not scored here",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the form rendered, assert the disabled/read-only state of the three budget controls",
+          "verify": "after a screenshot confirms the form rendered, assert the disabled/read-only state of the budget and spent controls (the form section names exactly those two of the three figures, examples/app-showcase/src/ui/views/project.view.ts); an EDITABLE budget or spent input for the contributor is the fail",
           "evidence": "screenshot + DOM read"
         },
         {
@@ -788,6 +805,12 @@
           "date": "2026-08-18",
           "change": "the SEED gap is closed too: showcase_client_liaison is a stock permission set carrying readable:false on all three showcase_project budget figures, so clause 5's UI half is reachable for the first time — a real member, a real console render, no test-local stack. knownGaps rewritten as closed-by-fixture rather than deleted, with the merge caveat (do not also grant showcase_contributor) and the reason all three figures move together. The #8993 maskingRule gap is UNTOUCHED and still has no fixture anywhere in this repo",
           "ref": "#9308"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "clause 4 and step 5 asked for the disabled state of THREE budget controls (#23878 checklist-accuracy finding). The edit form renders two: project.view.ts's 'Budget & Schedule' section lists budget, spent, start_date and end_date, and budget_remaining is a formula field that no edit form carries (re-measured on main c91af8ed6). The clause now scores budget and spent, and says why the formula cannot discriminate the lock. The API clauses are unchanged",
+          "ref": "#24036"
         }
       ]
     },
@@ -1014,7 +1037,7 @@
       "title": "Criteria sharing rules widen the OWD baseline: matching rows become visible to the rule's audience, non-matching stay hidden",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1026,25 +1049,26 @@
         "app": "showcase",
         "requires": [
           "the shipped criteria sharing rules + sys_business_unit tree (examples/app-showcase/src/security/)",
-          "runtime-assigned exec/manager/Field-Ops personas (as access-security.scope-depth-asymmetry already provisions)"
+          "a runtime member added to the Field Operations business-unit subtree — as admin POST /api/v1/data/sys_business_unit_member {\"user_id\": \"<member>\", \"business_unit_id\": \"bu_west_coast\"} (a descendant of bu_field_ops) — as the unit audience, a member outside that subtree as the outsider, and a manager-position member only to record the position variant's depth confound (knownGaps)"
         ],
         "knownGaps": [
-          "the owner-based rule is [experimental] and skipped per the liveness ledger — exclude it; criteria + position/unit audiences are the live surface"
+          "the owner-based rule is [experimental] and skipped per the liveness ledger — exclude it; criteria + position/unit audiences are the live surface",
+          "the POSITION-audience variant is CONFOUNDED on stock and scores no widening clause. The only seeded position rule, share_key_account_qualified_contacts_with_managers, shares Northwind-qualified showcase_contact rows with the manager position, and manager's showcase_manager set reads showcase_contact at readScope 'org'. Measured on main c91af8ed6: a manager-holding member reads all 32 contacts, and POST /api/v1/security/explain answers visible, decidedBy 'depth' on a matching AND a non-matching contact — the sharing layer never decides. So acceptance[0]-[2] are scored on the unit_and_subordinates variant (share_new_inquiries_with_field_ops: a member of bu_field_ops or a descendant unit reads exactly the status='new' inquiry, and its sys_record_share row carries source 'rule'); the position variant records its depth-decided reads as the confound. A position audience without org depth is authored in-run by access-security.sharing-rule-authoring-ui"
         ]
       },
       "variants": [
-        "criteria rule, position audience",
+        "criteria rule, position audience (confounded on stock by showcase_manager's org-depth read — see knownGaps; recorded, not scored as widening)",
         "criteria rule, unit_and_subordinates audience",
         "manual one-off share via the record-shares route"
       ],
       "steps": [
-        "boot showcase isolated; assign the exec/manager/Field-Ops positions to distinct runtime members",
-        "as admin create a MATCHING probe record (satisfies a rule's criteria, e.g. a high-value / red project or a matching inquiry) and a NON-MATCHING probe on the same private-OWD object",
+        "boot showcase isolated; add the audience member to bu_west_coast through sys_business_unit_member (fixtures.requires); give a second member the manager position to record the position confound",
+        "the probes are seeded: share_new_inquiries_with_field_ops matches status='new', and the seed ships one new, one contacted and one closed showcase_inquiry (OWD private). Use the new one as the MATCHING probe and a non-new one as the NON-MATCHING probe",
         "as the audience member: GET the object list and GET each probe by id",
         "as a member OUTSIDE the audience: same reads",
         "read sys_record_share for the matching record; run /security/explain for the audience member + matching record",
-        "manual-share the non-matching record to a specific user via the record-shares route; that user re-reads",
-        "§A13: as admin edit a materialized share, restart the server, re-read (seed-not-clobber)"
+        "manual-share the non-matching inquiry to a specific user via the record-shares route (POST /api/v1/data/showcase_inquiry/<id>/shares); that user re-reads, and a third member re-reads too. The recipient needs object-level read on the object: a share on showcase_contact to a baseline member lands 201 but the member's read answers 403 at the object gate, because the member baseline grants no showcase_contact read — so a manual share is only observable on an object the recipient can already read at object level",
+        "§A13: as admin edit the SEEDED sharing-rule row (PATCH /api/v1/data/sys_sharing_rule/<the share_new_inquiries_with_field_ops row id>, e.g. its description), restart the server on the same database, re-read the row (seed-not-clobber). The materialized share is not editable: PATCH /api/v1/data/sys_record_share/<id> answers 405 OBJECT_API_METHOD_NOT_ALLOWED (allowed get, list, aggregate, search, export)"
       ],
       "acceptance": [
         {
@@ -1072,9 +1096,9 @@
           "evidence": "the two reads"
         },
         {
-          "clause": "§A13 — an admin edit to a materialized/seeded share survives a restart (the seed does not clobber it, #2909)",
+          "clause": "§A13 — an admin edit to a SEEDED sharing-rule row (sys_sharing_rule) survives a restart: the declared-rules bootstrap does not clobber it (#2909). sys_record_share refuses edits (405), so the rule row is the editable seeded artifact",
           "oracle": "api",
-          "verify": "post-restart re-read shows the admin's edit intact",
+          "verify": "post-restart re-read of the sys_sharing_rule row shows the admin's edit intact",
           "evidence": "before/after-restart reads"
         }
       ],
@@ -1097,6 +1121,12 @@
           "date": "2026-08-08",
           "change": "initial — THE marquee gap: sharing rules (criteria → materialized sys_record_share) had zero behavioral coverage though showcase ships stock fixtures; owd-sharing-matrix only did baselines",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-16",
+          "change": "re-pointed on main c91af8ed6 (#23878 checklist-accuracy findings). (1) The position-audience variant is confounded on stock: the manager position binds showcase_manager, which reads showcase_contact at readScope 'org', so a manager reads all 32 contacts and explain answers decidedBy 'depth' on matching and non-matching rows alike. A knownGap records it, the variant is marked recorded-not-scored, and the widening clauses are scored on the unit_and_subordinates rule (measured: a member added to bu_west_coast reads exactly the one status='new' inquiry, rule-sourced share row). Steps 1-2 name the provisioning and the seeded probes instead of the retired red-project example. (2) Step 7 / clause 5 (§A13) said 'edit a materialized share', but sys_record_share answers 405 to PATCH; the editable seeded artifact is the sys_sharing_rule row. (3) Step 6 records that a manual-share recipient needs object-level read (a contact share to a baseline member reads 403)",
+          "ref": "#24036"
         }
       ]
     },
@@ -1105,7 +1135,7 @@
       "title": "Per-record manual shares grant, scope, and revoke access on a private-OWD record; rule evaluate reconciles the audience",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1189,7 +1219,7 @@
       ],
       "source": [
         "packages/rest/src/rest-route-ledger.ts#REST_ROUTE_LEDGER (record-shares family: GET/POST /data/:object/:id/shares, DELETE .../:shareId; sharing-rules family evaluate — re-pointed #18104: shareId is a route PATH PARAMETER, carried in this file only inside a route string)",
-        "packages/rest/src/rest-server.ts#registerSharingRuleEndpoints (the evaluate leg; the record-shares family GET/POST /data/:object/:id/shares + DELETE .../:shareId is registered inline, under no registrar of its own — #13788 measured that the registerRecordShareEndpoints this citation used to name is not in the file)",
+        "packages/rest/src/sharing-routes.ts#registerSharingEndpoints (the record-shares family: GET and POST /data/:object/:id/shares and DELETE .../:shareId, the body of RestServer#registerSharingEndpoints moved into this module whole) + packages/rest/src/sharing-routes.ts#registerSharingRuleEndpoints (the evaluate leg). The registerRecordShareEndpoints an older revision named still does not exist (#13788); the family's registrar is registerSharingEndpoints",
         "packages/plugins/plugin-sharing/src/objects/sys-record-share.object.ts#recipient_type (recipient_type/recipient_id/access_level/source fields)",
         "packages/plugins/plugin-sharing/src/sharing-rule-service.ts#evaluateRule (evaluateRule → SharingRuleEvaluationResult)",
         "examples/app-showcase/src/security/sharing-rules.ts#share_key_account_qualified_contacts_with_managers (share_key_account_qualified_contacts_with_managers seeded criteria rule)",
@@ -1219,6 +1249,12 @@
           "date": "2026-08-20",
           "change": "steps only — the revoke-scope probe was ordered AFTER the real revoke, which left clause 6's own evidence requirement ('the share still exists (re-read)') unsatisfiable for anyone following the steps literally: the shareId is already gone, so the refusal observed is the ordinary missing-share 404 and says nothing about record scoping. The probe now runs BEFORE the revoke, and the note-creation step creates the second record it needs. No acceptance clause changed. Found by the FIRST execution of this item, at revision 3",
           "ref": "#9702"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-16",
+          "change": "source[1] re-pointed (carried reading of the #23878 wave, confirmed on main c91af8ed6): it said the record-shares family is 'registered inline, under no registrar of its own'. packages/rest/src/sharing-routes.ts exports registerSharingEndpoints, which registers GET and POST /data/:object/:id/shares and DELETE .../:shareId; the evaluate leg stays on registerSharingRuleEndpoints. Anchor and wording only: no step, fixture or oracle changed, so no re-run is owed",
+          "ref": "#24036"
         }
       ]
     },
@@ -1227,7 +1263,7 @@
       "title": "The audit-log browser surfaces attributable events over sys_audit_log with correct actor/object, filters, and a before/after payload drawer",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1247,17 +1283,17 @@
         "generate 3 attributable events with distinct action/actor/object: (a) a fresh member SIGNS IN (action 'login', actor = the member); (b) as admin DELETE a showcase_task via /api/v1/data/showcase_task/<id> (action 'delete', object_name showcase_task, record_id set); (c) write a setting (action 'config_change')",
         "open /system/audit-log; wait for the table to settle; screenshot",
         "locate all three events in the page and read their action / object / actor cells",
-        "narrow to writes and confirm the narrowing is server-side; capture the re-issued /api/v1/data/sys_audit_log request with its $filter. /system/audit-log (AuditLogPage) has an Action select in its filter bar that writes action into the request's $filter. The sys_audit_log object list (the nav entry) offers the prebuilt filtered views (Recent / Writes / Auth / Config) and the generic Filter Records → Where → Add filter builder instead. Either is a valid server-side narrowing",
+        "narrow to writes and confirm the narrowing is server-side; capture the re-issued /api/v1/data/sys_audit_log request with its $filter. /system/audit-log (AuditLogPage) has an Action select in its filter bar that writes action into the request's $filter. The page's Presets row offers sys_audit_log's list views (Writes / Auth / Config / …), and its 'Open as list' link opens the sys_audit_log object list (no longer a Setup menu entry), which offers the same views and the generic Filter Records → Where → Add filter builder. Any of these is a valid server-side narrowing",
         "click an UPDATE row (e.g. PATCH a showcase_contact first) → the side drawer opens; screenshot the Before (old_value) / After (new_value) JSON panels — the update event is the shape that carries both",
         "cross-check the API twin directly: GET /api/v1/data/sys_audit_log?$filter=... for each of the three actions and compare actor/object/action to the page",
         "attempt to forge the trail: POST and PATCH /api/v1/data/sys_audit_log — both must be refused (get+list only)"
       ],
       "acceptance": [
         {
-          "clause": "all three ops produce audit rows with the correct action, actor and target: login→action 'login' attributed to the member; settings write→action 'config_change' — both SERVED on the data API; delete -> action 'delete' (showcase_task + record_id) is served to a reader holding view_all_audit_log (platform admins by default, #21296) and withheld from a non-holder who cannot read the deleted record (#21194).",
+          "clause": "all three ops produce audit rows with the correct action, actor and target: login→action 'login' attributed to the member; settings write→action 'config_change' — both SERVED on the data API; delete -> action 'delete' (showcase_task + record_id) is served to a reader holding view_all_audit_log (platform admins by default, #21296) and never reaches a non-holder: on stock a fresh member is refused the whole object (403 PERMISSION_DENIED — no stock non-admin set grants read on sys_audit_log), and a ledger reader without view_all_audit_log is held to rows about records it can read (#21194, the parent-record gate).",
           "oracle": "api",
-          "verify": "GET /api/v1/data/sys_audit_log as the admin returns the login, config_change AND delete rows, each with action / actor (user_id) / object_name / record_id matching what the op did (fields per packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts). The admin holds view_all_audit_log through ADMIN_FULL_ACCESS_CAPABILITIES, which exempts the holder from the ledger's parent-record read gate. The same $filter action='delete' read by a non-holder who cannot read the deleted record (e.g. the fresh member) returns NO row. A delete row withheld from the admin, or served to the non-holder, is the FAIL",
-          "evidence": "the admin's three served rows + the non-holder's empty delete-filtered read"
+          "verify": "GET /api/v1/data/sys_audit_log as the admin returns the login, config_change AND delete rows, each with action / actor (user_id) / object_name / record_id matching what the op did (fields per packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts). The admin holds view_all_audit_log through ADMIN_FULL_ACCESS_CAPABILITIES, which exempts the holder from the ledger's parent-record read gate. The same $filter action='delete' read by the fresh member answers 403 PERMISSION_DENIED at the object gate (measured on main c91af8ed6; the member never reaches the parent-record gate, because nothing grants it read on sys_audit_log), so no row reaches it. The parent-record gate itself — a ledger reader WITHOUT view_all_audit_log sees only rows about records it can read — has no stock non-admin holder of a sys_audit_log read and is scored from packages/plugins/plugin-audit/src/audit-log-read-visibility.test.ts and audit-log-read-visibility.integration.test.ts. A delete row withheld from the admin, or any row served to the fresh member, is the FAIL",
+          "evidence": "the admin's three served rows + the fresh member's 403 on the delete-filtered read + the two pin runs for the parent-record gate"
         },
         {
           "clause": "the browser renders those same rows: after a screenshot confirms the table painted, the DOM rows carry the same action/actor/object the API returned — the page shows server truth, not a recomputation",
@@ -1300,7 +1336,7 @@
       ],
       "source": [
         "packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts#user_id (action enum, actor/user_id/object_name/record_id/old_value/new_value fields, enable.apiMethods get+list)",
-        "packages/plugins/plugin-audit/src/audit-plugin.ts#nav_audit_logs (nav_audit_logs → sys_audit_log)",
+        "packages/plugins/plugin-audit/src/audit-plugin.ts#nav_audit_logs (nav_audit_logs → audit:log, Setup's one audit entry, which opens this page)",
         "objectui apps/console/src/pages/system/AuditLogPage.tsx (/api/v1/data/sys_audit_log, $filter/$orderby/$top/$skip, Before/After drawer)",
         "objectui apps/console/src/AppContent.tsx (route system/audit-log)"
       ],
@@ -1313,7 +1349,9 @@
         },
         { "revision": 2, "date": "2026-08-18", "change": "re-pointed clause 2 and step 5 at controls that exist. The item named an 'Action filter' dropdown; this console offers prebuilt filtered views (Recent / Writes / Auth / Config) plus a generic Filter Records / Where / Add filter builder. Server-side narrowing — the property the clause is actually for — is provable through the Writes view; naming a control that does not exist invites the absence-inference trap (#9453 CF-9)", "ref": "#9386" },
         { "revision": 3, "date": "2026-10-02", "change": "re-pointed clause 1 (and the clauses that counted its three rows) at 17.6.0's ledger read rule. 30c530e5 (#21194) serves a non-system reader, administrators included, only audit rows about records it can read, so the delete row is written but never served on the data API; the 17.6.0 release-verification run measured the admin's delete-filtered read at 0 rows while the stored row carried correct attribution. The clause now asserts the login and config_change rows served, the delete row stored and NOT served; step 6's drawer check moves to an update row, since no delete row reaches the page", "ref": "#21330" },
-        { "revision": 4, "date": "2026-10-05", "change": "clauses 1, 3 and 5 and steps 5-6 re-pointed (stale after 17.6.0, #21784 VF4 + FE7). 7ebb543164 (#21296, fixes #21260, 2026-10-02) gives platform admins view_all_audit_log by default (ADMIN_FULL_ACCESS_CAPABILITIES). That exempts them from the ledger's parent-record read gate, so the admin's read serves the delete row. Revision 3 was measured on 17.6.0 and encodes only #21194. Clauses 1 and 5 use the verifier's wording: the delete row is served to a view_all_audit_log holder and withheld from a non-holder who cannot read the deleted record. FE7: revision 2's 'there is no Action dropdown' is false at the console pin, because AuditLogPage has an Action select that narrows through $filter. Clause 3 and step 5 now name it beside the object list's prebuilt views. Re-read at objectui 9dfaca6543: unchanged", "ref": "#21797" }
+        { "revision": 4, "date": "2026-10-05", "change": "clauses 1, 3 and 5 and steps 5-6 re-pointed (stale after 17.6.0, #21784 VF4 + FE7). 7ebb543164 (#21296, fixes #21260, 2026-10-02) gives platform admins view_all_audit_log by default (ADMIN_FULL_ACCESS_CAPABILITIES). That exempts them from the ledger's parent-record read gate, so the admin's read serves the delete row. Revision 3 was measured on 17.6.0 and encodes only #21194. Clauses 1 and 5 use the verifier's wording: the delete row is served to a view_all_audit_log holder and withheld from a non-holder who cannot read the deleted record. FE7: revision 2's 'there is no Action dropdown' is false at the console pin, because AuditLogPage has an Action select that narrows through $filter. Clause 3 and step 5 now name it beside the object list's prebuilt views. Re-read at objectui 9dfaca6543: unchanged", "ref": "#21797" },
+        { "revision": 5, "date": "2026-10-16", "change": "clause 1's non-holder arm re-pointed to the measured answer (#23878 checklist-accuracy finding, re-measured on main c91af8ed6): a fresh member is refused sys_audit_log at the object level (GET /api/v1/data/sys_audit_log and the action='delete' filter both answer 403 PERMISSION_DENIED), so the 'empty filtered list' the clause expected never appears. No stock non-admin permission set grants read on sys_audit_log, so the parent-record gate (#21194) has no live non-admin reader; the clause now names the plugin-audit visibility pins as its oracle for that gate. The clause still fails if the fresh member is served any row", "ref": "#24036" },
+        { "revision": 6, "date": "2026-10-17", "change": "step 5 and the nav source re-pointed at Setup's one audit entry (#23890): nav_audit_logs now opens this page (audit:log) and is labelled Audit Log, the sys_audit_log object list has no Setup menu entry and is reached from the page's Open as list link, and the page offers the list views as presets (objectui#12667, at the console pin 5e15928b4631). No acceptance clause changes", "ref": "#23890" }
       ]
     },
     {
@@ -1416,7 +1454,7 @@
       "title": "Anonymous public form renders the whitelist only and its submit strips forged anchors; the inquiry lands via publicFormGrant",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1438,7 +1476,7 @@
         "anon POST /api/v1/forms/contact-us/submit with the whitelist fields (name/email/company/message) PLUS forged owner_id + organization_id + created_by + a non-whitelisted business field status:'closed' — capture the 201",
         "as admin/staff: read the landed showcase_inquiry and inspect owner_id, organization_id, created_by, status, source vs the payload",
         "anon GET /api/v1/forms/contact-us/lookup/owner_id — the non-whitelisted lookup picker probe",
-        "browser: open the public link '/forms/contact-us', submit the form, and screenshot the submitBehavior thank-you panel",
+        "browser: open the public link '/forms/contact-us' — on a boot that serves the console it answers 302 to the console's PUBLIC form page /_console/f/contact-us (packages/cli/src/utils/console.ts, console-route-ledger 'GET /forms/:slug'; on a console-less boot it is a plain 404) — submit the form, and screenshot the submitBehavior thank-you panel. ⛔ Not /_console/forms/:name: that is the AUTHED internal form route, which sends an anonymous visitor to the login page",
         "unpublish the contact form view (or clear sharing.allowAnonymous) and anon GET /api/v1/forms/contact-us again; then republish and re-GET",
         "smuggle probe: anon POST with a JSON body carrying a __proto__ key nesting owner_id — confirm no inherited anchor lands"
       ],
@@ -1450,7 +1488,7 @@
           "evidence": "the resolved form body"
         },
         {
-          "clause": "forged anchors are stripped on submit: the landed showcase_inquiry's owner_id is the server-stamped owner (NOT the forged usr_victim), organization_id/created_by are not the forged values — a visitor cannot forge ownership (#3004/#3022)",
+          "clause": "forged anchors are stripped on submit: the landed showcase_inquiry's owner_id is NOT the forged usr_victim — an anonymous submit has no principal to stamp, so it lands null — organization_id is the deployment's own organization (server-stamped) and created_by is not the forged value (null) — a visitor cannot forge ownership (#3004/#3022)",
           "oracle": "api",
           "verify": "the staff read of the landed row shows owner_id/organization_id/created_by != the forged payload values",
           "evidence": "the landed row read + the forged payload"
@@ -1514,109 +1552,109 @@
           "date": "2026-10-01",
           "change": "the lookup-refusal clause becomes the route's absence: ruling E retired the anonymous public-form lookup picker, so lookup / master_detail / user fields are always stripped from the anonymous rendering and GET /forms/:slug/lookup/:field is no longer registered (#21180)",
           "ref": "claude/issue-21180-retire-public-picker"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "clause 2 and step 6 corrected (#23878 checklist-accuracy findings, re-measured on main c91af8ed6; comment 6225030762 withdrew only the heading pointer, which this item never carried). The anonymous submit's landed row has owner_id null and created_by null — there is no 'server-stamped owner' — while organization_id is the deployment's own organization; the forged values are stripped either way, which is what the verify already scores. Step 6 now says the public link /forms/contact-us redirects (302) to the public page /_console/f/contact-us on a console-serving boot, and that /_console/forms/:name is the authed internal route",
+          "ref": "#24036"
         }
       ]
     },
     {
       "id": "access-security.public-form-withdrawal-layers",
-      "title": "A public form's withdrawal holds across metadata layers: an organization overlay cannot re-open a form the env-wide definition withdrew, only an explicit false withdraws, a package's shipped false withdraws, and the env-wide definition may open a package-closed form",
+      "title": "A public form's withdrawal holds across the layers of the environment's definition: an administrator's save is environment-wide whatever organization is active and its withdrawal closes the form, a withdrawal in any package's body of the view name closes it in every package, only an explicit false withdraws, a package's shipped false withdraws, and the package-less environment-wide copy may open a form a package ships closed",
       "since": "v17.7",
       "status": "active",
-      "revision": 1,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
         "anonymous (no Authorization header, no cookie) on both public form doors, GET /api/v1/forms/:slug and POST /api/v1/forms/:slug/submit",
-        "platform admin (the seeded admin), saving the form at two scopes from one session: env-wide (no active organization) and in the Default Organization, which is the organization the anonymous doors read on a single-posture boot"
+        "platform admin (the seeded admin), saving the form from a session whose active organization is the Default Organization. Since ADR-0131 D6 that save is environment-wide, so the active organization is a premise the item holds, not a second layer it writes"
       ],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "the stock public form: examples/app-showcase/src/ui/views/inquiry.view.ts#InquiryViews, formViews.contact (enabled and allowAnonymous true, publicLink '/forms/contact-us'), served as the flattened view item showcase_inquiry.contact with its sharing at config.sharing",
-          "the stock single tenancy posture and its Default Organization, whose owner is the seeded admin (packages/plugins/plugin-auth/src/ensure-default-organization.ts#ensureDefaultOrganization). The doors resolve the organization through tenancy.defaultOrgId(), and the admin moves between scopes with POST /api/v1/auth/organization/set-active (organizationId null for env-wide). Under a walled posture the doors read no organization, and an org-scoped change of intake is refused for that reason instead (packages/metadata-protocol/src/protocol.ts#anonymousFormIntakeOrgScopeRefusal): out of this item",
-          "a boot you own (pnpm dev -- --fresh -p <port>): the steps leave an env-wide row and an organization overlay of the stock form behind, which would change access-security.public-form-intake's next run on a shared boot. Teardown is discarding the tempdir"
+          "the stock single tenancy posture and its Default Organization, whose owner is the seeded admin (packages/plugins/plugin-auth/src/ensure-default-organization.ts#ensureDefaultOrganization). The admin makes it active with POST /api/v1/auth/organization/set-active, and an anonymous submission lands in it. Under a walled posture the stock form is not offered at all, because its object cannot take an anonymous submission there (packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeUnavailability; packages/qa/dogfood/test/showcase-public-form-walled-intake.dogfood.test.ts and public-form-withdrawal-walled.dogfood.test.ts own that half): out of this item",
+          "a boot you own (pnpm dev -- --fresh -p <port>): the steps leave an environment-wide row of the stock form behind, which would change access-security.public-form-intake's next run on a shared boot. Teardown is discarding the tempdir"
         ],
         "knownGaps": [
-          "THE RULED KNOWN LIMIT (#21835 comment 6005722623, 「保持现状，写进文档」): the anonymous doors judge a form by the name of the view item they serve, and the save check runs only on an organization-scoped save or publish. So an organization overlay that was stored before the env-wide withdrawal, or that a rollback or commit revert restores (neither is gated), and that keeps the form open under a different key or slot than the env-wide definition, can still be served. content/docs/ui/public-data-collection.mdx states it under 'Known limit.'. This item neither stages nor scores it: a run that meets it records it against that ruling, never as a FAIL and never as a new finding. Withdrawing the form in that organization's overlay closes it",
-          "acceptance[4] and acceptance[5] (package-shipped forms) have no stock fixture: the showcase ships its public form open, and no stock package ships one closed. Score both from the pins named in their verify (oracle test) and record that the verdict rests on the pins. ⛔ Do not edit a package's artifact on disk to plant one",
-          "acceptance[2] (only an explicit false withdraws) is pinned at the doors and at the write door by unit tests only; the dogfood drives explicit false switches alone, so steps 8-9 are its only end-to-end reading. Its premise is the stored body: a view save stores the authored keys and does not materialise schema defaults (packages/metadata-protocol/src/protocol.ts#projectStorableViewBody), so an omitted allowAnonymous stays absent. If step 8's env-wide read serves an allowAnonymous key at all, the premise failed: record acceptance[2] blocked(fixture) instead of scoring it",
-          "two packages that each ship a view of the same name are outside this item's fixture and are not scored here. The package rule is the one the docs page's 'Known limit: packages and names' states at the run's commit; #21934 (open when this item was written) may narrow it"
+          "THE ORGANIZATION LAYER IS RETIRED, NOT A GAP. Revision 1 staged an organization overlay of the form beneath the env-wide definition, and an organization save door that refused a re-open. ADR-0131 removed both: the /meta doors hand the protocol no organization (D6, PR #22447), the protocol refuses every organization-scoped write (D6, PR #22515), the sys_metadata family declares no organization column (D7, PR #23469), and the anonymous doors read the environment alone (C7). On a v17-shape database os serve and os dev refuse to boot until os migrate organization-ownership --apply has run (packages/runtime/src/organization-ownership-boot-guard.ts#OrganizationOwnershipBootGuardPlugin), so the fresh boot this item asks for holds no organization-scoped metadata row. A run that meets one records an environment fault, never a FAIL of this item. The ruled known limit revision 1 recorded (#21835 comment 6005722623: an organization overlay stored before the env-wide withdrawal) has no stage left to occur on",
+          "acceptance[2] to acceptance[5] (the package layers) have no stock fixture: the showcase ships its public form from one package, open, and no stock package ships a second body of the name or ships it closed. Score them from the pins named in their verify (oracle test) and record that the verdict rests on the pins. ⛔ Do not edit a package's artifact on disk to plant one"
         ]
       },
       "steps": [
-        "boot showcase on a fresh DB you own, on the stock posture; sign in as the admin. Read GET /api/v1/auth/get-session and record session.activeOrganizationId as ORG (the Default Organization); if it is null, read the one sys_organization row as the admin and set it active. Prove the scope server-side before every save below: the save response's message names org=ORG for an organization save and 'env-wide' for an env-wide one",
+        "boot showcase on a fresh DB you own, on the stock posture; sign in as the admin. Read GET /api/v1/auth/get-session and record session.activeOrganizationId as ORG (the Default Organization); if it is null, read the one sys_organization row as the admin and set it active. Keep ORG active for every save below: the item asserts that the save is environment-wide all the same",
         "the probe, anonymous, from a client with no cookie jar and no Authorization header: GET /api/v1/forms/contact-us, then POST /api/v1/forms/contact-us/submit with name set to a fresh unique marker, plus email and message; capture each status and body code. Then, as the admin, count the showcase_inquiry rows carrying that marker (GET /api/v1/data/showcase_inquiry?name=MARKER). Baseline: run the probe once on the stock form (open: 200, 201, one row)",
         "as the admin, GET /api/v1/meta/view/showcase_inquiry.contact and keep the item with every key that starts with '_' removed. Every save below PUTs this body back to the same path and changes only config.sharing",
-        "precondition: set-active ORG; PUT the body with config.sharing.allowAnonymous true (an organization overlay that keeps the form open); run the probe",
-        "env-wide withdrawal: set-active null; PUT the body with config.sharing.allowAnonymous false, publicLink kept; run the probe",
-        "write door: set-active ORG; PUT the overlay again with allowAnonymous true (the overlay as it was before the withdrawal) and capture status and code; PUT it with allowAnonymous false and capture; PUT it with allowAnonymous true again and capture; after each refusal, GET the item at ORG and compare its config.sharing with the previous read; run the probe",
-        "the organization narrows for itself: set-active null; PUT the body with allowAnonymous true env-wide (open env-wide while the organization's overlay stays withdrawn from step 6); run the probe",
-        "explicit only, an absent switch: set-active null; PUT the body with the config.sharing.allowAnonymous key deleted (enabled true, publicLink kept); GET the item env-wide and confirm the served config.sharing carries no allowAnonymous key (the premise, see knownGaps); set-active ORG; PUT the body with allowAnonymous true and capture the status; run the probe",
-        "explicit only, no link: set-active null; PUT the body with config.sharing set to enabled false and allowAnonymous false and NO publicLink; set-active ORG; PUT the body with allowAnonymous true again and capture the status; run the probe",
-        "control, open at both layers: set-active null; PUT the body with allowAnonymous true (the stock sharing); set-active ORG; PUT allowAnonymous true; run the probe, and as the admin read the landed row's organization_id",
-        "run the pins named in automated.ref; acceptance[4] and acceptance[5] are scored from the metadata-protocol and metadata-core files"
+        "withdrawal from an organization-active session: with ORG active, PUT the body with config.sharing.allowAnonymous false, publicLink kept; capture the status and the save response's message, which names the scope the row landed in; run the probe. Then set-active null, GET the item and record its config.sharing (the withdrawal is the environment's, so it is served here too), and set-active ORG again",
+        "control, open: with ORG active, PUT the body with allowAnonymous true (the stock sharing); run the probe, and as the admin read the landed row's organization_id",
+        "run the pins named in automated.ref; acceptance[2] to acceptance[5] are scored from the rest, metadata-protocol and metadata-core files"
       ],
       "acceptance": [
         {
-          "clause": "an env-wide withdrawal is not re-opened by an organization overlay: with the organization's overlay open (step 4's probe served) and the env-wide definition withdrawing the form with its link kept (step 5), both doors answer 404 with code FORM_NOT_FOUND and the probe leaves no row",
+          "clause": "an administrator's save is environment-wide whatever organization the session has active, and its withdrawal closes the form: with ORG active, the save that sets allowAnonymous false with the link kept answers 200 and names the environment-wide scope (never org=ORG), the item read with no organization active serves that withdrawal, and both doors answer 404 with code FORM_NOT_FOUND and the probe leaves no row",
           "oracle": "api",
-          "verify": "step 4's probe is recorded first (a form closed at both layers is closed for an unrelated reason); then step 5's GET and POST status and body code, and the admin's count for step 5's marker, which is 0. Mechanism: packages/rest/src/rest-server.ts#registerFormEndpoints reads the env-wide view list beneath the organization's read and drops a candidate that packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn finds withdrawn",
-          "evidence": "the probes of steps 4 and 5 (status, code, row count) and the two save responses with the scope each names"
+          "verify": "step 2's baseline probe is recorded first (a form already closed is closed for an unrelated reason); then step 4's save status and message, the no-organization read, and the GET and POST status and body code with the admin's count for the marker, which is 0. Mechanism: the /meta doors hand the protocol no organization, and an organization-scoped write is refused by packages/metadata-protocol/src/protocol.ts#organizationScopedWriteRefusal (403 NOT_OVERRIDABLE, ADR-0131 D6); packages/rest/src/form-routes.ts#registerFormEndpoints reads the environment's view list alone and drops a candidate that packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn finds withdrawn in that same list",
+          "evidence": "the baseline and step 4 probes (status, code, row count), the save response with the scope it names, and the no-organization read"
         },
         {
-          "clause": "an organization-scoped save cannot leave the withdrawn form open: re-saving the overlay as it was before the withdrawal, and re-opening it after a withdrawal, both answer 403 with code NOT_OVERRIDABLE and change nothing; the save that keeps the form withdrawn answers 200; both doors stay closed",
+          "clause": "a form open in the environment is served, and its submission lands in the organization the doors resolve: with ORG active and the body saved with both switches on, both doors accept (GET 200, POST 201, one row) and the landed row's organization_id is ORG",
           "oracle": "api",
-          "verify": "step 6's three responses (status, then the code at the top level or under error), the organization reads around each refusal (unchanged), and step 6's probe (404 FORM_NOT_FOUND twice, no row). Mechanism: packages/metadata-protocol/src/protocol.ts#anonymousFormIntakeReopenRefusal, reached from saveMetaItem and from the draft promotion of publishMetaItem; the draft-promotion half is pinned by the metadata-protocol file only",
-          "evidence": "step 6's save responses, the organization reads and the probe"
+          "verify": "step 5's save status, its probe and the admin's read of the landed row",
+          "evidence": "the probe and the landed row read"
         },
         {
-          "clause": "only an explicit false withdraws: an env-wide definition that keeps the link but leaves allowAnonymous absent, or a sharing that names no public link, withdraws nothing, so the organization-scoped save that opens the form answers 200 and both doors serve it (GET 200, POST 201, one row)",
-          "oracle": "api",
-          "verify": "steps 8 and 9: the premise read (no allowAnonymous key served env-wide), the organization save's status, and each probe. Mechanism: packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormExplicitWithdrawals (a sharing withdraws only when it keeps a non-empty publicLink and sets enabled or allowAnonymous to false)",
-          "evidence": "the premise read, the two organization save responses and the two probes"
-        },
-        {
-          "clause": "an organization can always narrow for itself, and a form open at every layer is served: open env-wide with the organization's overlay withdrawn, both doors answer 404 FORM_NOT_FOUND; open at both layers, both doors accept and the landed row's organization_id is ORG",
-          "oracle": "api",
-          "verify": "step 7's probe (closed) and step 10's probe (open) with the landed row's organization_id",
-          "evidence": "the two probes and the landed row read"
-        },
-        {
-          "clause": "a package's shipped false withdraws (#21835 comment 6005722623, 「包内的 false 算显式关闭」): a package artifact parsed by the stack schema (strict defineStack, the default) whose form keeps its publicLink without switching enabled on carries the schema default enabled false, which counts as an explicit withdrawal, so an organization-scoped save that opens it answers 403 NOT_OVERRIDABLE and stores nothing. An artifact that reached the runtime unparsed (defineStack with strict false, a hand-built manifest) is judged as written",
+          "clause": "only an explicit false withdraws (#21835 comment 5994082238, 「不算，写进文档」): another package's body of the view name that keeps the link with enabled true and allowAnonymous absent, or that names no public link, closes nothing, so the open form is still served (GET 200, POST 201)",
           "oracle": "test",
-          "verify": "pnpm --filter @objectstack/metadata-protocol exec vitest run --maxWorkers=2 src/protocol.org-scoped-write-refused.test.ts, the 'single: a package-shipped form' cases 'the parsed artifact carries an explicit `false` that keeps the link' and 'a schema-parsed `false` is a withdrawal: an org-scoped save that opens it is refused'; and pnpm --filter @objectstack/metadata-core exec vitest run --maxWorkers=2 src/anonymous-form-intake.test.ts, the case 'a schema-parsed `false` that keeps the link IS a withdrawal (a package artifact fails closed)'. No stock fixture (knownGaps)",
+          "verify": "pnpm --filter @objectstack/rest exec vitest run --maxWorkers=2 src/public-form-withdrawal.test.ts, the cases 'only an explicit false withdraws: a body with the link, enabled true and allowAnonymous absent closes nothing' and 'not a withdrawal: another package's body with the public link cleared leaves the form served'; and pnpm --filter @objectstack/metadata-core exec vitest run --maxWorkers=2 src/anonymous-form-intake.test.ts, the cases 'only an explicit false withdraws: an absent switch is not a withdrawal' and 'not a withdrawal: no body of the row, no sharing, the link cleared'. Mechanism: packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormExplicitWithdrawals (a sharing withdraws only when it keeps a non-empty publicLink and sets enabled or allowAnonymous to false). No stock fixture (knownGaps)",
           "evidence": "the two test runs, naming the cases above as passed"
         },
         {
-          "clause": "the env-wide definition may open a package-closed form (#21835 comment 6005722623, 「不算，环境级是开关」): the package artifact is part of the env-wide definition, not a layer beneath it, so an env-wide save with both switches on is accepted, the env-wide list the doors read then serves that open body as the only item of its name, and an organization-scoped save that keeps it open is accepted",
+          "clause": "a withdrawal in any package's body of the view name closes the form in every package, failing closed (the docs' 'Known limit: packages and names'): the environment's list holds one item per package of the name, and the doors serve no copy once one of them withdraws it; a different view that publishes the same slug closes nothing",
           "oracle": "test",
-          "verify": "the same metadata-protocol run, the case 'the env-wide definition is the switch: an env-wide save opens it, and the env-wide list serves that body'. The row anchor that makes the artifact the env-wide body is packages/metadata-protocol/src/protocol.ts#envWideRawViewRows (for a form one package ships: the active env-wide row of the name, else that package's artifact). No stock fixture (knownGaps)",
-          "evidence": "the metadata-protocol run, naming the case above as passed"
+          "verify": "the rest run, the describe 'a public form withdrawal is a kill switch: one package's withdrawal of a view name closes its form': the cases 'another package's withdrawal of the same view name closes this package's form (tenancy org)' and '(tenancy no-org)', 'withdrawn through `enabled: false` in another package: closed' and 'another view withdrawing the same slug does not close this view's form', with the control 'control: every package's body of the view name open serves the form'; and pnpm --filter @objectstack/metadata-protocol exec vitest run --maxWorkers=2 src/protocol.org-scoped-write-refused.test.ts, the describe 'two packages shipping a view name', the case 'the doors serve no copy once one package withdraws the name' under both registry orders. The list the doors judge against is packages/metadata-protocol/src/protocol.ts#getMetaItems. No stock fixture (knownGaps)",
+          "evidence": "the two test runs, naming the cases above as passed"
+        },
+        {
+          "clause": "a package's shipped false withdraws (#21835 comment 6005722623, 「包内的 false 算显式关闭」): a package artifact parsed by the stack schema (strict defineStack, the default) whose form keeps its publicLink without switching enabled on carries the schema default enabled false, which counts as an explicit withdrawal, and an artifact that reached the runtime unparsed (defineStack with strict false, a hand-built manifest) is judged as written; a shipped withdrawal in the environment's list closes the form beside another package's open copy",
+          "oracle": "test",
+          "verify": "the metadata-core run, the case 'a schema-parsed `false` that keeps the link IS a withdrawal (a package artifact fails closed)'; and the metadata-protocol run, the describe 'each package's copy of a view container expands into its own package's slot', its block '(a) one package's env-wide copy is saved with the form open, and another package ships it withdrawn', every case ending ': the env-wide list holds the shipped withdrawal beside the copy, and the doors serve no copy'. No stock fixture (knownGaps)",
+          "evidence": "the two test runs, naming the cases above as passed"
+        },
+        {
+          "clause": "the environment-wide copy is the switch over a form a package ships closed (#21835 comment 6005722623, 「不算，环境级是开关」): a package-less environment-wide copy stands in for every package with no copy of its own, so saved with both switches on it opens a form a package ships closed; a package's own copy still serves that package's slot ahead of it, so a withdrawal saved there keeps the form closed",
+          "oracle": "test",
+          "verify": "the metadata-protocol run, the block '(c) a package-less env-wide copy stands in for every package with no copy of its own': on both kernels, the case ending ': the package-less copy serves each package's slot, so the administrator's switch opens the form for every package', and the cases ending ': a package's own copy serves that package's slot ahead of the package-less copy'. The stand-in is packages/metadata-protocol/src/protocol.ts#servedViewExpansion. No stock fixture (knownGaps)",
+          "evidence": "the metadata-protocol run, naming the cases above as passed"
         }
       ],
       "negative": [
-        "a 200 or 201, or a landed row, at either door in step 5 or step 6 is the #21835 regression (an organization overlay re-opening an env-wide withdrawal): FAIL",
-        "a 200 to an organization-scoped save in step 6 that leaves the form open is a FAIL of the write door even while the doors stay closed: the platform accepted a change it will never honour",
-        "with the premise read holding, a closed door in step 8 or step 9 is a FAIL of the explicit-only rule (#21835 comment 5994082238, 「不算，写进文档」): an absent switch or a missing link withdraws nothing",
+        "a 200 or 201, or a landed row, at either door after step 4's withdrawal is a FAIL: the environment-wide withdrawal did not hold (the #21835 class, a layer re-opening a withdrawn form)",
+        "a step 4 save that answers 200 but names org=ORG, or a no-organization read that still serves allowAnonymous true, is a FAIL of ADR-0131 D6: an administrator's save lands environment-wide whatever organization is active",
+        "a 403 to the save in step 4 or step 5 on the stock boot is a FAIL (the dogfood pin saves the same body with 200); read its message before attributing it: one naming an organization means the save reached the protocol organization-scoped, which no /meta door may hand it",
         "a door probed with the admin's cookie or bearer token scores the admin, not the public: re-run it anonymously (auth-state-leak)",
-        "the ruled known limit (knownGaps, first entry) is not a FAIL"
+        "acceptance[2] to acceptance[5] scored from the stock boot prove nothing: the showcase ships the form from one package, so no second body of the name exists to compose. Score them from their pins",
+        "an organization-scoped metadata row met on the boot is an environment fault (knownGaps, first entry), not a FAIL of this item"
       ],
       "traps": [
         "auth-state-leak"
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-public-form-withdrawal-layers.dogfood.test.ts ('showcase: a public form withdrawal at any metadata layer holds', 5 cases: acceptance[0], [1] and [3] end to end on a showcase boot with an organization) + packages/rest/src/public-form-withdrawal.test.ts ('a public form withdrawal is a kill switch: layering only narrows intake': the doors, including 'only an explicit false withdraws: env-wide link + enabled true with allowAnonymous absent does not close the org's open form' and 'not a withdrawal: the public link cleared env-wide leaves the organization's open form served') + packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts ('org-scoped anonymous form intake changes the anonymous doors cannot see': the write door, including 'single: a package-shipped form') + packages/metadata-core/src/anonymous-form-intake.test.ts (the anonymousFormIntakeWithdrawnIn cases). acceptance[2] has no end-to-end pin, and acceptance[4] and [5] have no stock fixture (knownGaps)"
+        "ref": "packages/qa/dogfood/test/showcase-public-form-withdrawal-layers.dogfood.test.ts ('showcase: a public form withdrawal at any metadata layer holds', 3 cases: the precondition, acceptance[0] through the save's env-wide message, and acceptance[1], end to end on a showcase boot with an organization active) + packages/rest/src/public-form-withdrawal.test.ts (the doors: '[#21331] public form withdrawal reaches every intake door', including '[ADR-0131 C7] no view read names an organization, whatever the tenancy answers: one environment read per door', and 'a public form withdrawal is a kill switch: one package's withdrawal of a view name closes its form') + packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts ('[ADR-0131 D6] no organization-scoped metadata write is accepted', 'two packages shipping a view name' and 'each package's copy of a view container expands into its own package's slot', blocks (a) to (f)) + packages/metadata-core/src/anonymous-form-intake.test.ts (the anonymousFormIntakeWithdrawnIn cases). The no-organization read of step 4 has no end-to-end pin, and acceptance[2] to acceptance[5] have no stock fixture (knownGaps)"
       },
       "source": [
-        "packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn (the one judgement the doors and the write door share: a body of the same view name withdraws a candidate matched by slot or by slug; the package is not compared)",
+        "packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn (the one judgement the doors make over the environment's list: a body of the same view name withdraws a candidate matched by slot or by slug; the package is not compared)",
         "packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormExplicitWithdrawals (explicit only: a sharing that keeps its publicLink and sets enabled or allowAnonymous to false; a schema-parsed artifact carries the default enabled false, which counts)",
-        "packages/rest/src/rest-server.ts#registerFormEndpoints (resolveFormBySlug: the organization from tenancy.defaultOrgId(), and the env-wide view list read beneath it as the layer; a withdrawn form answers 404 FORM_NOT_FOUND on both doors)",
-        "packages/metadata-protocol/src/protocol.ts#anonymousFormIntakeReopenRefusal (the write door: 403 NOT_OVERRIDABLE, judged on the expanded body against the env-wide list and on the raw body against the row anchor; reached from saveMetaItem and from the draft promotion, never from rollbackMetaItem or revertCommit, which is the second half of the ruled known limit)",
-        "packages/metadata-protocol/src/protocol.ts#envWideRawViewRows (the row anchor, for a form one package ships: the active env-wide row of the name, else that package's artifact. How it resolves when several packages ship the name is #21934's)",
-        "content/docs/ui/public-data-collection.mdx, section '4. Withdraw a public form' (the published rules and both known limits)",
-        "#21835 (the 17.7 regression; rulings in comments 5994082238 and 6005722623) · PR #21864 (the fix, merge 3c7785d4ab) · #21934 (open when this item was written: package-identity follow-ups of the same fix)",
-        "sibling: access-security.public-form-intake owns the single-layer half (whitelist, forged-anchor strip, publicFormGrant, unpublish kills the link). This item owns how a withdrawal composes across layers"
+        "packages/rest/src/form-routes.ts#registerFormEndpoints (resolveFormBySlug: the environment's view list alone, judged against itself as the layer beneath each candidate; the Default Organization's legacy read was deleted with ADR-0131 C7, and the tenancy service is still read for the posture; a withdrawn form answers 404 FORM_NOT_FOUND on both doors)",
+        "packages/metadata-protocol/src/protocol.ts#getMetaItems (the environment's view list the doors read: one item per package that ships a view name, ADR-0048; a package-less copy stands in for every package with no copy of its own, packages/metadata-protocol/src/protocol.ts#servedViewExpansion)",
+        "packages/metadata-protocol/src/protocol.ts#organizationScopedWriteRefusal (every organization-scoped write refused 403 NOT_OVERRIDABLE, ADR-0131 D6; PR #22515 deleted the intake-specific organization refusals and the row anchor revision 1 cited, and since PR #22447 the /meta doors hand the protocol no organization, so an organization-active administrator's save is environment-wide)",
+        "content/docs/ui/public-data-collection.mdx, section '4. Withdraw a public form' (the published rules and the known limit for packages and names; when this revision was written its 'Known limit: legacy copies' paragraph still described the Default Organization read that ADR-0131 C7 deleted from the doors)",
+        "#21835 (the 17.7 regression; rulings in comments 5994082238 and 6005722623) · PR #21864 (the fix, merge 3c7785d4ab) · #21934 (package-identity follow-ups of the same fix, closed) · ADR-0131: PR #22447 (D6 stage S3), PR #22515 (D6 stage S4, b389e4355) and PR #23469 (D7, dd29bbe60) retired the organization layer revision 1 staged",
+        "sibling: access-security.public-form-intake owns the single-layer half (whitelist, forged-anchor strip, publicFormGrant, unpublish kills the link). This item owns how a withdrawal composes across the bodies the environment's definition holds of one view name"
       ],
       "history": [
         {
@@ -1624,6 +1662,18 @@
           "date": "2026-10-06",
           "change": "new: PR #21864 made a public form's withdrawal a kill switch across metadata layers, and no item asserted it; access-security.public-form-intake covers the single-layer withdrawal only. Adds the #21835 row of #21932: an env-wide withdrawal is not re-opened by an organization overlay (both doors and the write door), only an explicit false withdraws, a package's shipped false withdraws, and the env-wide definition may open a package-closed form. The ruled known limit (#21835 comment 6005722623) is recorded as a knownGap, not a clause",
           "ref": "#21932"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-15",
+          "change": "re-authored to the behaviour on main: ADR-0131 retired the organization layer every clause of revision 1 composed against. The /meta doors hand the protocol no organization (PR #22447); the protocol refuses every organization-scoped write, and PR #22515 (b389e4355) deleted the three protocol.ts symbols this item anchored, the intake-specific organization refusals and the env-wide row anchor (check:platform-checklist ABSENT SYMBOL on all five citations); the sys_metadata family declares no organization column (PR #23469); and the anonymous doors read the environment alone. Revision 1's clauses 0, 1 and 3 (an organization overlay beneath an env-wide withdrawal, the organization save door's 403, an organization narrowing for itself) describe a layer that can no longer be written, and its steps 4 to 10 PUT saves that now land environment-wide. Revision 2 keeps the capability the id names, a withdrawal no other layer re-opens, on the layers main has. The stock end-to-end half follows the dogfood pin's re-authored shape: an organization-active administrator's save is environment-wide and its withdrawal closes both doors, and the open control lands in the organization. The package layers are scored from the rest, metadata-protocol and metadata-core pins that replaced the deleted cases: one item per package of a view name in the environment's list (new as a clause; revision 1 left two packages of one name unscored while #21934 was open), a package's shipped false, and the package-less copy as the switch. The explicit-only clause moves from an end-to-end organization stage to those pins. The ruled known limit of revision 1 has no stage left to occur on and is recorded in knownGaps. Anchors re-pointed at what the files declare now: organizationScopedWriteRefusal, getMetaItems, servedViewExpansion, anonymousFormIntakeUnavailability and the v18 boot guard",
+          "ref": "#23593"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-17",
+          "change": "acceptance[0]'s verify re-pointed (the domain:cli pointer on #24036, comment 6227883776): it cited registerFormEndpoints in packages/rest/src/rest-server.ts for the code that reads the environment's view list and drops a withdrawn candidate. PR #24054 (#23050 slice 11, c40a0dd9c8) moved that body to the exported registerFormEndpoints in packages/rest/src/form-routes.ts and re-pointed source[2] only; the old anchor kept resolving through the private RestServer method left behind as a stub that hands the moved body its host, so the gate stayed green. Confirmed on main c40506aac. Anchor only: no clause, step, fixture or oracle changed, so no re-run is owed",
+          "ref": "#24128"
         }
       ]
     },
@@ -1632,7 +1682,7 @@
       "title": "Share-link capability tokens: anon resolve renders the record minus redactFields, password/audience gates hold, revoke/expire refuse without leaking, the stored password hash never leaves the server, the password travels in the X-Share-Password header, and public answers are never cached",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1657,7 +1707,7 @@
         "with a publicSharing-enabled fixture object F (redactFields declared): as a member who can see a record r of F, POST /api/v1/share-links {object:F, recordId:r, redactFields?, audience?, password?, expiresAt?} — capture the 201 {token}",
         "anon GET /api/v1/share-links/<token>/resolve — capture the 200 {record, link, redactFields}; confirm every field in F.publicSharing.redactFields ∪ link.redact_fields is absent from record",
         "mint a password-gated link; anon resolve WITHOUT ?password / x-share-password header → 401; with a WRONG password → 401; with the correct password → 200",
-        "mint audience:'signed_in'; anon resolve → 401 SIGN_IN_REQUIRED; mint audience:'email' and resolve with an email OFF the allowlist → refused",
+        "mint audience:'signed_in'; anon resolve → 401 SIGN_IN_REQUIRED; mint audience:'email' (the mint needs emailAllowlist: [\"<an address>\"], or it answers 400 VALIDATION_FAILED) and resolve anonymously and as a signed-in member whose email is OFF the allowlist → 404 INVALID_OR_EXPIRED, byte-identical to an unknown-token resolve. Links that COMBINE an audience with a password are access-security.share-link-combined-gates' to score",
         "DELETE /api/v1/share-links/<idOrToken> (revoke); anon resolve → 410 EXPIRED_OR_REVOKED; mint a short-expiry link and, after it expires, resolve → 410 — the record must never appear",
         "delete the shared record r, then anon resolve the still-live (un-passworded, link_only) token → 404 INVALID_OR_EXPIRED, byte-identical to the answer for an unknown token (fail-closed, #5190: \"that record is gone\" is itself information) — capture it beside an unknown-token resolve for the byte comparison",
         "GET /api/v1/share-links?object=F&recordId=r as the minter vs a SECOND member — the list returns only the caller's own links",
@@ -1685,9 +1735,9 @@
           "evidence": "the three traces"
         },
         {
-          "clause": "audience gating holds: a signed_in-audience link answers 401 SIGN_IN_REQUIRED for an anonymous caller; an email-audience link refuses an email off the allowlist (resolveToken returns null → named refusal, never the record)",
+          "clause": "audience gating holds: a signed_in-audience link answers 401 SIGN_IN_REQUIRED for an anonymous caller; an email-audience link answers a caller whose email is off the allowlist (anonymous or signed in) 404 INVALID_OR_EXPIRED, byte-identical to an unknown token — never the record, and no email-mismatch code that would turn the link into an allowlist oracle",
           "oracle": "api",
-          "verify": "signed_in resolve → 401 SIGN_IN_REQUIRED; email resolve with a non-allowlisted email → refused",
+          "verify": "signed_in resolve → 401 SIGN_IN_REQUIRED; email resolve with a non-allowlisted caller → 404 INVALID_OR_EXPIRED whose status and body equal an unknown-token resolve (resolveToken returns null)",
           "evidence": "the two traces"
         },
         {
@@ -1715,9 +1765,9 @@
           "evidence": "the three traces and the preflight response headers"
         },
         {
-          "clause": "public share-link answers are never cached: BOTH public routes (/:token/resolve and /:token/messages) answer Cache-Control: no-store and Vary: X-Share-Password, X-Share-Password-Encoding on EVERY outcome, success and refusal alike. The authenticated create, list and revoke routes do not carry these headers",
+          "clause": "public share-link answers are never cached: BOTH public routes (/:token/resolve and /:token/messages) answer Cache-Control: no-store and a Vary that INCLUDES X-Share-Password and X-Share-Password-Encoding on EVERY outcome, success and refusal alike (the CORS middleware appends Origin to the same header, so the live value is 'X-Share-Password, X-Share-Password-Encoding, Origin'). The authenticated create, list and revoke routes carry neither no-store nor the two share-password Vary members",
           "oracle": "api",
-          "verify": "each public response's headers carry exactly Cache-Control: no-store and Vary: X-Share-Password, X-Share-Password-Encoding (200, 401 x2, 404, 410, and the messages refusal); the authenticated list response carries neither",
+          "verify": "each public response's headers carry Cache-Control: no-store and a Vary whose members include X-Share-Password and X-Share-Password-Encoding (200, 401 NEEDS_PASSWORD, 401 WRONG_PASSWORD, 404, 410, and the /messages refusal); a public response missing either member, or missing no-store, is the fail. The authenticated create, list and revoke responses carry no Cache-Control: no-store and no share-password Vary member (measured: Vary: Origin only)",
           "evidence": "the header block of every public response and of the authenticated list response"
         }
       ],
@@ -1795,6 +1845,12 @@
           "date": "2026-10-07",
           "change": "the Vary clause and its verify re-pointed to the measured answer: both public routes now answer Vary: X-Share-Password, X-Share-Password-Encoding, because the answer also depends on the companion header that declares the password header's encoding (utf-8: percent-encoded UTF-8). Sources name the shared header reading and the companion header in the default CORS allow-list. No clause, step, negative or variant added or removed; a clause scoring the encoded form is left to a checklist sweep",
           "ref": "#22049"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-16",
+          "change": "two clauses re-pointed to the measured answers on main c91af8ed6 (#23878 checklist-accuracy finding; #23879 out_of_scope_findings). (1) clause 9 demanded EXACTLY 'Vary: X-Share-Password, X-Share-Password-Encoding'; every public outcome (200, 401 x2, 404, 410, the /messages 400 UNSUPPORTED) answers 'X-Share-Password, X-Share-Password-Encoding, Origin' with no-store, because the CORS middleware appends Origin, and the authenticated create, list and revoke answer Vary: Origin only — the clause now asserts the two share-password members are INCLUDED and no-store present, which still fails if either is dropped. (2) the email-audience leg (step 5, clause 4) now states the v18 answer: a caller off the allowlist, anonymous or signed in, gets 404 INVALID_OR_EXPIRED byte-identical to an unknown token, and the mint needs emailAllowlist; combined audience + password links are pointed at access-security.share-link-combined-gates",
+          "ref": "#24036"
         }
       ]
     },
@@ -1921,7 +1977,7 @@
       "title": "Authoring a sharing rule in Setup materializes matching grants for exactly the audience; deleting the rule retracts them",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1932,12 +1988,12 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the Setup 'Sharing Rules' surface (objectui plugin-sharing sharing-plugin.ts nav_sharing_rules → sys_sharing_rule record form, requiredPermissions manage_platform_settings) OR the POST /api/v1/sharing/rules authoring endpoint",
+          "the Setup 'Sharing Rules' surface (the nav_sharing_rules entry this repo's plugin-sharing contributes into the Setup app's group_access_control slot — packages/plugins/plugin-sharing/src/sharing-plugin.ts navigationContributions — opening the sys_sharing_rule object list and record form, requiredPermissions manage_platform_settings) OR the POST /api/v1/sharing/rules authoring endpoint",
           "a genuinely private-OWD object with authorable matching/non-matching rows: showcase_contact (sharingModel 'private', examples/app-showcase/src/data/objects/contact.object.ts) — its `stage` select (new | working | qualified | closed) is the criteria field. ⛔ NOT showcase_project: it declares sharingModel 'public_read_write', so its record baseline is already org-wide and a rule on it widens NOTHING observable (the pre-#7687 text called it private-OWD and was wrong). The other genuinely private-OWD showcase objects are showcase_inquiry and showcase_private_note",
           "an audience position holding object-level allowRead on showcase_contact at the DEFAULT (own) record scope — this needs a SCRATCH permission set bound to a scratch position, because stock's only showcase_contact grant is showcase_manager { allowRead: true, readScope: 'org' } (permission-sets.ts), whose org-depth read already sees every contact and would mask the widening; and no other stock set grants showcase_contact at all, so any other stock position is refused by the OBJECT gate before record scope is ever consulted"
         ],
         "knownGaps": [
-          "authoring a rule in Setup issues a direct sys_sharing_rule insert (packages/spec/src/security/sharing.zod.ts). Targeting showcase_contact keeps this item disjoint from access-security.sharing-rules-widen structurally rather than by convention: the four seeded rules cover showcase_project (×2), showcase_inquiry and showcase_task (examples/app-showcase/src/security/sharing-rules.ts) and NONE covers showcase_contact, so no criteria-distinctness dance is needed — that item tests the SEEDED rules' enforcement, this one authors a rule on an object no seeded rule touches",
+          "authoring a rule in Setup issues a direct sys_sharing_rule insert (packages/spec/src/security/sharing.zod.ts). Stock seeds TWO rules (examples/app-showcase/src/security/sharing-rules.ts allSharingRules; the showcase_project and showcase_task rules were retired because a public_read_write OWD leaves nothing to widen): share_new_inquiries_with_field_ops on showcase_inquiry, and share_key_account_qualified_contacts_with_managers ON showcase_contact — condition record.stage == 'qualified' && record.company == 'Northwind', shared with the manager position. So a seeded rule DOES touch this item's object. It does not confound the item, for two reasons the run must keep true: neither scored persona holds the manager position (the audience holds the scratch position, the outsider holds neither; the seeded dev admin does hold manager and is never a scored reader here), and acceptance[2] attributes a share by source_id = the NEW rule's row id, so a seeded-rule share on a Northwind-qualified probe is a different row. That item tests the SEEDED rules' enforcement; this one authors and retracts a rule in-run",
           "the audience persona must be provisioned in-run (scratch permission set + scratch position, see fixtures.requires); a stock position cannot serve as the audience for a showcase_contact rule. Until that provisioning is scripted, treat a run that skips it as blocked(fixture) — never as a pass off the admin's own reads"
         ]
       },
@@ -1994,7 +2050,7 @@
       ],
       "negative": [
         "a rule that shares the NON-matching (stage='new') contact, or grants that survive the rule's deletion (orphaned sys_record_share), is a FAIL",
-        "do not overlap access-security.sharing-rules-widen: that item verifies the SEEDED rules' enforcement — this item authors a rule in-run on showcase_contact, which no seeded rule covers, and verifies authoring + retraction",
+        "do not overlap access-security.sharing-rules-widen: that item verifies the SEEDED rules' enforcement — this item authors a rule in-run on showcase_contact for a scratch position no seeded rule names (the seeded showcase_contact rule shares only with the manager position, see knownGaps), and verifies authoring + retraction",
         "⛔ a run that authors the rule on a public_read_write object (showcase_project, showcase_task, …) proves nothing: the baseline is already org-wide, so the audience persona would read the 'matching' row with or without the rule and the item passes vacuously — the object under test must be OWD private"
       ],
       "traps": [
@@ -2002,10 +2058,10 @@
         "hydration-race"
       ],
       "source": [
-        "packages/rest/src/rest-server.ts#registerSharingRuleEndpoints (list/create/get/delete)",
+        "packages/rest/src/sharing-routes.ts#registerSharingRuleEndpoints (list/create/get/delete)",
         "packages/spec/src/security/sharing.zod.ts (criteria rule authoring + match-all refusal #3896)",
         "packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts + sys-record-share.object.ts",
-        "objectui packages/plugins/plugin-sharing/src/sharing-plugin.ts#nav_sharing_rules (nav_sharing_rules Setup nav → sys_sharing_rule)",
+        "packages/plugins/plugin-sharing/src/sharing-plugin.ts#nav_sharing_rules (this repo's plugin-sharing contributes the nav_sharing_rules entry into the Setup app's group_access_control slot → the sys_sharing_rule object; no objectui plugin-sharing package exists at objectui daeb77fc84dd or f8267df93aba)",
         "examples/app-showcase/src/data/objects/contact.object.ts#sharingModel (showcase_contact — sharingModel 'private', `stage` select) + src/security/permission-sets.ts (the showcase_manager readScope 'org' grant this item must avoid as its audience)",
         "cross-ref access-security.sharing-rules-widen (seeded-rule enforcement), ADR-0058 D3, ADR-0111 D6"
       ],
@@ -2021,6 +2077,12 @@
           "date": "2026-08-11",
           "change": "retargeted from showcase_project to showcase_contact (run #7637): showcase_project reports sharingModel 'public_read_write', so calling it 'a private-OWD object' was wrong and a rule on it widened nothing observable — the run substituted showcase_contact, which is genuinely OWD private and which no seeded rule covers, so the sharing-rules-widen non-overlap now holds structurally instead of by criteria convention. Criteria moves health=='green' → stage=='qualified'; the audience-provisioning requirement (scratch set + position, because stock's only showcase_contact grant reads org-wide) and a vacuous-pass negative are recorded. Same-fact fix as record-share-grant-revoke rev 2: source_id is the rule ROW ID, not the rule name",
           "ref": "#7687"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "knownGaps[0], negative[1], fixtures.requires[0] and source[3] corrected (#23878 checklist-accuracy findings, re-measured on main c91af8ed6). The stock boot seeds two sharing rules, not four, and one of them (share_key_account_qualified_contacts_with_managers) IS on showcase_contact, shared with the manager position; the text now says why that does not confound this item (no scored persona holds manager, and acceptance[2] keys on the new rule's source_id). The Setup nav citation named an objectui plugin-sharing file that does not exist at the objectui pin; the entry is contributed by this repo's packages/plugins/plugin-sharing/src/sharing-plugin.ts into the Setup app. No step, fixture request or oracle changed, so no re-run is owed",
+          "ref": "#24036"
         }
       ]
     },
@@ -2128,10 +2190,10 @@
     },
     {
       "id": "access-security.capability-declaration-lifecycle",
-      "title": "A package-declared capability bootstraps into sys_capability and resolves across the grant/require three-way (ADR-0066) on the PLATFORM action path; platform names cannot be shadowed",
+      "title": "A package-declared capability is served by the registry (no sys_capability row — the object is retired, ADR-0131 D3) and resolves across the grant/require three-way (ADR-0066) on the PLATFORM action path; platform names cannot be shadowed",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2143,11 +2205,11 @@
         "app": "showcase",
         "requires": [
           "the shipped capability declaration examples/app-showcase/src/security/capabilities.ts (showcase.export_data, org-scoped, defineCapability) — the DEFINE side of ADR-0066",
-          "OpsPermissionSet granting it via systemPermissions (examples/app-showcase/src/security/permission-sets.ts) — the GRANT side",
+          "OpsPermissionSet granting it via systemPermissions (examples/app-showcase/src/security/permission-sets.ts) — the GRANT side. showcase_ops is a packaged set and SEALED: PUT /api/v1/meta/permission/showcase_ops answers 403 NOT_OVERRIDABLE (ADR-0126), so the REGRANT leg edits a CLONE of it — POST /api/v1/security/permission-sets/showcase_ops/clone {\"name\": \"<scratch name>\", \"label\": \"<scratch label>\"} (label is mandatory: a clone without one answers 400 VALIDATION_FAILED) carries showcase.export_data, no package, and is runtime-editable",
           "the shipped REQUIRE-side specimens examples/app-showcase/src/ui/actions/predicate-matrix.action.ts: showcase_zoo_perm_held (requires showcase.export_data — the GRANTED capability), showcase_zoo_perm_missing (requires showcase.restricted_ops — DEFINED but granted to nobody), showcase_zoo_perm_and (requires BOTH — the gate is an AND), showcase_zoo_perm_empty (requiredPermissions:[] — always passes). All four are type:'script' on the **showcase_field_zoo** object (predicate-matrix.action.ts binds objectName to a local const zoo = 'showcase_field_zoo' — `zoo` is the TS variable, never the object name), so the platform action path can invoke them"
         ],
         "knownGaps": [
-          "the require side is exercised on the PLATFORM action path only — there is NO REST action-invoke route on this build and its absence is deliberate (#7680, ruling 2026-08-12): see the `data-actions` block comment in packages/rest/src/rest-route-ledger.ts. Which platform surface is reachable depends on the HTTP front the build under test boots (@objectstack/rest mounts neither /actions nor /mcp); the runner picks whichever of the dispatcher /actions domain, the MCP run_action bridge, or in-process ql.executeAction/invokeBusinessAction this build exposes, and RECORDS which — all three funnel through the single-sourced actionPermissionError"
+          "the require side is exercised on the PLATFORM action path. The surface to drive is the dispatcher /actions domain, mounted on the stock dev server: POST /api/v1/actions/showcase_field_zoo/<action>/<a showcase_field_zoo record id> (packages/runtime/src/domains/actions.ts → actionPermissionError) answers 200 {success, data} when the caller holds the capability and 403 PERMISSION_DENIED with the actionPermissionError sentence when not. @objectstack/rest itself still mounts no action-invoke route, by design (#7680, ruling 2026-08-12; the `data-actions` block comment in packages/rest/src/rest-route-ledger.ts): /api/v1/data/:object/:id/actions/... answers the routing 404 ENDPOINT_NOT_FOUND. The MCP run_action bridge and in-process ql.executeAction funnel through the same single-sourced gate, so a host that serves no dispatcher may drive one of those instead and RECORD which"
         ]
       },
       "variants": [
@@ -2158,26 +2220,26 @@
         "shadow-refusal — a declaration whose name collides with PLATFORM_CAPABILITY_NAMES, or with a name another package declares, is refused loudly by the registry's one-holder rule"
       ],
       "steps": [
-        "boot showcase isolated; confirm the declared capability is served: GET /api/v1/meta/capability/showcase.export_data answers its declared name/label/description/scope, and no sys_capability row names it",
+        "boot showcase isolated; confirm the declared capability is served: GET /api/v1/meta/capability/showcase.export_data answers its declared name/label/description/scope, and GET /api/v1/data/sys_capability answers 404 OBJECT_NOT_FOUND (the object is retired, ADR-0131 D3 — there is no row table to find the capability in)",
         "read its fields — they are the declaration's own; nothing is transcribed into a row",
-        "identify which platform action-invoke surface this build exposes (dispatcher /actions domain · MCP run_action · in-process ql.executeAction/invokeBusinessAction) and record it; do NOT probe /api/v1/actions/... or /api/v1/data/:object/actions/... — @objectstack/rest mounts no action-invoke route by design (#7680), so a 404 there scores nothing",
+        "drive the dispatcher /actions domain (knownGaps): POST /api/v1/actions/showcase_field_zoo/<action>/<a showcase_field_zoo record id>, read the record id off GET /api/v1/data/showcase_field_zoo. Do NOT score /api/v1/data/:object/:id/actions/... — @objectstack/rest mounts no action-invoke route by design (#7680), so a 404 there scores nothing",
         "on that surface, INVOKE showcase_zoo_perm_held (requires showcase.export_data) as the GRANTED member holding OpsPermissionSet, then as a NON-granted member: granted executes, non-granted is refused with the actionPermissionError text naming the action and the missing capability",
-        "REGRANT leg: withdraw showcase.export_data from OpsPermissionSet's systemPermissions, re-invoke as the (formerly) granted member → now refused; restore the grant, re-invoke → executes again",
+        "REGRANT leg: showcase_ops is sealed (PUT /api/v1/meta/permission/showcase_ops → 403 NOT_OVERRIDABLE), so clone it (fixtures.requires[1]) and grant the CLONE to a fresh member through a sys_user_permission_set row; invoke showcase_zoo_perm_held as that member → executes; withdraw showcase.export_data from the CLONE's systemPermissions (PUT /api/v1/meta/permission/<clone> with the read-back item minus that entry), re-invoke → refused; restore it, re-invoke → executes again",
         "invoke showcase_zoo_perm_missing (requires showcase.restricted_ops, granted to nobody) as EVERY persona incl. the OpsPermissionSet holder → refused for all; and showcase_zoo_perm_empty (requiredPermissions:[]) → executes for all, since 'declares nothing' is not 'denies everything'",
-        "author a scratch package declaring a capability whose name is in PLATFORM_CAPABILITY_NAMES; boot/validate",
-        "author a scratch capability with a malformed/unvalidated shape and confirm the write door validates it before it reaches the sys_capability upsert (the #5961 concern: an unvalidated row lands directly in the authorization namespace)"
+        "author a scratch package declaring a capability whose name is in PLATFORM_CAPABILITY_NAMES and BOOT it: os validate and os build both pass the declaration (the name is lexically valid), and the refusal is the registry's one-holder check at boot, which stops the process. The runtime door is closed to the same attempt: PUT /api/v1/meta/capability/<a platform name> answers 403 NOT_OVERRIDABLE (capability is a code-only type)",
+        "the capability write doors validate before anything reaches the authorization namespace (the #5961 concern): author a scratch capability with a malformed shape (e.g. scope 'galaxy') in source and run os validate — refused at parse; the runtime metadata door refuses the type outright, PUT /api/v1/meta/capability/<new name> → 403 NOT_CREATABLE (capability is allowRuntimeCreate:false and allowEnvironmentOverlay:false, packages/spec/src/kernel/metadata-plugin.zod.ts); and there is no sys_capability table to upsert into (step 1's 404)"
       ],
       "acceptance": [
         {
-          "clause": "the package-declared capability is served by the registry with its authored identity, and no sys_capability row is written for it (ADR-0131 D3)",
+          "clause": "the package-declared capability is served by the registry with its authored identity, and no sys_capability row exists for it — the sys_capability object is retired (ADR-0131 D3)",
           "oracle": "api",
-          "verify": "GET /api/v1/meta/capability/showcase.export_data matches the declaration; the sys_capability read finds no row for it",
+          "verify": "GET /api/v1/meta/capability/showcase.export_data matches the declaration; GET /api/v1/data/sys_capability answers 404 OBJECT_NOT_FOUND ('Object 'sys_capability' is not registered')",
           "evidence": "the metadata read + the empty row read + the declaration source"
         },
         {
-          "clause": "the three-way resolves by NAME on the surface that actually enforces it — the PLATFORM action path (ADR-0066 D4 actionPermissionError, reached via the dispatcher /actions domain, the MCP run_action bridge, or ql.executeAction): invoking an action that REQUIREs the capability is refused for a member whose granted sets do not carry it and executes for one that does, the refusal follows a grant WITHDRAWN from the permission set, and execution returns when it is re-granted — grant / deny / regrant, all three legs",
+          "clause": "the three-way resolves by NAME on the surface that actually enforces it — the PLATFORM action path (ADR-0066 D4 actionPermissionError, reached via the dispatcher /actions domain — POST /api/v1/actions/:object/:action/:recordId on the stock dev server — or, on a host without it, the MCP run_action bridge or ql.executeAction): invoking an action that REQUIREs the capability is refused for a member whose granted sets do not carry it and executes for one that does, the refusal follows a grant WITHDRAWN from the (cloned) permission set, and execution returns when it is re-granted — grant / deny / regrant, all three legs",
           "oracle": "api",
-          "verify": "on the platform surface this build exposes (recorded per steps): showcase_zoo_perm_held executes for the OpsPermissionSet holder and is refused for a non-granted member with the actionPermissionError string naming the action and the missing capability; after withdrawing showcase.export_data from OpsPermissionSet the SAME holder is refused, and after restoring it executes again. Cross-checks on the same surface: showcase_zoo_perm_missing (showcase.restricted_ops, granted to nobody) is refused for every persona, and showcase_zoo_perm_empty (requiredPermissions:[]) executes for every persona. This clause is NOT scored against @objectstack/rest — it mounts no action-invoke route by design (#7680)",
+          "verify": "on the dispatcher /actions domain (or the recorded alternative): showcase_zoo_perm_held answers 200 for the OpsPermissionSet holder and 403 PERMISSION_DENIED for a non-granted member, the message being the actionPermissionError sentence naming the action and the missing capability; a member holding the CLONE of showcase_ops (showcase_ops itself is sealed, 403 NOT_OVERRIDABLE) gets 200, then 403 after showcase.export_data is withdrawn from the clone, then 200 again after it is restored. Cross-checks on the same surface: showcase_zoo_perm_missing (showcase.restricted_ops, granted to nobody) is refused for every persona, and showcase_zoo_perm_empty (requiredPermissions:[]) executes for every persona. This clause is NOT scored against /api/v1/data/:object/:id/actions/... — @objectstack/rest mounts no action-invoke route by design (#7680)",
           "evidence": "the invocation results for all three legs (grant → deny → regrant) plus the two cross-checks, each with the refusal text or the executed result, and a note of which platform surface was driven"
         },
         {
@@ -2187,18 +2249,18 @@
           "evidence": "the refusal text"
         },
         {
-          "clause": "the capability write door validates before the upsert — an unvalidated capability row must never land directly in the authorization namespace (#5961)",
+          "clause": "no unvalidated capability can reach the authorization namespace (#5961): the only authoring door is source, which os validate / os build parse against the capability schema, the runtime metadata door refuses the type outright, and there is no sys_capability table to write into",
           "oracle": "build",
-          "verify": "a malformed capability shape is rejected at parse/validate, not silently upserted into sys_capability",
-          "evidence": "the rejection"
+          "verify": "a malformed capability shape in source is rejected at parse/validate; PUT /api/v1/meta/capability/<new name> answers 403 NOT_CREATABLE whatever the body; GET or POST /api/v1/data/sys_capability answers 404 OBJECT_NOT_FOUND",
+          "evidence": "the validate rejection + the runtime-door refusal + the 404"
         }
       ],
       "negative": [
-        "a shadow declaration silently accepted (overwriting a platform capability) is a FAIL; an unvalidated capability row reaching sys_capability is the #5961 authz-namespace-injection FAIL",
+        "a shadow declaration silently accepted (overwriting a platform capability) is a FAIL; an unvalidated capability reaching the authorization namespace (a runtime write the code-only type should refuse answering 2xx) is the #5961 authz-namespace-injection FAIL",
         "REQUIRE-side fail-open: a NON-granted member whose platform-path invocation of showcase_zoo_perm_held SUCCEEDS is the ADR-0066 D4 gate failing open — FAIL, and the server-side shape of the client-side fail-open #3923 reported. Likewise showcase_zoo_perm_missing executing for anyone (nobody is granted showcase.restricted_ops), or showcase_zoo_perm_and executing for a caller holding only showcase.export_data (the gate is an AND, not an OR)",
-        "stale-grant: after showcase.export_data is withdrawn from OpsPermissionSet, the former holder still executing showcase_zoo_perm_held is a FAIL — the gate is reading a cached grant, not the current permission set",
+        "stale-grant: after showcase.export_data is withdrawn from the cloned set, its holder still executing showcase_zoo_perm_held is a FAIL — the gate is reading a cached grant, not the current permission set",
         "over-block: the OpsPermissionSet holder REFUSED on showcase_zoo_perm_held, or showcase_zoo_perm_empty refused for anyone, is a FAIL in the other direction — 'declares nothing' is not 'denies everything'",
-        "a 404 from a REST action-invoke probe is NEITHER pass nor fail — that surface does not exist on this build by design (#7680). Scoring this clause off a REST 404, in either direction, is a mis-run: re-run it on the platform surface"
+        "a 404 from /api/v1/data/:object/:id/actions/... is NEITHER pass nor fail — @objectstack/rest mounts no action-invoke route by design (#7680). Scoring this clause off that 404, in either direction, is a mis-run: drive the dispatcher /actions domain"
       ],
       "traps": [
         "wrong-persona",
@@ -2228,7 +2290,8 @@
           "change": "re-pointed the REQUIRE clause at the surface that enforces it (#7680, maintainer ruling 2026-08-12). The clause asked for a 403 from a REST resource carrying requiredPermissions; no such surface exists — @objectstack/rest mounts no action-invoke route, deliberately — so the clause was unrunnable as written and the run fell back to a platform capability. Now: grant/deny/regrant driven through the platform action path (actionPermissionError via the dispatcher /actions domain, MCP run_action, or ql.executeAction) against the four shipped predicate-matrix specimens, with the fail-open / stale-grant / over-block / AND-vs-OR failure modes spelled out in `negative`, and REST 404s explicitly scoring nothing. The knownGap moved from 'no resource REQUIREs it' (false — four actions do) to 'which platform surface the build exposes, recorded per run'",
           "ref": "claude/issue-7680-package-capability-doctrine"
         },
-        { "revision": 3, "date": "2026-08-18", "change": "named the specimens' object correctly: showcase_field_zoo, not `zoo`. The fixture block quoted the local TS const from predicate-matrix.action.ts (const zoo = 'showcase_field_zoo'), so an invoke keyed on `zoo` answers 'Action ... not found on object zoo' — which reads like a missing specimen rather than a wrong object name (#9453 CF-6)", "ref": "#9386" }
+        { "revision": 3, "date": "2026-08-18", "change": "named the specimens' object correctly: showcase_field_zoo, not `zoo`. The fixture block quoted the local TS const from predicate-matrix.action.ts (const zoo = 'showcase_field_zoo'), so an invoke keyed on `zoo` answers 'Action ... not found on object zoo' — which reads like a missing specimen rather than a wrong object name (#9453 CF-6)", "ref": "#9386" },
+        { "revision": 4, "date": "2026-10-16", "change": "re-pointed against main c91af8ed6 (#23878 checklist-accuracy findings, #23879 out_of_scope_findings). (1) sys_capability is retired (GET /api/v1/data/sys_capability → 404 OBJECT_NOT_FOUND), so the title, step 1, clause 1 and the old steps 7-8 no longer describe a sys_capability row or upsert; clause 4 now states the doors that exist: source parsed by os validate, the runtime metadata door refusing the code-only type (403 NOT_CREATABLE), and no table. (2) The dispatcher /actions domain IS mounted on the stock dev server and enforces actionPermissionError (measured: held 200 for the ops holder, 403 PERMISSION_DENIED naming the missing capability for a plain member; missing and and refused, empty executes), so step 3 and the knownGap name it as the surface; /api/v1/data/:object/:id/actions/... stays the routing 404. (3) showcase_ops is sealed (PUT → 403 NOT_OVERRIDABLE, ADR-0126), so the REGRANT leg withdraws and restores the capability on a clone made through POST /api/v1/security/permission-sets/showcase_ops/clone (label mandatory); measured 200 → 403 → 200. The clause still fails if a non-holder executes, a withdrawn grant keeps executing or a holder is refused. The build-oracle clauses re-run on a minimal scratch stack: a capability with scope 'galaxy' → os validate exit 1 \"capabilities.0.scope: Invalid value 'galaxy'. Expected one of: platform, org.\"; a capability named manage_platform_settings → os validate and os build exit 0, and os dev refused to boot with '✗ Security catalog name conflict: package \"com.qa.caps\" cannot register a name another holder already holds — capability \"manage_platform_settings\" is already held by the platform …' (step 6 now says the refusal is at boot); the runtime door answered both a platform name and the malformed body 403 (sealed / code-only type)", "ref": "#24036" }
       ]
     },
     {
@@ -2351,7 +2414,7 @@
       "title": "Activation-ledger write authority (ADR-0126 §5): the manage_metadata tier refuses first on every posture, and the shared operator gate — INERT on stock `single` — demands the platform_admin POSITION in walled postures, at both the flow and action doors",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2363,7 +2426,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "stock showcase boots the `single` tenancy posture (no tenancy service / ADR-0093 D4-D5 fallback) — CONFIRM the posture before scoring, because it decides which gate can answer at all",
+          "stock showcase boots the `single` tenancy posture (no tenancy service / ADR-0093 D4-D5 fallback) — CONFIRM the posture before scoring, because it decides which gate can answer at all. No API exposes the posture; the proof is the boot banner line `Tenancy: single` (printed at every log level), corroborated at OS_LOG_LEVEL=info by the log line \"[security] tenancy posture 'single' — Layer 0 is inert …\"",
           "a packaged flow: showcase_urgent_task_alert (com.example.showcase, examples/app-showcase/src/automation/flows/index.ts) for POST /api/v1/automation/showcase_urgent_task_alert/toggle",
           "a packaged action for POST /api/v1/actions/_activation/showcase_task/showcase_mark_done (examples/app-showcase/src/ui/actions/index.ts)",
           "a runtime-authored scratch permission set with system_permissions ['manage_metadata'] granted to a fresh member via a sys_user_permission_set row (same runtime-authoring pattern access-security.fls-mask-and-strip's read half uses) — no stock showcase set grants manage_metadata"
@@ -2374,7 +2437,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; admin session; PROVE the posture is `single` (no tenancy service resolves / the deployment declares none) and record the evidence — the posture selects which gate can answer",
+        "boot showcase isolated; admin session; PROVE the posture is `single` and record the evidence — the boot banner's `Tenancy: single` line (no API reports the posture; at OS_LOG_LEVEL=info the \"[security] tenancy posture 'single'\" line corroborates it) — the posture selects which gate can answer",
         "as the plain member: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false} — capture status, code and the EXACT message string",
         "as the plain member: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} — capture status, code and the exact message",
         "as the plain member again: repeat the flow toggle with a deliberately INVALID body (e.g. {\"enabled\": \"false\"}) — the refusal must still be the 403, not a 400 body-validation answer (the gate runs before body validation, automation.ts; activation-gate.ts)",
@@ -2462,6 +2525,12 @@
           "date": "2026-09-04",
           "change": "read-back detail only: #15024 dropped sys_metadata_activation's reserved organization_id column, so the two ledger read-backs (step 7 and the inert-gate clause) asked the runner to see a column that is gone. They now read the row's KEY SET instead — a value check of the shape `row.organization_id ?? null` is `null` for a column that does not exist, so carrying the old spelling forward would have left a leg that passes while measuring nothing. ⚠️ The gate itself is UNCHANGED: ADR-0126 §5's operator-gate half stands and its unit pins pass unmodified; only §5's separate 'the org column is reserved' bullet was withdrawn (ADR-0131 D7). The source citation now says so, so the next reader does not infer the gate moved too",
           "ref": "#15154"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "step 1 and the fixture line name the posture oracle (#23878 checklist-accuracy finding): no API exposes the tenancy posture, and the proof the run used is the boot banner line 'Tenancy: single', which re-measured on main c91af8ed6 prints at any log level, with the info-level \"[security] tenancy posture 'single' — Layer 0 is inert\" line as corroboration. Re-run on that boot: the flow door and the action door both answer the plain member 403 PERMISSION_DENIED with the manage_metadata tier sentences, and the invalid body is still 403",
+          "ref": "#24036"
         }
       ]
     },
@@ -2662,7 +2731,7 @@
       "title": "OS_PLATFORM_OWNER_EMAIL platform-admin anchor: only a VERIFIED stored-email match confers PLATFORM_ADMIN — unset, unverified match, non-match and malformed lists each confer nothing, fail closed",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2676,15 +2745,15 @@
           "a manage_platform_settings-floor probe route: GET /api/v1/datasources answers 401/403 BEFORE any service resolution (packages/services/service-datasource/src/admin-routes.ts; DATASOURCE_ADMIN_CAPABILITY), and admin_full_access carries that capability (packages/spec/src/identity/eval-user.zod.ts) — so the probe discriminates platform-admin standing cleanly"
         ],
         "knownGaps": [
-          "the ENTITLED live leg needs a VERIFIED second account, and no stock HTTP path verifies one: email_verified is statically readonly at the user-context API (stripped — the write-path-guards class), a fresh sign-up reads unverified, and the seeded dev admin — whose address IS stamped verified at seed time (#11343, auth-plugin.ts) — also holds the unscoped admin_full_access grant under single (the posture this item boots), so its 200s can never attribute to the config anchor. Verify M's address via a verification-enabled boot with mail capture (identity-auth.email-verification-loop's fixture, itself a knownGap there) or a system-context stamp through the same isSystem doorway the seed itself uses; without either, clause 5's live leg scores blocked(fixture) and the entitled side rests on the unit pin"
+          "the ENTITLED live leg needs a VERIFIED second account, and no stock HTTP path verifies one: email_verified is statically readonly at the user-context API (stripped — the write-path-guards class), a fresh sign-up reads unverified, and the seeded dev admin — whose address IS stamped verified at seed time (#11343, auth-plugin.ts) — also holds the unscoped admin_full_access grant under single (the posture this item boots), so its 200s can never attribute to the config anchor. Verify M's address via a verification-enabled boot with mail capture (identity-auth.email-verification-loop's fixture, itself a knownGap there) or a system-context stamp through the same isSystem doorway the seed itself uses; without either, clause 5's live leg scores blocked(fixture) and the entitled side rests on the unit pin. Measured on main c91af8ed6: POST /api/v1/auth/admin/update-user {userId, data: {emailVerified: true}} answers the seeded dev admin 403 YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS, so the HTTP lane has no verifying door; the run stamped M's email_verified directly on its own isolated scratch database with the server stopped (a system-level write, never on a shared database) and records that it did"
         ]
       },
       "steps": [
         "boot showcase single (OS_TENANCY_POSTURE=single — also what a deployment with no tenancy configuration resolves to) with the variable UNSET — a walled posture (group / isolated) refuses to boot with it unset (plugin-auth init; out of scope here, see negative) — and keep that posture for every restart below; admin session; sign up fresh member M and record M's email; as M: GET /api/v1/datasources and GET /api/v1/auth/me/permissions (read systemPermissions) — the baseline refusals",
         "restart with OS_PLATFORM_OWNER_EMAIL=<M's email> (M's row is unverified); as M repeat both probes",
         "restart with OS_PLATFORM_OWNER_EMAIL=<an address matching no sys_user row>; repeat M's probes",
-        "restart with a malformed list, e.g. OS_PLATFORM_OWNER_EMAIL='<M's email>, not an address'; capture the [authz] refusal from the process log (it prints once, on the first derivation after the value is seen); as M repeat the probes — the WHOLE variable is refused, so even the well-formed entry confers nothing",
-        "entitled side (see knownGaps for the verified-member fixture): with M's row verified and the variable naming M, as M repeat the probes and read /api/v1/auth/me/permissions — expect the declared admin envelope; where the fixture is unavailable, run the unit pin and cite its output instead",
+        "entitled side (see knownGaps for the verified-member fixture): with M's row verified and the variable naming M, as M repeat the probes and read /api/v1/auth/me/permissions — expect the declared admin envelope; where the fixture is unavailable, run the unit pin and cite its output instead. This step runs BEFORE the malformed variant on purpose: the malformed list's 'the well-formed sibling confers nothing' check only discriminates once M is verified",
+        "with M's row STILL VERIFIED from the previous step, restart with a malformed list, e.g. OS_PLATFORM_OWNER_EMAIL='<M's email>, not an address'; capture the [authz] refusal from the process log (it prints once, on the first derivation after the value is seen); as M repeat the probes — the WHOLE variable is refused, so even the well-formed entry confers nothing. Run unverified, M's refusal here could not be told apart from clause 2's unverified arm; verified, a well-formed variable naming M would confer standing (the previous step shows it does), so the refusal is attributable to the malformed entry alone",
         "the walled half of the legacy grant anchor: run the #11663 L5 posture-split unit pins named in clause 6 and cite their output. There is no live log line to grep — the once-per-process legacy-grant re-anchor pointer was retired with the walled anchor (#19136), and nothing replaces it on the request path; the only operator-facing line left is plugin-security's boot-time fail-closed error, which fires when a walled rig has no usable configured administrator"
       ],
       "acceptance": [
@@ -2709,7 +2778,7 @@
         {
           "clause": "any malformed entry fails the WHOLE variable closed, loudly once: the process log carries the [authz] refusal naming the offending entry verbatim and stating the deployment now has ZERO config-derived platform administrators (parsePlatformAdminEmails, platform-admin.ts; sink) — and the well-formed sibling entry on the same list confers nothing (never skip-and-continue)",
           "oracle": "log",
-          "verify": "log line matches the refusal text and names the entry; M (the well-formed entry) still refused on the datasource probe",
+          "verify": "log line matches the refusal text and names the entry; M (the well-formed entry) still refused on the datasource probe WHILE M's row is verified — run after the entitled step, so the same well-formed address is known to confer standing when the variable is accepted",
           "evidence": "the log excerpt + M's trace"
         },
         {
@@ -2771,6 +2840,12 @@
           "date": "2026-09-23",
           "change": "re-anchored on the walled retirement of the legacy grant anchor (#19136, issue #19145): step 6 and clause 6 told the runner to grep the process log for the once-per-process re-anchor pointer and cited reportLegacyPlatformAdminGrant, both removed — clause 6 now states the posture split (an anchor under single only, silent everywhere) with the #11663 L5 unit pins as its oracle, and the source parenthetical names live symbols. The item's live legs move from isolated to single: an isolated boot with the variable unset refuses to start (plugin-auth init), and under a walled posture the seeded admin holds no grant-anchored standing, so clauses 1 and 3 and the seeded-admin both-sides control only hold under single. Persona and knownGap state the posture. The single half is described as it ships; its fate is #11979's",
           "ref": "#19145"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "steps reordered (#23878 checklist-accuracy finding): the malformed-list variant ran while M was still unverified, so its refusal could not be told apart from the unverified arm, and the 'well-formed sibling confers nothing' check only bites once M is verified. The entitled step now precedes the malformed one, which keeps M verified, and clause 4's verify says so; knownGaps[0] records how the verified fixture was made (the admin update-user door refuses; a direct email_verified stamp on the isolated scratch DB). Re-run on main c91af8ed6, single posture, same DB across restarts: var unset → M 403, systemPermissions []; var = M unverified → 403, []; var = a non-matching address → 403, []; M verified and var = M in another case → datasources 200, 9 system permissions incl. manage_platform_settings; var = 'M, not an address' with M verified → 403, [] and the [authz] whole-variable refusal naming the entry; the admin answered 200 on every boot",
+          "ref": "#24036"
         }
       ]
     },
@@ -2904,7 +2979,7 @@
       "title": "Opt-in record-view auditing writes `read` rows for exactly the opted-in objects' detail reads, batched off the request path — stock boot audits nothing, excluded names refuse loudly, values never copied",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2914,26 +2989,26 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "stock showcase boot for the honest-default half (grepped: nothing under examples/app-showcase constructs an AuditPlugin or names readAudit — the CLI's auto-registered instance passes NO options and audits no views)",
+          "stock showcase boot for the honest-default half (grepped: nothing under examples/app-showcase constructs an AuditPlugin or names readAudit — the CLI's auto-registered instance passes NO options and audits no views); boot it at OS_LOG_LEVEL=info so the install-line grep can discriminate",
           "read the rows through GET /api/v1/data/sys_audit_log — NEVER by opening a SQLite file directly: sys_audit_log's ADR-0057 lifecycle class routes it to the dedicated telemetry datasource whenever one is registered (os dev provisions one by default as a sibling file), and the data API resolves the right one; the write-failure text at read-audit.ts documents exactly this trap"
         ],
         "knownGaps": [
-          "the CONFIGURED half has no stock fixture and the provisioning is a BOOT-CONFIG change, not an API sequence — so no area recipe fits. Compose the docs' own snippet (content/docs/permissions/record-view-auditing.mdx, 'Under os serve'): a scratch app whose objectstack.config.ts plugins array carries new AuditPlugin({ readAudit: { objects: ['<object>', 'sys_job'] } }) — sys_job included deliberately as the excluded-name probe. The 'Plugin superseded: com.objectstack.audit' boot line is the opt-in WORKING (last-one-wins over the CLI's option-less instance), not a misconfiguration. Without such a boot, clauses 2-5 score blocked(fixture); clause 1 (the stock negative) runs regardless",
+          "the CONFIGURED half has no stock fixture and the provisioning is a BOOT-CONFIG change, not an API sequence — so no area recipe fits. Compose the docs' own snippet (content/docs/permissions/record-view-auditing.mdx, 'Under os serve'): a scratch app whose objectstack.config.ts plugins array carries new AuditPlugin({ readAudit: { objects: ['<object>', 'sys_job'] } }) — sys_job included deliberately as the excluded-name probe. The 'Plugin superseded: com.objectstack.audit' boot line is the opt-in WORKING (last-one-wins over the CLI's option-less instance), not a misconfiguration. Scripted scratch-copy recipe (measured on main c91af8ed6, #24036): copy examples/app-showcase without node_modules, dist, e2e and test into a scratch directory; give the copy a REAL node_modules directory holding one symlink per entry of examples/app-showcase/node_modules (each @objectstack/* entry pointed at its workspace package), plus @objectstack/plugin-audit → packages/plugins/plugin-audit and @objectstack/platform-objects → packages/platform-objects, which the showcase does not depend on; add `import { AuditPlugin } from '@objectstack/plugin-audit'` and put `new AuditPlugin({ readAudit: { objects: ['showcase_account', 'sys_job'] } })` first in the plugins array; boot with the copy's node_modules/.bin/objectstack dev --seed-admin -p PORT -d file:SCRATCH_DB, OS_PORT exported and OS_LOG_LEVEL=info. It is a boot-config copy, not an API sequence, so it lives here and not as an area recipe. Without such a boot, clauses 2-5 score blocked(fixture); clause 1 (the stock negative) runs regardless",
           "there is deliberately NO enable.auditReads object-metadata key, no stack-config key and no env flag (the docs state why: a declaration that can outlive the plugin reads as coverage while recording nothing) — a runner hunting for a config knob on the object will conclude the capability is missing (absence-inference); the opt-in lives ONLY where the plugin is constructed"
         ]
       },
       "steps": [
-        "stock leg: boot showcase stock; as M open a record detail (GET /api/v1/data/showcase_contact/<id>); wait past the 2s default flush window; as admin GET /api/v1/data/sys_audit_log with a $filter on action 'read' — expect zero rows; the boot log must carry NO 'record-view auditing installed' line",
-        "configured leg (see knownGaps): boot the scratch app with readAudit.objects naming object X plus the excluded sys_job; read the boot log for the install line and the exclusion warning",
+        "stock leg: boot showcase stock with OS_LOG_LEVEL=info (or --log-level info) — os dev defaults to warn, and the install line logs at INFO, so on a default boot its absence proves nothing; confirm INFO lines are present in the boot log as the positive control. As M open a record detail M can READ — GET /api/v1/data/showcase_account/<id> answering 200 (a baseline member is refused showcase_contact at the object gate with 403, and a refused read audits nothing under any configuration, so a contact specimen makes the zero vacuous); wait past the 2s default flush window; as admin GET /api/v1/data/sys_audit_log with a $filter on action 'read' — expect zero rows; the boot log must carry NO 'record-view auditing installed' line",
+        "configured leg (the scratch-copy recipe in knownGaps[0]): boot the scratch copy with readAudit.objects naming X = showcase_account plus the excluded sys_job, at OS_LOG_LEVEL=info; read the boot log for the install line and the exclusion warning",
         "as M (user context): GET /api/v1/data/X/<id>; wait past the flush window (or drive maxBatchSize reads); as admin read the ledger rows for action 'read'",
-        "as M: LIST /api/v1/data/X (a collection read) and GET a detail of an object NOT in the opt-in — then re-read the ledger",
+        "as M: LIST /api/v1/data/X (a collection read) and GET a detail of an object NOT in the opt-in that M can read (showcase_project) — then re-read the ledger",
         "inspect the landed row's fields: action, user_id, object_name, record_id, old_value, new_value, created_at (compare created_at against the wall clock of the read, not of the flush)"
       ],
       "acceptance": [
         {
           "clause": "stock boot audits nothing — the honest default: os serve/dev auto-registers AuditPlugin with NO options, so a stock boot writes zero action:'read' rows however many records are opened, and logs no install line (a deployment that opts nothing in pays nothing)",
           "oracle": "api",
-          "verify": "post-read ledger query for action 'read' returns 0 rows on the stock boot; boot log lacks 'record-view auditing installed'",
+          "verify": "post-read ledger query for action 'read' returns 0 rows on the stock boot after a detail read that answered 200; boot log, at info level with INFO lines present, lacks 'record-view auditing installed'",
           "evidence": "the filtered query + the log grep"
         },
         {
@@ -3001,6 +3076,12 @@
           "date": "2026-08-30",
           "change": "new — the #8992 record-view audit writer had no checklist coverage: the honest default (stock boot audits nothing), the closed per-object opt-in, the detail-read discriminator, the no-values row shape and the loud exclusion refusal were all unasserted. The configured half is fixture-gapped (a boot-config change per the docs' own snippet — recorded as knownGaps, not an area recipe, since it is not an API sequence); the stock negative runs on stock",
           "ref": "#8992"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-17",
+          "change": "re-measured on main c91af8ed6 (checklist-accuracy finding from #23878): the stock leg's install-line grep was vacuous on a default boot, because the line logs at INFO and os dev defaults to warn, so steps[0], the fixture and clause 0's verify now boot at OS_LOG_LEVEL=info with an INFO-line positive control. The stock specimen GET /data/showcase_contact/ID is refused to a baseline member at the object gate (403), so the zero proved nothing either; the step now reads a showcase_account detail (200). knownGaps[0] gains the scripted scratch-copy recipe for the configured half, and steps 1 and 3 name X = showcase_account and the un-opted showcase_project. Re-run: stock boot at info (649 INFO lines), plain member detail reads of showcase_project, showcase_task and showcase_account all 200, action 'read' rows 0, no install line. Configured scratch copy: 'Plugin superseded: com.objectstack.audit' WARN, the sys_job exclusion WARN and 'AuditPlugin: record-view auditing installed on 1 object(s) — showcase_account'; member M's account detail read → 1 row (action read, user_id M, object_name showcase_account, record_id correct, old_value and new_value null, created_at 00:15:23.489Z inside the 23.385–23.497 read window, about 4 s before the flush read); the list read and the showcase_project detail read left the count at 1; the admin's detail read made it 2",
+          "ref": "#24036"
         }
       ]
     },
@@ -3009,7 +3090,7 @@
       "title": "The /s/:token share-link landing page renders the resolved record minus redacted fields, gates on password, and refuses dead links with designed states — never a blank page or a raw error",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3026,7 +3107,7 @@
         "knownGaps": [
           "automated.ref lives ENTIRELY in the objectui repo — from this checkout it is neither runnable nor pin-evidenced (the RUNNER standing fact): drive the item by hand in the browser, or run the pin in an objectui checkout and name the revision",
           "the ai_conversations transcript branch (SharedRecordPage.tsx,190-234 — messages fetch + ChatbotEnhanced readOnly) is ai_conversations-only (Cloud/EE service-ai) — the same knownGap split the API item records for /:token/messages; not runnable on open-framework showcase",
-          "FIXED, regression row, expected PASS (objectui#11649): the page no longer folds every 401 into the password prompt. At objectui 1fb1ced36243, still this repo's .objectui-sha, SharedRecordPage.tsx reads a 401 by the body's error.code through shared-record-shape.ts resolveGateOf — NEEDS_PASSWORD and WRONG_PASSWORD open the password prompt, SIGN_IN_REQUIRED opens the sign-in gate, and any other code shows the server's message, not a prompt — so a signed_in-audience link opened anonymously renders the dedicated 'Sign in required' state, never 'Password required'. acceptance[3] now asserts that state (QA run #23163 saw it live at objectstack 36b2889c). The objectui pins are apps/console/src/pages/SharedRecordPage-11649.test.tsx ('shows the sign-in path back to this link, and no password prompt') and shared-record-shape.test.ts ('reads each 401 code as its gate'), objectui-repo-only like knownGaps[0]"
+          "FIXED, regression row, expected PASS (objectui#11649): the page no longer folds every 401 into the password prompt. Measured at objectui 1fb1ced36243 (the pin this row was written at), again at daeb77fc84dd (#23878) and at f8267df93aba (this repo's .objectui-sha when revision 3 was written; re-read it at whatever pin the run boots): SharedRecordPage.tsx reads a 401 by the body's error.code through shared-record-shape.ts resolveGateOf — NEEDS_PASSWORD and WRONG_PASSWORD open the password prompt, SIGN_IN_REQUIRED opens the sign-in gate, and any other code shows the server's message, not a prompt — so a signed_in-audience link opened anonymously renders the dedicated 'Sign in required' state, never 'Password required'. acceptance[3] now asserts that state (QA run #23163 saw it live at objectstack 36b2889c). The objectui pins are apps/console/src/pages/SharedRecordPage-11649.test.tsx ('shows the sign-in path back to this link, and no password prompt') and shared-record-shape.test.ts ('reads each 401 code as its gate'), objectui-repo-only like knownGaps[0]"
         ]
       },
       "steps": [
@@ -3112,6 +3193,678 @@
           "date": "2026-10-13",
           "change": "knownGaps[2], acceptance[3].clause, acceptance[3].verify and variants[5] (knownGap stale, #23163 C3; parked on #23121, carried by #23169). The page no longer folds every 401 into the password prompt: at objectui 1fb1ced36243, still this repo's .objectui-sha, SharedRecordPage.tsx reads a 401 by its error.code (shared-record-shape.ts resolveGateOf, objectui#11649) and renders a dedicated 'Sign in required' state, with a 'Sign in' link back to this link, for SIGN_IN_REQUIRED. The server half is unchanged at 87e902dcbb: both resolve mounts, packages/plugins/plugin-sharing/src/share-link-routes.ts and its dispatcher twin packages/runtime/src/domains/share-links.ts, answer an anonymous open of a live signed_in link with no password with 401 SIGN_IN_REQUIRED. As the knownGap itself asked, it becomes a regression row, and acceptance[3] (the item's clause 4) asserts the sign-in state instead of recording whichever state renders. Read from source at both pins; no browser was driven and no app was booted. QA run #23163 saw the state live",
           "ref": "#23169"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "knownGaps[2] stopped naming objectui 1fb1ced36243 as 'still this repo's .objectui-sha' (#23878 checklist-accuracy finding). The pin moved to daeb77fc84dd and then to f8267df93aba; at f8267df93aba SharedRecordPage.tsx still reads a 401 by its code through shared-record-shape.ts resolveGateOf, renders the 'Sign in required' state for SIGN_IN_REQUIRED, and both objectui pins (SharedRecordPage-11649.test.tsx, shared-record-shape.test.ts) are present. The revision 2 history row stays as written: it was true at its pin. Wording only, no re-run owed",
+          "ref": "#24036"
+        }
+      ]
+    },
+    {
+      "id": "access-security.anonymous-floor-v18-doors",
+      "title": "The anonymous floor answers 401 FIRST on the doors v18 added to it — /notifications (was 501), non-POST /keys (was 405), share-link management (was 501), /openapi.json and /docs, every /i18n face and the settings family — while the token faces and the public-form submit stay anonymous and the submit echoes only {id}",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "anonymous caller (no cookie, no bearer, no x-api-key)",
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "the showcase's stock public form `contact-us` (anon GET /api/v1/forms/contact-us resolves it; fields name/email/company/message)"
+        ],
+        "knownGaps": [
+          "the dispatcher `/ui` domain (also floored by 23225) is NOT mounted over HonoServer on a stock `os dev` / `os serve` — GET /api/v1/ui/... answers 404 ENDPOINT_NOT_FOUND to the admin too — so it is not driven here; it is reachable only on a dispatcher-only (hosted) kernel and is pinned by the dogfood sweep",
+          "the dispatcher mounts only POST /keys on HonoServer (packages/runtime/src/dispatcher-plugin.ts), so a non-POST /keys never reaches the domain's floor on a stock boot: the HonoServer fallback answers it 405 METHOD_NOT_ALLOWED (packages/plugins/plugin-hono-server/src/adapter.ts unmatchedResponse) — run 2026-10-16 measured exactly that; the clause stays as the 23225 contract states it, so a 405 there is a FAIL, not a re-point"
+        ]
+      },
+      "steps": [
+        "with NO credentials call: GET /api/v1/notifications, GET /api/v1/keys, GET /api/v1/share-links, GET /api/v1/openapi.json, GET /api/v1/docs, GET /api/v1/i18n/locales, GET /api/settings/branding",
+        "with no credentials call a token face: GET /api/v1/share-links/BOGUS/resolve",
+        "with no credentials POST /api/v1/forms/contact-us/submit with the four whitelisted fields plus a forged owner_id and a non-whitelisted status",
+        "repeat two of the 401 calls as admin to prove the door itself serves"
+      ],
+      "acceptance": [
+        {
+          "clause": "the anonymous floor is the first statement on every listed v18 door and the form submit answers {id} only — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "every listed door answers the anonymous caller 401 (UNAUTHENTICATED / AUTH_REQUIRED in that family's envelope) — never the 501/405/400 it answered before the floor",
+          "oracle": "api",
+          "verify": "status + error.code per door, anonymous",
+          "evidence": "one status+code line per door"
+        },
+        {
+          "clause": "the share-link token face is NOT behind the floor (it answers its own invalid-token refusal, not 401)",
+          "oracle": "api",
+          "verify": "status + code on the bogus token resolve",
+          "evidence": "the response line"
+        },
+        {
+          "clause": "an anonymous public-form submit answers 201 with a body that is exactly {id} — no stored, default or hook-stamped field echoed",
+          "oracle": "api",
+          "verify": "keys of the response body",
+          "evidence": "the response body"
+        }
+      ],
+      "negative": [
+        "an anonymous 200 from any listed door is a FAIL (and an authorization finding — RUNNER rule 2 carve-out applies to its reproduction)"
+      ],
+      "traps": [
+        "auth-state-leak",
+        "dispatcher-vs-hono-route"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/anonymous-door-sweep.dogfood.test.ts + packages/rest/src/rest-api-description-anonymous-deny.test.ts + packages/runtime/src/domains/i18n-anonymous-deny.test.ts + packages/services/service-settings/src/settings-routes.anonymous-floor.pin.test.ts + packages/rest/src/public-form-submit-answer.test.ts"
+      },
+      "source": [
+        "packages/core/src/security/anonymous-deny.ts#shouldDenyAnonymous",
+        "packages/rest/src/discovery-routes.ts#registerOpenApiEndpoints",
+        "packages/services/service-settings/src/settings-routes.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23225-domain-floor-anonymous-deny, 23225-ui-data-domain-floor, 22430-api-description-anonymous-deny, 22432-i18n-anonymous-deny, 23142-settings-anonymous-floor, 22437-public-form-submit-answers-id"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; extends access-security.anonymous-deny-surfaces (v15), which enumerates data/meta/actions/automation/batch/security/analytics only",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.walled-environment-metadata-operator-only",
+      "title": "Under a walled posture (group / isolated) environment metadata and the security catalog belong to the platform operator: an org owner holding manage_metadata is refused 403 on every /meta write verb, every /packages write, install-local of a catalog-carrying package, _migrate-stored and POST /automation — and the single posture is unchanged",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "api",
+      "personas": [
+        "org owner holding manage_metadata who is NOT platform admin — walled-posture legs only",
+        "platform operator (holds the platform_admin position) — only for the walled-posture legs",
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a second boot with OS_TENANCY_POSTURE=isolated (walled posture) on its own port and file DB — the stock single posture leaves every walled clause vacuous, so confirm the posture from the boot log before scoring",
+          "on the walled boot: a second organization whose owner is granted manage_metadata but not the platform_admin position"
+        ]
+      },
+      "steps": [
+        "walled boot, as the org owner: PUT /api/v1/meta/object/qa_walled_probe (a minimal object body); PUT /api/v1/meta/permission/showcase_member_access (any body); POST /api/v1/meta/view/SOME_VIEW/publish; DELETE /api/v1/packages/com.example.showcase",
+        "walled boot, as the org owner: POST /api/v1/security/permission-sets/SOME_SET/clone",
+        "walled boot, as the operator: repeat the object PUT and confirm it is admitted (then delete the probe)",
+        "single-posture boot, as admin: the same object PUT is admitted (control)"
+      ],
+      "acceptance": [
+        {
+          "clause": "every environment-metadata and catalog write door refuses a non-operator under a walled posture — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "each org-owner write on the walled boot answers 403 (FORBIDDEN on /meta, PERMISSION_DENIED on the dispatcher /packages and /security doors) and stores nothing (GET of the item afterwards is unchanged/404)",
+          "oracle": "api",
+          "verify": "status + error.code per call + a read-back",
+          "evidence": "one line per call + the read-backs"
+        },
+        {
+          "clause": "the operator's identical write is admitted on the walled boot, and the single-posture admin write is admitted",
+          "oracle": "api",
+          "verify": "status 2xx and read-back present",
+          "evidence": "both write answers"
+        }
+      ],
+      "negative": [
+        "an org owner on a walled boot succeeding at ANY environment-metadata write is a P0 FAIL (cross-tenant blast radius) — authorization carve-out: publish no reproduction"
+      ],
+      "traps": [
+        "wrong-persona",
+        "auth-state-leak"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/rest/src/meta-migrate-stored-walled-refusal.test.ts + packages/runtime/src/domains/packages-walled-write-refusal.test.ts + packages/runtime/src/domains/automation-walled-definition-write.test.ts + packages/runtime/src/domains/meta-walled-catalog-refusal.test.ts + packages/qa/dogfood/test/wall-environment-metadata-refusal.dogfood.test.ts + packages/qa/dogfood/test/wall-catalog-refusal.dogfood.test.ts + packages/qa/dogfood/test/wall-package-doors-refusal.dogfood.test.ts"
+      },
+      "source": [
+        "packages/metadata-core/src/meta-write-capability.ts#walledCatalogWriteVerdict",
+        "ADR-0131",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23231-walled-environment-metadata-writes, 15204-walled-catalog-refusal, 15204-walled-catalog-package-refusal, 15204-walled-catalog-package-verbs"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.meta-authoring-trail-and-audience-gates",
+      "title": "/meta read gates added on v18: the authoring-trail doors (history / audit / diff / package commits) refuse a setup.access-only caller, and a list view or dashboard carrying requiredPermissions is withheld from a caller without them on EVERY alternate door",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a scratch list view (PUT /api/v1/meta/view/showcase_task.qa_gated_view — view is overlay-allowed on stock showcase; a view name is dotted OBJECT.NAME) with requiredPermissions naming a capability the member lacks",
+          "a member granted setup.access but not studio.access / manage_metadata (a scratch permission set assigned through sys_user_permission_set)"
+        ]
+      },
+      "steps": [
+        "as the setup.access-only member: GET /api/v1/meta/object/showcase_task/history, /audit, /diff; GET /api/v1/packages/com.example.showcase/commits",
+        "as a member without the capability: GET /api/v1/meta/view (list) and GET /api/v1/meta/view/showcase_task.qa_gated_view, plus /published, /layers, ?state=draft, /history",
+        "as admin: the same reads (control); then delete the scratch view"
+      ],
+      "acceptance": [
+        {
+          "clause": "trail doors demand authoring access and the view/dashboard audience gate holds on every alternate door — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the setup.access-only caller gets 403 FORBIDDEN on history/audit/diff and 403 PERMISSION_DENIED on /packages/:id/commits",
+          "oracle": "api",
+          "verify": "status + error.code per door",
+          "evidence": "four status lines"
+        },
+        {
+          "clause": "the gated view is absent from the member's list and every by-name door answers 403 PERMISSION_DENIED; the admin reads it on all of them",
+          "oracle": "api",
+          "verify": "list membership + status per door, both personas",
+          "evidence": "the list ids + per-door lines"
+        }
+      ],
+      "negative": [
+        "a 304 Not Modified replaying the admin's body to the member (stale ETag) is a FAIL of the gate"
+      ],
+      "traps": [
+        "wrong-persona",
+        "cache-staleness"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/rest/src/meta-history-diff-authoring-door.test.ts + packages/qa/dogfood/test/wall-authoring-trail-doors.dogfood.test.ts + packages/rest/src/meta-view-dashboard-audience-gate.test.ts"
+      },
+      "source": [
+        "packages/rest/src/meta-item-read-gate.ts#holdsRequiredPermissions",
+        "packages/runtime/src/domains/packages.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23546-trail-doors-setup-access, 22611-list-view-dashboard-required-permissions, 22639-lint-capability-references-list-views, 22639-rest-meta-read-gate-audience, 22639-runtime-meta-legacy-object-exit, 22639-spec-audience-gate-enforced"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.security-catalog-activation-and-clone-doors",
+      "title": "Security-catalog doors new on v18: POST /security/_activation/:type/:name switches a position or permission set off and on (holders lose and regain its grants), and POST /security/permission-sets/:name/clone copies a set with its refusal arms",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)",
+        "anonymous caller (no cookie, no bearer, no x-api-key)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a showcase position the member holds (GET /api/v1/data/sys_user_position as admin)"
+        ]
+      },
+      "steps": [
+        "as admin POST /api/v1/security/_activation/position/POSITION {enabled:false}; as the member re-read GET /api/v1/auth/me/permissions (or a record the position grants)",
+        "POST the same with {enabled:true}; re-read",
+        "POST /api/v1/security/_activation/position/everyone {enabled:false}; and for an unknown name",
+        "POST /api/v1/security/permission-sets/SOURCE/clone {name:\"qa_clone_set\", label:\"QA clone\"}; repeat with the same name; with the source's own name; with a bad body; as the member; anonymously"
+      ],
+      "acceptance": [
+        {
+          "clause": "the activation door and the clone door with every refusal arm — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "disabling a position answers 200, writes a sys_metadata_activation row and removes the holder's grants from it; re-enabling restores them",
+          "oracle": "api",
+          "verify": "activation answer + the member's permissions before/after each switch",
+          "evidence": "the three permission reads"
+        },
+        {
+          "clause": "everyone / guest → 400; an unknown name → 404",
+          "oracle": "api",
+          "verify": "status + code",
+          "evidence": "refusal bodies"
+        },
+        {
+          "clause": "clone → 200 {permissionSet, notice} carrying the facets but not isDefault / adminScope / packageId; name taken (including the source's) → 409; bad body → 400; member without manage_metadata → 403; anonymous → 401",
+          "oracle": "api",
+          "verify": "status + code per arm and the cloned set's keys",
+          "evidence": "one line per arm + the clone body"
+        }
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/runtime/src/domains/catalog-activation-door.test.ts + packages/qa/dogfood/test/catalog-activation-door.dogfood.test.ts + packages/runtime/src/domains/permission-set-clone.test.ts + packages/qa/dogfood/test/permission-set-clone-door.dogfood.test.ts"
+      },
+      "source": [
+        "packages/runtime/src/domains/catalog-activation.ts#handleCatalogActivationWrite",
+        "packages/runtime/src/domains/permission-set-clone.ts#handlePermissionSetCloneWrite",
+        "packages/runtime/src/domains/permission-set-clone.ts#PERMISSION_SET_CLONE_DROPPED_KEYS",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 15204-s2c-catalog-activation-door, 15204-catalog-activation-environment-authored, 15204-s2b-plugin-sharing-ledger-deactivation, 15204-permission-set-clone-door"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.security-catalog-one-holder-and-boot-report",
+      "title": "The security catalog has exactly one holder per name: two packages declaring one permission-set / position name refuse boot (422 NAMESPACE_CONFLICT on install-local), a body packageId that disagrees with its package is refused, `os migrate security-catalog-overlays` clears environment shadows, and boot reports grants naming undefined catalog entries",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "metadata author running the CLI in a scratch copy of the showcase app (no server needed)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "a second scratch package declaring a permission set with the same name as a showcase set (for the install-local leg)"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/marketplace/install-local with the conflicting package; GET /api/v1/packages afterwards",
+        "PUT /api/v1/meta/permission/SET?package=com.example.showcase with a body whose packageId names another package",
+        "in the scratch app run `os migrate security-catalog-overlays` (preview), then `--apply --yes --json`",
+        "plant a sys_user_permission_set row naming an undefined set (scratch DB), reboot, read the [security] boot line"
+      ],
+      "acceptance": [
+        {
+          "clause": "one-holder refusal, owner binding, the overlay migration and the catalog-reference report — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "install-local of a package redeclaring a catalog name → 422 NAMESPACE_CONFLICT (or PLUGIN_REGISTER_FAILED) with conflicts[], and nothing is recorded as installed",
+          "oracle": "api",
+          "verify": "status + code + conflicts; package list unchanged",
+          "evidence": "refusal body + the list"
+        },
+        {
+          "clause": "a permission-set save whose body packageId disagrees with the target package → 400 VALIDATION_ERROR at packageId",
+          "oracle": "api",
+          "verify": "status + error located path",
+          "evidence": "refusal body"
+        },
+        {
+          "clause": "`os migrate security-catalog-overlays` previews and exits 1 when rows exist; --apply --yes deletes and exits 0; --json reports listed/deleted/rows",
+          "oracle": "build",
+          "verify": "exit codes + JSON",
+          "evidence": "both CLI outputs"
+        },
+        {
+          "clause": "a grant naming an undefined set is listed in the [security] error line at boot (per org, ≤50 names); a clean boot logs one info line",
+          "oracle": "log",
+          "verify": "boot log grep for [security]",
+          "evidence": "the log lines"
+        }
+      ],
+      "traps": [
+        "destructive-in-place"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/standalone-stack-security-catalog-one-holder.test.ts + packages/qa/dogfood/test/security-catalog-cold-boot-environment-holder.dogfood.test.ts + packages/cli/src/commands/migrate/security-catalog-overlays.integration.test.ts + packages/plugins/plugin-security/src/catalog-reference-report.test.ts + packages/spec/src/security/permission-set-owner-binding.test.ts + packages/objectql/src/permission-set-owner-registration.test.ts"
+      },
+      "source": [
+        "packages/objectql/src/registry.ts#SecurityCatalogNameConflictError",
+        "packages/cli/src/commands/migrate/security-catalog-overlays.ts",
+        "packages/plugins/plugin-security/src/catalog-reference-report.ts#reportCatalogReferences",
+        "packages/spec/src/security/permission-set-owner-binding.ts#judgePermissionSetOwnerBinding",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22135-security-catalog-one-holder, 22307-cold-boot-catalog-refusal, 22371-security-catalog-overlays-step, 15204-s3-boot-report, 23259-permission-set-owner-mismatch-refused, 23312-permission-set-owner-binding-build-and-registration"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.grant-table-write-contract",
+      "title": "Grant-table write contract (sys_user_permission_set / sys_user_position): the retired permission_set_id column is refused, a duplicate grant is 409, an inverted validity window is 400, granted_by is stamped with the caller, and (walled) a grant to a non-member is refused",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "the member's user id and a showcase permission-set NAME"
+        ]
+      },
+      "steps": [
+        "as admin POST /api/v1/data/sys_user_permission_set {user_id: MEMBER, permission_set: NAME} (201), then the same body again",
+        "POST with permission_set_id instead of permission_set",
+        "POST with valid_until earlier than valid_from",
+        "POST with granted_by naming the member; read the stored row's granted_by",
+        "walled boot only: as an org admin grant in org A to a user who is not a member of A"
+      ],
+      "acceptance": [
+        {
+          "clause": "the grant-table write contract — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "permission_set_id → 400 INVALID_FIELD; a second identical grant → 409 UNIQUE_VIOLATION",
+          "oracle": "api",
+          "verify": "status + code + located field per arm",
+          "evidence": "two refusal bodies"
+        },
+        {
+          "clause": "an INSERT with valid_until <= valid_from is refused as the rule's VIOLATION: 400 VALIDATION_FAILED at valid_until with constraint.rule validity_window_order, constraint.reason NOT `unevaluable`, and the rule's authored message (\"Valid Until must be later than Valid From …\") — an unevaluable-predicate refusal is a FAIL even though it also answers 400",
+          "oracle": "api",
+          "verify": "fields[0].constraint + message on the inverted-window insert; a valid window inserts 201 (control)",
+          "evidence": "the refusal body + the control"
+        },
+        {
+          "clause": "a non-system insert naming someone else as granted_by stores the CALLER",
+          "oracle": "api",
+          "verify": "read-back of granted_by",
+          "evidence": "the stored row"
+        },
+        {
+          "clause": "walled: a grant to a non-member → 400 VALIDATION_FAILED with fields.user_id reference_not_found",
+          "oracle": "api",
+          "verify": "status + field code",
+          "evidence": "refusal body"
+        }
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/plugins/plugin-security/src/grant-permission-set-name.test.ts + packages/plugins/plugin-security/src/sys-user-permission-set-window-order.test.ts + packages/qa/dogfood/test/permission-set-assignment-window.dogfood.test.ts + packages/plugins/plugin-security/src/granted-by-writer-provenance.test.ts + packages/plugins/plugin-security/src/grant-holder-membership-refusal.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts",
+        "packages/plugins/plugin-security/src/grant-holder-membership-refusal.ts#registerGrantHolderMembershipRefusal",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23430-grant-permission-set-id-retired, 9272-grant-window-order-refused, 9272-user-page-grant-window-columns, 22201-granted-by-provenance, 22226-grant-holder-must-be-organization-member"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.parent-and-organization-write-guards",
+      "title": "Write guards tightened on v18: a walled update cannot null out organization_id, a detail write naming an unreadable header is reference_not_found, a validation rule reading an unreadable header answers like a missing one, and a controlled_by_parent child's attachments / comments / explain follow the master's edit grant",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a showcase controlled_by_parent detail object with a master the member can read but not edit (or a scratch pair in the scratch app)",
+          "for the organization leg: the walled boot"
+        ]
+      },
+      "steps": [
+        "walled: PATCH a record with {organization_id: null}",
+        "as the member POST a detail row naming a header id the member cannot read, and one naming a non-existent id",
+        "as the member POST /api/v1/data/sys_attachment on the child; DELETE another user's file / comment on it",
+        "as the member POST /api/v1/security/explain for an update on the child; compare with the PATCH answer"
+      ],
+      "acceptance": [
+        {
+          "clause": "organization-removal refusal, unreadable-header parity and the cbp attach/comment/explain gates — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "walled: an update leaving organization_id null → 403 PERMISSION_DENIED; an insert with an empty org is still stamped",
+          "oracle": "api",
+          "verify": "status + code; read-back",
+          "evidence": "refusal + stamped row"
+        },
+        {
+          "clause": "an unreadable header and a non-existent header answer the SAME 400 reference_not_found (no existence oracle)",
+          "oracle": "api",
+          "verify": "compare the two bodies field by field",
+          "evidence": "both bodies"
+        },
+        {
+          "clause": "on a cbp child whose master the member cannot edit: attach → 403 ATTACHMENT_PARENT_ACCESS, deleting another's file → 403 ATTACHMENT_DELETE_DENIED, and explain reports not-writable decided by sharing — matching the PATCH",
+          "oracle": "api",
+          "verify": "status + code per call; explain verdict vs PATCH status",
+          "evidence": "per-call lines"
+        }
+      ],
+      "negative": [
+        "an unreadable header answering differently from a missing one is an existence-oracle FAIL — authorization carve-out applies"
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/plugins/plugin-security/src/tenant-wall-organization-removal.test.ts + packages/objectql/src/engine-unreadable-master-detail-header.test.ts + packages/objectql/src/engine-predicate-related-master-detail-header.test.ts + packages/qa/dogfood/test/cbp-parent-attachment-comment-gates.dogfood.test.ts + packages/qa/dogfood/test/cbp-explain-master-write.dogfood.test.ts + packages/plugins/plugin-security/src/controlled-by-parent-chain-middle-master.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/security-plugin.ts#SecurityPlugin",
+        "packages/services/service-storage/src/attachment-access-hooks.ts",
+        "packages/plugins/plugin-security/src/explain-engine.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22278-tenant-wall-judges-emptied-organization, 22519-unreadable-header-write, 22892-predicate-related-master-detail, 22455-cbp-parent-gates-judge-master, 22455-security-serves-controlled-by-parent-write, 22464-security-service-controlled-by-parent-write, 22514-explain-cbp-update-master-check, 23093-cbp-middle-master-floor"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.deployment-tables-platform-only",
+      "title": "Seven deployment tables (sys_job, sys_job_run, sys_job_queue, sys_flow_dispatch, sys_migration, sys_migration_journal, sys_presence) carry no organization column on v18 and are readable only with manage_platform_settings — an org admin who is not platform admin is refused even on single",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a member promoted to org admin (sys_member role admin) who is not platform admin"
+        ]
+      },
+      "steps": [
+        "as the org admin GET /api/v1/data/sys_job and /api/v1/data/sys_migration",
+        "as the platform admin repeat",
+        "as the platform admin GET /api/v1/data/sys_job?filter=[[\"organization_id\",\"=\",\"x\"]]"
+      ],
+      "acceptance": [
+        {
+          "clause": "the seven tables are platform-level and gated by manage_platform_settings — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the org admin gets 403 PERMISSION_DENIED on each; the platform admin gets 200",
+          "oracle": "api",
+          "verify": "status per persona per table",
+          "evidence": "status lines"
+        },
+        {
+          "clause": "organization_id is an unknown field on these tables (400 INVALID_FIELD on a filter)",
+          "oracle": "api",
+          "verify": "status + code",
+          "evidence": "refusal body"
+        }
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/platform-objects/src/deployment-level-no-tenant-column.test.ts + packages/plugins/plugin-security/src/authz-identity-objects-boot-refusal.test.ts"
+      },
+      "source": [
+        "packages/platform-objects/src/audit/sys-job.object.ts",
+        "packages/services/service-realtime/src/objects/sys-presence.object.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 15207-deployment-plumbing-no-organization-column"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.share-link-combined-gates",
+      "title": "Share links with two gates combined: signed_in + password answers an anonymous caller 401 SIGN_IN_REQUIRED whatever password is sent, email + password answers a uniform 404 INVALID_OR_EXPIRED, and /messages answers exactly like /resolve",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "anonymous caller (no cookie, no bearer, no x-api-key)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "two share links minted by admin on a showcase record: (a) audience signed_in + password, (b) audience email + password"
+        ]
+      },
+      "steps": [
+        "anonymously GET /api/v1/share-links/TOKEN_A/resolve with no password, a wrong one, the right one (UTF-8 header form)",
+        "anonymously resolve TOKEN_B with no password and with the right password but no matching email session",
+        "repeat each call on /messages"
+      ],
+      "acceptance": [
+        {
+          "clause": "combined share-link gates and resolve/messages parity — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "link A answers anonymous 401 SIGN_IN_REQUIRED for every password variant (the password is never evaluated first)",
+          "oracle": "api",
+          "verify": "status + code per variant",
+          "evidence": "three lines"
+        },
+        {
+          "clause": "link B answers the same 404 INVALID_OR_EXPIRED body for every non-entitled variant",
+          "oracle": "api",
+          "verify": "byte-compare the bodies",
+          "evidence": "the bodies"
+        },
+        {
+          "clause": "/messages answers identically to /resolve on every call",
+          "oracle": "api",
+          "verify": "status+code pairs",
+          "evidence": "the paired lines"
+        }
+      ],
+      "negative": [
+        "a password-correct anonymous caller reading link A is an authorization FAIL — carve-out applies"
+      ],
+      "automated": {
+        "kind": "conformance",
+        "ref": "packages/plugins/plugin-sharing/src/share-link-eligibility.test.ts + packages/plugins/plugin-sharing/src/share-link-envelope.conformance.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-sharing/src/share-link-routes.ts#registerShareLinkRoutes",
+        "packages/runtime/src/domains/share-links.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23328-share-link-refusal-order, 23372-share-link-email-audience-uniform-refusal, 23371-share-link-messages-audience-inputs"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
         }
       ]
     }

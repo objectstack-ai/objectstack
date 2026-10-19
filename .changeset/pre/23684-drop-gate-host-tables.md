@@ -1,0 +1,21 @@
+---
+'@objectstack/cli': minor
+---
+
+fix(cli)!: `os migrate apply --allow-destructive` holds back the `organization_id` drop on every table the organization-ownership ceremony plans, not only the platform inventory's, until the ceremony has verified (ADR-0131 D7, D10 item 5)
+
+Clause-②: no (narrowing)
+
+<!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is rewritten, converted or deleted, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is one CLI invocation: an `os migrate apply --allow-destructive` run that would drop `organization_id` from a table outside the platform inventory is refused until the organization-ownership ceremony's marker is verified; the remedy is running that ceremony, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+
+**BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+
+**The contract this meets.** The drop gate's own header (`packages/cli/src/utils/organization-ownership-drop-gate.ts`) already states it: the drop of `organization_id` on a table the ceremony owns waits for the ceremony's verified marker, and "⛔ No flag stands it down". ADR-0131 D10 item 5 is the rule behind it: a v18 runtime refuses to boot against a database the ceremony has not completed, and offers no escape hatch that silently skips that check. A column dropped ahead of the ceremony is that escape hatch, because the boot refusal then finds no column to refuse over.
+
+**FROM.** `os migrate apply --allow-destructive` held back no `organization_id` drop. Every one the schema-drift report offered was applied with no ceremony marker on the database, among them those on the objects a host declares platform-global (ADR-0131 D7, the `org-scoping` service's `platformGlobalObjects`) and on any host or application object that declares no organization column of its own. Measured on a host composition that declares two objects platform-global: `os migrate apply --database-url file:v17.db --allow-destructive --yes --json` exited 0 and applied `drop_column organization_id` on both.
+
+**TO.** The gate holds back every `organization_id` drop the drift offers. The ceremony's plan meets every physical table that carries the column, with an inventory row, a `--fate-supplement` row, the application-object fate, or a refusal by name; the drift offers only a column that is physically there. So this is the ceremony's own table set, read without a copy of its inventory and without the fate-supplement file `os migrate apply` is never handed. It includes an application object that declares `systemFields: { tenant: false }` over a table that still carries the column: the ceremony plans that table, and the v18 boot refusal refuses over it too. While the `sys_migration` row `adr-0131-organization-ownership` is not verified, the run is refused with the existing refusal. It exits 1 and prints "Refusing this --allow-destructive run: it would drop organization_id from TABLES", naming `os migrate organization-ownership --out PLAN`, then `os migrate organization-ownership --apply --plan-file PLAN`, as the remedy. Under `--json` it answers `message: 'refused_organization_ownership_unmigrated'` with the `tables`, the `detail` and the `marker`. The refusal holds the whole `--allow-destructive` run: nothing in it is created, applied or dropped.
+
+**Unchanged.** Once the ceremony's marker is verified, the drop applies. A destructive change to any other column applies as before. A run without `--allow-destructive` is unchanged. There is no new flag, and no flag skips the refusal.
+
+**Remedy.** Run `os migrate organization-ownership` (with `--fate-supplement FILE` when the host provides objects of its own), review its plan, run `os migrate organization-ownership --apply --plan-file PLAN`, then re-run `os migrate apply --allow-destructive`.

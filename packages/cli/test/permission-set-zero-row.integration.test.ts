@@ -88,7 +88,7 @@ async function storedPermissionNames(dbFile: string): Promise<string[]> {
   const probe = new SqlDriver({ client: 'better-sqlite3', connection: { filename: dbFile }, useNullAsDefault: true });
   const knex = (probe as any).knex;
   try {
-    const rows = await knex('sys_metadata').select('name').where({ type: 'permission', state: 'active' }).whereNull('organization_id');
+    const rows = await knex('sys_metadata').select('name').where({ type: 'permission', state: 'active' }); // every row is the environment's (ADR-0131 D7)
     return rows.map((r: any) => String(r.name)).sort();
   } finally {
     await knex.destroy();

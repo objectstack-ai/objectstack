@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { IAuthService, AuthResult, AuthUser } from './auth-service';
+import type { IAuthService, AuthResult, AuthUser, PrincipalSession } from './auth-service';
+import { PRINCIPAL_SESSION_MAX_TTL_SECONDS } from './auth-service';
 
 describe('Auth Service Contract', () => {
   it('should allow a minimal IAuthService implementation with required methods', () => {
@@ -113,5 +114,43 @@ describe('Auth Service Contract', () => {
 
     expect(service.getMcpResourceUrl).toBeUndefined();
     expect(service.getMcpResourceMetadataUrl).toBeUndefined();
+  });
+  // The verified MCP access-token result names the organization the user's
+  // OAuth consent bound, as an OPTIONAL member: a token minted before consents
+  // bound one verifies with none. The typed
+  // reads below are the pin; `check:test-typecheck` compiles this file.
+  it('should carry the consent-bound organization on a verified MCP access token, optionally', async () => {
+    const base: IAuthService = { handleRequest: async () => new Response('OK'), verify: async () => ({ success: true }) };
+    const bound: IAuthService = {
+      ...base,
+      verifyMcpAccessToken: async () => ({ userId: 'u1', scopes: ['data:read'], clientId: 'c1', organizationId: 'org_alpha' }),
+    };
+    const unbound: IAuthService = {
+      ...base,
+      verifyMcpAccessToken: async () => ({ userId: 'u1', scopes: ['data:read'], clientId: 'c1' }),
+    };
+
+    const boundOrganization: string | undefined = (await bound.verifyMcpAccessToken!('t'))?.organizationId;
+    const unboundOrganization: string | undefined = (await unbound.verifyMcpAccessToken!('t'))?.organizationId;
+    expect(boundOrganization).toBe('org_alpha');
+    expect(unboundOrganization).toBeUndefined();
+  });
+
+  // [#23772] The principal-session mint is OPTIONAL: an auth service that
+  // cannot mint a session keeps satisfying the contract unchanged, and a
+  // consumer reads its absence as "no mint here", never as a failed mint.
+  it('should keep mintPrincipalSession optional, with a fixed TTL ceiling', async () => {
+    const minimal: IAuthService = { handleRequest: async () => new Response('OK'), verify: async () => ({ success: false }) };
+    expect(minimal.mintPrincipalSession).toBeUndefined();
+    expect(PRINCIPAL_SESSION_MAX_TTL_SECONDS).toBe(120);
+
+    const minted: PrincipalSession = {
+      token: 't.sig',
+      cookie: { name: 'better-auth.session_token', value: 't.sig', path: '/', httpOnly: true, secure: false, sameSite: 'lax' },
+      expiresAt: '2099-01-01T00:00:00Z',
+      revoke: async () => {},
+    };
+    const service: IAuthService = { ...minimal, mintPrincipalSession: async () => minted };
+    expect((await service.mintPrincipalSession!({ userId: 'u1', positions: [], permissions: [], isSystem: false }, { ttlSeconds: 60 })).cookie.name).toBe('better-auth.session_token');
   });
 });

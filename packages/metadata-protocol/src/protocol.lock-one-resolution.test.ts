@@ -86,10 +86,13 @@
  *    each lock level, crossed with the package's own artifact, the env-wide
  *    stored row's lock, every address and topology, each run under BOTH
  *    registration orders;
- *  - the stored rows × organization × package (5988387087 on #21803): the
- *    organization holds only another package's row, so the content a request
- *    naming the package is served (the env-wide row) and the lock's scope (the
- *    organization's rows) part. The served body states the envelope's lock.
+ *  - the stored rows × package (5988387087 on #21803): another package's
+ *    env-wide row stands beside the package's own, so the content a request
+ *    naming the package is served (its own row) and the lock's scope (every
+ *    env-wide row) part. The served body states the envelope's lock.
+ *    [ADR-0131 D6/D7] A stored row carries no organization: the family
+ *    declares no organization column, so the organization-scoped stored rows
+ *    this table once held are no state the store can be in.
  *
  * Every row also asserts that the served body (`getMetaItem`'s `item`, the
  * layered read's `effective`) states the lock the envelope reports.
@@ -102,552 +105,85 @@
  *     registered first and the delete when B was; both are refused under both
  *     orders now, and the reads say so.
  * 10. A DISABLED package is still installed: its packaged lock binds.
- * 11. The folded position, named: the body served from the env-wide row of
- *     the package carries no lock the organization's rows do not declare.
  *
  * `@objectstack/objectql` cannot be imported here: it depends on this package.
  * The real `SchemaRegistry`'s enumeration is pinned beside it
  * (`packages/objectql/src/protocol-lock-artifact-package-axis.test.ts`).
+ *
+ * ## [#23182] Where the table lives, what it costs, and what it shares
+ *
+ * The table, the oracle, the engine and registry doubles, the door and the
+ * reads are in `protocol.lock-one-resolution.kit.test.ts`, which this file and
+ * four shard files (`protocol.lock-one-resolution.shard-N.test.ts`) import. The
+ * generated rows run in the shard files, a quarter of them each, under this
+ * describe's title (`PIN_1_TITLE`); this file keeps the named pins and the
+ * table's completeness checks, and the kit pins that the shard set is the whole
+ * table.
+ *
+ * The table is 16 320 rows, 28 848 runs of (reads, then a door) once each row's
+ * two store orders and two registration orders are counted, so a file's wall
+ * is the protocol's own cost times the count of runs it holds. The two reads
+ * take no organization and no verb, so the rows that differ only in those two
+ * (four of them) share one instance and one pair of reads (`readScenario`),
+ * and the shards keep those four together; each row still asserts, for itself,
+ * that the reads report the rule's lock and that its own door answers the
+ * rule. Nothing the table enumerates is dropped: the 16 360 tests that ran as
+ * one file run under the same titles, and the kit adds two tests of its own.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     MetadataLockSchema,
     evaluateLockForDelete,
     evaluateLockForWrite,
-    extractProtection,
 } from '@objectstack/spec/kernel';
-import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
-import { ObjectStackProtocolImplementation } from './protocol.js';
+import type { ObjectStackProtocolImplementation } from './protocol.js';
 import {
     ITEM_ADDRESS_FIELDS,
     ITEM_LOCK_LAYERS,
     resolveArtifactLockLayer,
     resolveItemLock,
     resolveOverlayLockLayer,
-    type ItemAddressField,
-    type ItemLockLayer,
 } from './item-lock.js';
-
-const ENV_ID = 'env_1';
-const ORG = 'org_a';
-const PACKAGE_ID = 'com.example.pkg';
-/** [#21803] Another installed package, shipping the same name. */
-const OTHER_PACKAGE = 'com.example.other';
-const NAME = 'v_lock';
-type Lock = (typeof MetadataLockSchema.options)[number];
-
-interface StoredRow {
-    id: string;
-    type: string;
-    name: string;
-    organization_id: string | null;
-    package_id: string | null;
-    state: string;
-    metadata: string;
-}
-
-// ── The axes ─────────────────────────────────────────────────────────────────
-
-/** What a package's loader registered for the item: nothing, an artifact with no `_lock`, or one declaring each level. */
-type ArtifactAxis = { artifact: 'absent' } | { artifact: 'no _lock' } | { artifact: 'declared'; lock: Lock };
-const ARTIFACT_VALUES: readonly ArtifactAxis[] = [
-    { artifact: 'absent' },
-    { artifact: 'no _lock' },
-    ...MetadataLockSchema.options.map((lock) => ({ artifact: 'declared' as const, lock })),
-];
-
-/** The package-less stored row: none, or env-wide / org-scoped, declaring each level, under either spelling. */
-type StoredRowAxis =
-    | { row: 'none' }
-    | { row: 'stored'; scope: 'env-wide' | 'org-scoped'; lock: Lock; spelling: 'canonical' | 'other (residue)' };
-const STORED_ROW_VALUES: readonly StoredRowAxis[] = [
-    { row: 'none' },
-    ...(['env-wide', 'org-scoped'] as const).flatMap((scope) => MetadataLockSchema.options.flatMap((lock) =>
-        (['canonical', 'other (residue)'] as const).map((spelling) => ({ row: 'stored' as const, scope, lock, spelling })))),
-];
-
-/**
- * [#21761] The row bound to the package (ADR-0048): none, or an env-wide
- * canonical row declaring each level. [#21803] The same shape serves the other
- * package's row in the organization.
- */
-type PackageRowAxis = { row: 'none' } | { row: 'stored'; lock: Lock };
-const PACKAGE_ROW_VALUES: readonly PackageRowAxis[] = [
-    { row: 'none' },
-    ...MetadataLockSchema.options.map((lock) => ({ row: 'stored' as const, lock })),
-];
-
-const AXIS_VALUES = {
-    artifact: ARTIFACT_VALUES,
-    /** [#21803] What ANOTHER installed package registered under the same name. */
-    otherArtifact: ARTIFACT_VALUES,
-    storedRow: STORED_ROW_VALUES,
-    packageRow: PACKAGE_ROW_VALUES,
-    /** [#21803] Another package's org-scoped canonical row of the item. */
-    otherPackageRow: PACKAGE_ROW_VALUES,
-    requestScope: [undefined, ORG] as const,
-    requestPackage: [undefined, PACKAGE_ID, OTHER_PACKAGE] as const,
-    topology: [{ kernel: 'environment', environmentId: ENV_ID }, { kernel: 'host-config', environmentId: undefined }] as const,
-    requestSpelling: ['view', 'views'] as const,
-    operation: ['save', 'delete'] as const,
-};
-type AxisName = keyof typeof AXIS_VALUES;
-type AxisValue<A extends AxisName> = (typeof AXIS_VALUES)[A][number];
-
-/** The caller's own axes, which decide no layer: how the request spells the type, which verb. */
-const CALLER_AXES: readonly AxisName[] = ['requestSpelling', 'operation'];
-
-/**
- * [#21803] The axes the family has been measured on. A layer × one of these
- * is a POSITION; every one has a row below.
- */
-const FAMILY_AXES = ['topology', 'organization', 'package'] as const;
-type FamilyAxis = (typeof FAMILY_AXES)[number];
-
-/**
- * [#21803] The family's positions: a layer of the one resolution × a family
- * axis, the table axes that open it (every one of them varies in some slice),
- * and the card that measured it. A layer added to `ITEM_LOCK_LAYERS`, or an
- * axis added to `FAMILY_AXES`, with no position here fails the completeness
- * check, naming the pair.
- */
-const POSITIONS: ReadonlyArray<{
-    readonly layer: ItemLockLayer;
-    readonly axis: FamilyAxis;
-    readonly opensWith: readonly AxisName[];
-    readonly card: string;
-}> = [
-    { layer: 'artifact', axis: 'topology', opensWith: ['artifact', 'topology'], card: '#21694' },
-    { layer: 'artifact', axis: 'organization', opensWith: ['artifact', 'requestScope'], card: '#21738' },
-    { layer: 'artifact', axis: 'package', opensWith: ['artifact', 'otherArtifact', 'requestPackage'], card: '#21803' },
-    { layer: 'overlay', axis: 'topology', opensWith: ['storedRow', 'topology'], card: '#21694' },
-    { layer: 'overlay', axis: 'organization', opensWith: ['storedRow', 'requestScope'], card: '#21716' },
-    { layer: 'overlay', axis: 'package', opensWith: ['storedRow', 'packageRow', 'requestPackage'], card: '#21761' },
-    {
-        layer: 'overlay', axis: 'organization',
-        opensWith: ['packageRow', 'otherPackageRow', 'requestScope', 'requestPackage'],
-        card: '#21803 (5988387087: the content scope and the lock scope part)',
-    },
-];
-
-/**
- * [#21761] Per field of the item's address (`ITEM_ADDRESS_FIELDS`), the axis
- * that varies it, or `'one item'` for the name every row addresses. Keyed by
- * `ItemAddressField`, so a field added to the address without an entry here
- * fails the typecheck, and the completeness check below fails the run, naming
- * it.
- */
-const ADDRESS_AXES: { readonly [F in ItemAddressField]: AxisName | 'one item' } = {
-    type: 'requestSpelling',
-    name: 'one item',
-    packageId: 'requestPackage',
-};
-
-interface Row {
-    artifact: ArtifactAxis;
-    otherArtifact: ArtifactAxis;
-    storedRow: StoredRowAxis;
-    packageRow: PackageRowAxis;
-    otherPackageRow: PackageRowAxis;
-    requestScope: AxisValue<'requestScope'>;
-    requestPackage: AxisValue<'requestPackage'>;
-    topology: AxisValue<'topology'>;
-    requestSpelling: AxisValue<'requestSpelling'>;
-    operation: AxisValue<'operation'>;
-}
-
-type SliceValues = { readonly [A in AxisName]: ReadonlyArray<AxisValue<A>> };
-
-const ABSENT: ArtifactAxis = ARTIFACT_VALUES[0]!;
-const NO_ROW: PackageRowAxis = PACKAGE_ROW_VALUES[0]!;
-const present = (v: ArtifactAxis): boolean => v.artifact !== 'absent';
-const storedOnly = (v: PackageRowAxis): boolean => v.row === 'stored';
-
-/**
- * [#21803] The table's slices. Each is a full product of its axes' values; an
- * axis a slice does not open is held at the family product's value.
- */
-const SLICES: ReadonlyArray<{ readonly name: string; readonly values: SliceValues }> = [
-    {
-        name: 'the family product (PR #21801)',
-        values: {
-            ...AXIS_VALUES,
-            otherArtifact: [ABSENT],
-            otherPackageRow: [NO_ROW],
-            requestPackage: [undefined, PACKAGE_ID],
-        },
-    },
-    {
-        name: '[#21803] the artifact layer × package: another installed package ships the name',
-        values: {
-            ...AXIS_VALUES,
-            otherArtifact: ARTIFACT_VALUES.filter(present),
-            // The overlay layer at its locks, env-wide and canonical: every
-            // per-package answer the artifact layer can join with.
-            storedRow: STORED_ROW_VALUES.filter((v) => v.row === 'none' || (v.scope === 'env-wide' && v.spelling === 'canonical')),
-            packageRow: [NO_ROW],
-            otherPackageRow: [NO_ROW],
-        },
-    },
-    {
-        name: '[#21803] the stored rows × organization × package: the organization holds only another package\'s row',
-        values: {
-            ...AXIS_VALUES,
-            artifact: [ABSENT],
-            otherArtifact: [ABSENT],
-            storedRow: [STORED_ROW_VALUES[0]!],
-            otherPackageRow: PACKAGE_ROW_VALUES.filter(storedOnly),
-            requestSpelling: ['view'],
-        },
-    },
-];
-
-function productOf(values: SliceValues): Row[] {
-    return values.artifact.flatMap((artifact) => values.otherArtifact.flatMap((otherArtifact) =>
-        values.storedRow.flatMap((storedRow) => values.packageRow.flatMap((packageRow) =>
-            values.otherPackageRow.flatMap((otherPackageRow) => values.requestScope.flatMap((requestScope) =>
-                values.requestPackage.flatMap((requestPackage) => values.topology.flatMap((topology) =>
-                    values.requestSpelling.flatMap((requestSpelling) => values.operation.map((operation) => ({
-                        artifact, otherArtifact, storedRow, packageRow, otherPackageRow,
-                        requestScope, requestPackage, topology, requestSpelling, operation,
-                    })))))))))));
-}
-
-const TABLE: Row[] = SLICES.flatMap((slice) => productOf(slice.values));
-
-function describeArtifact(a: ArtifactAxis): string {
-    return a.artifact === 'declared' ? `artifact _lock=${a.lock}` : `artifact ${a.artifact}`;
-}
-function describeOtherArtifact(a: ArtifactAxis): string {
-    if (a.artifact === 'absent') return '';
-    return a.artifact === 'declared'
-        ? `other package's artifact _lock=${a.lock}`
-        : `other package's artifact ${a.artifact}`;
-}
-function describeRow(r: StoredRowAxis): string {
-    return r.row === 'none' ? 'no stored row' : `${r.scope} row _lock=${r.lock} (${r.spelling} spelling)`;
-}
-function describePackageRow(r: PackageRowAxis): string {
-    return r.row === 'none' ? '' : `env-wide package row _lock=${r.lock}`;
-}
-function describeOtherPackageRow(r: PackageRowAxis): string {
-    return r.row === 'none' ? '' : `org-scoped other package's row _lock=${r.lock}`;
-}
-function titleOf(row: Row): string {
-    return [
-        `${row.topology.kernel} kernel`,
-        describeArtifact(row.artifact),
-        describeOtherArtifact(row.otherArtifact),
-        describeRow(row.storedRow),
-        describePackageRow(row.packageRow),
-        describeOtherPackageRow(row.otherPackageRow),
-        `request: ${row.requestScope ? `organization ${row.requestScope}` : 'no organization'}`
-            + (row.requestPackage ? `, package ${row.requestPackage}` : ''),
-        `/meta/${row.requestSpelling}`,
-        row.operation,
-    ].filter((part) => part !== '').join(' · ');
-}
-
-// ── The oracle: the declared rule, per layer, in the resolution's own order ──
-
-/** The stored rows of the row's arrangement, as the oracle reads them. */
-interface OracleRow { scope: 'env-wide' | 'org-scoped'; spelling: 'canonical' | 'other (residue)'; lock: Lock }
-function oracleRows(row: Row): OracleRow[] {
-    const rows: OracleRow[] = [];
-    if (row.storedRow.row === 'stored') {
-        rows.push({ scope: row.storedRow.scope, spelling: row.storedRow.spelling, lock: row.storedRow.lock });
-    }
-    if (row.packageRow.row === 'stored') rows.push({ scope: 'env-wide', spelling: 'canonical', lock: row.packageRow.lock });
-    if (row.otherPackageRow.row === 'stored') {
-        rows.push({ scope: 'org-scoped', spelling: 'canonical', lock: row.otherPackageRow.lock });
-    }
-    return rows;
-}
-
-/**
- * The strictest of `locks`, written from the rule: a write is refused when any
- * of them refuses it, a delete likewise, and the lock is the state with exactly
- * those two refusals.
- */
-function strictestOf(locks: readonly Lock[]): Lock {
-    const refusesWrite = locks.some((l) => evaluateLockForWrite(l) !== null);
-    const refusesDelete = locks.some((l) => evaluateLockForDelete(l) !== null);
-    return MetadataLockSchema.options.find((state) =>
-        (evaluateLockForWrite(state) !== null) === refusesWrite
-        && (evaluateLockForDelete(state) !== null) === refusesDelete)!;
-}
-
-const declaredLockOf = (a: ArtifactAxis): Lock => (a.artifact === 'declared' ? a.lock : 'none');
-
-/**
- * What each layer declares for `side` — the reads, or the door.
- *
- *  - `artifact`: [#21803] one lock per installed package that ships the name
- *    (the package's own, another package's), `'none'` for an artifact that
- *    declares no lock; no entry for a package that ships nothing.
- *  - `overlay`: the strictest lock among the rows in scope (ADR-0131 D6: the
- *    environment's rows, whatever organization the request comes from; any
- *    package). The door differs on exactly one input: it does not see a row
- *    stored under the other spelling, which the reads see only when no
- *    canonical row is in that scope. The request's package selects nothing.
- */
-const DECLARED: {
-    readonly artifact: (row: Row) => Lock[];
-    readonly overlay: (row: Row, side: 'reads' | 'door') => Lock;
-} = {
-    artifact: (row) => [row.artifact, row.otherArtifact].filter(present).map(declaredLockOf),
-    overlay: (row, side) => {
-        const scopes: Array<OracleRow['scope']> = ['env-wide'];
-        for (const scope of scopes) {
-            const inScope = oracleRows(row).filter((r) => r.scope === scope);
-            let visible = inScope.filter((r) => r.spelling === 'canonical');
-            if (visible.length === 0 && side === 'reads') visible = inScope;
-            if (visible.length > 0) return strictestOf(visible.map((r) => r.lock));
-        }
-        return 'none';
-    },
-};
-
-/**
- * The rule: per installed package that ships the name (or once, when none
- * does), the first layer in `ITEM_LOCK_LAYERS` order whose declared lock is not
- * `'none'` binds; [#21803] the item's lock is the strictest of those answers.
- */
-function expectedLock(row: Row, side: 'reads' | 'door'): Lock {
-    const shipped = DECLARED.artifact(row);
-    const perPackage = (shipped.length > 0 ? shipped : ['none' as Lock]).map((artifactLock) => {
-        for (const layer of ITEM_LOCK_LAYERS) {
-            const lock = layer === 'artifact' ? artifactLock : DECLARED.overlay(row, side);
-            if (lock !== 'none') return lock;
-        }
-        return 'none' as Lock;
-    });
-    return strictestOf(perPackage);
-}
-
-// ── The harness ──────────────────────────────────────────────────────────────
-
-function storedRow(
-    type: string, organizationId: string | null, lock: Lock, label: string, name = NAME, packageId: string | null = null,
-): StoredRow {
-    return {
-        id: `r_${type}_${organizationId ?? 'env'}_${packageId ?? 'pkgless'}`,
-        type,
-        name,
-        organization_id: organizationId,
-        package_id: packageId,
-        state: 'active',
-        metadata: JSON.stringify({
-            name,
-            label,
-            object: 'account',
-            _provenance: 'org',
-            ...(lock === 'none' ? {} : { _lock: lock, _lockReason: `Stored lock (${lock}).` }),
-        }),
-    };
-}
-
-/** What a code package's loader registers: package-stamped, with the envelope `applyProtection` writes. */
-function packagedView(a: ArtifactAxis, name = NAME, packageId = PACKAGE_ID): Record<string, unknown> | undefined {
-    if (a.artifact === 'absent') return undefined;
-    return {
-        name,
-        label: `packaged by ${packageId}`,
-        object: 'account',
-        _packageId: packageId,
-        _provenance: 'package',
-        ...(a.artifact === 'declared'
-            ? { _lock: a.lock, _lockReason: `Packaged lock of ${packageId} (${a.lock}).`, _lockSource: 'package' }
-            : {}),
-    };
-}
-
-/**
- * [#21803] The registry double, after `SchemaRegistry`: each package's item
- * under its composite key `<packageId>:<name>`, in REGISTRATION order (the Map
- * iterates in it, as the registry's does).
- *
- *  - `getArtifactItem` (`SchemaRegistry.getArtifactItem`): the asked package's
- *    own entry (prefer-local, ADR-0048), else the FIRST package registered
- *    that ships the name;
- *  - `getItem`: the same order, without the code-artifact test;
- *  - `listItems`: every entry, a disabled package's hidden;
- *  - `getAllPackages` / `getPackage` / `isPackageDisabled`: the packages the
- *    test installs (none by default: the family's rows install no package).
- */
-function registryDouble(
-    artifacts: ReadonlyArray<Record<string, unknown>>,
-    installed: ReadonlyArray<{ id: string; enabled: boolean }> = [],
-) {
-    const entries = new Map<string, Record<string, unknown>>();
-    for (const artifact of artifacts) entries.set(`${String(artifact._packageId)}:${String(artifact.name)}`, artifact);
-    const disabled = (id: unknown) => installed.some((p) => p.id === id && !p.enabled);
-    const ordered = (name: string, packageId?: string) => {
-        const local = packageId ? entries.get(`${packageId}:${name}`) : undefined;
-        const composites = [...entries].filter(([key]) => key.endsWith(`:${name}`)).map(([, item]) => item);
-        return local ? [local, ...composites] : composites;
-    };
-    return {
-        getArtifactItem(type: string, name: string, packageId?: string) {
-            return type === 'view' ? ordered(name, packageId).find((item) => isCodeArtifactBody(item)) : undefined;
-        },
-        getItem(type: string, name: string, packageId?: string) {
-            return type === 'view' ? ordered(name, packageId)[0] : undefined;
-        },
-        listItems(type: string) {
-            return type === 'view' ? [...entries.values()].filter((item) => !disabled(item._packageId)) : [];
-        },
-        getAllPackages: () => installed.map((p) => ({ manifest: { id: p.id }, enabled: p.enabled })),
-        getPackage: (id: string) => {
-            const p = installed.find((candidate) => candidate.id === id);
-            return p ? { manifest: { id: p.id }, enabled: p.enabled } : undefined;
-        },
-        isPackageDisabled: (id?: string) => disabled(id),
-        getObject: () => undefined,
-        registerObject: () => undefined,
-        applyNavContributions: (app: unknown) => app,
-    };
-}
-
-/**
- * The engine double: `find` / `findOne` over `sys_metadata` rows, the registry
- * double above over the packages' artifacts (one artifact, a list of them in
- * registration order, or none), and an `insert` that keeps nothing (the gate
- * writes its denial row through it).
- */
-function harness(
-    environmentId: string | undefined,
-    rows: StoredRow[],
-    artifacts?: Record<string, unknown> | ReadonlyArray<Record<string, unknown>>,
-    installed?: ReadonlyArray<{ id: string; enabled: boolean }>,
-) {
-    const registered = artifacts === undefined ? [] : Array.isArray(artifacts) ? artifacts : [artifacts];
-    const registry = registryDouble(registered as ReadonlyArray<Record<string, unknown>>, installed);
-    const matching = (where: Record<string, unknown>) => {
-        for (const k of Object.keys(where)) {
-            if (k.startsWith('$')) throw new Error(`[test double] unsupported WHERE combinator '${k}'`);
-        }
-        return rows.filter((r) =>
-            Object.entries(where).every(([k, v]) => v === undefined || (r as unknown as Record<string, unknown>)[k] === v),
-        );
-    };
-    const engine: any = {
-        async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
-            if (table !== 'sys_metadata') return [];
-            const matched = matching(opts?.where ?? {});
-            // `check:objectql-double-limit` — the caller's bound, applied after the filter.
-            return opts?.limit === undefined ? matched : matched.slice(0, opts.limit);
-        },
-        async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
-            // `check:engine-double-contract` — refuses what the real engine refuses.
-            assertEngineFindOnePredicate(table, opts);
-            if (table !== 'sys_metadata') return null;
-            return matching(opts?.where ?? {})[0] ?? null;
-        },
-        async insert() {
-            return {};
-        },
-        registry,
-    };
-    return new ObjectStackProtocolImplementation(engine, () => new Map(), environmentId);
-}
-
-/**
- * [#21761] The row's stored rows, in each order the store can return them: one
- * order when there is at most one row, both when there are two.
- */
-function rowOrdersFor(row: Row): StoredRow[][] {
-    const rows: StoredRow[] = [];
-    if (row.storedRow.row === 'stored') {
-        rows.push(storedRow(
-            row.storedRow.spelling === 'canonical' ? 'view' : 'views',
-            row.storedRow.scope === 'env-wide' ? null : ORG,
-            row.storedRow.lock,
-            `${row.storedRow.scope} row`,
-        ));
-    }
-    if (row.packageRow.row === 'stored') {
-        rows.push(storedRow('view', null, row.packageRow.lock, 'package row', NAME, PACKAGE_ID));
-    }
-    if (row.otherPackageRow.row === 'stored') {
-        rows.push(storedRow('view', ORG, row.otherPackageRow.lock, 'org row of the other package', NAME, OTHER_PACKAGE));
-    }
-    return rows.length < 2 ? [rows] : [rows, [...rows].reverse()];
-}
-
-/**
- * [#21803] The row's artifacts, in each order the packages can be registered
- * in: one order when at most one package ships the name, both when two do.
- */
-function registrationOrdersFor(row: Row): Array<Array<Record<string, unknown>>> {
-    const artifacts = [packagedView(row.artifact), packagedView(row.otherArtifact, NAME, OTHER_PACKAGE)]
-        .filter((a): a is Record<string, unknown> => a !== undefined);
-    return artifacts.length < 2 ? [artifacts] : [artifacts, [...artifacts].reverse()];
-}
-
-const settle = (run: Promise<unknown>) => run.then(() => null, (e: unknown) => e);
-
-type Verdict = { refused: { code: unknown; status: unknown } } | 'admitted';
-const ITEM_LOCKED: Verdict = { refused: { code: 'ITEM_LOCKED', status: 403 } };
-/** [ADR-0131 D6] Every organization-scoped write is refused first, before the `_lock` gate is reached. */
-const NOT_OVERRIDABLE: Verdict = { refused: { code: 'NOT_OVERRIDABLE', status: 403 } };
-
-/**
- * The door, end to end. Refused ⇔ the ADR-0112 `ITEM_LOCKED` / 403 envelope
- * came back (or, for an organization-scoped request, `NOT_OVERRIDABLE` / 403). Admitted ⇔ the ADR-0010 `_lock` gate was reached and answered no
- * refusal; whatever the write does after that is not a lock verdict.
- */
-async function door(
-    protocol: ObjectStackProtocolImplementation, type: string, operation: 'save' | 'delete', organizationId?: string,
-    name = NAME, packageId?: string,
-): Promise<Verdict> {
-    const gate = vi.spyOn(protocol as any, operation === 'save' ? 'assertLockAllowsWrite' : 'assertLockAllowsDelete');
-    try {
-        const scope = organizationId ? { organizationId } : {};
-        // [#21761] A save carries the request's package (`?package=`); a delete
-        // has none to carry (`DeleteMetaItemRequest` declares no package).
-        const outcome: any = await settle(operation === 'save'
-            ? protocol.saveMetaItem({
-                type, name, item: { name, label: name, object: 'account' }, ...scope, ...(packageId ? { packageId } : {}),
-            })
-            : protocol.deleteMetaItem({ type, name, ...scope }));
-        if (outcome instanceof Error && ['ITEM_LOCKED', 'NOT_OVERRIDABLE'].includes((outcome as any).code)) {
-            return { refused: { code: (outcome as any).code, status: (outcome as any).status } };
-        }
-        expect(gate, `${type}/${name} ${operation}: not refused, yet the _lock gate was never reached`).toHaveBeenCalledTimes(1);
-        expect(await gate.mock.results[0]?.value).toBeNull();
-        return 'admitted';
-    } finally {
-        gate.mockRestore();
-    }
-}
-
-/** Both reads' envelopes for one request; they must agree with each other first. */
-async function envelope(
-    // [ADR-0131 D6] The caller's organization reaches no read: the reads take
-    // none, so the request's organization changes nothing here.
-    protocol: ObjectStackProtocolImplementation, type: string, _callerOrganization?: string, name = NAME, packageId?: string,
-) {
-    const scope = { ...(packageId ? { packageId } : {}) };
-    const byName: any = await protocol.getMetaItem({ type, name, ...scope });
-    const layered: any = await protocol.getMetaItemLayered({ type, name, ...scope });
-    const pick = (r: any) => ({ lock: r.lock, editable: r.editable, deletable: r.deletable });
-    expect(pick(layered), `${type}/${name}: getMetaItemLayered disagrees with getMetaItem`).toEqual(pick(byName));
-    return { ...pick(byName), byName, layered };
-}
-
-/** The envelope's flags for a lock, read off the lock algebra itself. */
-const flagsOf = (lock: Lock) => ({
-    lock,
-    editable: evaluateLockForWrite(lock) === null,
-    deletable: evaluateLockForDelete(lock) === null,
-});
+import {
+    ABSENT,
+    ADDRESS_AXES,
+    ARTIFACT_VALUES,
+    AXIS_VALUES,
+    CALLER_AXES,
+    ENV_ID,
+    FAMILY_AXES,
+    ITEM_LOCKED,
+    NAME,
+    NO_ROW,
+    ORG,
+    OTHER_PACKAGE,
+    PACKAGE_ID,
+    PACKAGE_ROW_VALUES,
+    PIN_1_TITLE,
+    POSITIONS,
+    SLICES,
+    STORED_ROW_VALUES,
+    TABLE,
+    door,
+    envelope,
+    expectedLock,
+    harness,
+    packagedView,
+    registryDouble,
+    settle,
+    storedRow,
+    titleOf,
+    type ArtifactAxis,
+    type AxisName,
+    type Lock,
+    type StoredRow,
+} from './protocol.lock-one-resolution.kit.test.js';
 
 afterEach(() => vi.restoreAllMocks());
 
 // ── 1. The generated pin ─────────────────────────────────────────────────────
 
-describe('[#21738, #21803] pin 1 — the family\'s enumeration, generated from the resolution\'s inputs: getMetaItem = getMetaItemLayered = the door', () => {
+describe(PIN_1_TITLE, () => {
     it('completeness: every layer × family axis is a position, every position is opened by a slice, every axis belongs to a position, and the resolution takes nothing else', () => {
         // Every layer the resolution reads, on every axis the family has, is a
         // position here, by name.
@@ -695,11 +231,12 @@ describe('[#21738, #21803] pin 1 — the family\'s enumeration, generated from t
         expect(AXIS_VALUES.requestPackage, 'packageId absent, the package\'s own, another package').toEqual([undefined, PACKAGE_ID, OTHER_PACKAGE]);
     });
 
-    it('PR #21801\'s generated product (16 320 rows) is a subset of this table, by its own titles: no row is lost', () => {
+    it('PR #21801\'s generated product (8 640 rows since ADR-0131 D7) is a subset of this table, by its own titles: no row is lost', () => {
         const titles = new Set(TABLE.map(titleOf));
         // PR #21801's axes and title, frozen here as they were: the product
         // regenerated from them must be found in this table under the very
-        // titles it ran under.
+        // titles it ran under. [ADR-0131 D6/D7] Its 16 320 rows lose the
+        // 7 680 whose stored row was organization-scoped: no stored row can be.
         const before: string[] = [];
         for (const artifact of ARTIFACT_VALUES) for (const storedRowValue of STORED_ROW_VALUES)
             for (const packageRow of PACKAGE_ROW_VALUES) for (const requestScope of [undefined, ORG])
@@ -718,15 +255,15 @@ describe('[#21738, #21803] pin 1 — the family\'s enumeration, generated from t
                             operation,
                         ].filter((part) => part !== '').join(' · '));
                     }
-        expect(before).toHaveLength(16320);
-        expect(new Set(before).size).toBe(16320);
+        expect(before).toHaveLength(8640);
+        expect(new Set(before).size).toBe(8640);
         expect(before.filter((t) => !titles.has(t))).toEqual([]);
     });
 
-    it('PR #21737\'s 64-row enumeration (topology × row scope × request scope × lock × operation) is a subset of this table', () => {
+    it('PR #21737\'s enumeration (topology × row scope × request scope × lock × operation; 32 rows since ADR-0131 D7) is a subset of this table', () => {
         const titles = new Set(TABLE.map(titleOf));
         const folded: string[] = [];
-        for (const topology of AXIS_VALUES.topology) for (const scope of ['env-wide', 'org-scoped'] as const)
+        for (const topology of AXIS_VALUES.topology) for (const scope of ['env-wide'] as const)
             for (const requestScope of AXIS_VALUES.requestScope) for (const lock of MetadataLockSchema.options)
                 for (const operation of AXIS_VALUES.operation) {
                     folded.push(titleOf({
@@ -740,60 +277,9 @@ describe('[#21738, #21803] pin 1 — the family\'s enumeration, generated from t
                         topology, requestSpelling: 'view', operation,
                     }));
                 }
-        expect(folded).toHaveLength(64);
+        expect(folded).toHaveLength(32);
         expect(folded.filter((t) => !titles.has(t))).toEqual([]);
     });
-
-    for (const row of TABLE) {
-        const title = titleOf(row);
-        it(title, async () => {
-            // [#21761] Under every order the store can return the rows in, and
-            // [#21803] every order the packages can be registered in.
-            for (const [order, rows] of rowOrdersFor(row).entries()) {
-                for (const [registration, artifacts] of registrationOrdersFor(row).entries()) {
-                    const at = `${title} (row order ${order + 1}, registration order ${registration + 1})`;
-                    const protocol = harness(row.topology.environmentId, rows, artifacts);
-                    const read = await envelope(protocol, row.requestSpelling, row.requestScope, NAME, row.requestPackage);
-                    // Both reads report the declared rule's lock.
-                    expect({ lock: read.lock, editable: read.editable, deletable: read.deletable }, `${at}: the reads`)
-                        .toEqual(flagsOf(expectedLock(row, 'reads')));
-                    // [#21803] …and a body they serve states it, no more. (A
-                    // request can be served no body while a row in the lock's
-                    // scope binds: content never serves another package's row.)
-                    if (read.byName.item != null) {
-                        expect(extractProtection(read.byName.item).lock, `${at}: getMetaItem's body`).toBe(read.lock);
-                    }
-                    if (read.layered.effective != null) {
-                        expect(extractProtection(read.layered.effective).lock, `${at}: the layered read's effective`).toBe(read.lock);
-                    }
-                    // The door binds the rule's lock over the layers IT sees.
-                    const verdict = await door(
-                        protocol, row.requestSpelling, row.operation, row.requestScope, NAME, row.requestPackage,
-                    );
-                    const doorAllows = row.operation === 'save'
-                        ? evaluateLockForWrite(expectedLock(row, 'door')) === null
-                        : evaluateLockForDelete(expectedLock(row, 'door')) === null;
-                    // [ADR-0131 D6] An organization-scoped request never reaches
-                    // the `_lock` gate: every org-scoped write is refused first.
-                    expect(verdict, `${at}: the door`)
-                        .toEqual(row.requestScope ? NOT_OVERRIDABLE : doorAllows ? 'admitted' : ITEM_LOCKED);
-                    // …and the two agree: the door admits exactly when the envelope
-                    // says it may. Except on the one declared difference
-                    // (`overlayLockLayerAt`'s `otherSpelling`): a row stored under
-                    // the other spelling is in the reads' scope and not the door's,
-                    // which the two oracle assertions above already state row by
-                    // row — so those rows flip, by name, the day the reads'
-                    // fallback retires.
-                    const residue = expectedLock(row, 'reads') !== expectedLock(row, 'door');
-                    if (!residue && !row.requestScope) {
-                        const readAllows = row.operation === 'save' ? read.editable : read.deletable;
-                        expect(verdict, `${at}: the door and the read envelope (lock ${read.lock}) disagree`)
-                            .toEqual(readAllows ? 'admitted' : ITEM_LOCKED);
-                    }
-                }
-            }
-        });
-    }
 
     it('lit control: the table holds refusals and admissions on both verbs, both layers bind somewhere, and the residue difference is reachable', () => {
         const locks = TABLE.map((row) => ({ row, reads: expectedLock(row, 'reads'), door: expectedLock(row, 'door') }));
@@ -842,25 +328,20 @@ describe('[#21738, #21803] pin 1 — the family\'s enumeration, generated from t
         expect(locks.some((l) => l.row.artifact.artifact === 'no _lock'
             && l.row.otherArtifact.artifact === 'declared' && l.row.otherArtifact.lock === 'no-delete'
             && l.row.storedRow.row === 'stored' && l.row.storedRow.lock === 'no-overlay' && l.door === 'full')).toBe(true);
-        // [#21803, ADR-0131 D6] The folded position is closed: the
-        // organization's only row (another package's) is in no read's scope,
-        // so the env-wide package row's 'full' binds the request naming the
-        // package, as it binds one naming no organization.
+        // [#21803, ADR-0131 D6] The folded position is closed: another
+        // package's env-wide row is in the lock's scope, never the content's,
+        // so the package's own row's 'full' binds the request naming the
+        // package, whatever organization the request names.
         expect(locks.some((l) => l.row.otherPackageRow.row === 'stored' && l.row.otherPackageRow.lock === 'none'
             && l.row.packageRow.row === 'stored' && l.row.packageRow.lock === 'full'
             && l.row.requestScope === ORG && l.row.requestPackage === PACKAGE_ID && l.reads === 'full')).toBe(true);
     });
 
-    it('lit control: an org-scoped request is served the env-wide row and reads its lock; an org-scoped row is never served to a request naming none', async () => {
-        const protocol = harness(undefined, [storedRow('view', null, 'full', 'env-wide row')]);
+    it('lit control: an org-scoped request is served the env-wide row and reads its lock', async () => {
+        const protocol = harness(undefined, [storedRow('view', 'full', 'env-wide row')]);
         const read = await envelope(protocol, 'view', ORG);
         expect({ lock: read.lock, served: read.byName.item?.label, overlayScope: read.layered.overlayScope })
             .toEqual({ lock: 'full', served: 'env-wide row', overlayScope: 'env' });
-        const other = harness(undefined, [storedRow('view', ORG, 'full', 'org row')]);
-        const unscoped = await envelope(other, 'view');
-        expect({ lock: unscoped.lock, overlayScope: unscoped.layered.overlayScope }).toEqual({ lock: 'none', overlayScope: null });
-        expect(await door(other, 'view', 'save')).toBe('admitted');
-        expect(await door(other, 'view', 'delete')).toBe('admitted');
     });
 
     it('lit control: the registry double answers the first package registered when asked with no package, and the asked package\'s own when asked with one', () => {
@@ -881,7 +362,7 @@ describe('[#21738, #21803] pin 1 — the family\'s enumeration, generated from t
 
 describe('[#21738] pin 2 — position 1: an artifact\'s explicit _lock: \'none\' does not override a stored env-wide \'full\'', () => {
     const artifact = packagedView({ artifact: 'declared', lock: 'none' }, 'v_pos1')!;
-    const rows = () => [storedRow('view', null, 'full', 'env-wide row', 'v_pos1')];
+    const rows = () => [storedRow('view', 'full', 'env-wide row', 'v_pos1')];
 
     for (const { kernel, environmentId } of AXIS_VALUES.topology) {
         it(`${kernel} kernel: both reads say locked, the served body and the tile say so too, and save / delete are refused ITEM_LOCKED (403)`, async () => {
@@ -920,7 +401,7 @@ describe('[#21738] pin 2 — position 1: an artifact\'s explicit _lock: \'none\'
 
 describe('[#21738] pin 3 — position 2: getMetaItemLayered reads a stored lock under a packaged item with no _lock', () => {
     const artifact = packagedView({ artifact: 'no _lock' }, 'v_pos2')!;
-    const rows = () => [storedRow('view', null, 'full', 'env-wide row', 'v_pos2')];
+    const rows = () => [storedRow('view', 'full', 'env-wide row', 'v_pos2')];
 
     for (const { kernel, environmentId } of AXIS_VALUES.topology) {
         it(`${kernel} kernel: the layered read says locked, as getMetaItem does, and the door refuses`, async () => {
@@ -945,8 +426,8 @@ describe('[#21738] pin 3 — position 2: getMetaItemLayered reads a stored lock 
 /** The two stored rows of an arrangement, package-less first, in both orders. */
 function bothOrders(pkgless: Lock, ofPackage: Lock, name: string): Array<{ order: string; rows: StoredRow[] }> {
     const rows = [
-        storedRow('view', null, pkgless, 'package-less row', name),
-        storedRow('view', null, ofPackage, 'package row', name, PACKAGE_ID),
+        storedRow('view', pkgless, 'package-less row', name),
+        storedRow('view', ofPackage, 'package row', name, PACKAGE_ID),
     ];
     return [
         { order: 'package-less row returned first', rows },
@@ -1065,8 +546,8 @@ describe('[#21761] pin 6 — the #5706 outage: a failing row read in scope still
 describe('[#21761] pin 7 — a third package\'s row is in scope: no write the gate refused before is admitted', () => {
     const OTHER = 'com.example.other';
     const rows = () => [
-        storedRow('view', null, 'none', 'package row', 'v_third', PACKAGE_ID),
-        storedRow('view', null, 'full', 'other package row', 'v_third', OTHER),
+        storedRow('view', 'none', 'package row', 'v_third', PACKAGE_ID),
+        storedRow('view', 'full', 'other package row', 'v_third', OTHER),
     ];
 
     for (const reversed of [false, true]) {
@@ -1082,22 +563,6 @@ describe('[#21761] pin 7 — a third package\'s row is in scope: no write the ga
             expect(got.servedLabel).toBe('package row');
         });
     }
-
-    it('[ADR-0131 D6] an organization holding only another package\'s row: that legacy row is in no read\'s scope, and its writes are refused', async () => {
-        const protocol = harness(ENV_ID, [
-            storedRow('view', ORG, 'full', 'org row of the other package', 'v_org', OTHER),
-            storedRow('view', null, 'none', 'env-wide package row', 'v_org', PACKAGE_ID),
-        ]);
-        const read = await envelope(protocol, 'view', ORG, 'v_org', PACKAGE_ID);
-        expect({ lock: read.lock, editable: read.editable, deletable: read.deletable })
-            .toEqual({ lock: 'none', editable: true, deletable: true });
-        // Content stays prefer-local: the organization holds no row of the
-        // package or package-less, so the env-wide package row is served.
-        expect(read.byName.item?.label).toBe('env-wide package row');
-        // [ADR-0131 D6] The organization's writes are refused before the gate.
-        expect(await door(protocol, 'view', 'save', ORG, 'v_org', PACKAGE_ID)).toEqual(NOT_OVERRIDABLE);
-        expect(await door(protocol, 'view', 'delete', ORG, 'v_org')).toEqual(NOT_OVERRIDABLE);
-    });
 
     it('the list item and the directory tile report the same lock as the item\'s envelope', async () => {
         const protocol = harness(ENV_ID, bothOrders('full', 'none', 'v_list')[1]!.rows);
@@ -1182,7 +647,7 @@ describe('[#21803] pin 9 — never a widening: A ships no lock, B ships \'no-del
     for (const { order, artifacts } of twoPackages({ artifact: 'no _lock' }, { artifact: 'declared', lock: 'no-delete' }, 'v_join')) {
         for (const { request, packageId } of REQUESTS) {
             it(`${order} · request ${request}: the reads say 'full' and the door refuses both verbs`, async () => {
-                const protocol = harness(ENV_ID, [storedRow('view', null, 'no-overlay', 'env-wide row', 'v_join')], artifacts());
+                const protocol = harness(ENV_ID, [storedRow('view', 'no-overlay', 'env-wide row', 'v_join')], artifacts());
                 const read = await envelope(protocol, 'view', undefined, 'v_join', packageId);
                 expect({ lock: read.lock, editable: read.editable, deletable: read.deletable })
                     .toEqual({ lock: 'full', editable: false, deletable: false });
@@ -1211,40 +676,4 @@ describe('[#21803] pin 10 — a disabled package is still installed: its package
             expect(await door(protocol, 'view', 'delete', undefined, 'v_dis')).toEqual(ITEM_LOCKED);
         });
     }
-});
-
-describe('[#21803, ADR-0131 D6] pin 11 — the folded position is closed: a legacy organization row is in neither the content\'s scope nor the lock\'s', () => {
-    // 5988387087: the organization holds only package B's row; an env-wide row
-    // of package A declares 'full'. Before ADR-0131 D6 a request naming A in
-    // the organization was served A's env-wide row while the lock's scope was
-    // the organization's rows. The reads take no organization now, so the
-    // content and the lock are both the environment's: 'full'.
-    const rows = () => [
-        storedRow('view', ORG, 'none', 'org row of the other package', 'v_scope', OTHER_PACKAGE),
-        storedRow('view', null, 'full', 'env-wide package row', 'v_scope', PACKAGE_ID),
-    ];
-
-    for (const reversed of [false, true]) {
-        it(`${reversed ? 'the env-wide row returned first' : 'the org row returned first'}: the envelope and the served body both say 'full'`, async () => {
-            const protocol = harness(ENV_ID, reversed ? rows().reverse() : rows());
-            const read = await envelope(protocol, 'view', ORG, 'v_scope', PACKAGE_ID);
-            expect({ lock: read.lock, editable: read.editable, deletable: read.deletable })
-                .toEqual({ lock: 'full', editable: false, deletable: false });
-            expect(read.byName.item?.label).toBe('env-wide package row');
-            expect(read.byName.item?._lock).toBe('full');
-            expect(read.layered.effective?._lock).toBe('full');
-            expect(read.layered.overlay?._lock).toBe('full');
-            expect(read.layered.overlayScope).toBe('env');
-            // [ADR-0131 D6] The organization's writes are refused before the gate.
-            expect(await door(protocol, 'view', 'save', ORG, 'v_scope', PACKAGE_ID)).toEqual(NOT_OVERRIDABLE);
-            expect(await door(protocol, 'view', 'delete', ORG, 'v_scope')).toEqual(NOT_OVERRIDABLE);
-        });
-    }
-
-    it('lit control: the same rows read with no organization bind the env-wide row\'s \'full\'', async () => {
-        const protocol = harness(ENV_ID, rows());
-        const read = await envelope(protocol, 'view', undefined, 'v_scope', PACKAGE_ID);
-        expect({ lock: read.lock, body: read.byName.item?._lock }).toEqual({ lock: 'full', body: 'full' });
-        expect(await door(protocol, 'view', 'save', undefined, 'v_scope', PACKAGE_ID)).toEqual(ITEM_LOCKED);
-    });
 });

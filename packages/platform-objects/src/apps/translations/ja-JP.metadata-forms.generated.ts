@@ -204,6 +204,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.options.description": {
         label: "説明"
       },
+      "fields.options.kind": {
+        label: "種別",
+        helpText: "ライフサイクル区分(単一値の選択 / ラジオのみ):途中の段階、成功の終点、または不成功の終点。ステージ項目のすべての選択肢で必須です。"
+      },
       "fields.reference": {
         label: "参照",
         helpText: "対象オブジェクト名。tree フィールドでは省略可能で、指定する場合はこのオブジェクト自身でなければなりません（ツリーは同一オブジェクト内の階層です — 別のオブジェクトへリンクする場合は lookup を使います）"
@@ -632,6 +636,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ポリモーフィック参照の相棒項目",
         helpText: "このテキスト項目をポリモーフィック参照の id 側にします。ここには、対象オブジェクト名を行ごとに保持する同一オブジェクト上の別項目名を指定します（ADR-0052 §5）。snake_case で記述し、テキスト項目のみ、`reference` とは併用できません。"
       },
+      referenceDeletedWhen: {
+        label: "参照先削除条件",
+        helpText: "referenceVia と併用する場合のみ有効：同じオブジェクトの選択（select）項目が特定の選択肢の値を持つ行では、このポインターが指すレコードはプラットフォームにより削除済みであり、ポインターはその選択肢のラベルで削除済み表示されます。未設定：どの行も削除済みとして扱われません。"
+      },
+      "referenceDeletedWhen.field": {
+        label: "項目",
+        helpText: "このオブジェクト上の兄弟の選択項目（snake_case）。例：cancel_reason。インラインの選択肢を宣言した単一値の選択項目である必要があります。"
+      },
+      "referenceDeletedWhen.value": {
+        label: "値",
+        helpText: "参照先が削除されたことを示す、その選択項目の選択肢の値。例：record_deleted。宣言済みの選択肢の値のいずれかである必要があります。"
+      },
       mailAssociation: {
         label: "受信メールの照合",
         helpText: "この項目の値がメッセージの送信者またはいずれかの受信者のアドレスと一致する、このオブジェクトのレコードに受信メールを関連付けます（大文字と小文字は区別しません。メールボックス自身のアドレスは除きます）。メール項目のみ。メールボックスサービスが設定されている環境でのみ有効です。"
@@ -665,6 +681,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "options.visibleWhen": {
         label: "表示条件"
+      },
+      "options.kind": {
+        label: "種別"
       },
       reference: {
         label: "参照",
@@ -1000,7 +1019,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       end_user_controls: {
         label: "エンドユーザー操作",
-        description: "このビューでエンドユーザーが行える操作——クイックフィルター、フィルタータブ、可視化切り替え（ADR-0047、Airtable Interface 互換）。"
+        description: "このビューでエンドユーザーが行える操作——クイックフィルター、フィルタータブ、可視化切り替え。"
       },
       navigation_sharing: {
         label: "ナビゲーションと共有",
@@ -1204,7 +1223,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       source: {
         label: "ページソース",
-        helpText: "ページのソーステキスト。kind が 'html'（別名 'jsx'）の場合は制約付きの JSX で、保存時にコンポーネントツリーへコンパイルされます（解析のみで、実行はしません）。kind が 'react' の場合は本物の React で、信頼済みランタイムが描画時に実行します。"
+        helpText: "ページのソーステキスト。kind が 'html' の場合は制約付きの JSX で、保存時にコンポーネントツリーへコンパイルされます（解析のみで、実行はしません）。kind が 'react' の場合は本物の React で、信頼済みランタイムが描画時に実行します。"
       },
       object: {
         label: "オブジェクト",
@@ -2190,7 +2209,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "API エンドポイント",
-    description: "宣言的な HTTP エンドポイント — 既存のパイプラインの上に安定した URL とポリシー層を提供（ADR-0121）"
+    description: "他のシステムが呼び出す固定の HTTP URL。フローを実行したり、アプリのレコードを操作したりします"
   },
   translation: {
     label: "翻訳"
@@ -2270,11 +2289,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "ドキュメント",
-    description: "パッケージのドキュメント — フラットな Markdown 項目（ADR-0046）"
+    description: "Markdown で書かれたヘルプページ。パッケージに同梱されるほか、自分で作成することもできます"
   },
   book: {
     label: "ドキュメントブック",
-    description: "ドキュメントナビゲーションの骨格 — 順序付きグループと派生されたメンバーシップ（ADR-0046 §6）"
+    description: "ヘルプページを順序付きのセクションにまとめた目次"
   },
   permission: {
     label: "権限セット",
@@ -2311,15 +2330,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isDefault: {
         label: "既定の権限セット",
-        helpText: "everyone ポジション向けのアプリ基準です（ADR-0090 D5）。アプリレベルのセットは起動時に自動でバインドされ、パッケージレベルのセットはインストール時に管理者が確認する提案になります。既定は false です。"
-      },
-      managedBy: {
-        label: "管理元",
-        helpText: "レコードの由来（ADR-0086 D3）。アップグレードをまたいで、このセットを誰が所有するかを示します。"
+        helpText: "組み込みの everyone ポジションを通じて、サインインするすべてのユーザーにこのセットを付与します。アプリ自身が宣言したセットは起動時に付与され、インストールしたパッケージのセットは管理者が Setup で確認する提案になります。高権限を含むセットはこの方法では付与されません。既定は false です。"
       },
       packageId: {
         label: "所属パッケージ ID",
-        helpText: "パッケージ同梱のセットが属するパッケージ id（ADR-0086 D3）。環境側で作成したセットでは空のままにします。"
+        helpText: "このセットを同梱しているパッケージです。別のパッケージを指す値は拒否されます。この環境で作成したセットでは空のままにします。"
       },
       systemPermissions: {
         label: "システム権限",
@@ -2327,7 +2342,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       adminScope: {
         label: "委任管理スコープ",
-        helpText: "委任管理（ADR-0090 D12）: この権限セットの保持者が 1 つのビジネスユニットのサブツリーを管理できるようにします。businessUnit はサブツリーのルート（sys_business_unit.name）で、必須かつ空白不可です。includeSubtree の既定値は true、manageAssignments・manageBindings・authorEnvironmentSets の既定値は false です。委任先が付与できるのは assignablePermissionSets に挙げた権限セットだけです。何も委任しない権限セットでは空のままにしてください。"
+        helpText: "委任管理: この権限セットの保持者が 1 つのビジネスユニットのサブツリーを管理できるようにします。businessUnit はサブツリーのルート（sys_business_unit.name）で、必須かつ空白不可です。includeSubtree の既定値は true です。manageAssignments の既定値は false で、有効にすると保持者はそのサブツリー内でユーザーをポジションに割り当て、権限セットを直接付与できます。委任先が付与できるのは assignablePermissionSets に挙げた権限セットだけです。何も委任しない権限セットでは空のままにしてください。"
       },
       objects: {
         label: "オブジェクト権限",
@@ -2372,13 +2387,13 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       delegatable: {
         label: "セルフ委任を許可",
-        helpText: "保有者が自分でこのポジションを委任できるようにします。期間を区切り、理由の記入が必要です（ADR-0091 D3）。既定は false で、委任は管理者のみです。"
+        helpText: "保有者が自分でこのポジションを委任できるようにします。期間を区切り、理由の記入が必要です。既定は false で、委任は管理者のみです。"
       }
     }
   },
   capability: {
     label: "ケイパビリティ",
-    description: "パッケージが宣言する認可ケイパビリティ — ADR-0066 D1 の定義側（付与は権限セットに、要件はリソースに）"
+    description: "パッケージが定義する権限。権限セットを通じて付与します"
   },
   agent: {
     label: "AI エージェント",

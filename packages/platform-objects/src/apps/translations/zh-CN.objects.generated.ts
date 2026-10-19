@@ -35,7 +35,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "平台角色",
-        help: "遗留的 better-auth 角色标量（admin、user 等）。ObjectStack 不再写入该字段（ADR-0068 D2）。要授予平台管理员身份，请将该用户已验证的邮箱加入 `OS_PLATFORM_OWNER_EMAIL`；在 `single` 租户态势下，`sys_user_permission_set` 中一条未限定范围的 `admin_full_access` 授权同样可以赋予该身份。"
+        help: "遗留的 better-auth 角色标量（admin、user 等）。ObjectStack 不再写入该字段。要授予平台管理员身份，请将该用户已验证的邮箱加入 `OS_PLATFORM_OWNER_EMAIL`；在 `single` 租户态势下，`sys_user_permission_set` 中一条未限定范围的 `admin_full_access` 授权同样可以赋予该身份。"
       },
       banned: {
         label: "已封禁",
@@ -97,11 +97,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       manager_id: {
         label: "经理",
-        help: "该用户的直属上级。构成 `own_and_reports` 层级范围所遍历的汇报链（ADR-0057 / @objectstack/security-enterprise）。"
+        help: "该用户的直属上级。构成 `own_and_reports` 层级范围所遍历的汇报链。"
       },
       primary_business_unit_id: {
         label: "主属业务单元",
-        help: "该用户的主属业务单元——sys_business_unit_member.is_primary 的去规范化投影，由 plugin-sharing 维护（ADR-0057 附录 D12）。使用户查找字段无需遍历成员关系关联表即可按业务单元筛选候选人。请勿直接编辑；请通过业务单元成员关系设置。"
+        help: "该用户的主属业务单元——sys_business_unit_member.is_primary 的去规范化投影，由 plugin-sharing 维护。使用户查找字段无需遍历成员关系关联表即可按业务单元筛选候选人。请勿直接编辑；请通过业务单元成员关系设置。"
       },
       source: {
         label: "身份来源",
@@ -142,7 +142,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请"
+        successMessage: "已向 ${result.email} 发送邀请",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理员",
+              delegated_admin: "受托管理员",
+              member: "成员"
+            }
+          }
+        }
       },
       ban_user: {
         label: "封禁用户",
@@ -537,7 +547,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "上级组织",
-        help: "用于汇报 / 分组的上级。不授予任何权限——跨组织的可见性来自成员关系，绝不来自此引用（ADR-0105 D6）。"
+        help: "用于汇报 / 分组的上级。不授予任何权限——跨组织的可见性来自成员关系，绝不来自此引用。"
       },
       sort_order: {
         label: "排序",
@@ -559,6 +569,21 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "邀请用户",
+        description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
+        successMessage: "已向 ${result.email} 发送邀请",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理员",
+              delegated_admin: "受托管理员",
+              member: "成员"
+            }
+          }
+        }
+      },
       create_organization: {
         label: "创建组织",
         successMessage: "组织已创建"
@@ -576,15 +601,19 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "设为当前",
         successMessage: "当前组织已切换"
       },
-      leave_organization: {
-        label: "退出组织",
-        confirmText: "要退出该组织吗？退出后你将失去对其所有资源的访问权限。",
-        successMessage: "你已退出该组织"
+      rename_organization: {
+        label: "重命名组织",
+        successMessage: "组织已重命名"
       },
       change_slug: {
         label: "修改标识符",
         description: "重命名标识符会重写该组织所有平台子域名，旧标识符将保留占用 90 天。继续吗？",
         successMessage: "组织标识符已修改"
+      },
+      leave_organization: {
+        label: "退出组织",
+        confirmText: "要退出该组织吗？退出后你将失去对其环境和成员的访问权限。",
+        successMessage: "你已退出该组织"
       }
     }
   },
@@ -633,7 +662,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请"
+        successMessage: "已向 ${result.email} 发送邀请",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理员",
+              delegated_admin: "受托管理员",
+              member: "成员"
+            }
+          }
+        }
       },
       add_member: {
         label: "添加成员",
@@ -649,9 +688,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "成员已移除"
       },
       transfer_ownership: {
-        label: "转移所有权",
-        confirmText: "确定要将该组织的所有权转移给所选成员吗？您将被降级为管理员，并失去仅所有者拥有的权限。",
-        successMessage: "已转移所有权"
+        label: "设为所有者",
+        confirmText: "确定要将所选成员设为该组织的所有者吗？对方将获得所有者的全部权限，包括删除该组织。您仍是所有者；如需卸任，请在您自己的成员记录上使用“更改角色”。",
+        successMessage: "该成员现已成为所有者"
       }
     }
   },
@@ -710,32 +749,58 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       business_unit_id: {
         label: "分配业务单元",
-        help: "受邀者接受邀请后被分配到的业务单元（ADR-0105 D8）。必须位于邀请发起人的委派子树内。"
+        help: "受邀者接受邀请后被分配到的业务单元。必须位于邀请发起人的委派子树内。"
       },
       positions: {
         label: "分配岗位",
-        help: "接受邀请时分配的岗位名称（ADR-0105 D8）。每个岗位的权限集都必须在邀请发起人的 adminScope 允许列表内。"
+        help: "接受邀请时分配的岗位名称。每个岗位的权限集都必须在邀请发起人的 adminScope 允许列表内。"
       }
     },
     _views: {
       pending: {
-        label: "待处理"
+        label: "待处理",
+        emptyState: {
+          title: "没有待处理的邀请",
+          message: "邀请会一直显示在这里，直到被接受、拒绝或取消，或者过期。"
+        }
       },
       accepted: {
-        label: "已接受"
+        label: "已接受",
+        emptyState: {
+          title: "没有已接受的邀请",
+          message: "对方接受邀请并加入组织后，邀请会移到这里。"
+        }
       },
       expired: {
-        label: "已过期 / 已取消"
+        label: "已过期 / 已取消",
+        emptyState: {
+          title: "没有已过期或已取消的邀请",
+          message: "已过期、被拒绝或已取消的邀请保留在这里。"
+        }
       },
       all_invitations: {
-        label: "全部"
+        label: "全部",
+        emptyState: {
+          title: "尚无邀请",
+          message: "加入组织的每一份邀请都列在这里，无论处于什么状态。"
+        }
       }
     },
     _actions: {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请"
+        successMessage: "已向 ${result.email} 发送邀请",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理员",
+              delegated_admin: "受托管理员",
+              member: "成员"
+            }
+          }
+        }
       },
       cancel_invitation: {
         label: "取消邀请",
@@ -848,7 +913,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "业务单元",
     pluralLabel: "业务单元",
-    description: "层级化组织骨架节点（部门 / 事业部 / 业务单元 / 办公地点）。",
+    description: "公司的组织结构——事业部、部门、区域和办公地点——用于划定数据和报表的范围。",
     fields: {
       name: {
         label: "名称"
@@ -1008,6 +1073,13 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       revoked: {
         label: "已撤销"
       },
+      revoked_reason: {
+        label: "撤销原因",
+        help: "管理员强制重置密码时撤销了该密钥，则记录此原因。此类密钥只能由平台管理员恢复，其所有者应创建新的密钥。密钥恢复后清除。从 API 密钥列表撤销的密钥此项为空。",
+        options: {
+          admin_password_reset: "管理员强制重置密码"
+        }
+      },
       key: {
         label: "哈希密钥",
         help: "API 密钥值的哈希——绝不会向客户端暴露"
@@ -1024,19 +1096,47 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_keys: {
-        label: "全部"
+        label: "全部",
+        emptyState: {
+          title: "尚无 API 密钥",
+          message: "使用“创建密钥”为脚本和集成创建密钥；密钥只在创建时显示一次。"
+        }
       },
       mine: {
-        label: "我的密钥"
+        label: "我的密钥",
+        emptyState: {
+          title: "你还没有 API 密钥",
+          message: "使用“创建密钥”为你的脚本和集成创建密钥；密钥只在创建时显示一次。"
+        }
       },
       active: {
-        label: "启用"
+        label: "启用",
+        emptyState: {
+          title: "没有启用的 API 密钥",
+          message: "所有未被撤销的密钥都列在这里。"
+        }
       },
       revoked: {
-        label: "已撤销"
+        label: "已撤销",
+        emptyState: {
+          title: "没有已撤销的密钥",
+          message: "密钥被撤销后会移到这里；使用它的客户端会失去访问权限，直到它被恢复。"
+        }
       }
     },
     _actions: {
+      create_api_key: {
+        label: "创建密钥",
+        description: "为脚本或集成创建密钥。该密钥以你的身份、按你的访问权限，在你当前所在的组织中生效。",
+        resultDialog: {
+          title: "API 密钥已创建",
+          description: "请立即复制密钥——它只显示这一次，之后无法找回。如果泄露，请撤销它并创建新的密钥。",
+          acknowledge: "我已保存密钥",
+          fields: {
+            key: "API 密钥"
+          }
+        }
+      },
       revoke_api_key: {
         label: "撤销 API 密钥",
         confirmText: "要撤销该 API 密钥吗？所有使用该密钥的客户端都将立即失去访问权限。",
@@ -1388,16 +1488,32 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_apps: {
-        label: "全部"
+        label: "全部",
+        emptyState: {
+          title: "尚无 OAuth 应用",
+          message: "注册应用后，其客户端即可通过本系统让用户登录。"
+        }
       },
       mine: {
-        label: "我的应用"
+        label: "我的应用",
+        emptyState: {
+          title: "你还没有 OAuth 应用",
+          message: "你注册的应用会列在这里。"
+        }
       },
       active: {
-        label: "启用"
+        label: "启用",
+        emptyState: {
+          title: "没有启用的 OAuth 应用",
+          message: "应用在被停用之前一直处于启用状态；已停用的应用列在“已禁用”下。"
+        }
       },
       disabled_apps: {
-        label: "已禁用"
+        label: "已禁用",
+        emptyState: {
+          title: "没有已禁用的 OAuth 应用",
+          message: "应用被停用后会移到这里；在重新启用之前，其客户端无法登录。"
+        }
       }
     },
     _actions: {
@@ -1490,7 +1606,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "引用 ID",
-        help: "调用方提供的关联标识符"
+        help: "签发该令牌所依据的同意所绑定的组织；未绑定组织时为空"
       },
       authorization_code_id: {
         label: "授权码 ID",
@@ -1550,7 +1666,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "引用 ID",
-        help: "调用方提供的关联标识符"
+        help: "开启该刷新令牌族的同意所绑定的组织；未绑定组织时为空"
       },
       authorization_code_id: {
         label: "授权码 ID",
@@ -1618,7 +1734,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "引用 ID",
-        help: "调用方提供的关联标识符"
+        help: "该同意绑定的组织：同意时用户的当前活动组织；同意时无活动组织则为空"
       },
       resources: {
         label: "资源",
@@ -1778,7 +1894,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_sso_provider: {
     label: "SSO 提供方",
     pluralLabel: "SSO 提供方",
-    description: "本环境用于联合登录的外部 SSO 身份提供方（OIDC / SAML）",
+    description: "本系统用于联合登录的外部 SSO 身份提供方（OIDC / SAML）",
     fields: {
       id: {
         label: "ID"
@@ -1797,7 +1913,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       domain_verified: {
         label: "域名已验证",
-        help: "是否已证明对该邮箱域名的 DNS 所有权（ADR-0135 D6）。在 DNS TXT 记录解析后由“验证域名”设置。由 better-auth 管理——不可直接编辑。仅在本环境启用域名验证时强制执行。"
+        help: "是否已证明对该邮箱域名的 DNS 所有权。在 DNS TXT 记录解析后由“验证域名”设置。由 better-auth 管理——不可直接编辑。仅在本环境启用域名验证时强制执行。"
       },
       oidc_config: {
         label: "OIDC 配置",
@@ -1849,7 +1965,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           },
           clientId: {
             label: "客户端 ID",
-            helpText: "IdP 为本环境签发的 OAuth 客户端 ID。"
+            helpText: "IdP 为本系统签发的 OAuth 客户端 ID。"
           },
           clientSecret: {
             label: "客户端密钥",
@@ -2356,7 +2472,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",
-    description: "通知事件——每次 emit() 产生一行（ADR-0030 第 2 层入口）",
+    description: "平台发出的每一条通知，每个事件一行。",
     fields: {
       id: {
         label: "通知 ID"
@@ -2982,13 +3098,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           deprecated: "已废弃"
         }
       },
-      organization_id: {
-        label: "组织",
-        help: "用于多租户隔离的组织。"
-      },
       environment_id: {
         label: "环境（已废弃）",
-        help: "已废弃。请使用 organization_id 进行租户隔离。"
+        help: "已废弃。覆盖层是环境级的行，没有租户列。"
       },
       version: {
         label: "版本"
@@ -3082,10 +3194,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       source: {
         label: "来源"
       },
-      organization_id: {
-        label: "组织",
-        help: "用于多租户隔离的组织。"
-      },
       recorded_by: {
         label: "记录人",
         help: "做出此变更的用户。NULL 表示由系统发起（启动同步、迁移、定时任务）——绝不是哨兵字符串。"
@@ -3098,7 +3206,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_metadata_audit: {
     label: "元数据审计",
     pluralLabel: "元数据审计",
-    description: "元数据写入决策的仅追加审计记录（ADR-0010）。",
+    description: "元数据写入决策的仅追加审计记录。",
     fields: {
       id: {
         label: "ID"
@@ -3118,9 +3226,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "名称"
-      },
-      organization_id: {
-        label: "组织"
       },
       operation: {
         label: "操作",

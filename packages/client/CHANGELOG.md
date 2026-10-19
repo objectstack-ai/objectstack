@@ -1,5 +1,236 @@
 # @objectstack/client
 
+## 18.0.0-next.4
+
+### Minor Changes
+
+- 1e001c7: feat(client): `packages.publishDrafts(id, { backfill })` sends the opt-in backfill of new fields' defaults
+  
+  Clause-②: yes (widening)
+  
+  - `opts.backfill?: Array<{ object, field }>` is sent in the publish body; the response's `backfillApplied` reports the rows written per field. A field the publish does not add, or one without a literal `defaultValue`, refuses the whole request with a `400` before anything is published.
+
+### Patch Changes
+
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+
+## 18.0.0-next.3
+
+### Patch Changes
+
+- 6d1660d: Clause-②: no
+  
+  fix(client): `client.automation.getRuntimeStatus()` types its rows as the declared contract `FlowRuntimeState` (#23859)
+  
+  **What was wrong.** The method declared its answer as `{ flows: Array<{ name, enabled, bound }>; total }`. `GET /automation/_status` serves the automation engine's `getFlowRuntimeStates()` rows unchanged, and each row is the contract `FlowRuntimeState` from `@objectstack/spec/contracts`. The SDK's type therefore hid five optional fields the wire already carries: `status`, `triggerType`, `object`, `reason` (one sentence saying why an enabled, triggered flow is not armed) and `unboundCause` (which of the closed `FLOW_UNBOUND_CAUSES` that sentence describes). A caller that read `row.reason` or `row.unboundCause` got a type error and either cast past it or concluded the field did not exist.
+  
+  **What changes.** The return type is now `Promise<{ flows: FlowRuntimeState[]; total: number }>`. `name`, `enabled` and `bound` stay required, so existing callers compile unchanged. Read `row.unboundCause` to classify an unarmed flow, and render `row.reason` without parsing it. The request, the route and the values on the wire are unchanged.
+- 66d2757: feat(spec)!: every installed-package row declares where it came from, a closed `source: 'code' | 'marketplace' | 'authored'`, and the `GET /packages` rows declare the `writable` verdict they already served (#23972)
+  
+  Clause-②: yes (narrowing — the served row gains two declared keys, and the record schema, the served-row union and the registry's installPackage signature each refuse what they accepted before)
+  
+  **BREAKING** — three published accept sets narrow. `InstalledPackageSchema` refuses a row without `source`, or with a value outside `code` / `marketplace` / `authored`. The served-row union `InstalledPackageAtEitherStageSchema` refuses a row without a boolean `writable`. `SchemaRegistry.installPackage` and `EngineSchemaRegistryView.installPackage` take `source` as their second argument and refuse a call without it. The migration is below. None of it is mechanically convertible, because only the door that registers a package knows where it came from.
+  
+  **What is new on the wire.** `GET /api/v1/packages` and `GET /api/v1/packages/:id` serve two declared keys on every row:
+  
+  - `source` names the package's origin. `code` means the deployment's own code registered it (a `defineStack()` host, a plugin's bundled manifest, a platform package). `marketplace` means the marketplace install-local plugin installed it, and that holds after a restart too, when the plugin rehydrates it from its ledger. `authored` means it is a database-authored package (a Studio base, a duplicate, an HTTP install), including after the restart that rehydrates it from `sys_packages`. The door that registers the package stamps the value. No reader derives it.
+  - `writable` is the server's own writability verdict (ADR-0070 D2), served on these rows since #14375 and now declared. It is computed per read and never stored, so it is declared on the served row (`InstalledPackageAtEitherStageSchema`) and not on the registry record.
+  
+  FROM → TO for a reader of these rows:
+  
+  | you did | do instead |
+  | --- | --- |
+  | treated `writable: true` as authored, and looked up each non-writable row in the marketplace's installed list (the control plane's, else install-local's) to tell marketplace from code | read `row.source` |
+  | read the undeclared `writable` | read the declared `writable` (unchanged value) |
+  
+  The two keys are separate statements: `source` says where the package came from, and `writable` says what this server lets an org do to it.
+  
+  **`InstalledPackageSchema` requires `source`.** It is `InstalledPackageSourceSchema`, exported from `@objectstack/spec/kernel`. A row without it, or with a value outside the closed set, is refused at the `source` key.
+  
+  **API change for code that registers packages (`@objectstack/objectql`).** The registry records the origin and never infers it:
+  
+  | you wrote | write instead |
+  | --- | --- |
+  | `registry.installPackage(manifest)` | `registry.installPackage(manifest, 'code')` (or `'marketplace'` / `'authored'`, whichever is where the package came from) |
+  | `registry.installPackage(manifest, settings, scope)` | `registry.installPackage(manifest, source, settings, scope)` |
+  | `ctx.getService('manifest').register(artifact)` for a marketplace install | `ctx.getService('manifest').register(artifact, { source: 'marketplace' })` |
+  
+  `SchemaRegistry.installPackage` throws a `TypeError` naming the closed set when `source` is missing or unknown, before anything is recorded. `ObjectQL.registerApp(body, scope?, source?)` and the `manifest` service record `'code'` when no source is given. They accept `'code'` or `'marketplace'` and refuse `'authored'`. The `IObjectQLEngine` registry contract (`@objectstack/spec/contracts`) declares the same `installPackage(manifest, source, settings?)`.
+  
+  **The one-line fix:** pass the package's origin as `installPackage`'s second argument.
+  
+  Readers: objectui's Setup → Packages Source column and its `?source=` filter (it switches from the two-read join to `source` in its own follow-up), and the client SDK's `packages.list()` / `packages.get()` row types.
+  
+  <!-- adr-0087: registered installed-package-row-source-required, registry-install-package-source-argument -->
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+
+## 18.0.0-next.2
+
+### Minor Changes
+
+- 361a1c4: feat(client): `meta.publishItem` can name the package whose pending draft it promotes (`packageId`, sent as `?package=`), so a caller can follow the `?package=` remedy the per-item publish door prescribes when it refuses a publish that names no package (#23658)
+  
+  Clause-②: yes (widening)
+  
+  **What is new.** `meta.publishItem`'s options gain `packageId?: string`, sent as `?package=<id>` on `POST /api/v1/meta/:type/:name/publish`. The name, the query key and the omission rule are the ones `saveItem`'s and `deleteItem`'s `packageId` already use: only a non-empty id reaches the wire, and `undefined` and `''` send nothing.
+  
+  **Why.** A metadata item can hold one row per package (ADR-0048). A per-item publish that names no package promotes the draft a draft save naming no package writes, and the door refuses it in two states, each with `?package=` as the remedy and nothing published: `409 RESOURCE_CONFLICT` when two or more packages hold the item, and `404 NO_DRAFT` when the item's one package holds no draft and another package's draft is stored. This client had no option for it, so an SDK caller (an agent, the CLI, an app) could not do what the refusal said.
+  
+  FROM → TO:
+  
+  ```ts
+  // FROM: refused 409 RESOURCE_CONFLICT when two packages hold the item, with no way to name one
+  await client.meta.publishItem('view', 'shared_grid');
+  
+  // TO: promotes com.acme.crm's pending draft into com.acme.crm's active row, and no other package's draft
+  await client.meta.publishItem('view', 'shared_grid', { packageId: 'com.acme.crm' });
+  ```
+  
+  **Unchanged.** A publish without `packageId` sends the same request as before: no query string, and the body `{ message }` when a message is given, `{}` otherwise. `packageId` combines with `message`, which still rides the body. The environment-scoped `client.environment(id).meta` declares no `publishItem`, and this release adds none.
+
+### Patch Changes
+
+- a1285f2: feat(cli): `os meta delete` and `os meta register` take `--package <id>`, so a CLI user can follow the `409 RESOURCE_CONFLICT` remedy the metadata doors prescribe for an item two packages hold (#23350)
+  
+  Clause-②: yes (widening)
+  
+  **What is new.** Both commands declare an optional `--package` flag, a package id such as `com.acme.crm`, and forward it verbatim as the SDK's `packageId`, sent as `?package=<id>`:
+  
+  ```bash
+  os meta delete view shared_grid --package com.acme.crm              # removes com.acme.crm's row of the item, no other package's row
+  os meta register view --data view-def.json --package com.acme.crm   # writes com.acme.crm's row of the item
+  ```
+  
+  **Why.** A metadata item can hold one row per package (ADR-0048). When two or more packages hold an item, the reset door `DELETE /api/v1/meta/:type/:name` and the save door `PUT /api/v1/meta/:type/:name` both refuse a request that names no package, with `409 RESOURCE_CONFLICT`. The refusal names the packages and prescribes `?package=`. Neither command could send it, so a CLI user was told to do something the CLI could not do.
+  
+  **Unchanged.** Without `--package`, both commands send the same request as before: `os meta delete` adds no query string unless `--draft` is given, and `os meta register` saves active with no query string. `--package` combines with `--draft` and `--if-match` on `os meta delete`. An empty `--package` (for example `--package "$PKG"` with `PKG` unset) is refused before anything is sent, as an empty `--if-match` already is, because a package-less request is not always refused: the server may resolve it to a row the operator did not mean.
+  
+  **`@objectstack/client` (patch).** The `DeleteMetaItemOptions` docblock now names the reset door's carriers (`If-Match`, `state`, `package`, `dropStorage`, `member`) instead of stating a count that had gone stale. No type or behavior changes.
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [c03077e]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

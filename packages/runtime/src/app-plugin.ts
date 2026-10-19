@@ -19,13 +19,14 @@ import {
     assertProtocolCompat,
     type ArtifactForwardConversionResult,
 } from '@objectstack/metadata-core';
+import { OBJECTQL_DRIVERS_READY_HOOK } from '@objectstack/objectql';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
 import { contributeCodeDatasourceNames } from './code-datasource-names.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
-import { declareSeedSource } from './seed-settlement.js';
+import { declareSeedSource, recordOrganizationReplay, type SeedLandingReport } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
 import type { IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
@@ -133,9 +134,19 @@ export class AppPlugin implements Plugin {
      * the same invariant, so it is ordered ahead for the same reason.
      * Order-if-present: a composition with neither registers no organization
      * object, and its seeds keep today's unstamped branch.
+     *
+     * The v18 boot guard (ADR-0131 D10 item 5; the name is the guard module's
+     * `ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME`, spelled as a literal
+     * because `check:init-service-contract` reads this array as string literals
+     * only): on a kernel that composes it (`os serve`), the guard judges the
+     * database in its own
+     * `start()`, and a database it refuses must be left as it found it — so this
+     * plugin's `start()`, which loads the inline seed, runs only after the guard
+     * has judged. Order-if-present: every other kernel is unchanged.
      */
     optionalDependencies = [
         'com.objectstack.engine.objectql',
+        'com.objectstack.organization-ownership-boot-guard',
         'com.objectstack.auth',
         'com.objectstack.auth.identity-objects',
     ];
@@ -149,6 +160,16 @@ export class AppPlugin implements Plugin {
      */
     requiresServices: string[] = ['manifest'];
 
+    /**
+     * Private to the type checker only: three readers outside this class read
+     * `bundle` structurally off a plugin entry, with no type to break when it
+     * changes. `stackDeclaresOrganizationRecordPage` (`@objectstack/core`,
+     * `stack-organization-record-page.ts`) looks for an app's own
+     * `sys_organization` record page; `@objectstack/cli`'s `serve.ts` looks for
+     * declared translations, and its `graft-runtime-hooks.ts` finds an app's
+     * bundle by manifest id to graft hooks onto. Renaming or reshaping this
+     * field silently blinds all three; change them together.
+     */
     private bundle: any;
     /** Memoized backing store for {@link collections}. */
     private resolvedCollections?: any;
@@ -185,6 +206,12 @@ export class AppPlugin implements Plugin {
      * the residual-owner warning prints once, at whichever read comes first.
      */
     private codeDatasourceOwners?: Array<{ datasource: any; owner: { packageId?: string; packageVersion?: string } }>;
+    /**
+     * [#23649] Set once {@link installDatasourceMapping} has handed the stack's
+     * rules to the engine, so `start()` installs them only on a composition
+     * whose engine never announced its pre-sync moment.
+     */
+    private datasourceMappingInstalled = false;
     /** Memoized backing store for {@link forwardConverted} — the boot's one conversion. */
     private bootConversion?: ArtifactForwardConversionResult<any>;
     /** When true, init/start become no-ops — env has no app payload. */
@@ -571,6 +598,17 @@ export class AppPlugin implements Plugin {
         contributeCodeDatasourceNames(ctx, () => this.codeDefinedDatasourceOwners(ctx)
             .map(({ datasource }) => datasource?.name)
             .filter((name): name is string => typeof name === 'string' && name.length > 0));
+
+        // [#23649] The stack's `datasourceMapping` governs the engine from its
+        // FIRST schema sync — see `honourDatasourceMappingBeforeSchemaSync`.
+        // Subscribed here and resolved there: the rules come from `collections`,
+        // which walks `packages[]`, and the registration above is the one thing
+        // in `init()` allowed to touch that list. A context with no hook bus (a
+        // mock) leaves `start()` to install the rules.
+        if (typeof (ctx as { hook?: unknown }).hook === 'function') {
+            ctx.hook(OBJECTQL_DRIVERS_READY_HOOK, (engine: unknown) =>
+                this.honourDatasourceMappingBeforeSchemaSync(ctx, engine as IObjectQLEngine, appId));
+        }
     }
 
     /**
@@ -767,6 +805,128 @@ export class AppPlugin implements Plugin {
             },
         });
         ctx.logger.debug('[AppPlugin] Installed hook-metrics Server-Timing feed');
+    }
+
+    /**
+     * Hand the stack's `datasourceMapping` rules to the engine — the one
+     * install site, called at most once per boot. Answers whether there were
+     * rules to install.
+     */
+    private installDatasourceMapping(ctx: PluginContext, ql: IObjectQLEngine, appId: string): boolean {
+        this.datasourceMappingInstalled = true;
+        const datasourceMapping = this.collections.datasourceMapping;
+        if (!Array.isArray(datasourceMapping)) return false;
+        ctx.logger.info('Configuring datasource mapping rules', {
+            appId,
+            ruleCount: datasourceMapping.length,
+        });
+        ql.setDatasourceMapping(datasourceMapping);
+        return datasourceMapping.length > 0;
+    }
+
+    /**
+     * [#23649] Make the stack's `datasourceMapping` govern the engine from its
+     * FIRST schema sync. Runs inside `ObjectQLPlugin.start()`, on
+     * `OBJECTQL_DRIVERS_READY_HOOK`: the boot's drivers are adopted and
+     * connected, and nothing has been synced, hydrated, read or written yet.
+     *
+     * Two steps, in this order:
+     *
+     *  1. install the rules ({@link installDatasourceMapping});
+     *  2. connect every declared datasource they route an ALREADY-REGISTERED
+     *     object to — platform objects included — through the same
+     *     `connectDeclared` `start()` calls (ADR-0062 D2 (d): "a datasource a
+     *     mapping rule routes at least one registered object to is
+     *     auto-connected at boot", fail-fast on a `declared-auto` failure). The
+     *     connect also syncs those objects' schemas onto the datasource, and the
+     *     engine plugin's own sync that follows finds them there.
+     *
+     * Before this, the rules were installed in `start()`, after the engine
+     * plugin's schema sync and after the auth plugin's Default Organization
+     * had both used the default store, and step 2 counted this app's own
+     * objects only. A `{ default: true, datasource: 'primary' }` rule then
+     * re-routed every platform object to a `primary` whose schema never
+     * synced: the server reported ready while the URL store held the platform
+     * tables and the Default Organization, and `primary` answered "no such
+     * table". A rule routing platform objects to a datasource nothing else
+     * addressed (`objectPattern: 'sys_*'`) left it never connected at all.
+     *
+     * Which objects a rule matches is the ENGINE's answer
+     * ({@link resolveMappedObjects}), over the same registry the sync reads.
+     * Objects registered after this moment are routed by the installed rules
+     * as they arrive; `start()` connects for them as it always has. A
+     * datasource no rule routes a registered object to is left to `start()`,
+     * which connects it by its other D2 reasons at the moment it always did.
+     *
+     * Connecting HERE, after the engine adopted its `driver.*` services, keeps
+     * the default driver what it was: the engine makes its first registered
+     * driver the default, so a mapped datasource connected earlier (in
+     * `init()`) would take that slot from a stack plugin's driver.
+     */
+    private async honourDatasourceMappingBeforeSchemaSync(
+        ctx: PluginContext,
+        ql: IObjectQLEngine,
+        appId: string,
+    ): Promise<void> {
+        if (this.datasourceMappingInstalled) return;
+        if (!this.installDatasourceMapping(ctx, ql, appId)) return;
+
+        const dsDefs = this.convertedCollection(ctx, 'datasources');
+        const dsList: any[] = Array.isArray(dsDefs)
+            ? dsDefs
+            : dsDefs && typeof dsDefs === 'object'
+                ? Object.entries(dsDefs).map(([name, def]) => ({ name, ...(def as any) }))
+                : [];
+        if (dsList.length === 0) return;
+
+        // Absent on a runtime without the datasource-admin plugin: declared
+        // datasources stay metadata-only there, and `start()` says so.
+        let connection:
+            | {
+                  connectDeclared?: (input: {
+                      datasources: any[];
+                      objects?: Array<{ name?: string; datasource?: string }>;
+                      mappedObjects?: Record<string, string[]>;
+                  }) => Promise<Array<{ name: string; status: string }>>;
+              }
+            | undefined;
+        try {
+            connection = ctx.getService('datasource-connection');
+        } catch {
+            connection = undefined;
+        }
+        if (typeof connection?.connectDeclared !== 'function') return;
+
+        const registered = ql.registry.getAllObjects() as Array<{ name?: string; datasource?: string }>;
+        const mappedObjects = this.resolveMappedObjects(ql, registered);
+        const routedTo = dsList.filter(
+            (ds) => typeof ds?.name === 'string' && (mappedObjects[ds.name]?.length ?? 0) > 0,
+        );
+        if (routedTo.length === 0) return;
+
+        const declaredObjects = this.convertedCollection(ctx, 'objects');
+        try {
+            const results = await connection.connectDeclared({
+                datasources: routedTo,
+                objects: Array.isArray(declaredObjects) ? declaredObjects : [],
+                mappedObjects,
+            });
+            const connected = results.filter((r) => r.status === 'connected');
+            if (connected.length > 0) {
+                ctx.logger.info('Auto-connected declared datasources', {
+                    appId,
+                    connected: connected.map((r) => r.name),
+                    before: 'schema sync',
+                });
+            }
+        } catch (err) {
+            // Same verdict and the same line as `start()`'s connect: a
+            // datasource a mapping routes objects to has no fallback store.
+            ctx.logger.error(
+                `[AppPlugin] declared-datasource auto-connect failed for app '${appId}': ${(err as Error)?.message ?? String(err)}`,
+            );
+            throw err;
+        }
     }
 
     /**
@@ -1080,14 +1240,15 @@ export class AppPlugin implements Plugin {
 
         ctx.logger.debug('Retrieved ObjectQL engine service', { appId });
 
-        // Configure datasourceMapping if provided in the stack definition
-        const datasourceMapping = this.collections.datasourceMapping;
-        if (datasourceMapping && Array.isArray(datasourceMapping)) {
-            ctx.logger.info('Configuring datasource mapping rules', {
-                appId,
-                ruleCount: datasourceMapping.length
-            });
-            ql.setDatasourceMapping(datasourceMapping);
+        // [#23649] The stack's `datasourceMapping` is normally already installed:
+        // `honourDatasourceMappingBeforeSchemaSync` ran inside
+        // `ObjectQLPlugin.start()`, before its schema sync. Installed HERE only on
+        // a composition that never announced that moment (no `ObjectQLPlugin`
+        // start on this kernel, e.g. a declaration-only boot that suppresses
+        // it, or a mock context with no hook bus), where nothing synced or
+        // wrote through that engine before this line.
+        if (!this.datasourceMappingInstalled) {
+            this.installDatasourceMapping(ctx, ql, appId);
         }
 
         // Surface code-defined datasources (ADR-0015 Addendum) in the metadata
@@ -1699,6 +1860,11 @@ export class AppPlugin implements Plugin {
                          },
                      });
                      const result = await seedLoader.load(request);
+                     // [#23354] The rows this replay landed on, for the
+                     // organization's owner-bind claim (`seededRecordIds` with
+                     // this organization): it hands over these rows and no
+                     // other unowned row of the organization (ADR-0138 D1).
+                     recordOrganizationReplay(ctx, organizationId, result.results);
                      return {
                          inserted: result.summary.totalInserted,
                          updated: result.summary.totalUpdated,
@@ -1784,6 +1950,12 @@ export class AppPlugin implements Plugin {
                           },
                       });
                       const result = await seedLoader.load(request);
+                      // [#23354] Publish the rows this seed landed on BEFORE the
+                      // source settles, so the seed-ownership claim that runs on
+                      // `app:seeded` reads them: it hands over these rows and no
+                      // other unowned row (ADR-0138 D1). A replay on a later
+                      // boot reports the rows an earlier boot wrote, too.
+                      seedSource.publishLanded(result.results);
                       const { totalInserted, totalUpdated, totalSkipped, totalErrored } = result.summary;
                       // "Wrote the row, lost the link" (#3932): a reference field
                       // dropped from a row that WAS written moves none of the row
@@ -1845,30 +2017,42 @@ export class AppPlugin implements Plugin {
                   } else {
                       // Fallback: basic insert when metadata service is not available
                       ctx.logger.debug('[Seeder] No metadata service; using basic insert fallback');
+                      const landed: SeedLandingReport[number][] = [];
                       for (const dataset of normalizedDatasets) {
                           ctx.logger.info(`[Seeder] Seeding ${dataset.records.length} records for ${dataset.object}`);
+                          const landedIds: string[] = [];
                           for (const record of dataset.records) {
                               try {
-                                  await ql.insert(dataset.object, record, SEED_WRITE_OPTIONS as any);
+                                  const row: any = await ql.insert(dataset.object, record, SEED_WRITE_OPTIONS as any);
+                                  if (row?.id != null) landedIds.push(String(row.id));
                               } catch (err: any) {
                                   ctx.logger.warn(`[Seeder] Failed to insert ${dataset.object} record:`, { error: err.message });
                               }
                           }
+                          landed.push({ object: dataset.object, landedIds });
                       }
+                      // [#23354] Still this source's rows: published like the loader's.
+                      seedSource.publishLanded(landed);
                       ctx.logger.info('[Seeder] Data seeding complete.');
                   }
               } catch (err: any) {
                   // If SeedLoaderService fails (e.g., metadata not available), fall back to basic insert
                   ctx.logger.warn('[Seeder] SeedLoaderService failed, falling back to basic insert', { error: err.message });
+                  const landed: SeedLandingReport[number][] = [];
                   for (const dataset of normalizedDatasets) {
+                      const landedIds: string[] = [];
                       for (const record of dataset.records) {
                           try {
-                              await ql.insert(dataset.object, record, SEED_WRITE_OPTIONS as any);
+                              const row: any = await ql.insert(dataset.object, record, SEED_WRITE_OPTIONS as any);
+                              if (row?.id != null) landedIds.push(String(row.id));
                           } catch (insertErr: any) {
                               ctx.logger.warn(`[Seeder] Failed to insert ${dataset.object} record:`, { error: insertErr.message });
                           }
                       }
+                      landed.push({ object: dataset.object, landedIds });
                   }
+                  // [#23354] Still this source's rows: published like the loader's.
+                  seedSource.publishLanded(landed);
                   ctx.logger.info('[Seeder] Data seeding complete (fallback).');
               }
              })();

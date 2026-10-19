@@ -66,11 +66,34 @@ ARG OS_CLI_VERSION=latest
 # deployment can reach, so the two files must move in the same commit:
 # `pnpm check:docs-image-tag` fails when the install line and that table
 # disagree on the package set or on a version range.
-RUN npm install -g \
+#
+# The install runs under a PINNED npm 11, not the image's own npm (#23788).
+# node:22-slim bundles npm 10 (10.9.9, measured 2026-10-16), whose arborist
+# crashes on this install with `Cannot read properties of null (reading
+# 'edgesOut')` since vitest@4.1.12 was published: optional `vitest` peers in
+# the CLI's tree reach its self-contradicting peer set. npm 11 installs it,
+# and a global install reads no `overrides`, so the fix has to be the installer.
+# The version is the one `PROBE_INSTALLER_NPM` in
+# scripts/check-vendor-export-contract.mjs holds for the same crash.
+#
+# The installer is fetched into /tmp with the image's npm (npm bundles its
+# dependencies, so that fetch walks no peer graph), put first on PATH for this
+# RUN only, and deleted in the same layer: the image still ships node:22-slim's
+# npm, and does not grow by the installer's 20 MB. The `test` refuses to
+# continue if PATH did not hand the install to that exact npm. Not taken:
+# `npm install -g npm@…`, which replaces the image's npm for every user of the
+# image; `npx npm@…`, which leaves 20 MB in ~/.npm/_npx after `npm cache clean`
+# (measured); `--legacy-peer-deps`, which also skips REQUIRED peers (measured on
+# the vendor-export probe).
+RUN npm install --prefix /tmp/os-installer-npm --no-save --no-audit --no-fund "npm@11.21.0" \
+ && export PATH="/tmp/os-installer-npm/node_modules/.bin:$PATH" \
+ && test "$(npm --version)" = "11.21.0" \
+ && npm install -g \
       @objectstack/cli@${OS_CLI_VERSION} \
       "pg@^8.0.0" \
       "mysql2@^3.0.0" \
- && npm cache clean --force
+ && npm cache clean --force \
+ && rm -rf /tmp/os-installer-npm
 
 LABEL org.opencontainers.image.source="https://github.com/objectstack-ai/objectstack" \
       org.opencontainers.image.title="ObjectStack" \

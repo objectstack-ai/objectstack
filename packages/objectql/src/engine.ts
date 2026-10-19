@@ -98,7 +98,7 @@ import {
   resolveBundleLocale,
   SystemFieldName,
 } from '@objectstack/spec/system';
-import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
+import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 // [#21120] The family-wide stored-metadata-body seam. A `data.record.*` event
 // carries the written row in `after` (and the input patch in `changes`), so a
 // subscriber to `sys_metadata` / `sys_metadata_history` events would receive
@@ -143,6 +143,9 @@ import {
   // keys, before file-field hydration forwards it to the download door's
   // field-owned verdict — see `readParentDerivedFiles`.
   withoutOperationPrivateKeys,
+  // [ADR-0131 D8] The ONE tenant read predicate, shared with plugin-security's
+  // Layer 0 — see {@link buildDriverOptions}.
+  computeTenantLayer0Verdict,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
@@ -184,6 +187,7 @@ import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 // vocabulary of "benign driver error" is the exact debt that module exists to
 // retire, and `check:durability-log-level` exempts only this declared name.
 import { isMissingTableError } from '@objectstack/metadata/errors';
+import { applyArtifactForwardConversions, resolveDeclaredRange } from '@objectstack/metadata-core';
 // [#6806] The ONE shared "is this driver error a unique-constraint violation?"
 // predicate, and its narrower companion "which column conflicted" (#6250 /
 // #6544, both landed in `@objectstack/types`). The engine's autonumber
@@ -264,7 +268,7 @@ import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
-import { expandSearchToFilter } from './search-filter.js';
+import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine, toEvalPermissions, type EvalError, type EvalPermissions } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
@@ -286,12 +290,12 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 // [#20331] The divergent view-container `name` refusal — the ONE judge this
 // registrar and `os validate` both call.
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
-import { bindHooksToEngine } from './hook-binder.js';
+import { bindHooksToEngine, type BindHooksOptions } from './hook-binder.js';
 import { declaredHookCondition } from './hook-wrappers.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
-import { collectPredicateRelationships, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
+import { collectPredicateRelationships, collectReferenceTraversals, referenceTraversalConflicts, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -1546,6 +1550,21 @@ interface FormulaPlanEntry {
    * evaluator's value verbatim", which is what every formula did before this.
    */
   scale?: number;
+  /**
+   * [#24197] The reference fields this formula reads ONE hop through, and the
+   * related fields it names on each (`record.book.title` → `book → {title}`).
+   * Absent when the formula traverses nothing — every formula before #24197,
+   * and still the common case — which is what lets such a read skip the
+   * related read entirely.
+   */
+  hops?: ReadonlyMap<string, ReadonlySet<string>>;
+  /**
+   * [#24197] Why this formula's traversal cannot be served (a second hop; a
+   * reference read both through and as a value), worded for the author. Such a
+   * formula is not evaluated: it reads `null` and the fault sink carries this
+   * sentence — the lint refuses the same shape with the same words.
+   */
+  hopConflict?: string;
 }
 
 /**
@@ -1676,10 +1695,21 @@ function planFormulaProjection(
       const expr: Expression = typeof def.expression === 'string'
         ? { dialect: 'cel', source: def.expression }
         : def.expression;
-      plan.push({ name: f, expression: expr, scale: formulaRoundingScale(def) });
+      const entry: FormulaPlanEntry = { name: f, expression: expr, scale: formulaRoundingScale(def) };
+      // [#24197] The one hop this formula reads through a reference field, if
+      // any — judged by the validation-rule path's own collector, so the two
+      // seams that serve a hop read the same hops off the same expression.
+      const conflicts = referenceTraversalConflicts(expr, schema.fields, 'formula');
+      if (conflicts.length > 0) {
+        entry.hopConflict = conflicts.map((c) => c.message).join(' ');
+      } else {
+        const hops = collectReferenceTraversals([expr], schema.fields);
+        if (hops.size > 0) entry.hops = hops;
+      }
+      plan.push(entry);
       // Pre-compile to surface syntax errors at planning stage rather than
-      // per-row eval. Dependency discovery (which fields the formula reads)
-      // is no longer used — CEL uses dynamic projection via `record.<field>`.
+      // per-row eval. Own-column dependency discovery is not used — CEL reads
+      // the row via `record.<field>`; only the hops above are planned.
       ExpressionEngine.compile(expr);
     } else if (Array.isArray(requestedFields) && requestedFields.length > 0) {
       projected.add(f);
@@ -1986,6 +2016,42 @@ function assertProjectionHasNoDottedPaths(
   err.fields = dotted;
   err.object = object;
   throw err;
+}
+
+/**
+ * [#24284] The refusal for a non-blank `search` over an object whose RESOLVED
+ * search set is empty — no `searchableFields` entry naming a stored field, and
+ * no field of a type the auto-default scans (the junction shape: lookups plus
+ * a composed formula title). Without it the expansion added no predicate and
+ * the read answered every row.
+ *
+ * `INVALID_FIELD`, the code #4254's explicit-override gate answers on this
+ * same axis (and the one a search naming a formula title gets), not
+ * `INVALID_QUERY`: the request is well-formed, and what cannot be honoured is
+ * a fact about the object's FIELDS. 400 on every door, and the same answer for
+ * every caller — it is derived from the declaration, never from the caller's
+ * permissions (a narrowing by field-level security happens later, in the
+ * predicate guard, and `searchAll` hands the engine only the queryable subset).
+ */
+function emptySearchSetError(object: string, schema: any, internalExcluded: boolean): Error {
+  const declared: unknown[] = Array.isArray(schema?.searchableFields) ? schema.searchableFields : [];
+  const err: any = new Error(
+    `Object '${object}' has no searchable field, so 'search' cannot be honoured on it`
+    + (declared.length > 0
+      ? `: its 'searchableFields' (${declared.join(', ')}) names no stored field`
+      : `: it declares no 'searchableFields', and none of its fields is a type the default `
+        + `search scans (${[...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ')})`)
+    + (internalExcluded ? " ('internal: true' fields are never searched)" : '')
+    + '. Answering every row instead would read as "everything matched". Declare '
+    + `'searchableFields' on '${object}' naming a stored field, or mirror the composed title `
+    + `onto a stored text field and search that.`,
+  );
+  err.status = 400;
+  err.httpStatus = 400;
+  err.code = 'INVALID_FIELD';
+  err.object = object;
+  err.param = 'search';
+  return err;
 }
 
 /**
@@ -2579,12 +2645,99 @@ function roundFormulaValue(value: unknown, scale: number | undefined): unknown {
  */
 type FormulaFaultSink = (field: string, error: EvalError) => void;
 
+/**
+ * [#24197] What a formula read hands {@link applyFormulaPlan} for the hops its
+ * plan reads: the per-row related bindings
+ * ({@link ObjectQL.resolveFormulaRelated}), or — when this read serves no hop
+ * at all — the sentence saying why, which every traversing formula of the read
+ * then reports.
+ */
+type FormulaRelated = ((row: Record<string, unknown>) => RelatedRecordBinding | undefined) | string;
+
+/** [#24197] Why a hop was not served where no reader supplied one. */
+const FORMULA_HOP_NOT_SERVED =
+  'this evaluation reads no related record — only a read (`find` / `findOne`) or a write\'s response '
+  + 'preloads the one hop a formula reads through a reference';
+
+/**
+ * [#24197] The record ONE formula is evaluated against: a shallow copy whose
+ * reference fields this formula reads through carry the related row, or the
+ * reason it cannot be evaluated at all.
+ *
+ * The validation path's verdicts, kept ({@link RelatedFieldBinding}): a related
+ * record that was not found — or that this reader may not read, which a
+ * caller-authority read cannot tell apart and must not — a related object that
+ * declares no such field, and a failed read each leave the formula UNEVALUATED,
+ * so it reads `null` WITH a reason, never a value computed over a record that
+ * was not there. ⛔ Never a fallback evaluated in its place: an optional read
+ * would turn "not found" into the author's empty-reference default, which is
+ * data the reader cannot tell from a real answer.
+ *
+ * An EMPTY reference is the one case that is evaluated: the author can say
+ * what an empty reference means (`record.book.?title.orValue('—')`), and the
+ * field keeps its stored empty value, so a plain read through it faults
+ * exactly as before and the fault names the repair (`empty`).
+ *
+ * Per formula, onto a copy: hydrating replaces a reference's stored id with a
+ * row, and a sibling formula that reads the id, and the record the read
+ * returns, must keep seeing the id.
+ */
+function formulaHopScope(
+  rec: Record<string, unknown>,
+  hops: ReadonlyMap<string, ReadonlySet<string>>,
+  related: FormulaRelated | undefined,
+): { ok: true; record: Record<string, unknown>; empty: string[] } | { ok: false; reason: string } {
+  if (typeof related !== 'function') return { ok: false, reason: related ?? FORMULA_HOP_NOT_SERVED };
+  const binding = related(rec);
+  let copy: Record<string, unknown> | undefined;
+  const empty: string[] = [];
+  for (const [field, named] of hops) {
+    const b = binding?.[field];
+    if (!b) return { ok: false, reason: FORMULA_HOP_NOT_SERVED };
+    // ⛔ Only the row this record's own foreign key names.
+    if (b.row && b.row.id != null && String(b.row.id) === String(rec[field])) {
+      if (!copy) copy = { ...rec };
+      copy[field] = b.row;
+      continue;
+    }
+    if (!b.row && b.unavailable === 'no-reference') { empty.push(field); continue; }
+    return { ok: false, reason: formulaHopRefusal(field, b, named) };
+  }
+  return { ok: true, record: copy ?? rec, empty };
+}
+
+/**
+ * [#24197] The sentence a formula that could not read its hop reports. It names
+ * the RELATED object and field, as the validation path's refusal does, and it
+ * never says WHICH of "not found" and "not readable by this reader" held: a
+ * reader who may not see the related record learns nothing from the formula.
+ */
+function formulaHopRefusal(field: string, b: RelatedFieldBinding, named: ReadonlySet<string>): string {
+  const columns = [...named].sort().map((n) => `'${n}'`).join(', ');
+  const on = `\`${field}\` (object '${b.object}')`;
+  switch (b.unavailable) {
+    case 'undeclared-field': {
+      const missing = (b.undeclaredFields ?? []).map((n) => `'${n}'`).join(', ') || columns;
+      return `the formula reads ${missing} through ${on}, but '${b.object}' declares no such field: fix the `
+        + `expression, or declare ${missing} on '${b.object}' — not on the object carrying this formula`;
+    }
+    case 'unreadable':
+      return `the formula reads ${columns} through ${on}, and that read failed, so it has no value`;
+    case 'no-reference':
+    case 'unresolved':
+    default:
+      return `the formula reads ${columns} through ${on}, and the record it names was not found by this `
+        + 'read (it does not exist, or this reader may not read it), so it has no value';
+  }
+}
+
 function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
   execCtx?: ExecutionContext,
   permissions?: EvalPermissions,
   onFault?: FormulaFaultSink,
+  related?: FormulaRelated,
 ): void {
   if (!plan.length) return;
   const now = new Date();
@@ -2594,7 +2747,26 @@ function applyFormulaPlan(
   for (const rec of records) {
     if (rec == null) continue;
     for (const fp of plan) {
-      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, record: rec });
+      // [#24197] A traversal the one-hop read cannot serve is not evaluated:
+      // it reads null and says why, in the lint's own words.
+      if (fp.hopConflict) {
+        rec[fp.name] = null;
+        onFault?.(fp.name, { kind: 'runtime', message: fp.hopConflict });
+        continue;
+      }
+      let scope: Record<string, unknown> = rec;
+      let empty: string[] = [];
+      if (fp.hops) {
+        const hop = formulaHopScope(rec, fp.hops, related);
+        if (!hop.ok) {
+          rec[fp.name] = null;
+          onFault?.(fp.name, { kind: 'runtime', message: hop.reason });
+          continue;
+        }
+        scope = hop.record;
+        empty = hop.empty;
+      }
+      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, record: scope });
       if (r.ok) {
         rec[fp.name] = roundFormulaValue(r.value, fp.scale);
         continue;
@@ -2605,7 +2777,14 @@ function applyFormulaPlan(
       // call site must not silently turn a bad expression into `null`): the
       // sink names the field and the evaluator's error.
       rec[fp.name] = null;
-      onFault?.(fp.name, r.error);
+      onFault?.(fp.name, empty.length === 0 ? r.error : {
+        ...r.error,
+        // [#24197] The fault on a record whose reference is EMPTY names the
+        // repair first; the evaluator's own message follows it.
+        message: `${empty.map((f) => `\`${f}\``).join(', ')} holds no single reference on this record (it is `
+          + 'empty, or holds several), so the formula has no related record to read through it; to give the '
+          + `formula a value while it is empty, write the optional read \`record.${empty[0]}.?<related field>.orValue('…')\`.\n${r.error.message}`,
+      });
     }
   }
 }
@@ -2657,6 +2836,8 @@ async function hydrateWriteFormulas(
   execCtx: ExecutionContext | undefined,
   permissionsFor: (plan: FormulaPlanEntry[], records: readonly unknown[]) => Promise<EvalPermissions | undefined>,
   onFault?: FormulaFaultSink,
+  /** [#24197] The hops the plan reads, resolved over `records` as a read resolves them. */
+  relatedFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaRelated | undefined>,
 ): Promise<void> {
   const records = results.filter(
     (r): r is Record<string, unknown> => r != null && typeof r === 'object',
@@ -2664,7 +2845,7 @@ async function hydrateWriteFormulas(
   if (records.length === 0) return;
   const { plan } = planFormulaProjection(schema, undefined);
   if (plan.length === 0) return;
-  applyFormulaPlan(plan, records, execCtx, await permissionsFor(plan, records), onFault);
+  applyFormulaPlan(plan, records, execCtx, await permissionsFor(plan, records), onFault, await relatedFor?.(plan, records));
 }
 
 /**
@@ -2706,8 +2887,11 @@ async function hydrateWriteFormulas(
  * ⚠️ One scope difference, named rather than hidden [#20082]: this helper is
  * synchronous and passes NO permission map, so a formula that calls
  * `current_user.can(…)` does not evaluate here and yields `null` by the rule
- * above. The read and write paths resolve the map first
+ * above. [#24197] For the same reason it preloads no relationship hop, so a
+ * formula reading `record.<reference>.<field>` yields `null` here too. The read and write paths resolve the map first
  * ({@link ObjectQL.resolveFormulaPermissions}); a helper with no resolver cannot.
+ * A caller that holds a read channel and wants the read's answer calls
+ * {@link ObjectQL.serveFormulaField} (through `ScopedContext.serveFormulaField`).
  *
  * Returns `undefined` when `field` is not a declared formula field, which is
  * how a caller tells "read the stored column instead" from "the formula
@@ -2724,6 +2908,8 @@ export function evaluateFormulaField(
   const { plan } = planFormulaProjection(schema as any, [field]);
   if (plan.length === 0) return undefined;
   const scratch: Record<string, unknown> = { ...record };
+  // [#24197] Synchronous, so it preloads no hop: a formula reading through a
+  // reference yields `null` here, as a `can()` formula does above.
   applyFormulaPlan(plan, [scratch], execCtx);
   return scratch[field];
 }
@@ -3916,6 +4102,16 @@ function eventOrganizationValue(value: unknown): string | undefined {
 }
 
 /**
+ * [ADR-0105 D2] The context's organization access set
+ * (`ExecutionContext.accessible_org_ids`), stringified — `undefined` when
+ * absent or empty, which the verdict reads as "no membership" under `group`.
+ */
+function accessibleOrganizationsOf(execCtx: ExecutionContext | undefined): string[] | undefined {
+  const set = (execCtx as { accessible_org_ids?: unknown } | undefined)?.accessible_org_ids;
+  return Array.isArray(set) && set.length > 0 ? set.map(String) : undefined;
+}
+
+/**
  * `BulkDataEvent.organizationId` — the ONE organization the tenant wall named
  * for a predicate write, or `undefined` when the producer cannot assert one
  * (#15225, the bulk half of the cross-tenant fan-out leak whose single-record
@@ -4670,6 +4866,8 @@ export class ObjectQL implements IObjectQLEngine {
     strict?: boolean;
     warnLegacyHandler?: boolean;
     metrics?: any;
+    /** Wraps each in-process handler after its name resolves — see {@link BindHooksOptions.wrapHandler}. */
+    wrapHandler?: BindHooksOptions['wrapHandler'];
   }): void {
     const merged = { ...(opts ?? {}), logger: this.logger } as any;
     if (!merged.bodyRunner && this._defaultBodyRunner) {
@@ -6013,6 +6211,115 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#24197] The query objects {@link resolveOneHopRelated} issues to read a
+   * formula's hop. A `find` handed one of them computes the related object's
+   * formulas but serves them no hop of their own — see
+   * {@link resolveFormulaRelated}. Keyed on the object identity, so the marker
+   * never rides a context, a hook or a middleware anywhere else.
+   */
+  private readonly formulaHopReads = new WeakSet<object>();
+
+  /**
+   * [#24197] The related rows a formula plan reads ONE hop through a
+   * reference field, resolved for a whole page of `rows` at once — the
+   * formula half of {@link resolveOneHopRelated}, read under the CALLER's
+   * own authority.
+   *
+   * ## What it costs
+   *
+   * Nothing for a plan that traverses nothing (no query, no closure). For one
+   * that does: one batched read per reference field per call — per PAGE of a
+   * `find` (the rows the driver returned, after `limit` / `offset`), per row of
+   * a `findOne`, per write response — never one per row. A formula whose
+   * traversal cannot be served (`hopConflict`) asks for nothing.
+   *
+   * ## One hop, and only one
+   *
+   * A `find` that IS a hop read ({@link formulaHopReads}) serves no hop of its
+   * own: the related object's own formulas over its own columns are computed,
+   * one that reads through a reference of ITS own reads `null` and says so.
+   * That is the declared depth (a second hop is not loaded — the lint refuses
+   * one written out, this refuses one reached through a formula), and it is
+   * what keeps two objects whose titles read each other from recursing.
+   */
+  private async resolveFormulaRelated(
+    schema: any,
+    plan: readonly FormulaPlanEntry[],
+    rows: ReadonlyArray<Record<string, unknown> | undefined | null>,
+    context: unknown,
+    query?: EngineQueryOptions,
+  ): Promise<FormulaRelated | undefined> {
+    const wanted = new Map<string, Set<string>>();
+    for (const entry of plan) {
+      if (entry.hopConflict) continue;
+      for (const [fk, named] of entry.hops ?? []) {
+        let set = wanted.get(fk);
+        if (!set) wanted.set(fk, (set = new Set()));
+        for (const name of named) set.add(name);
+      }
+    }
+    if (wanted.size === 0) return undefined;
+    if (query && this.formulaHopReads.has(query)) {
+      return `this object was itself read one hop through a reference by another object's formula, and a `
+        + 'formula resolves ONE hop: a formula read this way does not read through a reference of its own '
+        + '(a second hop). Store the value on this object as a field of its own to read it from there';
+    }
+    const lookup = await this.resolveOneHopRelated(schema, wanted, rows, context, 'caller');
+    return (row) => lookup(row);
+  }
+
+  /**
+   * [#24197] Materialize ONE declared `formula` field against a record already
+   * in hand, SERVED the way a read serves it: the one hop the formula reads
+   * through a reference field ({@link resolveFormulaRelated}), the `can()`
+   * permission map ({@link resolveFormulaPermissions}) and the fault report
+   * ({@link formulaFaultSink}), all under `context`.
+   *
+   * The asynchronous twin of the module's {@link evaluateFormulaField}, which
+   * is synchronous and so serves none of the three. It exists for a record the
+   * engine never read back — a hook's in-flight state (stored ⊕ payload), whose
+   * foreign keys may name records the stored row does not — so the title a hook
+   * body asks for (`ctx.title()`) is the title a read of that state would show.
+   *
+   * ## Under which authority, on which connection
+   *
+   * `context` is the reader's own: every hop is the reader's own `find`, through
+   * every enforcement layer a read applies, exactly as the read path's hop is
+   * (`authority: 'caller'`). A related record that read does not return leaves
+   * the formula `null` with the read path's reason — never a fallback. A context
+   * carrying a `transaction` reads on that transaction's connection, so a body
+   * that opened one never asks the pool for a second (a deadlock on SQLite's
+   * `pool max=1`). Call it through {@link ScopedContext.serveFormulaField},
+   * which hands in the context the body's own `ctx.api` reads with.
+   *
+   * ## What it costs
+   *
+   * One batched read per reference field the formula reads through — the read
+   * path's own cost for one row — and nothing for a formula over the record's
+   * own columns. A read that is itself a formula's hop serves no hop of its own,
+   * so a second hop reads `null` with its reason here as it does on a read.
+   *
+   * Returns `undefined` when `field` is not a declared formula field on
+   * `objectName`, as {@link evaluateFormulaField} does. Evaluates against a
+   * shallow COPY of `record`.
+   */
+  async serveFormulaField(
+    objectName: string,
+    record: Record<string, unknown>,
+    field: string,
+    context?: ExecutionContext,
+  ): Promise<unknown> {
+    const schema = this._registry.getObject(objectName);
+    const { plan } = planFormulaProjection(schema, [field]);
+    if (plan.length === 0) return undefined;
+    const scratch: Record<string, unknown> = { ...record };
+    applyFormulaPlan(plan, [scratch], context, await this.resolveFormulaPermissions(
+      objectName, plan, [scratch], context, this.permissionResolution(context),
+    ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(schema, plan, [scratch], context));
+    return scratch[field];
+  }
+
+  /**
    * [#22019] The (object, field) pairs whose formula fault this engine instance
    * has already reported — see {@link reportFormulaFault}.
    */
@@ -6470,14 +6777,48 @@ export class ObjectQL implements IObjectQLEngine {
   /**
    * Build the DriverOptions blob passed to every IDataDriver call.
    *
-   * Carries `tenantId` from the active ExecutionContext so the driver can
-   * enforce per-tenant isolation (SQL driver auto-scopes reads and
-   * auto-injects the tenant column on writes) — EXCEPT for the two object
-   * postures below. The SQL driver has its own opt-out (sticky tenant-field
-   * cache), but withholding tenantId here protects every driver at the
-   * source. Existing user-supplied shapes (transactions, AST extras) are
-   * preserved by spreading them first — an explicitly-passed `base.tenantId`
-   * is deliberate caller intent and still wins, under both exemptions.
+   * # The tenant read scope is the wall's verdict (ADR-0131 D8)
+   *
+   * The driver's native tenant scope — `tenantId` (equality) and `tenantIds`
+   * (the `group` union), which `applyTenantScope` compiles — is the Layer 0
+   * verdict projected onto `DriverOptions`, never a second derivation beside
+   * it. One function decides ({@link computeTenantLayer0Verdict},
+   * `@objectstack/core`), and the engine reads it from one of two places:
+   *
+   * - **the verdict the wall RECORDED on this operation**
+   *   ({@link OperationContext.tenantLayer0Verdict}, passed in as
+   *   `scope.recordedVerdict`) — present where the security layer composed its
+   *   wall onto the predicate: a read, or a predicate write. It already carries
+   *   what only that layer can know (the exempt `PLATFORM_ADMIN` on a
+   *   posture-permitting object, the verified platform owner's read, the
+   *   delegator's intersection), so the driver reaches exactly the rows Layer 0
+   *   admits;
+   * - **otherwise, the same function over the engine's own facts** — the
+   *   posture in force ({@link resolveEnginePosture}), the context's active
+   *   organization and access set, the object's tenancy — with no admin
+   *   exemption, since the engine holds no permission sets. That covers a
+   *   system context, a by-id write, and a composition with no security layer
+   *   mounted.
+   *
+   * Projected: `none` (the `single` posture; a non-tenant, tenancy-disabled or
+   * federated object; an exempt platform admin) → no scope; `organization` →
+   * `tenantId`; `organizations` → `tenantIds`, with the active organization as
+   * `tenantId` (the driver keys its scope on `tenantId` being present); `deny`
+   * → the active organization if there is one — the narrowest scope a driver
+   * can express, and where the wall ran its deny sentinel is already in the
+   * predicate. Under `single` the driver therefore no longer narrows a read to
+   * the active organization: the posture is one tenant, and isolation inside it
+   * was never the driver's to add (ADR-0131 D11).
+   *
+   * # The write target is not a read scope
+   *
+   * An insert (`scope.writeTarget`) keeps the active organization as
+   * `tenantId` in EVERY posture — `injectTenantOnInsert` stamps the row with
+   * it, the counter scopes by it, and an upsert's identity probe refuses a
+   * merge into another organization's row by it — and the `group` membership
+   * set beside it, unchanged.
+   *
+   * # Withheld for two object postures
    *
    * 1. **`tenancy.enabled: false`** (ADR-0066 platform-global posture, e.g.
    *    `sys_license`): stamping the caller's active-org tenantId there would
@@ -6508,11 +6849,18 @@ export class ObjectQL implements IObjectQLEngine {
    *    the remote and to the layers above (RBAC/RLS, the datasource binding),
    *    not to a predicate the platform guesses onto someone else's table.
    *
-   * System / isSystem callers may still cross tenants by clearing
-   * `tenantId` themselves on the resulting object; this helper does not
-   * mask the system path.
+   * Existing user-supplied shapes (transactions, AST extras) are preserved by
+   * spreading them first — an explicitly-passed `base.tenantId` is deliberate
+   * caller intent and still wins, under every verdict. System / isSystem
+   * callers may still cross tenants by clearing `tenantId` themselves on the
+   * resulting object; this helper does not mask the system path.
    */
-  private buildDriverOptions(object: string, execCtx?: ExecutionContext, base?: any): any {
+  private buildDriverOptions(
+    object: string,
+    execCtx?: ExecutionContext,
+    base?: any,
+    scope: { writeTarget?: boolean; recordedVerdict?: unknown } = {},
+  ): any {
     // The open transaction may arrive explicitly via the context, or ambiently
     // via txStore when an internal query runs during a transactional write
     // (ADR-0034). Explicit wins; ambient is the safety net. [#22855] A handle
@@ -6538,10 +6886,13 @@ export class ObjectQL implements IObjectQLEngine {
     // federated object by — one spelling of "this schema is the remote's",
     // not a second reading of it.
     const isFederated = isFederatedObject(objectSchema);
-    const hasTenant =
-      execCtx?.tenantId !== undefined &&
-      !isTenancyDisabled(objectSchema) &&
-      !isFederated;
+    const tenantObject = !isTenancyDisabled(objectSchema) && !isFederated;
+    const tenantScope = tenantObject
+      ? scope.writeTarget
+        ? this.driverWriteTarget(execCtx)
+        : this.driverReadScope(execCtx, scope.recordedVerdict)
+      : undefined;
+    const hasTenant = tenantScope !== undefined;
     const hasTz = execCtx?.timezone !== undefined;
     const isSystem = execCtx?.isSystem === true;
     // [#13491] The object's tenancy classification — the ONE reading both the
@@ -6559,21 +6910,10 @@ export class ObjectQL implements IObjectQLEngine {
       opts.transaction = tx;
     }
     if (hasTenant && opts.tenantId === undefined) {
-      opts.tenantId = execCtx!.tenantId;
+      opts.tenantId = tenantScope.tenantId;
     }
-    // [ADR-0105 D2 / #3623] Under the `group` posture the caller's read reach
-    // is their whole membership set, not the active org — thread it so the
-    // driver's native scope widens to the SAME union Layer 0 enforces, instead
-    // of ANDing an active-org equality under it (which collapsed group reads
-    // to isolated semantics). Inserts still stamp from `tenantId` (the active
-    // org is the write target, D5). No provider / other postures / absent set
-    // → no `tenantIds`, and drivers fall back to equality: fail toward
-    // isolation, never toward exposure.
-    if (hasTenant && opts.tenantIds === undefined && this.tenancyPostureProvider?.() === 'group') {
-      const set = (execCtx as any)?.accessible_org_ids;
-      if (Array.isArray(set) && set.length > 0) {
-        opts.tenantIds = set.map(String);
-      }
+    if (hasTenant && opts.tenantIds === undefined && tenantScope.tenantIds !== undefined) {
+      opts.tenantIds = tenantScope.tenantIds;
     }
     if (hasTz && opts.timezone === undefined) {
       // Thread the business timezone so date-dependent driver generation
@@ -6610,6 +6950,69 @@ export class ObjectQL implements IObjectQLEngine {
       opts.preserveAudit = true;
     }
     return opts;
+  }
+
+  /**
+   * [ADR-0131 D8] The driver's native read scope for one operation — the Layer
+   * 0 verdict projected onto `DriverOptions` (see {@link buildDriverOptions}).
+   * `undefined` is "no scope"; the caller has already excluded a
+   * tenancy-disabled or federated object.
+   *
+   * A recorded verdict that does not parse as `TenantLayer0VerdictSchema`
+   * reads as absent — never as an organization — and the engine then decides
+   * over its own facts, which carry no admin exemption: fail toward the wall.
+   */
+  private driverReadScope(
+    execCtx: ExecutionContext | undefined,
+    recordedVerdict: unknown,
+  ): { tenantId: string; tenantIds?: string[] } | undefined {
+    const activeOrganization =
+      execCtx?.tenantId !== undefined && execCtx.tenantId !== null && String(execCtx.tenantId) !== ''
+        ? String(execCtx.tenantId)
+        : undefined;
+    const recorded = recordedVerdict === undefined ? undefined : TenantLayer0VerdictSchema.safeParse(recordedVerdict);
+    const verdict = recorded?.success
+      ? recorded.data
+      : computeTenantLayer0Verdict({
+          tenancyPosture: this.resolveEnginePosture(),
+          organizationId: activeOrganization,
+          accessibleOrgIds: accessibleOrganizationsOf(execCtx),
+          // Left to the driver, which resolves the tenant column from the
+          // table it actually built (`resolveTenantField`): an object with no
+          // such column is unscoped there whatever this says. `undefined` is
+          // the verdict's "assume a tenant object", as Layer 0 reads an
+          // unresolved field set.
+          objectHasOrgIdField: undefined,
+          tenancyDisabled: false,
+          // The engine holds no permission sets: no exemption is ITS to grant.
+          posturePermitsCrossTenant: false,
+          isPlatformAdmin: false,
+        });
+    switch (verdict.kind) {
+      case 'none':
+        return undefined;
+      case 'organization':
+        return { tenantId: verdict.organizationId };
+      case 'organizations':
+        return { tenantId: activeOrganization ?? verdict.organizationIds[0], tenantIds: [...verdict.organizationIds] };
+      case 'deny':
+        return activeOrganization !== undefined ? { tenantId: activeOrganization } : undefined;
+    }
+  }
+
+  /**
+   * The write target of an insert or upsert: the active organization, in every
+   * posture, with the `group` membership set beside it — the scope the
+   * driver's insert readback and upsert identity probe narrow by (ADR-0105 D5:
+   * the active organization is where a write lands).
+   */
+  private driverWriteTarget(
+    execCtx: ExecutionContext | undefined,
+  ): { tenantId: string; tenantIds?: string[] } | undefined {
+    if (execCtx?.tenantId === undefined) return undefined;
+    const tenantIds =
+      this.resolveEnginePosture() === 'group' ? accessibleOrganizationsOf(execCtx) : undefined;
+    return { tenantId: execCtx.tenantId as string, ...(tenantIds ? { tenantIds: [...tenantIds] } : {}) };
   }
 
   /**
@@ -7772,6 +8175,88 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * The (package id, conversion id) pairs this engine has already warned
+   * about at the registration door — one line per pair per process, as the
+   * artifact door prints its summaries (`MetadataPlugin`).
+   */
+  private registrationConversionWarned = new Set<string>();
+
+  /**
+   * ADR-0087 D2 at the kernel's package REGISTRATION door: a package body that
+   * declares its protocol range replays the versioned forward conversion
+   * before anything of it registers.
+   *
+   * ## Why this door converts
+   *
+   * A compiled artifact is data at rest with a version stamp, and the
+   * artifact FILE doors replay the conversion chain inside the window its
+   * `engines.protocol` opens (`loadArtifactBundle`, the metadata plugin's
+   * artifact door, `AppPlugin`). An INSTALLED package reaches this engine by
+   * other roads too: a hosted environment's kernel registers the package
+   * bodies it holds through `manifest.register` / {@link registerApp} with no
+   * parse and no file door in between, and a marketplace install hands the
+   * fetched bundle straight to `manifest.register`. On those roads the registry
+   * was the first and only judge, so a declaration a newer spec retires —
+   * `isDefault: true` on a `home` page, say — stopped the kernel build of every
+   * environment holding a package built before the retirement, with no operator
+   * remedy short of upgrading each one. This is the one door every package
+   * registration reaches (`SchemaRegistry.installPackage` and the per-item
+   * seam both sit behind it), so the window is opened here, once.
+   *
+   * ## Why only a body that declares a range
+   *
+   * The policy function reads the body's own `engines.protocol` (the manifest
+   * half of a package body carries it; every `os build` stamps it). A body
+   * with NO declared range is, at this door, a manifest a plugin built in code
+   * (`manifest.register({ … })` in its `init`), not data at rest: it has an
+   * author, and it meets the registry's refusals exactly as before — nothing
+   * is replayed for it. That keeps the registry's own refusals the authority
+   * for code-registered metadata while an installed body converts under the
+   * same versioned window every artifact door opens, decided by the same
+   * function (`applyArtifactForwardConversions`, `@objectstack/metadata-core`),
+   * never by a second table.
+   *
+   * Idempotent: a body an artifact door already converted comes back by
+   * reference with no notice, so the two doors never print one conversion
+   * twice. Copy-on-write: untouched branches (`plugins`, code) are shared.
+   *
+   * Loud: one `warn` per (package, conversion) names the conversion id, the
+   * sites and the remedy, the way the artifact door's summary does — the named
+   * warning an operator reads in the boot log. The notices themselves are the
+   * structured `OS_METADATA_CONVERTED` record every conversion emits.
+   */
+  convertPackageBodyForward(body: any): any {
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+      if (resolveDeclaredRange(body) === null) return body;
+      const result = applyArtifactForwardConversions(body);
+      if (result.notices.length === 0) return result.definition;
+
+      const id = String(body.id || body.name || '(unnamed)');
+      const byConversion = new Map<string, { count: number; firstPath: string; message: string }>();
+      for (const n of result.notices) {
+          const existing = byConversion.get(n.conversionId);
+          if (existing) existing.count += 1;
+          else byConversion.set(n.conversionId, { count: 1, firstPath: n.path, message: n.message });
+      }
+      const retiredAfter = new Map(result.replayedRetirements.map((r) => [r.conversionId, r.retiredAfter]));
+      for (const [conversionId, agg] of byConversion) {
+          const key = `${id}|${conversionId}`;
+          if (this.registrationConversionWarned.has(key)) continue;
+          this.registrationConversionWarned.add(key);
+          const pastFloor = retiredAfter.get(conversionId);
+          this.logger.warn(
+              `[ObjectQL] package '${id}' registered with declared protocol floor ${result.authoredFloor ?? '(unreadable)'} `
+              + `on @objectstack/spec ${result.runtimeSpecVersion ?? '(unknown)'} (${result.verdict}) — ADR-0087 conversion `
+              + `'${conversionId}'${pastFloor !== undefined ? ` (a retirement this runtime enforces past the body's floor; the shape was last accepted by @objectstack/spec ${pastFloor})` : ''} `
+              + `converted ${agg.count} site(s) forward (first at ${agg.firstPath}). ${agg.message} `
+              + `The installed body itself is unchanged, so it converts again at every registration until the package `
+              + `is rebuilt ('os build') and re-published with tooling from a release that ships this retirement.`,
+          );
+      }
+      return result.definition;
+  }
+
+  /**
    * Register contribution (Manifest)
    * 
    * Installs the manifest as a Package (the unit of installation),
@@ -7780,8 +8265,31 @@ export class ObjectQL implements IObjectQLEngine {
    * 
    * Key: Package ≠ App. The manifest is the package. The apps[] array inside
    * the manifest contains UI navigation definitions (AppSchema).
+   *
+   * [#23972] `source` is where the package came from, stamped on its registry
+   * row (`InstalledPackageSchema.source`). This is the door the deployment's
+   * own code registers through — a `defineStack()` host, a plugin's bundled
+   * manifest, a platform package — so `'code'` is what the door means when the
+   * caller says nothing. The one other producer on this door, the marketplace
+   * install-local plugin, states `'marketplace'` through the `manifest`
+   * service's `register(artifact, { source })`. An authored package never
+   * comes through here (it is installed by `installPackage` in
+   * `@objectstack/metadata-protocol`), so `'authored'` is not accepted.
    */
-  registerApp(manifest: any, scope?: ArtifactInstallScope) {
+  registerApp(registeredBody: any, scope?: ArtifactInstallScope, source: Exclude<InstalledPackageSource, 'authored'> = 'code') {
+      // The CONVERTED body, for everything below — the package record, the
+      // live manifest, every item it registers (see {@link convertPackageBodyForward}).
+      // [#23972] Refused before anything registers — see the docblock: an
+      // untyped caller handing this door `'authored'` (or any other value)
+      // would record a row whose origin contradicts the read-only verdict
+      // this door's `manifests` entry produces.
+      if (source !== 'code' && source !== 'marketplace') {
+          throw new TypeError(
+              `[ObjectQL] registerApp: source must be 'code' or 'marketplace'; received ${JSON.stringify(source)}. `
+              + `An authored package is installed through the protocol's installPackage, not registered here.`,
+          );
+      }
+      const manifest = this.convertPackageBodyForward(registeredBody);
       const id = manifest.id || manifest.name;
       const namespace = manifest.namespace as string | undefined;
       // Stamped beside `id` on every item below ({@link stampPackage}), so an
@@ -7813,7 +8321,7 @@ export class ObjectQL implements IObjectQLEngine {
       // tell a CO-OWNER (another package from this same artifact) from a
       // stranger — the question D1 corrected the gate to ask. Absent for every
       // single-package caller, where the gate behaves exactly as before (D7).
-      this._registry.installPackage(manifest, undefined, scope);
+      this._registry.installPackage(manifest, source, undefined, scope);
       this.logger.debug('Installed Package', { id: manifest.id, name: manifest.name, namespace });
 
       // 2. Register owned objects
@@ -9370,6 +9878,14 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<Record<string, unknown> | null> {
     const rel = resolveMasterDetailRelation(schema);
     if (!rel) return null;
+    // [#24358] ⛔ A header in the stored-metadata-body family is never read,
+    // under either authority. Read 2 below is a whole-row read the family's
+    // projection never reaches, so a `parent.*` predicate would be judged over
+    // the stored body and its content hash unprojected: one bit of material the
+    // family's own door withholds, per write. `parent` stays unbound, the
+    // fail-closed signal (#4889) an unreadable header already gives, so the
+    // verdict says nothing about the row.
+    if (isStoredMetadataBodyObject(rel.master)) return null;
     const parentId = masterIdOf(rel.fk, data, priorRow);
     if (parentId == null) return null;
     // [#22519] 1. The caller's read door: a header it does not return binds as
@@ -9427,6 +9943,9 @@ export class ObjectQL implements IObjectQLEngine {
     const unbound = () => null;
     const rel = resolveMasterDetailRelation(schema);
     if (!rel) return unbound;
+    // [#24358] ⛔ The single-id twin's family guard, for the batch: a
+    // stored-metadata-body header is never read, and every row binds unbound.
+    if (isStoredMetadataBodyObject(rel.master)) return unbound;
     const ids = new Set<string>();
     for (const row of priorRows ?? []) {
       const id = masterIdOf(rel.fk, data, row);
@@ -9522,7 +10041,9 @@ export class ObjectQL implements IObjectQLEngine {
     priorIds.forEach((id, i) => { if (repoints[i]) ids.add(String(id)); });
 
     const headers = new Map<string, Record<string, unknown>>();
-    if (rel && ids.size > 0) {
+    // [#24358] ⛔ A stored-metadata-body header is never read here either, as
+    // the write's own header read never reads one: every header binds unbound.
+    if (rel && ids.size > 0 && !isStoredMetadataBodyObject(rel.master)) {
       // 1. The read door, under the caller's own context.
       const served = new Map<string, Record<string, unknown>>();
       try {
@@ -9657,11 +10178,54 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const wanted = collectPredicateRelationships(schema);
     if (wanted.size === 0) return unbound;
+    return this.resolveOneHopRelated(schema, wanted, rows, context, 'predicate');
+  }
+
+  /**
+   * [#24197] Resolve the related rows a page of `rows` reads ONE hop through a
+   * reference field — the one loader behind both seams that serve a hop:
+   * validation predicates ({@link resolvePredicateRelated}, `authority:
+   * 'predicate'`) and formula fields ({@link resolveFormulaRelated},
+   * `authority: 'caller'`).
+   *
+   * Everything but the AUTHORITY of the value read is shared, so the two seams
+   * cannot disagree about it: which reference fields and related fields to
+   * read ({@link collectReferenceTraversals}), the declared-field intersection
+   * and its `undeclared-field` report, the id set (one batched read per
+   * reference field per call, never one per row; a multi-value or already
+   * expanded slot names no single row), the `null` materialisation of a
+   * declared column the driver omitted, and the per-row
+   * {@link RelatedFieldBinding} with its reason when there is no row.
+   *
+   * ## The authority, and why the two differ
+   *
+   *  - `predicate`: a rule's output is a pass/fail the SYSTEM enforces, so the
+   *    values are read as SYSTEM behind the caller's read doors — see
+   *    {@link resolvePredicateRelated} for the whole argument.
+   *  - `caller`: a formula's output is DATA handed to the reader. Reading the
+   *    hop as SYSTEM would hand any reader of the junction row a related
+   *    column it could not read directly, so the hop is read under the
+   *    caller's OWN context, through every enforcement layer `find` applies
+   *    (row-level security, field-level security, the organization wall). A
+   *    related row that read does not return is `unresolved` — whether it
+   *    exists nowhere or the reader may not see it, the formula answers the
+   *    same, so the answer discloses neither.
+   */
+  private async resolveOneHopRelated(
+    schema: any,
+    wanted: ReadonlyMap<string, ReadonlySet<string>>,
+    rows: ReadonlyArray<Record<string, unknown> | undefined | null>,
+    context: unknown,
+    authority: 'predicate' | 'caller',
+  ): Promise<((row: Record<string, unknown> | undefined | null) => RelatedRecordBinding | undefined)> {
+    const unbound = () => undefined;
     // ⛔ Every bound below keys on "not SYSTEM", never on `userId`: a public-form
     // submitter or a principal-less caller is bound exactly like a user. Walled
     // posture: such a caller with no `tenantId` cannot be scoped here, so it reads nothing.
+    // [#24197] The caller-authority read applies the wall itself (it IS the
+    // caller's own `find`), so it computes no bound of its own.
     const caller = context as ExecutionContext | undefined;
-    const bound = !caller?.isSystem;
+    const bound = authority === 'predicate' && !caller?.isSystem;
     const readsNothing = bound && !carriesOrganization(caller?.tenantId)
       && postureEnforcesWall(this.resolveEnginePosture());
 
@@ -9681,6 +10245,18 @@ export class ObjectQL implements IObjectQLEngine {
     for (const [fk, namedFields] of wanted) {
       const target = referenceTargetOf(fields[fk]);
       if (!target) continue;
+      // [#24316] ⛔ A hop into the stored-metadata-body family is never read,
+      // under either authority. The family's projection runs at its doors and
+      // never here, so this `find` would hand the formula (or the rule) the
+      // stored body and its content hash unprojected — material the family's
+      // own door withholds from the same reader. The binding is `unreadable`,
+      // the disclosure-safe shape: a formula reads `null` with its reason, a
+      // rule has no verdict and refuses the write, and neither says anything
+      // about the row. The lint refuses the same hop at author time.
+      if (isStoredMetadataBodyObject(target)) {
+        resolved.set(fk, { object: target, byId: new Map(), blocked: true });
+        continue;
+      }
       const named = [...namedFields];
 
       // ── The READ SET is the intersection of "what the predicate names" and
@@ -9771,8 +10347,16 @@ export class ObjectQL implements IObjectQLEngine {
         const query: EngineQueryOptions = {
           where: { id: { $in: [...readSet] } },
           fields: [...new Set(['id', ...named])],
-          context: { ...(context as Record<string, unknown> ?? {}), isSystem: true } as EngineQueryOptions['context'],
+          // [#24197] A formula's hop is read as the CALLER (see the docblock).
+          context: (authority === 'caller'
+            ? context
+            : { ...(context as Record<string, unknown> ?? {}), isSystem: true }) as EngineQueryOptions['context'],
         };
+        // [#24197] ONE hop: the related object's own formulas are computed on
+        // this read, but none of them reads a hop of its own — that would be
+        // the second hop the formula contract does not serve, and two objects
+        // whose titles read each other would recurse without end.
+        if (authority === 'caller') this.formulaHopReads.add(query);
         const related = await this.find(target, query) as Array<Record<string, unknown>>;
         const byId = new Map<string, Record<string, unknown>>();
         // Materialise the named DECLARED columns to `null`. A driver omits a key
@@ -9789,7 +10373,9 @@ export class ObjectQL implements IObjectQLEngine {
         }
         resolved.set(fk, { object: target, byId, ownRead });
       } catch (err) {
-        this.logger?.warn?.('predicate relationship read failed — the rule will reject the write', {
+        this.logger?.warn?.(authority === 'caller'
+          ? 'formula relationship read failed — the formulas reading through this reference read null'
+          : 'predicate relationship read failed — the rule will reject the write', {
           object: target, field: fk, error: err,
         });
         resolved.set(fk, { object: target, byId: new Map(), blocked: true });
@@ -12515,6 +13101,15 @@ export class ObjectQL implements IObjectQLEngine {
       if (!REFERENCE_VALUE_TYPES.has(fieldDef.type)) continue;
       const referenceObject = referenceTargetOf(fieldDef);
       if (!referenceObject) continue;
+      // [#24358] ⛔ A reference into the stored-metadata-body family is never
+      // expanded, at any depth and for any caller. The family's projection runs
+      // at its doors and only for the object a request names, so this sub-read
+      // would nest the stored body and its content hash unprojected under the
+      // requested rows — material the family's own door withholds from the same
+      // reader. The field keeps the stored id, the answer a reference the
+      // caller may not expand gets (an unexposed target, #22661, or a refused
+      // sub-read, below), so it says nothing about the row.
+      if (isStoredMetadataBodyObject(referenceObject)) continue;
 
       // Collect all foreign key IDs from records (handle both single and multiple values)
       const allIds: any[] = [];
@@ -12712,10 +13307,19 @@ export class ObjectQL implements IObjectQLEngine {
    * that record — and hydrates when it allows. Every other id keeps the
    * refused marker. See {@link readParentDerivedFiles}.
    *
-   * Batched: at most one `sys_file` `id $in […]` read per call (no N+1) — and,
-   * on the refused arm only, one more system read plus one verdict call; zero
-   * reads when no field holds a string value (the blob-only case), so the step
-   * is free for objects that have not adopted references.
+   * ASKED BEFORE READ (#24335): the caller's `sys_file` read is issued only
+   * when the security service admits it — {@link callerMayReadSysFile}, the
+   * middleware's own object-level read gate. A caller it refuses goes
+   * straight to the refused arm, the answer that read's refusal produced, so
+   * the served value is the same and no access attempt is made: the security
+   * layer logs no denial for a read the reader never asked for. A direct
+   * `sys_file` read by that reader is refused, and logged, exactly as before.
+   *
+   * Batched: one admission ask and at most one `sys_file` `id $in […]` read
+   * per call (no N+1) — and, on the refused arm only, one more system read
+   * plus one verdict call; zero of each when no field holds a string value
+   * (the blob-only case), so the step is free for objects that have not
+   * adopted references.
    */
   private async resolveFileReferences(
     objectName: string,
@@ -12761,6 +13365,13 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const uniqueIds = [...new Set(candidateIds)];
     if (uniqueIds.length === 0) return records; // blob-only / empty → zero cost
+
+    // [#24335] Ask before reading: a caller the security service refuses
+    // `sys_file` read is served the refused arm without the read whose
+    // refusal would have produced it.
+    if (!(await this.callerMayReadSysFile(execCtx))) {
+      return this.serveRefusedFileHydration(objectName, records, fileFields, uniqueIds, execCtx);
+    }
 
     // One batched sys_file read. `__expandRead` mirrors the lookup-expansion
     // sub-read (a system-built marker, never from client input). Metadata only —
@@ -12815,37 +13426,12 @@ export class ObjectQL implements IObjectQLEngine {
       // them. The marker stays on everything else: an id another record owns
       // (copied in), an attachment-only or unclaimed file, an id with no row,
       // and every id when the verdict is unwired or cannot be asked.
+      //
+      // [#24335] A caller the security service's admission already refused
+      // never reaches this read (see {@link callerMayReadSysFile}); this arm
+      // still serves a refusal the admission did not foresee, the same way.
       if (isReadRefusal(error)) {
-        const owned = await this.readParentDerivedFiles(objectName, records, uniqueIds, execCtx);
-        this.logger.debug('sys_file read refused for this caller; file fields carry the refused marker', {
-          object: objectName,
-          fields: fileFields,
-          refusedIds: uniqueIds.length,
-          parentDerivedIds: owned.size,
-        });
-        const refused = (id: string): FileRefusedValue => ({ id, metadataRefused: true });
-        // Judged per ELEMENT and per RECORD: the verdict covers a file only on
-        // the record whose field owns it, so the same id copied into a second
-        // record is still refused there. An owned, allowed id with no servable
-        // row reads as the bare id — what a `sys_file` reader gets for it.
-        const valueFor = (record: any, v: unknown): unknown => {
-          if (!isFileIdToken(v)) return v;
-          const hit = owned.get(v);
-          if (!hit || record?.id == null || hit.ownerId !== String(record.id)) return refused(v);
-          return hit.row ? toFileValue(hit.row) : v;
-        };
-        for (const record of records) {
-          for (const fieldName of fileFields) {
-            const val = record[fieldName];
-            if (val == null) continue;
-            if (Array.isArray(val)) {
-              record[fieldName] = val.map((v: unknown) => valueFor(record, v));
-            } else {
-              record[fieldName] = valueFor(record, val);
-            }
-          }
-        }
-        return records;
+        return this.serveRefusedFileHydration(objectName, records, fileFields, uniqueIds, execCtx);
       }
       // Everything else (connection drop, timeout, a database-level permission
       // fault, query error) means the rows may well exist and simply were not
@@ -12886,6 +13472,87 @@ export class ObjectQL implements IObjectQLEngine {
             typeof v === 'string' && fileMap.has(v) ? toFileValue(fileMap.get(v)) : v);
         } else if (typeof val === 'string' && fileMap.has(val)) {
           record[fieldName] = toFileValue(fileMap.get(val));
+        }
+      }
+    }
+    return records;
+  }
+
+  /**
+   * [#24335] May this caller read `sys_file` at all? Asked of the registered
+   * security service's `canReadObject` BEFORE {@link resolveFileReferences}
+   * issues the caller's own `sys_file` read, as the parent-record read gate
+   * asks before it reads a parent object ("A skipped object is not an access
+   * attempt", plugin-audit). `canReadObject` is the security middleware's own
+   * object-level read gate, arm for arm, and answers without logging or
+   * throwing; the read it spares is one that gate would refuse, and
+   * plugin-security logs every refusal at WARN — a line on every ordinary
+   * record read by a reader without `sys_file` read, burying the real denials.
+   *
+   * Asked with the caller's envelope minus its operation-private `__` keys
+   * (`withoutOperationPrivateKeys`, as {@link readParentDerivedFiles} asks its
+   * verdict): no second derivation of authority, and no muting of the
+   * middleware's log — the reader's own `sys_file` read still logs its denial.
+   *
+   * It only ever NARROWS what is read: `true` still reads as the caller, and
+   * that read still decides. Unasked ⇒ `true`, the read goes to the middleware
+   * as it did before: no usable security service, one whose contract omits the
+   * optional `canReadObject`, or an ask that throws. Any other answer than
+   * `true` ⇒ the refused arm, which is what that read's refusal served.
+   */
+  private async callerMayReadSysFile(execCtx?: ExecutionContext): Promise<boolean> {
+    const security = this.resolveReadableIdsSecurity();
+    if (security.kind !== 'usable' || typeof security.svc.canReadObject !== 'function') return true;
+    const caller = withoutOperationPrivateKeys((execCtx ?? {}) as Record<string, unknown>);
+    try {
+      return (await security.svc.canReadObject('sys_file', caller as ExecutionContext)) === true;
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * The refused arm of {@link resolveFileReferences}: this caller may not read
+   * `sys_file`, whether its admission said so up front (#24335) or its read was
+   * refused. Each id a record of this result owns is put to the field-owned
+   * verdict ({@link readParentDerivedFiles}, #22637) and hydrates when it
+   * allows; every other id becomes `{ id, metadataRefused: true }`
+   * (`FileRefusedValueSchema`). Logged at `debug`: the answer is handed to
+   * the caller in the value.
+   */
+  private async serveRefusedFileHydration(
+    objectName: string,
+    records: any[],
+    fileFields: string[],
+    uniqueIds: string[],
+    execCtx?: ExecutionContext,
+  ): Promise<any[]> {
+    const owned = await this.readParentDerivedFiles(objectName, records, uniqueIds, execCtx);
+    this.logger.debug('sys_file read refused for this caller; file fields carry the refused marker', {
+      object: objectName,
+      fields: fileFields,
+      refusedIds: uniqueIds.length,
+      parentDerivedIds: owned.size,
+    });
+    const refused = (id: string): FileRefusedValue => ({ id, metadataRefused: true });
+    // Judged per ELEMENT and per RECORD: the verdict covers a file only on
+    // the record whose field owns it, so the same id copied into a second
+    // record is still refused there. An owned, allowed id with no servable
+    // row reads as the bare id — what a `sys_file` reader gets for it.
+    const valueFor = (record: any, v: unknown): unknown => {
+      if (!isFileIdToken(v)) return v;
+      const hit = owned.get(v);
+      if (!hit || record?.id == null || hit.ownerId !== String(record.id)) return refused(v);
+      return hit.row ? toFileValue(hit.row) : v;
+    };
+    for (const record of records) {
+      for (const fieldName of fileFields) {
+        const val = record[fieldName];
+        if (val == null) continue;
+        if (Array.isArray(val)) {
+          record[fieldName] = val.map((v: unknown) => valueFor(record, v));
+        } else {
+          record[fieldName] = valueFor(record, val);
         }
       }
     }
@@ -13315,6 +13982,20 @@ export class ObjectQL implements IObjectQLEngine {
       });
       if (searchFilter) {
         ast.where = ast.where ? { $and: [ast.where, searchFilter] } : searchFilter;
+      } else if (normalizeSearch(raw).query.trim()) {
+        // [#24284] A non-blank term that expanded to nothing means the RESOLVED
+        // search set is empty: `expandSearchToFilter` answers `null` for
+        // exactly two reasons, and the other one (a blank term) is excluded
+        // here. Leaving `where` untouched would answer the search with EVERY
+        // row, indistinguishable from "everything matched" — the silent
+        // widening #4254 refuses on the explicit-override axis. Judged on the
+        // set the expansion itself resolved (no second resolver), so it holds
+        // for every verb that reaches here (`find` / `findOne` / `aggregate` /
+        // the count) and every door (REST, dispatcher, SDK, a hook's
+        // `ctx.api`). An explicit override intersected to nothing falls back
+        // to the allowed set inside `resolveSearchFields`, so it reaches this
+        // only when that set is empty too.
+        throw emptySearchSetError(ast.object, schema, internalFields.length > 0);
       }
     }
     delete (ast as any).search;
@@ -13574,7 +14255,7 @@ export class ObjectQL implements IObjectQLEngine {
           ql: this
       };
       await this.triggerHooks('beforeFind', hookContext);
-      hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+      hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
       // [ADR-0139 D2] The executor boundary: the AST is final here — after the
       // doors, the middleware chain and `beforeFind` — so every `ReadableIds`
       // leaf is composed (or refused) on it, immediately before the driver.
@@ -13602,7 +14283,11 @@ export class ObjectQL implements IObjectQLEngine {
           if (Array.isArray(result)) {
             applyFormulaPlan(_findFormula.plan, result, opCtx.context, await this.resolveFormulaPermissions(
               object, _findFormula.plan, result, opCtx.context, this.permissionResolution(opCtx.context),
-            ), this.formulaFaultSink(object));
+            ), this.formulaFaultSink(object), await this.resolveFormulaRelated(
+              // [#24197] One batched read per reference field for this PAGE —
+              // the rows the driver returned, after limit/offset.
+              _findSchema, _findFormula.plan, result, opCtx.context, query,
+            ));
           }
 
           // Post-process: expand related records if expand is requested
@@ -13872,7 +14557,7 @@ export class ObjectQL implements IObjectQLEngine {
           ql: this
       };
       await this.triggerHooks('beforeFind', hookContext);
-      hookContext.input.options = this.buildDriverOptions(objectName, opCtx.context, hookContext.input.options as any);
+      hookContext.input.options = this.buildDriverOptions(objectName, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
       // [ADR-0139 D2] The executor boundary, as in `find`.
       const driverAst = await this.composeReadableIdsAtBoundary(objectName, 'findOne', hookContext.input.ast as QueryAST, opCtx.context);
 
@@ -13887,7 +14572,9 @@ export class ObjectQL implements IObjectQLEngine {
       if (result != null) {
         applyFormulaPlan(_findOneFormula.plan, [result], opCtx.context, await this.resolveFormulaPermissions(
           objectName, _findOneFormula.plan, [result], opCtx.context, this.permissionResolution(opCtx.context),
-        ), this.formulaFaultSink(objectName));
+        ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(
+          _findOneSchema, _findOneFormula.plan, [result], opCtx.context, query,
+        ));
       }
 
       // Post-process: expand related records if expand is requested
@@ -15348,6 +16035,9 @@ export class ObjectQL implements IObjectQLEngine {
         derivedOrganizationId !== undefined
           ? { ...(optionsBase && typeof optionsBase === 'object' ? optionsBase : {}), tenantId: derivedOrganizationId }
           : optionsBase,
+        // The active organization is where the row LANDS, in every posture —
+        // not a read scope (ADR-0131 D8 leaves the write target alone).
+        { writeTarget: true },
       );
       for (const rowCtx of rowHookContexts) {
         rowCtx.input.options = driverOptions;
@@ -15628,6 +16318,7 @@ export class ObjectQL implements IObjectQLEngine {
           schemaForValidation, resultRows, opCtx.context,
           (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
           this.formulaFaultSink(object),
+          (plan, records) => this.resolveFormulaRelated(schemaForValidation, plan, records, opCtx.context),
         );
         for (let k = 0; k < liveIndexes.length; k++) {
           const rowCtx = rowHookContexts[liveIndexes[k]];
@@ -16535,7 +17226,7 @@ export class ObjectQL implements IObjectQLEngine {
                await dispatchHooksExplainingWithheldReadonly(readonlyHiddenFromHooks, 'beforeUpdate',
                  () => this.dispatchUnscopedMultiWriteHooks('beforeUpdate', object, hookContext));
            }
-           const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+           const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
            readPriorRows = async () => {
                if (!priorRowsRead) {
                    priorRowsRead = true;
@@ -16710,7 +17401,7 @@ export class ObjectQL implements IObjectQLEngine {
        // refuses before any driver call.
        reportDroppedFields(preComputedPayload, computedStripUpdate.rows[0] as Record<string, unknown> | null | undefined, 'computed');
 
-       hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+       hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
 
        try {
            let result;
@@ -17427,6 +18118,7 @@ export class ObjectQL implements IObjectQLEngine {
                opCtx.context,
                (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
                this.formulaFaultSink(object),
+               (plan, records) => this.resolveFormulaRelated(updateSchema, plan, records, opCtx.context),
              );
            }
            // Coerce boolean fields (SQLite 0/1 → JS bool) on the after-hook view
@@ -19057,7 +19749,7 @@ export class ObjectQL implements IObjectQLEngine {
       const declaredDeleteColumns = declaredColumnSet(deleteSchema);
       const readPreImage = async (targetId: unknown): Promise<Record<string, unknown> | null> => {
         const preAst: QueryAST = { object, where: { id: targetId }, limit: 1 };
-        const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+        const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
         return withDeclaredColumnsOnly(
           (await driver.findOne(object, preAst, preOpts)) as Record<string, unknown> | null,
           declaredDeleteColumns,
@@ -19200,7 +19892,7 @@ export class ObjectQL implements IObjectQLEngine {
         const perRowBeforeHooks = this.hasHooksFor('beforeDelete', object);
         const perRowAfterHooks = this.hasHooksFor('afterDelete', object);
         if (perRowBeforeHooks || perRowAfterHooks) {
-          const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+          const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
           // [#21613] Each doomed row is its per-row `previous`: declared set.
           const doomed = rowsWithDeclaredColumnsOnly(
             (await driver.find(object, ast, preOpts) as Record<string, unknown>[]) ?? [],
@@ -19219,7 +19911,7 @@ export class ObjectQL implements IObjectQLEngine {
         }
       }
 
-      hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+      hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
 
       try {
           let result;
@@ -19437,7 +20129,7 @@ export class ObjectQL implements IObjectQLEngine {
      const callerWhere = (opCtx.ast as QueryAST).where;
 
      await this.executeWithMiddleware(opCtx, async () => {
-       const countOpts = this.buildDriverOptions(object, opCtx.context);
+       const countOpts = this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict });
        if (driver.count) {
            // [ADR-0139 D2] The executor boundary, as in `find` (`count` has no
            // before-hook): the AST is final once the chain has run. The
@@ -19958,7 +20650,7 @@ export class ObjectQL implements IObjectQLEngine {
             // natively today; one that grows native support must advertise a
             // capability flag, at which point this post-filter becomes the
             // fallback tier — the dateGranularity two-tier pattern.
-            const aggregated = await drv.aggregate(object, ast, this.buildDriverOptions(object, opCtx.context));
+            const aggregated = await drv.aggregate(object, ast, this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict }));
             return applyHaving(aggregated, ast.having, havingColumnClasses);
         }
         // In-memory fallback path: ask the driver for raw rows, then bucket +
@@ -20002,7 +20694,7 @@ export class ObjectQL implements IObjectQLEngine {
         delete rowsAst.groupBy;
         delete rowsAst.aggregations;
         delete rowsAst.having;
-        const raw = await driver.find(object, rowsAst, this.buildDriverOptions(object, opCtx.context));
+        const raw = await driver.find(object, rowsAst, this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict }));
         return applyHaving(applyInMemoryAggregation(raw, ast, tz, declaredFields), ast.having, havingColumnClasses);
       });
 
@@ -21345,4 +22037,17 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
 
   /** Internal: expose the transaction handle for driver-level access */
   get transactionHandle() { return this.executionContext.transaction; }
+
+  /**
+   * [#24197] One declared `formula` field of `objectName`, evaluated over
+   * `record` as a read under THIS context serves it — {@link
+   * ObjectQL.serveFormulaField} with this context's own execution context, so
+   * the one hop the formula reads through a reference is read with this
+   * context's identity and permissions and, inside a transaction this context
+   * carries, on that transaction's connection. `undefined` when `field` is not
+   * a declared formula field.
+   */
+  async serveFormulaField(objectName: string, record: Record<string, unknown>, field: string): Promise<unknown> {
+    return (this.engine as unknown as ObjectQL).serveFormulaField(objectName, record, field, this.executionContext);
+  }
 }

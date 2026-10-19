@@ -10,7 +10,8 @@
  * `enable.files` object.
  *
  * Both are declared now, each with a strict row measured from its renderer's
- * read points at the `.objectui-sha` pin. Both rows accept no key:
+ * read points (recorded in `liveness/page.json`, row `regions`). Both rows
+ * accept no key:
  * `record:attachments` reads no props at all, and `record:approvals` reads
  * only the host's runtime channel (`approvals`, `currentUserId`), which the row
  * refuses with a prescription instead of declaring. The authoring rule ids
@@ -44,7 +45,9 @@ const row = (type: (typeof TYPES)[number]) => ComponentPropsMap[type];
  * `buildDefaultPageSchema(objectDef)`, called with no options (objectui
  * `app-shell/src/views/metadata-admin/anchors.ts`, `createSeed`). The
  * Attachments tab is the synthesizer's `buildDefaultAttachments()`, a bare
- * `{ type: 'record:attachments' }`.
+ * `{ type: 'record:attachments' }`. The synthesizer still names the retired
+ * `full-width` template, a second name for `default` (#23610); the seed is
+ * spelled here as the closed template set requires.
  */
 const seededRecordPage = (extraTabs: unknown[] = []) => ({
   name: 'invoice_record',
@@ -52,7 +55,7 @@ const seededRecordPage = (extraTabs: unknown[] = []) => ({
   type: 'record',
   object: 'invoice',
   kind: 'full',
-  template: 'full-width',
+  template: 'default',
   regions: [
     {
       name: 'main',

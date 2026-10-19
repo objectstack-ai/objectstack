@@ -59,6 +59,15 @@
  * (the control: the door READS the table and reports the row), and the four
  * doors that already exited 0 on the absent database, which still do.
  *
+ * [ADR-0139 E6] `os migrate activity-changed-fields` joined it born with the
+ * answer too: it reads `sys_activity` alone, through `absentTableReads`. Its
+ * control row is the seeded activity row, planted below the writer, so it
+ * carries no stamp.
+ *
+ * [ADR-0139 E7] `os migrate comment-parent-pair` joined it the same way: it
+ * reads `sys_comment` alone, through `absentTableReads`. Its control row is the
+ * seeded comment, planted below the writer, so it carries no parent pair.
+ *
  * [#21573] `os migrate unmapped-columns` joined the roster later, born with
  * the same answer: it asks `tableAbsent` before the differ. Its control row is
  * a retired field's column on `os21529_contact`, holding a value.
@@ -424,6 +433,10 @@ await k(shard.name).insert({
     },
   }),
 });
+await k('sys_comment').insert({
+  id: 'cmt_23857', thread_id: 'sys_metadata:m_21552', body: 'planted below the writer', author_id: 'u1',
+  created_at: new Date().toISOString(),
+});
 await k('sys_secret').insert({
   id: 'sec_21552', namespace: 'os21552', key: 'orphan', kms_key_id: 'local', alg: 'aes-256-gcm', version: 1, ciphertext: 'not-a-real-ciphertext',
 });
@@ -483,6 +496,32 @@ const DOORS: readonly Door[] = [
     },
   },
   {
+    name: 'migrate activity-changed-fields',
+    argv: ['migrate', 'activity-changed-fields'],
+    empty: (doc) => expect(doc).toMatchObject({ apply: false, report: { scanned: 0, stamped: 0, failures: 0 } }),
+    humanEmpty: /Nothing to stamp/,
+    tables: ['sys_activity'],
+    work: (doc) => {
+      // The seeded activity row was planted below the writer, so it carries no
+      // stamp: the one row to stamp. The writer's own rows are stamped already.
+      // Rotation-managed, so READ, though the boot listed its base name as a
+      // table to create.
+      expect(doc.report).toMatchObject({ scanned: 1, stamped: 1, unjudged: 0, failures: 0 });
+    },
+  },
+  {
+    name: 'migrate comment-parent-pair',
+    argv: ['migrate', 'comment-parent-pair'],
+    empty: (doc) => expect(doc).toMatchObject({ apply: false, report: { scanned: 0, stamped: 0, failures: 0 } }),
+    humanEmpty: /Nothing to stamp/,
+    tables: ['sys_comment'],
+    work: (doc) => {
+      // The seeded comment was planted below the writer, so it carries no pair:
+      // the one row to stamp.
+      expect(doc.report).toMatchObject({ scanned: 1, stamped: 1, unparented: 0, failures: 0 });
+    },
+  },
+  {
     name: 'migrate meta --stored',
     argv: ['migrate', 'meta', '--stored'],
     empty: (doc) => expect(doc).toMatchObject({ apply: false, scanned: 0, pending: 0, failed: 0, rows: [], clean: true }),
@@ -503,7 +542,7 @@ const DOORS: readonly Door[] = [
         expect(family.status).toBe('enumerated');
       }
     },
-    humanEmpty: /Report only — nothing was written or deleted/,
+    humanEmpty: /Report only — no row or table was written or deleted/,
     tables: ['sys_secret', 'sys_setting', 'sys_metadata'],
     work: (doc) => expect(doc.plan.counts.total).toBe(1),
   },
@@ -516,7 +555,7 @@ const DOORS: readonly Door[] = [
         expect(family.status).toBe('enumerated');
       }
     },
-    humanEmpty: /Dry run — nothing was written/,
+    humanEmpty: /Dry run — no row or table was written/,
     tables: ['sys_secret', 'sys_setting', 'sys_metadata'],
     work: (doc) => expect(doc.report.counts.total).toBe(1),
   },

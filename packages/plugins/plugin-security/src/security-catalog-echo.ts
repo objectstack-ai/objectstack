@@ -79,6 +79,7 @@
  * stored row is gone.
  */
 
+import { readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { seedCtx } from './organization-scope.js';
 import {
   ENV_PROJECTION_MARKER,
@@ -149,9 +150,15 @@ export const isProjectionEcho = (v: any): boolean =>
 
 /**
  * The package the stored row a by-name read SERVES for `name` is bound to:
- * the `_packageId` the protocol's single-item read states from that row's
- * `package_id` column. `undefined` when the row is bound to no package, or the
- * protocol has no single-item read. A read that fails is not caught here.
+ * the protection envelope's `packageId`, which the protocol's single-item read
+ * states from the served document's `_packageId` (that row's `package_id`
+ * column). `undefined` when the row is bound to no package, or the protocol
+ * has no single-item read. A read that fails is not caught here.
+ *
+ * [#7557, #24210] The envelope, not `item._packageId`: this is a resolution
+ * read, and the by-name read withholds the item of a disabled package while
+ * keeping its envelope. Read off the item, a disabled package's set echoed
+ * unowned, and stayed unowned after the package was re-enabled.
  */
 export async function readServedPackageBinding(
   protocol: any,
@@ -160,7 +167,7 @@ export async function readServedPackageBinding(
 ): Promise<string | undefined> {
   if (typeof protocol?.getMetaItem !== 'function') return undefined;
   const served = await protocol.getMetaItem({ type, name });
-  const packageId = served?.item?._packageId;
+  const packageId = served?.packageId;
   return typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
 }
 
@@ -284,9 +291,20 @@ export async function echoStoredSecurityCatalogOverlays(
     // The plural spelling is a legacy `type` column value the protocol still reads.
     for (const stored of [type, `${type}s`]) {
       let rows: any[];
+      // [ADR-0131 D6/D7] Env-wide overlays only. The family declares no
+      // organization column, so the engine row never carries one: a legacy
+      // organization's row is told apart off the physical column, on a
+      // database the ceremony has not migrated. A read that cannot answer is a
+      // failed read, below.
+      let legacy: ReadonlyMap<string, string> = new Map();
       try {
         const found = await ql.find('sys_metadata', { where: { type: stored, state: 'active' } }, { context: seedCtx() });
         rows = Array.isArray(found) ? found : [];
+        if (rows.length > 0) {
+          legacy = await readLegacyOrganizationRows(
+            typeof ql.getDriverForObject === 'function' ? ql.getDriverForObject('sys_metadata') : undefined,
+          );
+        }
       } catch (e) {
         logger?.warn(
           `[security] stored ${type} overlays could not be read at boot, so none is echoed into the security ` +
@@ -297,7 +315,7 @@ export async function echoStoredSecurityCatalogOverlays(
         continue;
       }
       for (const row of rows) {
-        if ((row?.organization_id ?? null) !== null || !row?.name) continue; // env-wide overlays only
+        if (!row?.name || legacy.has(String(row.id))) continue; // env-wide overlays only
         names.add(String(row.name));
       }
     }

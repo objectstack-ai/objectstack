@@ -247,8 +247,13 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    * guessed at here, and #5016 answered it **per key, on measurement**:
    *
    * - **`visibleWhen` — opened.** The reader is on this exact path and it works
-   *   today. An inline param's `options` are lowered VERBATIM (objectui
-   *   `resolveActionParam`'s inline branch does `options: param.options`;
+   *   today. An inline param's `options` are lowered VERBATIM (at the console
+   *   pin, `.objectui-sha` `5e15928b4631`, objectui `resolveActionParam`'s
+   *   inline branch does `options: authoredOptions`, and `authoredOptions` is
+   *   `resolveOptionLabels(param.options, ctx.locale)`, which returns the
+   *   authored array itself when every `label` is already a string and
+   *   otherwise re-spreads only the entries whose `label` is an inline
+   *   per-locale map, resolving that `label`;
    *   `ActionParamDialog` re-spreads each entry to localise `label`;
    *   `paramToField` passes the array straight into the widget's field
    *   metadata), and `SelectField` / `MultiSelectField` / `RadioField` /
@@ -265,15 +270,18 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    *   `default` it would actively mislead, since a dialog param defaults
    *   through `defaultValue` one level up.
    *
-   * **What this does NOT fix**, deliberately, because it is objectui's and not
-   * the spec's: a FIELD-BACKED param that inherits its list instead of declaring
-   * one still loses the key. `resolveActionParam` reaches
-   * `param.options ?? normaliseOptions(field.options, …)`, and `normaliseOptions`
-   * rebuilds every inherited entry as `{ label, value }`. That drop predates
-   * this change, is invisible to it (an authored `options` array wins over the
-   * inherited one), and is tracked in objectui — so the guidance below still
-   * refuses to prescribe "make it field-backed and inherit" (ledger finding 18:
-   * a confidently wrong prescription is worse than none).
+   * **A FIELD-BACKED param that inherits its list** instead of declaring one
+   * takes objectui's path, not the spec's. At the console pin (`.objectui-sha`
+   * `f8267df93aba`), objectui's `packages/fields/src/resolveActionParams.ts`
+   * resolves it as `authoredOptions ?? normaliseOptions(field.options, …)`
+   * (`:650`–`:651`), and `normaliseOptions` returns
+   * `{ ...raw, label, value: raw.value }` per entry (`:515`), so every key of an
+   * inherited entry survives the resolver. An authored `options` array still
+   * wins over the inherited one. Surviving is not being read: no reader of
+   * `color` / `icon` / `disabled` on an inherited option is measured from this
+   * repo, so the guidance below still refuses to prescribe "make it
+   * field-backed and inherit" (ledger finding 18: a confidently wrong
+   * prescription is worse than none, and an unmeasured one is no cure for it).
    *
    * The aliases are anchored on `SelectOptionSchema`'s own curated table (the
    * same idea, one layer down) rather than on edit distance, and deliberately
@@ -307,9 +315,11 @@ export const ActionParamSchema = lazySchema(() => strictObject(
       // The per-option keys that are real one layer down but have no reader on
       // THIS path, plus the two that no spec shape declares at all. Each says
       // where the vocabulary lives and — critically — does NOT promise that a
-      // field-backed param inherits it: `resolveActionParams`' `normaliseOptions`
-      // rebuilds each inherited entry as `{ label, value }`, so that promise
-      // would be false in exactly the way ledger finding 18 warns about.
+      // field-backed param inherits it. objectui's `normaliseOptions` keeps an
+      // inherited entry's keys by spread (the `options` docblock above cites the
+      // pin and line), but no reader of them on the inherited path is measured
+      // from this repo, so that promise would be an unmeasured one in exactly
+      // the way ledger finding 18 warns about.
       //
       // `visibleWhen` is deliberately absent: it is a declared key now, and
       // `guidance` is consulted only from the `unrecognized_keys` path, so an
@@ -962,16 +972,15 @@ const actionObject = () => strictObject({
    * Explanatory line shown in the action's PARAM DIALOG, under the title.
    *
    * The renderer half already exists and predates this key: objectui's
-   * `ActionParamDialog` renders it as the dialog's `DialogDescription`
-   * (`objectui packages/app-shell/src/views/ActionParamDialog.tsx:215`, falling
+   * `ActionParamDialog` renders it as the dialog's `DialogDescription` (falling
    * back to the generic `actionDialog.description` string), fed by
    * `actionDescription(objectName, actionName, action.description)` from two
-   * independent handlers — `useConsoleActionRuntime.tsx:206` and
-   * `RecordDetailView.tsx:586`. The resolver
-   * (`objectui packages/i18n/src/useObjectLabel.ts:463`) reads
-   * `objects.{object}._actions.{action}.description`, falls back to
-   * `globalActions.{action}.description`, then to this literal. Until #7367 no
-   * producer could reach any of it: this shape refused the key.
+   * independent param-collection handlers. The resolver reads the translated
+   * copy at `objects.{object}._actions.{action}.description` for an action bound
+   * to an object, or at `globalActions.{action}.description` for an object-less
+   * one, never both, and falls back to this literal (read points recorded in
+   * `liveness/action.json`, row `description`). Until #7367 no producer could
+   * reach any of it: this shape refused the key.
    *
    * **Use it for the question the dialog is asking.** An action that collects
    * params and ALSO sets `confirmText` shows the user two dialogs for one

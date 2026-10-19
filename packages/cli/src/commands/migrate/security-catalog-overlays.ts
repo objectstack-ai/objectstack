@@ -20,7 +20,7 @@ import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { describeSecurityPluginComposition, describeUnloadableHostConfig } from '../../utils/schema-migration-plugins.js';
 import { absentTableReads } from '../../utils/absent-table-reads.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
-import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import {
   deleteSecurityCatalogOverlayRows,
   listSecurityCatalogOverlayRows,
@@ -195,7 +195,7 @@ export default class MigrateSecurityCatalogOverlays extends Command {
     if (occupancy.status === 'busy' && !flags.json) {
       printWarning(apply
         ? `--force: ${describeOccupancy(occupancy)} Deleting anyway — the live process may write metadata mid-run.`
-        : `${describeOccupancy(occupancy)} The preview below writes nothing.`);
+        : `${describeOccupancy(occupancy)} The preview below writes no row or table. ${JOURNAL_MODE_SWITCH_NOTE}`);
     }
     if (occupancy.status === 'unknown' && !flags.json) {
       printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);
@@ -290,7 +290,7 @@ export default class MigrateSecurityCatalogOverlays extends Command {
     // The preview's read-only boot measured whether `sys_metadata` exists; a
     // table that does not exist stores no row (the `meta --stored` reading).
     const reads = absentTableReads(stack);
-    const rows = reads.absent('sys_metadata') ? [] : await listSecurityCatalogOverlayRows(stack.kernel);
+    const rows = reads.absent('sys_metadata') ? [] : await listSecurityCatalogOverlayRows(stack.kernel, stack.driver);
     const outcomes = apply && rows.length > 0 ? await deleteSecurityCatalogOverlayRows(stack.kernel, rows) : [];
     const deleted = outcomes.filter((o) => o.outcome === 'deleted').length;
     const failed = outcomes.filter((o) => o.outcome === 'failed').length;

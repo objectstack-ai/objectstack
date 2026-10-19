@@ -78,9 +78,9 @@ export class HistoryCleanupManager {
   async runCleanup(): Promise<{ deleted: number; errors: number }> {
     const driver = (this.dbLoader as any).driver as IDataDriver;
     const historyTableName = (this.dbLoader as any).historyTableName as string;
-    const organizationId = (this.dbLoader as any).organizationId as string | undefined;
-    // `environmentId` was removed from the metadata layer (ADR-0008 §0
-    // amendment). Cleanup is now scoped by `organization_id` only.
+    // Neither `environmentId` (ADR-0008 §0 amendment) nor `organization_id`
+    // (ADR-0131 D6/D7: the family declares no organization column) scopes
+    // cleanup: every history row is the environment's.
 
     let deleted = 0;
     let errors = 0;
@@ -101,10 +101,6 @@ export class HistoryCleanupManager {
           recorded_at: { $lt: cutoffISO },
         };
 
-        if (organizationId) {
-          filter.organization_id = organizationId;
-        }
-
         if (pinnedTypes.length > 0) {
           // Exclude executionPinned rows from bulk age delete.
           filter.type = { $nin: pinnedTypes };
@@ -124,7 +120,6 @@ export class HistoryCleanupManager {
         try {
           // Get all unique metadata items keyed by (type, name)
           const baseWhere: Record<string, unknown> = {};
-          if (organizationId) baseWhere.organization_id = organizationId;
 
           const metaItems = await driver.find(historyTableName, {
             where: baseWhere,
@@ -240,7 +235,6 @@ export class HistoryCleanupManager {
   }> {
     const driver = (this.dbLoader as any).driver as IDataDriver;
     const historyTableName = (this.dbLoader as any).historyTableName as string;
-    const organizationId = (this.dbLoader as any).organizationId as string | undefined;
 
     let recordsByAge = 0;
     let recordsByCount = 0;
@@ -252,7 +246,6 @@ export class HistoryCleanupManager {
 
     try {
       const baseWhere: Record<string, unknown> = {};
-      if (organizationId) baseWhere.organization_id = organizationId;
 
       // Count records that would be deleted by age
       if (this.policy.maxAgeDays) {

@@ -20,6 +20,8 @@ import {
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { oneShotSettingsPlugin } from '../../utils/one-shot-settings.js';
 import { absentTableReads, secretUnionReadView } from '../../utils/absent-table-reads.js';
+import { describeDriverSqliteFile } from '../../utils/connection-display.js';
+import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import type {
   DatasourceArtefactLike,
   SecretReferenceEngineLike,
@@ -95,7 +97,7 @@ import type {
 export default class SecretOrphans extends Command {
   static override description =
     'Report `sys_secret` rows no producer references any more, and (only with --delete) remove the '
-    + 'ones attributable to settings. Report-only by default: it writes nothing and deletes nothing.';
+    + 'ones attributable to settings. Report-only by default: it writes no row or table and deletes nothing.';
 
   static override examples = [
     '<%= config.bin %> secret orphans',
@@ -112,7 +114,7 @@ export default class SecretOrphans extends Command {
     }),
     delete: Flags.boolean({
       description:
-        'Delete the deletable rows (default is a report that writes nothing). Requires --export, '
+        'Delete the deletable rows (default is a report that writes no row or table). Requires --export, '
         + 'and refuses whenever the reference union is incomplete.',
       default: false,
     }),
@@ -216,7 +218,7 @@ export default class SecretOrphans extends Command {
         // [#21471] Composed through the one-shot helper, never with the
         // service's default provider: in a development posture with no key,
         // that default mints a key file in the key home, and this report
-        // promises to write nothing.
+        // promises to write no row or table, and writes no key file either.
         extraPlugins: [new PlatformObjectsPlugin(), await oneShotSettingsPlugin()],
         // [#21391] The report boots READ-ONLY, the boot `os migrate plan`
         // takes: `deferSchemaDdl` holds schema DDL back on every SQL
@@ -233,6 +235,17 @@ export default class SecretOrphans extends Command {
     }
 
     try {
+      // [#23622] Either mode's connect may have switched a SQLite file's
+      // journal mode (`SqlDriver.applySqliteJournalMode`, one rule for every
+      // connect), which rewrites the file header and no row. So no line below
+      // says that nothing changed: the read-only mode claims no row or table
+      // (its boot defers DDL), an abort after the plain boot claims no row
+      // (that boot may have created a missing table), and on a SQLite file
+      // each says what the connect may still have changed. A target that is
+      // no SQLite file (PostgreSQL, MySQL) has no header to switch.
+      const journalNote = describeDriverSqliteFile(stack.driver?.config) !== undefined
+        ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
+        : '';
       const engine = stack.kernel.getService('objectql') as SecretReferenceEngineLike | undefined;
       if (!engine) {
         const message = 'No ObjectQL engine on this runtime, so no producer family can be enumerated.';
@@ -329,7 +342,7 @@ export default class SecretOrphans extends Command {
       if (!flags.delete) {
         if (json) { await emitJson({ mode: 'report', plan }, 0, { compact: true }); return; }
         renderPlan(plan);
-        printInfo(`Report only — nothing was written or deleted. (${timer.display()})`);
+        printInfo(`Report only — no row or table was written or deleted.${journalNote} (${timer.display()})`);
         printInfo('Re-run with --delete --export <path> to remove the deletable rows.');
         return;
       }
@@ -369,7 +382,7 @@ export default class SecretOrphans extends Command {
         const ok = await confirm(
           chalk.yellow(`  Delete ${plan.deletable.length} row(s) after writing the export? [y/N] `),
         );
-        if (!ok) { printInfo('Aborted — nothing was written or deleted.'); return; }
+        if (!ok) { printInfo(`Aborted — no export was written and no row was deleted.${journalNote}`); return; }
       }
 
       // ── The export, written and READ BACK before anything is deleted ──────

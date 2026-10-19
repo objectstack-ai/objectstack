@@ -266,8 +266,9 @@ const WIDGET_HISTORY =
  * renderer setting. `dataset` is required, so every widget renders through
  * objectui's dataset-bound path (`DatasetWidget`), and that path is meant to
  * read exactly the five keys declared below. Any other key parses and reaches
- * no renderer. The #20960 census measured that at objectui `main` `5262f7dd`
- * over every key this repo's examples wrote here (`format`, `currency`,
+ * no renderer. The #20960 census measured that on objectui `main` (read points
+ * recorded in `liveness/dashboard.json`, row `widgets.options`) over every key
+ * this repo's examples wrote here (`format`, `currency`,
  * `color`, `suffix`, `showLegend`, `horizontal`, `showDataLabels`): none is
  * read on that path — only the legacy inline arm, which a widget carrying a
  * `dataset` never reaches, spreads the bag into component props — so each was
@@ -690,7 +691,8 @@ const SINGLE_MEASURE_WIDGET_TYPES = ['metric', 'kpi', 'gauge', 'solid-gauge', 'b
  *     the dataset, not about the widget, and unreachable from this schema — a
  *     tile naming one measure nobody declared parses exactly as before.
  *  5. **objectui's CLIENT-SIDE authoring door**, a `.shape` mirror that runs no
- *     object-level check of this schema's: at the `.objectui-sha` pin,
+ *     object-level check of this schema's (read point recorded in
+ *     `liveness/dashboard.json`, row `widgets`):
  *     `@object-ui/types` builds its own `DashboardWidgetSchema` from
  *     `specFieldsExcept(SpecDashboardWidgetSchema.shape, …).extend({…}).strict()`
  *     and re-attaches none of this file's exported checks. Until it imports and

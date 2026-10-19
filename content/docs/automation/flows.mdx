@@ -139,11 +139,11 @@ Each node performs a specific action in the flow.
 | `type` | `string` | ✅ | Node type — a built-in id from the table above **or** a plugin-registered one. Per ADR-0018 the spec does not gate this with a closed enum; it is checked against the live action registry once that registry is complete — plugins contribute node types while they start, so flows registered during boot are checked in one pass when the vocabulary closes (all plugins started), and anything registered after that (Studio publish, dev reload) is checked immediately. Unknown types warn, never reject; executing one fails with `NO_EXECUTOR` |
 | `label` | `string` | ✅ | Display label |
 | `config` | `object` | optional | Type-specific configuration — its node type owns its shape. On every built-in node type with an executor contract, a key that contract does not declare is refused at the flow parse, at the key's path; on a plugin node type, a key the published `configSchema` does not declare is rejected at `registerFlow()`. An `approval` node's config is judged whole against its declared contract at the flow parse, and the built-in executors `parse()` the value against their Zod contract before running |
-| `connectorConfig` | `object` | ✅ on `connector_action` | `{ connectorId, actionId, input }` — the only input a `connector_action` node's executor reads. `FlowSchema` refuses a `connector_action` node without it, and one whose `connectorId` or `actionId` is blank (empty or whitespace only), at any depth including a region body. `connectorId` is the registered connector's `name`, `actionId` one of the action keys it declares; `input` is optional |
+| `connectorConfig` | `object` | ✅ on `connector_action` | `{ connectorId, actionId, input }` — the only input a `connector_action` node's executor reads. `FlowSchema` refuses a `connector_action` node without it, and one whose `connectorId` or `actionId` is blank (empty or whitespace only), at any depth including a region body. `connectorId` is the registered connector's `name`, `actionId` one of the action keys it declares; `input` is optional. The same three keys written under the node's `config` are refused (since 18), each naming its `connectorConfig` key |
 | `position` | `{ x, y }` | optional | Visual position on canvas |
 | `timeoutMs` | `number` | optional | Per-node execution timeout |
 | `inputSchema` | `object` | optional | Declared input parameter types, for Studio form generation and runtime validation |
-| `waitEventConfig` | `object` | ✅ on `wait` | `wait`-node event descriptor (`eventType`, `timerDuration`, `signalName`). `FlowSchema` refuses a `wait` node without it; `eventType` has no default, and `eventType: 'timer'` requires a non-blank `timerDuration`. `timeoutMs` / `onTimeout` were removed in 17 (#4158) — `wait` has no timeout; `timerDuration` is a string, and a quoted bare number (`'60000'`) is read as milliseconds |
+| `waitEventConfig` | `object` | ✅ on `wait` | `wait`-node event descriptor (`eventType`, `timerDuration`, `signalName`). `FlowSchema` refuses a `wait` node without it; `eventType` has no default, and `eventType: 'timer'` requires a non-blank `timerDuration`. `timeoutMs` / `onTimeout` were removed in 17 (#4158) — `wait` has no timeout; `timerDuration` is a string, and a quoted bare number (`'60000'`) is read as milliseconds. Event keys written under the node's `config` instead (`eventType`, `timerDuration` or `duration`, `signalName` or `signal`, `timeoutMs`) are refused (since 18), each naming its `waitEventConfig` key |
 | `boundaryConfig` | `object` | ✅ on `boundary_event` | BPMN boundary-event descriptor (interop). `FlowSchema` refuses a `boundary_event` node without it |
 
 <Callout type="info">
@@ -1193,7 +1193,8 @@ is consumed: nothing is applied, the run stays parked, and the corrected
 submission still lands.
 
 Three shapes declare no contract and so keep the pass-through — the same way an
-action with no `params` is untouched:
+action with no `params` is untouched, unless it is a declarative
+`operation: 'update'`, whose empty list is an empty accept set:
 
 - an **object-form** screen (`config.objectName`), whose flat `fields` list is
   empty by construction; the client persists the record through the normal write

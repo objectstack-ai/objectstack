@@ -32,7 +32,7 @@
  *     sub-tree under a refused key as if it were authored is what the ruling
  *     rules out. The conversion walker still descends it — stored documents
  *     are its population, not this walk's.
- *   - `kind: 'html' | 'react' | 'jsx'` pages are authored as `source`, which is
+ *   - `kind: 'html' | 'react'` pages are authored as `source`, which is
  *     authoritative; their `regions` hold at most a DERIVED cache that the
  *     source wins over. Linting that cache reports findings about metadata the
  *     author never wrote, so those pages are skipped here and covered by
@@ -77,7 +77,7 @@ function strName(v: unknown): string | undefined {
 }
 
 /** Page kinds whose component tree is a derived cache, not authored metadata. */
-const SOURCE_AUTHORED_KINDS = new Set(['html', 'react', 'jsx']);
+const SOURCE_AUTHORED_KINDS = new Set(['html', 'react']);
 
 /** Is this page authored as `source` (so its `regions` must not be linted)? */
 export function isSourceAuthoredPage(page: AnyRec): boolean {

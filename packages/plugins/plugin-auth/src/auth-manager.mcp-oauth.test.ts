@@ -443,6 +443,42 @@ describe('verifyMcpAccessToken (local JWKS verification, fail-closed)', () => {
     });
   });
 
+  // ── the bound organization, by CLAIM SHAPE (#24166) ─────────────────────
+  // What the real authorization server mints, and from where, is pinned in
+  // auth-manager.oauth-consent-organization.test.ts against a running server.
+  // These pin how the verifier READS the claim, including shapes that server
+  // never mints.
+
+  it('returns the `organization_id` claim as `organizationId`', async () => {
+    const token = await signToken({ sub: 'user-1', client_id: 'client-abc', organization_id: 'org-a' });
+    expect(await manager().verifyMcpAccessToken(token)).toEqual({
+      userId: 'user-1',
+      scopes: ['data:read', 'data:write'],
+      clientId: 'client-abc',
+      organizationId: 'org-a',
+    });
+  });
+
+  it('a token with no `organization_id` claim resolves with no `organizationId` member at all', async () => {
+    const res = await manager().verifyMcpAccessToken(await signToken());
+    expect(res).not.toBeNull();
+    expect(Object.keys(res!)).not.toContain('organizationId');
+  });
+
+  it('refuses a token whose `organization_id` is present but is not a non-empty string', async () => {
+    // Not read as "no organization": a claim this server never mints is doubt,
+    // and the method is fail-closed on doubt. The string case beside it is the
+    // control, so a method that refuses everything cannot satisfy this.
+    for (const organization_id of [42, '', ['org-a'], { id: 'org-a' }, null]) {
+      const token = await signToken({ organization_id });
+      expect(
+        await manager().verifyMcpAccessToken(token),
+        `organization_id ${JSON.stringify(organization_id)} must be refused`,
+      ).toBeNull();
+    }
+    expect(await manager().verifyMcpAccessToken(await signToken({ organization_id: 'org-a' }))).not.toBeNull();
+  });
+
   it('rejects garbage / non-JWT input without touching the JWKS', async () => {
     const m = manager();
     expect(await m.verifyMcpAccessToken('')).toBeNull();

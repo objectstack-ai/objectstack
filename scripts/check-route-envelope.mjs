@@ -268,6 +268,12 @@ const MODULES = {
   // created the module so the gap never exists.
   'packages/services/service-storage/src/mount-storage-routes.ts': { responses: 0, ok: 0, err: 0 },
 
+  // The print door (`POST /api/v1/print/records`), mounted by `PrintServicePlugin`
+  // straight on `IHttpServer`. Every body it answers is written by the shared pair
+  // (`sendOk` / `sendError` / `sendServerFault`), so it builds none itself.
+  // Declared in the same PR that created the module.
+  'packages/services/service-print/src/print-routes.ts': { responses: 0, ok: 0, err: 0 },
+
   // ── Exempt ──────────────────────────────────────────────────────────────
 
   // A dev-only SSE endpoint (`GET|POST /api/v1/dev/metadata-events`) that closes
@@ -329,7 +335,102 @@ const MODULES = {
     // string `error` bodies of `registerDataActionEndpoints`' handlers left this
     // file with that body for `data-action-routes.ts`, which declares them
     // below at the count they had here; the sum is unchanged (26 + 13 = 39).
-    stringError: 26,
+    //
+    // 26 → 18 (#23050 slice 2): NOT progress — the same MOVE. The eight literal
+    // string `error` bodies of `registerBatchEndpoints`' handlers left this file
+    // with that body for `batch-routes.ts`, declared below at the count they had
+    // here; the sum is unchanged (18 + 13 + 8 = 39).
+    //
+    // 18 → 17 (#23050 slice 3): NOT progress — the same MOVE. The one literal
+    // string `error` body of `registerApprovalsEndpoints`' handlers left this
+    // file with that body for `approvals-routes.ts`, declared below at the count
+    // it had here; the sum is unchanged (17 + 13 + 8 + 1 = 39).
+    //
+    // 17 → 17 (#23050 slice 4): the record-sharing and sharing-rule bodies left
+    // this file for `sharing-routes.ts` carrying NO literal string `error` body
+    // (every arm there computes its message), so this count does not move and
+    // that module declares 0 below; the sum is unchanged (17 + 13 + 8 + 1 + 0 = 39).
+    //
+    // 17 → 17 (#23050 slice 5): the analytics dataset body left this file for
+    // `analytics-routes.ts` carrying NO literal string `error` body (its one
+    // `{ code, error }` arm sends the computed `outward`), so this count does
+    // not move and that module declares 0 below; the sum is unchanged
+    // (17 + 13 + 8 + 1 + 0 + 0 = 39).
+    //
+    // 17 → 17 (#23050 slice 6): the security-explain and suggested-binding
+    // bodies left this file for `security-routes.ts` carrying NO literal string
+    // `error` body (every arm there emits the nested `{ error: { code, message } }`
+    // through its family's one emitter), so this count does not move and that
+    // module declares 0 below; the sum is unchanged (17 + 13 + 8 + 1 + 0 + 0 + 0 = 39).
+    //
+    // 17 → 17 (#23050 slice 7): the discovery and OpenAPI bodies left this file
+    // for `discovery-routes.ts` carrying NO literal string `error` body (the
+    // discovery handler's one refusal path is the shared `handleRouteError`, and
+    // the OpenAPI document's one hand-built refusal is the nested
+    // `{ error: { code, message } }`), so this count does not move and that
+    // module declares 0 below; the sum is unchanged
+    // (17 + 13 + 8 + 1 + 0 + 0 + 0 + 0 = 39).
+    //
+    // 17 → 16 (#23050 slice 8): NOT progress — the same MOVE as slices 1–3.
+    // The email send body's one literal string `error` body (the non-object
+    // body's 400 `INVALID_REQUEST`, `'JSON body required'`) left this file with
+    // that body for `email-routes.ts`, declared below at the count it had here;
+    // the sum is unchanged (16 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 = 39).
+    //
+    // 16 → 16 (#23050 slice 9): the global search body left this file for
+    // `search-routes.ts` carrying NO literal string `error` body (its one
+    // hand-built refusal, the 501 `{ code, message }`, has no `error` key, and
+    // its catch sends `mapDataError`'s computed body), so this count does not
+    // move and that module declares 0 below; the sum is unchanged
+    // (16 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 = 39).
+    //
+    // 16 → 15 (#23050 slice 10): NOT progress — the same MOVE as slices 1–3 and 8.
+    // The UI view body's one literal string `error` body (its 501
+    // `NOT_IMPLEMENTED`, `'UI View resolution not supported by protocol
+    // implementation'`) left this file with that body for `ui-routes.ts`,
+    // declared below at the count it had here; the sum is unchanged
+    // (15 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 = 39).
+    //
+    // 15 → 11 (#23050 slice 11): NOT progress — the same MOVE as slices 1–3, 8
+    // and 10. The public form doors' four literal string `error` bodies (each
+    // door's 400 `INVALID_REQUEST`, `'slug is required'`, and each door's 404
+    // `FORM_NOT_FOUND`) left this file with `registerFormEndpoints`' body for
+    // `form-routes.ts`, declared below at the count they had here; the sum is
+    // unchanged (11 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 = 39).
+    //
+    // 11 → 8 (#23050 slice 12): NOT progress — the same MOVE as slices 1–3, 8,
+    // 10 and 11. The CRUD doors' three literal string `error` bodies (the 400
+    // `VALIDATION_FAILED` answers of the create, QueryAST query and update
+    // request gates: `'Invalid create request'`, `'Invalid query request'`,
+    // `'Invalid update request'`) left this file with `registerCrudEndpoints`'
+    // body for `crud-routes.ts`, declared below at the count they had here; the
+    // sum is unchanged (8 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 + 3 = 39).
+    //
+    // 8 → 8 (#23050 slice 13a): the first three `/meta` groups of
+    // `registerMetadataEndpointsInner` left this file for
+    // `meta-collection-routes.ts` carrying NO literal string `error` body (their
+    // refusals are nested `{ error: { code, message } }` bodies and their catches
+    // go through `handleRouteError`), so this count does not move and that module
+    // declares 0 below; the sum is unchanged
+    // (8 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 + 3 + 0 = 39).
+    //
+    // 8 → 7 (#23050 slice 13b): NOT progress — the same MOVE as slices 1–3, 8 and
+    // 10–12. The fourth `/meta` group, the per-item reads, left this file for
+    // `meta-item-read-routes.ts` with its one literal string `error` body (the
+    // `/layers` door's 501 `NOT_IMPLEMENTED`, `'Layered metadata view not
+    // supported by protocol implementation'`), declared below at the count it had
+    // here; the sum is unchanged
+    // (7 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 + 3 + 0 + 1 = 39).
+    //
+    // 7 → 2 (#23050 slice 13d): NOT progress — the same MOVE as slices 1–3, 8, 10–12
+    // and 13b. The sixth `/meta` group, the history family, left this file for
+    // `meta-item-history-routes.ts` with its five literal string `error` bodies (the
+    // 501 `NOT_IMPLEMENTED` of `/history`, `/publish`, `/rollback` and `/diff`, and
+    // the rollback's 400 `INVALID_REQUEST` on a missing or invalid `toVersion`),
+    // declared below at the count they had here. The two left here are class-head
+    // sites; the sum is unchanged, `meta-item-write-routes.ts`' 0 included
+    // (2 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 + 3 + 0 + 1 + 0 + 5 = 39).
+    stringError: 2,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
     // `respondError` helper, banking that progress per the ratchet's own rule.
@@ -371,7 +472,84 @@ const MODULES = {
     // 54 → 39 (#23050 slice 1): NOT progress — the same MOVE as `stringError`
     // above. Fifteen `{ code, error }` bodies left with the data-action body for
     // `data-action-routes.ts`, declared below; the sum is unchanged (39 + 15 = 54).
-    siblingCode: 39,
+    //
+    // 39 → 31 (#23050 slice 2): NOT progress — the same MOVE as `stringError`
+    // above. Eight `{ code, error }` bodies left with the batch body for
+    // `batch-routes.ts`, declared below; the sum is unchanged (31 + 15 + 8 = 54).
+    //
+    // 31 → 22 (#23050 slice 3): NOT progress — the same MOVE as `stringError`
+    // above. Nine `{ code, error }` bodies left with the approvals body for
+    // `approvals-routes.ts`, declared below; the sum is unchanged
+    // (22 + 15 + 8 + 9 = 54).
+    //
+    // 22 → 18 (#23050 slice 4): NOT progress — the same MOVE as `stringError`
+    // above. The four `{ code, error }` bodies of the sharing-rule family's
+    // `handleError` (`VALIDATION_FAILED`, `PERMISSION_DENIED`, `RULE_NOT_FOUND`
+    // and its 500 terminal) left with that body for `sharing-routes.ts`,
+    // declared below; the sum is unchanged (18 + 15 + 8 + 9 + 4 = 54).
+    //
+    // 18 → 17 (#23050 slice 5): NOT progress — the same MOVE as `stringError`
+    // above. The analytics dataset door's one `{ code, error }` body (its
+    // undeclared-fault 500, `ANALYTICS_QUERY_FAILED`) left with that body for
+    // `analytics-routes.ts`, declared below; the sum is unchanged
+    // (17 + 15 + 8 + 9 + 4 + 1 = 54).
+    //
+    // 17 → 17 (#23050 slice 6): the security-explain and suggested-binding
+    // bodies left this file for `security-routes.ts` carrying NO `{ code, error }`
+    // body — the four arms #7981 and #8073 converted are the ones counted above
+    // as 77 → 73 — so this count does not move and that module declares 0 below;
+    // the sum is unchanged (17 + 15 + 8 + 9 + 4 + 1 + 0 = 54).
+    //
+    // 17 → 17 (#23050 slice 7): the discovery and OpenAPI bodies left this file
+    // for `discovery-routes.ts` carrying NO `{ code, error }` body, so this
+    // count does not move and that module declares 0 below; the sum is
+    // unchanged (17 + 15 + 8 + 9 + 4 + 1 + 0 + 0 = 54).
+    //
+    // 17 → 14 (#23050 slice 8): NOT progress — the same MOVE as `stringError`
+    // above. The email send body's three `{ code, error }` bodies (the 400s
+    // `INVALID_REQUEST` and `VALIDATION_FAILED`, and its 500 `EMAIL_SEND_FAILED`)
+    // left with that body for `email-routes.ts`, declared below; the sum is
+    // unchanged (14 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 = 54).
+    //
+    // 14 → 14 (#23050 slice 9): the global search body left this file for
+    // `search-routes.ts` carrying NO `{ code, error }` body, so this count does
+    // not move and that module declares 0 below; the sum is unchanged
+    // (14 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 = 54).
+    //
+    // 14 → 13 (#23050 slice 10): NOT progress — the same MOVE as `stringError`
+    // above. The UI view body's one `{ code, error }` body (that same 501
+    // `NOT_IMPLEMENTED`) left with that body for `ui-routes.ts`, declared below;
+    // the sum is unchanged (13 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 = 54).
+    //
+    // 13 → 7 (#23050 slice 11): NOT progress — the same MOVE as `stringError`
+    // above. The public form doors' six `{ code, error }` bodies (each door's
+    // 400 `INVALID_REQUEST` and 404 `FORM_NOT_FOUND`, the resolve door's 500
+    // `FORM_RESOLVE_FAILED` and the submit door's 400 `VALIDATION_ERROR`) left
+    // with that body for `form-routes.ts`, declared below; the sum is unchanged
+    // (7 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 = 54).
+    //
+    // 7 → 4 (#23050 slice 12): NOT progress — the same MOVE as `stringError`
+    // above. Those same three `{ error, code }` bodies (each request gate's 400
+    // `VALIDATION_FAILED`) left with that body for `crud-routes.ts`, declared
+    // below; the sum is unchanged (4 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 + 3 = 54).
+    //
+    // 4 → 4 (#23050 slice 13a): those same three `/meta` groups carried NO
+    // `{ code, error }` body either, so this count does not move and
+    // `meta-collection-routes.ts` declares 0 below; the sum is unchanged
+    // (4 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 + 3 + 0 = 54).
+    //
+    // 4 → 3 (#23050 slice 13b): NOT progress — the same MOVE as `stringError`
+    // above. That same `{ error, code }` body left with the per-item reads for
+    // `meta-item-read-routes.ts`, declared below; the sum is unchanged
+    // (3 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 + 3 + 0 + 1 = 54).
+    //
+    // 3 → 2 (#23050 slice 13d): NOT progress — the same MOVE as `stringError`
+    // above. The rollback's one `{ error, code }` body (its 400 `INVALID_REQUEST`)
+    // left with the history family for `meta-item-history-routes.ts`, declared
+    // below; the two left here are class-head sites, and the sum is unchanged,
+    // `meta-item-write-routes.ts`' 0 included
+    // (2 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 + 3 + 0 + 1 + 0 + 1 = 54).
+    siblingCode: 2,
   },
 
   // [#8850] The ADR-0112 error/fault-classification prologue, extracted from
@@ -426,6 +604,298 @@ const MODULES = {
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 13,
     siblingCode: 15,
+  },
+
+  // [#23050 slice 2] `RestServer#registerBatchEndpoints`' body — the
+  // cross-object transactional batch and the four per-object bulk doors —
+  // moved out of `rest-server.ts` whole, on exactly slice 1's terms above: a
+  // MOVE, no wire answer changed, so it inherits `dialectOnly` and the two
+  // dialect facts, and no write-site count. Both counts were measured on the
+  // moved file and equal what left `rest-server.ts` in the same PR (stringError
+  // 26 → 18, siblingCode 39 → 31), so each sum is unchanged. Both only ever tick
+  // down. Discovered by the `*-routes.ts` convention and declared in the same PR
+  // that created the module, so the gap never exists.
+  'packages/rest/src/batch-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 2 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 8,
+    siblingCode: 8,
+  },
+
+  // [#23050 slice 3] `RestServer#registerApprovalsEndpoints`' body — the
+  // approval request list and read, the decisions, recall, the flow moves, the
+  // thread interactions and the audit trail — moved out of `rest-server.ts`
+  // whole, on exactly slice 1's terms above: a MOVE, no wire answer changed, so
+  // it inherits `dialectOnly` and the two dialect facts, and no write-site
+  // count. Both counts were measured on the moved file and equal what left
+  // `rest-server.ts` in the same PR (stringError 18 → 17, siblingCode 31 → 22),
+  // so each sum is unchanged. Both only ever tick down. Discovered by the
+  // `*-routes.ts` convention and declared in the same PR that created the
+  // module, so the gap never exists.
+  'packages/rest/src/approvals-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 3 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 1,
+    siblingCode: 9,
+  },
+
+  // [#23050 slice 4] `RestServer#registerSharingEndpoints`' and
+  // `#registerSharingRuleEndpoints`' bodies — the per-record share family and
+  // the sharing-rule family — moved out of `rest-server.ts` whole, into ONE
+  // module, on exactly slice 1's terms above: a MOVE, no wire answer changed,
+  // so it inherits `dialectOnly` and the two dialect facts, and no write-site
+  // count. Both counts were measured on the moved file and equal what left
+  // `rest-server.ts` in the same PR (stringError 17 → 17, siblingCode 22 → 18),
+  // so each sum is unchanged. Both only ever tick down. Discovered by the
+  // `*-routes.ts` convention and declared in the same PR that created the
+  // module, so the gap never exists.
+  'packages/rest/src/sharing-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 4 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 4,
+  },
+
+  // [#23050 slice 5] `RestServer#registerAnalyticsEndpoints`' body — the
+  // analytics dataset preview/query door, `POST {basePath}/analytics/dataset/query`
+  // — moved out of `rest-server.ts` whole, on exactly slice 1's terms above: a
+  // MOVE, no wire answer changed, so it inherits `dialectOnly` and the two
+  // dialect facts, and no write-site count. Both counts were measured on the
+  // moved file and equal what left `rest-server.ts` in the same PR (stringError
+  // 17 → 17, siblingCode 18 → 17), so each sum is unchanged. Both only ever
+  // tick down. Discovered by the `*-routes.ts` convention and declared in the
+  // same PR that created the module, so the gap never exists.
+  'packages/rest/src/analytics-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 5 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 1,
+  },
+
+  // [#23050 slice 6] `RestServer#registerSecurityExplainEndpoints`' and
+  // `#registerSecurityEndpoints`' bodies — the access-explanation family
+  // (`/security/explain` and `/security/my-delegable-scope`) and the
+  // suggested audience bindings (`/security/suggested-bindings` and its
+  // confirm / dismiss) — moved out of `rest-server.ts` whole, into ONE module,
+  // on exactly slice 1's terms above: a MOVE, no wire answer changed, so it
+  // inherits `dialectOnly` and the two dialect facts, and no write-site count.
+  // Both counts were measured on the moved file and equal what left
+  // `rest-server.ts` in the same PR (stringError 17 → 17, siblingCode 17 → 17:
+  // none), so each sum is unchanged. Both only ever tick down. Discovered by
+  // the `*-routes.ts` convention and declared in the same PR that created the
+  // module, so the gap never exists.
+  'packages/rest/src/security-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 6 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 0,
+  },
+
+  // [#23050 slice 7] `RestServer#registerDiscoveryEndpoints`' and
+  // `#registerOpenApiEndpoints`' bodies — the discovery document (the API root
+  // and `/discovery`) and the OpenAPI pair (`/openapi.json` and the `/docs`
+  // viewer) — moved out of `rest-server.ts` whole, into ONE module, on exactly
+  // slice 1's terms above: a MOVE, no wire answer changed, so it inherits
+  // `dialectOnly` and the two dialect facts, and no write-site count. Both
+  // counts were measured on the moved file and equal what left `rest-server.ts`
+  // in the same PR (stringError 17 → 17, siblingCode 17 → 17: none), so each
+  // sum is unchanged. Both only ever tick down. Discovered by the `*-routes.ts`
+  // convention and declared in the same PR that created the module, so the gap
+  // never exists.
+  'packages/rest/src/discovery-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 7 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 0,
+  },
+
+  // [#23050 slice 8] `RestServer#registerEmailEndpoints`' body — the
+  // transactional send door, `POST /email/send` — moved out of `rest-server.ts`
+  // whole, on exactly slice 1's terms above: a MOVE, no wire answer changed, so
+  // it inherits `dialectOnly` and the two dialect facts, and no write-site
+  // count. Both counts were measured on the moved file and equal what left
+  // `rest-server.ts` in the same PR (stringError 17 → 16, siblingCode 17 → 14),
+  // so each sum is unchanged. Both only ever tick down. Discovered by the
+  // `*-routes.ts` convention and declared in the same PR that created the
+  // module, so the gap never exists.
+  'packages/rest/src/email-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 8 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 1,
+    siblingCode: 3,
+  },
+
+  // [#23050 slice 9] `RestServer#registerSearchEndpoints`' body — the global
+  // cross-object search door, `GET /search` — moved out of `rest-server.ts`
+  // whole, on exactly slice 1's terms above: a MOVE, no wire answer changed, so
+  // it inherits `dialectOnly` and the two dialect facts, and no write-site
+  // count. Both counts were measured on the moved file and equal what left
+  // `rest-server.ts` in the same PR (stringError 16 → 16, siblingCode 14 → 14:
+  // none), so each sum is unchanged. Both only ever tick down. Discovered by
+  // the `*-routes.ts` convention and declared in the same PR that created the
+  // module, so the gap never exists.
+  'packages/rest/src/search-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 9 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 0,
+  },
+
+  // [#23050 slice 10] `RestServer#registerUiEndpoints`' body — the UI view
+  // door, `GET /ui/view/:object/:type` — moved out of `rest-server.ts` whole, on
+  // exactly slice 1's terms above: a MOVE, no wire answer changed, so it
+  // inherits `dialectOnly` and the two dialect facts, and no write-site count.
+  // Both counts were measured on the moved file and equal what left
+  // `rest-server.ts` in the same PR (stringError 16 → 15, siblingCode 14 → 13:
+  // the one 501 `{ error, code }` body), so each sum is unchanged. Both only
+  // ever tick down. Discovered by the `*-routes.ts` convention and declared in
+  // the same PR that created the module, so the gap never exists.
+  'packages/rest/src/ui-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 10 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 1,
+    siblingCode: 1,
+  },
+
+  // [#23050 slice 11] `RestServer#registerFormEndpoints`' body — the public
+  // (anonymous) form doors, `GET /forms/:slug` and `POST /forms/:slug/submit` —
+  // moved out of `rest-server.ts` whole, on exactly slice 1's terms above: a
+  // MOVE, no wire answer changed, so it inherits `dialectOnly` and the two
+  // dialect facts, and no write-site count. Both counts were measured on the
+  // moved file and equal what left `rest-server.ts` in the same PR (stringError
+  // 15 → 11, siblingCode 13 → 7), so each sum is unchanged. Both only ever tick
+  // down. Discovered by the `*-routes.ts` convention and declared in the same
+  // PR that created the module, so the gap never exists.
+  'packages/rest/src/form-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 11 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 4,
+    siblingCode: 6,
+  },
+
+  // [#23050 slice 12] `RestServer#registerCrudEndpoints`' body — the six record
+  // doors under `{basePath}{crud.dataPrefix}` (list, read, create, the QueryAST
+  // query, update, delete) — moved out of `rest-server.ts` whole, on exactly
+  // slice 1's terms above: a MOVE, no wire answer changed, so it inherits
+  // `dialectOnly` and the two dialect facts, and no write-site count. Both
+  // counts were measured on the moved file and equal what left
+  // `rest-server.ts` in the same PR (stringError 11 → 8, siblingCode 7 → 4), so
+  // each sum is unchanged. Both only ever tick down. Discovered by the
+  // `*-routes.ts` convention and declared in the same PR that created the
+  // module, so the gap never exists.
+  'packages/rest/src/crud-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 12 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 3,
+    siblingCode: 3,
+  },
+
+  // [#23050 slice 13a] The first three `/meta` groups of
+  // `RestServer#registerMetadataEndpointsInner`' body — the type list, the
+  // whole-store maintenance family and the per-type list — moved out of
+  // `rest-server.ts` on exactly slice 1's terms above: a MOVE, no wire answer
+  // changed, so it inherits `dialectOnly` and the two dialect facts, and no
+  // write-site count. Both counts were measured on the moved file at 0 and
+  // `rest-server.ts` keeps its 8 / 4, so each sum is unchanged. Both only ever
+  // tick down. Discovered by the `*-routes.ts` convention and declared in the
+  // same PR that created the module, so the gap never exists.
+  'packages/rest/src/meta-collection-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 13a and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 0,
+  },
+
+  // [#23050 slice 13b] The fourth `/meta` group of
+  // `RestServer#registerMetadataEndpointsInner`' body — the per-item reads
+  // (`/references`, `/layers`, the book tree and the item read) — moved out of
+  // `rest-server.ts` on exactly slice 1's terms above: a MOVE, no wire answer
+  // changed, so it inherits `dialectOnly` and the two dialect facts, and no
+  // write-site count. Both counts were measured on the moved file and equal what
+  // left `rest-server.ts` in the same PR (stringError 8 → 7, siblingCode 4 → 3:
+  // the `/layers` door's one 501 body), so each sum is unchanged. Both only ever
+  // tick down. Discovered by the `*-routes.ts` convention and declared in the same
+  // PR that created the module, so the gap never exists.
+  'packages/rest/src/meta-item-read-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 13b and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 1,
+    siblingCode: 1,
+  },
+
+  // [#23050 slice 13c] The fifth `/meta` group of
+  // `RestServer#registerMetadataEndpointsInner`' body — the per-item writes (the
+  // item save and the reset, `PUT` and `DELETE {metaPath}/:type/:name`) — moved
+  // out of `rest-server.ts` on exactly slice 1's terms above: a MOVE, no wire
+  // answer changed, so it inherits `dialectOnly` and the two dialect facts, and no
+  // write-site count. Both counts were measured on the moved file at 0 (each door's
+  // 403 and 501 bodies, and the save's 400, are the nested `{ error: { code,
+  // message } }`) and `rest-server.ts` keeps its 7 / 3, so each sum is unchanged. Both
+  // only ever tick down. Discovered by the `*-routes.ts` convention and declared in
+  // the same PR that created the module, so the gap never exists.
+  'packages/rest/src/meta-item-write-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 13c and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 0,
+  },
+
+  // [#23050 slice 13d] The sixth `/meta` group of
+  // `RestServer#registerMetadataEndpointsInner`' body — the history family (the
+  // change log, the audit trail, the publish, the rollback and the version
+  // comparison, `{metaPath}/:type/:name/history`, `/audit`, `/publish`, `/rollback`
+  // and `/diff`) — moved out of `rest-server.ts` on exactly slice 1's terms above: a
+  // MOVE, no wire answer changed, so it inherits `dialectOnly` and the two dialect
+  // facts, and no write-site count. Both counts were measured on the moved file and
+  // equal what left `rest-server.ts` in the same PR (stringError 7 → 2, siblingCode
+  // 3 → 2: the four 501 bodies and the rollback's 400, which is also the one
+  // sibling-`code` body), so each sum is unchanged. Both only ever tick down.
+  // Discovered by the `*-routes.ts` convention and declared in the same PR that
+  // created the module, so the gap never exists.
+  // [#23050 slice 13e] The eighth and last `/meta` group, the published read
+  // (`{metaPath}/:type/:name/published`), joined this module on the same terms. Its
+  // three response bodies are all nested ADR-0112 envelopes or the served document
+  // (stringError 0, siblingCode 0, measured on the moved text), so both counts here
+  // are unchanged and `rest-server.ts`' row does not move.
+  'packages/rest/src/meta-item-history-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 13d and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 5,
+    siblingCode: 1,
+  },
+
+  // [#23050 slice 13e] The seventh `/meta` group of
+  // `RestServer#registerMetadataEndpointsInner`' body — the object state-machine
+  // read (`{metaPath}/object/:name/state/:field`) — moved out of `rest-server.ts` on
+  // exactly slice 1's terms above: a MOVE, no wire answer changed, so it inherits
+  // `dialectOnly` and the two dialect facts, and no write-site count. Both counts
+  // were measured on the moved file at 0 (its three response bodies are the nested
+  // ADR-0112 `404 NOT_FOUND` and `501 NOT_IMPLEMENTED` envelopes and the served
+  // answer), which is what left `rest-server.ts` (its row stays 2 / 2), so each sum
+  // is unchanged. Both only ever tick down. Discovered by the `*-routes.ts`
+  // convention and declared in the same PR that created the module, so the gap
+  // never exists.
+  'packages/rest/src/meta-object-state-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 13e and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 0,
   },
 };
 
@@ -492,7 +962,13 @@ const SHARED_BUILDER = {
 const DISPATCHER_DOMAIN_DIR = 'packages/runtime/src/domains';
 
 const DISPATCHER_DOMAINS = {
-  'actions.ts': { handBuilt: 0 },
+  // Was 0. Kind 1: the handler's one 405 (every verb but POST) must carry
+  // `Allow:` — RFC 9110 requires it — and `deps.error` takes no headers, the
+  // same reason `mcp.ts`, `meta.ts` and `ai.ts` hand-roll theirs.
+  'actions.ts': {
+    handBuilt: 1,
+    note: 'one 405 for every verb but POST, which must carry an `Allow:` header (`deps.error` takes none); the body is the declared envelope, the code derived from the status',
+  },
   // [#12160] Not a domain either — the ADR-0126 §5 activation write-authority
   // gates, shared by the `/automation` toggle door, the `/actions` activation
   // door and the `/security` catalog activation door so one security policy
@@ -544,9 +1020,12 @@ const DISPATCHER_DOMAINS = {
   'webhooks.ts': { handBuilt: 0 },
 
   // Kind 1 — enveloped, hand-built only because the helper cannot say it.
+  // Was 1. The 405 for every verb but POST must carry `Allow:` (RFC 9110), and
+  // `deps.error` takes no headers — the same reason `actions.ts` above and
+  // `mcp.ts`, `meta.ts` and `ai.ts` below hand-roll theirs.
   'keys.ts': {
-    handBuilt: 1,
-    note: 'POST /keys is a 201 and `deps.success` hardcodes 200; the body is the declared envelope',
+    handBuilt: 2,
+    note: 'POST /keys is a 201 and `deps.success` hardcodes 200; one 405 for every other verb, which must carry an `Allow:` header (`deps.error` takes none); both bodies are the declared envelope, the 405 code derived from the status',
   },
   'share-links.ts': {
     handBuilt: 1,

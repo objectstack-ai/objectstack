@@ -23,17 +23,28 @@ import { defineFlow } from '@objectstack/spec';
  * covers `org_membership_level` + `expression`; the kinds below are the ones no
  * other flow declares.
  *
- * ## Why `draft`
+ * ## Why `obsolete`
  *
  * Deliberate, not an oversight. The record-backed kinds point at rows a fresh
  * boot does not have: `sys_user` holds only the seeded admin, `sys_team` is
  * empty (the seeded `Team` rows are the DEMO `showcase_team` object), and both
  * unit membership (`sys_business_unit_member`) and position assignment
  * (`sys_user_position`) are runtime admin actions by design — see the seed
- * notes in `src/data/seed/index.ts`. An `active` flow over them would resolve
- * to nobody, which is precisely the silent dead slot #3508 exists to remove.
- * Shipping that as a demo would re-teach the bug. `draft` keeps it out of the
- * runtime while still loading in the designer, which is the surface under test.
+ * notes in `src/data/seed/index.ts`. An armed flow over them would resolve to
+ * nobody, which is precisely the silent dead slot #3508 exists to remove: every
+ * Field Zoo update would start a run that parks at `by_user` and, under
+ * `onEmptyApprovers: 'admin_rescue'`, files a pending approval request on the
+ * organization's administrators. Shipping that as a demo would re-teach the bug.
+ *
+ * `obsolete` is the status the platform declares for "loaded, not armed". The
+ * engine still registers the flow — the designer lists and opens it, which is
+ * the surface under test, and Studio's on/off switch reads it as Off — but it
+ * never hands the flow to a trigger and refuses a direct start with
+ * `FLOW_DISABLED`. ⛔ Not `draft`: a draft flow binds and fires exactly like an
+ * `active` one (only `obsolete` / `invalid` disable — `registerFlow` in
+ * service-automation's engine), which is why every boot logs the draft flows
+ * by name and `os validate` flags them `flow-draft-status-ambiguous`. Pinned by
+ * `test/approver-bindings-specimen-unarmed.test.ts`.
  *
  * `queue` is absent on purpose: #3536 made it non-authorable
  * (`NON_AUTHORABLE_APPROVER_TYPES` → `xEnumDeprecated`) because the engine has
@@ -44,9 +55,10 @@ export const ApproverBindingsFlow = defineFlow({
   label: 'Approver Binding Specimens (#3508)',
   description:
     'Authoring specimen: one approval node per record-backed approver kind, so the designer '
-    + 'renders each Value control. Draft on purpose — a fresh org has no rows for these kinds.',
+    + 'renders each Value control. Obsolete on purpose (loaded, never armed) — a fresh org has '
+    + 'no rows for these kinds, so an armed run would park on the org administrators.',
   type: 'autolaunched',
-  status: 'draft',
+  status: 'obsolete',
   nodes: [
     {
       id: 'start',

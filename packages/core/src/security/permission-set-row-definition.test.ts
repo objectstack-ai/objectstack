@@ -137,6 +137,34 @@ describe('permissionSetDefinitionFromRow', () => {
     expect(permissionSetDefinitionFromRow({ name: 'n', admin_scope: '{"businessUnit":"emea"}' }).adminScope).toEqual({ businessUnit: 'emea' });
   });
 
+  // [#23488] The ceremony saves through `saveMetaItem`, which replays no
+  // conversion and validates against the current schema; spec 18 tombstones
+  // `manageBindings` / `authorEnvironmentSets`, so a body still carrying either
+  // is refused there (`422 INVALID_METADATA`, measured on the PR). A 17.x
+  // projection carries both as the materialized default `false`.
+  it('drops the two retired scope keys whatever they hold, so the body is one the door accepts', () => {
+    for (const retired of [
+      { manageBindings: false, authorEnvironmentSets: false },
+      { manageBindings: true, authorEnvironmentSets: true },
+      { manageBindings: 'yes' },
+    ]) {
+      const scope = { businessUnit: 'emea', includeSubtree: true, manageAssignments: true, assignablePermissionSets: ['sales_ops'] };
+      const body = permissionSetDefinitionFromRow({ name: 'emea_admin', admin_scope: JSON.stringify({ ...scope, ...retired }) });
+      // Every live key survives byte-for-byte; only the retired ones go.
+      expect(body.adminScope, JSON.stringify(retired)).toStrictEqual(scope);
+      expect(PermissionSetSchema.safeParse(body).success, JSON.stringify(retired)).toBe(true);
+    }
+    // CONTROL: the identical scope with the keys left in is refused by the
+    // door's schema at the retired key — so the drop above is what makes the
+    // body acceptable, not something else in it.
+    const kept = { ...permissionSetDefinitionFromRow({ name: 'emea_admin' }), adminScope: { businessUnit: 'emea', manageBindings: false } };
+    const refused = PermissionSetSchema.safeParse(kept);
+    expect(refused.success).toBe(false);
+    expect(refused.error?.issues.map((i) => i.path)).toEqual([['adminScope', 'manageBindings']]);
+    // A scope with neither key is handed on as read, and a driver-parsed one too.
+    expect(permissionSetDefinitionFromRow({ name: 'n', admin_scope: { businessUnit: 'emea' } }).adminScope).toEqual({ businessUnit: 'emea' });
+  });
+
   it('a null or absent row answers the body of a row with every column absent', () => {
     const empty = {
       name: undefined,

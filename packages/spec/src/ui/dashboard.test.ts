@@ -874,9 +874,9 @@ describe('DashboardHeaderAction fields carry an item-level `title`', () => {
  *  - the sentence being trimmed back to the plural framing.
  *
  * The renderer half is deliberately NOT pinned here: which chart types consult
- * the forwarded order is objectui's fact, measured against this repo's
- * `.objectui-sha` pin and reported on the issue, not something `packages/spec`
- * can assert.
+ * the forwarded order is objectui's fact, measured against the console this
+ * repo ships and reported on the issue, not something `packages/spec` can
+ * assert.
  */
 /** A minimal dataset-bound widget — everything `stageOrder` is not. */
 const WIDGET_BASE = {

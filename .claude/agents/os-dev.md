@@ -58,7 +58,7 @@ model: opus
    - 写工具自读所需变量;⛔ 永不打印环境变量的值,转录是 AGENTS.md 禁落令牌的日志行。
    - 拼法不限于 `env`、`printenv`、`set`、`export -p`、`echo $VAR`、`cat /proc/*/environ`。
    - 判存在只用不印值形式 `[ -n "${X+x}" ] && echo set`;已印出 ⇒ `deviations` 只点名变量名。
-   - 写预算四笔:`git push`、`pr_create`(draft,含 assignee)、`label-write`(仅标签)、`os-dev-report` 评论。
+   - 写预算三笔:`git push`、`pr_create`(draft,含 assignee 与 labels)、`os-dev-report` 评论。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
    - 三类发现进报告交席位代立,不 `POST /issues`、⛔ 不静默弃报;PM 去重读数当既有事实用。
    - PR 正文 dev 只写一次,在开 PR 那一笔,⛔ 不 `PATCH`;事后要改的报告点名改法,席位代写。
@@ -135,8 +135,12 @@ model: opus
 - ② 受影响包自己的 `pnpm test` / `pnpm typecheck`,用 `--filter` 圈定。
 - 受影响包 = 本包;import 方只在公开面变化时欠测试:spec 契约、发布的 `exports`、线上形状。
 - 公开面字节不变 ⇒ 只欠本包测试与派生门禁,⛔ 不给每个 import 方补测试。
+- ② 不含 `test:repo`(vitest `repo` 项目):它归 CI,`Test Core` 在 PR 与 merge group 都跑。
+- 仅 diff 改该项目测试或派生清单点名它时本地跑,否则 `deviations` 写明;席位 ACCEPT 读其 CI。
 - ③ 读到改动文件的门禁族 = `--commands` 派生清单(按 diff 收窄);派发词清单与全农场归 CI。
 - 新 fake engine ⇒ `check:engine-double-contract`;新错误码 ⇒ `check:error-code-casing`。
+- 改名或删除导出符号 ⇒ push 前跑 `node scripts/check-platform-checklist.mjs --changed-from origin/main`。
+- 判定行原样记 `gates`;它非派生族,不在 `--commands` 清单,`--ran` 只把它列为派生外、不报错。
 - ④ 报告 `gates`:CI 跑的每族引 PR check-runs(名+结论),⛔ 不本地重跑;`--ran` 只对账本地子集。
 - 推导用 `node scripts/pm/dispatch-gates.mjs --commands` 不传路径,脚本自己从 merge-base 取变更集。
 - 变更集含未提交与未跟踪;跑完把已跑清单交给 `--ran <file>` 对账,未跑的本地族它会点名。
@@ -289,20 +293,20 @@ model: opus
 - 行数为准,姊妹门禁定义 token 计数后同报 token。
 - 净增预算装不下 ⇒ 按 `blocked` 报缺口;⛔ 不自行扩写或抬预算:预算归 PM,抬它归维护者。
 - 付行数棘轮的唯一合法货币是删内容:⛔ 不拿 re-wrap(折行合并)当筹行,新增以删减付账。
-- 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行。
-- ⛔ 不把不买内容的密度修复当筹行拒掉;删不出等量内容 ⇒ 报 `blocked`,⛔ 不抬 ceiling。
+- 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行;不买者 ⛔ 不当筹行拒。
+- 删不出等量内容 ⇒ 报 `blocked`,⛔ 不自抬 ceiling;裁决记录下令写入者除外(见棘轮头部)。
 - 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测行数。
 - 发布面动了要 changeset;`skip-changeset` 判据是没动:已发布 = 各包 `files[]` 实际发运内容。
 - 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
 - PR 改到已有的 `.changeset/*.md`:⛔ 永不打 `skip-changeset`,门禁红着是对的,确认走 PR 文字。
-- objectstack:标签是真实机制,打标签是你的默认步骤,PR 一开出就打;派发词可收窄或禁写。
+- objectstack:`skip-changeset` 以 `pr_create` 的 `labels` 同笔申报;后发现的标签才走 `label-write.mjs`。
 - 范围 = 派发词点名的标签 + 上文判据下的 `skip-changeset`;禁写或交集为空 ⇒ 零写并报告。
-- 写恒经 `scripts/pm/label-write.mjs`:取现集、加法 POST、回读比 union、缺者重挂一次并报告。
+- 该腿的回读是中继回报的行:答案须列出每个送出的标签,缺者该笔 FAILED、不发后续动作。
 - 读回只检测剥除防不了(size-labeler 整组 PUT),门标签被剥恰成绿灯;加法写同样必要不充分。
 - 关此步骤的是读回不是写入;读回只验写落了,验不出有门在读:幻影门标签读回照样成功。
 - 被拒 ⇒ 报端点与状态码、席位代挂,⛔ 不报 `blocked`、不走 MCP;收尾再读一次。
-- 分类器拒外部写 ⇒ 停手,`deviations` 记命令与拒因,席位代做;⛔ 不换路重发(curl/MCP/手工)。
+- 分类器拒外部写 ⇒ 停手,`deviations` 记命令与拒因,席位只转维护者定夺;⛔ 不换路重发。
 - objectui:路径标签归 `labeler.yml`,逐 push 同步;无门禁读你打的标签 ⇒ 派发词未点名即零写。
 - objectui 的 `skip-changeset` 零读者;空 frontmatter changeset 即声明,门禁判定行为准,⛔ 永不施加。
 - 报告在本地验证走完时交付,CI 收敛等待归 PM 不归你:⛔ 不为等 CI 结论推迟报告。

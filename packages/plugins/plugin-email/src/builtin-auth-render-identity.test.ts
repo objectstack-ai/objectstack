@@ -39,6 +39,7 @@ const DATA = {
   verificationUrl: 'https://example.test/verify?token=v1&next=/home',
   magicLinkUrl: 'https://example.test/magic?token=m1&next=/home',
   acceptUrl: 'https://example.test/accept?invite=i1&next=/home',
+  setPasswordUrl: 'https://example.test/reset-password/s1?callbackURL=%2Fset&next=/home',
   expiresInMinutes: 30,
   otp: '424242',
   newEmail: 'ada+new@example.test',
@@ -113,25 +114,52 @@ const RENDERED: Record<string, { subject: string; html: string; text: string }> 
     html: '0367cfe001dbc9aedb210b2d14af3de8b623be6d2b0c9ca62910da405ad5678f',
     text: '0e8fe995b762d65a08152d727bfd393877783b86bb90d30f0d6a5f1b7ab76dac',
   },
+  // #24154 — the four invitation TEXT digests were re-captured when the text
+  // bodies gained the role clause their HTML bodies carry (each recomputed
+  // from its expected string by hand, not copied from a run); the subject and
+  // HTML pins are the row path's, unchanged.
   'auth.invitation@en-US': {
     subject: 'Grace <Hopper> invited you to Analytical & Engines',
     html: '58aa661450e6d836a02267bede0e644f2f6cfcce2f125e63e4a4cc661d424069',
-    text: '51133e10b09e812ef7c26e6f3ecef8b4e3af2d631d11b03ab35b868bf3838dc7',
+    text: '80f58fec58593820cc25e500532d7749044829ff81313430087a8ee534c2c3d9',
   },
   'auth.invitation@zh-CN': {
     subject: 'Grace <Hopper> 邀请您加入 Analytical & Engines',
     html: '6789d8a1f8fe77ae9dac42694c4512df93be52edac56bfe91bbfad0a453e63fe',
-    text: '6594a2e35834be88ba7cab9d1337a74cb6f066adf507afddc72606e21f71d752',
+    text: '6590d3d0c00efdddbdfd9e6883a8f8955f22c0dbd88c8c315c3bf66be2d19841',
   },
   'auth.invitation@ja-JP': {
     subject: 'Grace <Hopper> さんが Analytical & Engines に招待しています',
     html: '6f5123d67393d721038b50292106bf83676d946f1950bf45869f16c2e977ef0f',
-    text: 'bbfd601ea83dab70d6d9bf48da887d7a1890c69efaf3bcc69958c1a4971ac7fe',
+    text: 'c8856c71f961085c3953f58886896d06506c453c7bddcec94460bfe12a13010e',
   },
   'auth.invitation@es-ES': {
     subject: 'Grace <Hopper> te ha invitado a Analytical & Engines',
     html: '9f49cf12933faf499b1000b8895d29c4dbfba9b051e695bd845e885b22e7db02',
-    text: 'f7acc0d60a7fdcb68611e6d69b905a1260b104b9c947e9ae74b595fe25b7330e',
+    text: '53e0aa5ea929c9d1da42c129d5289f51557790a3a88ddc22c68bf47cdebd6b10',
+  },
+  // [#23343] Declared after the row path was deleted, so these four never had
+  // a seeded row: they are pinned against their first registry render, in the
+  // commit that added them. Every byte is still pinned from here on.
+  'auth.account_invitation@en-US': {
+    subject: 'Grace <Hopper> invited you to Acme & <Co>',
+    html: 'baa6c29af47c46bf06368450cbb16ecd5c79053143409abef1cdbf58533866f4',
+    text: '7c2019d448f34c6d851eb3d35b76462d68932162473987300e2b0aef11c9cff6',
+  },
+  'auth.account_invitation@zh-CN': {
+    subject: 'Grace <Hopper> 邀请您使用 Acme & <Co>',
+    html: '9c93150a86230d4270a6758c4944214be62625b5a63e195be0649d3f0f1a9511',
+    text: '31a9c79bd0278bec9dbc89835716ea7f0014608e74a7e38d99206cc73f652561',
+  },
+  'auth.account_invitation@ja-JP': {
+    subject: 'Grace <Hopper> さんから Acme & <Co> への招待が届いています',
+    html: 'af385b49931a8420788849426c932e340ae3c3b32a21942eae231ea2f6667405',
+    text: '85fad1dda634370822d8a36f1278e41939179870a405d264d09ffa84be01e0dd',
+  },
+  'auth.account_invitation@es-ES': {
+    subject: 'Grace <Hopper> te ha invitado a Acme & <Co>',
+    html: '5429cef2368584d991992021d2d309593ccdffad75bf1dd00dcee0cc555bd16f',
+    text: '8f9882fab386469509598af8a41f6f00aeb59ce75184c1060d13b895c4b32722',
   },
   'auth.two_factor_otp@en-US': {
     subject: 'Your Acme & <Co> verification code',
@@ -210,7 +238,7 @@ describe('every built-in auth mail renders byte-identical from the registry', ()
       rendered[`${tpl.name}@${tpl.locale}`] = { subject: r.subject, html: sha256(r.html), text: sha256(r.text) };
     }
 
-    expect(Object.keys(rendered)).toHaveLength(24);
+    expect(Object.keys(rendered)).toHaveLength(28);
     expect(rendered).toEqual(RENDERED);
   });
 });

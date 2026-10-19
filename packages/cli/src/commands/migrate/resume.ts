@@ -28,6 +28,8 @@ import {
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
+import { describeDriverSqliteFile } from '../../utils/connection-display.js';
+import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -125,6 +127,18 @@ export default class MigrateResume extends Command {
     }
 
     try {
+      // [#23622] Either mode's connect may have switched a SQLite file's
+      // journal mode (`SqlDriver.applySqliteJournalMode`, one rule for every
+      // connect), which rewrites the file header and no row. So no line below
+      // says that nothing changed: the read-only mode claims no row or table
+      // (its boot defers DDL), an abort after the plain boot claims no row
+      // (that boot may have created a missing table), and on a SQLite file
+      // each says what the connect may still have changed. A target that is
+      // no SQLite file (PostgreSQL, MySQL) has no header to switch.
+      const journalNote = describeDriverSqliteFile(stack.driver?.config) !== undefined
+        ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
+        : '';
+
       // Typed off the slot's contract, not erased to `any` (#4168/#4176/#4251):
       // the journal reads below are exactly the surface `IObjectQLEngine`
       // declares, so there is nothing here that needs the checking switched off.
@@ -169,7 +183,7 @@ export default class MigrateResume extends Command {
         }
         printWarning(`${interrupted.length} interrupted migration run(s):`);
         for (const run of interrupted) this.log(`  ${describeInterruptedRun(run, plans)}`);
-        printInfo('Nothing was changed. Re-run with --run <id> to act on one.');
+        printInfo(`No row or table was changed. Re-run with --run <id> to act on one.${journalNote}`);
         return;
       }
 
@@ -215,7 +229,7 @@ export default class MigrateResume extends Command {
         this.log('');
         this.log(`  ${describeInterruptedRun(target, plans)}`);
         const ok = await confirm(chalk.bold(`\n${summary}? [y/N] `));
-        if (!ok) { printInfo('Aborted — nothing changed.'); return; }
+        if (!ok) { printInfo(`Aborted — no row was changed.${journalNote}`); return; }
       }
 
       if (!flags.json) printStep(policy === 'compensate' ? 'Unwinding…' : 'Resuming forward…');

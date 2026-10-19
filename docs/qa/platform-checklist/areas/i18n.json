@@ -9,7 +9,7 @@
       "title": "Notification mark-as-read is server-authoritative, the deep-link target is localized — and the title is the flow-authored literal string, because notification copy has no translation group",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": ["zh-CN session user receiving an app-flow notification", "en session recipient (the control that proves the title is recipient-INDEPENDENT)"],
@@ -20,14 +20,14 @@
           "a second user to assign work to, so the assignment notification has a recipient distinct from the actor"
         ],
         "knownGaps": [
-          "per-recipient localized notification COPY is not a capability of the app-flow notify path, and this item pins that contract instead of assuming the retired one: `notifications` is a RETIRED top-level translation key whose own spec guidance reads \"`notifications` is the retired object-first dialect — notifications have no translation group, omit them\" (packages/spec/src/system/translation.zod.ts, verified on origin/main); `sys_user` declares no `locale` field; and the notify executor interpolates cfg.title against flow variables with no locale lookup anywhere (packages/services/service-automation/src/builtin/notify-node.ts — `const title = stringifyForTemplate(interpolate(cfg.title ?? '', variables, context))`). Platform-side assignment notifications moved to app-authored flows in #3403, pinned by packages/plugins/plugin-audit/src/audit-writers.test.ts ('does NOT emit an assignment notification when an owner field is set'). ⛔ Do not re-assert a localized-title premise on this item",
+          "the INLINE notification title this item drives is not localized, and the item pins that contract instead of assuming the retired one: `notifications` is a RETIRED top-level translation key whose own spec guidance reads \"`notifications` is the retired object-first dialect — notifications have no translation group, omit them\" (packages/spec/src/system/translation.zod.ts), and the notify node renders its inline `title` slot per run from {{ }} placeholders with no locale lookup — its own config schema calls the slot \"Not localizable — use template for per-locale content\" (packages/services/service-automation/src/builtin/notify-node.ts). Per-recipient localized copy DOES exist on the app-flow path, through the OTHER slot: a notify node that names a `template` (with templateData) instead of an inline title is rendered per recipient at delivery, by the inbox channel and the email channel alike, in the recipient's own sys_user.locale, else the deployment default (#13881; packages/services/service-messaging/src/inbox-channel.ts). The showcase's notify_assignee authors an inline title, so its bell entry is the same literal string in every locale. sys_user.locale exists, and the avatar-menu language switcher writes it. Platform-side assignment notifications moved to app-authored flows in #3403, pinned by packages/plugins/plugin-audit/src/audit-writers.test.ts ('does NOT emit an assignment notification when an owner field is set'). ⛔ Do not re-assert a localized-title premise for an INLINE title",
           "the one platform notification path that IS per-recipient localized is a DIFFERENT producer, and knowing it is what stops the over-correction: plugin-audit's collab.mention writer resolves messages.mentionedYou per recipient (resolveWriteLocale(tenantId, uid) → the ADR-0053 localization context) through the long-declared `messages` translation group (packages/plugins/plugin-audit/src/audit-writers.ts + src/translations/messages.ts). That is a plugin-emitted title through an existing group — not a `notifications` group, and not the app-flow path this item drives. 'Notification titles are never localized' is as wrong as 'the bell title should be localized'"
         ]
       },
       "steps": [
         "boot the showcase under os dev/standalone and sign in as admin",
-        "put the RECIPIENT's own browser session in Chinese — there is no per-user locale field to set (sys_user declares none). The console LocaleSwitcher persists localStorage['objectui-locale'] and accepts LANGUAGE-only codes: write `zh`, which the server resolves to zh-CN for /i18n/* and Accept-Language-driven metadata localization; writing `zh-CN` there is rejected by isKnownLanguage() and silently boots en (#7640)",
-        "read the showcase flow's notify-node config first (examples/app-showcase/src/automation/flows/index.ts — the record-after-update flow on `assignee != previous.assignee`, notify node `notify_assignee`, topic `task.assigned`, channel inbox) and write down cfg.title verbatim; the title expectation is that literal template with {record.*} interpolated, derived from the flow, not from a locale",
+        "put the RECIPIENT in Chinese the way a user does: signed in as the recipient, pick 中文 in the avatar-menu language switcher, which writes the recipient's own sys_user.locale (zh-CN) and the console's UI locale together (objectui packages/app-shell/src/layout/LocaleSwitcher.tsx). The server-side equivalent is the recipient's own PATCH /api/v1/data/sys_user/RECIPIENT_ID {\"locale\":\"zh-CN\"} followed by a reload. Seeding browser storage alone is not a language switch — it leaves sys_user.locale empty (i18n.studio-follows-app-locale step 0 records the harness gap that cost a run)",
+        "read the showcase flow's notify-node config first (examples/app-showcase/src/automation/flows/index.ts — the record-after-update flow on `assignee != previous.assignee`, notify node `notify_assignee`, topic `task.assigned`, channel inbox) and write down cfg.title verbatim (stock: 'New task assigned: {{ record.title }}'); confirm the node authors an inline `title` and no `template`. The title expectation is that literal template with its {{ record.* }} placeholders rendered, derived from the flow, not from a locale",
         "trigger it by changing a seeded showcase_task's assignee to the recipient. ⛔ Not `collab.assignment` — the kernel stopped emitting assignment notifications in #3403; that topic survives only in regression pins",
         "sign in as the recipient (own browser context — never a shared tab), open the bell, and screenshot the notification entry",
         "click through the notification's deep link and screenshot the target detail page",
@@ -37,9 +37,9 @@
       ],
       "acceptance": [
         {
-          "clause": "the bell entry's title is the flow-authored literal string with its {record.*} placeholders interpolated — notification copy is NOT localized, and this clause pins the shipped contract rather than the retired one",
+          "clause": "the bell entry's title is the flow-authored literal string with its {{ record.* }} placeholders rendered — an INLINE notification title is NOT localized, and this clause pins the shipped contract rather than the retired one",
           "oracle": "screenshot",
-          "verify": "the bell entry renders exactly cfg.title from the showcase flow's notify node with {record.title} substituted (stock showcase: 'New task assigned: <the task's title>'), character for character, on a zh-CN session. The executor interpolates the template with no locale lookup, so an English title on a Chinese session is the PASS here. A raw unsubstituted '{record.title}' IS a FAIL — interpolation, not translation, is what this clause tests",
+          "verify": "the bell entry renders exactly cfg.title from the showcase flow's notify node with its {{ record.title }} placeholder rendered (stock showcase: 'New task assigned: ' followed by the task's title), character for character, on a zh-CN session. The node renders an inline title with no locale lookup, so an English title on a Chinese session is the PASS here. A raw, unrendered '{{ record.title }}' token IS a FAIL — rendering, not translation, is what this clause tests",
           "evidence": "bell screenshot next to the flow's notify-node config"
         },
         {
@@ -61,9 +61,9 @@
           "evidence": "post-reload unread-count read"
         },
         {
-          "clause": "the title is recipient-INDEPENDENT: the same event notifies an EN-session and a zh-CN-session recipient with the identical title string — per-recipient localization of app-flow notification copy is a spec-RETIRED capability, not a gap this run should report",
+          "clause": "the title is recipient-INDEPENDENT: the same event notifies an EN-session and a zh-CN-session recipient with the identical title string — the showcase flow authors an INLINE title, which the notify node renders with no locale lookup. Per-recipient copy exists only through a notify `template` reference (rendered in each recipient's sys_user.locale at delivery), which this flow does not use",
           "oracle": "screenshot",
-          "verify": "the control recipient's bell entry carries the same title string as the zh-CN recipient's, modulo the interpolated record values. A DIFFERENCE is the finding in this clause — it would mean an undeclared per-recipient localization path appeared under a contract that retired one: re-read translation.zod.ts's `notifications` guidance, confirm which producer emitted the row (an app flow's notify node, or a plugin writer resolving an existing group such as messages.mentionedYou), and file rather than tick",
+          "verify": "the control recipient's bell entry carries the same title string as the zh-CN recipient's, modulo the rendered record values. A DIFFERENCE is the finding in this clause — it would mean the inline title slot was localized per recipient, which its contract says it never is: confirm which producer emitted the row (the showcase flow's notify node, or a plugin writer resolving an existing group such as messages.mentionedYou) and file rather than tick. If the flow now names a `template` instead of an inline title, its per-recipient members are DECLARED and this item's premise has moved — revise the item, do not tick",
           "evidence": "the two bell screenshots side by side"
         }
       ],
@@ -81,13 +81,15 @@
         "packages/spec/src/system/translation.zod.ts#TRANSLATION_KEY_GUIDANCE (TRANSLATION_KEY_GUIDANCE — `notifications` is the retired object-first dialect; notifications have no translation group)",
         "#3403 (platform-side assignment notifications moved to app-authored flows; pinned by packages/plugins/plugin-audit/src/audit-writers.test.ts)",
         "examples/app-showcase/src/automation/flows/index.ts#notify_assignee (the notify_assignee node whose literal cfg.title this item now asserts)",
-        "packages/services/service-automation/src/builtin/notify-node.ts#title (title = interpolate(cfg.title) — no locale lookup on the flow notify path)",
+        "packages/services/service-automation/src/builtin/notify-node.ts#title (the inline title is rendered per run from {{ }} placeholders with no locale lookup — the node schema calls it 'Not localizable'; the localizable path is the `template` slot)",
+        "packages/services/service-messaging/src/inbox-channel.ts (a notify `template` reference is rendered per recipient at delivery, in the recipient's sys_user.locale else the deployment default, #13881 — the per-recipient path this item's inline-title flow does not take)",
         "#7684 (the decision this revision implements), #7640 (the run that surfaced it)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; the #3362 route-seam regression is the reason the oracle is a live-server network trace, never a unit test", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-11", "change": "c0/c4 REWRITTEN against the shipped contract (#7684). Both clauses assumed a per-recipient localized notification title — a capability the spec retired — so on a stock app they were unprovable and landed blocked(fixture) rather than testing anything. c0 now asserts the flow-authored literal title with its placeholders interpolated; c4 now asserts the title is recipient-INDEPENDENT, with a per-recipient difference as the finding. The mechanical read/clear clauses (live-server POST /notifications/read + the survives-reload re-read) are untouched and remain the item's substance. The retirement is cited on the item (translation.zod.ts, #3403, notify-node.ts) so the next author cannot re-assert the retired premise; the steps drop the unperformable 'set the recipient user's locale' (sys_user has no locale field) and the stale collab.assignment trigger. Verified before editing: the retirement guidance is still on origin/main and no notification-copy translation group has appeared — plugin-audit's per-recipient collab.mention title resolves the pre-existing `messages` group, a different producer, and is recorded in knownGaps so the correction does not overshoot", "ref": "#7684" }
+        { "revision": 3, "date": "2026-08-11", "change": "c0/c4 REWRITTEN against the shipped contract (#7684). Both clauses assumed a per-recipient localized notification title — a capability the spec retired — so on a stock app they were unprovable and landed blocked(fixture) rather than testing anything. c0 now asserts the flow-authored literal title with its placeholders interpolated; c4 now asserts the title is recipient-INDEPENDENT, with a per-recipient difference as the finding. The mechanical read/clear clauses (live-server POST /notifications/read + the survives-reload re-read) are untouched and remain the item's substance. The retirement is cited on the item (translation.zod.ts, #3403, notify-node.ts) so the next author cannot re-assert the retired premise; the steps drop the unperformable 'set the recipient user's locale' (sys_user has no locale field) and the stale collab.assignment trigger. Verified before editing: the retirement guidance is still on origin/main and no notification-copy translation group has appeared — plugin-audit's per-recipient collab.mention title resolves the pre-existing `messages` group, a different producer, and is recorded in knownGaps so the correction does not overshoot", "ref": "#7684" },
+        { "revision": 4, "date": "2026-10-16", "change": "knownGaps[0], steps[1] and [2], acceptance[0] (clause, verify) and acceptance[4] (clause, verify) and source[7] re-pointed (checklist-accuracy note 1 of QA run #23951, wave #23878). Three premises had moved: sys_user.locale exists and the avatar-menu switcher writes it (zh-CN accepted), so steps[1]'s storage-only, language-code-only recipe is replaced by the switcher (or the recipient's own PATCH of sys_user.locale); the notify node gained a per-recipient `template` path (#13881), so 'per-recipient localization is spec-RETIRED' is wrong — only the INLINE title is unlocalized, which is what the showcase flow uses; and placeholders are {{ record.title }}, so the FAIL shape is an unrendered double-brace token. The clauses are not loosened: clause 0 still demands the literal rendered title, and clause 4 still files any per-recipient difference on an inline title; a flow that moved to a `template` is a premise change that revises the item, never a tick", "ref": "#24036" }
       ]
     },
     {
@@ -95,32 +97,32 @@
       "title": "Studio follows the in-app locale switch — no mixed-language session",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "browser",
       "personas": ["admin"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the platform-owned zh-CN metadata-form translations (the metadataForms translation group is owned and translated by platform-objects — scripts/check-i18n-coverage.mjs folds that baseline away because it is platform-owned)"
+          "the console's own zh catalogue for the Studio designers: the object editor's section and field labels are objectui's metadata-admin `designer.object.*` strings (objectui packages/app-shell/src/views/metadata-admin/i18n.ts, read by inspectors/ObjectDefaultInspector.tsx), NOT the served metadataForms translation group — QA run #23951 read 标识、显示名与分类 / 显示名 where the served group carries …分类标签 / 显示名称. The metadataForms group stays platform-owned (platform-objects translates it, and scripts/check-i18n-coverage.mjs folds that baseline away)"
         ],
         "knownGaps": [
-          "the showcase's declared surface carries FROZEN untranslated debt, ratcheted by scripts/check-i18n-coverage.mjs + scripts/i18n-coverage-baseline.json (examples/app-showcase/objectstack.config.ts: 451 untranslated declared labels, held flat — growth fails the gate). Residual English strings on an otherwise-Chinese Studio surface (#7640 recorded `Announcement`, `Business Unit`, `Owning Business Unit`, `Sales Region`) render their EN SOURCE label, never a raw key, and are legitimate — exactly as i18n.surface-matrix's knownGaps already declares for the same fixture. This item asserts consistency WITH the bundle, not 100% coverage"
+          "the showcase's declared surface carries FROZEN untranslated debt, ratcheted by scripts/check-i18n-coverage.mjs + scripts/i18n-coverage-baseline.json (examples/app-showcase/objectstack.config.ts: 414 untranslated declared labels in scripts/i18n-coverage-baseline.json, held flat — growth fails the gate, and the count only shrinks). Residual English strings on an otherwise-Chinese Studio surface (#7640 recorded `Announcement`, `Business Unit`, `Owning Business Unit`, `Sales Region`) render their EN SOURCE label, never a raw key, and are legitimate — exactly as i18n.surface-matrix's knownGaps already declares for the same fixture. This item asserts consistency WITH the bundle, not 100% coverage"
         ]
       },
       "steps": [
         "sign in as admin on the showcase, switch the in-app locale to zh-CN, and confirm the app shell followed (nav in zh-CN). To switch, use the avatar-menu language switcher (it writes the user's locale); seeding browser storage alone is not a language switch — a run that only seeds the UI language in browser storage leaves the user's stored locale empty, so dates follow the browser and a FAIL read off it is the harness's, not the product's",
         "navigate into Studio / metadata-admin: open the object editor for showcase_project and the dashboard designer for showcase_chart_gallery",
-        "screenshot the object editor's form — its labels/sections come from the metadataForms translation group (packages/spec/src/system/translation.zod.ts: metadataForms.<type>.label / sections / fields)",
+        "screenshot the object editor's form — its section and field labels come from objectui's metadata-admin catalogue (`designer.object.*` in packages/app-shell/src/views/metadata-admin/i18n.ts at the .objectui-sha pin), not from the served metadataForms translation group (packages/spec/src/system/translation.zod.ts): judge them against that catalogue (e.g. section 基础信息 with hint 标识、显示名与分类)",
         "screenshot a surface showing RELATIVE dates in the switched locale: the Studio Data pillar's records grid (/_console/studio/<package>/data, an object's records), whose timestamps render as '6天前'-style relative forms. The metadata list and history surfaces show none — history renders absolute timestamps — so they cannot score this step",
         "reload the browser fully and re-screenshot one Studio surface — the locale choice must survive the reload",
         "switch back to en through the same avatar-menu language switcher and re-screenshot the same two Studio surfaces"
       ],
       "acceptance": [
         {
-          "clause": "Studio's metadata-editor forms render in the switched locale via the metadataForms translation group",
+          "clause": "Studio's metadata-editor forms render in the switched locale — for the object editor through objectui's own metadata-admin catalogue (`designer.object.*`), which is where its strings come from; the served metadataForms group is not what this editor renders",
           "oracle": "screenshot",
-          "verify": "object-editor screenshot shows zh-CN section and field labels (e.g. 基础信息-style section labels per the schema's own example), not English",
+          "verify": "object-editor screenshot shows zh-CN section and field labels that match objectui's metadata-admin catalogue at the pin (e.g. section 基础信息, hint 标识、显示名与分类), not English",
           "evidence": "object-editor screenshot"
         },
         {
@@ -149,12 +151,13 @@
         }
       ],
       "negative": [
-        "a Studio surface staying English after the app switched (mixed session) is the FAIL this item exists for — judged against the bundle, not by counting English words: a string the platform metadataForms bundle translates rendering English is the FAIL; a string inside the frozen coverage debt rendering its EN source label is not. Check against a fresh objectui build before filing either way (the vendored /_console bundle may be stale)"
+        "a Studio surface staying English after the app switched (mixed session) is the FAIL this item exists for — judged against the bundle, not by counting English words: a string the bundle feeding that surface translates (the console's metadata-admin catalogue for the Studio designers, the app's bundle for app labels such as navigation) rendering English is the FAIL; a string inside the frozen coverage debt rendering its EN source label is not. Check against a fresh objectui build before filing either way (the vendored /_console bundle may be stale)"
       ],
       "traps": ["stale-console-bundle"],
       "source": [
         "#3358 §7",
-        "packages/spec/src/system/translation.zod.ts#metadataForms (metadataForms group + resolveMetadataFormLabels convention)",
+        "packages/spec/src/system/translation.zod.ts#metadataForms (metadataForms group + resolveMetadataFormLabels convention — the served group, which the Studio object editor does not render)",
+        "objectui packages/app-shell/src/views/metadata-admin/i18n.ts (the `designer.object.*` zh strings) + inspectors/ObjectDefaultInspector.tsx (the object editor that reads them) — where the object editor's labels come from (QA run #23951, checklist-accuracy note 3)",
         "scripts/check-i18n-coverage.mjs#baseline (platform metadata-form baseline is platform-objects-owned)",
         "scripts/i18n-coverage-baseline.json (the frozen per-config untranslated counts this item's mixed-language clause is judged against)",
         "#7640 (i18n area run — the residual EN strings that exposed the clause/ratchet collision), #7686",
@@ -165,7 +168,8 @@
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-11", "change": "the mixed-language clause is reconciled with the coverage ratchet (#7640): as written it read 'no untranslated declared string next to translated ones', which the showcase's FROZEN untranslated debt violates by design — the sibling item i18n.surface-matrix already declares that debt legitimate, so this item contradicted it and cost a clean PASS. The clause now judges against the bundle (translated key renders translated; untranslated key renders its EN SOURCE label; a raw dotted key is the unconditional FAIL), the same knownGap is declared on this item's fixtures, and the negative carries the matching qualifier", "ref": "#7686" },
         { "revision": 4, "date": "2026-10-05", "change": "the switch steps now name HOW to switch: through the avatar-menu language switcher, which writes the user's locale. Seeding browser storage alone is not a language switch. The 17.7 console run held a relative-date FAIL on this item, and its re-run on #21782 settled it as a harness gap: the first lane had set the UI language only in browser storage, so the user's stored locale stayed empty and dates followed the browser. Through the switcher the clause passed, so the clauses themselves are unchanged (card #21851 entry 11, filed with the follow-up run #21845)", "ref": "#21782" },
-        { "revision": 5, "date": "2026-10-13", "change": "steps[3] and acceptance[2].verify re-pointed to the surface that renders relative dates (stale step, #23163 A2; parked on #23121, carried by #23169). The metadata list and history surfaces carry no relative dates — history is absolute — so the step pointed at nothing scorable. QA run #23163 read relative dates (6天前) on the Studio Data pillar's records grid under zh-CN, through the avatar-menu switcher, and passed", "ref": "#23169" }
+        { "revision": 5, "date": "2026-10-13", "change": "steps[3] and acceptance[2].verify re-pointed to the surface that renders relative dates (stale step, #23163 A2; parked on #23121, carried by #23169). The metadata list and history surfaces carry no relative dates — history is absolute — so the step pointed at nothing scorable. QA run #23163 read relative dates (6天前) on the Studio Data pillar's records grid under zh-CN, through the avatar-menu switcher, and passed", "ref": "#23169" },
+        { "revision": 6, "date": "2026-10-16", "change": "knownGaps[0], fixtures.requires[0], steps[2], acceptance[0] (clause, verify), negative[0] and source re-pointed (checklist-accuracy notes 2 and 3 of QA run #23951, wave #23878). The clause-0 premise was wrong: the Studio object editor's strings come from objectui's metadata-admin catalogue (designer.object.* in packages/app-shell/src/views/metadata-admin/i18n.ts, ObjectDefaultInspector.tsx), not the served metadataForms group — #23951 read 标识、显示名与分类 / 显示名 where the group carries …分类标签 / 显示名称 — so the clause passed on its verify text while naming the wrong source, and negative[0] judged residual English against the wrong bundle. Both now name the catalogue that feeds the surface. The frozen debt count is 414, not 451 (scripts/i18n-coverage-baseline.json). Not loosened: a zh session still FAILS on any English string the feeding bundle translates, and on any raw dotted key", "ref": "#24036" }
       ]
     },
     {
@@ -173,7 +177,7 @@
       "title": "Every translatable surface localizes on a zh-CN session — one pass over the full translation-group vocabulary, plus the runtime i18n routes it resolves through",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": ["admin on a zh-CN session"],
@@ -199,8 +203,8 @@
         "an action dialog — trigger an object action with confirmText/successMessage and capture the confirm prompt and the success toast (_actions group: label/confirmText/successMessage)",
         "a view empty state (_views.<view>.emptyState) — RUNNABLE on the stock fixture since the #7714 specimen landed: examples/app-showcase/src/ui/views/task.view.ts authors an emptyState on the filtered `urgent` view, and the zh-CN bundle carries objects.showcase_task._views.urgent.emptyState.{title,message}. Demote the two urgent seed rows (or filter them away) so the view renders empty, then read the copy — it resolves to 暂无紧急任务 / 当前没有需要立即处理的事项。任务优先级调整为「紧急」后会出现在这里。 ⛔ Still do not manufacture coverage from the console's built-in zero-row placeholder, which is console chrome and not an objects._views.<view>.emptyState resolution",
         "section labels (_sections group) — read them off a NAMED-section surface the console actually renders: showcase_task's New form (its default form's `task` section), a task record page (task-detail.page.ts names overview / schedule / details since #22036) and showcase_contact's default edit form (ui/views/contact.view.ts). Each declares a stable `name` per section, which is the only thing that makes objects.<object>._sections.<name>.label resolvable — the showcase bundle carries 概览/排期/详细信息 and 联系方式/工作信息/状态/备注 for exactly those names. ⛔ Not `…/view/tabbed`: the named formViews are reachable from no console door, and that URL renders the grid (see the knownGap below)",
-        "a dashboard — Chart Gallery's title and widget titles (dashboards.<name>.label / widgets.<id>.title)",
-        "a page — a seeded page's header title/subtitle (pages.<name> group)",
+        "a dashboard — Chart Gallery's title and widget titles (dashboards.<name>.label / widgets.<id>.title). The showcase bundle translates one widget title: dashboards.showcase_chart_gallery.widgets.combo_count_vs_progress.title → 任务数与平均进度 on the runtime dashboard; read that widget",
+        "a page — a page header's title/subtitle (pages.<name> group). No showcase page carries a translated title or subtitle (QA run #23951 fixture gap), so read a PLATFORM page: pages.connect_agent (label 连接智能体 and its zh subtitle, platform-objects' bundle), and the showcase_command_center page's translated component titles (pages.showcase_command_center.components.*)",
         "a Settings namespace — title, group titles, key labels, and the source badges (settings.<namespace> + settingsCommon.sourceLabels)",
         "Studio metadata forms (metadataForms group — overlaps i18n.studio-follows-app-locale; a pinned pass there may be cited)",
         "a sys_ object surface — e.g. the All Users list showing sys_user's translated label (platform-objects-owned bundle)",
@@ -255,7 +259,7 @@
           "evidence": "the /i18n/locales response"
         },
         {
-          "clause": "GET /i18n/translations/:locale returns a non-empty bundle whose key paths all sit within the declared translation-group vocabulary (PlatformTranslationDataSchema — the SERVED document is the merged tree, so it is the eleven-group platform face and not the ten-group per-app one) — a key outside the declared groups, or a raw dotted key handed to a consumer, is the silent-strip class",
+          "clause": "GET /i18n/translations/:locale returns a non-empty bundle whose key paths all sit within the declared translation-group vocabulary (PlatformTranslationDataSchema — the SERVED document is the merged tree, so it is the twelve-group platform face — the eleven per-app groups plus the platform-only `settings` — and not the eleven-group per-app one) — a key outside the declared groups, or a raw dotted key handed to a consumer, is the silent-strip class",
           "oracle": "api",
           "verify": "translations for zh-CN is non-empty; spot-check that sampled keys resolve under objects/_views/_actions/_sections/apps.navigation/dashboards/pages/settings groups, not a fourth dialect",
           "evidence": "the /translations/zh-CN response + the key check"
@@ -291,7 +295,7 @@
         "select option labels (objects.fields.options)",
         "form labels/placeholders (objects.fields)",
         "action dialogs (objects._actions: label/confirmText/successMessage)",
-        "view empty states (objects._views.emptyState) — blocked(fixture): no showcase view authors one",
+        "view empty states (objects._views.emptyState) — runnable on stock: the `urgent` view authors one (#7714) and the showcase bundle carries its zh-CN half; empty the view first (steps[6])",
         "section labels (objects._sections) — on a named-section surface the console renders: the task New form, the task record page or the contact form; the named formViews (tabbed / wizard / split) are reachable from no console door",
         "dashboards (dashboards.label / widgets.title)",
         "pages (pages.label/title/subtitle)",
@@ -304,10 +308,10 @@
       "traps": ["stale-console-bundle", "hydration-race", "wrong-panel", "dispatcher-vs-hono-route"],
       "automated": {
         "kind": "unit",
-        "ref": "objectui, for acceptance[5]'s CONFIRM half ONLY: packages/components/src/__tests__/page-header-action-i18n.test.tsx ('renders the translated button AND opens the confirm dialog with the translated body') + packages/plugin-detail/src/renderers/__tests__/record-quick-actions.actionText-i18n.test.tsx ('resolves the button AND the confirm dialog body from the same bundle entry'). Each runs the real ActionRunner under a real I18nProvider holding a zh-CN `_actions.NAME.confirmText` entry. Run them in an objectui checkout at the .objectui-sha revision (present at 0abd4f9f8769) and cite the output; every other clause still needs the run"
+        "ref": "objectui, for acceptance[5]'s CONFIRM half ONLY: packages/components/src/__tests__/page-header-action-i18n.test.tsx ('renders the translated button AND opens the confirm dialog with the translated body') + packages/plugin-detail/src/renderers/__tests__/record-quick-actions.actionText-i18n.test.tsx ('resolves the button AND the confirm dialog body from the same bundle entry'). Each runs the real ActionRunner under a real I18nProvider holding a zh-CN `_actions.NAME.confirmText` entry. Run them in an objectui checkout at the .objectui-sha revision (both files present at f8267df93aba; QA run #23951 ran them at daeb77fc84dd, 2 files, 7/7) and cite the output; every other clause still needs the run"
       },
       "source": [
-        "packages/spec/src/system/translation.zod.ts#appTranslationDataShape (appTranslationDataShape — the group vocabulary an APPLICATION may author: objects/_views/_actions/_sections, apps.navigation, messages, globalActions, dashboards, datasets, pages, flows, metadataForms, settingsCommon. `settings` is platform-only since #15178 and lives in platformSettingsShape, spread into PlatformTranslationDataSchema only — TranslationItemSchema refuses it too since #19620)",
+        "packages/spec/src/system/translation.zod.ts#appTranslationDataShape (appTranslationDataShape — the eleven-group vocabulary an APPLICATION may author: objects (with _views/_actions/_sections), picklists, apps (navigation), messages, globalActions, dashboards, datasets, pages, flows, metadataForms, settingsCommon. `settings` is platform-only since #15178 and lives in platformSettingsShape, spread into PlatformTranslationDataSchema only — TranslationItemSchema refuses it too since #19620)",
         "examples/app-showcase/src/system/translations/index.ts (full-column coverage rationale)",
         "packages/services/service-i18n/src/i18n-service-plugin.ts#i18n (GET /i18n/locales | /translations/:locale | /labels/:object/:locale; { success, data } envelope #3636/#3675; resolveObjectFieldLabels nested shape #3778/#3833; the plugin mount and the dispatcher /i18n domain serve the same routes interchangeably)",
         "packages/services/service-i18n/src/file-i18n-adapter.ts#getLocales (getLocales / getTranslations — unloaded locale → {}; fallbackLocale applies per-KEY in t(), not to the bulk route)",
@@ -326,7 +330,8 @@
         { "revision": 4, "date": "2026-08-18", "change": "two corrections. (1) The #7714 emptyState waiver is stale: the specimen has landed — task.view.ts authors an emptyState on the urgent view and the zh-CN bundle carries objects.showcase_task._views.urgent.emptyState.{title,message} — so step 7 and the knownGap now describe a runnable variant instead of instructing blocked(fixture) (#9467 CF-1). (2) Clause 11 asserted the feed/audit verb localizes on the READER's session; audit-writers.ts renders the summary once at write time via resolveWriteLocale(tenantId, userId) and stores it, so only the tenant setting at write time moves it. The clause and its step now flip the tenant locale before writing — this premise nearly produced a false resolver FAIL (#9467 CF-2)", "ref": "#9386" },
         { "revision": 5, "date": "2026-10-05", "change": "the switch step now names HOW to switch: through the avatar-menu language switcher, which writes the user's locale. Seeding browser storage alone is not a language switch. The 17.7 console run held the relative-dates variant of acceptance[0] as a FAIL, and its re-run on #21782 settled it as a harness gap: the first lane had set the UI language only in browser storage, so the user's stored locale stayed empty and dates followed the browser. Through the switcher the variant passed, so the clauses themselves are unchanged (card #21851 entry 11, filed with the follow-up run #21845)", "ref": "#21782" },
         { "revision": 6, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 8). A6's confirm half was blocked(fixture): no zh confirmText. Measured: no showcase action declares a confirmText at all, so there is no live specimen. Disposition: pin. The objectui tests page-header-action-i18n and record-quick-actions.actionText-i18n prove that the confirm dialog body resolves from the `_actions` zh-CN entry through the real ActionRunner. `automated` names them for that half only, and a knownGap records why the half is pin-only on stock", "ref": "#22017" },
-        { "revision": 7, "date": "2026-10-13", "change": "knownGaps[2], steps[7], variants[6] and the showcase source note re-pointed (knownGap stale, #23163; parked on #23121, carried by #23169). task-detail.page.ts's record:details block has named its sections overview / schedule / details since #22036, so the task record page renders them translated; QA run #23163 read zh headings on the New form, the task record page and the contact form under zh-CN. The step used to name the tabbed / wizard / split formViews, but those are reachable from no console door, and `…/view/tabbed` renders the grid. The negative that keeps a nameless section out of resolver FAILs stands", "ref": "#23169" }
+        { "revision": 7, "date": "2026-10-13", "change": "knownGaps[2], steps[7], variants[6] and the showcase source note re-pointed (knownGap stale, #23163; parked on #23121, carried by #23169). task-detail.page.ts's record:details block has named its sections overview / schedule / details since #22036, so the task record page renders them translated; QA run #23163 read zh headings on the New form, the task record page and the contact form under zh-CN. The step used to name the tabbed / wizard / split formViews, but those are reachable from no console door, and `…/view/tabbed` renders the grid. The negative that keeps a nameless section out of resolver FAILs stands", "ref": "#23169" },
+        { "revision": 8, "date": "2026-10-16", "change": "variants[5], acceptance[7].clause, steps[8] and [9], source[0] and automated.ref corrected (checklist-accuracy note 4 and the fixture gaps of QA run #23951, wave #23878). variants[5] still marked the view-empty-state variant blocked(fixture), contradicting knownGaps[1] and steps[6] — it ran and passed. acceptance[7] counted the served tree as an eleven-group platform face over a ten-group per-app one; the spec declares eleven per-app groups (appTranslationDataShape, picklists included — source[0]'s list had dropped it) and twelve platform groups (plus settings). The dashboard and page steps now name a translated specimen each, because no showcase page carries a translated title (the run scored pages on platform page connect_agent). automated.ref's revision note moves to the current pin. Wording and specimen names only: no request or oracle changed", "ref": "#24036" }
       ]
     },
     {
@@ -488,6 +493,83 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: the i18n build lane — drift gate, undeclared-key gate, ratchet, and their provable red paths", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "step 4 was a no-op as written: 'perturb one committed bundle VALUE' is green by design under merge mode, where the committed file is its own baseline. Reworded to the STRUCTURAL perturbation (remove/rename a KEY) that actually bites, split into a do/don't pair, with the #7640 symlink-farm technique that drives it without touching a repo file; the drift-bites clause and both negatives are reconciled so a green value edit can no longer be read (or filed) as a gate defect", "ref": "#7686" }
+      ]
+    },
+    {
+      "id": "i18n.flow-copy-translation-and-host-override",
+      "title": "Flow copy is translatable on v18: a flow refusal message and a paused screen's title/description resolve in the caller's Accept-Language with holes filled, `os i18n extract` scaffolds the refusal / screen / option keys, a translated screen title is judged by the {{ }} text-slot rule, and a host translation bundle overrides a platform key in either load order",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "metadata author running the CLI in a scratch copy of the showcase app (no server needed)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "a showcase (or scratch) flow with an end-node refusal message and a screen, plus a zh-CN translation bundle carrying their keys"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/automation/FLOW/trigger with Accept-Language: zh-CN and read the refusal message",
+        "start the screen flow with Accept-Language: zh-CN and read the paused screen title",
+        "in the scratch app run `os i18n extract` and inspect the scaffolded keys; add a translated screen title \"Hi {name}\" and run `os validate`",
+        "in the scratch app give the host bundle a key the platform also ships (e.g. a sys_user label) and boot; GET /api/v1/meta/object/sys_user with Accept-Language for that locale"
+      ],
+      "acceptance": [
+        {
+          "clause": "flow refusal / screen translation, extract scaffolding, translated text-slot rule and host override — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the refusal and the screen title come back in zh-CN with their holes filled; record-trigger refusals stay in the source language",
+          "oracle": "api",
+          "verify": "message text per call",
+          "evidence": "the two answers"
+        },
+        {
+          "clause": "`os i18n extract` writes the refusal, screen, option and toast keys",
+          "oracle": "build",
+          "verify": "diff of the bundle file",
+          "evidence": "the added keys"
+        },
+        {
+          "clause": "a translated screen title with single braces fails `os validate` naming the {{ }} spelling",
+          "oracle": "build",
+          "verify": "exit code + rule",
+          "evidence": "the issue line"
+        },
+        {
+          "clause": "the host bundle's value wins for the overlapping platform key",
+          "oracle": "api",
+          "verify": "label in the served definition",
+          "evidence": "the excerpt"
+        }
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-automation/src/end-node-refusal-translation.test.ts + packages/runtime/src/flow-run-locale.test.ts + packages/spec/src/automation/flow-screen-option-key.test.ts + packages/spec/src/system/translation.test.ts + packages/platform-objects/src/plugin.translations.test.ts"
+      },
+      "source": [
+        "packages/spec/src/system/i18n-resolver.ts#flowRefusalMessageKey",
+        "packages/spec/src/system/i18n-resolver.ts#flowScreenCopyKey",
+        "packages/spec/src/automation/flow-screen-option-key.ts#flowScreenFieldOptionKey",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22450-flow-refusal-translation, 22507-flow-options-toasts-translation, 22507-screen-copy-engine-pick-automation, 22507-screen-copy-engine-pick-cli, 22507-screen-copy-engine-pick-lint, 22507-screen-copy-engine-pick-spec, 22627-flow-screen-title-translation-text-slot, 22972-host-bundle-wins"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
       ]
     }
   ]

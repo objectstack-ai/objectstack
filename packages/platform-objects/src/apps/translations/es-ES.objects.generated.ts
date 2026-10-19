@@ -35,7 +35,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "Rol de plataforma",
-        help: "Valor de rol heredado de better-auth (admin, user, …). ObjectStack ya no lo escribe (ADR-0068 D2). Para conceder la condición de administrador de la plataforma, incluya el correo verificado del usuario en `OS_PLATFORM_OWNER_EMAIL`; bajo la postura de tenencia `single`, una asignación sin ámbito de `admin_full_access` en `sys_user_permission_set` también la concede."
+        help: "Valor de rol heredado de better-auth (admin, user, …). ObjectStack ya no lo escribe. Para conceder la condición de administrador de la plataforma, incluya el correo verificado del usuario en `OS_PLATFORM_OWNER_EMAIL`; bajo la postura de tenencia `single`, una asignación sin ámbito de `admin_full_access` en `sys_user_permission_set` también la concede."
       },
       banned: {
         label: "Bloqueado",
@@ -97,11 +97,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       manager_id: {
         label: "Gerente",
-        help: "Gerente directo de este usuario. Forma la cadena de reporte que recorre el ámbito jerárquico `own_and_reports` (ADR-0057 / @objectstack/security-enterprise)."
+        help: "Gerente directo de este usuario. Forma la cadena de reporte que recorre el ámbito jerárquico `own_and_reports`."
       },
       primary_business_unit_id: {
         label: "Unidad de negocio principal",
-        help: "Unidad de negocio principal del usuario: una proyección desnormalizada de sys_business_unit_member.is_primary que mantiene plugin-sharing (anexo D12 de ADR-0057). Permite que una búsqueda de usuarios filtre candidatos por unidad de negocio sin recorrer la tabla de unión de membresías. No la edites directamente; establécela mediante la membresía a la unidad de negocio."
+        help: "Unidad de negocio principal del usuario: una proyección desnormalizada de sys_business_unit_member.is_primary que mantiene plugin-sharing. Permite que una búsqueda de usuarios filtre candidatos por unidad de negocio sin recorrer la tabla de unión de membresías. No la edites directamente; establécela mediante la membresía a la unidad de negocio."
       },
       source: {
         label: "Origen de la identidad",
@@ -142,7 +142,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
-        successMessage: "Invitación enviada a ${result.email}"
+        successMessage: "Invitación enviada a ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Propietario",
+              admin: "Administrador",
+              delegated_admin: "Administrador delegado",
+              member: "Miembro"
+            }
+          }
+        }
       },
       ban_user: {
         label: "Bloquear usuario",
@@ -537,7 +547,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "Organización principal",
-        help: "Organización principal a efectos de informes y agrupación. No concede NADA: la visibilidad entre organizaciones procede de la membresía, nunca de esta referencia (ADR-0105 D6)."
+        help: "Organización principal a efectos de informes y agrupación. No concede NADA: la visibilidad entre organizaciones procede de la membresía, nunca de esta referencia."
       },
       sort_order: {
         label: "Orden",
@@ -559,6 +569,21 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "Invitar usuario",
+        description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
+        successMessage: "Invitación enviada a ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Propietario",
+              admin: "Administrador",
+              delegated_admin: "Administrador delegado",
+              member: "Miembro"
+            }
+          }
+        }
+      },
       create_organization: {
         label: "Crear organización",
         successMessage: "Organización creada"
@@ -576,15 +601,19 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Establecer como activa",
         successMessage: "Organización activa cambiada"
       },
-      leave_organization: {
-        label: "Abandonar organización",
-        confirmText: "¿Abandonar esta organización? Perderá el acceso a todos sus recursos.",
-        successMessage: "Ha abandonado la organización"
+      rename_organization: {
+        label: "Renombrar organización",
+        successMessage: "Organización renombrada"
       },
       change_slug: {
         label: "Cambiar slug",
         description: "Renombrar el slug reescribe todos los subdominios de la plataforma para esta organización y reserva el slug anterior durante 90 días. ¿Continuar?",
         successMessage: "Slug de la organización cambiado"
+      },
+      leave_organization: {
+        label: "Abandonar organización",
+        confirmText: "¿Abandonar esta organización? Perderá el acceso a sus entornos y miembros.",
+        successMessage: "Ha abandonado la organización"
       }
     }
   },
@@ -633,7 +662,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
-        successMessage: "Invitación enviada a ${result.email}"
+        successMessage: "Invitación enviada a ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Propietario",
+              admin: "Administrador",
+              delegated_admin: "Administrador delegado",
+              member: "Miembro"
+            }
+          }
+        }
       },
       add_member: {
         label: "Añadir miembro",
@@ -649,9 +688,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Miembro eliminado"
       },
       transfer_ownership: {
-        label: "Transferir propiedad",
-        confirmText: "¿Transferir la propiedad de esta organización al miembro seleccionado? Pasarás a ser administrador y perderás los privilegios exclusivos del propietario.",
-        successMessage: "Propiedad transferida"
+        label: "Hacer propietario",
+        confirmText: "¿Hacer propietario de esta organización al miembro seleccionado? Obtendrá todos los privilegios de propietario, incluido eliminar la organización. Tú sigues siendo propietario; para dejar de serlo, usa «Cambiar rol» en tu propia membresía.",
+        successMessage: "El miembro ahora es propietario"
       }
     }
   },
@@ -710,32 +749,58 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       business_unit_id: {
         label: "Unidad de negocio de asignación",
-        help: "Unidad de negocio en la que se asigna a la persona invitada al aceptar (ADR-0105 D8). Debe estar dentro del subárbol delegado de quien emite la invitación."
+        help: "Unidad de negocio en la que se asigna a la persona invitada al aceptar. Debe estar dentro del subárbol delegado de quien emite la invitación."
       },
       positions: {
         label: "Puestos de asignación",
-        help: "Nombres de puestos asignados al aceptar (ADR-0105 D8). Los conjuntos de permisos de cada puesto deben estar en la lista de permitidos del adminScope de quien emite la invitación."
+        help: "Nombres de puestos asignados al aceptar. Los conjuntos de permisos de cada puesto deben estar en la lista de permitidos del adminScope de quien emite la invitación."
       }
     },
     _views: {
       pending: {
-        label: "Pendientes"
+        label: "Pendientes",
+        emptyState: {
+          title: "No hay invitaciones pendientes",
+          message: "Una invitación permanece aquí hasta que se acepta, se rechaza o se cancela, o hasta que caduca."
+        }
       },
       accepted: {
-        label: "Aceptadas"
+        label: "Aceptadas",
+        emptyState: {
+          title: "No hay invitaciones aceptadas",
+          message: "Una invitación pasa aquí cuando la persona la acepta y se une a la organización."
+        }
       },
       expired: {
-        label: "Caducadas / canceladas"
+        label: "Caducadas / canceladas",
+        emptyState: {
+          title: "No hay invitaciones caducadas ni canceladas",
+          message: "Aquí se conservan las invitaciones que caducaron, se rechazaron o se cancelaron."
+        }
       },
       all_invitations: {
-        label: "Todas"
+        label: "Todas",
+        emptyState: {
+          title: "Aún no hay invitaciones",
+          message: "Aquí aparece cada invitación para unirse a una organización, sea cual sea su estado."
+        }
       }
     },
     _actions: {
       invite_user: {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
-        successMessage: "Invitación enviada a ${result.email}"
+        successMessage: "Invitación enviada a ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Propietario",
+              admin: "Administrador",
+              delegated_admin: "Administrador delegado",
+              member: "Miembro"
+            }
+          }
+        }
       },
       cancel_invitation: {
         label: "Cancelar invitación",
@@ -848,7 +913,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "Unidad de negocio",
     pluralLabel: "Unidades de negocio",
-    description: "Nodo jerárquico de la estructura organizativa (departamento / división / unidad de negocio / oficina).",
+    description: "La estructura de su empresa (divisiones, departamentos, regiones y oficinas), usada para delimitar datos e informes.",
     fields: {
       name: {
         label: "Nombre"
@@ -1008,6 +1073,13 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       revoked: {
         label: "Revocado"
       },
+      revoked_reason: {
+        label: "Motivo de la revocación",
+        help: "Se registra cuando el restablecimiento forzado de la contraseña por parte de un administrador revocó esta clave. Solo un administrador de la plataforma puede restaurar una clave así; su propietario crea una nueva. Se borra cuando la clave se restaura. Vacío para una clave revocada desde la lista de claves de API.",
+        options: {
+          admin_password_reset: "Restablecimiento forzado de la contraseña por un administrador"
+        }
+      },
       key: {
         label: "Clave con hash",
         help: "Valor de la clave de API con hash; nunca se expone a los clientes."
@@ -1024,19 +1096,47 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_keys: {
-        label: "Todas"
+        label: "Todas",
+        emptyState: {
+          title: "Aún no hay claves de API",
+          message: "Crea una clave para scripts e integraciones con Crear clave; la clave se muestra una sola vez, al crearla."
+        }
       },
       mine: {
-        label: "Mis claves"
+        label: "Mis claves",
+        emptyState: {
+          title: "Aún no tienes claves de API",
+          message: "Crea una clave para tus scripts e integraciones con Crear clave; la clave se muestra una sola vez, al crearla."
+        }
       },
       active: {
-        label: "Activo"
+        label: "Activo",
+        emptyState: {
+          title: "No hay claves de API activas",
+          message: "Aquí aparece cada clave que no se ha revocado."
+        }
       },
       revoked: {
-        label: "Revocado"
+        label: "Revocado",
+        emptyState: {
+          title: "No hay claves revocadas",
+          message: "Una clave pasa aquí cuando se revoca; los clientes que la usan pierden el acceso hasta que se restaura."
+        }
       }
     },
     _actions: {
+      create_api_key: {
+        label: "Crear clave",
+        description: "Crea una clave para un script o una integración. La clave actúa como tú, con tu acceso, en la organización en la que trabajas ahora.",
+        resultDialog: {
+          title: "Clave de API creada",
+          description: "Copia la clave ahora: solo se muestra una vez y no se puede recuperar. Si se filtra, revócala y crea una nueva.",
+          acknowledge: "He guardado la clave",
+          fields: {
+            key: "Clave de API"
+          }
+        }
+      },
       revoke_api_key: {
         label: "Revocar clave de API",
         confirmText: "¿Revocar esta clave de API? Los clientes que la utilicen perderán el acceso inmediatamente.",
@@ -1388,16 +1488,32 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_apps: {
-        label: "Todas"
+        label: "Todas",
+        emptyState: {
+          title: "Aún no hay aplicaciones OAuth",
+          message: "Registra una aplicación para que sus clientes puedan iniciar la sesión de los usuarios con este sistema."
+        }
       },
       mine: {
-        label: "Mis aplicaciones"
+        label: "Mis aplicaciones",
+        emptyState: {
+          title: "Aún no tienes aplicaciones OAuth",
+          message: "Aquí aparecen las aplicaciones que registras."
+        }
       },
       active: {
-        label: "Activo"
+        label: "Activo",
+        emptyState: {
+          title: "No hay aplicaciones OAuth activas",
+          message: "Una aplicación sigue activa hasta que se deshabilita; las aplicaciones deshabilitadas aparecen en Deshabilitado."
+        }
       },
       disabled_apps: {
-        label: "Deshabilitado"
+        label: "Deshabilitado",
+        emptyState: {
+          title: "No hay aplicaciones OAuth deshabilitadas",
+          message: "Una aplicación pasa aquí cuando se deshabilita; sus clientes no pueden iniciar sesión hasta que se vuelva a habilitar."
+        }
       }
     },
     _actions: {
@@ -1490,7 +1606,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "ID de referencia",
-        help: "Identificador de correlación proporcionado por quien llama."
+        help: "Organización vinculada por el consentimiento con el que se emitió este token; vacío si no se vinculó ninguna."
       },
       authorization_code_id: {
         label: "ID del código de autorización",
@@ -1550,7 +1666,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "ID de referencia",
-        help: "Identificador de correlación proporcionado por quien llama."
+        help: "Organización vinculada por el consentimiento que inició esta familia de tokens de actualización; vacío si no se vinculó ninguna."
       },
       authorization_code_id: {
         label: "ID del código de autorización",
@@ -1618,7 +1734,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "ID de referencia",
-        help: "Identificador de correlación proporcionado por quien llama."
+        help: "Organización que vincula este consentimiento: la organización activa del usuario al consentir; vacío si no había ninguna."
       },
       resources: {
         label: "Recursos",
@@ -1778,7 +1894,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_sso_provider: {
     label: "Proveedor SSO",
     pluralLabel: "Proveedores SSO",
-    description: "Proveedores de identidad SSO externos (OIDC / SAML) a los que este entorno federa el inicio de sesión",
+    description: "Proveedores de identidad SSO externos (OIDC / SAML) a los que este sistema federa el inicio de sesión",
     fields: {
       id: {
         label: "ID"
@@ -1797,7 +1913,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       domain_verified: {
         label: "Dominio verificado",
-        help: "Si se ha probado la propiedad DNS del dominio de correo (ADR-0135 D6). Lo establece «Verificar dominio» tras resolverse el registro DNS TXT. Gestionado por better-auth: no editable directamente. Solo se aplica cuando la verificación de dominio está habilitada para el entorno."
+        help: "Si se ha probado la propiedad DNS del dominio de correo. Lo establece «Verificar dominio» tras resolverse el registro DNS TXT. Gestionado por better-auth: no editable directamente. Solo se aplica cuando la verificación de dominio está habilitada para el entorno."
       },
       oidc_config: {
         label: "Configuración OIDC",
@@ -1849,7 +1965,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           },
           clientId: {
             label: "ID de cliente",
-            helpText: "ID de cliente OAuth emitido por el IdP para este entorno."
+            helpText: "ID de cliente OAuth emitido por el IdP para este sistema."
           },
           clientSecret: {
             label: "Secreto de cliente",
@@ -2356,7 +2472,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_notification: {
     label: "Notificación",
     pluralLabel: "Notificaciones",
-    description: "Eventos de notificación: una fila por cada emit() (entrada de la capa 2 de ADR-0030)",
+    description: "Todas las notificaciones que envió la plataforma, una fila por evento.",
     fields: {
       id: {
         label: "ID de notificación"
@@ -2982,13 +3098,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           deprecated: "Obsoleto"
         }
       },
-      organization_id: {
-        label: "Organización",
-        help: "Organización para el aislamiento multi-tenant."
-      },
       environment_id: {
         label: "Entorno (obsoleto)",
-        help: "OBSOLETO. Use organization_id para el aislamiento del tenant."
+        help: "OBSOLETO. Las personalizaciones son filas del entorno; no hay columna de tenant."
       },
       version: {
         label: "Versión"
@@ -3082,10 +3194,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       source: {
         label: "Origen"
       },
-      organization_id: {
-        label: "Organización",
-        help: "Organización para el aislamiento multi-tenant."
-      },
       recorded_by: {
         label: "Registrado por",
         help: "Usuario que realizó este cambio. NULL = iniciado por el sistema (sincronización al arrancar, migración, tarea programada); nunca una cadena centinela."
@@ -3098,7 +3206,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_metadata_audit: {
     label: "Auditoría de metadatos",
     pluralLabel: "Auditoría de metadatos",
-    description: "Registro de auditoría de solo adición de las decisiones de escritura de metadatos (ADR-0010).",
+    description: "Registro de auditoría de solo adición de las decisiones de escritura de metadatos.",
     fields: {
       id: {
         label: "ID"
@@ -3118,9 +3226,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "Nombre"
-      },
-      organization_id: {
-        label: "Organización"
       },
       operation: {
         label: "Operación",

@@ -66,6 +66,7 @@ import { CloudConnectionPlugin } from './cloud-connection-plugin.js';
 import { MarketplaceProxyPlugin } from './marketplace-proxy-plugin.js';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { RuntimeConfigPlugin } from './runtime-config-plugin.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 // ── Shared harness ───────────────────────────────────────────────────────────
 
@@ -95,9 +96,18 @@ function makeC(opts: {
     body?: unknown;
     params?: Record<string, string>;
     headers?: Record<string, string>;
+    /**
+     * [#23914] A body as the client SENT it, served the way Hono 4.13's
+     * `HonoRequest` serves one: `json()` is the cached `text()` then
+     * `JSON.parse`, so a body that does not parse rejects `json()` and still
+     * reads back from `text()`. Takes the place of `body`.
+     */
+    raw?: { contentType: string; text: string };
 } ): { c: any; captured: Captured } {
     const captured: Captured = { status: 0, body: undefined };
     const h = new Headers(opts.headers ?? {});
+    if (opts.raw) h.set('content-type', opts.raw.contentType);
+    const sent = opts.raw ? Promise.resolve(opts.raw.text) : undefined;
     const c: any = {
         req: {
             url: opts.url,
@@ -105,7 +115,8 @@ function makeC(opts: {
             path: new URL(opts.url).pathname,
             raw: new Request(opts.url, { headers: h }),
             header: (n: string) => h.get(n) ?? undefined,
-            json: async () => opts.body ?? {},
+            json: sent ? () => sent.then((t) => JSON.parse(t)) : async () => opts.body ?? {},
+            text: sent ? () => sent : async () => JSON.stringify(opts.body ?? {}),
             param: (n: string) => opts.params?.[n],
             query: () => undefined,
         },
@@ -167,6 +178,12 @@ async function mountCloudConnection(opts: {
     environmentId?: string;
     userId?: string;
     resolvesEnvironment?: boolean;
+    /**
+     * [#24148] Whether the signed-in caller holds `setup.access`, which the
+     * connection-changing doors demand. Default: yes, so the exits below that
+     * are about something else reach the code they are about.
+     */
+    setupAccess?: boolean;
 } = {}) {
     const rawApp = makeRawApp();
     const hooks = new Map<string, any>();
@@ -175,13 +192,22 @@ async function mountCloudConnection(opts: {
             getSession: async () => (opts.userId ? { user: { id: opts.userId }, session: {} } : null),
         },
     };
+    const grantRows: Record<string, any[]> = opts.userId && opts.setupAccess !== false
+        ? {
+            sys_user_permission_set: [{ id: 'ups_1', user_id: opts.userId, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: null }],
+            sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
+        }
+        : {};
+    const objectql = bindCatalogFromTables({ find: async (object: string) => grantRows[object] ?? [] }, grantRows);
+    const envKernelServices: Record<string, unknown> = { auth, objectql };
     const services: Record<string, any> = {
         'env-registry': {
             resolveByHostname: async () =>
                 (opts.resolvesEnvironment ? { environmentId: 'env-123' } : undefined),
         },
-        'kernel-manager': { getOrCreate: async () => ({ getServiceAsync: async () => auth }) },
+        'kernel-manager': { getOrCreate: async () => ({ getServiceAsync: async (name: string) => envKernelServices[name] }) },
         auth,
+        objectql,
         manifest: { register: vi.fn() },
     };
     const ctx: any = {
@@ -209,12 +235,12 @@ async function mountCloudConnection(opts: {
 async function driveCloudConnection(
     routes: Map<string, Handler>,
     key: string,
-    opts: { body?: unknown } = {},
+    opts: { body?: unknown; raw?: { contentType: string; text: string } } = {},
 ): Promise<Captured> {
     const handler = routes.get(key);
     if (!handler) throw new Error(`no handler for ${key} (have: ${[...routes.keys()].join(', ')})`);
     const [method, path] = key.split(' ');
-    const { c, captured } = makeC({ url: `${HOST}${path}`, method, body: opts.body });
+    const { c, captured } = makeC({ url: `${HOST}${path}`, method, body: opts.body, raw: opts.raw });
     await handler(c);
     return captured;
 }
@@ -262,6 +288,20 @@ describe('plugin-route door — CloudConnectionPlugin error exits (#9267)', () =
             { status: 401, code: 'UNAUTHENTICATED' },
         );
     });
+
+    /**
+     * [#24148] The three connection-changing doors refuse a signed-in caller
+     * without `setup.access` with the standard catalog's `PERMISSION_DENIED`,
+     * which `ApiErrorSchema` admits without a registration.
+     */
+    for (const door of ['bind/start', 'bind/poll', 'unbind'] as const) {
+        it(`POST /${door} with a session lacking setup.access → 403 in the declared envelope`, async () => {
+            const routes = await mountCloudConnection({ resolvesEnvironment: true, userId: 'usr_1', setupAccess: false });
+            const captured = await driveCloudConnection(routes, `POST ${CC}/${door}`, { body: { device_code: 'dc_1' } });
+            expectDeclaredErrorEnvelope(captured, { status: 403, code: 'PERMISSION_DENIED' });
+            expect(captured.body.error.message).toContain('`setup.access`');
+        });
+    }
 
     it('POST /install without a session → 401 in the declared envelope', async () => {
         const routes = await mountCloudConnection({ resolvesEnvironment: true });
@@ -398,6 +438,55 @@ describe('plugin-route door — MarketplaceProxyPlugin error exits (#9267)', () 
         });
         await handler(c, async () => 'NEXT');
         expectDeclaredErrorEnvelope(captured, { status: 502, code: 'MARKETPLACE_PROXY_FAILED' });
+    });
+});
+
+// ── [#23914] An unparseable body is refused, never read as no body ───────────
+
+/**
+ * Each of these routes read its body as `try { body = await c.req.json() }
+ * catch { body = {} }`, so a truncated body was answered as if the client had
+ * sent none — `/bind/poll` with `400 "device_code is required"` for a body that
+ * carried `device_code` and lacked a brace. Now a body sent as
+ * `application/json` that does not parse is refused with its own `400
+ * INVALID_REQUEST`, whose message names the parse failure and echoes nothing.
+ * CONTROL: an empty JSON body is still no body, so the required-field answer
+ * it always gave is unchanged.
+ */
+describe('plugin-route door — CloudConnectionPlugin refuses an unparseable body (#23914)', () => {
+    const json = (text: string) => ({ contentType: 'application/json', text });
+
+    function expectParseRefusal(captured: Captured, sent: string) {
+        expectDeclaredErrorEnvelope(captured, { status: 400, code: 'INVALID_REQUEST' });
+        expect(captured.body.error.message).toMatch(/parsed as JSON/);
+        expect(captured.body.error.message).not.toContain(sent.trim());
+    }
+
+    it('POST /bind/start with a truncated body → 400, before anything else is read', async () => {
+        const routes = await mountCloudConnection({ resolvesEnvironment: true });
+        const sent = '{"environment_id": "env-123"';
+        expectParseRefusal(await driveCloudConnection(routes, `POST ${CC}/bind/start`, { raw: json(sent) }), sent);
+    });
+
+    it('POST /bind/poll with a truncated body carrying device_code → the parse refusal, not "device_code is required"', async () => {
+        const routes = await mountCloudConnection({ resolvesEnvironment: true, userId: 'usr_1' });
+        const sent = '{"device_code": "dc_1"';
+        expectParseRefusal(await driveCloudConnection(routes, `POST ${CC}/bind/poll`, { raw: json(sent) }), sent);
+    });
+
+    it('POST /install with a truncated body carrying package_id → the parse refusal, not "package_id is required"', async () => {
+        const routes = await mountCloudConnection({
+            resolvesEnvironment: true, userId: 'usr_1', controlPlaneApiKey: 'svc-key',
+        });
+        const sent = '{"package_id": "pkg_1"';
+        expectParseRefusal(await driveCloudConnection(routes, `POST ${CC}/install`, { raw: json(sent) }), sent);
+    });
+
+    it('CONTROL — an empty JSON body is still no body: /bind/poll answers its required-field 400', async () => {
+        const routes = await mountCloudConnection({ resolvesEnvironment: true, userId: 'usr_1' });
+        const captured = await driveCloudConnection(routes, `POST ${CC}/bind/poll`, { raw: json('') });
+        expectDeclaredErrorEnvelope(captured, { status: 400, code: 'INVALID_REQUEST' });
+        expect(captured.body.error.message).toMatch(/device_code/);
     });
 });
 

@@ -18,6 +18,10 @@
  * existed does not block an unrelated edit — repairing it is the only write
  * that has to state a valid window.
  *
+ * An insert is judged with `previous` bound to `null` — the clause
+ * `previous == null` is how the rule says "this write makes the window" — so
+ * the refusal carries the rule's own message on insert exactly as on update.
+ *
  * Measured on a REAL `ObjectQL` engine over a real SQL driver with the REAL
  * `SecurityPlugin` started on it, the harness `grant-permission-set-name.test.ts`
  * uses: what is pinned is what the write door does, and a double would answer
@@ -131,10 +135,25 @@ function envelopeOf(e: unknown) {
   return { status: r.status, code: r.code, fields: (r.details?.fields ?? []) as any[] };
 }
 
+/** The rule's own declared message — read off the object, never retyped here. */
+const WINDOW_ORDER_MESSAGE = (SysUserPermissionSet.validations as unknown as Array<{ name: string; message: string }>)
+  .find((r) => r.name === 'validity_window_order')!.message;
+
+/**
+ * The refusal is the RULE's verdict: its own message, and no `unevaluable`
+ * reason. `rule_violation` alone does not say that — a rule that could not be
+ * evaluated refuses under the same code, naming the CEL fault instead. On
+ * insert that is what this rule answered while the insert path left `previous`
+ * unbound: `previous == null` faulted `Unknown variable: previous`, and the
+ * administrator read a fault where the rule's sentence belongs.
+ */
 function expectWindowRefusal(err: unknown): void {
   const env = envelopeOf(err);
   expect([env.status, env.code]).toEqual([400, 'VALIDATION_FAILED']);
   expect(env.fields.map((f) => [f.field, f.code])).toEqual([['valid_until', 'rule_violation']]);
+  expect(env.fields[0].constraint?.reason).not.toBe('unevaluable');
+  // Its opening: a multi-row update appends the row it refused, `(record ID)`.
+  expect(String(env.fields[0].message).slice(0, WINDOW_ORDER_MESSAGE.length)).toBe(WINDOW_ORDER_MESSAGE);
 }
 
 async function grantsOf(h: Harness, userId: string): Promise<any[]> {

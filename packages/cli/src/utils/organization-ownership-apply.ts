@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { ORGANIZATION_OWNERSHIP_MIGRATION_ID } from '@objectstack/spec/system';
 import {
   convertPositionBindingRows,
   permissionSetDefinitionFromRow,
@@ -8,6 +9,7 @@ import {
 import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn, hashSpec } from '@objectstack/metadata-core';
 import {
   inventoryEntryFor,
+  LEGACY_SHIPPED_SET_SEEDS,
   type InventoryEntry,
   type RowPredicate,
 } from './organization-ownership-inventory.js';
@@ -23,9 +25,10 @@ import {
   SEEDED_BY,
   TEMPLATE_OBJECT,
   columnNameOf,
-  dialectOf,
   predicateSql,
+  PRIMARY_DATABASE,
   Sql,
+  underivableDepartureOf,
   type AttributionSink,
   type MetadataConflict,
   type MetadataKeyRow,
@@ -42,6 +45,7 @@ import {
   type UnnamedReason,
 } from './organization-ownership-grants.js';
 import { describeSecurityPluginComposition, type SchemaMigrationComposition } from './schema-migration-plugins.js';
+import type { DeclaredSharingRuleSkip } from '@objectstack/plugin-sharing';
 
 /**
  * The ADR-0131 D10 ceremony's apply step — ceremony items 2 to 4: the backup
@@ -53,7 +57,11 @@ import { describeSecurityPluginComposition, type SchemaMigrationComposition } fr
  *     ({@link AttributionSink}): the apply writes exactly what the plan
  *     reported, derived once, never a second derivation. Repeated to a fixed
  *     point, so a child whose parent was itself NULL in the first pass takes
- *     the parent's owner in the next.
+ *     the parent's owner in the next. Under `single` on a database that holds
+ *     no organization at all, the Default Organization is created first
+ *     ({@link DefaultOrganizationPort}; ADR-0131 D3: it exists before the
+ *     first write that needs an owner), so the rows no anchor names take it —
+ *     never left NULL and certified. The plan says so in its warnings.
  *  2. `authored-conversion` — the catalog rows an organization authored
  *     (the inventory's `authored` categories) become environment metadata
  *     through the metadata door, by core's row→definition mappers; the
@@ -105,7 +113,16 @@ import { describeSecurityPluginComposition, type SchemaMigrationComposition } fr
  *     `mirror-deletion` object that match its mirror selector and none of its
  *     named categories are deleted. Templates: the promotion runs again first,
  *     and beyond the seeded mirrors only the rows whose environment copy that
- *     pass verified are deleted, by id.
+ *     pass verified are deleted, by id. Then the `declared-rule-mirrors`
+ *     departure on the fate-3 `sys_sharing_rule`, made executable (ADR-0131
+ *     C3 stage 9): every grant naming a mirror row is renamed to the rule's
+ *     NAME, which the registry must resolve, and only then is the mirror
+ *     deleted ({@link runDeclaredRuleMirrorDeletion}). It runs again on a
+ *     checkpointed run while a mirror stands. Before them, a fate-3 table's
+ *     `underivableDeparture` (`sys_activity`, ruling record 6257510973 item
+ *     3): the NULL rows no anchor attributes once attribution is done are
+ *     deleted — never under `single`, where the Default Organization takes
+ *     them ({@link runUnderivableDeletion}).
  *  4h. `history-renumber` — seat answer Q2 A: `sys_metadata_history`'s
  *     `event_seq` and every `(type, name, version)` unique environment-wide
  *     before the column goes. Every lineage still tagged to an organization
@@ -122,6 +139,19 @@ import { describeSecurityPluginComposition, type SchemaMigrationComposition } fr
  *     one would refuse them; they are reported, never deleted).
  *
  * Then the post-check re-runs the plan and reports, per table, what remains.
+ * A departure no step of a release can perform — the declared sharing-rule
+ * mirrors while a release's own boot still seeded them
+ * (`DECLARED_SHARING_RULE_SEEDER_RUNS`, the inventory; `false` since the
+ * seeder retired) — is reported as advisory: named and counted, its rows still
+ * NULL, never deleted, and not a discrepancy. Every other remaining row is one,
+ * and so is every unattributable row (ruling C on the C8 decision: fate 4's
+ * reported rows, and a fate-3 row no anchor names under a wall): named per
+ * table with its count and the remedy — assign it an organization, or delete
+ * it by hand — and held against certification until it is gone, so a verified
+ * marker means zero NULL rows on every table. ⛔ The ceremony neither guesses
+ * its owner nor deletes it (D10 fate 4). The one exception is a fate-4 table
+ * whose column is not the tenancy anchor (`InventoryEntry.notNullExempt`): its
+ * organization-less rows are legitimate, reported, and advisory.
  *
  * ## Idempotent and resumable
  *
@@ -130,7 +160,11 @@ import { describeSecurityPluginComposition, type SchemaMigrationComposition } fr
  * empty, a delete selects only mirrors — so a second run writes nothing the
  * first one wrote. On top of that, each step that finishes is recorded in the
  * ceremony's checkpoint ({@link CeremonyLedgerPort}) and is not run again: a
- * run interrupted inside step N resumes at step N. A step that stops on a
+ * run interrupted inside step N resumes at step N. Two steps run again when
+ * checkpointed: `history-renumber` (below), and `attribution` whenever the
+ * plan derives an owner for rows still NULL — a row the operator made
+ * attributable since, or one an earlier run found no Default Organization
+ * for. A step that stops on a
  * blocker stops the ceremony there — fate order is the contract — and the
  * report names the blocker and its remedy.
  *
@@ -155,13 +189,15 @@ import { describeSecurityPluginComposition, type SchemaMigrationComposition } fr
  *
  * ## What it never does
  *
- * ⛔ Delete a row outside fate 2. ⛔ Give an unattributable row an owner:
+ * ⛔ Delete a row outside fate 2 and a declared `underivableDeparture`. ⛔ Give an unattributable row an owner:
  * owners come only from the plan's anchors and, under `single`, the Default
- * Organization. ⛔ Run at boot: the command is the only caller.
+ * Organization. ⛔ Create any organization but the Default Organization, and
+ * that one only under `single` on a database that holds none. ⛔ Run at boot:
+ * the command is the only caller.
  */
 
-/** The `sys_migration` row the ceremony checkpoints into and completes. */
-export const ORGANIZATION_OWNERSHIP_MIGRATION_ID = 'adr-0131-organization-ownership';
+/** The `sys_migration` row the ceremony checkpoints into and completes; the v18 boot guard reads it. */
+export { ORGANIZATION_OWNERSHIP_MIGRATION_ID };
 
 export const CEREMONY_STEPS = [
   'attribution',
@@ -179,6 +215,17 @@ export type CeremonyStep = (typeof CEREMONY_STEPS)[number];
 /** The raw-SQL seam: the plan's reader plus the one write verb. */
 export interface ApplyExecutor extends PlanReader {
   execute(sql: string, params?: readonly unknown[]): Promise<void>;
+}
+
+/**
+ * A database beside the primary the deployment keeps objects in — the
+ * `telemetry` sibling (`PlanSibling`): its tables are planned, attributed and
+ * have their columns dropped where they live, through its own executor.
+ */
+export interface ApplySibling {
+  name: string;
+  database: string;
+  executor: ApplyExecutor;
 }
 
 /** The security catalog read (core's `SecurityCatalogReader` satisfies it). */
@@ -208,6 +255,53 @@ export interface ServedViewsPort {
  */
 export interface MetadataLockPort {
   verdict(type: string, name: string, packageId: string | null): Promise<{ editable: boolean; lock?: string; lockReason?: string }>;
+}
+
+/**
+ * [ADR-0131 C3 stage 9] The sharing rules the deployment's packages DECLARE,
+ * by name — the registry the plugin's enforcement reads them from (the
+ * command: the booted engine's registry) — each with whether that enforcement
+ * SERVES it: `refused` is `null` when plugin-sharing's own translation
+ * (`translateDeclaredSharingRule`) accepts the declaration, else its reason in
+ * the operator's terms. A declared-rule mirror's grants are renamed only onto a
+ * served name: a grant naming a refused one would be revoked by the next
+ * boot's orphan sweep, so such a mirror blocks instead, naming the rule and the
+ * reason.
+ */
+export interface DeclaredSharingRulesPort {
+  rules(): Promise<ReadonlyArray<{ name: string; refused: string | null }>>;
+}
+
+/**
+ * Judge each declared `sharing_rule` item as plugin-sharing's enforcement does
+ * — through its own `translateDeclaredSharingRule`, never a copy of it — for
+ * {@link DeclaredSharingRulesPort}: a nameless item is no rule to rename onto
+ * and is left out.
+ */
+export async function judgeDeclaredSharingRules(items: readonly unknown[]): Promise<Array<{ name: string; refused: string | null }>> {
+  const { translateDeclaredSharingRule } = await import('@objectstack/plugin-sharing');
+  const out: Array<{ name: string; refused: string | null }> = [];
+  for (const item of items) {
+    const name = (item as { name?: unknown } | null)?.name;
+    if (typeof name !== 'string' || name === '') continue;
+    const { skip } = translateDeclaredSharingRule(item);
+    out.push({ name, refused: skip ? describeDeclaredRuleSkip(skip) : null });
+  }
+  return out;
+}
+
+/** Why plugin-sharing does not serve a declared rule, in the operator's terms: the translation's own refusal. */
+function describeDeclaredRuleSkip(skip: DeclaredSharingRuleSkip): string {
+  switch (skip.kind) {
+    case 'unnamed':
+      return 'the declaration names no object';
+    case 'unmappable-recipient':
+      return `its recipient (sharedWith type ${JSON.stringify(skip.sharedWith ?? null)}) maps to no recipient the runtime grants to`;
+    case 'owner-rule':
+      return 'it is an owner-based rule, a retired authoring shape (use a criteria rule)';
+    case 'condition':
+      return `its condition does not translate (${skip.cause.reason}: ${skip.cause.detail})`;
+  }
 }
 
 /** The `email_template` item the registry serves for one `(name, locale)` bundle member. */
@@ -258,6 +352,15 @@ export interface CeremonyCheckpoint {
    * between the two accepts the same choice and finishes.
    */
   metadataChoicesApplied?: string[];
+}
+
+/**
+ * The Default Organization's producer (the command: plugin-auth's boot
+ * invariant, `ensureDefaultOrganizationExists`): find it or create it, and
+ * answer its id. Throws when it cannot.
+ */
+export interface DefaultOrganizationPort {
+  create(): Promise<{ id: string }>;
 }
 
 /** Where the checkpoint lives (the command: the `sys_migration` row). */
@@ -416,14 +519,26 @@ export interface TableOutcome {
   /** Rows still NULL and listed by id — reported, never guessed. */
   unattributable: UnattributableRow[];
   /**
+   * Present when the {@link unattributable} rows hold certification (every
+   * table but a `notNullExempt` one): their count, which `remaining` includes,
+   * and the remedy in the operator's terms ({@link UNATTRIBUTABLE_REMEDY}).
+   */
+  held?: { rows: number; remedy: string };
+  /**
    * Rows that leave this table by a step this ceremony has not yet performed
    * (a move, or a mirror its own stage removes): each counts as remaining
-   * until it is gone, and its label is the remedy.
+   * until it is gone, and its label is the remedy. One that carries `advisory`
+   * is a departure no step of this release can perform, because its own boot
+   * re-creates the rows (`PlannedDeparture.advisory`): its rows are named and
+   * counted here and in the run's `advisory`, never in `remaining`.
    */
-  departures: Array<{ id: string; label: string; as: 'mirror-deletion' | 'moved'; rows: number }>;
+  departures: Array<{ id: string; label: string; as: 'mirror-deletion' | 'moved'; rows: number; advisory?: string }>;
   /** Templates: each `(name, locale)` whose rows still differ, with every candidate row and its organization. */
   templateConflicts?: TemplateConflict[];
-  /** Post-check: what is left for this table's fate, `0` when the fate is done. */
+  /**
+   * Post-check: what is left for this table's fate, `0` when the fate is done —
+   * its {@link held} unattributable rows included; advisory departures are not in it.
+   */
   remaining: number;
   notNull: TablePlan['notNull'];
 }
@@ -445,13 +560,23 @@ export interface OrganizationOwnershipApplyReport {
   restartedFrom?: { inventoryDigest: string; steps: CeremonyStep[] };
   /** Steps an earlier run finished, read from the checkpoint. */
   resumedFrom: CeremonyStep[];
+  /** The plan's warnings as this run read them before its first write (`OrganizationOwnershipPlan.warnings`). */
+  warnings: string[];
   steps: StepReport[];
   tables: TableOutcome[];
   /** Every step finished. */
   complete: boolean;
-  /** Blockers (an unfinished ceremony) or post-check discrepancies (a finished one). Zero is the verdict. */
+  /**
+   * Blockers (an unfinished ceremony) or post-check discrepancies (a finished
+   * one), unattributable rows among them (`TableOutcome.held`). Zero is the verdict.
+   */
   blocking: number;
-  /** Rows reported, never guessed: unattributable rows and rows held for another stage. */
+  /**
+   * Rows reported, never guessed and never held against the verdict: the rows
+   * of an advisory departure, held for the release that can remove them
+   * (`TableOutcome.departures`), and the unattributable rows of a table whose
+   * column is not the tenancy anchor (`InventoryEntry.notNullExempt`).
+   */
   advisory: number;
 }
 
@@ -459,15 +584,31 @@ export interface ApplyOptions {
   executor: ApplyExecutor;
   posture: string;
   database: string;
+  /** The databases beside the primary (the `telemetry` sibling), each with its own executor. */
+  siblings?: readonly ApplySibling[];
+  /** The database the deployment keeps `object` in (the booted engine's routing); see the plan's `homeOf`. */
+  homeOf?: (object: string) => string | undefined;
   catalog: CatalogPort;
   door: MetadataDoorPort;
   templates: TemplatePort;
+  /**
+   * [ADR-0131 C3 stage 9] The declared sharing rules, by name. Absent, a run
+   * that finds a declared-rule mirror standing blocks instead of deleting it.
+   */
+  declaredSharingRules?: DeclaredSharingRulesPort;
   /** The served views, for carrying form withdrawals. */
   views: ServedViewsPort;
   /** The door's lock verdict, for the one write the ceremony makes in place. */
   lock: MetadataLockPort;
   columnDrops: ColumnDropPort;
   ledger: CeremonyLedgerPort;
+  /**
+   * Creates the Default Organization when the plan says `--apply` does (`single`,
+   * no organization at all, and rows that fall to it —
+   * `OrganizationOwnershipPlan.defaultOrganizationCreatedByApply`).
+   * Absent, such a run blocks at attribution instead of attributing nothing.
+   */
+  defaultOrganization?: DefaultOrganizationPort;
   /** The kept plan file the operator reviewed; the run refuses unless it matches (see the module doc). */
   reviewedPlan: ReviewedPlan;
   inventory?: readonly InventoryEntry[];
@@ -498,6 +639,8 @@ export interface ApplyOptions {
   now?: () => Date;
   /** One line per milestone, for the command's human face. */
   onProgress?: (message: string) => void;
+  /** Each of the plan's warnings, before the first write: what the ceremony decides on the operator's behalf. */
+  onWarning?: (message: string) => void;
 }
 
 const ORG = 'organization_id';
@@ -530,7 +673,12 @@ const text = (value: unknown): string | null =>
 /** Shared state of one run. */
 interface Run {
   opts: ApplyOptions;
+  /** The primary database's SQL seam. */
   sql: Sql;
+  /** Each database's SQL seam and executor, by name (the primary is `PRIMARY_DATABASE`). */
+  databases: Map<string, { sql: Sql; executor: ApplyExecutor }>;
+  /** The database each planned physical table lives in, as the latest plan read it. */
+  databaseOf: Map<string, string>;
   plan: OrganizationOwnershipPlan;
   columns: Map<string, Set<string> | null>;
   attributed: Map<string, number>;
@@ -584,12 +732,18 @@ async function saveDefinition(run: Run, type: 'position' | 'permission', name: s
   run.saved.set(`${type}|${name}`, body);
 }
 
+/** The database `table` lives in: its SQL seam and executor (the primary for a table no plan placed). */
+function databaseFor(run: Run, table: string): { sql: Sql; executor: ApplyExecutor } {
+  return run.databases.get(run.databaseOf.get(table) ?? PRIMARY_DATABASE) ?? run.databases.get(PRIMARY_DATABASE)!;
+}
+
 async function columnsOf(run: Run, table: string): Promise<Set<string> | null> {
   if (run.columns.has(table)) return run.columns.get(table)!;
   const present = run.plan.tables.some((t) => t.tables.includes(table));
   let cols: Set<string> | null = null;
   if (present) {
-    const rows = await run.sql.read(table, columnListSql(run.sql.dialect), [table]);
+    const { sql } = databaseFor(run, table);
+    const rows = await sql.read(table, columnListSql(sql.dialect), [table]);
     cols = new Set(rows.map(columnNameOf).filter((c): c is string => c !== null));
   }
   run.columns.set(table, cols);
@@ -598,7 +752,7 @@ async function columnsOf(run: Run, table: string): Promise<Set<string> | null> {
 
 /** Every row of `table` matching `where`, keyset-paged by id. */
 async function readAll(run: Run, table: string, select: readonly string[], where: { text: string; params: unknown[] } = { text: '1 = 1', params: [] }): Promise<Record<string, unknown>[]> {
-  const { sql } = run;
+  const { sql } = databaseFor(run, table);
   const t = sql.q(table, table);
   const id = sql.q('id', table);
   const cols = [...new Set(['id', ...select])].map((c) => `${sql.q(c, table)} AS ${sql.q(c, table)}`).join(', ');
@@ -618,28 +772,77 @@ async function readAll(run: Run, table: string, select: readonly string[], where
 
 async function execute(run: Run, table: string, statement: string, params: readonly unknown[]): Promise<void> {
   try {
-    await run.opts.executor.execute(statement, params);
+    await databaseFor(run, table).executor.execute(statement, params);
   } catch (error) {
     throw new Error(`The write to ${table} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 }
 
-const planFor = (run: Run, extra: { onAttribution?: AttributionSink } = {}): Promise<OrganizationOwnershipPlan> =>
-  buildOrganizationOwnershipPlan({
+async function planFor(run: Run, extra: { onAttribution?: AttributionSink } = {}): Promise<OrganizationOwnershipPlan> {
+  const plan = await buildOrganizationOwnershipPlan({
     reader: run.opts.executor,
     posture: run.opts.posture,
     database: run.opts.database,
+    ...(run.opts.siblings?.length
+      ? { siblings: run.opts.siblings.map((d) => ({ name: d.name, database: d.database, reader: d.executor })) }
+      : {}),
+    ...(run.opts.homeOf ? { homeOf: run.opts.homeOf } : {}),
     ...(run.opts.inventory ? { inventory: run.opts.inventory } : {}),
     ...(run.opts.now ? { now: run.opts.now() } : {}),
     ...extra,
   });
+  for (const table of plan.tables) {
+    for (const physical of table.tables) run.databaseOf.set(physical, table.database ?? PRIMARY_DATABASE);
+  }
+  return plan;
+}
 
 const nullsUnderAttribution = (plan: OrganizationOwnershipPlan): number =>
   plan.tables.filter((t) => t.fate === 'attribution').reduce((n, t) => n + (t.rows?.organizationNull ?? 0), 0);
 
+/** The rows the plan derives an owner for and has not yet written: what an attribution pass would write. */
+const rowsToAttribute = (plan: OrganizationOwnershipPlan): number =>
+  plan.tables.filter((t) => t.fate === 'attribution').reduce((n, t) => n + Number(t.fateCounts.rowsToAttribute ?? 0), 0);
+
 // ── Step 1: attribution ──────────────────────────────────────────────────────
 
+/**
+ * [ADR-0131 D3, D10 fate 3] Under `single`, on a database that holds no
+ * organization at all and rows no anchor names, create the Default
+ * Organization before the first attribution write: it owns those rows, and it
+ * exists before the first write that needs an owner. The plan the operator reviewed said so
+ * (`defaultOrganizationCreatedByApply`, and its warning). `null` when it now
+ * exists; the blocker, in the operator's terms, when it could not be created.
+ */
+async function ensureDefaultOrganization(run: Run): Promise<string | null> {
+  if (!run.plan.defaultOrganizationCreatedByApply) return null;
+  const port = run.opts.defaultOrganization;
+  if (!port) {
+    return (
+      'This single-posture database holds no organization, and this run has no way to create the Default ' +
+      'Organization that owns its organization-less rows (ADR-0131 D3). Nothing was attributed. Run the ceremony ' +
+      'through `os migrate organization-ownership --apply`, which creates it.'
+    );
+  }
+  try {
+    const { id } = await port.create();
+    run.opts.onProgress?.(`created the Default Organization ${id} (single posture): the owner of the rows no anchor names`);
+    return null;
+  } catch (error) {
+    return (
+      `The Default Organization could not be created (${error instanceof Error ? error.message : String(error)}), so ` +
+      'the organization-less rows no anchor names have no owner to take (ADR-0131 D3). Nothing was attributed. Make ' +
+      'the sys_organization insert land — the database\'s write permission, a legacy unique index on its slug — then ' +
+      're-run --apply.'
+    );
+  }
+}
+
 async function runAttribution(run: Run): Promise<StepReport> {
+  const unowned = await ensureDefaultOrganization(run);
+  if (unowned) {
+    return { step: 'attribution', status: 'blocked', summary: { rowsAttributed: 0, passes: 0 }, blockers: [unowned], notes: [] };
+  }
   let passes = 0;
   let total = 0;
   let lastNulls = Number.POSITIVE_INFINITY;
@@ -648,24 +851,28 @@ async function runAttribution(run: Run): Promise<StepReport> {
     let wrote = 0;
     const plan = await planFor(run, {
       onAttribution: async ({ object, assignments }) => {
+        // Each row is written in the database the plan read it from (the
+        // assignment says, before any plan of this pass has placed the table).
         const groups = new Map<string, string[]>();
         for (const a of assignments) {
-          const key = `${a.table}\u0000${a.organizationId}`;
+          const key = `${a.database ?? PRIMARY_DATABASE}\u0000${a.table}\u0000${a.organizationId}`;
           const ids = groups.get(key) ?? [];
           ids.push(a.id);
           groups.set(key, ids);
         }
         for (const [key, ids] of groups) {
-          const [table, organizationId] = key.split('\u0000') as [string, string];
-          const t = run.sql.q(table, table);
+          const [database, table, organizationId] = key.split('\u0000') as [string, string, string];
+          const { sql, executor } = run.databases.get(database)!;
+          const t = sql.q(table, table);
           for (let i = 0; i < ids.length; i += IN_CHUNK) {
             const chunk = ids.slice(i, i + IN_CHUNK);
-            await execute(
-              run,
-              table,
-              `UPDATE ${t} SET ${run.sql.q(ORG, table)} = ? WHERE ${run.sql.q(ORG, table)} IS NULL AND ${run.sql.q('id', table)} IN (${chunk.map(() => '?').join(', ')})`,
-              [organizationId, ...chunk],
-            );
+            const statement =
+              `UPDATE ${t} SET ${sql.q(ORG, table)} = ? WHERE ${sql.q(ORG, table)} IS NULL AND ${sql.q('id', table)} IN (${chunk.map(() => '?').join(', ')})`;
+            try {
+              await executor.execute(statement, [organizationId, ...chunk]);
+            } catch (error) {
+              throw new Error(`The write to ${table} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+            }
           }
         }
         wrote += assignments.length;
@@ -774,6 +981,31 @@ async function runAuthoredConversion(run: Run): Promise<StepReport> {
     if (!cols || !where) return [];
     return readAll(run, table, [...cols], predicateSql(run.sql, table, cols, where));
   };
+  // The shipped sets an install seeded as `admin` rows (LEGACY_SHIPPED_SET_SEEDS)
+  // are the platform's seeds, not Setup-authored sets: re-owned `platform`
+  // here, under every posture, so the authored read below leaves them out and
+  // mirror deletion takes them once the rewrite has named every grant.
+  // Idempotent: a re-run finds none. The plan warned, naming each row.
+  const setColumns = await columnsOf(run, SETS);
+  if (setColumns?.has('managed_by') && setColumns.has('name')) {
+    const legacy = predicateSql(run.sql, SETS, setColumns, LEGACY_SHIPPED_SET_SEEDS);
+    const adopted = await readAll(run, SETS, ['name'], legacy);
+    if (adopted.length > 0) {
+      await execute(
+        run,
+        SETS,
+        `UPDATE ${run.sql.q(SETS, SETS)} SET ${run.sql.q('managed_by', SETS)} = ? WHERE ${legacy.text}`,
+        ['platform', ...legacy.params],
+      );
+      summary.legacySeedsAdopted = adopted.length;
+      notes.push(
+        `Adopted ${adopted.length} shipped permission set row(s) stored as managed_by 'admin' ` +
+          `(${[...new Set(adopted.map((r) => String(r.name)))].sort().join(', ')}) as platform seeds: the shipped ` +
+          'definitions stand, and mirror deletion removes these rows once every grant names its set.',
+      );
+      run.opts.onProgress?.(`adopted ${adopted.length} legacy shipped permission set row(s) as platform seeds`);
+    }
+  }
   const sets = await authoredRows(SETS);
   const positions = await authoredRows(POSITIONS);
   const capabilities = await authoredRows(CAPABILITIES);
@@ -1970,6 +2202,68 @@ async function unnamedForComposition(run: Run, ids: readonly string[]): Promise<
   return out;
 }
 
+/**
+ * [#23542] The remedy for a `converted` binding — rows that bind position
+ * `name` to sets its catalog definition does not name; `sets` is the
+ * conversion's answer, the definition's sets followed by the ones the rows add
+ * — when the gate refuses it under a wall. There no step carries binding rows:
+ * `authored-conversion` reports and returns before it reads one (ADR-0131 D3,
+ * the module doc), so pointing at that step points at nothing.
+ *
+ * The one act that clears the gate is a definition naming every bound set,
+ * which the operator makes, through the door the position's definition lives
+ * behind:
+ *
+ *  - undeclared: declare it with `sets`, in the deployment's code or through
+ *    the metadata door as the platform administrator — one of the two only, as
+ *    a cold boot refuses a name a package declares and the environment catalog
+ *    also holds;
+ *  - declared, and the metadata door reports it editable: add the missing sets
+ *    to its `permissionSets` through that door;
+ *  - declared, and not editable (ADR-0131 D6: a definition a package ships is
+ *    sealed; or an ADR-0010 lock), or its state unreadable: the fact — the
+ *    package that ships it, when the definition's provenance names one — and
+ *    no act, because no door adds the sets.
+ *
+ * Whether it is editable is the metadata door's own answer
+ * ({@link MetadataLockPort}), never inferred from the body; the body only
+ * names the shipping package. The gate still refuses; nothing here writes.
+ */
+async function walledBindingRemedy(run: Run, name: string, sets: readonly string[]): Promise<string> {
+  const why = `Under the ${run.opts.posture} posture no ceremony step carries binding rows (ADR-0131 D3).`;
+  const door = `the metadata door as the platform administrator (PUT /api/v1/meta/position/${name})`;
+  const entry = await resolveName(run, 'position', name);
+  if (!entry) {
+    return (
+      `${why} Declare the position ${name} with permissionSets naming ${sets.join(', ')}, ` +
+      `through one door only: the deployment's code (compiled into the artifact this ceremony boots), or ${door}. A ` +
+      'cold boot refuses a position name a package declares and the environment catalog also holds. Then re-run.'
+    );
+  }
+  let verdict: Awaited<ReturnType<MetadataLockPort['verdict']>>;
+  try {
+    verdict = await run.opts.lock.verdict('position', name, null);
+  } catch (error) {
+    return (
+      `${why} Whether the metadata door can edit the definition of ${name} could not be read ` +
+      `(${error instanceof Error ? error.message : String(error)}), so no act is named here.`
+    );
+  }
+  if (!verdict.editable) {
+    const lock = `lock ${verdict.lock ?? 'unknown'}${verdict.lockReason ? `: ${verdict.lockReason}` : ''}`;
+    const { isCodeArtifactBody } = await import('@objectstack/metadata-core');
+    const shipped = isCodeArtifactBody(entry.definition) ? String(entry.definition._packageId) : undefined;
+    return shipped
+      ? `${why} Package ${shipped} ships the definition of ${name}, which is sealed (ADR-0131 D6: the metadata door ` +
+          `reports it not editable, ${lock}), so no door on this database adds those sets.`
+      : `${why} The metadata door reports the definition of ${name} not editable (${lock}), so no door on this ` +
+          'database adds those sets.';
+  }
+  const declared = Array.isArray(entry.definition.permissionSets) ? entry.definition.permissionSets.map(String) : [];
+  const missing = sets.filter((set) => !declared.includes(set));
+  return `${why} Add ${missing.join(', ')} to the permissionSets of the position ${name} through ${door}, then re-run.`;
+}
+
 /** Read-only: does every reference resolve by name? The gate of fate 2. */
 async function verifyReferences(run: Run): Promise<Verification> {
   const out: Verification = { blockers: [], notes: [], grants: 0, verified: 0 };
@@ -2052,7 +2346,10 @@ async function verifyReferences(run: Run): Promise<Verification> {
         position.fate === 'conflicting'
           ? `Position ${position.name}: organizations bind different permission sets to it; the bindings cannot be carried into one definition.`
           : `Binding rows give position ${position.name} sets its catalog definition does not name (${position.permissionSets.join(', ')}); ` +
-            `deleting them would lose a grant. ${(await uncomposedSecurityRemedy(run, 'position', position.name)) ?? 'The authored-conversion step carries them; resolve its blocker, then re-run.'}`,
+            `deleting them would lose a grant. ${(await uncomposedSecurityRemedy(run, 'position', position.name)) ??
+              (run.opts.posture === 'single'
+                ? 'The authored-conversion step carries them; resolve its blocker, then re-run.'
+                : await walledBindingRemedy(run, position.name, position.permissionSets))}`,
       );
     }
   }
@@ -2234,7 +2531,278 @@ async function runMirrorDeletion(run: Run): Promise<StepReport> {
     const kept = Math.max(0, table.rows!.total - (run.deleted.get(table.object) ?? 0));
     if (kept > 0) notes.push(`${table.object}: ${kept} row(s) are not mirrors (a named category or their non-seeded provenance claims them) and stay.`);
   }
-  return { step: 'mirror-deletion', status: 'done', summary: { deleted: total }, blockers: [], notes };
+  const underivable = await runUnderivableDeletion(run);
+  total += underivable.deleted;
+  if (underivable.blockers.length) {
+    return { step: 'mirror-deletion', status: 'blocked', summary: { deleted: total }, blockers: underivable.blockers, notes };
+  }
+  const declared = await runDeclaredRuleMirrorDeletion(run);
+  if (declared.status !== 'done') return { ...declared, summary: { ...declared.summary, deleted: total }, notes: [...notes, ...declared.notes] };
+  return {
+    step: 'mirror-deletion',
+    status: 'done',
+    summary: { ...declared.summary, deleted: total + (declared.summary.deleted ?? 0) },
+    blockers: [],
+    notes: [...notes, ...declared.notes],
+  };
+}
+
+// ── Step 4, continued: the rows no anchor attributes (ruling record 6257510973 item 3) ─
+
+/**
+ * The NULL rows of a fate-3 table that declares an `underivableDeparture`
+ * (`sys_activity`: activity is never a NULL row, and the existing ones are
+ * deleted): once attribution has written every owner it derives, every row
+ * still NULL is one of them. Read from a fresh plan, so the delete takes
+ * exactly what that plan classifies: a table on which it still derives an
+ * owner, or reports a row, blocks with nothing deleted. Never under `single`
+ * ({@link underivableDepartureOf}).
+ */
+/** Whether the plan this run started from counts a row an `underivableDeparture` deletes. */
+function underivableRowsDue(run: Run): boolean {
+  return run.plan.tables.some((t) => {
+    const entry = mirrorEntry(run, t.object);
+    const id = entry ? underivableDepartureOf(entry, run.opts.posture)?.id : undefined;
+    return id !== undefined && t.departures.some((d) => d.id === id && d.rows > 0);
+  });
+}
+
+async function runUnderivableDeletion(run: Run): Promise<{ deleted: number; blockers: string[] }> {
+  const declares = (object: string): string | undefined => {
+    const entry = mirrorEntry(run, object);
+    return entry ? underivableDepartureOf(entry, run.opts.posture)?.id : undefined;
+  };
+  if (!run.plan.tables.some((t) => t.physical === 'present' && declares(t.object))) return { deleted: 0, blockers: [] };
+  const plan = await planFor(run);
+  let deleted = 0;
+  const blockers: string[] = [];
+  for (const table of plan.tables) {
+    const id = declares(table.object);
+    const leaving = id ? table.departures.find((d) => d.id === id) : undefined;
+    if (!leaving || leaving.rows === 0 || table.physical !== 'present') continue;
+    const deriving = Number(table.fateCounts.rowsToAttribute ?? 0);
+    if (deriving > 0 || table.unattributable.length > 0 || leaving.rows !== table.rows!.organizationNull) {
+      blockers.push(
+        `${table.object}: ${leaving.rows} row(s) no anchor attributes are due for deletion, but the table still holds ` +
+          `${table.rows!.organizationNull} NULL row(s) (${deriving} an anchor attributes, ${table.unattributable.length} ` +
+          'reported), so nothing was deleted. Re-run --apply: the attribution step runs again first.',
+      );
+      continue;
+    }
+    for (const physical of table.tables) {
+      const { sql } = databaseFor(run, physical);
+      const where = `${sql.q(ORG, physical)} IS NULL`;
+      const count = (): Promise<number> => sql.count(physical, `SELECT COUNT(*) AS n FROM ${sql.q(physical, physical)} WHERE ${where}`);
+      const before = await count();
+      if (before === 0) continue;
+      await execute(run, physical, `DELETE FROM ${sql.q(physical, physical)} WHERE ${where}`, []);
+      const left = await count();
+      if (left !== 0) throw new Error(`The delete on ${physical} left ${left} organization-less row(s) behind; nothing past this table was deleted.`);
+      run.deleted.set(table.object, (run.deleted.get(table.object) ?? 0) + before);
+      deleted += before;
+      run.opts.onProgress?.(`mirror deletion: ${before} organization-less row(s) of ${physical} no anchor attributes`);
+    }
+  }
+  return { deleted, blockers };
+}
+
+// ── Step 4, continued: the declared sharing-rule mirrors (ADR-0131 C3 stage 9) ─
+
+const SHARING_RULES = 'sys_sharing_rule';
+const RECORD_SHARES = 'sys_record_share';
+/** The inventory departure on `sys_sharing_rule` whose selector names the mirrors. */
+const DECLARED_RULE_MIRRORS = 'declared-rule-mirrors';
+
+/** One declared-rule mirror row, where it lives. */
+interface DeclaredRuleMirror {
+  id: string;
+  name: string;
+  table: string;
+}
+
+/**
+ * Every `sys_sharing_rule` row the `declared-rule-mirrors` departure's selector
+ * names (`managed_by` package or platform, not customized) — the copies of code
+ * the retired seeder wrote: organization-less under `single` (the departure's
+ * NULL rows), one per organization under a wall (#10103). Both are copies of
+ * the same declaration, which the registry now serves in every scope, so both
+ * go. A customized copy and an organization's own rule are not selected.
+ */
+async function readDeclaredRuleMirrors(run: Run): Promise<DeclaredRuleMirror[]> {
+  const where = mirrorEntry(run, SHARING_RULES)?.departures?.find((d) => d.id === DECLARED_RULE_MIRRORS)?.where;
+  const table = run.plan.tables.find((t) => t.object === SHARING_RULES);
+  if (!where || !table || table.physical !== 'present') return [];
+  const out: DeclaredRuleMirror[] = [];
+  for (const physical of table.tables) {
+    const cols = await columnsOf(run, physical);
+    if (!cols?.has('name')) continue;
+    const selector = predicateSql(databaseFor(run, physical).sql, physical, cols, where);
+    for (const row of await readAll(run, physical, ['name'], selector)) {
+      out.push({ id: String(row.id), name: typeof row.name === 'string' ? row.name : '', table: physical });
+    }
+  }
+  return out;
+}
+
+/** Whether a declared-rule mirror stands that this release deletes (not while the departure is advisory). */
+async function declaredRuleMirrorsDue(run: Run): Promise<boolean> {
+  const departure = run.plan.tables.find((t) => t.object === SHARING_RULES)?.departures.find((d) => d.id === DECLARED_RULE_MIRRORS);
+  return !departure?.advisory && (await readDeclaredRuleMirrors(run)).length > 0;
+}
+
+/** The grants (`source = 'rule'`) whose `source_id` is `sourceId`, on each physical grant table. */
+async function countRuleGrants(run: Run, tables: readonly string[], sourceId: string): Promise<number> {
+  let n = 0;
+  for (const physical of tables) {
+    const { sql } = databaseFor(run, physical);
+    n += await sql.count(
+      physical,
+      `SELECT COUNT(*) AS n FROM ${sql.q(physical, physical)} WHERE ${sql.q('source', physical)} = ? AND ${sql.q('source_id', physical)} = ?`,
+      ['rule', sourceId],
+    );
+  }
+  return n;
+}
+
+/**
+ * [ADR-0131 C3 stage 9; ruling β on the C3 epic] Delete the declared-rule
+ * mirrors — once enforcement reads declared rules from the registry, they are
+ * copies nothing needs. In the ruled order:
+ *
+ *  1. Every grant naming a mirror must be able to name its rule instead: the
+ *     mirror's name must resolve to a rule a package declares and the plugin
+ *     serves (the registry through the plugin's own translation,
+ *     {@link DeclaredSharingRulesPort}). A mirror whose rule no package
+ *     declares any more, or whose declaration the plugin refuses to serve, and
+ *     that grants still name, blocks — named, with the refusal's reason and the
+ *     remedy, nothing written: deleting it would withdraw that access on the
+ *     operator's behalf, and renaming its grants onto a refused rule would have
+ *     the next boot's sweep withdraw it. One no grant names is a copy of
+ *     nothing that grants nothing, and goes like every fate-2 mirror.
+ *  2. Item 5 (c): every grant naming a mirror row by id
+ *     (`sys_record_share.source_id`, `source = 'rule'`) is renamed to the
+ *     rule's NAME — the id a declared rule's grants carry — BEFORE any mirror
+ *     is deleted, so no standing access is orphaned. Then it is verified: no
+ *     grant names a mirror row any more.
+ *  3. The mirrors are deleted by id, the selector re-asserted, and counted to
+ *     zero.
+ *
+ * Idempotent: a second run finds no mirror and writes nothing.
+ */
+async function runDeclaredRuleMirrorDeletion(run: Run): Promise<StepReport> {
+  // While a release's boot still seeds them the departure is advisory and no
+  // step removes them: the next boot would write them again.
+  const departure = run.plan.tables.find((t) => t.object === SHARING_RULES)?.departures.find((d) => d.id === DECLARED_RULE_MIRRORS);
+  const mirrors = departure?.advisory ? [] : await readDeclaredRuleMirrors(run);
+  if (mirrors.length === 0) return { step: 'mirror-deletion', status: 'done', summary: {}, blockers: [], notes: [] };
+  const blocked = (blockers: string[]): StepReport => ({ step: 'mirror-deletion', status: 'blocked', summary: { deleted: 0 }, blockers, notes: [] });
+
+  if (!run.opts.declaredSharingRules) {
+    return blocked([
+      `${SHARING_RULES} holds ${mirrors.length} declared-rule mirror(s), deleted only once each name resolves to a ` +
+        'rule a package declares, and this run has no registry to read the declared sharing rules from. Run the ' +
+        'command against the deployment\'s own composition, then re-run.',
+    ]);
+  }
+  const declaredRules = await run.opts.declaredSharingRules.rules();
+  const served = new Set(declaredRules.filter((r) => r.refused === null).map((r) => r.name));
+  const refusedFor = new Map<string, string>();
+  for (const rule of declaredRules) {
+    if (rule.refused !== null && !served.has(rule.name) && !refusedFor.has(rule.name)) refusedFor.set(rule.name, rule.refused);
+  }
+
+  const shares = run.plan.tables.find((t) => t.object === RECORD_SHARES);
+  const grantTables: string[] = [];
+  for (const physical of shares?.physical === 'present' ? shares.tables : []) {
+    const cols = await columnsOf(run, physical);
+    if (cols?.has('source') && cols.has('source_id')) grantTables.push(physical);
+  }
+  const grantsOf = new Map<string, number>();
+  for (const mirror of mirrors) grantsOf.set(mirror.id, await countRuleGrants(run, grantTables, mirror.id));
+  const unnameable = mirrors.filter((m) => !served.has(m.name) && grantsOf.get(m.id)! > 0);
+  if (unnameable.length > 0) {
+    const rowsOf = (list: readonly DeclaredRuleMirror[]): string => list.map((m) => m.id).sort().join(', ');
+    const undeclared = unnameable.filter((m) => !refusedFor.has(m.name));
+    const refused = unnameable.filter((m) => refusedFor.has(m.name));
+    const blockers: string[] = [];
+    if (undeclared.length > 0) {
+      const names = [...new Set(undeclared.map((m) => m.name || '(no name)'))].sort();
+      blockers.push(
+        `${undeclared.length} declared-rule mirror(s) on ${SHARING_RULES} name a sharing rule no installed package ` +
+          `declares (${names.join(', ')}; rows ${rowsOf(undeclared)}), and ${RECORD_SHARES} ` +
+          'grants still name them. Their grants cannot be renamed to a rule the registry serves, and deleting the ' +
+          'mirrors would withdraw that access, so they stay and nothing was written. Declare the rule in its package ' +
+          `again, or delete each row and the ${RECORD_SHARES} rows whose source_id names it, then re-run.`,
+      );
+    }
+    for (const name of [...new Set(refused.map((m) => m.name))].sort()) {
+      const of = refused.filter((m) => m.name === name);
+      blockers.push(
+        `${of.length} declared-rule mirror(s) on ${SHARING_RULES} name the sharing rule ${name} (rows ${rowsOf(of)}), ` +
+          `which its package declares but plugin-sharing does not serve: ${refusedFor.get(name)}. ${RECORD_SHARES} ` +
+          'grants still name them; renamed onto the rule, the next boot\'s sweep would withdraw them as grants of a ' +
+          'rule nobody serves, and deleting the mirrors would withdraw them now, so they stay and nothing was ' +
+          `written. Correct the rule's declaration in its package so it is served, or delete each row and the ` +
+          `${RECORD_SHARES} rows whose source_id names it, then re-run.`,
+      );
+    }
+    return blocked(blockers);
+  }
+
+  // (c) — the grants first.
+  let renamed = 0;
+  for (const mirror of mirrors) {
+    if (grantsOf.get(mirror.id) === 0) continue;
+    for (const physical of grantTables) {
+      const { sql } = databaseFor(run, physical);
+      const n = await countRuleGrants(run, [physical], mirror.id);
+      if (n === 0) continue;
+      await execute(
+        run,
+        physical,
+        `UPDATE ${sql.q(physical, physical)} SET ${sql.q('source_id', physical)} = ? ` +
+          `WHERE ${sql.q('source', physical)} = ? AND ${sql.q('source_id', physical)} = ?`,
+        [mirror.name, 'rule', mirror.id],
+      );
+      renamed += n;
+    }
+  }
+  for (const mirror of mirrors) {
+    const left = await countRuleGrants(run, grantTables, mirror.id);
+    if (left !== 0) {
+      throw new Error(
+        `${left} grant(s) still name the declared-rule mirror ${mirror.id} (${mirror.name}) after the rename; no mirror was deleted.`,
+      );
+    }
+  }
+  if (renamed > 0) run.opts.onProgress?.(`declared-rule mirrors: ${renamed} grant(s) now name their rule`);
+
+  // The mirrors, by id, the selector re-asserted.
+  const where = mirrorEntry(run, SHARING_RULES)!.departures!.find((d) => d.id === DECLARED_RULE_MIRRORS)!.where;
+  let deleted = 0;
+  for (const physical of [...new Set(mirrors.map((m) => m.table))]) {
+    const { sql } = databaseFor(run, physical);
+    const cols = (await columnsOf(run, physical))!;
+    const selector = predicateSql(sql, physical, cols, where);
+    const ids = mirrors.filter((m) => m.table === physical).map((m) => m.id);
+    for (let i = 0; i < ids.length; i += IN_CHUNK) {
+      const chunk = ids.slice(i, i + IN_CHUNK);
+      const byId = `${sql.q('id', physical)} IN (${chunk.map(() => '?').join(', ')})`;
+      await execute(run, physical, `DELETE FROM ${sql.q(physical, physical)} WHERE ${byId} AND (${selector.text})`, [...chunk, ...selector.params]);
+      const left = await sql.count(physical, `SELECT COUNT(*) AS n FROM ${sql.q(physical, physical)} WHERE ${byId}`, chunk);
+      if (left !== 0) throw new Error(`The declared-rule mirror delete on ${physical} left ${left} row(s) behind; nothing past it was deleted.`);
+      deleted += chunk.length;
+    }
+  }
+  run.deleted.set(SHARING_RULES, (run.deleted.get(SHARING_RULES) ?? 0) + deleted);
+  run.opts.onProgress?.(`declared-rule mirrors: ${deleted} row(s) of ${SHARING_RULES} deleted`);
+  return {
+    step: 'mirror-deletion',
+    status: 'done',
+    summary: { deleted, grantsRenamed: renamed },
+    blockers: [],
+    notes: [`${SHARING_RULES}: ${deleted} declared-rule mirror(s) deleted; the registry serves those rules (ADR-0131 D2).`],
+  };
 }
 
 /** Delete, by id, the promotion rows whose environment copy this run verified; nothing else. */
@@ -2371,17 +2939,42 @@ const RUNNERS: Record<CeremonyStep, (run: Run) => Promise<StepReport>> = {
   'column-drops': runColumnDrops,
 };
 
-/** NULL rows a departure still has to carry out of the table. */
-const departingRows = (table: TablePlan): number => table.departures.reduce((n, d) => n + d.rows, 0);
+/**
+ * NULL rows a departure still has to carry out of the table. An advisory
+ * departure's rows are not among them: no step of this release removes them
+ * (`PlannedDeparture.advisory`), so they are counted as advisory instead.
+ */
+const departingRows = (table: TablePlan): number => table.departures.reduce((n, d) => n + (d.advisory ? 0 : d.rows), 0);
+
+/** NULL rows of the table's advisory departures: reported, never held against the verdict. */
+const advisoryRows = (table: TablePlan): number => table.departures.reduce((n, d) => n + (d.advisory ? d.rows : 0), 0);
+
+/**
+ * What the operator does about a row whose owner cannot be derived (ADR-0131
+ * D10 fate 4; ruling C on the C8 decision). The ceremony does neither itself.
+ */
+export const UNATTRIBUTABLE_REMEDY =
+  'assign each row its organization (write its organization_id, or repair the anchor its reason names), or delete ' +
+  'it by hand, then re-run --apply; the ceremony never guesses an owner and never deletes such a row, and the ' +
+  'database does not certify while one stays NULL';
+
+/**
+ * Unattributable rows the post-check holds against certification: every one,
+ * but on a fate-4 table whose column is not the tenancy anchor
+ * (`InventoryEntry.notNullExempt`), where an organization-less row is a
+ * legitimate one and is reported only.
+ */
+const heldUnattributable = (run: Run, table: TablePlan): number =>
+  mirrorEntry(run, table.object)?.notNullExempt ? 0 : table.unattributable.length;
 
 /** What a table still owes its fate, read from the post-check plan. */
 async function remainingFor(run: Run, table: TablePlan, complete: boolean): Promise<number> {
   if (table.physical !== 'present' || !table.rows) return 0;
   switch (table.fate) {
     case 'attribution':
-      return Number(table.fateCounts.rowsToAttribute ?? 0) + departingRows(table);
+      return Number(table.fateCounts.rowsToAttribute ?? 0) + departingRows(table) + heldUnattributable(run, table);
     case 'report':
-      return departingRows(table);
+      return departingRows(table) + heldUnattributable(run, table);
     case 'mirror-deletion': {
       const entry = mirrorEntry(run, table.object);
       if (!entry) return 0;
@@ -2493,11 +3086,17 @@ function refuseUnreviewedChoices(plan: OrganizationOwnershipPlan, opts: ApplyOpt
  * the report.
  */
 export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<OrganizationOwnershipApplyReport> {
-  const dialect = dialectOf(opts.executor.client);
   const now = opts.now ?? (() => new Date());
   const run: Run = {
     opts,
-    sql: new Sql(opts.executor, dialect ?? 'sqlite'),
+    // The executor's dialect was resolved from the driver before this call
+    // (`ceremonyDialectOf`, which refuses an unresolved one): never a default.
+    sql: new Sql(opts.executor, opts.executor.dialect),
+    databases: new Map([
+      [PRIMARY_DATABASE, { sql: new Sql(opts.executor, opts.executor.dialect), executor: opts.executor }],
+      ...(opts.siblings ?? []).map((d) => [d.name, { sql: new Sql(d.executor, d.executor.dialect), executor: d.executor }] as const),
+    ]),
+    databaseOf: new Map(),
     plan: undefined as unknown as OrganizationOwnershipPlan,
     columns: new Map(),
     attributed: new Map(),
@@ -2512,6 +3111,7 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
   refuseUnreviewedPlan(run.plan, opts.reviewedPlan);
   validateTemplateChoices(run);
   const before = run.plan;
+  for (const warning of before.warnings) opts.onWarning?.(warning);
 
   const stored = await opts.ledger.read();
   // The applied choices outlive a new digest: their rows are already resolved.
@@ -2542,6 +3142,59 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
       continue;
     }
     const done = checkpoint.completed[step];
+    // `attribution` runs again even when checkpointed, when the plan derives
+    // an owner for rows still NULL: it writes only where `organization_id IS
+    // NULL`, so it never re-derives an owner already written (D10 item 3), and
+    // a row that became attributable since the earlier run — its anchor fixed
+    // by the operator (D10 item 4: "resolves them and re-runs"), or the
+    // Default Organization now existing where an earlier run found none — is
+    // attributed instead of standing as a post-check discrepancy no re-run
+    // could clear.
+    if (done && step === 'attribution' && rowsToAttribute(before) > 0) {
+      const again = await RUNNERS[step](run);
+      steps.push(again);
+      if (again.status !== 'done') {
+        stopped = true;
+        continue;
+      }
+      checkpoint.completed[step] = { at: now().toISOString(), summary: again.summary };
+      await opts.ledger.write(checkpoint, { complete: false, blocking: 0, advisory: 0 });
+      run.columns.clear();
+      continue;
+    }
+    // [ADR-0131 C3 stage 9] The declared-rule mirrors are deleted again on a
+    // checkpointed run while one stands: a database whose ceremony completed on
+    // a release whose boot still seeded them carries them (advisory then), and
+    // the step that deletes them is this release's.
+    // So are the rows no anchor attributes, while one stands: a row written
+    // NULL since the run that finished the step is one too.
+    if (done && step === 'mirror-deletion' && underivableRowsDue(run)) {
+      const again = await runUnderivableDeletion(run);
+      const report: StepReport = again.blockers.length
+        ? { step, status: 'blocked', summary: { deleted: again.deleted }, blockers: again.blockers, notes: [] }
+        : { step, status: 'done', summary: { deleted: again.deleted }, blockers: [], notes: [] };
+      steps.push(report);
+      if (report.status !== 'done') {
+        stopped = true;
+        continue;
+      }
+      checkpoint.completed[step] = { at: now().toISOString(), summary: report.summary };
+      await opts.ledger.write(checkpoint, { complete: false, blocking: 0, advisory: 0 });
+      run.columns.clear();
+      if (!(await declaredRuleMirrorsDue(run))) continue;
+    }
+    if (done && step === 'mirror-deletion' && (await declaredRuleMirrorsDue(run))) {
+      const again = await runDeclaredRuleMirrorDeletion(run);
+      steps.push(again);
+      if (again.status !== 'done') {
+        stopped = true;
+        continue;
+      }
+      checkpoint.completed[step] = { at: now().toISOString(), summary: again.summary };
+      await opts.ledger.write(checkpoint, { complete: false, blocking: 0, advisory: 0 });
+      run.columns.clear();
+      continue;
+    }
     if (done) {
       // `history-renumber` runs again even when checkpointed: it is
       // idempotent, and an environment write made since the earlier run must
@@ -2590,7 +3243,9 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     const ref = a ?? b!;
     const remaining = a ? await remainingFor(run, a, complete) : 0;
     if (complete) discrepancies += remaining;
-    const departures = (a?.departures ?? []).filter((d) => d.rows > 0).map((d) => ({ id: d.id, label: d.label, as: d.as, rows: d.rows }));
+    const departures: TableOutcome['departures'] = (a?.departures ?? [])
+      .filter((d) => d.rows > 0)
+      .map((d) => ({ id: d.id, label: d.label, as: d.as, rows: d.rows, ...(d.advisory ? { advisory: d.advisory } : {}) }));
     if (a?.physical === 'present' && object === TEMPLATES) {
       let unpromoted = 0;
       for (const physical of a.tables) {
@@ -2605,7 +3260,11 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
         });
       }
     }
-    const waiting = departures.reduce((n, d) => n + d.rows, 0);
+    // Advisory rows stay NULL too, and the plan's own NOT NULL reading
+    // (`ref.notNull`) already says so; only a step not yet run overrides it.
+    const pending = departures.filter((d) => !d.advisory);
+    const waiting = pending.reduce((n, d) => n + d.rows, 0);
+    const held = a ? heldUnattributable(run, a) : 0;
     tables.push({
       object,
       fate: ref.fate,
@@ -2617,15 +3276,16 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
       movedIn: run.movedIn.get(object) ?? 0,
       columnDropped: b?.organizationColumn === 'present' && a?.organizationColumn === 'absent',
       unattributable: a?.unattributable ?? [],
+      ...(held > 0 ? { held: { rows: held, remedy: UNATTRIBUTABLE_REMEDY } } : {}),
       departures,
       ...(a?.templateConflicts?.length ? { templateConflicts: a.templateConflicts } : {}),
       remaining,
       notNull: waiting > 0
-        ? { willReceive: false, reason: `${waiting} row(s) still wait for a step not yet run: ${departures.map((d) => d.label).join('; ')}` }
+        ? { willReceive: false, reason: `${waiting} row(s) still wait for a step not yet run: ${pending.map((d) => d.label).join('; ')}` }
         : ref.notNull,
     });
   }
-  const advisory = after.summary.unattributableRows;
+  const advisory = after.tables.reduce((n, t) => n + advisoryRows(t) + t.unattributable.length - heldUnattributable(run, t), 0);
   const blocking = complete ? discrepancies : steps.reduce((n, s) => n + s.blockers.length, 0) || 1;
   await opts.ledger.write(checkpoint, { complete, blocking, advisory });
   return {
@@ -2639,6 +3299,7 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     reviewedPlan: { file: opts.reviewedPlan.file, generatedAt: opts.reviewedPlan.generatedAt },
     ...(stored && superseded.length > 0 ? { restartedFrom: { inventoryDigest: stored.inventoryDigest, steps: superseded } } : {}),
     resumedFrom,
+    warnings: [...before.warnings],
     steps,
     tables,
     complete,

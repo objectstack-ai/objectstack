@@ -20,10 +20,10 @@
 export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_approval_delegation.fields.display_title.help": "2831a1ffde72b425",
   "objects.sys_approval_delegation.fields.display_title.label": "70f7aadecce647a5",
-  "objects.sys_approval_request.fields.flow_node_id.help": "154aa23b4eee4cae",
+  "objects.sys_approval_request.fields.flow_node_id.help": "97e7489e6549d78c",
   "objects.sys_approval_request.fields.flow_node_id.label": "052ad568aa41227c",
-  "objects.sys_approval_request.fields.flow_run_id.help": "35c92818f5e11090",
+  "objects.sys_approval_request.fields.flow_run_id.help": "5718cf2ce8a0abd6",
   "objects.sys_approval_request.fields.flow_run_id.label": "d0124e323da966f9",
-  "objects.sys_approval_request.fields.node_config_json.help": "7ee00ef9b3ca7e80",
+  "objects.sys_approval_request.fields.node_config_json.help": "e832e60ef12791e6",
   "objects.sys_approval_request.fields.node_config_json.label": "e64eb4bf7d7ea033",
 };

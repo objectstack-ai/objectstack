@@ -24,6 +24,13 @@
  *  - `platform-census-main` — objects the gated census on `main` lists and
  *    the first census did not (`sys_comment_reaction`, `sys_flow_credential`,
  *    `sys_platform_setting`).
+ *  - `retired-before-census` — platform objects retired from the tree before
+ *    the first census was measured, so neither census counted them, whose
+ *    physical tables a database that booted an earlier release still holds,
+ *    `organization_id` included (`sys_scim_provider`, whose ADR-0087 entry
+ *    leaves the table in place untouched). Without a row the plan would
+ *    refuse every such database as carrying an uninventoried platform table.
+ *    Each row is listed with fate 4 and cites the retirement's ADR-0087 entry.
  *  - `example-census-2026-08-31` — the non-platform objects the same census
  *    counted as "28" (it counted the 28 FILES; they declare 33 objects, the
  *    same 33 on `main` today).
@@ -94,6 +101,7 @@ export const ORGANIZATION_OWNERSHIP_FATES: readonly OrganizationOwnershipFate[] 
 export type InventoryCensus =
   | 'platform-census-2026-08-31'
   | 'platform-census-main'
+  | 'retired-before-census'
   | 'example-census-2026-08-31'
   | 'cloud-supplement'
   | 'host-supplement';
@@ -150,6 +158,15 @@ export interface InventoryEntry {
   mirror?: RowPredicate;
   /** Fate 3 / 4: rows that leave the table before the NOT NULL gate. */
   departures?: readonly InventoryDeparture[];
+  /**
+   * Fate 3 only, platform-only: the NULL rows no anchor names leave the table
+   * by the mirror-deletion step instead of being reported — on a table whose
+   * runtime writer no longer writes a row it cannot attribute, so such a row
+   * is one it would not write today. Classified after the anchors; under
+   * `single` the Default Organization takes them first, and none leave. A
+   * host declares no deletion, so the spec's supplement row has no such key.
+   */
+  underivableDeparture?: Omit<InventoryDeparture, 'as' | 'where'>;
   categories?: readonly InventoryCategory[];
   /**
    * Fate 4 only: the column is not the tenancy anchor, so it never receives
@@ -191,11 +208,41 @@ const EXAMPLE =
 const P1: readonly InventoryCensus[] = ['platform-census-2026-08-31', 'platform-census-main'];
 const P1_ONLY: readonly InventoryCensus[] = ['platform-census-2026-08-31'];
 const PMAIN: readonly InventoryCensus[] = ['platform-census-main'];
+const RETIRED: readonly InventoryCensus[] = ['retired-before-census'];
 const EX: readonly InventoryCensus[] = ['example-census-2026-08-31'];
 
 /** Rows a package or the platform seeded — the D10 fate-2 mirror selector on the catalog objects. */
 const SEEDED = [{ column: 'managed_by', in: ['package', 'platform', 'system'] }] satisfies RowPredicate;
 const AUTHORED = [{ column: 'managed_by', notIn: ['package', 'platform', 'system'] }] satisfies RowPredicate;
+
+/**
+ * The permission sets the security plugin ships (`securityDefaultPermissionSets`,
+ * `@objectstack/plugin-security`), by name. `organization-ownership-inventory.test.ts`
+ * holds this list equal to the plugin's.
+ */
+export const SHIPPED_PERMISSION_SET_NAMES: readonly string[] = [
+  'admin_full_access', 'organization_admin', 'organization_admin_no_bypass', 'member_default', 'viewer_readonly',
+  'mcp_agent_data_read', 'mcp_agent_data_write', 'mcp_agent_restricted',
+];
+
+/**
+ * The shipped sets an install seeded before the seeder stamped its rows
+ * `managed_by: 'platform'` (commit 712e185db, ruled 2026-08-15): the insert
+ * omitted the column, so the object's `defaultValue: 'admin'` filled it, and
+ * every install created earlier holds the shipped sets as `admin` rows that
+ * read as Setup-authored. The ceremony adopts them as the platform seeds they
+ * are — re-owned `platform` at the authored conversion, then deleted as mirrors
+ * once the grants name them — so the shipped definition stands; an edit an
+ * administrator made to one of them in Setup is not carried, and the plan and
+ * the apply both warn, naming each row (ADR-0131, amendment 2026-10-16).
+ */
+export const LEGACY_SHIPPED_SET_SEEDS = [
+  { column: 'managed_by', equals: 'admin' },
+  { column: 'name', in: [...SHIPPED_PERMISSION_SET_NAMES] },
+] satisfies RowPredicate;
+
+/** The `sys_permission_set` category that counts {@link LEGACY_SHIPPED_SET_SEEDS}. */
+export const LEGACY_SHIPPED_SET_SEEDS_CATEGORY = 'legacy-shipped-set-seeds';
 
 const parent = (childKey: string, parentObject: string): Anchor => ({ kind: 'parent', childKey, parentObject });
 const subject = (objectColumn: string, idColumn: string): Anchor => ({ kind: 'subject', objectColumn, idColumn });
@@ -350,7 +397,15 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     fate: 'mirror-deletion',
     citation: `${D3_CATALOG}; ADR-0094 D1 generalized (D2); D10 fate 2`,
     mirror: SEEDED,
-    categories: [{ id: 'authored', label: 'Setup-authored permission sets — converted to environment metadata by C3, never deleted as mirrors', citation: 'ADR-0131 D3', where: AUTHORED }],
+    categories: [
+      { id: 'authored', label: 'Setup-authored permission sets — converted to environment metadata by C3, never deleted as mirrors', citation: 'ADR-0131 D3', where: AUTHORED },
+      {
+        id: LEGACY_SHIPPED_SET_SEEDS_CATEGORY,
+        label: 'shipped permission sets an install seeded before 2026-08-15 as managed_by admin — adopted as platform seeds and deleted as mirrors; a Setup edit to one of them is not carried',
+        citation: 'seed provenance: commit 712e185db (ruled 2026-08-15); ADR-0131, amendment 2026-10-16',
+        where: LEGACY_SHIPPED_SET_SEEDS,
+      },
+    ],
   },
   {
     object: 'sys_capability',
@@ -400,6 +455,22 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     census: P1_ONLY,
     fate: 'report',
     citation: `${CENSUS_1}; removed from the tree since (re-verification record 6018712820). A physical table left by an older release is listed, its NULL rows reported`,
+  },
+
+  // ── Platform: retired before either census (fate 4) ──
+  {
+    object: 'sys_scim_provider',
+    census: RETIRED,
+    fate: 'report',
+    citation:
+      'ADR-0087 semantic entry scim-provider-object-retired (packages/spec/src/migrations/entries/semantic/' +
+      '18.scim-provider-object-retired.ts): the rc.1-era @better-auth/scim connection object, retired before the ' +
+      'first census with no data-migration path owed (maintainer ruling 2026-08-24), its tables in deployed ' +
+      'databases left in place untouched by ruling. A physical table left by an older release is listed, its NULL ' +
+      'rows reported, never attributed and never deleted',
+    notNullExempt:
+      'the object is retired and its table is left in place untouched, by ruling: no declaration anchors tenancy on ' +
+      'the column, and a connection scoped to no organization was a legitimate row',
   },
 
   // ── Platform: attribution through a parent anchor (fate 3) ──
@@ -453,7 +524,23 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   },
   { object: 'sys_share_link', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; the linked record carries the organization`, anchors: [subject('object_name', 'record_id')] },
   { object: 'sys_attachment', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; the attachment's parent record carries the organization`, anchors: [subject('parent_object', 'parent_id')] },
-  { object: 'sys_activity', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; the activity's record carries the organization (rotation-sharded storage)`, anchors: [subject('object_name', 'record_id')] },
+  {
+    object: 'sys_activity',
+    census: P1,
+    fate: 'attribution',
+    citation: `${D3_ORG_ROWS}; the activity's record carries the organization (rotation-sharded storage)`,
+    anchors: [subject('object_name', 'record_id')],
+    // The mirror writes activity only when an organization is derivable, never
+    // a NULL row (audit-writers.ts), so a NULL row no anchor names is one it
+    // would not write today: 14-day telemetry, deleted rather than reported.
+    underivableDeparture: {
+      id: 'underivable-activity',
+      label:
+        'activity rows about a record no organization owns (a sign-up\'s user, a global setting) — telemetry the ' +
+        'mirror no longer writes; deleted by the mirror-deletion step, the change itself stays in sys_audit_log',
+      citation: 'ruling record 6257510973 item 3 (Q3 A: activity is never a NULL row; existing NULL rows are deleted); ADR-0131 D7, D9',
+    },
+  },
   { object: 'sys_comment', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; a reply's parent comment carries the organization`, anchors: [parent('parent_id', 'sys_comment')] },
   { object: 'sys_comment_reaction', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the reaction's comment carries the organization`, anchors: [parent('comment_id', 'sys_comment')] },
   { object: 'sys_email', census: P1, fate: 'attribution', citation: `${D7}: sys_email is stamped at its producers; the related record carries the organization`, anchors: [subject('related_object', 'related_id')] },
@@ -472,10 +559,17 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     fate: 'attribution',
     citation: `${D3_ORG_ROWS} (sharing rules an organization authors); ${D10_SINGLE}`,
     anchors: [],
+    // Executed by the apply's mirror-deletion step (C3 stage 9, #23952 — ruling
+    // β item 6 asks the label to name that card; the label names the stage and
+    // the step instead, because a runtime string carries no tracker id): the
+    // grants are renamed to the rule's name, then the rows go. Blocking until
+    // then: DECLARED_SHARING_RULE_SEEDER_RUNS below.
     departures: [
       {
         id: 'declared-rule-mirrors',
-        label: 'uncustomized declared sharing rules — seeded copies of code (D2 retires bootstrapDeclaredSharingRules)',
+        label:
+          'uncustomized declared sharing rules — seeded copies of code, which the registry now serves; deleted by ' +
+          'the mirror-deletion step (ADR-0131 C3 stage 9)',
         citation: 'ADR-0131 D2, D10 fate 2',
         as: 'mirror-deletion',
         where: [{ column: 'managed_by', in: ['package', 'platform'] }, { column: 'customized', notTrue: true }],
@@ -573,6 +667,64 @@ const BY_OBJECT: ReadonlyMap<string, InventoryEntry> = new Map(
 /** The inventory row for `object`, or `undefined`. */
 export function inventoryEntryFor(object: string): InventoryEntry | undefined {
   return BY_OBJECT.get(object);
+}
+
+// ── The declared sharing-rule mirrors, and the seeder that wrote them ─────────
+
+/**
+ * Does a served boot of this release still write the package-declared sharing
+ * rules into `sys_sharing_rule`?
+ *
+ * It does not. `@objectstack/plugin-sharing` reads declared rules from the
+ * registry at enforcement and writes no row for them: ADR-0131 D2 retired its
+ * seeder (`bootstrapDeclaredSharingRules`) at C3 stage 9. While that seeder
+ * ran, every `os serve` / `os dev` boot wrote each declared rule
+ * organization-less under `single`, as `managed_by 'package'`, uncustomized —
+ * exactly the population the `declared-rule-mirrors` departure on
+ * `sys_sharing_rule` names — so no step of such a release could remove them,
+ * and the ceremony reported them as advisory ({@link advisoryDepartureReason})
+ * under the ordering ruled for ADR-0131 C3 (ruling β: stage 9 first, the
+ * verified marker after it).
+ *
+ * Now that departure is the apply's to perform: its mirror-deletion step
+ * renames every grant naming a mirror to the rule's name and deletes the
+ * mirrors, and until it has, they hold certification like every other NULL
+ * row.
+ *
+ * ⛔ It was set to `false` in the change that retired that seeder, and in no
+ * other: a release that seeds the rows must not hold certification on them,
+ * and a release that has stopped seeding them holds it again until its
+ * ceremony deletes them. `commands/migrate/organization-ownership.declared-rule-mirrors.integration.test.ts`
+ * boots a served stack declaring one sharing rule and fails, naming this
+ * constant, while what that boot writes disagrees with it.
+ */
+export const DECLARED_SHARING_RULE_SEEDER_RUNS: boolean = false;
+
+/** The one departure {@link DECLARED_SHARING_RULE_SEEDER_RUNS} decides, by its table and its id. */
+const DECLARED_RULE_MIRRORS = { object: 'sys_sharing_rule', departure: 'declared-rule-mirrors' } as const;
+
+/**
+ * Why the rows of `departureId` on `object` stay on this release without
+ * holding the ceremony's certification, or `null` when they hold it — every
+ * departure but the declared sharing-rule mirrors, and those too once their
+ * seeder retires ({@link DECLARED_SHARING_RULE_SEEDER_RUNS}).
+ *
+ * Keyed on the table AND the id: a host fate supplement can declare a
+ * departure under any id on its own table, and that departure's rows block
+ * like every other. The answer is the ceremony's verdict rule, not inventory
+ * data, so it is not part of the plan's `inventoryDigest`: a plan reviewed
+ * under it executes the same writes either way.
+ */
+export function advisoryDepartureReason(
+  object: string,
+  departureId: string,
+  seederRuns: boolean = DECLARED_SHARING_RULE_SEEDER_RUNS,
+): string | null {
+  if (!seederRuns || object !== DECLARED_RULE_MIRRORS.object || departureId !== DECLARED_RULE_MIRRORS.departure) return null;
+  return (
+    'this release\'s own boot still writes them (the declared-sharing-rule seeder runs on every served boot), so no ' +
+    'step of this release can remove them; the release that retires that seeder (ADR-0131 D2) deletes them'
+  );
 }
 
 // ── The host fate supplement ──────────────────────────────────────────────────

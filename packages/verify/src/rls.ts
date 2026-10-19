@@ -419,6 +419,24 @@ export function rlsProbeSecurity(config: any): SecurityPlugin {
  * Callers must NOT swallow that into a weaker persona silently: run degraded and
  * say so (`RlsProbeDescriptor.degraded`), or fail.
  */
+/**
+ * [ADR-0131 D3/D9] The organization a persona's assignment row belongs to: the
+ * one the persona is a member of. Under `single` the membership reconciler
+ * makes every sign-up a member of the Default Organization, so this is it —
+ * the owner the engine would derive. A persona with no membership (a walled
+ * boot, where a sign-up joins nothing) or several names none: the row is
+ * written without one, and its fate is the engine's.
+ */
+async function personaOrganization(
+  ql: any,
+  userId: string,
+  sysCtx: { context: { isSystem: boolean } },
+): Promise<{ organization_id?: string }> {
+  const memberships = rowsOf(await ql.find('sys_member', { where: { user_id: userId }, limit: 2 }, sysCtx));
+  const organizationId = memberships.length === 1 ? memberships[0]?.organization_id : undefined;
+  return typeof organizationId === 'string' && organizationId !== '' ? { organization_id: organizationId } : {};
+}
+
 export async function provisionRlsProbePersona(
   stack: VerifyStack,
   config: any,
@@ -469,7 +487,7 @@ export async function provisionRlsProbePersona(
       user_id: userId,
       // [ADR-0131 D4] The grant names its set; no id is written (D10).
       permission_set: RLS_PROBE_PERMISSION_SET,
-      organization_id: null,
+      ...(await personaOrganization(ql, userId, sysCtx)),
       granted_by: null,
     },
     sysCtx,
@@ -561,7 +579,7 @@ export async function provisionRlsPositionPersona(
       user_id: userId,
       position,
       business_unit_id: null,
-      organization_id: null,
+      ...(await personaOrganization(ql, userId, sysCtx)),
       granted_by: null,
       reason: `Ephemeral persona minted by \`objectstack verify --rls\`: holds '${position}' and nothing else, so the app's own position-gated RLS narrowing is exercised.`,
     },

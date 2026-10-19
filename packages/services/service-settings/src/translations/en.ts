@@ -24,7 +24,7 @@ export const en: PlatformTranslationData = {
       title: 'Mail Delivery',
       description: 'SMTP and transactional email provider configuration.',
       groups: {
-        provider: { title: 'Provider', description: 'Choose how this workspace sends outbound email.' },
+        provider: { title: 'Provider', description: 'Choose how this system sends outbound email.' },
         smtp: { title: 'SMTP' },
         api_key: { title: 'API key' },
         from_address: { title: 'From address' },
@@ -64,13 +64,13 @@ export const en: PlatformTranslationData = {
 
     branding: {
       title: 'Branding',
-      description: 'Workspace name, logo, and accent colour.',
+      description: 'Organization name, logo, and accent colour.',
       groups: {
         identity: { title: 'Identity' },
         appearance: { title: 'Appearance' },
       },
       keys: {
-        workspace_name: { label: 'Workspace name' },
+        workspace_name: { label: 'Organization name' },
         support_email: { label: 'Support email', help: 'Example: support@example.com' },
         theme_mode: {
           label: 'Default theme',
@@ -90,7 +90,7 @@ export const en: PlatformTranslationData = {
         contact: { title: 'Contact' },
       },
       keys: {
-        legal_name: { label: 'Legal name', help: 'Registered legal name (may differ from the workspace name).' },
+        legal_name: { label: 'Legal name', help: 'Registered legal name (may differ from the organization name set under Branding).' },
         registration_number: { label: 'Registration number', help: 'Company registration / incorporation number (e.g. EIN).' },
         tax_id: { label: 'Tax / VAT ID', help: 'Shown on invoices (e.g. VAT, GST, ABN).' },
         address_line1: { label: 'Address line 1' },
@@ -136,7 +136,7 @@ export const en: PlatformTranslationData = {
         },
         audience: {
           title: 'Audience',
-          description: 'Who may become a user of this environment\'s apps. Allowlisted email domains always force email verification on. Open forces it on unless the deployment turns it off; a value saved in this console cannot. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
+          description: 'Who may become a user of this system\'s apps. Allowlisted email domains always force email verification on. Open forces it on unless the deployment turns it off; a value saved in this console cannot. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
         },
         password_policy: {
           title: 'Password policy',
@@ -158,7 +158,7 @@ export const en: PlatformTranslationData = {
         require_email_verification: { label: 'Require email verification' },
         membership_policy: {
           label: 'New user membership',
-          help: 'Automatic binds every new user to the default organization. Invitation only grants membership solely through an explicit act — creating a workspace, accepting an invitation, an admin adding them, or SSO just-in-time provisioning.',
+          help: 'Automatic binds every new user to the default organization. Invitation only grants membership solely through an explicit act — creating an organization, accepting an invitation, an admin adding them, or SSO just-in-time provisioning.',
           options: {
             auto: 'Join the default organization automatically',
             'invite-only': 'Invitation only — never join automatically',
@@ -202,7 +202,7 @@ export const en: PlatformTranslationData = {
 
     feature_flags: {
       title: 'Feature Flags',
-      description: 'Toggle experimental and beta features for this workspace.',
+      description: 'Toggle experimental and beta features for this organization.',
       groups: {
         productivity: { title: 'Productivity' },
         collaboration: { title: 'Collaboration' },
@@ -216,15 +216,15 @@ export const en: PlatformTranslationData = {
         realtime_cursors: { label: 'Realtime cursors' },
         inline_comments: { label: 'Inline comments' },
       },
+      banners: {
+        beta_notice: { title: 'Heads up',
+          text: 'Beta features may change without notice. Pin via env vars (e.g. `OS_FEATURE_FLAGS_AI_ENABLED=true`) to lock for the whole deployment.' },
+      },
     },
 
     storage: {
       title: 'File Storage',
-      description:
-        'Backend used for attachments, exports, and user uploads. ' +
-        '⚠ Switching adapter does not migrate existing files — files ' +
-        'uploaded under the previous adapter become unreachable through ' +
-        'the new one.',
+      description: 'Backend used for attachments, exports, and user uploads.',
       groups: {
         adapter: { title: 'Backend', description: 'Choose where uploaded files are stored.' },
         local: { title: 'Local' },
@@ -254,6 +254,11 @@ export const en: PlatformTranslationData = {
       },
       actions: {
         test: { label: 'Test connection' },
+      },
+      banners: {
+        adapter_switch_warning: { title: 'Existing files are not migrated',
+          text: 'Switching adapter does not migrate existing files — files uploaded under the '
+            + 'previous adapter become unreachable through the new one.' },
       },
     },
 
@@ -313,7 +318,7 @@ export const en: PlatformTranslationData = {
         trace_enabled: { label: 'Record traces',
           help: 'Persist prompt/response traces to sys_ai_trace for debugging and replay.' },
         log_prompts: { label: 'Log full prompts',
-          help: 'Include rendered prompts (not just metadata) in trace rows. ⚠ May leak PII — disable in regulated environments.' },
+          help: 'Include rendered prompts (not just metadata) in trace rows.' },
         embedder_provider: {
           label: 'Provider',
           options: {
@@ -344,13 +349,15 @@ export const en: PlatformTranslationData = {
         test: { label: 'Test connection' },
         test_embedder: { label: 'Test embedder' },
       },
+      banners: {
+        log_prompts_warning: { title: 'Prompts may contain PII',
+          text: 'May leak PII — disable in regulated environments.' },
+      },
     },
 
     knowledge: {
       title: 'Knowledge',
-      description:
-        'Vector-store backend for RAG / knowledge sources. ' +
-        '⚠ Switching adapter does NOT migrate existing indices.',
+      description: 'Vector-store backend for RAG / knowledge sources.',
       groups: {
         adapter: { title: 'Backend',
           description: 'Choose where document chunks and their vectors are stored.' },
@@ -386,10 +393,18 @@ export const en: PlatformTranslationData = {
         over_fetch: { label: 'Over-fetch multiplier',
           help: 'Internal topK × overFetch candidates fetched so JS-side metadata filtering still has rows.' },
         enforce_rls: { label: 'Enforce RLS on search',
-          help: 'Re-check every hit against the caller\'s record-level permissions. ⚠ Disabling skips the platform\'s unique safeguard.' },
+          help: 'Re-check every hit against the caller\'s record-level permissions.' },
       },
       actions: {
         test: { label: 'Test connection' },
+      },
+      banners: {
+        adapter_switch_warning: { title: 'Existing indices are not migrated',
+          text: 'Switching adapter does NOT migrate existing indices — documents indexed under the '
+            + 'previous adapter become unreachable until re-indexed.' },
+        enforce_rls_warning: { title: 'Leave RLS on in production',
+          text: 'Disabling skips the platform\'s unique safeguard against vector-store data leakage — '
+            + 'leave on in production.' },
       },
     },
   },

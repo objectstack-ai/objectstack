@@ -476,6 +476,17 @@ export const ERROR_CODE_LEDGER = {
     // rows for the addressed object. Provenance, not identity (see above).
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
+    // [ADR-0131 D10 item 5, ruling 6163114098 Q3 A] The v18 boot refusal
+    // (`OrganizationOwnershipBootGuardPlugin`, `organization-ownership-boot-
+    // guard.ts`): `os serve` refuses to start against a database still in the
+    // v17 shape — a table whose object declares no organization column still
+    // carries a physical `organization_id` — while the organization-ownership
+    // ceremony's `sys_migration` marker is not verified. Thrown from the
+    // plugin's `kernel:ready` hook, before `kernel:listening` opens the socket,
+    // so no request is ever served (`door: 'none'`, the
+    // WALLED_MEMBERSHIP_POLICY_UNDECLARED precedent); the `code` lets a host
+    // discriminate the refusal structurally. No escape hatch exists (D10).
+    'ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED',
     // [#7557] `DELETE /packages/:id` on the DISPATCHER door — per-item failures
     // used to ride inside a 200 with a hardcoded `success: true`. Second
     // EMITTER of the code `@objectstack/rest` already registers for the
@@ -559,13 +570,28 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_EMAIL',
     'INVALID_PHONE',
     'INVITE_EMAIL_FAILED',
+    // [#24082] The invitation role cap's three refusals (`invitation-role-cap.ts`),
+    // each thrown 403 from `beforeCreateInvitation` with its code (#23945).
+    'INVITE_ISSUER_MEMBER_ONLY',  // [#24082] 403: an issuer below admin grade may invite only as a plain `member`; the requested role does not outrank theirs but may carry capability of its own
+    'INVITE_ISSUER_UNVERIFIED',   // [#24082] 403, fail-closed: the issuer's `sys_member` role was not established (the read answered with no usable row, or the composition has no data engine to read), so the invitation may confer nothing beyond `member`; a read that throws answers `SERVICE_UNAVAILABLE` (503) instead
+    // [#24254] The invitation placement gate's two refusals (ADR-0105 D8), thrown
+    // 403 from `beforeCreateInvitation` after the role cap, registered AHEAD of
+    // their producer: today both are a bare `FORBIDDEN`, and #24243 stamps these.
+    'INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE', // [#24254] 403: the delegated-administration gate refused the invitation's placement intent (its business unit, or a position's permission sets, lies outside the issuer's `adminScope`, ADR-0090 D12), so no invitation is created; the gate's own verdict, not a failure to reach one
+    'INVITE_PLACEMENT_UNSUPPORTED', // [#24254] 403, fail-closed: the invitation carries placement intent (a business unit and positions) and this deployment has no delegated-administration runtime (plugin-security's `invitation-placement` service) to authorize it, so no invitation is created; the same invitation without placement is unaffected
     'INVITE_REQUIRES_EMAIL',
+    'INVITE_ROLE_ABOVE_ISSUER',   // [#24082] 403: the requested role grades above the issuer's own (an invitation never confers authority above its issuer)
     'INVALID_REQUEST',
     'INVITE_SMS_FAILED',
     'IP_NOT_ALLOWED',
     'LAST_LOCAL_CREDENTIAL',      // refusing to remove the user's only local credential
     'NO_IDENTITY',                // import row has neither email nor phone
     'NO_PENDING_VERIFICATION',    // pass-through from better-auth
+    // [#24254] The organization hooks' two refusals no standard member names
+    // (`beforeCreateOrganization`, `beforeUpdateOrganization`), registered AHEAD
+    // of their producer: today both are a bare `FORBIDDEN`, and #24243 stamps these.
+    'ORGANIZATION_CREATION_DISABLED', // [#24254] 403: the deployment's effective tenancy posture enforces no organization wall (ADR-0105), so creating an organization is refused for every caller; the same derivation `/auth/config` publishes as `features.multiOrgEnabled: false`, a deployment setting and not a grant the caller lacks
+    'ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS', // [#24254] 403: a change to a new slug is refused while the organization has an active environment, meaning a `sys_environment` row with its `organization_id` whose `status` is neither `archived` nor `failed` (a row with no status counts), and no hostname is read; a guard read that could not answer is `SERVICE_UNAVAILABLE` (503) instead
     'PASSWORD_ALREADY_SET',       // pass-through from better-auth
     'PASSWORD_EXPIRED',
     'PASSWORD_POLICY_VIOLATION',
@@ -628,19 +654,10 @@ export const ERROR_CODE_LEDGER = {
     // string is spelled in each). Served by the `/meta` write doors through
     // `errorFromThrown`.
     'DEFAULT_RECORD_PAGE_CONFLICT',
-    // [#9567] ADR-0078's rename guard refuses a metadata write whose `type`/
-    // `name` token is already a LIVE name owned by something else in the
-    // environment — persisting the un-renamed body would mint exactly the row
-    // that guard exists to prevent (`saveMetaItem`, `protocol.ts`, same posture
-    // as `duplicatePackage` / #4454). 409, not 422: the body may be perfectly
-    // valid — the refusal comes from environment state, so resubmitting the
-    // same body cannot help. Surfaced by the widened
-    // `check:dispatcher-error-vocabulary` scan (#9460, half 1); NOTE the
-    // producer's message prefix spells the code lowercase
-    // (`[flow_conversion_conflict]`) while the wire stamp is SCREAMING_SNAKE —
-    // a human-log inconsistency worth a glance, left as-is because the
-    // producer is outside this ledger's surface.
-    'FLOW_CONVERSION_CONFLICT',
+    // [#24001] The flow save door's 409 for a refused conversion rename came
+    // out with its last producer (this header's "Retiring a code"): protocol
+    // 18 reserved the old HTTP-callout node types, so no live owner can
+    // collide with a rename and no conversion reports a conflict.
     'INVALID_METADATA',
     'INVALID_REQUEST',
     'ITEM_LOCKED',                // _lock refuses the write/delete (ADR-0010 §3.3)
@@ -692,6 +709,17 @@ export const ERROR_CODE_LEDGER = {
     'WRITABLE_PACKAGE_REQUIRED',
   ],
   '@objectstack/metadata-core': [
+    // [ADR-0131 D6/D7, #23429] `readLegacyOrganizationRows`
+    // (`legacy-organization-row.ts`, `LegacyOrganizationRowsUnreadable`) could
+    // not tell a `sys_metadata`-family table's legacy organization rows from
+    // the environment's: the driver's raw seam returned no result set, its SQL
+    // dialect resolved to none, or the column list came back empty for a table
+    // that exists. Refused, never read as "none" — that answer would serve,
+    // list or delete one organization's rows as the environment's. It reaches a
+    // door only on a database the organization-ownership ceremony has not
+    // migrated (which `os serve` refuses), so the remedy it names is the
+    // ceremony.
+    'LEGACY_ORGANIZATION_ROWS_UNREADABLE',
     'METADATA_BRANCH',
     'METADATA_CONFLICT',
     'METADATA_NOT_FOUND',
@@ -703,7 +731,7 @@ export const ERROR_CODE_LEDGER = {
     // never satisfy, and the remedy is a body change
     // (`objectstack migrate meta --from N`). It matches this package's own
     // METADATA_SCHEMA_INVALID. It is not 409, which this ledger keeps for
-    // refusals from environment state (FLOW_CONVERSION_CONFLICT). The two HTTP
+    // refusals from environment state (CONCURRENT_UPDATE). The two HTTP
     // doors that reach the throw, `POST /api/v1/packages` and (since #21805)
     // `POST /api/v1/marketplace/install-local`, answer the same bytes through
     // the shared `protocolIncompatibleAnswer`, carrying `requiredRange`,
@@ -924,7 +952,7 @@ export const ERROR_CODE_LEDGER = {
     // two HTTP install doors call `installPackage`. Its own code rather than
     // `NAMESPACE_CONFLICT`: no name is taken — an object's one default slot is
     // held — and renaming fixes nothing; the remedy is `isDefault: false` on
-    // one page, or composing the deployment without the other package. Not a
+    // one page, or composing the deployment without the other package's page. Not a
     // synonym of any standard member: the manifest is well-formed, and the
     // refusal comes from what the deployment already holds.
     'DEFAULT_RECORD_PAGE_CONFLICT',

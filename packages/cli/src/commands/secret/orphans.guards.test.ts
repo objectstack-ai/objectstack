@@ -24,9 +24,14 @@
  * `mode: 0o600` that keeps cipher material owner-only is applied by the OS only
  * at CREATION, so a truncating write would have inherited the squatter's owner
  * and permissions and put cipher material inside them.
+ *
+ * The last is what the human face says about the database. Either mode's
+ * connect can switch a SQLite file's journal mode, which rewrites its header
+ * and no row, so neither the report nor an abort says that nothing was
+ * written; each names the switch on a SQLite target, and only there.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -35,6 +40,7 @@ import SecretOrphans, { asDeletingDriver, readDeclaredDatasources } from './orph
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { collectSecretReferenceUnion } from '../../utils/secret-reference-union.js';
 import type { SecretReferenceUnion } from '../../utils/secret-reference-union.js';
+import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 
 // The command's own control flow is the subject here, so only the two seams
 // that would boot a database or walk a real engine are replaced. Everything
@@ -46,6 +52,19 @@ vi.mock('../../utils/secret-reference-union.js', () => ({ collectSecretReference
 // Constructed and handed to the (mocked) boot, never used — a stub keeps the
 // platform-objects graph out of this file's import cost.
 vi.mock('@objectstack/platform-objects/plugin', () => ({ PlatformObjectsPlugin: class {} }));
+// The `--delete` confirmation, answered without a terminal: `undefined` leaves
+// readline as it is.
+const prompt = vi.hoisted(() => ({ answer: undefined as string | undefined }));
+vi.mock('node:readline', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:readline')>();
+  return {
+    ...real,
+    createInterface: ((...args: Parameters<typeof real.createInterface>) => (prompt.answer === undefined
+      ? real.createInterface(...args)
+      : { question: (_q: string, answer: (a: string) => void) => answer(prompt.answer as string), close: () => {} }
+    )) as typeof real.createInterface,
+  };
+});
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
@@ -273,4 +292,101 @@ describe('the pre-delete export is created exclusively, never written onto', () 
     // the only way this file is ever opened.
     expect(statSync(file).mode & 0o777).toBe(0o600);
   }, 60_000);
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// The human face: what the report and an abort say about the database
+// ───────────────────────────────────────────────────────────────────────────
+
+/** The primary datasource's driver config, as the boot's `SchemaStack.driver` carries it. */
+const SQLITE_CONFIG = { client: 'better-sqlite3', connection: { filename: '/srv/app/.objectstack/data/objectstack.db' } };
+const POSTGRES_CONFIG = { client: 'pg', connection: 'postgres://db.example.com:5432/app' };
+
+/** Drive one human-mode run over the deletable orphan, with the boot's driver on `config`. */
+async function runHuman(
+  argv: string[],
+  config: Record<string, unknown>,
+): Promise<{ lines: string[]; removed: string[] }> {
+  const removed: string[] = [];
+  vi.mocked(collectSecretReferenceUnion).mockResolvedValue(unreferencingCompleteUnion());
+  vi.mocked(bootSchemaStack).mockImplementation(async () => {
+    const objectql = {
+      getConfigs: () => ({}),
+      getDriverForObject: (object: string) =>
+        object === 'sys_secret'
+          ? {
+            async find() { return [{ ...ORPHAN_ROW }]; },
+            async delete(_object: string, id: string) { removed.push(id); return true; },
+          }
+          : { async find() { return []; } },
+    };
+    return {
+      driver: { config },
+      kernel: {
+        getService: (name: string) =>
+          name === 'objectql' ? objectql
+            : name === 'settings' ? { listManifests: () => SETTINGS_MANIFESTS }
+              : undefined,
+      },
+      tableAbsent: () => false,
+      shutdown: async () => { /* nothing was booted */ },
+    } as never;
+  });
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const savedExitCode = process.exitCode;
+  try {
+    await SecretOrphans.run(argv, { root: CLI_ROOT });
+    return { lines: log.mock.calls.map((c) => c.map(String).join(' ')), removed };
+  } finally {
+    process.exitCode = savedExitCode;
+    for (const spy of [log, warn, error]) spy.mockRestore();
+  }
+}
+
+describe('the human face names no write it cannot vouch for', () => {
+  let savedIsTTY: PropertyDescriptor | undefined;
+  beforeEach(() => {
+    savedIsTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+  });
+  afterEach(() => {
+    prompt.answer = undefined;
+    if (savedIsTTY) Object.defineProperty(process.stdin, 'isTTY', savedIsTTY);
+    else delete (process.stdin as { isTTY?: boolean }).isTTY;
+  });
+
+  it('the report claims no row or table, and names the journal-mode switch on a SQLite file', async () => {
+    const { lines } = await runHuman(['--no-declared-datasources'], SQLITE_CONFIG);
+    const closing = lines.find((line) => line.includes('Report only'));
+    expect(closing, lines.join('\n')).toContain(`Report only — no row or table was written or deleted. ${JOURNAL_MODE_SWITCH_NOTE}`);
+    expect(lines.join('\n')).not.toContain('nothing was written');
+  }, 60_000);
+
+  it('on a target with no file header (PostgreSQL) the report claims no row or table and names no switch', async () => {
+    const { lines } = await runHuman(['--no-declared-datasources'], POSTGRES_CONFIG);
+    const closing = lines.find((line) => line.includes('Report only'));
+    expect(closing, lines.join('\n')).toContain('Report only — no row or table was written or deleted.');
+    expect(lines.join('\n')).not.toContain(JOURNAL_MODE_SWITCH_NOTE);
+  }, 60_000);
+
+  it('a --delete declined at the prompt claims no export and no row, and names the switch on a SQLite file', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    prompt.answer = 'n';
+    const exportPath = join(tempDir(), 'export.json');
+    const { lines, removed } = await runHuman(
+      ['--delete', '--no-declared-datasources', '--export', exportPath],
+      SQLITE_CONFIG,
+    );
+    expect(removed).toEqual([]);
+    expect(existsSync(exportPath)).toBe(false);
+    const aborted = lines.find((line) => line.includes('Aborted'));
+    expect(aborted, lines.join('\n')).toContain(`Aborted — no export was written and no row was deleted. ${JOURNAL_MODE_SWITCH_NOTE}`);
+  }, 60_000);
+
+  it('the help says the report writes no row or table, never that it writes nothing', () => {
+    expect(SecretOrphans.description).toContain('Report-only by default: it writes no row or table and deletes nothing.');
+    expect(SecretOrphans.flags.delete.description).toContain('(default is a report that writes no row or table)');
+    expect(`${SecretOrphans.description} ${SecretOrphans.flags.delete.description}`).not.toContain('writes nothing');
+  });
 });

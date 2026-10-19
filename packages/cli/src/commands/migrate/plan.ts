@@ -15,12 +15,16 @@ import {
 } from '../../utils/format.js';
 import {
   bootSchemaStack,
+  collectDriftApplyLimits,
+  describeWithApplyLimits,
   describeDatabaseSource,
   describeTelemetryDatabase,
+  distinctDatabaseDrivers,
   renderPlan,
   renderPendingSchemaWork,
   summarize,
   summarizePendingSchemaWork,
+  SKIPPED_SCHEMA_SYNC_NOTE,
 } from '../../utils/schema-migrate.js';
 import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 import {
@@ -33,7 +37,8 @@ import {
   renderUnmanagedTables,
   type UnmanagedTablesReport,
 } from '../../utils/unmanaged-tables.js';
-import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
+import { describeDriverSqliteFile } from '../../utils/connection-display.js';
 import {
   resolveTenancyPosture,
   collectGlobalUniques,
@@ -52,7 +57,7 @@ import {
  * boot-time create-table / add-column sync that used to run before this command
  * printed a single line is now REPORTED as pending work instead of performed.
  * A database another process is using is reported too — as a warning, not a
- * refusal, since a plan writes nothing either way.
+ * refusal, since a plan writes no row either way.
  *
  * Since #6743 the dry run also stops short of CREATING the database. The
  * deferral #3917 introduced covered the DDL and the seed but not the open
@@ -63,6 +68,21 @@ import {
  * an empty in-memory database: the plan is unchanged (an empty database is an
  * empty database, and "every table needs creating" is the true answer for a
  * fresh project), and nothing is written to disk.
+ *
+ * [#23848] A primary whose transport cannot hold DDL back (the Turso REMOTE
+ * transport) used to refuse the plan at its boot. It now boots with schema sync
+ * skipped: still nothing written, the drift half read from the database, and
+ * the additive half reported as not examined in both faces.
+ *
+ * [#23925] Nor does the plan offer a remedy that database does not have. The
+ * driver that reported each entry declares what its apply door cannot perform
+ * (`SchemaStack.driftApplyLimit`); such an entry is listed with its finding and
+ * that limit instead of `--allow-destructive`, and the footer offers
+ * `--allow-destructive` only for a destructive entry the database can apply.
+ * Read from the declaration, never from the dialect or the transport name. A
+ * driver that declares nothing (every database but a Turso REMOTE one) gets
+ * the plan it always got, byte for byte. The `--json` document is the report
+ * and is unchanged.
  */
 export default class MigratePlan extends Command {
   static override description =
@@ -131,7 +151,7 @@ export default class MigratePlan extends Command {
     // not our own pool.
     const occupancy = await probeMigrationTarget(flags['database-url']);
     if (occupancy.status === 'busy' && !flags.json) {
-      printWarning(`${describeOccupancy(occupancy)} The plan below is still accurate — nothing is written — but "os migrate apply" will refuse until it is free (or you pass --force).`);
+      printWarning(`${describeOccupancy(occupancy)} The plan below is still accurate — it writes no row or table — but "os migrate apply" will refuse until it is free (or you pass --force). ${JOURNAL_MODE_SWITCH_NOTE}`);
     }
 
     let stack;
@@ -140,7 +160,14 @@ export default class MigratePlan extends Command {
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         deferSchemaDdl: true,
-        // A plan writes nothing — so it must not bring a database file into
+        // [#23848] …and where the primary's transport cannot defer DDL (the
+        // Turso REMOTE transport), boot with schema sync skipped instead of
+        // refusing: the drift half of the plan still reads the database, and
+        // the additive half is reported as NOT examined (`schemaSync`), never
+        // as "nothing to create". `os migrate apply` passes the same posture,
+        // so the plan an operator reads is the one that apply confirms.
+        deferredDdlUnsupported: 'skip-schema-sync',
+        // A plan writes no row — so it must not bring a database file into
         // existence either (#6743). On a never-started project the target is
         // opened as an empty in-memory database: the plan below is unchanged
         // (an empty database is an empty database), and no file, `-wal` or
@@ -159,6 +186,11 @@ export default class MigratePlan extends Command {
         // resolves — or an app declaring `requires: ['auth']` plans without
         // `sys_account`, and its retired `issuer` column is never a drop.
         composeServedPlatform: true,
+        // [#24120] …and the datasources the deployment declares, connected as
+        // `os serve` connects them: a `datasourceMapping` rule's objects are
+        // planned in the datasource it routes them to, the declared default's
+        // included. `os migrate apply` passes the same.
+        composeDeclaredDatasources: true,
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
@@ -195,9 +227,14 @@ export default class MigratePlan extends Command {
       // indistinguishable from "never looked at". See `../../utils/unmanaged-tables.ts`.
       const { normalizeRows } = await import('@objectstack/metadata-protocol');
       const unmanagedTables: UnmanagedTablesReport = await collectUnmanagedTables({
-        // [#22580] Every database the drift above covers, the sibling included.
-        drivers: stack.drivers,
+        // [#22580] Every database the drift above covers, the sibling included —
+        // [#24120] each read once, though a declared default and the primary
+        // resolved from it are two connections to one file.
+        drivers: distinctDatabaseDrivers(stack.drivers),
         declaredObjects: stack.allObjects(),
+        // [#24059] …and the tables the composition declares outside the object
+        // set — `sys_packages`, which `os migrate apply` creates.
+        nonObjectTables: stack.nonObjectTables,
         composition: stack.composition,
         normalize: normalizeRows,
       });
@@ -207,10 +244,14 @@ export default class MigratePlan extends Command {
       // are separate CUSTOMERS. The HARD gate runs at app install; this covers
       // the two populations it cannot reach (installs predating the gate, and
       // environments whose posture changed after install). Never fatal: a plan
-      // writes nothing, and this reports a metadata decision, not drift.
+      // writes no row or table, and this reports a metadata decision, not drift.
       const uniqueScopeAdvisory = postureGatesGlobalUniques(resolveTenancyPosture())
         ? collectGlobalUniques(stack.allObjects())
         : [];
+
+      // [#23848] The boot skipped schema sync (a transport that cannot defer
+      // DDL): `pending` below was not examined, so it cannot read as "none".
+      const schemaSyncSkipped = stack.schemaSync === 'skipped';
 
       if (flags.json) {
         await emitJson({
@@ -222,6 +263,10 @@ export default class MigratePlan extends Command {
           // against — present only when the serving boot keeps one, so a
           // document without it planned every object against `database`.
           ...(stack.telemetryDatabase !== null ? { telemetryDatabase: stack.telemetryDatabase } : {}),
+          // [#23848] Present only when the boot skipped schema sync: then
+          // `pending: []` means NOT EXAMINED, and a consumer must not read it
+          // as "every declared table and column exists".
+          ...(schemaSyncSkipped ? { schemaSync: 'skipped' as const } : {}),
           managedTables: stack.managedTableCount,
           total: drift.length,
           changes: drift,
@@ -290,13 +335,30 @@ export default class MigratePlan extends Command {
         console.log('');
       }
 
+      // [#23899] Two kinds of line below claim that this plan wrote no row or
+      // table: the declaration boot's write-guard note (one of the composition
+      // notes, when a plugin's write was refused or a raw command forwarded)
+      // and the unmanaged-table section's closing line. The read-only boot's
+      // connect may still have switched a SQLite file's journal mode
+      // (`SqlDriver.applySqliteJournalMode`, its rule for every connect), which
+      // rewrites the file header and no row, so on a SQLite file each line that
+      // makes the claim is followed by the note naming the switch. A target
+      // that is no SQLite file (PostgreSQL, MySQL) has no header to switch. The
+      // `--json` document above carries the same lines and no note.
+      const journalNote = describeDriverSqliteFile(stack.driver?.config) !== undefined
+        ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
+        : '';
+      const withJournalNote = (line: string): string =>
+        (line.includes('no row or table') ? `${line}${journalNote}` : line);
+
       printInfo(`Database: ${chalk.white(stack.dbLabel)} ${chalk.dim(`(${describeDatabaseSource(stack.dbSource)})`)}`);
       if (stack.telemetryDatabase !== null) printInfo(describeTelemetryDatabase(stack.telemetryDatabase));
+      if (schemaSyncSkipped) printWarning(SKIPPED_SCHEMA_SYNC_NOTE);
       printInfo(`Examined ${chalk.white(String(stack.managedTableCount))} managed table(s).`);
       // What the object set was composed from (#12938) — never silent about a
       // host config it could not load, and empty (so this block prints nothing)
       // when there was no deployment to compose.
-      for (const note of stack.composition.notes) console.log(chalk.dim(`      ${note}`));
+      for (const note of stack.composition.notes) console.log(chalk.dim(`      ${withJournalNote(note)}`));
       console.log('');
 
       // [#13204] Its own block, above the drift verdict and never folded into
@@ -307,7 +369,7 @@ export default class MigratePlan extends Command {
       const unmanagedLines = renderUnmanagedTables(unmanagedTables);
       if (unmanagedLines.length > 0) {
         printInfo(unmanagedLines[0]!);
-        for (const line of unmanagedLines.slice(1)) console.log(chalk.dim(`      ${line}`));
+        for (const line of unmanagedLines.slice(1)) console.log(chalk.dim(`      ${withJournalNote(line)}`));
         console.log('');
       }
 
@@ -325,6 +387,12 @@ export default class MigratePlan extends Command {
             + `${c.unexaminedObjects} of ${c.registeredObjects} declared object(s) were NOT examined (see above). `
             + 'This is a PARTIAL plan: it is not evidence that the deployment is in sync.',
           );
+        } else if (schemaSyncSkipped) {
+          // [#23848] Drift was read; the additive half was not (see above).
+          printWarning(
+            'No drift over the tables this database holds — but its additive schema work was NOT examined (see above). '
+            + 'This is a PARTIAL plan: it is not evidence that every declared table and column exists.',
+          );
         } else {
           printSuccess('Physical schema is in sync with metadata — nothing to migrate.');
         }
@@ -332,12 +400,40 @@ export default class MigratePlan extends Command {
         return;
       }
 
+      // [#23925] What the driver that reported each entry declares its apply
+      // door cannot perform: on the Turso REMOTE transport, every column entry
+      // but a drop (it runs no SQLite table rebuild). Empty for a driver that
+      // declares nothing, and then everything below reads as it always has.
+      const limits = collectDriftApplyLimits(stack, drift);
+
       await renderPendingSchemaWork(pending);
-      renderPlan(drift);
+      if (limits.size === 0) {
+        renderPlan(drift);
+      } else {
+        // Still listed, still counted: it IS drift. Only the remedy changes,
+        // from a command that cannot perform it here to the reason it cannot.
+        renderPlan(drift, await describeWithApplyLimits(limits));
+      }
       if (pending.length > 0) printInfo(await summarizePendingSchemaWork(pending));
       printInfo(summarize(drift));
-      console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') +
-        chalk.dim(' (add --allow-destructive for drops / tightenings)'));
+      if (limits.size === 0) {
+        console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') +
+          chalk.dim(' (add --allow-destructive for drops / tightenings)'));
+      } else {
+        // `--allow-destructive` only for a destructive entry this database can
+        // apply; no apply line at all when it can apply nothing listed here.
+        const appliable = drift.filter((d) => !limits.has(d));
+        const appliableDestructive = appliable.filter((d) => d.category === 'destructive').length;
+        if (appliable.length > 0 || pending.length > 0) {
+          console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') + (appliableDestructive > 0
+            ? chalk.dim(` (add --allow-destructive for the ${appliableDestructive} destructive change(s) it can apply on this database)`)
+            : ''));
+        }
+        printWarning(
+          `${limits.size} change(s) above cannot be applied on this database by "os migrate apply" (each says why), `
+          + 'so they remain drift after it runs.',
+        );
+      }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
     } catch (error: any) {

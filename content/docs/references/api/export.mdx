@@ -54,8 +54,8 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **dryRun** | `boolean` | optional (default: `false`) | Validate + coerce every row without persisting. The verdict is the engine's own write-path validation, with one boundary an author should know: a preview runs NO automations. Hooks never fire in a dry run — a preview that executed user-authored side effects (mail, outbound calls, writes to other objects) would be the retired `validateOnly` defect in a new spelling. So a dry run with `runAutomations: true` can report `required` for a field a `beforeInsert` hook would populate during the real import; for hook-derived fields the real write is authoritative. |
 | **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | optional (default: `"insert"`) | insert / update / upsert semantics |
 | **matchFields** | `string[]` | optional | Fields that identify an existing record (required for update/upsert) |
-| **runAutomations** | `boolean` | optional (default: `true`) | Fire triggers/hooks for each imported row. ON by default, and opting out must be explicit: automations always ran on import historically (the engine ignored this flag until this flag was honoured), so a caller that wants a silent bulk load sends `runAutomations: false` — omitting the key runs them. This matches platform convention (Salesforce fires triggers on import by default). One boundary: a `dryRun` preview runs NO automations whatever this flag says. |
-| **treatAsHistorical** | `boolean` | optional (default: `false`) | Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates; and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them. Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped. |
+| **runAutomations** | `boolean` | optional (default: `true`) | Fire triggers/hooks for each imported row. ON by default, and opting out must be explicit: automations always ran on import historically (the engine ignored this flag until this flag was honoured), so omitting the key runs them. This matches platform convention (Salesforce fires triggers on import by default). Only the system principal (an in-process caller such as a seed or migration job) may send `runAutomations: false`, because it takes the object's triggers and metadata-bound hooks, its approvals and record freezes among them, off every row: the import doors refuse it from every other caller, every signed-in user and administrator included, with `403 PERMISSION_DENIED` before any row is read. One boundary: a `dryRun` preview runs NO automations whatever this flag says. |
+| **treatAsHistorical** | `boolean` | optional (default: `false`) | Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates; and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them. Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped. Only the system principal (an in-process caller such as a seed or migration job) may send `treatAsHistorical: true`: the import doors refuse it from every other caller, every signed-in user and administrator included, with `403 PERMISSION_DENIED` before any row is read. |
 | **trimWhitespace** | `boolean` | optional (default: `true`) | Trim leading/trailing whitespace from string cells |
 | **nullValues** | `string[]` | optional | Strings treated as null/blank (besides empty string) |
 | **createMissingOptions** | `boolean` | optional (default: `false`) | Keep a select / radio / multiselect cell that matches none of the field's options instead of failing the row. The cell is stored as written (trimmed; for a multi-value cell, each unmatched item), and the engine's option check admits exactly the values this import kept, on this import's writes (dry run included). The field's option list is not changed: a later write that sends the field is judged against the options again, while one that leaves the field out is not affected. A field bound to a shared picklist that did not resolve is still refused. |
@@ -182,7 +182,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **errors** | `integer` | ✅ | Rows that failed |
 | **percentComplete** | `number` | ✅ | processed / total as a percentage |
 | **undoable** | `boolean` | ✅ | Whether this job can still be logically rolled back (undo log captured, terminal state, not yet reverted) |
-| **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601) |
+| **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601): set only once every row is reverted. An undo that left rows unreverted sets nothing, and the job stays undoable for those rows. |
 | **error** | `string` | optional | Fatal error message (when status = failed) |
 | **startedAt** | `string` | optional | Processing start timestamp (ISO 8601) |
 | **completedAt** | `string` | optional | Completion timestamp (ISO 8601) |
@@ -210,7 +210,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **errors** | `integer` | ✅ | Rows that failed |
 | **percentComplete** | `number` | ✅ | processed / total as a percentage |
 | **undoable** | `boolean` | ✅ | Whether this job can still be logically rolled back (undo log captured, terminal state, not yet reverted) |
-| **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601) |
+| **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601): set only once every row is reverted. An undo that left rows unreverted sets nothing, and the job stays undoable for those rows. |
 | **error** | `string` | optional | Fatal error message (when status = failed) |
 | **startedAt** | `string` | optional | Processing start timestamp (ISO 8601) |
 | **completedAt** | `string` | optional | Completion timestamp (ISO 8601) |
@@ -266,7 +266,7 @@ const result = CreateImportJobRequestSchema.parse(data);
 | **createdAt** | `string` | ✅ | Job creation timestamp (ISO 8601) |
 | **completedAt** | `string` | optional | Completion timestamp (ISO 8601) |
 | **undoable** | `boolean` | ✅ | Whether this job can still be logically rolled back |
-| **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601) |
+| **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601): set only once every row is reverted. An undo that left rows unreverted sets nothing, and the job stays undoable for those rows. |
 
 
 ---
@@ -308,8 +308,8 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **dryRun** | `boolean` | optional (default: `false`) | Validate + coerce every row without persisting. The verdict is the engine's own write-path validation, with one boundary an author should know: a preview runs NO automations. Hooks never fire in a dry run — a preview that executed user-authored side effects (mail, outbound calls, writes to other objects) would be the retired `validateOnly` defect in a new spelling. So a dry run with `runAutomations: true` can report `required` for a field a `beforeInsert` hook would populate during the real import; for hook-derived fields the real write is authoritative. |
 | **writeMode** | `Enum<'insert' \| 'update' \| 'upsert'>` | optional (default: `"insert"`) | insert / update / upsert semantics |
 | **matchFields** | `string[]` | optional | Fields that identify an existing record (required for update/upsert) |
-| **runAutomations** | `boolean` | optional (default: `true`) | Fire triggers/hooks for each imported row. ON by default, and opting out must be explicit: automations always ran on import historically (the engine ignored this flag until this flag was honoured), so a caller that wants a silent bulk load sends `runAutomations: false` — omitting the key runs them. This matches platform convention (Salesforce fires triggers on import by default). One boundary: a `dryRun` preview runs NO automations whatever this flag says. |
-| **treatAsHistorical** | `boolean` | optional (default: `false`) | Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates; and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them. Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped. |
+| **runAutomations** | `boolean` | optional (default: `true`) | Fire triggers/hooks for each imported row. ON by default, and opting out must be explicit: automations always ran on import historically (the engine ignored this flag until this flag was honoured), so omitting the key runs them. This matches platform convention (Salesforce fires triggers on import by default). Only the system principal (an in-process caller such as a seed or migration job) may send `runAutomations: false`, because it takes the object's triggers and metadata-bound hooks, its approvals and record freezes among them, off every row: the import doors refuse it from every other caller, every signed-in user and administrator included, with `403 PERMISSION_DENIED` before any row is read. One boundary: a `dryRun` preview runs NO automations whatever this flag says. |
+| **treatAsHistorical** | `boolean` | optional (default: `false`) | Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates; and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them. Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped. Only the system principal (an in-process caller such as a seed or migration job) may send `treatAsHistorical: true`: the import doors refuse it from every other caller, every signed-in user and administrator included, with `403 PERMISSION_DENIED` before any row is read. |
 | **trimWhitespace** | `boolean` | optional (default: `true`) | Trim leading/trailing whitespace from string cells |
 | **nullValues** | `string[]` | optional | Strings treated as null/blank (besides empty string) |
 | **createMissingOptions** | `boolean` | optional (default: `false`) | Keep a select / radio / multiselect cell that matches none of the field's options instead of failing the row. The cell is stored as written (trimmed; for a multi-value cell, each unmatched item), and the engine's option check admits exactly the values this import kept, on this import's writes (dry run included). The field's option list is not changed: a later write that sends the field is judged against the options again, while one that leaves the field out is not affected. A field bound to a shared picklist that did not resolve is still refused. |
@@ -533,7 +533,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **createdAt** | `string` | ✅ | Job creation timestamp (ISO 8601) |
 | **completedAt** | `string` | optional | Completion timestamp (ISO 8601) |
 | **undoable** | `boolean` | ✅ | Whether this job can still be logically rolled back |
-| **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601) |
+| **revertedAt** | `string` | optional | When the job was undone / rolled back (ISO 8601): set only once every row is reverted. An undo that left rows unreverted sets nothing, and the job stays undoable for those rows. |
 
 
 ---
@@ -544,12 +544,22 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **success** | `boolean` | ✅ | Whether the undo completed |
+| **success** | `boolean` | ✅ | Whether every row was reverted. False when any row is listed in `failures`: the undo did not complete, and the job is not stamped reverted. |
 | **jobId** | `string` | ✅ | Import job id |
 | **object** | `string` | ✅ | Target object name |
 | **deleted** | `integer` | ✅ | Created records deleted |
 | **restored** | `integer` | ✅ | Updated records restored to pre-import values |
-| **failed** | `integer` | ✅ | Reversal operations that failed |
+| **failed** | `integer` | ✅ | Rows the undo did not revert: one per entry in `failures` |
+| **failures** | `{ id: string; action: Enum<'delete' \| 'restore'>; code: string; error: string }[]` | ✅ | One entry per row the undo did not revert, in the order the undo tried them (deletes first). For every caller but the system principal the reversal writes run under the object's hooks, record-change triggers and `state_machine` rule, so a row one of them refuses is listed here, as is a write that failed for any other reason. The job keeps these rows, each with its entry, in its undo log and stays undoable: undoing it again retries only them. Empty when every row was reverted. |
+
+### Nested Shape: `UndoImportJobResponse.failures[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Id of the record the reversal targeted |
+| **action** | `Enum<'delete' \| 'restore'>` | ✅ | The reversal that did not happen: `delete` for a record the import created, `restore` for one it updated |
+| **code** | `string` | ✅ | Error code the write was refused or failed with, as the single-record write door answers it |
+| **error** | `string` | ✅ | Human-readable message: a refusing hook or validation rule's own sentence, or the door's withheld-fault sentence |
 
 
 ---

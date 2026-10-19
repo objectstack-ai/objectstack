@@ -128,7 +128,7 @@ describe('protocol.duplicatePackage (ADR-0070 D4)', () => {
             find: vi.fn(async () => rows),
             registry: {
                 getPackage: vi.fn(() => ({
-                    manifest: { id: 'app.iojn', name: 'Repair', namespace: 'iojn', version: '1.0.0', type: 'application', scope: 'environment' },
+                    manifest: { id: 'app.iojn', name: 'Repair', namespace: 'iojn', version: '1.0.0', type: 'app', scope: 'environment' },
                 })),
                 installPackage,
             },

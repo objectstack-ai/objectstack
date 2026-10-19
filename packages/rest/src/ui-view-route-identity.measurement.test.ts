@@ -73,14 +73,25 @@ import {
 } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
+import { REST_SERVER_REGISTRAR_FILES } from './rest-server-registrar-files.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
 // [#23050 slice 1] The reverse checks below count a term's spelling over the
 // files RestServer's registrars live in, which since that slice include the
 // module `registerDataActionEndpoints`' body moved to. Sliced readings of ONE
-// registrar still read `SOURCE` alone.
-const REGISTRAR_SOURCES = SOURCE + '\n' + readFileSync(resolve(HERE, 'data-action-routes.ts'), 'utf8');
+// registrar still read `SOURCE` alone. [#23050 slice 2] …and the module
+// `registerBatchEndpoints`' body moved to. [#23050 slice 3] …and every module
+// on THE list of the files RestServer's registrars live in, read off that list
+// (`rest-server-registrar-files.ts`) rather than named here, so the slice that
+// moves the next body widens these checks by adding its module there. The
+// reverse checks pin the list's length.
+const REGISTRAR_SOURCES = REST_SERVER_REGISTRAR_FILES
+    .map((file) => (file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'))).join('\n');
+// [#23050 slice 10] `registerUiEndpoints`' BODY moved to `ui-routes.ts`; the
+// class keeps the private method as a host literal that forwards members and
+// calls none of them in a route. The sliced reading below reads the body there.
+const UI_SOURCE = readFileSync(resolve(HERE, 'ui-routes.ts'), 'utf8');
 
 const BASE = '/api/v1';
 const UI_ROUTE = `GET ${BASE}/ui/view/:object/:type`;
@@ -322,11 +333,18 @@ describe('[#13214] §1 the REST seam — absent context vs entitled context', ()
         // in this file 52 times over, and `registerUiEndpoints` sits directly
         // above `registerCrudEndpoints`, whose handlers all carry it — so a
         // file-wide grep would have read as a pass before the repair too.
-        const start = SOURCE.indexOf('private registerUiEndpoints(');
-        const end = SOURCE.indexOf('private registerCrudEndpoints(');
+        //
+        // [#23050 slice 10] The body moved to `ui-routes.ts`, so it is sliced
+        // there: from the moved function's signature to its own closing brace
+        // (the first column-0 brace after it), so neither the module header nor
+        // a later declaration can satisfy it. Sliced in `rest-server.ts`, the
+        // private method is now a host literal whose forwarders spell three of
+        // the terms below while calling none of them in a route.
+        const start = UI_SOURCE.indexOf('export function registerUiEndpoints(');
+        const end = UI_SOURCE.indexOf('\n}\n', start);
         expect(start).toBeGreaterThan(0);
         expect(end).toBeGreaterThan(start);
-        const body = SOURCE.slice(start, end);
+        const body = UI_SOURCE.slice(start, end);
 
         expect(body).toContain('this.resolveProtocol(');
         expect(body).toContain('p.getUiView(');
@@ -334,7 +352,55 @@ describe('[#13214] §1 the REST seam — absent context vs entitled context', ()
         expect(body.includes('this.resolveExecCtx(')).toBe(true);
         // ⛔ Reverse-checked: a `true` from a substring test is only worth
         // something if the term is spelled the way the rest of the file spells
-        // it — 52 sibling sites say it is.
+        // it — 52 sibling sites say it is. [#23050 slice 4] The list's length
+        // 4 → 5 (`sharing-routes.ts`); over it the two terms read 52 and 67
+        // (50 and 65 before, +1 each per new host-literal forwarder).
+        // [#23050 slice 5] 5 → 6 (`analytics-routes.ts`): 53 and 68, +1 each
+        // for that slice's forwarder.
+        // [#23050 slice 6] 6 → 7 (`security-routes.ts`): 55 and 70, +1 each
+        // per new host-literal forwarder (two registrars, two forwarders).
+        // [#23050 slice 7] 7 → 8 (`discovery-routes.ts`): 56 and 71, +1 each
+        // for the OpenAPI host literal's forwarder (the discovery body reads
+        // neither term, so its literal forwards neither).
+        // [#23050 slice 8] 8 → 9 (`email-routes.ts`): 57 and 72, +1 each for
+        // that slice's forwarder.
+        // [#23050 slice 9] 9 → 10 (`search-routes.ts`): 58 and 73, +1 each for
+        // that slice's forwarder.
+        // [#23050 slice 10] 10 → 11 (`ui-routes.ts`): 59 and 74, +1 each for
+        // that slice's forwarder (the two call sites moved with the body and are
+        // counted in both readings).
+        // [#23050 slice 11] 11 → 12 (`form-routes.ts`): 59 and 74 unchanged —
+        // the public form body reads neither term, so its literal forwards
+        // neither.
+        // [#23050 slice 12] 12 → 13 (`crud-routes.ts`): 60 and 75, +1 each for
+        // that slice's forwarder (the six CRUD doors' call sites moved with the
+        // body and are counted in both readings).
+        // [#23050 slice 13a] 13 → 14 (`meta-collection-routes.ts`): 60 unchanged
+        // and 75 → 76. The moved `/meta` groups call `resolveExecCtx` at three
+        // sites and `enforceAuth` at none (the umbrella's wrapper gates them), so
+        // the host literal the inner method builds forwards the first only; the
+        // three call sites moved and are counted in both readings.
+        // [#23050 slice 13b] 14 → 15 (`meta-item-read-routes.ts`): 60 unchanged
+        // and 76 → 77, the same shape: the per-item reads call `resolveExecCtx` at
+        // one site and `enforceAuth` at none, so the second host literal the inner
+        // method builds forwards the first only; the call site moved and is
+        // counted in both readings.
+        // [#23050 slice 13c] 15 → 16 (`meta-item-write-routes.ts`): 60 unchanged
+        // and 77 → 78, the same shape: the per-item writes call `resolveExecCtx` at
+        // two sites and `enforceAuth` at none, so the third host literal the inner
+        // method builds forwards the first only; the two call sites moved and are
+        // counted in both readings.
+        // [#23050 slice 13d] 16 → 17 (`meta-item-history-routes.ts`): 60 unchanged
+        // and 78 → 79, the same shape: the history family calls `resolveExecCtx` at
+        // five sites and `enforceAuth` at none, so the fourth host literal the inner
+        // method builds forwards the first only; the five call sites moved and are
+        // counted in both readings.
+        // [#23050 slice 13e] 17 → 18 (`meta-object-state-routes.ts`): 60 and 79
+        // unchanged: neither the object state-machine read nor the published read
+        // (which joined `meta-item-history-routes.ts`) calls `resolveExecCtx` or
+        // `enforceAuth`, so neither host literal the inner method builds for them
+        // forwards either, and no call site moved.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
     });

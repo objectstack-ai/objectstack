@@ -85,6 +85,14 @@ import {
   type ActivityTextSources,
 } from './activity-field-redaction.js';
 import type { LedgerRecordWriteAction } from './audit-log-field-redaction.js';
+// [ADR-0139 E6] The ONE derivation of the two writer-stamped columns the
+// withheld-row rule reads, shared with the before-insert hook and the backfill.
+import {
+  declaredMilestoneWatchedFields,
+  declaresActivityStampColumns,
+  installActivityStampHook,
+  planActivityStamp,
+} from './activity-changed-fields.js';
 
 /**
  * Minimal structural view of `NotificationService.emit` (ADR-0030). Declared
@@ -135,10 +143,22 @@ export interface AuditWriterOptions {
   /**
    * Resolve the workspace default locale (ADR-0053 `localization.locale`) for
    * the write's tenant/user scope. Called per audited write but memoized here
-   * with a short TTL, so implementations may hit the settings service
-   * directly. Absent → summaries stay English (status quo).
+   * per scope, so implementations may hit the settings service directly. A
+   * held answer lasts until the next write to `sys_setting` or
+   * `sys_platform_setting` through this engine, or a short TTL, whichever
+   * comes first. Absent → summaries stay English (status quo).
    */
   getLocale?(tenantId?: string, userId?: string): Promise<string | undefined>;
+  /**
+   * [ADR-0131 D9] The organization an activity row carries when neither its
+   * record nor the acting session names one: the Default Organization under
+   * `single` (the only organization there is), `null` under a wall — the
+   * `tenancy` service's `defaultOrgId()`. Asked only for such a row, never
+   * for one whose organization is already known. Absent, `null`, or an answer
+   * that throws → no activity row is written; the ledger row still is
+   * (ruling 6257510973 item 3: activity is never a NULL row).
+   */
+  getDefaultOrganizationId?(): Promise<string | null | undefined>;
 }
 
 /**
@@ -155,8 +175,8 @@ export interface AuditWriterOptions {
  * Skip rules avoid recursion and noise:
  *  - Never audit the audit/activity tables themselves.
  *  - Never audit session/presence/auth tables (high-frequency, low value).
- *  - A user's own write to their own per-user UI-state row writes the ledger
- *    row and no activity row (`PER_USER_UI_STATE_OWNER_FIELD`).
+ *  - A user's own write to their own per-user UI-state row writes neither the
+ *    ledger row nor the activity row (`PER_USER_UI_STATE_OWNER_FIELD`).
  *  - Read-only operations (`afterFind`) are not audited BY THIS WRITER. Since
  *    #8992 the `read` action has its own writer in `read-audit.ts`, installed
  *    separately and only over the objects a deployment opts in: record-detail
@@ -263,37 +283,45 @@ const SKIP_OBJECTS = new Set<string>([
 export const AUDIT_EXCLUDED_OBJECTS: string[] = [...SKIP_OBJECTS];
 
 /**
- * [#22961] Per-user UI-state objects: the ledger row stays, and the activity
- * mirror is skipped for the owning user's OWN write only.
+ * [#22961, ruling record 6212163130] Per-user UI-state objects: the owning
+ * user's OWN write writes neither the `sys_audit_log` row nor the activity row.
  *
- * The rule: what reaches a user's bell is another actor's act or something the
- * user needs, never the user's own UI state. A `sys_activity` row reaches the
- * bell (its Activity tab lists the newest rows the caller may read). A per-user
- * UI-state row is re-saved by the client as a side effect of using the
- * interface, and RLS keeps it private to its user, so the one reader of its
- * activity row is the user who just caused it. Mirrored, every navigation came
- * back as `Updated User Preference "ui.recent"`, and a fresh user's bell held
- * nothing else.
+ * The rule: the ledger records acts (data, configuration, access and sharing
+ * changes), and what reaches a user's bell is another actor's act or something
+ * the user needs. A user's own UI state is neither. A per-user UI-state row is
+ * re-saved by the client as a side effect of using the interface (a column
+ * hidden, a sort toggled, a page visited), and RLS keeps it private to its
+ * user. Recorded, every click came back twice: as an `update` row on top of
+ * Setup's Audit Logs, burying the rows an administrator opens it for, and as
+ * `Updated User Preference "ui.recent"` in the user's own bell, where a fresh
+ * user saw nothing else.
  *
  *  - CLOSED and DECLARED: an object is a member only by being listed here,
  *    mapped to the field that names its owning user. ⛔ Never a name heuristic.
  *    No spec key means "per-user UI state"; `enable.activities: false` mutes
- *    every writer, which is wider than this rule.
- *  - OWN WRITES ONLY: the user the activity row would name (`actor_id`) must be
- *    the owner on every side of the row the write carries. Another actor's
- *    write keeps its activity row: an organization admin editing the row from
- *    Setup's User Preferences grid (`modifyAllRecords` passes the self-only
- *    RLS), a system write with no user, a write that moves the row to another
- *    owner.
- *  - ACTIVITY ONLY: the `sys_audit_log` row is written exactly as before. That
- *    is why this is not `SKIP_OBJECTS`, which drops the ledger row too and is
- *    the `AUDIT_EXCLUDED_OBJECTS` list the hook registration and `read-audit.ts`
- *    share.
+ *    the activity row of every writer and never the ledger row, so it is not
+ *    this rule.
+ *  - OWN WRITES ONLY: the acting user (`userId`: the `user_id` the ledger row
+ *    would record, and the `actor_id` the activity row would) must be the
+ *    owner on every side of the row the write carries. Another actor's write
+ *    keeps BOTH rows: an organization admin editing the row from Setup's User
+ *    Preferences grid (`modifyAllRecords` passes the self-only RLS), a system
+ *    write with no user, a write that moves the row to another owner.
+ *  - LEDGER AND ACTIVITY, one test (ruling record 6212163130): judged once, at
+ *    the top of `writeAudit`, before either row is built; a write it does not
+ *    admit writes both rows exactly as before. It is still not `SKIP_OBJECTS`,
+ *    which drops every writer's rows and is the `AUDIT_EXCLUDED_OBJECTS` list
+ *    the hook registration and `read-audit.ts` share: another actor's write to
+ *    the same object is an act. No spec key and no object-level flag either;
+ *    `SKIP_OBJECTS` and this rule are the standing qualifications of the
+ *    spec's "audit capture itself is always on" (`enable.trackHistory`). Rows
+ *    already stored are kept.
  *
  * Membership as measured: the console keeps all of its per-user UI state
  * (`ui.recent`, `ui.favorites`, `ui.flow.palette.recents`) on
  * `sys_user_preference`, and no other per-user UI-state object exists. A new
- * one joins by a line here.
+ * one joins by a line here, and that line takes its owners' own writes out of
+ * the compliance ledger: ⛔ never a business or security object.
  */
 const PER_USER_UI_STATE_OWNER_FIELD: ReadonlyMap<string, string> = new Map([
   ['sys_user_preference', 'user_id'],
@@ -835,7 +863,9 @@ function matchMilestone(
       return {
         template: m.summary,
         type: typeof m.type === 'string' ? m.type : undefined,
-        watched: [...new Set<string>(milestones.filter(asked).map((w: any) => w.field))],
+        // [ADR-0139 E6] The same list the read rule keys the CURRENT
+        // declaration by, from the same function.
+        watched: declaredMilestoneWatchedFields(objectDef),
       };
     }
   }
@@ -1255,25 +1285,71 @@ export function installAuditWriters(
     }
   };
 
-  // Workspace locale changes rarely, but writeAudit runs on every CRUD write —
-  // memoize the settings lookup per principal scope with a short TTL so audit
-  // logging doesn't add a settings query to every mutation's hot path.
+  // [#24235] The write locale, held per principal scope. Asking for it costs
+  // the settings cascade (one `sys_platform_setting` and one `sys_setting`
+  // read on a stock boot) and writeAudit runs on every CRUD write, so the
+  // answer is held — but a summary line is stored ONCE, at write time, so a
+  // held answer that outlives a language change stores the old language for
+  // good. It is therefore held only until the first of:
+  //
+  //  1. A write to either settings store, seen by this writer's own
+  //     after-hooks (`retireHeldLocales`, registered below). `SettingsService`
+  //     persists through this engine, so a `localization` change made through
+  //     the settings API is one; a direct row write (a seeder) is the other,
+  //     and it emits no settings event at all. Those are the writes that
+  //     retire the core resolver's success cache beneath this one
+  //     (`resolveLocalizationContext`: the settings generation and the engine
+  //     write epoch), so this memo no longer outlives the layer it sits on.
+  //  2. `LOCALE_TTL_MS` — the residual bound, for what (1) cannot see: a host
+  //     resolver's own storage (`AuditPluginOptions.getLocale` offers no
+  //     seam), and a peer node's settings write.
+  //
+  // ⛔ Not the engine write epoch itself, and not a read through the core
+  // resolver with no memo here. Every audited write IS an engine write, so the
+  // epoch has always moved by the time this writer asks: either shape costs
+  // the full settings read on every audited write (measured on a real engine:
+  // two settings reads per audited write, against none for a held answer).
   const LOCALE_TTL_MS = 30_000;
-  const localeCache = new Map<string, { value: string | undefined; expires: number }>();
+  /**
+   * Advanced by every settings-store write. ONE rule retires a held answer:
+   * an entry stamped with an older generation is dead.
+   */
+  let localeGeneration = 0;
+  const localeCache = new Map<string, { value: string | undefined; expires: number; generation: number }>();
   const resolveWriteLocale = async (tenantId?: string, userId?: string): Promise<string | undefined> => {
     if (!opts.getLocale) return undefined;
     const cacheKey = `${tenantId ?? ''}|${userId ?? ''}`;
+    // Read BEFORE the lookup and stamped on its answer, as the core resolver
+    // stamps its epoch: a settings write that lands while the lookup is in
+    // flight moves the generation past the stamp, so the pre-write answer is
+    // dead on arrival instead of held for the TTL.
+    const generation = localeGeneration;
     const now = Date.now();
     const hit = localeCache.get(cacheKey);
-    if (hit && hit.expires > now) return hit.value;
+    if (hit && hit.generation === generation && hit.expires > now) return hit.value;
     let value: string | undefined;
     try {
       value = await opts.getLocale(tenantId, userId);
     } catch {
       value = undefined;
     }
-    localeCache.set(cacheKey, { value, expires: now + LOCALE_TTL_MS });
+    localeCache.set(cacheKey, { value, expires: now + LOCALE_TTL_MS, generation });
     return value;
+  };
+  /**
+   * The two objects the settings cascade answers from (ADR-0131 D7: the global
+   * rung has its own store). Coarse on purpose — any write to either retires
+   * every held locale, whatever its namespace: a predicate update names no
+   * namespace the hook can read without fetching the row, and settings writes
+   * are rare, so the over-retirement costs one locale read per scope.
+   */
+  const LOCALE_SOURCE_OBJECTS: ReadonlySet<string> = new Set(['sys_setting', 'sys_platform_setting']);
+  const retireHeldLocales = (ctx: HookContext): void => {
+    // Defence in depth, as `writeAudit`'s early return is for its exclusions:
+    // the registration is object-scoped, but a dispatcher that ignored the
+    // scope would otherwise retire on every write — a memo that never hits.
+    if (!LOCALE_SOURCE_OBJECTS.has(ctx.object)) return;
+    localeGeneration += 1;
   };
 
   // Translate function bound to a locale. Returns undefined on any miss
@@ -1297,6 +1373,15 @@ export function installAuditWriters(
   // Remove any prior installation so we can safely re-install on hot reload.
   if (typeof engine.unregisterHooksByPackage === 'function') {
     engine.unregisterHooksByPackage(packageId);
+  }
+
+  // [#24235] The held write locale's retirement seam — see `resolveWriteLocale`.
+  // One registration per object, in the string form every registration in this
+  // file uses; `retireHeldLocales` re-checks the object either way.
+  for (const object of LOCALE_SOURCE_OBJECTS) {
+    for (const event of ['afterInsert', 'afterUpdate', 'afterDelete']) {
+      engine.registerHook(event, retireHeldLocales, { object, packageId });
+    }
   }
 
   // Whether a given object's *registered* schema declares a field — see
@@ -1370,6 +1455,14 @@ export function installAuditWriters(
   // `resolveRecordOrganizationField` there for the precedence and for why the
   // answer comes from the schema rather than a literal.
   const recordOrgResolver = createRecordOrganizationResolver(engine);
+  const derivableActivityOrganization = async (): Promise<string | undefined> => {
+    if (!opts.getDefaultOrganizationId) return undefined;
+    try {
+      return (await opts.getDefaultOrganizationId()) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
 
   // Display label for an object under a given translate fn: translated label
   // → authored def label → API name. Shared by activity summaries and the
@@ -1813,6 +1906,13 @@ export function installAuditWriters(
         ? (ctx as any).provenance.attributedUserId
         : undefined;
     const userId: string | undefined = sess.userId ?? attributedUserId;
+    // [#22961, ruling record 6212163130] A user's own write to their own
+    // per-user UI-state row writes neither the ledger row nor the activity row
+    // (PER_USER_UI_STATE_OWNER_FIELD states the rule). Judged on `userId`, the
+    // value the ledger's `user_id` and the activity row's `actor_id` would
+    // carry, and before any read this writer pays for. A write the test does
+    // not admit goes on to write both rows.
+    if (isOwnUiStateWrite(ctx.object, userId, before, after)) return;
     // [#17022, ADR-0090 D10 rule 4] The AGENT that performed this write, when
     // an MCP OAuth client acted for the human above. A THIRD channel, and the
     // reason it is a separate one: `session.userId` is the delegator — the
@@ -2073,13 +2173,9 @@ export function installAuditWriters(
     // = mirror on (spec default `true`), explicit `false` = this object's CRUD
     // is not mirrored into the sys_activity timeline. This is the per-object
     // lever for activity-row growth (ADR-0057). The compliance audit row is
-    // NOT gated — sys_audit_log capture stays unconditional.
-    const activitiesEnabled = getObjectDef(ctx.object)?.enable?.activities !== false;
-    // [#22961] A user's own write to their own per-user UI-state row is not
-    // mirrored either (PER_USER_UI_STATE_OWNER_FIELD states the rule). Judged
-    // on `userId`, the same value `actor_id` would carry. The ledger row is
-    // untouched.
-    const mirrorsActivity = activitiesEnabled && !isOwnUiStateWrite(ctx.object, userId, before, after);
+    // NOT gated by it. ([#22961] A user's own write to their own per-user
+    // UI-state row never reaches this line: it returned above, with no row.)
+    const mirrorsActivity = getObjectDef(ctx.object)?.enable?.activities !== false;
     // [#22510, #22527] The name and avatar of the user `actor_id` names — the
     // SAME `userId`, so the columns cannot disagree about who acted — from one
     // memoized `sys_user` read. Read only when an activity row will be
@@ -2089,6 +2185,12 @@ export function installAuditWriters(
     const actor: ActorSnapshot =
       mirrorsActivity && userId ? await resolveActorSnapshot(api, userId) : NO_ACTOR_SNAPSHOT;
 
+    const activityMetadata = {
+      old: oldValue,
+      new: newValue,
+      ...(kind ? { [ACTIVITY_KIND_KEY]: kind.value } : {}),
+      [ACTIVITY_TEXT_SOURCES_KEY]: textSources,
+    };
     const activityRow: Record<string, any> = {
       type: activityType,
       // Explicit ISO timestamp — `defaultValue: 'NOW()'` on the column
@@ -2109,21 +2211,36 @@ export function installAuditWriters(
       // came from. The read side strips the declaration before serving.
       // [#22771] A fired milestone's kind rides beside them, judged on read
       // against the fields the declaration names for it.
-      metadata: safeStringify({
-        old: oldValue,
-        new: newValue,
-        ...(kind ? { [ACTIVITY_KIND_KEY]: kind.value } : {}),
-        [ACTIVITY_TEXT_SOURCES_KEY]: textSources,
-      }),
+      metadata: safeStringify(activityMetadata),
+      // [ADR-0139 E6] The two writer-stamped columns the withheld-row rule is
+      // a predicate over, from the metadata this row records (the
+      // before-insert hook re-derives them by the same planner).
+      ...(declaresActivityStampColumns(engine as any)
+        ? (planActivityStamp(activityMetadata) ?? { changed_fields: null, milestone_key: null })
+        : {}),
     };
     // Same rationale as auditRow: stamp the tenant column so RLS matches the
     // recipient's organization on read — but only when the (auto-injected)
     // column actually exists, so single-tenant activity writes don't fail.
+    //
+    // [ADR-0131 D9] A record with no organization of its own (a `sys_user`, a
+    // platform setting), written with no session organization (a sign-up),
+    // takes the derivable one: the Default Organization under `single`. Only
+    // the activity row: the ledger's `tenant_id` above is an attribution of
+    // what the row is ABOUT (D7) and stays the record's.
+    //
+    // [ADR-0131 D9; ruling 6257510973 item 3, Q3 A] When none is derivable (a
+    // wall, with neither the record nor the session naming one), NO activity
+    // row is written — never a NULL one. The ledger row still is:
+    // `sys_audit_log` is the deployment-level record of the change (D7).
+    let activityOrganizationKnown = true;
     if (objectHasField('sys_activity', 'organization_id')) {
-      activityRow.organization_id = tenantId ?? null;
+      const organizationId = tenantId ?? (await derivableActivityOrganization());
+      activityOrganizationKnown = organizationId != null;
+      if (activityOrganizationKnown) activityRow.organization_id = organizationId;
     }
 
-    const activityRowToWrite = mirrorsActivity ? activityRow : undefined;
+    const activityRowToWrite = mirrorsActivity && activityOrganizationKnown ? activityRow : undefined;
     // [#21262] The ledger row is written first; the writer advances this
     // before the activity row, so after a throw it names the refused table.
     const progress: AuditTrailWriteProgress = { writing: 'sys_audit_log' };
@@ -2161,6 +2278,9 @@ export function installAuditWriters(
   // `afterDelete` are the two the bulk gates (#5038) read, and `afterUpdate` is
   // the one #5284's single-id gate reads.
   engine.registerHook('afterInsert', writeAudit, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
+  // [ADR-0139 E6, Q2 = b] Every `sys_activity` insert, whoever writes it, is
+  // stamped by the one planner — the mirror's own rows included.
+  installActivityStampHook(engine as any, packageId);
   engine.registerHook('afterUpdate', writeAudit, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
   engine.registerHook('afterDelete', writeAudit, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
 

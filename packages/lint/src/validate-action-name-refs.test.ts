@@ -206,7 +206,7 @@ describe('validateActionNameRefs — page quick actions', () => {
       pages: [
         {
           name: 'p',
-          kind: 'jsx',
+          kind: 'html',
           source: '<div />',
           regions: [
             {

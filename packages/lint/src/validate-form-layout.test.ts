@@ -3,10 +3,21 @@
 import { describe, it, expect, vi } from 'vitest';
 import { defineStack, normalizeStackInput } from '@objectstack/spec';
 import {
-  validateFormLayout,
+  validateFormLayout as validateFormLayoutUnrecorded,
   FORM_FIELD_UNKNOWN,
   FORM_SECTION_GROUP_UNKNOWN,
 } from './validate-form-layout.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Slice 21: every `form-section-group-unknown` finding this file fires
+// is recorded, and the block at the foot of the file holds each recorded `fix:`
+// line to one line of at most 200 characters.
+const firedGroupHints: Array<{ rule: string; hint: string }> = [];
+const validateFormLayout: typeof validateFormLayoutUnrecorded = (...args) => {
+  const findings = validateFormLayoutUnrecorded(...args);
+  for (const f of findings) if (f.rule === FORM_SECTION_GROUP_UNKNOWN) firedGroupHints.push(f);
+  return findings;
+};
 
 type AnyRec = Record<string, unknown>;
 
@@ -18,7 +29,8 @@ const objects = [
  * [#13855] The same object, plus the declared field groups a section may now
  * reference. Kept separate from `objects` so every pre-existing test above
  * still runs against an object with NO groups — which is also the state the
- * `declares no field groups at all` hint is written for.
+ * hint's "declare a group, or enumerate the section's `fields`" line is written
+ * for.
  */
 const groupedObjects = [
   {
@@ -203,7 +215,7 @@ describe('#13855 — dangling `section.group` references', () => {
     expect(validateFormLayout(viewWith([{ group: 'basics' }, { group: 'money' }]))).toEqual([]);
   });
 
-  it('flags a key that names no declared group, with the declared set in the hint', () => {
+  it('flags a key that names no declared group, with one remedy line as the hint', () => {
     const findings = validateFormLayout(viewWith([{ group: 'contact_info' }]));
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(FORM_SECTION_GROUP_UNKNOWN);
@@ -212,7 +224,12 @@ describe('#13855 — dangling `section.group` references', () => {
     expect(findings[0].message).toContain('field group "contact_info"');
     // The consequence, in the words the severity is argued from.
     expect(findings[0].message).toContain('silently does not render');
-    expect(findings[0].hint).toContain('Declared groups on contract: basics, money.');
+    // [#22161] Slice 21: the declared set is no longer echoed — the nearest
+    // declared group is named when one is close, and none is to `contact_info`.
+    expect(findings[0].hint).toBe(
+      "Fix the key, or declare 'contact_info' in contract's `fieldGroups` and set `group: 'contact_info'` on its " +
+        'member fields.',
+    );
   });
 
   it('reads the LEGACY `groups` bucket too — a rule silent on the alias is half a rule', () => {
@@ -229,7 +246,10 @@ describe('#13855 — dangling `section.group` references', () => {
       views: [{ name: 'f', data: { provider: 'object', object: 'contract' }, sections: [{ group: 'basics' }] }],
     });
     expect(findings).toHaveLength(1);
-    expect(findings[0].hint).toContain('declares no field groups at all');
+    expect(findings[0].hint).toBe(
+      "Declare `fieldGroups: [{ key: 'basics', label: '…' }]` on contract and `group: 'basics'` on its member " +
+        "fields, or enumerate the section's `fields`.",
+    );
   });
 
   it('says nothing about an object this stack does not define', () => {
@@ -586,5 +606,39 @@ describe('#16168 — falls back to the container list binding', () => {
       objects,
       views: [listBoundContainer({ sections: [{ columns: 2, fields: [{ field: 'ghost_lb', colSpan: 2 }] }] })],
     }).map((f) => f.rule)).toEqual([FORM_FIELD_UNKNOWN]);
+  });
+});
+
+// [#22161] Slice 21: the `fix:` line of `form-section-group-unknown` is one
+// remedy line. It names the nearest declared group ("Did you mean") instead of
+// echoing the object's whole group list, and how a section inherits a group's
+// members is the id's `os explain` entry.
+describe('[#22161] one-line fix — form-section-group-unknown', () => {
+  it('a misspelt group key names the nearest declared group', () => {
+    const findings = validateFormLayout({
+      objects: groupedObjects,
+      views: [{ name: 'f', data: { provider: 'object', object: 'contract' }, sections: [{ group: 'basic' }] }],
+    });
+    expect(findings.map((f) => f.hint)).toEqual([
+      "Fix the key, or declare 'basic' in contract's `fieldGroups` and set `group: 'basic'` on its member fields. " +
+        'Did you mean "basics"?',
+    ]);
+  });
+
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    expect(firedGroupHints.length).toBeGreaterThan(3);
+    for (const f of firedGroupHints) {
+      expect(f.hint).not.toContain('\n');
+      expect(f.hint.length, f.hint).toBeLessThanOrEqual(200);
+      expect(f.hint).not.toContain('Declared groups');
+      expect(f.hint).not.toContain('declares no field groups at all');
+    }
+  });
+
+  it('`os explain form-section-group-unknown` carries what the `fix:` line no longer says', () => {
+    const text = explainRule(FORM_SECTION_GROUP_UNKNOWN)!.paragraphs.join('\n');
+    for (const fact of ['inherits its members', 'membership is declared on the FIELD', 'legacy `groups`']) {
+      expect(text, fact).toContain(fact);
+    }
   });
 });

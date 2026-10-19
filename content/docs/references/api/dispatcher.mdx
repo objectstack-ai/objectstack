@@ -15,12 +15,15 @@ The dispatcher is the central routing component that:
 1. Matches incoming request URLs against registered route prefixes
 2. Delegates to the corresponding CoreService implementation
 3. Returns 503 Service Unavailable when a service is not registered
-4. Serves prefixes registered by the kernel services above. Plugins that need
-   a code handler mount it imperatively on the `http.server` service (resolve
-   it from the plugin context on `kernel:ready`) — the manifest's
-   `contributes.routes` key was removed in @objectstack/spec 17 (commit bc56e1881):
-   nothing ever read it, and authoring it is now a tsc error and a parse
-   error carrying that prescription.
+4. Serves prefixes registered by the kernel services above. The `http.server`
+   service is the PLATFORM plugins' own door-building primitive, not an
+   app-author surface: an app declares its endpoint under `defineStack({ apis })`
+   (`type: 'object_operation'` or `'flow'`, ADR-0121), computes in a flow, and
+   registers code as a stack function (`defineStack({ functions })`) or a
+   connector. The manifest's `contributes.routes` key was removed in
+   @objectstack/spec 17 (commit bc56e1881): nothing ever read it, and
+   authoring it is now a tsc error and a parse error carrying that
+   prescription.
 
 Architecture alignment:
 - Kubernetes: API server aggregation layer

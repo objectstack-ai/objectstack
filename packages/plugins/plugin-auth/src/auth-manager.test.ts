@@ -37,6 +37,7 @@ vi.mock('better-auth/plugins/haveibeenpwned', () => ({
 import { betterAuth } from 'better-auth';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
 import { ADMIN_FULL_ACCESS, ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
+import { AuthzStoreUnavailableError } from '@objectstack/core';
 
 describe('AuthManager', () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
@@ -1003,35 +1004,101 @@ describe('AuthManager', () => {
       });
     });
 
+    /**
+     * [#24243] A placement answer asserted on its envelope (ADR-0112): the
+     * status and the `code` better-auth serialises into the body.
+     */
+    const placementAnswer = async (attempt: Promise<unknown>) => {
+      const err = (await attempt.then(
+        () => undefined,
+        (e: unknown) => e,
+      )) as
+        | { status?: unknown; statusCode?: unknown; body?: { code?: unknown; message?: unknown }; cause?: unknown }
+        | undefined;
+      expect(err, 'the invitation was admitted').toBeTruthy();
+      return err;
+    };
+
     it('issuance: a refused placement REJECTS the whole invitation (no row is created)', async () => {
+      // The gate's own refusal, in the shape `invitation-placement.ts` throws
+      // it: plugin-security's `PermissionDeniedError`, read by its ADR-0112
+      // code. A structural stand-in, because importing plugin-security here
+      // measured roughly 1–2 s more import time on this file; the real class
+      // reaches this catch on the wire in the dogfood `delegated-admin-invite`
+      // file.
       const assertIssuable = vi.fn(async () => {
-        throw new Error("business unit 'bu_plant_b' is outside the delegated subtree");
+        throw Object.assign(new Error("business unit 'bu_plant_b' is outside the delegated subtree"), {
+          name: 'PermissionDeniedError',
+          code: 'PERMISSION_DENIED',
+          status: 403,
+          statusCode: 403,
+        });
       });
       const { hooks, warnSpy } = await bootWithPlacement({ assertIssuable, apply: vi.fn() });
       warnSpy.mockRestore();
 
-      await expect(
+      const err = await placementAnswer(
         hooks.beforeCreateInvitation({
           invitation: PLACEMENT_INVITE,
           inviter: { id: 'u_issuer' },
           organization: { id: 'org-42' },
         }),
-      ).rejects.toThrow(/outside the delegated subtree/);
+      );
+      expect(err?.statusCode).toBe(403);
+      expect(err?.status).toBe('FORBIDDEN');
+      expect(err?.body?.code).toBe('INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE');
+      // The gate's verdict is relayed as its message.
+      expect(String(err?.body?.message)).toMatch(/outside the delegated subtree/);
+    });
+
+    it('issuance: a store fault out of the placement check is an outage (503 SERVICE_UNAVAILABLE), not a scope refusal', async () => {
+      // [#24243] `assertIssuable` resolves the issuer's grants from the store
+      // BEFORE the gate runs; a store that cannot answer throws there, as the
+      // shared resolver's loud failure. Pinned at the unit level: on a booted
+      // stack the store answers, so no request reaches this arm on demand.
+      const fault = new AuthzStoreUnavailableError('sys_user_position', new Error('connection refused'));
+      const assertIssuable = vi.fn(async () => {
+        throw fault;
+      });
+      const { hooks, warnSpy } = await bootWithPlacement({ assertIssuable, apply: vi.fn() });
+      warnSpy.mockRestore();
+
+      const err = await placementAnswer(
+        hooks.beforeCreateInvitation({
+          invitation: PLACEMENT_INVITE,
+          inviter: { id: 'u_issuer' },
+          organization: { id: 'org-42' },
+        }),
+      );
+      expect(err?.statusCode).toBe(503);
+      expect(err?.status).toBe('SERVICE_UNAVAILABLE');
+      expect(err?.body?.code).toBe('SERVICE_UNAVAILABLE');
+      // Not the refusal's code, and the store's own text does not ride the body.
+      expect(err?.body?.code).not.toBe('INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE');
+      expect(String(err?.body?.message)).not.toContain('connection refused');
+      // The failure is kept for the operator.
+      expect(err?.cause).toBe(fault);
     });
 
     it('issuance: NO placement runtime ⇒ a placement-carrying invitation is refused (fail closed)', async () => {
       // Without plugin-security there is no gate; honouring the request would
       // hand org_admin the RBAC-write authority it is deliberately denied.
+      // [#24243] Pinned at the unit level: the dogfood harness (`bootStack`)
+      // always boots plugin-security, which registers the placement service,
+      // so no door on a stock dogfood boot reaches this refusal.
       const { hooks, warnSpy } = await bootWithPlacement(undefined);
       warnSpy.mockRestore();
 
-      await expect(
+      const err = await placementAnswer(
         hooks.beforeCreateInvitation({
           invitation: PLACEMENT_INVITE,
           inviter: { id: 'u_issuer' },
           organization: { id: 'org-42' },
         }),
-      ).rejects.toThrow(/requires the delegated-administration runtime/);
+      );
+      expect(err?.statusCode).toBe(403);
+      expect(err?.body?.code).toBe('INVITE_PLACEMENT_UNSUPPORTED');
+      expect(String(err?.body?.message)).toMatch(/requires the delegated-administration runtime/);
     });
 
     it('issuance: an ordinary invitation (no placement) never consults the gate', async () => {
@@ -1198,6 +1265,28 @@ describe('AuthManager', () => {
       expect(roles.sales_rep).toBeUndefined();
     });
 
+    /**
+     * [#23945] A cap refusal asserted on its envelope (ADR-0112): the status
+     * and the `code` better-auth serialises into the body — never the bare
+     * throw, which a codeless `FORBIDDEN` passes just as well.
+     */
+    const capAnswer = async (attempt: Promise<unknown>) => {
+      const err = (await attempt.then(
+        () => undefined,
+        (e: unknown) => e,
+      )) as
+        | { status?: unknown; statusCode?: unknown; body?: { code?: unknown; message?: unknown }; cause?: unknown }
+        | undefined;
+      expect(err, 'the invitation was admitted').toBeTruthy();
+      return err;
+    };
+    const inviteAs = (orgPlugin: any, role: string, inviterId = 'u_delegate') =>
+      orgPlugin._opts.organizationHooks.beforeCreateInvitation({
+        invitation: { organizationId: 'org-42', email: 'e@x.test', role },
+        inviter: { id: inviterId },
+        organization: { id: 'org-42' },
+      });
+
     it('role cap: a delegate inviting an `admin` is REFUSED (the escalation chain)', async () => {
       // delegate invites admin → sys_member(role='admin') → auto-org-admin-grant
       // → organization_admin → wildcard modifyAllRecords → isTenantAdmin().
@@ -1205,13 +1294,20 @@ describe('AuthManager', () => {
         dataEngine: engineWithMemberRole('delegated_admin') as never,
       });
 
-      await expect(
-        orgPlugin._opts.organizationHooks.beforeCreateInvitation({
-          invitation: { organizationId: 'org-42', email: 'e@x.test', role: 'admin' },
-          inviter: { id: 'u_delegate' },
-          organization: { id: 'org-42' },
-        }),
-      ).rejects.toThrow(/never confer a role above the issuer/);
+      const err = await capAnswer(inviteAs(orgPlugin, 'admin'));
+      expect(err?.statusCode).toBe(403);
+      expect(err?.status).toBe('FORBIDDEN');
+      expect(err?.body?.code).toBe('INVITE_ROLE_ABOVE_ISSUER');
+    });
+
+    it('role cap: a delegate minting another delegate is REFUSED as member-only, not as outranked', async () => {
+      const orgPlugin = await bootOrgPlugin({
+        dataEngine: engineWithMemberRole('delegated_admin') as never,
+      });
+
+      const err = await capAnswer(inviteAs(orgPlugin, 'delegated_admin'));
+      expect(err?.statusCode).toBe(403);
+      expect(err?.body?.code).toBe('INVITE_ISSUER_MEMBER_ONLY');
     });
 
     it('role cap: a delegate inviting a plain `member` passes — and costs no lookup', async () => {
@@ -1244,17 +1340,50 @@ describe('AuthManager', () => {
     });
 
     it('role cap: an unresolvable issuer membership fails CLOSED', async () => {
+      // Pinned HERE, not on the wire: through `POST /organization/invite-member`
+      // this input is not reachable. better-auth reads the inviter's membership
+      // before the hook runs and refuses a non-member (`MEMBER_NOT_FOUND`, 400)
+      // or a role without `invitation:create` (403) first, and the cap re-reads
+      // the same `sys_member` rows in system context — so a read that answers
+      // "no usable row" needs the row to vanish between the two reads.
       const orgPlugin = await bootOrgPlugin({
         dataEngine: engineWithMemberRole(null) as never,
       });
 
-      await expect(
-        orgPlugin._opts.organizationHooks.beforeCreateInvitation({
-          invitation: { organizationId: 'org-42', email: 'e@x.test', role: 'admin' },
-          inviter: { id: 'u_ghost' },
-          organization: { id: 'org-42' },
-        }),
-      ).rejects.toThrow(/could not be verified/);
+      const err = await capAnswer(inviteAs(orgPlugin, 'admin', 'u_ghost'));
+      expect(err?.statusCode).toBe(403);
+      expect(err?.body?.code).toBe('INVITE_ISSUER_UNVERIFIED');
+    });
+
+    it('role cap: NO data engine to read fails CLOSED too — "cannot check" is never "does not apply"', async () => {
+      // Not reachable through `AuthPlugin`, which hard-depends on ObjectQL and
+      // always passes its `data` service; only a bare `AuthManager` built
+      // without `dataEngine` (better-auth then runs on its in-memory adapter)
+      // reaches the hook with nothing to read.
+      const orgPlugin = await bootOrgPlugin();
+
+      const err = await capAnswer(inviteAs(orgPlugin, 'admin', 'u_any'));
+      expect(err?.statusCode).toBe(403);
+      expect(err?.body?.code).toBe('INVITE_ISSUER_UNVERIFIED');
+    });
+
+    it('role cap: a membership read that THROWS is an outage (503 SERVICE_UNAVAILABLE), not a refusal', async () => {
+      // An owner's invitation, so the only thing between it and admission is
+      // the read: the verdict the store would have given is "admitted".
+      const engine = engineWithMemberRole('owner');
+      engine.find.mockImplementation(async () => {
+        throw new Error('store unavailable');
+      });
+      const orgPlugin = await bootOrgPlugin({ dataEngine: engine as never });
+
+      const err = await capAnswer(inviteAs(orgPlugin, 'admin', 'u_owner'));
+      expect(err?.statusCode).toBe(503);
+      expect(err?.status).toBe('SERVICE_UNAVAILABLE');
+      expect(err?.body?.code).toBe('SERVICE_UNAVAILABLE');
+      expect(err?.body?.code).not.toBe('INVITE_ISSUER_UNVERIFIED');
+      // The driver's own failure is kept for the operator.
+      expect((err?.cause as Error | undefined)?.message).toBe('store unavailable');
+      expect(engine.find).toHaveBeenCalledTimes(1);
     });
 
     it('role cap: it runs BEFORE the placement gate and applies without placement intent', async () => {
@@ -1278,7 +1407,7 @@ describe('AuthManager', () => {
           inviter: { id: 'u_delegate' },
           organization: { id: 'org-42' },
         }),
-      ).rejects.toThrow(/never confer a role above the issuer/);
+      ).rejects.toMatchObject({ statusCode: 403, body: { code: 'INVITE_ROLE_ABOVE_ISSUER' } });
       // Refused before the placement gate was ever consulted.
       expect(assertIssuable).not.toHaveBeenCalled();
     });
@@ -1299,24 +1428,30 @@ describe('AuthManager', () => {
         else process.env.OS_MULTI_ORG_ENABLED = OLD_MULTI;
       });
 
+      /**
+       * [#24243] The reservation's envelope (ADR-0112): 400 with the standard
+       * `VALIDATION_ERROR`, a value the request may not carry.
+       */
+      const RESERVED_IDENTIFIER_ANSWER = { statusCode: 400, status: 'BAD_REQUEST', body: { code: 'VALIDATION_ERROR' } };
+
       it("rejects an organization whose slug is '__global__'", async () => {
         const orgPlugin = await bootOrgPlugin();
-        await expect(
-          orgPlugin._opts.organizationHooks.beforeCreateOrganization({
-            organization: { name: 'Global Inc', slug: '__global__' },
-            user: { id: 'u1' },
-          }),
-        ).rejects.toThrow(/'__global__' is reserved .* \(ADR-0120 D3\)/);
+        const attempt = orgPlugin._opts.organizationHooks.beforeCreateOrganization({
+          organization: { name: 'Global Inc', slug: '__global__' },
+          user: { id: 'u1' },
+        });
+        await expect(attempt).rejects.toThrow(/'__global__' is reserved .* \(ADR-0120 D3\)/);
+        await expect(attempt).rejects.toMatchObject(RESERVED_IDENTIFIER_ANSWER);
       });
 
       it("rejects an organization whose id is '__global__'", async () => {
         const orgPlugin = await bootOrgPlugin();
-        await expect(
-          orgPlugin._opts.organizationHooks.beforeCreateOrganization({
-            organization: { id: '__global__', name: 'Global Inc', slug: 'global-inc' },
-            user: { id: 'u1' },
-          }),
-        ).rejects.toThrow(/'__global__' is reserved .* \(ADR-0120 D3\)/);
+        const attempt = orgPlugin._opts.organizationHooks.beforeCreateOrganization({
+          organization: { id: '__global__', name: 'Global Inc', slug: 'global-inc' },
+          user: { id: 'u1' },
+        });
+        await expect(attempt).rejects.toThrow(/'__global__' is reserved .* \(ADR-0120 D3\)/);
+        await expect(attempt).rejects.toMatchObject(RESERVED_IDENTIFIER_ANSWER);
       });
 
       it('an ordinary organization passes the reservation guard', async () => {
@@ -1332,12 +1467,13 @@ describe('AuthManager', () => {
       it('the reservation is judged before the multi-org gate (precise error in single-org mode too)', async () => {
         delete process.env.OS_MULTI_ORG_ENABLED; // default: single-org
         const orgPlugin = await bootOrgPlugin();
-        await expect(
-          orgPlugin._opts.organizationHooks.beforeCreateOrganization({
-            organization: { name: 'Global Inc', slug: '__global__' },
-            user: { id: 'u1' },
-          }),
-        ).rejects.toThrow(/'__global__' is reserved/);
+        const attempt = orgPlugin._opts.organizationHooks.beforeCreateOrganization({
+          organization: { name: 'Global Inc', slug: '__global__' },
+          user: { id: 'u1' },
+        });
+        await expect(attempt).rejects.toThrow(/'__global__' is reserved/);
+        // [#24243] …and its code, not the posture gate's `ORGANIZATION_CREATION_DISABLED`.
+        await expect(attempt).rejects.toMatchObject(RESERVED_IDENTIFIER_ANSWER);
       });
     });
 
@@ -2279,6 +2415,8 @@ describe('AuthManager', () => {
         expect(err.name).toBe('APIError');
         expect(err.status).toBe('TOO_MANY_REQUESTS');
         expect(err.statusCode).toBe(429);
+        // [#24243] The standard ADR-0112 code a client branches on.
+        expect(err.body?.code).toBe('RATE_LIMIT_EXCEEDED');
         // #2780 standing requirement: the code never travels in an error.
         expect(String(err.message)).not.toContain('424242');
       });
@@ -2292,6 +2430,7 @@ describe('AuthManager', () => {
         expect(isAPIError(err)).toBe(true);
         expect(err.status).toBe('TOO_MANY_REQUESTS');
         expect(err.statusCode).toBe(429);
+        expect(err.body?.code).toBe('RATE_LIMIT_EXCEEDED');
       });
 
       it('both walls on the endpoint present the SAME outward shape', async () => {
@@ -2305,17 +2444,23 @@ describe('AuthManager', () => {
         const quota = await rejection(() => opts.sendOTP({ phoneNumber: PHONE, code: '111111' }));
 
         expect(outwardShape(quota)).toEqual(outwardShape(perNumber));
+        // [#24243] One code for both walls: a code per wall would tell them apart.
+        // Pinned at the unit level: the dogfood harness mounts no phone-number
+        // plugin (`bootStack` builds `AuthPlugin` from its secret alone, and
+        // `OS_AUTH_PHONE_NUMBER_ENABLED` is read only by `objectstack serve`),
+        // so neither wall has a door on a stock dogfood boot.
         expect(outwardShape(quota)).toEqual({
           name: 'APIError',
           status: 'TOO_MANY_REQUESTS',
           statusCode: 429,
-          bodyCode: undefined,
+          bodyCode: 'RATE_LIMIT_EXCEEDED',
         });
       });
 
       it('matches the CODE prefix, so the service may reword the message half', async () => {
         const { manager, opts } = await bootOtp();
-        // Only `TOO_MANY_REQUESTS` — an ADR-0112 error code — is restated across
+        // Only the envelope's `TOO_MANY_REQUESTS` token (the service's spelling,
+        // better-call's status name, not an ADR-0112 code) is restated across
         // the package boundary; the prose after the colon is service-owned and
         // free to change without breaking this mapping.
         manager.setSmsService(

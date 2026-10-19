@@ -145,7 +145,13 @@ import {
 } from '@objectstack/types';
 import { SEMCONV } from '@objectstack/observability';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
-import { hookBodyRunnerFactory, actionBodyRunnerFactory, jobBodyRunnerFactory, judgeJobBody } from './sandbox/body-runner.js';
+import {
+    hookBodyRunnerFactory,
+    actionBodyRunnerFactory,
+    jobBodyRunnerFactory,
+    judgeJobBody,
+    withInProcessHookTitle,
+} from './sandbox/body-runner.js';
 import { GLOBAL_ACTION_OBJECT_KEY } from './action-execution.js';
 import {
     collectBundleActions,
@@ -268,6 +274,11 @@ export function bindAppArtifactHandlers(
                     packageId: owner,
                     functions,
                     bodyRunner: hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId }),
+                    // [#24289] A handler that runs in-process, an inline function or
+                    // the function a string `handler` names, is handed the
+                    // `ctx.title(field?)` a `body` gets in the sandbox. The binder
+                    // applies it after resolving the name, so both take this one wrap.
+                    wrapHandler: (handler, hook) => withInProcessHookTitle(handler, ql, String(hook.name)),
                 });
                 out.hooks = hooks.length;
                 out.functions = Object.keys(functions).length;

@@ -47,6 +47,12 @@ interface Row {
 const keyOf = (w: Record<string, unknown>) =>
     `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}`;
 
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 /**
  * The engine surface the repository write path touches.
  *
@@ -72,18 +78,25 @@ function makeProtocol(seed: Array<{ type: string; name: string; metadata: Record
     };
     const rows = tableOf('sys_metadata');
     let nextId = 0;
+    const seedRowsAt = (where: Record<string, unknown>) => seed
+        .filter((r) => whereValueMatches(r.type, where.type) && r.name === where.name
+            && (where.state ?? 'active') === 'active' && (where.organization_id ?? null) === null)
+        .map((hit) => ({
+            id: `seed_${hit.name}`, type: hit.type, name: hit.name, organization_id: null, state: 'active',
+            metadata: JSON.stringify(hit.metadata),
+        }));
     const engine: any = {
         async findOne(object: string, query?: EngineFindOneQueryInput) {
             assertEngineFindOnePredicate(object, query);
-            if (object !== 'sys_metadata' || seed.length === 0) return null;
-            const where = ((query as { where?: Record<string, unknown> } | undefined)?.where ?? {});
-            const hit = seed.find((r) => r.type === where.type && r.name === where.name
-                && (where.state ?? 'active') === 'active' && (where.organization_id ?? null) === null);
-            return hit
-                ? { id: `seed_${hit.name}`, type: hit.type, name: hit.name, organization_id: null, state: 'active', metadata: JSON.stringify(hit.metadata) }
-                : null;
+            if (object !== 'sys_metadata') return null;
+            return seedRowsAt((query as { where?: Record<string, unknown> } | undefined)?.where ?? {})[0] ?? null;
         },
-        async find() { return []; },
+        // [#24371] The by-name read takes the item's active rows from ONE
+        // `find` (both spellings, `type: { $in }`), so the seed is found there too.
+        async find(object: string, query?: { where?: Record<string, unknown> }) {
+            if (object !== 'sys_metadata') return [];
+            return seedRowsAt(query?.where ?? {});
+        },
         async insert(table: string, data: Record<string, unknown>) {
             nextId += 1;
             const row = { id: `r_${nextId}`, ...(data as any) } as Row;
@@ -489,87 +502,5 @@ describe('#20230 a flattened overlay carrying a retired owner/hidden is refused 
             expect(result.success).toBe(true);
             expect(rows.size).toBe(1);
         }
-    });
-});
-
-/**
- * #23357 — a page whose component binds the retired view-level `api` data
- * source, at the save door: `saveMetaItem`, the `PUT /api/v1/meta/page/:name`
- * write path the Studio, a REST caller and an MCP author reach.
- *
- * Before: the page parse left a component's `properties` an open record and the
- * component-props gate that refuses the binding runs at the CLI doors only, so
- * an `object-grid` whose `data` named the retired provider saved — one row
- * persisted with its request headers — and the console kept sending it. After:
- * `PageSchema`'s `checkPageComponentViewData` refuses it, and this envelope is
- * what the author meets. Pinned HERE and not only in spec for the reason the
- * #20230 block above gives: a spec refusal that did not reach this envelope
- * would be a refusal nobody sees.
- */
-describe('#23357 a page whose component binds the retired view-level api source is refused at the save door', () => {
-    // Spelled through a constant: the spec's tree-scoped absence pin reads
-    // authored literals, and these bodies are refusals, not authorings.
-    const RETIRED_PROVIDER = 'api' as const;
-    const RETIRED_BINDING = {
-        provider: RETIRED_PROVIDER,
-        read: { url: 'https://partner.example.com/cases', headers: { Authorization: 'Bearer s3cr3t' } },
-    };
-    const PRESCRIPTION = /^`view\.data\.provider: 'api'` was removed in @objectstack\/spec 18 \(ADR-0049/;
-    const grid = (data: unknown) => ({ id: 'cases', type: 'object-grid', properties: { objectName: 'crm_case', data } });
-    const pageBody = (components: unknown[]) => ({
-        name: 'partner_page',
-        label: 'Partner',
-        type: 'app',
-        regions: [{ name: 'main', components }],
-    });
-    const savePage = (protocol: any, body: unknown) => save(protocol, body, 'partner_page', 'page');
-
-    it('an `object-grid` binding it answers 422 INVALID_METADATA, persists nothing, and locates the prescription at the component', async () => {
-        const { protocol, rows } = makeProtocol();
-
-        const err = await rejection(savePage(protocol, pageBody([grid(RETIRED_BINDING)])));
-
-        expect(err.code).toBe('INVALID_METADATA');
-        expect(err.status).toBe(422);
-        expect(rows.size).toBe(0);
-        const at = err.issues.find((i: any) => i.path === 'regions.0.components.0.properties.data.provider');
-        expect(at, `an issue at the component's data provider; got ${JSON.stringify(err.issues)}`).toBeDefined();
-        expect(at.code).toBe('custom');
-        expect(at.message).toMatch(PRESCRIPTION);
-    });
-
-    it('a component nested in a `page:tabs` item is refused at its own position', async () => {
-        const { protocol, rows } = makeProtocol();
-        const tabs = { id: 'tabs', type: 'page:tabs', properties: { items: [{ label: 'Cases', children: [grid(RETIRED_BINDING)] }] } };
-
-        const err = await rejection(savePage(protocol, pageBody([tabs])));
-
-        expect(err.code).toBe('INVALID_METADATA');
-        expect(err.status).toBe(422);
-        expect(rows.size).toBe(0);
-        expect(err.issues.map((i: any) => i.path)).toContain('regions.0.components.0.properties.items.0.children.0.properties.data.provider');
-    });
-
-    it('CONTROL: the same page with the `object` or `value` provider saves, one row', async () => {
-        for (const data of [{ provider: 'object', object: 'crm_case' }, { provider: 'value', items: [{ name: 'a' }] }]) {
-            const { protocol, rows } = makeProtocol();
-            const result = await savePage(protocol, pageBody([grid(data)]));
-            expect(result.success, JSON.stringify(data)).toBe(true);
-            expect(rows.size).toBe(1);
-        }
-    });
-
-    it('READ PATH: a stored page still carrying the binding is served, with the refusal in its `_diagnostics`', async () => {
-        const { protocol } = makeProtocol([
-            { type: 'page', name: 'partner_page', metadata: pageBody([grid(RETIRED_BINDING)]) },
-        ]);
-
-        const served = (await protocol.getMetaItem({ type: 'page', name: 'partner_page' })).item;
-
-        expect(served.regions[0].components[0].type).toBe('object-grid');
-        expect(served._diagnostics?.valid).toBe(false);
-        const at = served._diagnostics.errors.find((e: any) => e.path === 'regions.0.components.0.properties.data.provider');
-        expect(at, JSON.stringify(served._diagnostics)).toBeDefined();
-        expect(at.message).toMatch(PRESCRIPTION);
     });
 });

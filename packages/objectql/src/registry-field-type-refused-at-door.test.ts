@@ -200,6 +200,11 @@ function makeStubDriver() {
             if (k === '$and' && Array.isArray(v)) { if (!v.every((w: any) => matchesWhere(row, w))) return false; continue; }
             if (k === '$or' && Array.isArray(v)) { if (!v.some((w: any) => matchesWhere(row, w))) return false; continue; }
             if (k.startsWith('$')) continue;
+            // [#24371] The by-name read's both-spellings `type: { $in: [...] }`.
+            if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
+                if (!(v as any).$in.includes(row[k] === undefined ? null : row[k])) return false;
+                continue;
+            }
             const expected = (v && typeof v === 'object' && '$eq' in (v as any)) ? (v as any).$eq : v;
             const a = row[k] === undefined ? null : row[k];
             const b = expected === undefined ? null : expected;

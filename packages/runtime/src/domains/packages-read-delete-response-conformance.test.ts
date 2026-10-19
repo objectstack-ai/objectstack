@@ -167,7 +167,7 @@ function matchesWhere(row: any, where: any): boolean {
 function dispatcher(manifests: any[], protocol?: unknown): HttpDispatcher {
     const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
     (registry as any).logLevel = 'silent';
-    for (const m of manifests) registry.installPackage(m as any);
+    for (const m of manifests) registry.installPackage(m as any, 'code');
 
     const ql = bindCatalogFromTables({
         registry,
@@ -298,18 +298,16 @@ describe('#16781 — GET /packages: the F2 gap is closed on EVERY authoring path
     });
 
     /**
-     * ⚠️ The declaration is a strict SUBSET of the wire on this row too, and
-     * the residue is named rather than hidden — the disposition its `DELETE`
-     * sibling already carries below.
+     * [#23972] The declaration now covers the whole row: `writable` (this
+     * door's own computed verdict, #14375) is declared on the served row and
+     * `source` on the record, so a declared parse drops nothing. Before, the
+     * residue here was exactly `['writable']`.
      */
-    it('the UNDECLARED per-row residue is exactly `writable`', async () => {
+    it('no per-row residue: `source` and `writable` are both declared', async () => {
         const r = await send('GET', `${PREFIX}/packages`, [CODE_PKG]);
         const parsed: any = ListInstalledPackagesResponseSchema.parse(r.body);
-        // `writable` is this door's own computed verdict (#14375), not a
-        // declared record field, so a declared parse drops it. Deleting it from
-        // the wire is a payload removal; declaring it is a separate decision
-        // about what the response promises.
-        expect(strippedKeys(r.body.data.packages[0], parsed.data.packages[0])).toEqual(['writable']);
+        expect(strippedKeys(r.body.data.packages[0], parsed.data.packages[0])).toEqual([]);
+        expect(parsed.data.packages[0]).toMatchObject({ source: 'code', writable: expect.any(Boolean) });
     });
 });
 
@@ -340,10 +338,11 @@ describe('#17431 — GET /packages/:id serves the same row, and parses on BOTH a
         expect(verdict.error!.issues.map((i) => i.path.join('.'))).toEqual(['manifest.objects.0']);
     });
 
-    it('the UNDECLARED residue is exactly `writable` — named, not hidden', async () => {
+    it('no residue: `source` and `writable` are both declared (#23972)', async () => {
         const r = await get(CODE_PKG);
         const parsed: any = GetInstalledPackageResponseSchema.parse(r.body);
-        expect(strippedKeys(r.body.data, parsed.data)).toEqual(['writable']);
+        expect(strippedKeys(r.body.data, parsed.data)).toEqual([]);
+        expect(parsed.data).toMatchObject({ source: 'code', writable: expect.any(Boolean) });
     });
 });
 

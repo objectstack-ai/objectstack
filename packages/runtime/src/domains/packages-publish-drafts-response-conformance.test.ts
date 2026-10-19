@@ -121,10 +121,10 @@ function makeDoor(opts: {
     return { dispatcher: new HttpDispatcher(kernel), publishPackageDrafts, saveMetaItem, trigger };
 }
 
-async function publishDrafts(opts: Parameters<typeof makeDoor>[0] = {}) {
+async function publishDrafts(opts: Parameters<typeof makeDoor>[0] = {}, requestBody: Record<string, unknown> = {}) {
     const door = makeDoor(opts);
     const result = await door.dispatcher.handlePackages(
-        '/com.workspace/publish-drafts', 'POST', {}, {}, PKG_ADMIN(),
+        '/com.workspace/publish-drafts', 'POST', requestBody, {}, PKG_ADMIN(),
     );
     expect(result.response?.status).toBe(200);
     const body: any = (result.response as any)?.body;
@@ -261,7 +261,7 @@ describe('publish-drafts wire payload conforms to PublishPackageDraftsResponseSc
         // the schema has no `.default()`, which is what "the declaration must
         // not change wire bytes" cashes out to on the consumer side.
         const wire = JSON.stringify(data);
-        for (const key of ['advisories', 'unhiddenApps', 'unhideError', 'rebindError', 'seedApplied']) {
+        for (const key of ['advisories', 'unhiddenApps', 'unhideError', 'rebindError', 'seedApplied', 'backfillApplied']) {
             expect(wire).not.toContain(key);
         }
         const parsed = PublishPackageDraftsResponseSchema.parse(data) as Record<string, unknown>;
@@ -269,5 +269,75 @@ describe('publish-drafts wire payload conforms to PublishPackageDraftsResponseSc
         // order, so key order is not part of the claim — presence is.
         expect(Object.keys(parsed).sort()).toEqual(Object.keys(data).sort());
         expect(parsed).toEqual(data);
+    });
+});
+
+describe('publish-drafts backfill crosses the door (#24253)', () => {
+    const BACKFILL = [{ object: 'case_item', field: 'done' }];
+    const receipt = { success: true, fields: [{ object: 'case_item', field: 'done', updated: 12 }] };
+
+    it('the key reaches the protocol as sent, with THIS caller\'s execution context, and the receipt conforms', async () => {
+        const { data, publishPackageDrafts } = await publishDrafts({
+            result: {
+                success: true, outcome: 'published', publishedCount: 1, failedCount: 0,
+                published: [{ type: 'object', name: 'case_item', version: 'sha256:dd44' }], failed: [],
+                backfillApplied: receipt,
+            },
+            apps: [],
+        }, { backfill: BACKFILL });
+
+        const sent = publishPackageDrafts.mock.calls[0]![0];
+        expect(sent.backfill).toEqual(BACKFILL);
+        expect(sent.context).toEqual(PKG_ADMIN().executionContext);
+        expect(sent.context?.isSystem).toBeUndefined();
+        expect(strippedKeys(data)).toEqual([]);
+        expect(PublishPackageDraftsResponseSchema.parse(data).backfillApplied).toEqual(receipt);
+    });
+
+    it('a stopped field\'s error and code survive the declared parse', async () => {
+        const stopped = {
+            success: false,
+            fields: [{ object: 'case_item', field: 'done', updated: 3, error: "Record 'r_4' of 'case_item' was not written", code: 'PERMISSION_DENIED' }],
+        };
+        const { data } = await publishDrafts({
+            result: {
+                success: true, outcome: 'published', publishedCount: 1, failedCount: 0,
+                published: [{ type: 'object', name: 'case_item', version: 'sha256:dd44' }], failed: [],
+                backfillApplied: stopped,
+            },
+            apps: [],
+        }, { backfill: BACKFILL });
+
+        expect(strippedKeys(data)).toEqual([]);
+        expect(PublishPackageDraftsResponseSchema.parse(data).backfillApplied).toEqual(stopped);
+    });
+
+    it('without the key, the protocol is sent neither a backfill nor a context', async () => {
+        const { publishPackageDrafts } = await publishDrafts({ apps: [] });
+
+        const sent = publishPackageDrafts.mock.calls[0]![0];
+        expect('backfill' in sent).toBe(false);
+        expect('context' in sent).toBe(false);
+    });
+
+    it('the protocol\'s request refusal answers 400 VALIDATION_ERROR with its issues, nothing flipped or announced', async () => {
+        const door = makeDoor({ apps: [] });
+        door.publishPackageDrafts.mockImplementation(async () => {
+            throw Object.assign(new Error("Nothing was published: the backfill of package 'com.workspace' cannot be honoured"), {
+                code: 'VALIDATION_ERROR', status: 400,
+                issues: [{ path: 'backfill.0', message: "Field 'case_item.flagged' declares no defaultValue", code: 'custom' }],
+            });
+        });
+
+        const result = await door.dispatcher.handlePackages(
+            '/com.workspace/publish-drafts', 'POST', { backfill: [{ object: 'case_item', field: 'flagged' }] }, {}, PKG_ADMIN(),
+        );
+
+        expect(result.response?.status).toBe(400);
+        const err: any = (result.response as any)?.body?.error;
+        expect(err?.code).toBe('VALIDATION_ERROR');
+        expect(JSON.stringify((result.response as any)?.body)).toContain('backfill.0');
+        expect(door.saveMetaItem).not.toHaveBeenCalled();
+        expect(door.trigger).not.toHaveBeenCalled();
     });
 });

@@ -25,6 +25,21 @@
  *  3. a plain `member` still cannot invite at all — so it is the ROLE that
  *     opened the endpoint, not some unrelated loosening.
  *
+ * [#23945] Each cap refusal is pinned on its ADR-0112 `code`, the way
+ * better-auth's own `owner` refusal on this endpoint carries one — a client
+ * (the console's Invite User dialog) branches on it, never on the prose. The
+ * cap's third code, `INVITE_ISSUER_UNVERIFIED`, has no input that reaches it
+ * through this door (better-auth refuses a non-member before the hook runs);
+ * it is pinned at the unit level in plugin-auth's `auth-manager.test.ts`.
+ *
+ * [#24243] The placement gate behind the cap is pinned on its code here too:
+ * the delegate's out-of-scope placement answers
+ * `INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE`. Its two other answers have no door
+ * on this boot and are pinned at the unit level beside the cap's: the harness
+ * always registers plugin-security's placement service, so
+ * `INVITE_PLACEMENT_UNSUPPORTED` is unreachable, and a store fault (503
+ * `SERVICE_UNAVAILABLE`) needs a store that cannot answer.
+ *
  * Harness note: `bootStack` boots the production `single` shape, so the
  * Default Organization exists from the boot (ADR-0131 D3); this file sets
  * membership roles in system context, which is the only writer
@@ -137,11 +152,54 @@ describe('#3697: delegated_admin may invite — as `member` only', () => {
       organizationId: orgId,
     });
 
-    expect(res.status).toBe(403);
-    expect(JSON.stringify(await res.json())).toMatch(/never confer a role above the issuer/);
+    const body = await res.clone().json();
+    expect(res.status, JSON.stringify(body)).toBe(403);
+    expect(body?.code).toBe('INVITE_ROLE_ABOVE_ISSUER');
     // Rejecting throws out of the endpoint BEFORE the row is written.
     expect(
       (await findRows(ql, 'sys_invitation', { email: 'invitee.admin.3697@example.com' }, 5)).length,
+    ).toBe(0);
+  }, 30_000);
+
+  it('the same delegate minting another delegate is REFUSED as member-only, with no invitation row', async () => {
+    // [#23945] Not outranked — `delegated_admin` grades as a member — but a
+    // delegated issuer may invite only as `member`: a distinct refusal, so a
+    // distinct code.
+    const res = await stack.apiAs(delegateToken, 'POST', '/auth/organization/invite-member', {
+      email: 'invitee.subdelegate.3697@example.com',
+      role: 'delegated_admin',
+      organizationId: orgId,
+    });
+
+    const body = await res.clone().json();
+    expect(res.status, JSON.stringify(body)).toBe(403);
+    expect(body?.code).toBe('INVITE_ISSUER_MEMBER_ONLY');
+    expect(
+      (await findRows(ql, 'sys_invitation', { email: 'invitee.subdelegate.3697@example.com' }, 5)).length,
+    ).toBe(0);
+  }, 30_000);
+
+  it('the same delegate requesting PLACEMENT outside their scope is REFUSED by the gate, on its code, with no invitation row', async () => {
+    // [ADR-0105 D8, #24243] A plain `member` invitation passes the role cap, so
+    // the only thing left to judge is the placement intent: the delegated
+    // administration gate dry-runs the `sys_user_position` rows acceptance would
+    // write, against the ISSUER's adminScope (ADR-0090 D12). This delegate holds
+    // the org role and no adminScope at all, so any unit is outside it. The
+    // refusal is the gate's own `PermissionDeniedError`, so it answers the
+    // registered `INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE`, not a store outage.
+    const res = await stack.apiAs(delegateToken, 'POST', '/auth/organization/invite-member', {
+      email: 'invitee.placed.3697@example.com',
+      role: 'member',
+      organizationId: orgId,
+      businessUnitId: 'bu_outside_24243',
+      positions: ['placement_probe_24243'],
+    });
+
+    const body = await res.clone().json();
+    expect(res.status, JSON.stringify(body)).toBe(403);
+    expect(body?.code).toBe('INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE');
+    expect(
+      (await findRows(ql, 'sys_invitation', { email: 'invitee.placed.3697@example.com' }, 5)).length,
     ).toBe(0);
   }, 30_000);
 

@@ -13,9 +13,8 @@ import { onSuccessBesideUpdateOperationRefusal } from './action-on-success-execu
  * the rows' half is pinned in `component-action-row-declarative-update.test.ts`.
  *
  * Both runtimes read `operation` before the executor. The console's action
- * runner (`ActionRunner.execute`, `core/src/actions/ActionRunner.ts:1384-1388`
- * at the `.objectui-sha` pin `b9814b334`, byte-identical at objectui `main`
- * `524136e`) posts the write through its registered `script` dispatch and runs
+ * runner (`ActionRunner.execute`; read point recorded in `liveness/action.json`,
+ * row `operation`) posts the write through its registered `script` dispatch and runs
  * no executor of its own, whatever executor the action or row names. The
  * platform action route treats an action carrying `operation: 'update'` as the
  * write "whatever `type` says" (`isDeclarativeUpdateAction`,

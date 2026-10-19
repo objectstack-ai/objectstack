@@ -3,6 +3,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { cors } from 'hono/cors';
+import { parseBody } from 'hono/utils/body';
 import {
   type ObjectKernel,
   HttpDispatcher,
@@ -282,8 +283,9 @@ export function objectStackMiddleware(kernel: ObjectKernel) {
 }
 
 /**
- * The JSON body this adapter hands the dispatcher, read WITHOUT consuming the
- * request (#22576).
+ * The body this adapter hands the dispatcher: read by its declared media type,
+ * by `@objectstack/plugin-hono-server`'s rule, or REFUSED when read (#24042);
+ * never invented, and never read off the request it forwards (#22576).
  *
  * ## Why the raw request must stay readable
  *
@@ -299,34 +301,202 @@ export function objectStackMiddleware(kernel: ObjectKernel) {
  * verify an HMAC over the sender's exact JSON bytes — and a spaced JSON body
  * re-serialised from the parsed value is not those bytes.
  *
- * So the parse reads a CLONE: `clone()` tees the body, `c.req.raw` keeps the
- * other branch unread, and a domain that forwards the request gets every byte
- * the client sent, for every `Content-Type`, JSON included.
- *
- * ## What the domains see is unchanged, deliberately
- *
- * Hono's `c.req.json()` is `text()` then `JSON.parse`, with any failure mapped
- * to `{}` by the `.catch` this adapter put on it — so an empty body, a form
- * body and invalid JSON all became `{}`, and any JSON value (an array, `null`,
- * a number) came through as parsed. The clone is parsed by the same two steps
- * and every failure is the same `{}`, so the `body` argument is the value it
- * was for every input. One case cannot be read from a clone: a body something
- * upstream already consumed through `c.req` — Hono's body cache then holds the
- * only copy, and `c.req.json()` is asked exactly as before.
+ * So whatever is parsed is parsed from a CLONE: `clone()` tees the body,
+ * `c.req.raw` keeps the other branch unread, and a domain that forwards the
+ * request gets every byte the client sent, for every `Content-Type`. One case
+ * cannot be read from a clone: a body something upstream already consumed
+ * through `c.req` — Hono's body cache then holds the only copy, and it is read
+ * from that cache (`c.req.text()`, `c.req.parseBody()`), as
+ * `plugin-hono-server` reads it.
  *
  * ⚠️ The cost is the tee: until the request is released, the unread branch
- * holds the body's bytes, so a body is buffered twice instead of once for the
- * life of the request. These are API bodies the old path already buffered
- * whole; nothing here streams.
+ * holds the body's bytes, so a JSON or form body is buffered twice instead of
+ * once for the life of the request. These are API bodies the old path already
+ * buffered whole; nothing here streams. A body of any other media type is not
+ * read here at all.
+ *
+ * ## What a reading answers: `plugin-hono-server`'s rule (#24042)
+ *
+ * One rule on both Hono transports. It is `readRequestBody` in
+ * `@objectstack/plugin-hono-server` (`src/request-body.ts`), module-private
+ * there and mirrored here, media type by media type:
+ *
+ * - **Declared JSON** (`Content-Type` includes `application/json`, matched
+ *   case-insensitively): read as text and parsed. Empty or whitespace-only is
+ *   `{}` (the REST data doors document an empty body as an empty query). A
+ *   body that does not parse, or cannot be read, is refused (#23914).
+ * - **A form** (`multipart/form-data`, `application/x-www-form-urlencoded`):
+ *   parsed by Hono's own `parseBody`, the function `c.req.parseBody()` runs on
+ *   the other door. A form that does not parse is refused.
+ * - **Any other media type, or none**: nothing is read. When the request
+ *   declares a body by its framing headers ({@link declaresBody}), it is
+ *   refused; when it declares none, it is `{}`.
+ *
+ * The content-type-blind parse this replaces read a JSON body sent as
+ * `text/plain` as JSON, and handed `{}` for every other body that did not
+ * declare JSON, a form included. `{}` reached the data domain as an empty
+ * query, so a garbled body that did not declare JSON read the whole table on
+ * this door, while `plugin-hono-server` refused it. The wire contract names
+ * `Content-Type: application/json` as required
+ * (`content/docs/api/wire-format.mdx`); parsing `text/plain` as JSON is a
+ * second dialect, so it is refused, not parsed.
+ *
+ * ## A body that cannot be read is refused BY ITS READER (#23914)
+ *
+ * …and is never `{}`. The code that READS the parsed body refuses it, nothing
+ * earlier. `@objectstack/plugin-hono-server` does that with its `req.body`
+ * accessor; here the body is a `dispatch()` argument, so the value handed on
+ * for every refusal above is {@link refusedOnRead}'s: any read of it — a
+ * property, `in`, its keys, a spread, `JSON.stringify` — throws
+ * {@link RequestBodyRefusal} (a declared `400` with the registered code
+ * `INVALID_REQUEST`) and records that it was read. Both arms that call this
+ * then answer that refusal, through `thrownJson` as the ADR-0112 envelope,
+ * whatever the domain made of the throw — the same override
+ * `plugin-hono-server` applies — and only then.
+ *
+ * Why on read and not before `dispatch()`. A domain that forwards the request
+ * reads its own bytes from it and never reads `body`: `/webhooks/redeliver`
+ * and the inbound automation hooks answer a body that is not JSON with their
+ * own refusal, after their own sign-in or signature check, and the
+ * `/approvals/act` form `POST` reads its form from the request. Refusing
+ * before `dispatch()` pre-empted them at this door only (measured:
+ * `/webhooks/redeliver` then answered this adapter's message where the
+ * self-hosted mount answers the member's, and an anonymous caller got `400`
+ * where the mount says `401`). `dispatch()` itself never reads `body` (its
+ * gates read headers and the path), so the gates still run first, as they do
+ * ahead of a route handler on `plugin-hono-server`. No list of routes is kept
+ * here: whether a domain reads the body is answered by the domain reading it.
+ *
+ * `@objectstack/plugin-hono-server` answers the same body with the same
+ * `status`, `code` and `message` (`hono-body-refusal.test.ts` drives both
+ * doors over one table).
  */
-async function readDispatchBody(c: Context): Promise<any> {
+async function readDispatchBody(c: Context): Promise<DispatchBody> {
+  const lowered = (c.req.header('content-type') ?? '').toLowerCase();
   const raw = c.req.raw;
-  if (raw.bodyUsed) return c.req.json().catch(() => ({}));
-  try {
-    return JSON.parse(await raw.clone().text());
-  } catch {
-    return {};
+
+  if (lowered.includes('application/json')) {
+    let text: string;
+    try {
+      text = raw.bodyUsed ? await c.req.text() : await raw.clone().text();
+    } catch {
+      return refusedOnRead(new RequestBodyRefusal(UNREADABLE_BODY_MESSAGE));
+    }
+    if (text.trim() === '') return readable({});
+    try {
+      return readable(JSON.parse(text));
+    } catch {
+      return refusedOnRead(new RequestBodyRefusal(MALFORMED_JSON_BODY_MESSAGE));
+    }
   }
+
+  const mediaType = lowered.split(';')[0]!.trim();
+  if (mediaType === 'multipart/form-data' || mediaType === 'application/x-www-form-urlencoded') {
+    try {
+      return readable(raw.bodyUsed ? await c.req.parseBody() : await parseBody(raw.clone()));
+    } catch {
+      return refusedOnRead(new RequestBodyRefusal(malformedFormMessage(mediaType)));
+    }
+  }
+
+  // Not read: a domain that wants these bytes reads them off the request.
+  return declaresBody(c)
+    ? refusedOnRead(new RequestBodyRefusal(unreadMediaTypeMessage(mediaType)))
+    : readable({});
+}
+
+/** What {@link readDispatchBody} hands an arm: the `body` argument, and whether a refused body was read. */
+interface DispatchBody {
+  /** The `body` argument for `dispatch()` / `handleAuth()`. */
+  readonly value: any;
+  /** The refusal, once something READ a body this adapter could not parse; `undefined` otherwise. */
+  readonly refusalRead: () => RequestBodyRefusal | undefined;
+}
+
+const readable = (value: any): DispatchBody => ({ value, refusalRead: () => undefined });
+
+/**
+ * [#23914] A `body` argument whose every READ throws `refusal` and is recorded:
+ * property reads, `in`, key enumeration (and so a spread, `Object.keys`,
+ * `JSON.stringify`), descriptor and prototype lookups, and writes. Holding it
+ * is not a read: `typeof` is `'object'`, `Array.isArray` is `false`, and
+ * passing it along, comparing it or testing it with `??` touch nothing.
+ */
+function refusedOnRead(refusal: RequestBodyRefusal): DispatchBody {
+  let read = false;
+  const refuse = (): never => {
+    read = true;
+    throw refusal;
+  };
+  const value = new Proxy(Object.create(null), {
+    get: refuse,
+    has: refuse,
+    ownKeys: refuse,
+    getOwnPropertyDescriptor: refuse,
+    getPrototypeOf: refuse,
+    set: refuse,
+    defineProperty: refuse,
+    deleteProperty: refuse,
+  });
+  return { value, refusalRead: () => (read ? refusal : undefined) };
+}
+
+/**
+ * [#23914] The refusal a read of {@link refusedOnRead}'s body throws: a DECLARED ADR-0112
+ * throw (`status` and the registered `INVALID_REQUEST`), so `thrownJson`
+ * renders it through `declaredEnvelopeForThrow`. Module-private, like its twin
+ * in `@objectstack/plugin-hono-server` (`src/request-body.ts`); the messages
+ * below and {@link declaresBody} are the twin's, word for word, and a test
+ * holds the two doors' answers equal (`hono-body-refusal.test.ts`).
+ */
+class RequestBodyRefusal extends Error {
+  readonly status = 400;
+  readonly code = 'INVALID_REQUEST';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'RequestBodyRefusal';
+  }
+}
+
+/** The refusal tail every message ends with: what the transport did NOT do. */
+const NOT_EMPTY = 'It was refused rather than read as an empty body';
+
+const MALFORMED_JSON_BODY_MESSAGE =
+  `The request body could not be parsed as JSON (it was sent as application/json). ${NOT_EMPTY}: `
+  + 'send a well-formed JSON document, or no body at all.';
+
+const UNREADABLE_BODY_MESSAGE = `The request body could not be read. ${NOT_EMPTY}.`;
+
+/** [#24042] A media type as the client spelled it, echoed only when it is a plain token pair. */
+function namedMediaType(mediaType: string): string {
+  if (mediaType === '') return 'with no Content-Type';
+  return /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/.test(mediaType)
+    ? `as ${mediaType}`
+    : 'with an unrecognised Content-Type';
+}
+
+function malformedFormMessage(mediaType: string): string {
+  return `The request body could not be parsed as form data (it was sent ${namedMediaType(mediaType)}). ${NOT_EMPTY}.`;
+}
+
+function unreadMediaTypeMessage(mediaType: string): string {
+  return `The request body was sent ${namedMediaType(mediaType)}, which this server does not read into a `
+    + `request body. ${NOT_EMPTY}: send it as application/json.`;
+}
+
+/**
+ * [#24042] Whether the request carries a body, by RFC 9112 §6.3: a `Content-Length`
+ * that is not `0`, or a `Transfer-Encoding`. Reading the bytes to find out would
+ * buffer a body this adapter never reads, and `Request.body` cannot answer:
+ * `@hono/node-server` hands every non-GET/HEAD request a stream, an empty one
+ * included. An in-process `Request` built without those headers is therefore
+ * read as having no body — on both doors.
+ */
+function declaresBody(c: Context): boolean {
+  const length = c.req.header('content-length');
+  if (length !== undefined && length.trim() !== '') return Number(length) !== 0;
+  return c.req.header('transfer-encoding') !== undefined;
 }
 
 /**
@@ -365,6 +535,40 @@ function readDispatchQuery(c: Context): Record<string, string | string[]> {
       values.length > 1 ? values : values[0],
     ]),
   ) as Record<string, string | string[]>;
+}
+
+/**
+ * [#24245] The verb the catch-all hands `dispatch()`, and the one the auth
+ * arm's `/auth/config` branch compares: the request's own, except that a
+ * `HEAD` goes as `GET`.
+ *
+ * Hono answers a `HEAD` from the `GET` route: it routes the request as `GET`
+ * and returns that answer's status and headers with no body. `c.req.method`
+ * still reads `HEAD`, though, and the dispatcher decides a verb by comparing it
+ * with `'GET'` (a domain's `methods`, its branches, the discovery root). So the
+ * catch-all handed `dispatch()` a verb nothing serves, and a `HEAD` was not
+ * answered as its `GET`. Measured through `app.request`, `GET` vs `HEAD`:
+ * `/mcp/skill` `200` vs `405` with `Allow: GET`; `/health`, `/ready` and the
+ * scoped root `/environments/:id` `200` vs `404 ROUTE_NOT_FOUND`; signed in,
+ * `/analytics/meta` `200` vs `404`, `/ai/agents` `200` vs `501`; anonymous,
+ * `/share-links/:token/resolve` (public) `501` vs `401`; with an auth service,
+ * `/auth/config` `200` vs `404`.
+ *
+ * The standalone server hands `dispatch()` `GET` for the same request: both
+ * `IHttpServer` transports route a `HEAD` to the `GET` handler (the
+ * conformance suite pins "answers HEAD from GET routes without a body"), and
+ * the dispatcher plugin's `GET` mounts pass a literal `'GET'`. This door now
+ * does the same, so every domain answers `HEAD` exactly as it answers `GET`: a
+ * path that serves no `GET` answers its `405` and `Allow`, an anonymous caller
+ * gets the anonymous `GET` answer.
+ *
+ * Only the verb moves. `{ request: c.req.raw }` stays the client's `HEAD`
+ * request, as the standalone mounts hand theirs, so a domain that forwards
+ * the request (the `/mcp` transport, the `/approvals/act` member) sees the
+ * method that was sent. The body is dropped by Hono's `HEAD` handling.
+ */
+function dispatchedMethod(method: string): string {
+  return method === 'HEAD' ? 'GET' : method;
 }
 
 /**
@@ -616,21 +820,40 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
           return c.redirect(res.url);
         }
         if (res.type === 'stream' && res.events) {
-          // SSE / Vercel Data Stream streaming response
-          const headers: Record<string, string> = {
+          /**
+           * [#24287] SSE / Vercel Data Stream / raw single-chunk response.
+           *
+           * A string event is written as given, in every mode; an object
+           * event is one SSE frame (or one JSON line in a Vercel data
+           * stream). A producer's own header replaces the default it names,
+           * matched case-insensitively. That is what the standalone server's
+           * writer does (`runtime/src/dispatcher-plugin.ts`,
+           * `sendResultBase`), and what `/mcp/skill`'s domain relies on: it
+           * serves the markdown as one string event under its own lowercase
+           * `content-type` and `cache-control`. This arm used to SSE-frame
+           * every event outside a Vercel data stream and spread those headers
+           * into a record beside its capitalised defaults, so the caller got
+           * `data: "# skill"` under a doubled `Content-Type` and
+           * `no-cache, no-store`. The `/ai` domain's two shapes reach this arm
+           * too — pre-encoded string frames with `vercelDataStream`, object
+           * parts without it — and both answer as before.
+           */
+          const headers = new Headers({
             'Content-Type': res.contentType || 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
-            ...(res.headers || {}),
-          };
+          });
+          for (const [k, v] of Object.entries(res.headers || {})) headers.set(k, String(v));
           const stream = new ReadableStream({
             async start(controller) {
               try {
                 const encoder = new TextEncoder();
                 for await (const event of res.events) {
-                  const chunk = res.vercelDataStream
-                    ? (typeof event === 'string' ? event : JSON.stringify(event) + '\n')
-                    : `data: ${JSON.stringify(event)}\n\n`;
+                  const chunk = typeof event === 'string'
+                    ? event
+                    : res.vercelDataStream
+                      ? JSON.stringify(event) + '\n'
+                      : `data: ${JSON.stringify(event)}\n\n`;
                   controller.enqueue(encoder.encode(chunk));
                 }
               } catch (err) {
@@ -726,6 +949,8 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
 
   // --- Auth (needs auth service integration) ---
   app.all(`${authMount}/*`, async (c, next) => {
+    // [#23914] Declared outside the `try` so the catch arm can ask it too.
+    let read: DispatchBody | undefined;
     try {
       const path = c.req.path.substring(authMount.length + 1);
       const method = c.req.method;
@@ -744,7 +969,10 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       }
 
       // Handle /auth/config endpoint specifically (not handled by better-auth)
-      if (path === 'config' && method === 'GET' && authService) {
+      // [#24245] A `HEAD` is answered as this `GET` too (`dispatchedMethod`), as
+      // `plugin-auth`'s `GET` mount answers it on the standalone server; it was
+      // forwarded to better-auth instead and answered `404`.
+      if (path === 'config' && dispatchedMethod(method) === 'GET' && authService) {
         try {
           const config = (authService as any).getPublicConfig?.();
           if (config) {
@@ -824,10 +1052,13 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       }
 
       // Fallback to legacy dispatcher
-      const body = method === 'GET' || method === 'HEAD'
-        ? {}
-        : await readDispatchBody(c);
+      if (method !== 'GET' && method !== 'HEAD') read = await readDispatchBody(c);
+      const body = read ? read.value : {};
       const result = await dispatcher.handleAuth(path, method, body, { request: c.req.raw });
+      // [#23914] A body this adapter could not parse, READ by the domain: the
+      // refusal is the answer, whatever the domain answered (see `readDispatchBody`).
+      const refusal = read?.refusalRead();
+      if (refusal) return thrownJson(c, refusal);
       // `handled: false` is the dispatcher saying no auth domain claimed it —
       // an explicit ownership signal, better than inferring one from a status.
       if (!result.handled) return yieldUnowned(c, next, () => toResponse(c, result));
@@ -837,7 +1068,8 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       // in-repo producer was found that reaches this arm with a declared
       // envelope (better-auth answers its own failures as a `Response`), so it
       // takes the rule for uniformity: one rule for both arms, not two.
-      return thrownJson(c, err);
+      // [#23914] …and a refused body that was read is answered as that refusal.
+      return thrownJson(c, read?.refusalRead() ?? err);
     }
   });
 
@@ -868,6 +1100,8 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
   // ExecutionContext). Revisit only if the gate stages are middleware-ized
   // for an independent reason — reopen conditions are archived on #3608.
   app.all(`${prefix}/*`, async (c) => {
+    // [#23914] Declared outside the `try` so the catch arm can ask it too.
+    let read: DispatchBody | undefined;
     try {
       const subPath = c.req.path.substring(prefix.length);
       const method = c.req.method;
@@ -875,20 +1109,25 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       // [#22576] Parsed from a clone: `c.req.raw` reaches the dispatcher with
       // its body unread, so a domain that forwards the request (the
       // `/approvals/act` form POST) still has it. See `readDispatchBody`.
-      let body: any = undefined;
       if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
-        body = await readDispatchBody(c);
+        read = await readDispatchBody(c);
       }
 
       // [#23214] A repeated name stays an array (`readDispatchQuery`).
       const queryParams = readDispatchQuery(c);
 
-      const result = await dispatcher.dispatch(method, subPath, body, queryParams, { request: c.req.raw }, prefix);
+      // [#24245] A `HEAD` is dispatched as the `GET` it is answered from (`dispatchedMethod`).
+      const result = await dispatcher.dispatch(dispatchedMethod(method), subPath, read?.value, queryParams, { request: c.req.raw }, prefix);
+      // [#23914] A body this adapter could not parse, READ by the domain: the
+      // refusal is the answer, whatever the domain answered (see `readDispatchBody`).
+      const refusal = read?.refusalRead();
+      if (refusal) return thrownJson(c, refusal);
       return toResponse(c, result);
     } catch (err: any) {
       // [#23365] A declared ADR-0112 envelope that left `dispatch()` (its foot
       // catch re-raises everything but a denial) is answered as declared.
-      return thrownJson(c, err);
+      // [#23914] …and a refused body that was read is answered as that refusal.
+      return thrownJson(c, read?.refusalRead() ?? err);
     }
   });
 

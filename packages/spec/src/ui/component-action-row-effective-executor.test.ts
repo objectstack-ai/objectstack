@@ -6,8 +6,8 @@
  * console's action runner will RUN, not only against the executor key.
  *
  * The runner dispatches on `action.type || action.actionType || action.name`
- * (objectui `core/src/actions/ActionRunner.ts:1265` at the `.objectui-sha`
- * pin), and every row forwards its executor key as `type` beside its `name`.
+ * (read points recorded in `liveness/page.json`, row `regions`), and every row
+ * forwards its executor key as `type` beside its `name`.
  * So a row with no executor key whose `name` is `url` or `navigation` runs the
  * url navigator — and its `target` is judged by the one url-target grammar
  * (`navigation-target.ts`), whichever key spelled the executor. ⛔ `name` is

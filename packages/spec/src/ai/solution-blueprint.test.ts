@@ -2,11 +2,16 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  BlueprintViewSchema,
   SolutionBlueprintSchema,
   SolutionBlueprintStrictSchema,
   defineSolutionBlueprint,
   type SolutionBlueprint,
 } from './solution-blueprint.zod';
+import { ViewFilterRuleSchema } from '../ui/view.zod';
+import { SortItemSchema } from '../shared/enums.zod';
+import { SelectOptionSchema } from '../data/field.zod';
+import { ObjectSchema } from '../data/object.zod';
 
 const validBlueprint: SolutionBlueprint = {
   summary: 'A simple project tracker',
@@ -282,6 +287,180 @@ describe('SolutionBlueprintSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  describe('view filters + sort (a view named by a condition carries the condition)', () => {
+    const taskObject = {
+      name: 'task',
+      fields: [
+        { name: 'title', type: 'text' as const },
+        { name: 'status', type: 'select' as const },
+        { name: 'due_date', type: 'date' as const },
+      ],
+    };
+    const overdueRules = [
+      { field: 'due_date', operator: 'less_than' as const, value: '{today}' },
+      { field: 'status', operator: 'not_equals' as const, value: 'completed' },
+    ];
+    /** The first issue of a failed lenient parse, as `{ path, code }`. */
+    const firstIssue = (input: unknown) => {
+      const result = SolutionBlueprintSchema.safeParse(input);
+      expect(result.success).toBe(false);
+      const issue = result.success ? undefined : result.error.issues[0];
+      return { path: issue?.path, code: issue?.code };
+    };
+
+    it('carries a view\'s filters and sort through the parse — z.object would strip an undeclared key', () => {
+      const parsed = SolutionBlueprintSchema.parse({
+        summary: 's',
+        objects: [taskObject],
+        views: [{
+          object: 'task', name: 'overdue_tasks', label: '逾期任务', columns: ['title', 'due_date'],
+          filters: overdueRules,
+          sort: [{ field: 'due_date', order: 'asc' }],
+        }],
+      });
+      expect(parsed.views?.[0].filters).toEqual(overdueRules);
+      expect(parsed.views?.[0].sort).toEqual([{ field: 'due_date', order: 'asc' }]);
+    });
+
+    it('keeps both keys optional — a view over every record omits them', () => {
+      const parsed = SolutionBlueprintSchema.parse({
+        summary: 's',
+        objects: [taskObject],
+        views: [{ object: 'task', name: 'all_tasks' }],
+      });
+      expect(parsed.views?.[0].filters).toBeUndefined();
+      expect(parsed.views?.[0].sort).toBeUndefined();
+    });
+
+    it('declares no new format: `filters` IS ViewFilterRuleSchema and `sort` IS the shared SortItemSchema', () => {
+      // Identity, not shape: a copy would agree today and drift on the next
+      // edit of the ListView rule, which is the dialect this key must not fork.
+      const shape = (BlueprintViewSchema as any).shape;
+      expect(shape.filters.unwrap().element).toBe(ViewFilterRuleSchema);
+      expect(shape.sort.unwrap().element).toBe(SortItemSchema);
+    });
+
+    it('refuses an operator outside the view-filter vocabulary, at the rule\'s own path', () => {
+      expect(firstIssue({
+        summary: 's',
+        objects: [taskObject],
+        views: [{ object: 'task', name: 'overdue_tasks', filters: [{ field: 'due_date', operator: 'older_than', value: '{today}' }] }],
+      })).toEqual({ path: ['views', 0, 'filters', 0, 'operator'], code: 'invalid_value' });
+    });
+
+    it('refuses the list-view rule\'s value-shape violations too (the rule is reused, refinement included)', () => {
+      // The strict mirror cannot express this coupling in JSON Schema; the
+      // lenient parse `apply_blueprint` runs is where it is refused.
+      expect(firstIssue({
+        summary: 's',
+        objects: [taskObject],
+        views: [{ object: 'task', name: 'open_or_new', filters: [{ field: 'status', operator: 'in', value: 'open' }] }],
+      })).toEqual({ path: ['views', 0, 'filters', 0, 'value'], code: 'custom' });
+    });
+
+    it('refuses a sort order outside asc / desc, at the entry\'s own path', () => {
+      expect(firstIssue({
+        summary: 's',
+        objects: [taskObject],
+        views: [{ object: 'task', name: 'by_due', sort: [{ field: 'due_date', order: 'descending' }] }],
+      })).toEqual({ path: ['views', 0, 'sort', 0, 'order'], code: 'invalid_value' });
+    });
+
+    it('refuses a bare-string sort clause — the array is the only spelling, as on ListView', () => {
+      expect(firstIssue({
+        summary: 's',
+        objects: [taskObject],
+        views: [{ object: 'task', name: 'by_due', sort: 'due_date desc' }],
+      })).toEqual({ path: ['views', 0, 'sort'], code: 'invalid_type' });
+    });
+  });
+
+  describe('option `kind` + object `stageField` (an AI-built status field ships its lifecycle kinds)', () => {
+    const LOAN_STAGES = [
+      { label: '申请中', value: 'applied', kind: 'open' as const },
+      { label: '已放款', value: 'disbursed', kind: 'open' as const },
+      { label: '已还清', value: 'repaid', kind: 'won' as const },
+      { label: '已核销', value: 'written_off', kind: 'lost' as const },
+    ];
+    const loanObject = (stages: Array<Record<string, unknown>> = LOAN_STAGES, extra: Record<string, unknown> = {}) => ({
+      name: 'loan',
+      fields: [
+        { name: 'title', type: 'text' as const },
+        { name: 'status', type: 'select' as const, options: stages },
+      ],
+      stageField: 'status',
+      ...extra,
+    });
+    /** The first issue of a failed lenient parse, as `{ path, code }`. */
+    const firstIssue = (input: unknown) => {
+      const result = SolutionBlueprintSchema.safeParse(input);
+      expect(result.success).toBe(false);
+      const issue = result.success ? undefined : result.error.issues[0];
+      return { path: issue?.path, code: issue?.code };
+    };
+
+    it('carries every option\'s kind and the object\'s stageField through the parse — z.object would strip an undeclared key', () => {
+      const parsed = SolutionBlueprintSchema.parse({ summary: 's', objects: [loanObject()] });
+      expect(parsed.objects[0].stageField).toBe('status');
+      expect(parsed.objects[0].fields[1].options?.map((o) => o.kind)).toEqual(['open', 'open', 'won', 'lost']);
+    });
+
+    it('keeps both keys optional — a plain select on an object that names no stage field omits them', () => {
+      const parsed = SolutionBlueprintSchema.parse(validBlueprint);
+      const task = parsed.objects.find((o) => o.name === 'task');
+      expect(task?.stageField).toBeUndefined();
+      const status = task?.fields.find((f) => f.name === 'status');
+      expect(status?.options?.every((o) => !Object.prototype.hasOwnProperty.call(o, 'kind'))).toBe(true);
+    });
+
+    it('reuses SelectOption.kind\'s enum by identity — the blueprint spells no lifecycle vocabulary of its own', () => {
+      // Identity, not shape: a copy would agree today and drift the day the
+      // object field's option gains or loses a kind.
+      const ownEnum = (SelectOptionSchema as any).shape.kind.unwrap();
+      const lenientKind = (SolutionBlueprintSchema as any).shape.objects.element.shape.fields.element.shape
+        .options.unwrap().element.shape.kind;
+      const strictKind = (SolutionBlueprintStrictSchema as any).shape.objects.element.shape.fields.element.shape
+        .options.unwrap().element.shape.kind;
+      expect(lenientKind.unwrap()).toBe(ownEnum);
+      expect(strictKind.unwrap()).toBe(ownEnum);
+      expect(ownEnum.options).toEqual(['open', 'won', 'lost']);
+    });
+
+    it('refuses a kind outside open / won / lost, at the option\'s own path', () => {
+      const stages = LOAN_STAGES.map((o) => (o.value === 'repaid' ? { ...o, kind: 'done' } : o));
+      expect(firstIssue({ summary: 's', objects: [loanObject(stages)] }))
+        .toEqual({ path: ['objects', 0, 'fields', 1, 'options', 2, 'kind'], code: 'invalid_value' });
+    });
+
+    it('refuses a stageField that is not a snake_case field name', () => {
+      expect(firstIssue({ summary: 's', objects: [loanObject(LOAN_STAGES, { stageField: 'Status' })] }))
+        .toEqual({ path: ['objects', 0, 'stageField'], code: 'invalid_format' });
+    });
+
+    it('carries exactly what the object schema reads: a 1:1 copy parses, and an option missing its kind is refused there', () => {
+      // The blueprint does not judge the kinds itself (strict structured
+      // output cannot express a cross-key rule); the object schema the applier
+      // writes through does. This pins that the two keys land on the object
+      // schema's own spellings — `stageField` on the object, `kind` on the
+      // option — so a plain copy is all an applier has to do.
+      const toObject = (bp: ReturnType<typeof loanObject>) => {
+        const parsed = SolutionBlueprintSchema.parse({ summary: 's', objects: [bp] }).objects[0];
+        return {
+          name: parsed.name,
+          fields: Object.fromEntries(parsed.fields.map(({ name, ...field }) => [name, { label: name, ...field }])),
+          stageField: parsed.stageField,
+        };
+      };
+      expect(ObjectSchema.safeParse(toObject(loanObject())).success).toBe(true);
+
+      const forgot = LOAN_STAGES.map((o) => (o.value === 'written_off' ? { label: o.label, value: o.value } : o));
+      const refused = ObjectSchema.safeParse(toObject(loanObject(forgot)));
+      expect(refused.success).toBe(false);
+      expect(refused.error?.issues.map((i) => ({ path: i.path, code: i.code })))
+        .toEqual([{ path: ['fields', 'status', 'options', 3, 'kind'], code: 'custom' }]);
+    });
+  });
 });
 
 // The strict mirror is what `generateObject` sends to OpenAI: every property
@@ -300,6 +479,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
         description: null,
         sharingModel: null,
         nameField: null,
+        stageField: null,
         fields: [
           { name: 'name', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null },
         ],
@@ -324,8 +504,8 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const parsed = SolutionBlueprintStrictSchema.parse({
       ...strictBp,
       views: [
-        { object: 'event', name: 'wall', label: null, type: 'gallery', columns: null, groupBy: null },
-        { object: 'event', name: 'plan', label: null, type: 'gantt', columns: null, groupBy: null },
+        { object: 'event', name: 'wall', label: null, type: 'gallery', columns: null, groupBy: null, filters: null, sort: null },
+        { object: 'event', name: 'plan', label: null, type: 'gantt', columns: null, groupBy: null, filters: null, sort: null },
       ],
     });
     expect(parsed.views?.map((v) => v.type)).toEqual(['gallery', 'gantt']);
@@ -340,7 +520,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const badField = {
       ...strictBp,
       objects: [
-        { name: 'x', label: null, description: null, sharingModel: null, nameField: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null }] },
+        { name: 'x', label: null, description: null, sharingModel: null, nameField: null, stageField: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null }] },
       ],
     };
     // `f` is missing the (nullable, required) `label` key.
@@ -363,6 +543,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
           description: null,
           sharingModel: null,
           nameField: null,
+          stageField: null,
           fields: [
             {
               name: 'task_total', label: '任务总数', type: 'summary', required: null, reference: null, options: null, expression: null,
@@ -437,6 +618,59 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const missingKey = { ...strictBp, objects: [{ ...strictBp.objects[0] }] };
     delete (missingKey.objects[0] as { nameField?: unknown }).nameField;
     expect(() => SolutionBlueprintStrictSchema.parse(missingKey)).toThrow();
+  });
+
+  describe('stageField + option kind (the model names the stage field and states each option\'s kind, or says null)', () => {
+    const statusField = (options: Array<Record<string, unknown>>) => ({
+      name: 'status', label: null, type: 'select', required: null, reference: null, options, summaryOperations: null, expression: null,
+    });
+    const STAGES = [
+      { label: 'New', value: 'new', kind: 'open' },
+      { label: 'Closed Won', value: 'closed_won', kind: 'won' },
+      { label: 'Closed Lost', value: 'closed_lost', kind: 'lost' },
+    ];
+    const withStatus = (options: Array<Record<string, unknown>>, stageField: string | null = 'status') => ({
+      ...strictBp,
+      objects: [{ ...strictBp.objects[0], stageField, fields: [...strictBp.objects[0].fields, statusField(options)] }],
+    });
+    /** The issue paths of a failed strict parse. */
+    const issuePaths = (input: unknown) => {
+      const result = SolutionBlueprintStrictSchema.safeParse(input);
+      expect(result.success).toBe(false);
+      return result.success ? [] : result.error.issues.map((i) => i.path.join('.'));
+    };
+
+    it('carries the stage field and every option\'s kind — the lifecycle is expressible in the structured output', () => {
+      const parsed = SolutionBlueprintStrictSchema.parse(withStatus(STAGES));
+      expect(parsed.objects[0].stageField).toBe('status');
+      expect(parsed.objects[0].fields[1].options?.map((o) => o.kind)).toEqual(['open', 'won', 'lost']);
+    });
+
+    it('accepts null for both — an object with no stage field, options with no stated kind', () => {
+      const parsed = SolutionBlueprintStrictSchema.parse(
+        withStatus(STAGES.map((o) => ({ ...o, kind: null })), null),
+      );
+      expect(parsed.objects[0].stageField).toBeNull();
+      expect(parsed.objects[0].fields[1].options?.every((o) => o.kind === null)).toBe(true);
+    });
+
+    it('requires both keys to be present (OpenAI strict: every key in `required`)', () => {
+      const noStageField = withStatus(STAGES);
+      delete (noStageField.objects[0] as { stageField?: unknown }).stageField;
+      expect(issuePaths(noStageField)).toEqual(['objects.0.stageField']);
+
+      const noKind = withStatus(STAGES.map((o, i) => (i === 1 ? { label: o.label, value: o.value } : o)));
+      expect(issuePaths(noKind)).toEqual(['objects.0.fields.1.options.1.kind']);
+    });
+
+    it('refuses a kind outside open / won / lost', () => {
+      expect(issuePaths(withStatus(STAGES.map((o, i) => (i === 1 ? { ...o, kind: 'done' } : o)))))
+        .toEqual(['objects.0.fields.1.options.1.kind']);
+    });
+
+    it('refuses a stageField that is not a snake_case field name', () => {
+      expect(issuePaths(withStatus(STAGES, 'Status'))).toEqual(['objects.0.stageField']);
+    });
   });
 
   it('carries viewName on a strict nav item — nullable, and REQUIRED to be present (OpenAI strict)', () => {
@@ -516,6 +750,72 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     };
     expect(() => SolutionBlueprintStrictSchema.parse(missingKeys)).toThrow();
   });
+
+  describe('view filters + sort (the model states a view\'s filter or says null)', () => {
+    const strictView = {
+      object: 'task', name: 'overdue_tasks', label: '逾期任务', type: 'list', columns: ['title', 'due_date'], groupBy: null,
+    };
+    /** The first issue of a failed strict parse, as `{ path, code }`. */
+    const firstIssue = (input: unknown) => {
+      const result = SolutionBlueprintStrictSchema.safeParse(input);
+      expect(result.success).toBe(false);
+      const issue = result.success ? undefined : result.error.issues[0];
+      return { path: issue?.path, code: issue?.code };
+    };
+
+    it('carries a view\'s filters and sort — the filter its name promises is expressible in the structured output', () => {
+      const filters = [
+        { field: 'due_date', operator: 'less_than', value: '{today}' },
+        { field: 'status', operator: 'not_equals', value: 'completed' },
+        { field: 'status', operator: 'in', value: ['open', 'blocked'] },
+        { field: 'archived_at', operator: 'is_null', value: null },
+      ];
+      const parsed = SolutionBlueprintStrictSchema.parse({
+        ...strictBp,
+        views: [{ ...strictView, filters, sort: [{ field: 'due_date', order: 'asc' }] }],
+      });
+      expect(parsed.views?.[0].filters).toEqual(filters);
+      expect(parsed.views?.[0].sort).toEqual([{ field: 'due_date', order: 'asc' }]);
+    });
+
+    it('accepts null for both keys — a view over every record, in the platform default order', () => {
+      const parsed = SolutionBlueprintStrictSchema.parse({
+        ...strictBp,
+        views: [{ ...strictView, name: 'all_tasks', filters: null, sort: null }],
+      });
+      expect(parsed.views?.[0].filters).toBeNull();
+      expect(parsed.views?.[0].sort).toBeNull();
+    });
+
+    it('requires both keys to be present (OpenAI strict: every key in `required`)', () => {
+      expect(firstIssue({ ...strictBp, views: [{ ...strictView, sort: null }] }))
+        .toEqual({ path: ['views', 0, 'filters'], code: 'invalid_type' });
+      expect(firstIssue({ ...strictBp, views: [{ ...strictView, filters: null }] }))
+        .toEqual({ path: ['views', 0, 'sort'], code: 'invalid_type' });
+    });
+
+    it('requires a rule\'s `value` key to be present — null is the unary operators\' spelling', () => {
+      expect(firstIssue({
+        ...strictBp,
+        views: [{ ...strictView, filters: [{ field: 'archived_at', operator: 'is_null' }], sort: null }],
+      // `invalid_union`: an absent key fails every arm of the nullable value union.
+      })).toEqual({ path: ['views', 0, 'filters', 0, 'value'], code: 'invalid_union' });
+    });
+
+    it('takes the canonical operator vocabulary only — a legacy shorthand is not a word the model may emit', () => {
+      expect(firstIssue({
+        ...strictBp,
+        views: [{ ...strictView, filters: [{ field: 'status', operator: 'eq', value: 'open' }], sort: null }],
+      })).toEqual({ path: ['views', 0, 'filters', 0, 'operator'], code: 'invalid_value' });
+    });
+
+    it('refuses a sort order outside asc / desc', () => {
+      expect(firstIssue({
+        ...strictBp,
+        views: [{ ...strictView, filters: null, sort: [{ field: 'due_date', order: 'descending' }] }],
+      })).toEqual({ path: ['views', 0, 'sort', 0, 'order'], code: 'invalid_value' });
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -544,14 +844,27 @@ describe('strict mirror ↔ lenient schema — key parity', () => {
     expect(strictFieldKeys()).toEqual(lenientFieldKeys());
   });
 
+  it('the select OPTION schemas carry exactly the same keys', () => {
+    // One level below the field pin, for the reason the filter-rule pin sits
+    // below the view pin: both sides declare the option inline, so a key added
+    // to one is a key the other drops. `kind` is the reason this pin exists —
+    // with it on the lenient side only, the design model could never state an
+    // option's lifecycle kind, and the object schema refuses a stage field
+    // whose options do not each declare one. No deliberate exclusions.
+    const optionKeys = (root: any) =>
+      Object.keys(root.shape.objects.element.shape.fields.element.shape.options.unwrap().element.shape).sort();
+    expect(optionKeys(SolutionBlueprintStrictSchema)).toEqual(optionKeys(SolutionBlueprintSchema));
+    expect(optionKeys(SolutionBlueprintSchema)).toEqual(['kind', 'label', 'value']);
+  });
+
   it('the OBJECT schemas carry exactly the same keys', () => {
     // The `nameField` gap proved the field-level pin alone is not enough: the
     // lenient object schema carried the ADR-0079 record-title key while the
     // strict mirror did not, so the design-stage model could never author it —
     // detected by cloud lint, unfixable on the surface that produced it. There
     // are NO deliberate object-level exclusions (measured: both sides carry
-    // name/label/description/fields/sharingModel/nameField); if one ever
-    // becomes deliberate, list it explicitly here with its reason.
+    // name/label/description/fields/sharingModel/nameField/stageField); if one
+    // ever becomes deliberate, list it explicitly here with its reason.
     const lenientObjectKeys = Object.keys(
       (SolutionBlueprintSchema as any).shape.objects.element.shape,
     ).sort();
@@ -559,6 +872,10 @@ describe('strict mirror ↔ lenient schema — key parity', () => {
       (SolutionBlueprintStrictSchema as any).shape.objects.element.shape,
     ).sort();
     expect(strictObjectKeys).toEqual(lenientObjectKeys);
+    // `stageField` named outright: it is the only trigger of the object
+    // schema's mandatory-kind rule, so the option key pin above is half a fix
+    // without it.
+    expect(lenientObjectKeys).toContain('stageField');
   });
 
   it('the NAV ITEM schemas carry exactly the same keys', () => {
@@ -576,6 +893,47 @@ describe('strict mirror ↔ lenient schema — key parity', () => {
       (SolutionBlueprintStrictSchema as any).shape.app.unwrap().shape.nav.unwrap().element.shape,
     ).sort();
     expect(strictNavKeys).toEqual(lenientNavKeys);
+  });
+
+  const lenientViewShape = () => (SolutionBlueprintSchema as any).shape.views.unwrap().element.shape;
+  const strictViewShape = () => (SolutionBlueprintStrictSchema as any).shape.views.unwrap().element.shape;
+
+  it('the VIEW schemas carry exactly the same keys', () => {
+    // Widened with `filters` / `sort`, the fourth level of the same gap
+    // (fields → objects → nav items → views). The view is where "WHICH records
+    // does this view show" lives; with the key on the lenient side only, the
+    // design step could never state the filter its view's name promises, and the
+    // applier would accept a filter no proposal can contain. There are NO
+    // deliberate view-level exclusions (measured: both sides carry
+    // object/name/label/type/columns/groupBy/filters/sort); if one ever becomes
+    // deliberate, list it explicitly here with its reason.
+    expect(Object.keys(strictViewShape()).sort()).toEqual(Object.keys(lenientViewShape()).sort());
+    expect(Object.keys(lenientViewShape())).toEqual(expect.arrayContaining(['filters', 'sort']));
+  });
+
+  it('the view FILTER RULE and SORT ENTRY shapes carry exactly the same keys', () => {
+    // One level down, for the same reason the field pin sits under the object
+    // pin: the strict mirror re-declares these two shapes inline (strict mode
+    // cannot take the lenient rule's preprocess / refinement), so a key added to
+    // `ViewFilterRuleSchema` or `SortItemSchema` would otherwise be one the
+    // model can never emit. No deliberate exclusions at either level.
+    const keysOf = (arraySchema: any) => Object.keys(arraySchema.unwrap().element.shape).sort();
+    expect(keysOf(strictViewShape().filters)).toEqual(keysOf(lenientViewShape().filters));
+    expect(keysOf(strictViewShape().sort)).toEqual(keysOf(lenientViewShape().sort));
+  });
+
+  it('the strict filter rule offers exactly the view-filter operator vocabulary the lenient rule accepts', () => {
+    // Value parity for the one enum the VALUE-parity walker below cannot see
+    // (it indexes string patterns): the lenient operator is an enum behind a
+    // preprocess, the strict one the same enum without it. A canonical operator
+    // missing here is one the model cannot choose; an extra one, a rule the
+    // applier refuses.
+    const strictOperators = strictViewShape().filters.unwrap().element.shape.operator.options;
+    const lenientOperators = lenientViewShape().filters.unwrap().element.shape.operator.def.out.options;
+    expect([...strictOperators].sort()).toEqual([...lenientOperators].sort());
+    const strictOrders = strictViewShape().sort.unwrap().element.shape.order.options;
+    const lenientOrders = lenientViewShape().sort.unwrap().element.shape.order.options;
+    expect([...strictOrders].sort()).toEqual([...lenientOrders].sort());
   });
 
   it('carries `viewName`, so a menu entry can say WHICH view it opens', () => {
@@ -764,13 +1122,16 @@ describe('strict mirror ↔ lenient schema — VALUE parity', () => {
         description: null,
         sharingModel: null,
         nameField: null,
+        stageField: null,
         fields: [{
           name: 'company_size',
           label: null,
           type: 'select',
           required: null,
           reference: null,
-          options: optionsWithLeadingDigit,
+          // Every strict option key present (`kind: null`), so the ONLY defect
+          // left in this proposal is the leading digit the pin is about.
+          options: optionsWithLeadingDigit.map((o) => ({ ...o, kind: null })),
           summaryOperations: null,
           expression: null,
         }],

@@ -395,13 +395,29 @@ describe('try_catch: its retry is closed, so the spec judges its keys like every
     expect(saved.success ? [] : saved.error.issues.map((i) => i.path.join('.'))).toEqual(['nodes.1.config.retry.maxRetry']);
   });
 
-  it('CONTROL: a pre-17 retryDelayMs alone is converted first where the door converts', () => {
+  // `retry-policy-converged` left the load path at 18 (#23543 F2): the doors
+  // that still convert first are the ones replaying retired entries — the
+  // automation engine's `registerFlow` and the other rehydration seams — and
+  // the authoring door now meets the tombstone instead.
+  it('CONTROL: a pre-17 retryDelayMs alone is converted first where the door replays the conversion', () => {
+    const legacy = flowWith('try_catch', { try: TRY_REGION, retry: { maxRetries: 1, retryDelayMs: 500 } }, 'retry_legacy');
+    const replayed = applyConversionsToFlow(structuredClone(legacy), { includeRetired: true });
+    expect(FlowSchema.safeParse(replayed).success).toBe(true);
+
     const stack = {
       manifest: { id: 'com.example.retry', name: 'retry', version: '1.0.0', type: 'app', namespace: 'rty' },
       objects: [{ name: 'rty_task', label: 'Task', fields: { title: { type: 'text', label: 'Title' } } }],
-      flows: [flowWith('try_catch', { try: TRY_REGION, retry: { maxRetries: 1, retryDelayMs: 500 } }, 'retry_legacy')],
+      flows: [legacy],
     };
-    expect(() => defineStack(stack as never)).not.toThrow();
+    let refusal: { code?: unknown; issues?: Array<{ path: unknown[]; message: string }> } | undefined;
+    try {
+      defineStack(stack as never);
+    } catch (error) {
+      refusal = error as typeof refusal;
+    }
+    expect(refusal?.code).toBe('STACK_SCHEMA_INVALID');
+    expect(refusal!.issues!.map((i) => i.path.join('.'))).toEqual(['flows.0.nodes.1.config.retry.retryDelayMs']);
+    expect(refusal!.issues![0]!.message).toContain('Rename the key to `backoffMs`');
   });
 });
 

@@ -139,7 +139,7 @@ describe('#21276 SchemaRegistry.assertPackageUninstallable', () => {
     expect(ask).toHaveBeenCalledWith('com.owner');
     expect(registry.getObject('free')).toBeDefined();
 
-    registry.installPackage({ id: 'com.owner', name: 'Owner', version: '1.0.0' } as any);
+    registry.installPackage({ id: 'com.owner', name: 'Owner', version: '1.0.0' } as any, 'code');
     ask.mockClear();
     const viaUninstall = thrownBy(() => registry.uninstallPackage('com.owner'));
     expect(ask).toHaveBeenCalledTimes(1);

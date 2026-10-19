@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 1230 — spawns the real producer once per single-cause fixture: every case runs the real schema generator (build-schemas.ts --check) in its own sandbox git tree, one fixture per cause; re-measured 2026-10-16 over the 11 hourly runs that executed it (38731551915 to 38891051243): slowest CI reading 983.3 s (run 38798542648) x 1.25, rounded up; rose from 940, which rested on 3 executed runs, with the file unchanged: its wall tracks the run's load (spec package 969.8 to 1560.2 s in the same runs)
 //
 // Pins that `build-schemas.ts --check` — the script behind
 // `check:authorable-surface`, one of the eight generated-artifact gates
@@ -2776,25 +2777,32 @@ describe('build-schemas.ts — the drift notice names the direction it measured 
       // same assumption printed the exact opposite of the truth. Declining is the
       // same disposition #5370 already took for the write.
       //
-      // #6452 re-based this fixture without changing its subject. The baseline a
-      // shallow run resolves is no longer origin/main's TIP (that is what made
-      // main's additions read as this branch's deletions), so the fixture now
-      // says on MAIN which upstream rev the anchor names — `older` — instead of
-      // inheriting whichever anchor an earlier case left behind. And BOTH fetched
-      // revs are grafted, which is what a checkout that fetched two commits at
-      // `--depth=1` actually looks like: with `tip` a shallow root too, neither
-      // ancestry probe can answer and the notice must still decline.
+      // #24359 re-based this fixture without changing its subject. Where
+      // `merge-base` cannot answer at all, a shallow run now anchors on the
+      // rev the TREE records, so it resolves exactly the committed anchor and
+      // there is no drift left to describe. The notice's shallow arm is the
+      // other truncated state: `merge-base` still answers (the agent container
+      // this repo is worked in is one), while the anchor's own commit sits in
+      // `.git/shallow` as a grafted root. Here origin/main reaches the fork
+      // point `older` along a second parent, so the merge base is walkable,
+      // and `tip` — the rev the anchor names — is grafted, so neither ancestry
+      // probe between the two can answer and the notice must still decline.
       seedSurfaceBase(older, (k) => k.filter((x) => x !== AHEAD_KEY && x !== LANDED_KEY));
       git('add', 'authorable-surface.base.json');
       git('commit', '-q', '-m', 'fixture: main records its anchor at the older baseline');
       const mainHead = git('rev-parse', 'HEAD');
-      git('update-ref', 'refs/remotes/origin/main', mainHead);
+      const mainMerge = git(
+        'commit-tree', `${mainHead}^{tree}`, '-p', mainHead, '-p', older,
+        '-m', 'fixture: origin/main also reaches the fork point along a second parent',
+      );
+      git('update-ref', 'refs/remotes/origin/main', mainMerge);
 
       git('checkout', '-q', '-B', 'issue-5847-shallow', older);
       seedSurface((s) => s);
       const anchorAtTip = commitAnchor(tip, (k) => k.filter((x) => x !== LANDED_KEY));
-      fs.writeFileSync(shallowFile(), `${mainHead}\n${tip}\n`);
+      fs.writeFileSync(shallowFile(), `${tip}\n`);
       expect(git('rev-parse', '--is-shallow-repository')).toBe('true');
+      expect(git('merge-base', 'HEAD', mainMerge), 'the merge base must still answer here').toBe(older);
 
       const { status, output } = run([]);
 
@@ -2902,14 +2910,22 @@ describe('build-schemas.ts — the drift notice names the direction it measured 
 //      resolution took the file's own `keys`, `verifyCommittedSurfaceBase` would
 //      hit its `rev === resolved.rev` fast path and compare the anchor against
 //      itself, so a line shed from it would pass. The fixture sheds one;
-//   4. an anchor rev nothing upstream vouches for is not used — a PR can point
-//      `baseRev` at one of its OWN commits (a `--depth=1` fetch resolves any sha
-//      the remote advertises), and a truncated history cannot refute it by
-//      walking, so the rev is accepted only when origin/main's own copy of the
-//      anchor names it (or reachability is demonstrated outright);
-//   5. with no upstream anchor at all the run keeps the tip and SAYS so, naming
-//      `fetch-depth: 0`. That residual false red is the honest degradation, and
-//      it is pinned so it stays loud rather than becoming a silent skip.
+//   4. the anchor is the one the TREE records (#24359). A PR can point `baseRev`
+//      at one of its OWN commits, and a truncated history cannot refute that by
+//      walking — so the shallow run uses it, and the forged rev is refused where
+//      history IS walkable, the path this repository's own PR gate runs
+//      (`fetch-depth: 0`). Both halves are pinned: the shallow run's anchor, and
+//      the walkable run's refusal. Before #24359 the shallow run swapped in the
+//      rev origin/main's anchor named, which made the verdict about a commit a
+//      function of wherever main pointed;
+//   5. with no anchor the tree can read, the run REFUSES — it never anchors on
+//      the tip again. What origin/main does or does not record is irrelevant;
+//   6. the acceptance #24359 is about: the same commit, under a main that only
+//      moved on and under a main that re-anchored past it, gets the same verdict;
+//   7. and that verdict keeps its teeth: a schema the commit's own anchor
+//      recorded and the build no longer emits is red under either main — where
+//      the old run, under the re-anchored main, missed it and named one of
+//      main's additions instead.
 describe('build-schemas.ts — a shallow checkout re-anchors the deletion gate, it does not accuse (#6452)', () => {
   /** Only in the baseline at origin/main's TIP: what main added after this branch forked. */
   const MAIN_ADDED_KEY = 'data/Object:zzAddedOnMainAfterTheFork6452';
@@ -2917,6 +2933,11 @@ describe('build-schemas.ts — a shallow checkout re-anchors the deletion gate, 
   const BRANCH_DELETED_KEY = 'data/Object:zzDeletedByThisBranch6452';
   /** A live key this build really emits — shed from the anchor FILE by case 3. */
   const SHED_KEY = 'data/Object:label';
+  /** A schema only main publishes, AFTER the commit under test (cases 6–7). */
+  const MAIN_ADDED_DEF = 'ui/ZzzPublishedOnMainAfterTheCommit';
+  /** A schema the commit's own anchor recorded and the commit stopped emitting (case 7). */
+  const ANCHOR_ONLY_DEF = 'ui/ZzzPublishedAtTheAnchorOnly';
+  const NO_REGISTERED_REMOVAL = 'schema(s) left the published set with no registered removal';
 
   const shallowFile = (): string => path.join(sandbox, '.git', 'shallow');
 
@@ -2931,6 +2952,11 @@ describe('build-schemas.ts — a shallow checkout re-anchors the deletion gate, 
     expect(pristineSurface, `${SHED_KEY} is no longer in the baseline — pick another live key`).toContain(
       SHED_KEY,
     );
+    const registeredDefs = Object.values(RETIRED_DEFS_BY_MAJOR).flat();
+    for (const def of [MAIN_ADDED_DEF, ANCHOR_ONLY_DEF]) {
+      expect(pristine, `${def} is a real published def — pick a phantom`).not.toContain(def);
+      expect(registeredDefs, `${def} is registered for real — pick an unregistered phantom`).not.toContain(def);
+    }
     // Own repo: EVERY case here marks the repo shallow (`forkBranch` writes
     // `.git/shallow`), which is the widest such window in the file (#9068).
     ownSandbox = createSandbox('build-schemas-6452-');
@@ -3003,7 +3029,7 @@ describe('build-schemas.ts — a shallow checkout re-anchors the deletion gate, 
 
       // The anchor moved, and the line says which rev and on whose authority.
       expect(output).toContain(`anchors on ${forkBase.slice(0, 12)} rather than on`);
-      expect(output).toContain("origin/main's own authorable-surface.base.json names the same commit");
+      expect(output).toContain("it is the rev this tree's authorable-surface.base.json records");
       expect(output).not.toContain('no merge base is walkable here');
       // The defect itself: under the tip anchor this run exited 1 naming
       // MAIN_ADDED_KEY as an unproven deletion.
@@ -3054,16 +3080,14 @@ describe('build-schemas.ts — a shallow checkout re-anchors the deletion gate, 
   );
 
   it(
-    'an anchor rev nothing upstream vouches for is not used — the rev origin/main records is',
-    { timeout: SPAWN_TIMEOUT_MS },
+    'an anchor rev only this branch vouches for: the shallow run uses it, the walkable run refuses it',
+    { timeout: SPAWN_TIMEOUT_MS * 2 },
     () => {
-      const { forkBase, anchored, mainTip } = seedUpstream((s) => [...s, BRANCH_DELETED_KEY].sort());
+      const { anchored, mainTip } = seedUpstream((s) => [...s, BRANCH_DELETED_KEY].sort());
       git('checkout', '-q', '-B', 'issue-6452-unvouched', anchored);
       // The branch deletes the key, commits it, and then points `baseRev` at its
       // OWN commit — authentic against itself (its keys ARE that commit's
-      // surface), upstream against nothing. A truncated history cannot refute it
-      // by walking, which is why the rev has to be vouched for rather than merely
-      // checked.
+      // surface), upstream against nothing.
       seedSurface((s) => s);
       git('add', AUTHORABLE_SURFACE_DIR_NAME);
       git('commit', '-q', '-m', 'fixture: the branch deletes a baseline key');
@@ -3071,28 +3095,39 @@ describe('build-schemas.ts — a shallow checkout re-anchors the deletion gate, 
       seedSurfaceBase(branchOwn, (k) => k);
       git('add', 'authorable-surface.base.json');
       git('commit', '-q', '-m', 'fixture: the branch anchors on its own commit');
+
+      // Truncated. Nothing here can refute the forged rev by walking, and the
+      // run no longer overrides the tree's anchor with the one main records —
+      // that override is what made a commit's verdict move with main (#24359).
+      // The trade, stated rather than hidden: this run is green.
       fs.writeFileSync(shallowFile(), `${mainTip}\n`);
       expect(mergeBaseFails(mainTip)).toBe(true);
+      const shallow = run(['--check']);
+      expect(shallow.output).toContain(`anchors on ${branchOwn.slice(0, 12)} rather than on`);
+      expect(shallow.output).toContain('That the rev is upstream is proved where');
+      expect(shallow.output).not.toContain(BRANCH_DELETED_KEY);
+      expect(shallow.status).toBe(0);
 
-      const { status, output } = run(['--check']);
-
-      expect(output).toContain(`names ${branchOwn.slice(0, 12)}, which nothing here can`);
-      expect(output).toContain(`anchors on ${forkBase.slice(0, 12)} rather than on`);
-      // …and the deletion the forged anchor was hiding is still adjudicated.
-      expect(status).toBe(1);
-      expect(output).toContain('deleted without proof (#4650)');
-      expect(output).toContain(BRANCH_DELETED_KEY);
+      // Walkable — the checkout this repository's own PR and merge-queue gate
+      // asks for (`fetch-depth: 0`). The forged rev is refused there, before any
+      // baseline is read: this is where the anchor's upstream half is proved.
+      fs.rmSync(shallowFile(), { force: true });
+      expect(git('rev-parse', '--is-shallow-repository')).toBe('false');
+      const walkable = run(['--check']);
+      expect(walkable.status).toBe(1);
+      expect(walkable.output).toContain('NOT an ancestor of');
+      expect(walkable.output).toContain(branchOwn.slice(0, 12));
     },
   );
 
   it(
-    'with no upstream anchor at all it keeps the tip and says so, naming fetch-depth: 0',
+    "origin/main carrying no anchor changes nothing: the tree's own anchor is the baseline",
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
-      // The honest degradation, pinned so it stays LOUD. A main whose tree carries
-      // no anchor cannot vouch for anything, so this run has only the tip — and
-      // the tip anchor is the defect. It reports the residual false red instead of
-      // waiving the check, because a diagnosable false red beats a silent bypass.
+      // Main's tree carries no anchor. Before #24359 that left this run with
+      // nothing it would accept, so it anchored on main's TIP and reported
+      // MAIN_ADDED_KEY as this branch's deletion. The tree's own anchor was there
+      // all along, and it is the only one the verdict may depend on.
       seedManifest((s) => s);
       const forkBase = seedBase((s) => s);
       seedSurfaceBase(forkBase, (k) => k);
@@ -3105,12 +3140,175 @@ describe('build-schemas.ts — a shallow checkout re-anchors the deletion gate, 
 
       const { status, output } = run(['--check']);
 
-      expect(output).toContain('no merge base is walkable here, and no upstream anchor was usable');
-      expect(output).toContain(`anchors on the origin/main TIP ${mainTip.slice(0, 12)} instead`);
-      expect(output).toContain('fetch-depth: 0');
+      expect(output).toContain(`anchors on ${forkBase.slice(0, 12)} rather than on`);
+      expect(output).not.toContain('anchors on the origin/main TIP');
+      expect(output).not.toContain('deleted without proof');
+      expect(output).not.toContain(MAIN_ADDED_KEY);
+      expect(status).toBe(0);
+    },
+  );
+
+  it(
+    'a tree that carries no anchor of its own refuses — the tip is never its baseline',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedManifest((s) => s);
+      const forkBase = seedBase((s) => s);
+      const mainTip = seedBase((s) => [...s, MAIN_ADDED_KEY].sort());
+      forkBranch('issue-6452-tree-without-anchor', forkBase, mainTip);
+      // The tree under test does not carry the anchor; `afterEach`'s checkout of
+      // main brings it back for the next case.
+      fs.rmSync(surfaceBasePath);
+
+      const { status, output } = run(['--check']);
+
+      // Loud, and about what is MISSING — never the old accusation that this
+      // tree deleted a key main added.
       expect(status).toBe(1);
-      expect(output).toContain('deleted without proof');
-      expect(output).toContain(MAIN_ADDED_KEY);
+      expect(output).toContain('No baseline to anchor the deletion checks on');
+      expect(output).toContain('authorable-surface.base.json');
+      expect(output).toContain('fetch-depth: 0');
+      expect(output).not.toContain('anchors on the origin/main TIP');
+      expect(output).not.toContain('deleted without proof');
+      expect(output).not.toContain(MAIN_ADDED_KEY);
+    },
+  );
+
+  it(
+    'an anchor commit this checkout cannot read refuses — it never falls back to the tip',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // What a `--depth=1` clone sees when the fetch of the anchor commit fails:
+      // the old run fell back to main's TIP and reported every schema main had
+      // published since as this commit's removal.
+      seedManifest((s) => s);
+      const forkBase = seedBase((s) => s);
+      const mainTip = seedBase((s) => [...s, MAIN_ADDED_KEY].sort());
+      forkBranch('issue-6452-unreadable-anchor', forkBase, mainTip);
+      // A rev no object store here holds and no remote serves — the fixture
+      // repository has no remote at all, so the fetch fails as it does offline.
+      const unreadable = 'f'.repeat(40);
+      expect(gitStatusIn(sandbox, 'cat-file', '-e', `${unreadable}^{commit}`)).not.toBe(0);
+      seedSurfaceBase(unreadable, (k) => k);
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('is not in this checkout, and the remote did not');
+      expect(output).toContain(`git fetch --depth=1 origin ${unreadable}`);
+      expect(output).not.toContain('anchors on the origin/main TIP');
+      expect(output).not.toContain('deleted without proof');
+      expect(output).not.toContain(MAIN_ADDED_KEY);
+    },
+  );
+
+  /**
+   * Cases 6–7: a commit that is ALREADY on main — a release, say — rebuilt in a
+   * truncated clone, once under a main that only moved on and once under a main
+   * that then re-anchored past it. The manifest is tracked here (the rest of this
+   * block leaves it untracked), because the manifest removal check is the gate
+   * the reported rebuild failed on.
+   */
+  function seedReleasedCommit(anchorManifest: (s: string[]) => string[]): {
+    forkBase: string;
+    underTest: string;
+    mainMovedOn: string;
+    mainReanchored: string;
+  } {
+    const commitManifest = (mutate: (s: string[]) => string[]): void => {
+      seedManifest(mutate);
+      git('add', SCHEMA_MANIFEST_DIR_NAME);
+    };
+    // The commit's upstream base, and the commit itself: its anchor names that base.
+    commitManifest(anchorManifest);
+    const forkBase = seedBase((s) => s);
+    commitManifest((s) => s);
+    seedSurfaceBase(forkBase, (k) => k);
+    git('add', 'authorable-surface.base.json');
+    git('commit', '-q', '-m', 'fixture: the commit under test, anchored at its base');
+    const underTest = git('rev-parse', 'HEAD');
+    // Main moves on: it publishes a schema and a key the commit never had…
+    commitManifest((s) => [...s, MAIN_ADDED_DEF].sort());
+    const mainMovedOn = seedBase((s) => [...s, MAIN_ADDED_KEY].sort());
+    // …and then re-anchors on its own tip, the way `--update-base` does.
+    seedSurfaceBase(mainMovedOn, (k) => [...k, MAIN_ADDED_KEY].sort());
+    git('add', 'authorable-surface.base.json');
+    git('commit', '-q', '-m', 'fixture: main re-anchors past the commit under test');
+    const mainReanchored = git('rev-parse', 'HEAD');
+    return { forkBase, underTest, mainMovedOn, mainReanchored };
+  }
+
+  /** Build `underTest` in a clone truncated at `originMain`, which origin/main names. */
+  function judgeUnder(underTest: string, originMain: string): { status: number; output: string } {
+    git('update-ref', 'refs/remotes/origin/main', originMain);
+    forkBranch(`issue-24359-under-${originMain.slice(0, 7)}`, underTest, originMain);
+    try {
+      return run(['--check']);
+    } finally {
+      fs.rmSync(shallowFile(), { force: true });
+    }
+  }
+
+  /** Hand the block back with the manifest untracked again, as every other case expects. */
+  function untrackManifest(): void {
+    git('checkout', '-q', '-f', 'main');
+    git('rm', '-r', '-q', '--cached', SCHEMA_MANIFEST_DIR_NAME);
+    seedManifest((s) => s);
+    git('commit', '-q', '-m', 'fixture: the manifest is untracked again');
+  }
+
+  it(
+    'the verdict belongs to the commit: the same tree is judged alike under a main that re-anchored past it',
+    { timeout: SPAWN_TIMEOUT_MS * 2 },
+    () => {
+      const { forkBase, underTest, mainMovedOn, mainReanchored } = seedReleasedCommit((s) => s);
+      try {
+        const movedOn = judgeUnder(underTest, mainMovedOn);
+        const reanchored = judgeUnder(underTest, mainReanchored);
+
+        // Before #24359 the second run anchored on the rev main's anchor names
+        // and exited 1: `1 schema(s) left the published set with no registered
+        // removal`, naming MAIN_ADDED_DEF — a schema this commit never had.
+        for (const { status, output } of [movedOn, reanchored]) {
+          expect(output).toContain(`anchors on ${forkBase.slice(0, 12)} rather than on`);
+          expect(output).not.toContain(NO_REGISTERED_REMOVAL);
+          expect(output).not.toContain(MAIN_ADDED_DEF);
+          expect(output).not.toContain(MAIN_ADDED_KEY);
+          expect(output).not.toContain('deleted without proof');
+          // …and green because the comparison RAN, not for want of a baseline.
+          expect(output).not.toContain('removal check: no');
+          expect(status).toBe(0);
+        }
+      } finally {
+        untrackManifest();
+      }
+    },
+  );
+
+  it(
+    "the shallow verdict keeps its teeth: a schema the commit's anchor recorded and the build dropped is red under either main",
+    { timeout: SPAWN_TIMEOUT_MS * 2 },
+    () => {
+      // The #4725 bypass shape: published at the commit's anchor, gone from the
+      // build AND from the commit's own manifest, registered nowhere.
+      const { forkBase, underTest, mainMovedOn, mainReanchored } = seedReleasedCommit((s) =>
+        [...s, ANCHOR_ONLY_DEF].sort(),
+      );
+      try {
+        // Under the re-anchored main the old run compared against main's anchor,
+        // which no longer lists ANCHOR_ONLY_DEF — so it MISSED this removal and
+        // reported MAIN_ADDED_DEF instead.
+        for (const originMain of [mainMovedOn, mainReanchored]) {
+          const { status, output } = judgeUnder(underTest, originMain);
+          expect(output).toContain(`anchors on ${forkBase.slice(0, 12)} rather than on`);
+          expect(status).toBe(1);
+          expect(output).toContain(`1 ${NO_REGISTERED_REMOVAL}`);
+          expect(output).toContain(`     - json-schema/${ANCHOR_ONLY_DEF}.json`);
+          expect(output).not.toContain(MAIN_ADDED_DEF);
+        }
+      } finally {
+        untrackManifest();
+      }
     },
   );
 });

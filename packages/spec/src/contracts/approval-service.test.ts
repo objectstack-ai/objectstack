@@ -111,6 +111,59 @@ describe('ApprovalActionRow.acted_as — the slot an approval action was taken a
 });
 
 // ---------------------------------------------------------------------------
+// [#24309] `ApprovalRequestRow.current_step_label` — the step's label under the
+// declared `sys_approval_request` column's own name, beside `step_label`.
+//
+// A page bound to `sys_approval_request` names the object's declared fields,
+// and `step_label` is not one, so the row declares the column's own name. The
+// pins hold what the card decided: the member is OPTIONAL and a STRING (the
+// column is a text field, and `step_label` carries the same value at the same
+// shape), and `step_label` stays, so no reader moves. Same optionality-alias
+// reasoning as the `acted_as` block above.
+// ---------------------------------------------------------------------------
+
+/** Optional: a row may omit it. A required member turns this alias red. */
+export type CurrentStepLabelIsOptional = Assert<
+    {} extends Pick<ApprovalRequestRow, 'current_step_label'> ? true : false
+>;
+
+/** A plain string label — not nullable, not an object. */
+export type CurrentStepLabelIsAString = Assert<Eq<ApprovalRequestRow['current_step_label'], string | undefined>>;
+
+/** `step_label` stays beside it, at the same shape: no reader moves. */
+export type StepLabelStays = Assert<Eq<ApprovalRequestRow['step_label'], ApprovalRequestRow['current_step_label']>>;
+
+describe('ApprovalRequestRow.current_step_label — the step label under the declared column name', () => {
+    it('is optional and string-typed: a row without it still conforms, and one with it reads back', () => {
+        const read = (row: ApprovalRequestRow): string | undefined => row.current_step_label;
+
+        expectTypeOf<ApprovalRequestRow['current_step_label']>().toEqualTypeOf<string | undefined>();
+
+        // The shape a producer that does not serve it returns: no member at all.
+        // This literal failing to compile is the regression.
+        const withoutLabel: ApprovalRequestRow = {
+            id: 'req_1',
+            process_name: 'flow:expense_review',
+            object_name: 'expense',
+            record_id: 'rec_1',
+            status: 'pending',
+            current_step: 'approve_step',
+        };
+        expect(read(withoutLabel)).toBeUndefined();
+
+        // The machine id and both label spellings side by side, each in its own member.
+        const withLabel: ApprovalRequestRow = {
+            ...withoutLabel,
+            step_label: 'Manager Review',
+            current_step_label: 'Manager Review',
+        };
+        expect(read(withLabel)).toBe('Manager Review');
+        expect(withLabel.step_label).toBe('Manager Review');
+        expect(withLabel.current_step).toBe('approve_step');
+    });
+});
+
+// ---------------------------------------------------------------------------
 // [#15389] `continueRestoredRun` — the approvals half of the operator repair
 // pair, declared on the contract.
 //

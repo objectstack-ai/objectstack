@@ -211,7 +211,10 @@ export const CEILING_HEADROOM = 1.25;
 //                              alone, not a finding.
 //   FILE_BUDGET_SECONDS        a test file over this many seconds of wall in
 //                              the window is listed (objectstack#22998: a file
-//                              over 10 s is a card for the owning lane).
+//                              over 10 s is a card for the owning lane) --
+//                              unless it declares a measured budget with its
+//                              class (readTestBudget, ruling record
+//                              6181973363), and then only over that budget.
 //
 // ⛔ None of these reds anything. A finding is a card the refresh lane's seat
 // files after the bot PR lands (the workflow's header says who files what);
@@ -976,7 +979,8 @@ export function renderSpread({ bySample, dataset }) {
 //   DOWNS     one line: how many packages got lighter, naming the ones down by
 //             the same factor.
 //   FILES     every test file over FILE_BUDGET_SECONDS of wall in the window,
-//             with its package and its slowest run (objectstack#22998).
+//             or over the budget it declares (readTestBudget), with its
+//             package and its slowest run (objectstack#22998).
 //
 // ⚠ THE PER-FILE READING IS NOT IN THE DATASET, although ruling E reads it as
 // if it were. The dataset holds per-PACKAGE weights only; the `Slowest
@@ -994,7 +998,9 @@ export function renderSpread({ bySample, dataset }) {
 // ⛔ Nothing here exits non-zero on a reading. A rise, a finding or a file over
 // budget is a card the refresh lane's seat files after the PR lands -- never a
 // red build. The only non-zero exit is a REFUSAL: a dataset whose `density` is
-// present but malformed was generated, so a malformed one is a defect.
+// present but malformed was generated, so a malformed one is a defect; and a
+// test file's budget declaration that is malformed was written to be read, so
+// reading past it would hold that file to a line its author did not declare.
 
 // The window density a dataset recorded (densityOf), with its mean executed
 // packages per run, or null when the dataset predates ruling E and carries no
@@ -1166,7 +1172,7 @@ export function diffRefresh({ prior, refreshed, factor = RISE_FACTOR, comparable
 // read it as a population this script declares (check:declared-population-
 // live refuses exactly that: a declaration that reaches no tracked path). The
 // marker below is the declaration this script does make:
-// dispatch-gates: no-path-population -- the --self-test drives in-memory fixtures and a temp dir and reads no tracked file; the generator and --diff read only the paths the refresh workflow hands them on argv, and that workflow's own pull_request paths trigger names this file
+// dispatch-gates: no-path-population -- the --self-test drives in-memory fixtures and a temp dir, and reads the tracked tree only through the workspace index (every package manifest, to resolve two packages by name) and one package's test-file count, the resolver's own depth fixture; the generator and --diff run only in the refresh workflow, and beside the paths it hands them on argv they read the workspace's package manifests, the generator to count each package's test files and --diff to read the budget declaration of each test file its window read over 10 s, a population the window's captures name at run time and no card's paths place; that workflow's own pull_request paths trigger names this file
 export const TIMING_CAPTURE_SCHEMA = ['test-timing-capture', 1].join('/');
 
 // The per-shard captures of the window's runs, laid out by the refresh lane as
@@ -1216,6 +1222,107 @@ export function readWindowCaptures(dir) {
   return { byRun, problems, present: true };
 }
 
+// -- A test file's own measured budget (ruling records 6181973363, 6212133431) --
+//
+// Three classes of test file cannot fit the 10 s line without being weakened:
+// one that spawns the real producer (a gate, a generator) once per
+// single-cause fixture, and one whose subject is every module of its package
+// (both ruling record 6181973363, letter B); and one whose floor is a single
+// compile of its package's type graph, every probe after the first reading
+// that one program (ruling record 6212133431, letter A, which adds this class
+// and changes nothing else). A file of any class carries its own budget in
+// place of the line, as ONE line in its header, and is listed only when the
+// window reads it above it:
+//
+//   // test-budget: SECONDS — CLASS: REASON
+//
+//   SECONDS  the measured CI reading x CEILING_HEADROOM, rounded UP to the
+//            next 10 s: a whole number, a multiple of 10, above
+//            FILE_BUDGET_SECONDS (one at or under the line lifts nothing). It
+//            rises only by a PR that re-measures and says why in REASON.
+//   CLASS    exactly one of TEST_BUDGET_CLASSES, spelled as its ruling names it.
+//   REASON   why the file is of that class; not empty.
+//
+// The separators are an em dash between single spaces, and a colon and a space
+// after the class. The HEADER is the file's leading run of blank lines, `//`
+// lines and block comments, up to its first line of code, and the declaration
+// is a `//` line in it, at column 0. No table and no second artefact: the
+// declaration is the record.
+//
+// ⛔ A declaration this cannot read is REFUSED, never skipped. A comment line
+// whose text opens with `test-budget:` (any case; `test budget` and
+// `test_budget` too) is a declaration attempt, and one that is not the grammar
+// above, a second one, or one below the header throws with the file and the
+// line. Skipped, it would hold the file to the 10 s line while its author
+// believes otherwise; read leniently, it would exempt a file on a budget
+// nobody can see was mis-declared.
+export const TEST_BUDGET_CLASSES = Object.freeze([
+  'spawns the real producer once per single-cause fixture',
+  'whole-package import',
+  'compiles the package type graph once',
+]);
+const TEST_BUDGET_ATTEMPT = /^(?:\/\/+|\/\*+|\*)\s*test[-_ ]?budget\s*:/i;
+const TEST_BUDGET_LINE = /^\/\/ test-budget: (\S+) — ([^:]+): (.*)$/u;
+
+// The declaration in one test file's text: { seconds, cls, reason, line }, or
+// null when it declares none. `label` names the file in a refusal.
+export function readTestBudget(text, label) {
+  const refuse = (line, why) => {
+    throw new Error(
+      `${label}:${line}: ${why}. A test file's budget is ONE header line, \`// test-budget: SECONDS — CLASS: REASON\` ` +
+        `(ruling records 6181973363 and 6212133431): SECONDS is the measured CI reading x ${CEILING_HEADROOM} rounded up to the next 10 s, ` +
+        `above the ${FILE_BUDGET_SECONDS} s line; CLASS is one of ${TEST_BUDGET_CLASSES.map((c) => `"${c}"`).join(', ')}; ` +
+        'REASON is not empty. Refusing to guess which budget the file is held to.'
+    );
+  };
+  let found = null;
+  let header = true;
+  let inBlock = false;
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (header) {
+      if (inBlock) inBlock = !t.includes('*/');
+      else if (t.startsWith('/*')) inBlock = !t.slice(2).includes('*/');
+      else if (t !== '' && !t.startsWith('//') && !(i === 0 && t.startsWith('#!'))) header = false;
+    }
+    if (!TEST_BUDGET_ATTEMPT.test(t)) continue;
+    const line = i + 1;
+    if (!header) refuse(line, "a test-budget line below the file's header, where no reader looks for it");
+    if (found !== null) refuse(line, `a second test-budget line (the first is line ${found.line})`);
+    const m = TEST_BUDGET_LINE.exec(lines[i]);
+    if (!m) refuse(line, `\`${t}\` is not the declaration's grammar`);
+    const [, number, cls, reason] = m;
+    if (!/^[1-9]\d*$/.test(number)) refuse(line, `the budget \`${number}\` is not a whole number of seconds`);
+    const seconds = Number(number);
+    if (seconds % 10 !== 0) refuse(line, `the budget ${seconds} s is not on the 10 s grid`);
+    if (seconds <= FILE_BUDGET_SECONDS) refuse(line, `the budget ${seconds} s does not lift the ${FILE_BUDGET_SECONDS} s line`);
+    if (!TEST_BUDGET_CLASSES.includes(cls)) refuse(line, `the class "${cls}" is none of the ${TEST_BUDGET_CLASSES.length} classes the rulings name`);
+    if (reason.trim() === '') refuse(line, 'the reason is empty');
+    found = { seconds, cls, reason: reason.trim(), line };
+  }
+  return found;
+}
+
+// One captured file row's declaration, read from this checkout. A row names
+// its package and the path vitest printed, relative to that package's own
+// directory (vitest's root), so the file is the package's directory plus that
+// path. A file no longer there -- renamed or deleted since the window ran --
+// has no declaration to read: `{ absent }`, so the 10 s line holds and the
+// body names the file. Never a crash, and never an exemption.
+export function declaredBudgetInTree(pkg, file, packageDir = packageDirForName) {
+  const dir = packageDir(pkg);
+  if (dir === null) return { absent: 'no workspace package by that name in this checkout' };
+  const at = path.join(dir, file);
+  let text;
+  try {
+    text = readFileSync(at, 'utf8');
+  } catch {
+    return { absent: `no file at ${path.relative(REPO_ROOT, at)} in this checkout` };
+  }
+  return readTestBudget(text, path.relative(REPO_ROOT, at));
+}
+
 // Every test file over the budget in the window (#22949 ruling E, item 3; the
 // budget is objectstack#22998's), and each package's slowest file.
 //
@@ -1224,7 +1331,13 @@ export function readWindowCaptures(dir) {
 // durations of the run that FILLED the cache). That run is not in this window
 // and its density is unknown, so a replayed row is not a reading of this
 // window -- the same rule the weights follow.
-export function windowFiles({ byRun, runs, dataset, budgetSeconds = FILE_BUDGET_SECONDS }) {
+//
+// A file the window reads over `budgetSeconds` is asked for its declaration
+// (`declaredBudget(pkg, file)`: a readTestBudget result, null, or `{ absent }`)
+// and is then held to the budget it declares. No other file is asked: a
+// declaration cannot lift a file the line does not list, so nothing else
+// depends on it.
+export function windowFiles({ byRun, runs, dataset, budgetSeconds = FILE_BUDGET_SECONDS, declaredBudget = () => null }) {
   const entries = new Map();
   const measuredPackages = new Set();
   const runsWithoutCapture = [];
@@ -1252,11 +1365,11 @@ export function windowFiles({ byRun, runs, dataset, budgetSeconds = FILE_BUDGET_
         const project = typeof row.project === 'string' && row.project.length > 0 ? row.project : null;
         const key = JSON.stringify([row.pkg, project, row.file]);
         if (!entries.has(key)) {
-          entries.set(key, { pkg: row.pkg, file: row.file, project, slowest: null, runsSeen: new Set(), runsOver: new Set() });
+          entries.set(key, { pkg: row.pkg, file: row.file, project, slowest: null, runsSeen: new Set(), msByRun: new Map() });
         }
         const entry = entries.get(key);
         entry.runsSeen.add(run);
-        if (row.ms > budgetSeconds * 1000) entry.runsOver.add(run);
+        entry.msByRun.set(run, Math.max(entry.msByRun.get(run) ?? 0, row.ms));
         if (entry.slowest === null || row.ms > entry.slowest.ms) entry.slowest = { run, ms: row.ms };
       }
     }
@@ -1264,7 +1377,23 @@ export function windowFiles({ byRun, runs, dataset, budgetSeconds = FILE_BUDGET_
   const all = [...entries.values()].sort(
     (a, b) => b.slowest.ms - a.slowest.ms || a.pkg.localeCompare(b.pkg, 'en') || a.file.localeCompare(b.file, 'en')
   );
-  const over = all.filter((e) => e.slowest.ms > budgetSeconds * 1000);
+  const declared = [];
+  const budgetNotRead = [];
+  for (const e of all) {
+    e.budgetSeconds = budgetSeconds;
+    e.declared = null;
+    if (e.slowest.ms > budgetSeconds * 1000) {
+      const d = declaredBudget(e.pkg, e.file);
+      if (d?.absent) budgetNotRead.push({ pkg: e.pkg, file: e.file, why: d.absent });
+      else if (d) {
+        e.declared = d;
+        e.budgetSeconds = d.seconds;
+        declared.push(e);
+      }
+    }
+    e.runsOver = new Set([...e.msByRun].filter(([, ms]) => ms > e.budgetSeconds * 1000).map(([run]) => run));
+  }
+  const over = all.filter((e) => e.slowest.ms > e.budgetSeconds * 1000);
   const slowestByPackage = new Map();
   for (const e of all) if (!slowestByPackage.has(e.pkg)) slowestByPackage.set(e.pkg, e);
   const carriedOver = new Set(dataset?.carriedOver ?? []);
@@ -1276,6 +1405,8 @@ export function windowFiles({ byRun, runs, dataset, budgetSeconds = FILE_BUDGET_
   return {
     budgetSeconds,
     over,
+    declared,
+    budgetNotRead,
     slowestByPackage,
     runsRead: runs.length - runsWithoutCapture.length,
     runsWithoutCapture,
@@ -1389,26 +1520,38 @@ export function renderRefreshDiff({ diff, files = null, filesNotMeasured = null,
   );
   out.push('');
   const budget = files?.budgetSeconds ?? FILE_BUDGET_SECONDS;
+  const filesHeading = `### Test files over budget in this window (${budget} s of wall, unless the file declares a measured budget with its class)`;
   if (files === null) {
-    out.push(`### Test files over ${budget} s of wall in this window: NOT MEASURED`);
+    out.push(`${filesHeading}: NOT MEASURED`);
     out.push('');
     out.push(`${filesNotMeasured ?? 'No per-file capture was read.'} This is not "no file is over budget".`);
   } else {
     const pkgs = new Set(files.over.map((e) => e.pkg));
-    out.push(`### Test files over ${budget} s of wall in this window: ${files.over.length} in ${pkgs.size} package(s)`);
+    out.push(`${filesHeading}: ${files.over.length} in ${pkgs.size} package(s)`);
     out.push('');
     if (files.over.length === 0) {
-      out.push(`None: no file measured in this window ran longer than ${budget} s.`);
+      out.push(`None: no file measured in this window ran longer than ${budget} s, or than the budget it declares.`);
     } else {
       out.push('| file | package | slowest run | its seconds | runs over budget / runs that executed it |');
       out.push('|---|---|---|--:|--:|');
       for (const e of files.over.slice(0, FILE_ROWS)) {
         const label = e.project ? `\`${e.file}\` (${e.project})` : `\`${e.file}\``;
-        out.push(`| ${label} | \`${e.pkg}\` | \`${e.slowest.run}\` | ${secs(e.slowest.ms / 1000)} | ${e.runsOver.size} / ${e.runsSeen.size} |`);
+        const reading = `${secs(e.slowest.ms / 1000)}${e.declared ? ` (declared ${e.declared.seconds})` : ''}`;
+        out.push(`| ${label} | \`${e.pkg}\` | \`${e.slowest.run}\` | ${reading} | ${e.runsOver.size} / ${e.runsSeen.size} |`);
       }
       if (files.over.length > FILE_ROWS) {
         out.push('', `…and ${files.over.length - FILE_ROWS} more file(s) over budget, in full in this run's job log.`);
       }
+    }
+    if (files.declared.length > 0) {
+      const held = files.declared.map(
+        (e) => `\`${e.file}\` (\`${e.pkg}\`) ${secs(e.slowest.ms / 1000)} s of its ${e.declared.seconds} s, ${e.declared.cls}`
+      );
+      out.push('', `**Held to the budget it declares** (ruling record 6181973363), in place of the ${budget} s line: ${held.join('; ')}.`);
+    }
+    if (files.budgetNotRead.length > 0) {
+      const unread = files.budgetNotRead.map((e) => `\`${e.file}\` (\`${e.pkg}\`): ${e.why}`);
+      out.push('', `**No budget declaration could be read, so the ${budget} s line holds:** ${unread.join('; ')}.`);
     }
     out.push('');
     const missing = files.runsWithoutCapture.length
@@ -1465,15 +1608,15 @@ export function renderRefreshDiff({ diff, files = null, filesNotMeasured = null,
     }
   }
   if (files === null) {
-    out.push(`2. **Files over ${budget} s:** not measured this time (see above) -- nothing to file from this refresh.`);
+    out.push('2. **Files over budget:** not measured this time (see above) -- nothing to file from this refresh.');
   } else if (files.over.length === 0) {
-    out.push(`2. **Files over ${budget} s:** no card this time.`);
+    out.push('2. **Files over budget:** no card this time.');
   } else {
     const pkgs = [...new Set(files.over.map((e) => e.pkg))];
     out.push(
-      `2. **Files over ${budget} s:** #22998 makes a test file over ${budget} s of wall a card for the owning ` +
-        `lane -- one card per package in the file list above (${pkgs.length} this time), naming each of its files and ` +
-        'its slowest run.'
+      `2. **Files over budget:** #22998 makes a test file over ${budget} s of wall, or over the budget it declares ` +
+        `with its class, a card for the owning lane -- one card per package in the file list above (${pkgs.length} ` +
+        'this time), naming each of its files and its slowest run.'
     );
   }
   out.push(
@@ -1521,11 +1664,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // #22949 ruling E: the density reading, the refresh diff and its guard
   // (the density-only and the code fixture first), and the per-file budget.
   'refresh diff and per-file budget (#22949 E)': 22,
+  // Ruling record 6181973363: a test file's own measured budget, the
+  // declaration's grammar and its refusals, and the list held to it; ruling
+  // record 6212133431: its third class, read in memory and from disk.
+  'per-file budget declarations (ruling 6181973363)': 18,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2784,7 +2931,7 @@ function selfTest() {
     // NOT MEASURED reads as such, never as an empty list; and the body is safe
     // for GitHub's sanitizer: no less-than character anywhere in it.
     const body = renderRefreshDiff({ diff: diffRefresh({ prior: priorWindow, refreshed: codeWindow }), files: null, filesNotMeasured: 'No capture.' });
-    if (!body.includes('over 10 s of wall in this window: NOT MEASURED') || !body.includes('This is not "no file is over budget"')) {
+    if (!body.includes('(10 s of wall, unless the file declares a measured budget with its class): NOT MEASURED') || !body.includes('This is not "no file is over budget"')) {
       throw new Error(`render: a missing per-file reading did not say NOT MEASURED:\n${body}`);
     }
     if (body.includes('<') || renderRefreshDiff({ diff: diffRefresh({ prior: priorWindow, refreshed: codeWindow }), files }).includes('<')) {
@@ -2822,7 +2969,7 @@ function selfTest() {
       console.error = () => {};
       let code;
       try {
-        code = diffMain(['--diff', '--prior', path.join(dir, 'prior.json'), '--refreshed', path.join(dir, 'refreshed.json'), '--captures', caps, '--out', outFile]);
+        code = diffMain(['--diff', '--prior', path.join(dir, 'prior.json'), '--refreshed', path.join(dir, 'refreshed.json'), '--captures', caps, '--out', outFile], { packageDir: () => null });
       } finally {
         console.error = quiet;
       }
@@ -2831,6 +2978,269 @@ function selfTest() {
         throw new Error(`cli: --diff exited ${code} and wrote:\n${md}`);
       }
       if (!threw(() => diffMain(['--diff', '--prior', 'x', '--refreshed', 'y', '--bogus', 'z']))) throw new Error('cli: an unknown --diff flag was accepted');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // -- A test file's own measured budget (ruling record 6181973363) ----------
+  battery('per-file budget declarations (ruling 6181973363)');
+  const [producerClass, wholePackageClass, typeGraphClass] = TEST_BUDGET_CLASSES;
+  // The ruled spellings, as LITERALS: a case that read them back out of
+  // TEST_BUDGET_CLASSES would still pass with a value deleted from it.
+  const ruledClasses = ['spawns the real producer once per single-cause fixture', 'whole-package import', 'compiles the package type graph once'];
+  const declare = (seconds, cls = producerClass, reason = 'each case spawns the gate once') =>
+    `// test-budget: ${seconds} — ${cls}: ${reason}`;
+  // Line 3 of the file is `decl`; `rest` follows the header's blank line 4.
+  const fileWith = (decl, rest = "import { it } from 'vitest';\n") => `// Copyright (c) 2026 ObjectStack.\n//\n${decl}\n\n${rest}`;
+  // The header of the two spec files the third class was ruled for, with the
+  // declaration on line 2, where every declaration in the tree sits.
+  const specFileWith = (decl) =>
+    `// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.\n${decl}\n\nimport { describe, it, expect } from 'vitest';\nimport ts from 'typescript';\n`;
+  const typeGraphLine =
+    '// test-budget: 30 — compiles the package type graph once: one ts.createProgram over the published entries, and every probe after the first reads that one program';
+  const refusalOf = (fn) => {
+    try {
+      fn();
+    } catch (err) {
+      return String(err?.message ?? err);
+    }
+    return null;
+  };
+  check(() => {
+    // The three classes, spelled as their rulings name them, in order, and no fourth.
+    if (
+      TEST_BUDGET_CLASSES.length !== 3 ||
+      producerClass !== ruledClasses[0] ||
+      wholePackageClass !== ruledClasses[1] ||
+      typeGraphClass !== ruledClasses[2]
+    ) {
+      throw new Error(`budget: the classes read ${JSON.stringify(TEST_BUDGET_CLASSES)}`);
+    }
+  });
+  check(() => {
+    // The third class (ruling record 6212133431), in the line the ruling
+    // writes, under the header of the files it was ruled for: a declared budget.
+    const d = readTestBudget(specFileWith(typeGraphLine), 'packages/spec/src/contracts/scoped-context.test.ts');
+    if (d?.seconds !== 30 || d.cls !== ruledClasses[2] || d.line !== 2 || !d.reason.startsWith('one ts.createProgram over')) {
+      throw new Error(`budget: the third class's declaration read ${JSON.stringify(d)}`);
+    }
+  });
+  check(() => {
+    // The two earlier classes still read, in that same header: the third
+    // took nothing from them.
+    for (const cls of ruledClasses.slice(0, 2)) {
+      const d = readTestBudget(specFileWith(declare(40, cls, 'r')), 'f.test.ts');
+      if (d?.seconds !== 40 || d.cls !== cls || d.line !== 2) throw new Error(`budget: the class "${cls}" read ${JSON.stringify(d)}`);
+    }
+  });
+  check(() => {
+    // A near miss of the third class is REFUSED, never read as a nearby class:
+    // the refusal names the file and line, the spelling, and all three classes.
+    for (const near of [
+      'compiles the package type-graph once',
+      'compiles the package type graph',
+      'compiles the type graph once',
+      'compiles the packages type graph once',
+      'Compiles the package type graph once',
+      'compiles the package type graph once ',
+    ]) {
+      const msg = refusalOf(() => readTestBudget(fileWith(declare(30, near)), 'f.test.ts'));
+      if (!msg?.startsWith('f.test.ts:3: ') || !msg.includes(`"${near}"`) || !ruledClasses.every((c) => msg.includes(`"${c}"`))) {
+        throw new Error(`budget: the near miss "${near}" read as ${msg}`);
+      }
+    }
+  });
+  check(() => {
+    // Each class parses, in a `//` header and below a header docblock.
+    const d = readTestBudget(fileWith(declare(1130)), 'f.test.ts');
+    if (d?.seconds !== 1130 || d.cls !== producerClass || d.reason !== 'each case spawns the gate once' || d.line !== 3) {
+      throw new Error(`budget: a well-formed declaration read ${JSON.stringify(d)}`);
+    }
+    const docblock = `// Copyright\n\n/**\n * Every module.\n */\n${declare(60, wholePackageClass, 'imports every module')}\nimport x from 'y';\n`;
+    const w = readTestBudget(docblock, 'g.test.ts');
+    if (w?.seconds !== 60 || w.cls !== wholePackageClass || w.line !== 6) throw new Error(`budget: a declaration under a docblock read ${JSON.stringify(w)}`);
+  });
+  check(() => {
+    // No declaration is null, and the token in CODE (a string, not a comment line) is no attempt.
+    if (readTestBudget(fileWith('// nothing declared'), 'f.test.ts') !== null) throw new Error('budget: a file with no declaration declared one');
+    if (readTestBudget(fileWith('//', `const s = '${declare(5, 'x')}';\n`), 'f.test.ts') !== null) {
+      throw new Error('budget: a test-budget string in code was read as a declaration');
+    }
+  });
+  check(() => {
+    // A class naming none of them is REFUSED, naming the file and the line.
+    const msg = refusalOf(() => readTestBudget(fileWith(declare(1130, 'slow by nature')), 'packages/x/a.test.ts'));
+    if (!msg?.startsWith('packages/x/a.test.ts:3: ') || !msg.includes('slow by nature')) throw new Error(`budget: a class naming none of them read as ${msg}`);
+  });
+  check(() => {
+    // A number off the 10 s grid, at or under the line, or not a whole number is REFUSED.
+    for (const n of ['1135', '10', '0', '0130', '1130.5', '-20']) {
+      const msg = refusalOf(() => readTestBudget(fileWith(declare(n)), 'f.test.ts'));
+      if (!msg?.startsWith('f.test.ts:3: ')) throw new Error(`budget: the number ${n} read as ${msg}`);
+    }
+  });
+  check(() => {
+    // Every near-miss spelling is a REFUSED attempt, never a skipped comment.
+    for (const decl of [
+      declare(1130, producerClass, ''),
+      declare(1130).replace(' — ', ' -- '),
+      declare(1130).replace('1130', '1130 s'),
+      ` ${declare(1130)}`,
+      declare(1130).replace('test-budget', 'Test-Budget'),
+      declare(1130).replace('test-budget', 'test budget'),
+      `/* ${declare(1130).slice(3)} */`,
+      `/**\n * ${declare(1130).slice(3)}\n */`,
+    ]) {
+      if (!refusalOf(() => readTestBudget(fileWith(decl), 'f.test.ts'))?.startsWith('f.test.ts:')) {
+        throw new Error(`budget: the near miss ${JSON.stringify(decl)} was not refused`);
+      }
+    }
+  });
+  check(() => {
+    // A second declaration, and one below the header, are REFUSED at their own line.
+    if (!refusalOf(() => readTestBudget(fileWith(`${declare(1130)}\n${declare(1130)}`), 'f.test.ts'))?.startsWith('f.test.ts:4: ')) {
+      throw new Error('budget: a second declaration was not refused');
+    }
+    if (!refusalOf(() => readTestBudget(fileWith('//', `import x from 'y';\n${declare(1130)}\n`), 'f.test.ts'))?.startsWith('f.test.ts:6: ')) {
+      throw new Error('budget: a declaration below the header was not refused');
+    }
+  });
+
+  // windowFiles with declarations: `gate` declared and under, `over` declared
+  // and over in one of its two runs, `plain` undeclared, `gone` not in the
+  // tree, `fast` under the line -- and never asked for its declaration.
+  const asked = [];
+  const declaredStub = (pkg, file) => {
+    asked.push(file);
+    if (file === 'src/fast.test.ts') throw new Error('the declaration of a file under the line was read');
+    if (file === 'src/gone.test.ts') return { absent: 'no file at packages/spec/src/gone.test.ts in this checkout' };
+    return file.startsWith('scripts/') ? { seconds: 1130, cls: producerClass, reason: 'r', line: 3 } : null;
+  };
+  const budgetedFiles = windowFiles({
+    byRun: new Map([
+      ['m1', [capture([fileRow('spec', 'scripts/gate.test.ts', 900_000), fileRow('spec', 'scripts/over.test.ts', 1_200_000), fileRow('spec', 'src/plain.test.ts', 12_000), fileRow('spec', 'src/gone.test.ts', 15_000), fileRow('spec', 'src/fast.test.ts', 3_000)])]],
+      ['m2', [capture([fileRow('spec', 'scripts/gate.test.ts', 950_000), fileRow('spec', 'scripts/over.test.ts', 1_100_000)])]],
+    ]),
+    runs: ['m1', 'm2'],
+    dataset: null,
+    declaredBudget: declaredStub,
+  });
+  const listed = (file) => budgetedFiles.over.find((e) => e.file === file);
+  check(() => {
+    // Declared and under its budget: NOT listed, and named as held to it.
+    if (listed('scripts/gate.test.ts') || !budgetedFiles.declared.some((e) => e.file === 'scripts/gate.test.ts' && e.budgetSeconds === 1130)) {
+      throw new Error(`files: a file under its declared budget was listed (${JSON.stringify(budgetedFiles.over.map((e) => e.file))})`);
+    }
+  });
+  check(() => {
+    // Declared and over it: listed with its own budget, its runs counted against that budget.
+    const e = listed('scripts/over.test.ts');
+    if (e?.budgetSeconds !== 1130 || e.runsOver.size !== 1 || e.runsSeen.size !== 2) throw new Error(`files: a file over its declared budget read ${JSON.stringify(e)}`);
+  });
+  check(() => {
+    // Undeclared and over the line: listed as before, against 10 s.
+    const e = listed('src/plain.test.ts');
+    if (e?.budgetSeconds !== FILE_BUDGET_SECONDS || e.declared !== null || e.runsOver.size !== 1) throw new Error(`files: an undeclared file read ${JSON.stringify(e)}`);
+  });
+  check(() => {
+    // Not in the tree: the 10 s line holds -- listed, and named as unread.
+    if (listed('src/gone.test.ts')?.budgetSeconds !== FILE_BUDGET_SECONDS || budgetedFiles.budgetNotRead.map((e) => e.file).join(',') !== 'src/gone.test.ts') {
+      throw new Error(`files: a file missing from the tree read ${JSON.stringify(budgetedFiles.budgetNotRead)}`);
+    }
+  });
+  check(() => {
+    // Only the files over the line are asked; the stub throws on any other.
+    if ([...asked].sort().join(',') !== 'scripts/gate.test.ts,scripts/over.test.ts,src/gone.test.ts,src/plain.test.ts') {
+      throw new Error(`files: the declarations asked for were ${JSON.stringify(asked)}`);
+    }
+  });
+  check(() => {
+    // The rendered rows: the budget that applied, the files held to theirs, the unread one.
+    const body = renderRefreshDiff({ diff: diffRefresh({ prior: priorWindow, refreshed: codeWindow }), files: budgetedFiles });
+    for (const want of [
+      '| `scripts/over.test.ts` | `spec` | `m1` | 1200.00 (declared 1130) | 1 / 2 |',
+      '| `src/plain.test.ts` | `spec` | `m1` | 12.00 | 1 / 1 |',
+      '`scripts/gate.test.ts` (`spec`) 950.00 s of its 1130 s',
+      '`src/gone.test.ts` (`spec`): no file at packages/spec/src/gone.test.ts in this checkout',
+    ]) {
+      if (!body.includes(want)) throw new Error(`render: missing ${JSON.stringify(want)}:\n${body}`);
+    }
+    if (body.includes('<')) throw new Error('render: the body carries a less-than character');
+  });
+  check(() => {
+    // The CLI, from files on disk: a declared file under its budget is held to
+    // it; a malformed declaration REFUSES the diff (it throws, so the process
+    // exits non-zero and the workflow quotes it), naming the file and the line,
+    // with no body written.
+    const dir = mkdtempSync(path.join(tmpdir(), 'os-refresh-budget-'));
+    try {
+      const pkgDir = path.join(dir, 'spec');
+      mkdirSync(path.join(pkgDir, 'scripts'), { recursive: true });
+      writeFileSync(path.join(pkgDir, 'scripts', 'gate.test.ts'), fileWith(declare(1130)));
+      writeFileSync(path.join(pkgDir, 'scripts', 'bad.test.ts'), fileWith(declare(1130, 'slow by nature')));
+      writeFileSync(path.join(dir, 'prior.json'), JSON.stringify(priorWindow));
+      writeFileSync(path.join(dir, 'refreshed.json'), JSON.stringify(codeWindow));
+      const run = (file, ms, out) => {
+        const caps = path.join(dir, `captures-${out}`);
+        mkdirSync(path.join(caps, 'n1', '1'), { recursive: true });
+        writeFileSync(path.join(caps, 'n1', '1', 'shard-1.json'), JSON.stringify(capture([fileRow('spec', file, ms)])));
+        const argv = ['--diff', '--prior', path.join(dir, 'prior.json'), '--refreshed', path.join(dir, 'refreshed.json'), '--captures', caps, '--out', path.join(dir, out)];
+        const quiet = console.error;
+        console.error = () => {};
+        try {
+          return diffMain(argv, { packageDir: (name) => (name === 'spec' ? pkgDir : null) });
+        } finally {
+          console.error = quiet;
+        }
+      };
+      const code = run('scripts/gate.test.ts', 900_000, 'held.md');
+      const md = readFileSync(path.join(dir, 'held.md'), 'utf8');
+      if (code !== 0 || md.includes('| `scripts/gate.test.ts`') || !md.includes('`scripts/gate.test.ts` (`spec`) 900.00 s of its 1130 s')) {
+        throw new Error(`cli: a declared file under its budget exited ${code} and wrote:\n${md}`);
+      }
+      const msg = refusalOf(() => run('scripts/bad.test.ts', 20_000, 'refused.md'));
+      if (!msg?.includes(`${path.join('spec', 'scripts', 'bad.test.ts')}:3: `) || existsSync(path.join(dir, 'refused.md'))) {
+        throw new Error(`cli: a malformed declaration did not refuse the diff (${msg})`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  check(() => {
+    // The third class end to end, from a file on disk through --diff: at the
+    // card's slowest CI reading (18.1 s) the file is held to its 30 s and named
+    // with its class; read over the 30 s, it is listed against them.
+    const dir = mkdtempSync(path.join(tmpdir(), 'os-refresh-type-graph-'));
+    try {
+      const pkgDir = path.join(dir, 'spec');
+      mkdirSync(path.join(pkgDir, 'src', 'integration'), { recursive: true });
+      writeFileSync(path.join(pkgDir, 'src', 'integration', 'graph.test.ts'), specFileWith(typeGraphLine));
+      writeFileSync(path.join(dir, 'prior.json'), JSON.stringify(priorWindow));
+      writeFileSync(path.join(dir, 'refreshed.json'), JSON.stringify(codeWindow));
+      const run = (ms, out) => {
+        const caps = path.join(dir, `captures-${out}`);
+        mkdirSync(path.join(caps, 'n1', '1'), { recursive: true });
+        writeFileSync(path.join(caps, 'n1', '1', 'shard-1.json'), JSON.stringify(capture([fileRow('spec', 'src/integration/graph.test.ts', ms)])));
+        const argv = ['--diff', '--prior', path.join(dir, 'prior.json'), '--refreshed', path.join(dir, 'refreshed.json'), '--captures', caps, '--out', path.join(dir, out)];
+        const quiet = console.error;
+        console.error = () => {};
+        try {
+          return diffMain(argv, { packageDir: (name) => (name === 'spec' ? pkgDir : null) });
+        } finally {
+          console.error = quiet;
+        }
+      };
+      const heldCode = run(18_100, 'held.md');
+      const held = readFileSync(path.join(dir, 'held.md'), 'utf8');
+      if (heldCode !== 0 || held.includes('| `src/integration/graph.test.ts`') || !held.includes('`src/integration/graph.test.ts` (`spec`) 18.10 s of its 30 s, compiles the package type graph once')) {
+        throw new Error(`cli: a type-graph file under its declared budget exited ${heldCode} and wrote:\n${held}`);
+      }
+      const overCode = run(31_000, 'over.md');
+      const over = readFileSync(path.join(dir, 'over.md'), 'utf8');
+      if (overCode !== 0 || !over.includes('| `src/integration/graph.test.ts` | `spec` | `n1` | 31.00 (declared 30) | 1 / 1 |')) {
+        throw new Error(`cli: a type-graph file over its declared budget exited ${overCode} and wrote:\n${over}`);
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -2938,9 +3348,11 @@ function packageDirForName(name) {
 // `--diff` (#22949 ruling E): the refresh PR's regression section, from the
 // previous dataset, the refreshed one and the window's per-shard captures.
 // Exit 0 on every READING -- a finding is a card, never a red -- and non-zero
-// only on a refusal (an argument it does not know, or a generated field that is
-// malformed), which the workflow quotes into the PR body instead of the section.
-function diffMain(argv) {
+// only on a refusal (an argument it does not know, a generated field that is
+// malformed, or a test file's malformed budget declaration), which the workflow
+// quotes into the PR body instead of the section. `packageDir` resolves a
+// package name to its directory, so the self-test can point it at a temp dir.
+function diffMain(argv, { packageDir = packageDirForName } = {}) {
   let prior = null;
   let refreshed = null;
   let captures = null;
@@ -2985,7 +3397,12 @@ function diffMain(argv) {
       // names none, and then every run directory present is the window.
       const declared = refreshedDataset.provenance?.runs;
       const runs = Array.isArray(declared) && declared.length > 0 ? declared.map(String) : [...read.byRun.keys()];
-      const read2 = windowFiles({ byRun: read.byRun, runs, dataset: refreshedDataset });
+      const read2 = windowFiles({
+        byRun: read.byRun,
+        runs,
+        dataset: refreshedDataset,
+        declaredBudget: (pkg, file) => declaredBudgetInTree(pkg, file, packageDir),
+      });
       if (read2.runsRead === 0) {
         filesNotMeasured = `No per-file capture arrived for any of the window's ${runs.length} run(s).`;
       } else {
@@ -3000,7 +3417,9 @@ function diffMain(argv) {
     `measure-test-shard-timings --diff: ${diff.rises.length} rise(s) of ${diff.factor}x or more, ` +
       `${diff.findings.length} finding(s)${diff.baseline === null ? '' : ' (BASELINE: none judged)'}; ` +
       `${diff.downs.length} down; ` +
-      (files === null ? 'files over budget NOT MEASURED' : `${files.over.length} file(s) over ${files.budgetSeconds} s`) +
+      (files === null
+        ? 'files over budget NOT MEASURED'
+        : `${files.over.length} file(s) over budget (${files.budgetSeconds} s, or the ${files.declared.length} declared)`) +
       (out === null ? '' : ` -> ${path.relative(REPO_ROOT, out)}`)
   );
   // The whole of every list the body caps, so "in full in this run's job log"
@@ -3013,9 +3432,12 @@ function diffMain(argv) {
     }
   }
   if (files !== null && files.over.length > FILE_ROWS) {
-    console.error(`measure-test-shard-timings --diff: every test file over ${files.budgetSeconds} s:`);
+    console.error('measure-test-shard-timings --diff: every test file over budget:');
     for (const e of files.over) {
-      console.error(`  ${e.pkg}  ${e.file}${e.project ? ` (${e.project})` : ''}  ${(e.slowest.ms / 1000).toFixed(2)}s  run ${e.slowest.run}`);
+      console.error(
+        `  ${e.pkg}  ${e.file}${e.project ? ` (${e.project})` : ''}  ${(e.slowest.ms / 1000).toFixed(2)}s` +
+          `${e.declared ? ` (declared ${e.declared.seconds}s)` : ''}  run ${e.slowest.run}`
+      );
     }
   }
   return 0;

@@ -35,6 +35,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ソース",
         help: "リクエストの発生元 — ノード駆動の承認では `flow:<flowName|nodeId>`"
       },
+      process_label: {
+        label: "フロー",
+        help: "このリクエストを開いたフローのラベル（リクエストを開いた時点の値）"
+      },
       object_name: {
         label: "オブジェクト"
       },
@@ -70,6 +74,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "現在のステップ",
         help: "承認待ちのステップの機械名"
       },
+      current_step_label: {
+        label: "承認ステップ",
+        help: "承認待ちのステップのラベル（リクエストがそのステップに到達した時点の値）"
+      },
       current_step_index: {
         label: "現在のステップ番号"
       },
@@ -77,21 +85,25 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "承認待ち承認者",
         help: "現在のステップを処理できるユーザー ID のカンマ区切りリスト"
       },
+      pending_approver_labels: {
+        label: "承認待ちの相手",
+        help: "リクエストが待っている相手：各承認待ち承認者の名前。スロットが特定の人を指さない場合はそのアドレス"
+      },
       payload_json: {
         label: "スナップショット",
         help: "送信時のレコードスナップショット"
       },
       flow_run_id: {
         label: "Flow Run",
-        help: "Suspended automation run id this request gates (ADR-0019). The decision resumes it."
+        help: "Suspended automation run id this request gates. The decision resumes it."
       },
       flow_node_id: {
         label: "Flow Node",
-        help: "Approval node id within the flow that opened this request (ADR-0019)."
+        help: "Approval node id within the flow that opened this request."
       },
       node_config_json: {
         label: "Node Config",
-        help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests (ADR-0019)."
+        help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests."
       },
       completed_at: {
         label: "完了日時"
@@ -244,6 +256,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ステップ",
         help: "アクション時点のステップの機械名"
       },
+      step_label: {
+        label: "承認ステップ",
+        help: "アクション実行時のステップのラベル"
+      },
+      object_name: {
+        label: "オブジェクト",
+        help: "リクエストの対象レコードのオブジェクト"
+      },
+      record_id: {
+        label: "レコード",
+        help: "リクエストの対象レコード"
+      },
       step_index: {
         label: "ステップ番号"
       },
@@ -272,6 +296,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       acted_as: {
         label: "代表スロット",
         help: "この操作が代表した承認待ちスロット。スロットに保存された表記（ユーザー ID、メールアドレス、またはポジションアドレス）で記録されます。申請者自身の操作、システム操作、管理者オーバーライドなど、スロットを経由せずに許可された操作では空になります。"
+      },
+      acted_as_label: {
+        label: "代理元",
+        help: "このアクションを実行したスロット（表示用）：人を指す場合はその名前、指さない場合はアドレス"
       },
       comment: {
         label: "コメント"
@@ -315,7 +343,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_approval_delegation: {
     label: "Approval Delegation",
     pluralLabel: "Approval Delegations",
-    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window.",
+    description: "While someone is away, approvals assigned to them personally go to their delegate.",
     fields: {
       id: {
         label: "Delegation ID"
@@ -334,7 +362,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "Valid From",
-        help: "Rule is inactive before this instant. Null = active immediately. Enforced at resolution time via isGrantActive (ADR-0091 D2 predicate) — never by a background job."
+        help: "Rule is inactive before this instant. Null = active immediately. Enforced at resolution time via isGrantActive — never by a background job."
       },
       valid_until: {
         label: "Valid Until",

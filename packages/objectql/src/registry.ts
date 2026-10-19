@@ -6,6 +6,7 @@ import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolve
 // package `objectql` and `metadata-protocol` both depend on.
 import {
   AUDIT_FIELD_GOVERNANCE,
+  applyAuditFieldGovernance,
   AUDIT_FIELD_DEFS,
   TENANT_SCOPE_FIELD_DEF,
   OWNER_FIELD_DEF,
@@ -44,7 +45,7 @@ import { SystemFieldName, scalarOverridesPackagedBase } from '@objectstack/spec/
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
-import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, checkFieldCompleteness } from '@objectstack/spec/kernel';
+import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness } from '@objectstack/spec/kernel';
 import { DEFAULT_FLOW_FUNCTION_EFFECT } from '@objectstack/spec/automation';
 import { AppSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -69,11 +70,13 @@ import {
 // place a manifest's default record pages are read from (module doc).
 import {
   declaredDefaultRecordPages,
+  misplacedDefaultPages,
+  type MisplacedDefaultPage,
   defaultRecordPageHolderKey,
   describeDefaultRecordPageHolder,
   type DefaultRecordPageHolder,
 } from './default-record-page.js';
-import { defaultRecordPageObject } from '@objectstack/spec/ui';
+import { defaultRecordPageObject, misplacedDefaultPageRefusal } from '@objectstack/spec/ui';
 // [#14553] The ONE resolution of "does this nav group id exist?" and the ONE
 // wording of the diagnostic when it does not. `os build` calls the same two
 // (`checkNavContributionGroups`), so the compile-time door and this read-time
@@ -1794,6 +1797,51 @@ export class DefaultRecordPageConflictError extends Error {
 }
 
 /**
+ * {@link MisplacedDefaultPageError}'s code — `INVALID_METADATA`, already this
+ * package's spelling for "a programmatically supplied metadata body does not
+ * satisfy the spec schema" (see {@link OBJECT_FIELD_TYPE_REFUSED_CODE}): the
+ * page parse refuses the same body at `os validate` and at save. ⛔ Not a new
+ * code. The condition is named by the error's `name`.
+ */
+export const MISPLACED_DEFAULT_PAGE_CODE = 'INVALID_METADATA' as const;
+
+/**
+ * Raised when a package registers a page declaring `isDefault: true` that is
+ * not a record page bound to an object (maintainer ruling A on
+ * objectstack#23610, record 6190536588). Nothing reads the flag there — an app
+ * opens on its first navigation item and the root landing follows the app's
+ * own `isDefault` — so the registry refuses it as the page parse does, with
+ * the parse's own sentence (`misplacedDefaultPageRefusal`,
+ * `@objectstack/spec/ui`). A package's pages reach the registry without a
+ * parse, which is why this door needs its own throw.
+ *
+ * The ADR-0112 envelope (`code` + `status: 422`). Every misplaced page the
+ * registration carries is listed — `pages` — so one boot reports all of them.
+ */
+export class MisplacedDefaultPageError extends Error {
+  readonly code = MISPLACED_DEFAULT_PAGE_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
+  /** The package whose registration this refusal stopped. */
+  readonly packageId: string | undefined;
+  /** Every misplaced page, in declaration order. */
+  readonly pages: readonly MisplacedDefaultPage[];
+
+  constructor(packageId: string | undefined, pages: readonly MisplacedDefaultPage[]) {
+    const owner = packageId === undefined ? 'a package' : `package "${packageId}"`;
+    super(
+      pages
+        .map(({ page, refusal }) => `Page "${page ?? '(unnamed)'}" of ${owner}: ${refusal}`)
+        .join(' '),
+    );
+    this.name = 'MisplacedDefaultPageError';
+    this.packageId = packageId;
+    this.pages = pages;
+  }
+}
+
+/**
  * Every package-held position and permission-set name the environment catalog
  * also holds, read off `registry` — the conflicts the engine plugin's cold-boot
  * check refuses the boot with (`ObjectQLPlugin`, right after `sys_metadata`
@@ -2662,6 +2710,12 @@ export class SchemaRegistry {
    *   pages of each conflict.
    */
   private refuseDefaultRecordPageConflicts(manifest: ObjectStackManifest, selfId: string | undefined): void {
+    // `isDefault: true` on a page that is not a record page bound to an object
+    // is refused on its own account first (maintainer ruling A on
+    // objectstack#23610) — whatever the package's identity, since the page
+    // itself, not a holder, is what is wrong.
+    const misplaced = misplacedDefaultPages(manifest);
+    if (misplaced.length > 0) throw new MisplacedDefaultPageError(selfId, misplaced);
     if (selfId === undefined) return;
     const conflicts: DefaultRecordPageConflict[] = [];
     // object → the first page this manifest declares for it.
@@ -3032,10 +3086,26 @@ export class SchemaRegistry {
     // the registered schema (driver syncSchema, REST projector, hooks)
     // sees the same canonical shape. Author-declared fields win — see
     // applySystemFields().
-    schema = applySystemFields(schema, {
-      multiTenant: this.multiTenant,
-      platformGlobalObjects: this.deploymentPlatformGlobalObjects,
-    });
+    //
+    // [#24314] A BASE layer only (`own` / `overlay`). An `extend` body is a
+    // bag of fields for an object someone else declares, so it is never
+    // planned on its own: it carries none of the declarations the plan reads
+    // (`managedBy`, `systemFields`, `tenancy`, `ownership`), and planning it
+    // as an ordinary object injected the full column set onto targets whose
+    // own declaration withholds it. Measured on a walled boot: an extension of
+    // `sys_organization` (`managedBy: 'better-auth'`) added `organization_id`,
+    // NULL on every row, and the wall then hid the organisation from its own
+    // members; the same on `sys_user`. The fold also let the injected
+    // definition REPLACE a column the owner declares itself: plugin-auth's
+    // own `sys_sso_provider` extension swapped the authored `organization_id`
+    // for the platform's lookup. So the extended object's system columns are
+    // exactly its base layer's plan, whichever order the layers register in.
+    if (ownership !== 'extend') {
+      schema = applySystemFields(schema, {
+        multiTenant: this.multiTenant,
+        platformGlobalObjects: this.deploymentPlatformGlobalObjects,
+      });
+    }
 
     // [ADR-0092 / #1591] Reconcile generic-write `apiMethods` against the CRUD
     // affordances a better-auth-managed object actually grants — strip verbs
@@ -3269,10 +3339,16 @@ export class SchemaRegistry {
     // scalar look "authored" to the next extender and silently invert
     // extender-vs-extender precedence (D9.3: declared numbers order peers).
     const tenantAuthored = this.tenantAuthoredScalars(contributors, baseDefinition);
+    // [#24314] An `extend` body is not planned at registration, so an audit
+    // field it declares is governed HERE, by the base layer's plan: where the
+    // base carries the audit family, a `created_at` an extender declares cannot
+    // replace the platform's read-only definition with a writable one (#4447).
+    const governAudit = resolveInjectedSystemColumns(baseDefinition).audit;
     let merged = { ...baseDefinition };
     for (const contrib of contributors) {
       if (contrib.ownership === 'extend') {
-        merged = mergeObjectDefinitions(merged, contrib.definition, tenantAuthored);
+        const extension = governAudit ? applyAuditFieldGovernance(contrib.definition) : contrib.definition;
+        merged = mergeObjectDefinitions(merged, extension, tenantAuthored);
       }
     }
     // A picklist-bound field is served with its list's options resolved onto
@@ -3752,8 +3828,8 @@ export class SchemaRegistry {
    * answers for an object registered after it: on every base layer the
    * platform's tenant index entry and the platform's own `organization_id`
    * come off and `systemFields.tenant: false` is recorded
-   * ({@link applyDeploymentTenancy}); an `extend` layer loses the platform's
-   * own `organization_id` and tenant index. A column the AUTHOR declared is the author's — it
+   * ({@link applyDeploymentTenancy}); an `extend` layer carries neither, since
+   * it is never planned on its own (#24314). A column the AUTHOR declared is the author's — it
    * stays, the object stays walled on it, and its name is returned in
    * `keptAuthoredColumn` for the caller to report.
    *
@@ -3785,15 +3861,14 @@ export class SchemaRegistry {
           keptAuthoredColumn.add(name);
           continue;
         }
+        // [#24314] An `extend` layer has nothing to re-plan: `registerObject`
+        // plans base layers only, so it carries no platform column or index.
+        if (contributor.ownership === 'extend') continue;
         // The tenant index comes off FIRST, while the body is still in the
         // state it was stamped in (the strip re-stamps to prove the entry is
-        // the platform's own); an `extend` layer carried both too, because
-        // `applySystemFields` runs on every contributor.
+        // the platform's own).
         const unindexed = this.stripProvisionedTenantIndexFrom(before);
-        const after =
-          contributor.ownership === 'extend'
-            ? withoutField(unindexed, 'organization_id')
-            : this.applyDeploymentTenancy(unindexed);
+        const after = this.applyDeploymentTenancy(unindexed);
         if (after !== before) {
           contributor.definition = after;
           replanned.add(name);
@@ -4591,6 +4666,12 @@ export class SchemaRegistry {
     // judged here: the metadata save door refuses a second default before it
     // is stored.
     if (packageId && type === 'page') {
+      // A page declaring `isDefault: true` that is not a record page bound to
+      // an object is refused before it is judged as a holder (maintainer
+      // ruling A on objectstack#23610) — the same sentence the page parse
+      // prints at `os validate` and at save.
+      const refusal = misplacedDefaultPageRefusal(item);
+      if (refusal !== undefined) throw new MisplacedDefaultPageError(packageId, [{ page: baseName, refusal }]);
       const object = defaultRecordPageObject(item);
       if (object !== undefined) {
         const holders = this.otherDefaultRecordPageHolders(object, baseName, packageId);
@@ -5380,9 +5461,27 @@ export class SchemaRegistry {
 
   installPackage(
     manifest: ObjectStackManifest,
+    source: InstalledPackageSource,
     settings?: Record<string, any>,
     scope?: ArtifactInstallScope,
   ): InstalledPackage {
+    // [#23972] `source` is the CALLER's statement of where this package came
+    // from — the door that registers it is the only party that knows
+    // (`registerApp`: code or marketplace; `installPackage` in
+    // `@objectstack/metadata-protocol`, the `POST /packages` fallback and the
+    // `sys_packages` rehydrate: authored). The registry records it and never
+    // infers it, so an untyped caller that omits it, or spells a value outside
+    // the closed set, is refused here — ahead of every check and mutation
+    // below, so a refused call leaves no row behind — rather than recording a
+    // row the read door would serve without an origin.
+    if (!InstalledPackageSourceSchema.safeParse(source).success) {
+      throw new TypeError(
+        `[Registry] installPackage('${String(manifest?.id)}') needs the package's source, one of `
+        + `${InstalledPackageSourceSchema.options.map((v) => `'${v}'`).join(' | ')}; received `
+        + `${source === undefined ? 'none' : JSON.stringify(source)}. The door that registers a package `
+        + `states where it came from; the registry does not guess.`,
+      );
+    }
     // [ADR-0130 D1] The co-owners of this package — the OTHER packages the same
     // release artifact is delivering. Computed once and read by both halves of
     // the install-time pair below, so the relaxation and the refusal cannot
@@ -5508,6 +5607,7 @@ export class SchemaRegistry {
       // equal so the structural projection reports BOTH, without teaching the
       // projection a key name.
       manifest: toRecordManifest(withDeclaredFunctionEntries(manifest)),
+      source,
       ...lifecycle,
       installedAt: now,
       updatedAt: now,

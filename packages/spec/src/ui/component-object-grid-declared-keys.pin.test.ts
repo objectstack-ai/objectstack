@@ -8,9 +8,9 @@
  * ## The gap this file closes
  *
  * `ComponentPropsMap['object-grid']` is a strict shape derived from the
- * renderer's own read points, and it lagged the renderer: at the
- * `.objectui-sha` pin the grid reads `schema.description` and
- * `schema.emptyState`, while this row refused both by name. A metadata author
+ * renderer's own read points, and it lagged the renderer: the grid reads
+ * `schema.description` and `schema.emptyState` (read points recorded in
+ * `liveness/page.json`, row `regions`), while this row refused both by name. A metadata author
  * validating against the row had a key the renderer honours reported as
  * unknown, and objectui's registry could not list it either (its parity test
  * refuses an input the spec does not accept).

@@ -7,6 +7,7 @@ import type { IAuthService, IMetadataService, Logger } from '@objectstack/spec/c
 import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 import { HttpDispatcher, HttpDispatcherResult, type HttpProtocolContext } from './http-dispatcher.js';
 import { isServiceServeable } from './service-serveable.js';
+import { deferRequestBody } from './deferred-request-body.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 import { buildApiError } from './error-envelope.js';
 import { appEndpointMountPrefix, isAppEndpointPath, runAppEndpointStep } from './api-endpoint-step.js';
@@ -210,8 +211,9 @@ async function readGatedSessionUser(
         }
         // [#22258] The in-process session-read rule: a cookie request reads
         // without renewal, because this door's response never carries a
-        // renewed cookie.
-        const session: any = await api.getSession(inProcessSessionReadInput(webHeaders));
+        // renewed cookie. [#24222] Typed as `AuthSessionApi` declares the
+        // answer (`api` is the contract's handle), no longer through `any`.
+        const session = await api.getSession(inProcessSessionReadInput(webHeaders));
         return session?.user;
     } catch (err) {
         throw new AuthzStoreUnavailableError('auth_gate', err);
@@ -984,6 +986,16 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 sendResultBase(result, res, securityHeaders, { logger: ctx.logger });
             const errorResponse = (err: any, res: any) =>
                 errorResponseBase(err, res, securityHeaders, { logger: ctx.logger });
+            // [#24151] Every mount below whose domain reads a body hands
+            // `dispatch()` `deferRequestBody(req)`, ⛔ never `req.body`. Reading
+            // `req.body` here runs the transport's refuse-on-read ahead of
+            // `dispatch()`, so a body it cannot parse was answered `400` before
+            // the domain's anonymous decision (ADR-0138 D2: the domain's first
+            // statement) could answer `401`. Deferred, the domain reads the body
+            // once it has admitted the caller (`readDispatchedBody`), so the
+            // anonymous answer no longer depends on whether the body parses,
+            // and an admitted caller's unparseable body still gets the
+            // transport's refusal. See `./deferred-request-body.ts`.
 
             // ── Observability ──────────────────────────────────────────
             // Noop defaults; production hosts inject real adapters.
@@ -997,9 +1009,10 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
             /**
              * Wrap the IHttpServer so every route registration is
-             * automatically instrumented. We only override the three
-             * verb methods the dispatcher uses; everything else passes
-             * through unchanged.
+             * automatically instrumented. We override all five route
+             * verbs `IHttpServer` declares; everything else (`use`,
+             * `getRawApp`, `setFallbackHandler`, …) passes through
+             * unchanged.
              */
             const rawServer = server;
             // ── `http_requests_total` on the transport seam (#9835) ────
@@ -1042,9 +1055,25 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     config.observability.metrics,
                 );
             }
+            // [#24025] Every route verb, not the three the first mounts used.
+            // A verb missing here is not a smaller instrumentation surface: a
+            // route registered through it answers with no request-id header,
+            // leaves `req.requestId` unset, never reaches `errorReporter` on a
+            // 5xx, and its 5xx log line loses the `res.__obsRequest`
+            // coordinates. PUT and PATCH ran that way while this arm named
+            // only get/post/delete — `/keys`, `/notifications`, `/packages/:id`,
+            // `/automation/:name`, the `/ai/*` wildcards and service-emitted
+            // PATCH routes among them. Widening the arm adds no second metrics
+            // emitter: on a transport implementing `afterResponse` the two
+            // `emit*` flags below leave the counter and the histogram to the
+            // transport for every verb alike, and on one without it PUT and
+            // PATCH now get both from the wrapper, as the other three always did.
+            const instrumentedRouteVerbs: ReadonlySet<PropertyKey> = new Set(
+                ['get', 'post', 'put', 'delete', 'patch'] satisfies ReadonlyArray<keyof IHttpServer>,
+            );
             server = new Proxy(rawServer, {
                 get(target, prop, receiver) {
-                    if (prop === 'get' || prop === 'post' || prop === 'delete') {
+                    if (instrumentedRouteVerbs.has(prop)) {
                         const method = String(prop).toUpperCase();
                         const original = (target as any)[prop];
                         if (typeof original !== 'function') return original;
@@ -1066,6 +1095,40 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     return Reflect.get(target, prop, receiver);
                 },
             }) as IHttpServer;
+
+            // ── Paths whose domain decides EVERY verb (#24228) ──────────
+            // `IHttpServer` can register five verbs. A request under any other
+            // verb — `OPTIONS` when the transport's CORS is off, `TRACE`, an
+            // extension method — and under any of the five a path does not
+            // mount, matches no route, and the transport answers it itself:
+            // `405`, with an `Allow` built from the verbs REGISTERED on the
+            // path. That answer is wrong twice for a path whose domain decides
+            // every verb (ADR-0138 D2: the anonymous decision is the domain's
+            // first statement, taken once per domain; RFC 9110 §15.5.6: `Allow`
+            // names the SUPPORTED methods):
+            //   1. an anonymous caller is told the route's shape instead of 401,
+            //      because the domain never ran (`/actions` mounts `POST` only);
+            //   2. a verb mounted only so the domain could refuse it is listed as
+            //      supported (`/keys` answered `OPTIONS` with
+            //      `Allow: DELETE, GET, HEAD, PATCH, POST, PUT`; it serves `POST`).
+            // So such a path is declared here, by the route that serves it, and
+            // the fallback seam below hands every request the router could not
+            // route on it to `dispatch()` — the domain answers, exactly as it
+            // does on a `createHonoApp` host, whose catch-all hands it every
+            // verb. Refusal-only MOUNTS are not the answer for `/actions`: each
+            // one would be one more verb the transport lists in `Allow`.
+            //
+            // A declaration is the serving route's verb and its pattern, spelled
+            // as it was registered. The fallback asks the transport's own router
+            // which registered route a path resolves to (`resolveMountedRoute`),
+            // so whether a path belongs to a declared route is the router's
+            // verdict, never a second matcher written here.
+            const domainDecidedRoutes = new Map<'GET' | 'POST', Set<string>>();
+            const domainDecidesEveryVerb = (method: 'GET' | 'POST', pattern: string): void => {
+                const patterns = domainDecidedRoutes.get(method) ?? new Set<string>();
+                patterns.add(pattern);
+                domainDecidedRoutes.set(method, patterns);
+            };
 
             // ── Discovery (.well-known) ─────────────────────────────────
             server.get('/.well-known/objectstack', async (_req: any, res: any) => {
@@ -1227,7 +1290,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             if (analyticsInstalled) {
                 server.post(`${prefix}/analytics/query`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', '/analytics/query', req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', '/analytics/query', deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1245,7 +1308,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 server.post(`${prefix}/analytics/sql`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', '/analytics/sql', req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', '/analytics/sql', deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1271,7 +1334,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 const register = method === 'GET' ? server.get : method === 'DELETE' ? server.delete : server.post;
                 register.call(server, `${prefix}/mcp`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch(method, '/mcp', req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch(method, '/mcp', deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1299,15 +1362,15 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // domain branch dead code on this adapter. Registering the verbs
             // hands the mismatch to the branch that already exists.
             //
-            // The method set tracks `/mcp`'s deliberately: `server.get/post/
-            // delete` are also the three verbs the observability Proxy above
-            // instruments, so a PUT/PATCH mount here would be both wider than
-            // the sibling route and silently un-instrumented.
+            // The method set tracks `/mcp`'s deliberately, so the two sibling
+            // routes answer the same verbs. Instrumentation is no reason either
+            // way any more: the observability Proxy above wraps every verb
+            // (#24025), where it once wrapped only get/post/delete.
             const mountMcpSkill = (method: 'GET' | 'POST' | 'DELETE') => {
                 const register = method === 'GET' ? server.get : method === 'DELETE' ? server.delete : server.post;
                 register.call(server, `${prefix}/mcp/skill`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch(method, '/mcp/skill', req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch(method, '/mcp/skill', deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1317,15 +1380,59 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             mountMcpSkill('GET');
             mountMcpSkill('POST');
             mountMcpSkill('DELETE');
+            // [#24228] `PUT`, `PATCH` and every verb the transport cannot route
+            // reach the same branch through the fallback seam, so the only
+            // `Allow` this path answers is the domain's `GET`.
+            domainDecidesEveryVerb('GET', `${prefix}/mcp/skill`);
 
+            // [#23909] `/keys` is mounted for EVERY verb, though `POST` (mint)
+            // is the only one it serves. The published v18 text is "`/keys`:
+            // `401 UNAUTHENTICATED` for every verb", and the domain keeps it as
+            // its first statement (`handleKeysRequest`, ADR-0138 D2: the
+            // anonymous decision ahead of the method check) — but a floor can
+            // only answer a verb that REACHES it. With `POST` as the sole
+            // registration, any other verb matched no route and the adapter's
+            // unmatched-route answer replied first: `405`, naming the allowed
+            // method, to an anonymous caller as well. Same remedy as
+            // `/mcp/skill` above (#7649): register the verbs and the mismatch
+            // goes to the domain, which answers an anonymous caller 401 and a
+            // signed-in one its own 405 in the dispatcher's envelope.
+            //
+            // Unlike `/mcp/skill`, PUT and PATCH are mounted too, because the
+            // contract says every verb. All five go through the observability
+            // Proxy above like every other mount here (#24025).
             server.post(`${prefix}/keys`, async (req: any, res: any) => {
                 try {
-                    const result = await dispatcher.dispatch('POST', '/keys', req.body, req.query, { request: req });
+                    const result = await dispatcher.dispatch('POST', '/keys', deferRequestBody(req), req.query, { request: req });
                     sendResult(result, res);
                 } catch (err: any) {
                     errorResponse(err, res);
                 }
             });
+            const mountKeys = (method: 'GET' | 'PUT' | 'PATCH' | 'DELETE') => {
+                const register =
+                    method === 'GET' ? server.get
+                        : method === 'PUT' ? server.put
+                            : method === 'PATCH' ? server.patch
+                                : server.delete;
+                register.call(server, `${prefix}/keys`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch(method, '/keys', deferRequestBody(req), req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+            };
+            mountKeys('GET');
+            mountKeys('PUT');
+            mountKeys('PATCH');
+            mountKeys('DELETE');
+            // [#24228] And every verb `IHttpServer` cannot register (`OPTIONS`
+            // with CORS off, `TRACE`, …) reaches the domain through the fallback
+            // seam, rather than the transport's `405` listing the four
+            // refusal-only mounts above as supported.
+            domainDecidesEveryVerb('POST', `${prefix}/keys`);
 
             // ── In-app notifications (ADR-0030) ─────────────────────────
             // The inbox list + receipt mark-read surface backed by the
@@ -1348,7 +1455,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
             server.post(`${prefix}/notifications/read`, async (req: any, res: any) => {
                 try {
-                    const result = await dispatcher.dispatch('POST', '/notifications/read', req.body, req.query, { request: req });
+                    const result = await dispatcher.dispatch('POST', '/notifications/read', deferRequestBody(req), req.query, { request: req });
                     sendResult(result, res);
                 } catch (err: any) {
                     errorResponse(err, res);
@@ -1357,12 +1464,66 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
             server.post(`${prefix}/notifications/read/all`, async (req: any, res: any) => {
                 try {
-                    const result = await dispatcher.dispatch('POST', '/notifications/read/all', req.body, req.query, { request: req });
+                    const result = await dispatcher.dispatch('POST', '/notifications/read/all', deferRequestBody(req), req.query, { request: req });
                     sendResult(result, res);
                 } catch (err: any) {
                     errorResponse(err, res);
                 }
             });
+
+            // [#24024] Each of the three faces is mounted for EVERY verb, though
+            // each serves one. The published v18 text is "`/notifications`:
+            // `401 UNAUTHENTICATED` on every face", and the domain keeps it as
+            // its first statement (`handleNotificationRequest`, ADR-0138 D2: the
+            // anonymous decision ahead of the inbox probe and of every face) —
+            // but a floor can only answer a verb that REACHES it. With the three
+            // served verbs as the only registrations, any other verb on these
+            // paths matched no route and the adapter's unmatched-route answer
+            // replied first: `405`, naming the allowed methods, to an anonymous
+            // caller as well. Same remedy as `/keys` above (#23909): register the
+            // verbs and the mismatch goes to the domain, which answers an
+            // anonymous caller 401, and a signed-in one what it answers on
+            // `createHonoApp`'s catch-all: the 501 capability answer on a
+            // deployment with no inbox, and otherwise the dispatcher's 404 for a
+            // route the domain does not serve.
+            //
+            // Exact paths only, like `/keys`: a sub-path no face names (say
+            // `/notifications/xyz`) is not mounted, and keeps the adapter's 404.
+            // No body is handed on: none of these verbs is a face, so the domain
+            // never reads one, and reading `req.body` here would answer a body
+            // the transport cannot parse with its `400` ahead of the floor's 401.
+            const mountNotificationsVerb = (
+                subPath: '/notifications' | '/notifications/read' | '/notifications/read/all',
+                method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+            ) => {
+                const register =
+                    method === 'GET' ? server.get
+                        : method === 'POST' ? server.post
+                            : method === 'PUT' ? server.put
+                                : method === 'PATCH' ? server.patch
+                                    : server.delete;
+                register.call(server, `${prefix}${subPath}`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch(method, subPath, undefined, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+            };
+            for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+                mountNotificationsVerb('/notifications', method);
+            }
+            for (const subPath of ['/notifications/read', '/notifications/read/all'] as const) {
+                for (const method of ['GET', 'PUT', 'PATCH', 'DELETE'] as const) {
+                    mountNotificationsVerb(subPath, method);
+                }
+            }
+            // [#24228] Every verb `IHttpServer` cannot register reaches the
+            // domain through the fallback seam, as on `/keys` above.
+            domainDecidesEveryVerb('GET', `${prefix}/notifications`);
+            domainDecidesEveryVerb('POST', `${prefix}/notifications/read`);
+            domainDecidesEveryVerb('POST', `${prefix}/notifications/read/all`);
 
             // ── Packages ────────────────────────────────────────────────
             // Single pipeline (ADR-0076 D11 / OQ#9): every package route flows
@@ -1400,7 +1561,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                             const result = await dispatcher.dispatch(
                                 verb.toUpperCase(),
                                 `/packages${toSubPath(req)}`,
-                                req.body,
+                                deferRequestBody(req),
                                 req.query ?? {},
                                 { request: req },
                             );
@@ -1523,7 +1684,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // the list is `GET /api/v1/meta/flow`.
                 server!.post(`${base}/automation`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', '/automation', req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', '/automation', deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1582,7 +1743,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 server!.put(`${base}/automation/:name`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('PUT', `/automation/${req.params.name}`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('PUT', `/automation/${req.params.name}`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1600,7 +1761,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 server!.post(`${base}/automation/trigger/:name`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/trigger/${req.params.name}`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/trigger/${req.params.name}`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1609,7 +1770,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 server!.post(`${base}/automation/:name/trigger`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/trigger`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/trigger`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1618,7 +1779,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 server!.post(`${base}/automation/:name/toggle`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/toggle`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/toggle`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1642,7 +1803,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // dispatch path, which the domain answers `trigger` first.
                 server!.post(`${base}/automation/:name/clone`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/clone`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/clone`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1671,7 +1832,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // screen node's collected input, and re-fetch its pending screen.
                 server!.post(`${base}/automation/:name/runs/:runId/resume`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/resume`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/resume`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1695,7 +1856,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // second policy that happens to agree today.
                 server!.post(`${base}/automation/:name/runs/:runId/cancel`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/cancel`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/cancel`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1704,7 +1865,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 server!.post(`${base}/automation/:name/runs/:runId/restore-suspension`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/restore-suspension`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/restore-suspension`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1756,7 +1917,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                             const fullPath: string = req.path ?? '';
                             const idx = fullPath.lastIndexOf('/ai');
                             const aiSubPath = idx >= 0 ? fullPath.slice(idx) : '/ai';
-                            const result = await dispatcher.dispatch(method.toUpperCase(), aiSubPath, req.body, req.query, { request: req });
+                            const result = await dispatcher.dispatch(method.toUpperCase(), aiSubPath, deferRequestBody(req), req.query, { request: req });
                             sendResult(result, res);
                         } catch (err: any) {
                             errorResponse(err, res);
@@ -1794,7 +1955,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // the two-segment route below (verified against the router).
                 server!.post(`${base}/actions//:action`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/actions//${req.params.action}`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/actions//${req.params.action}`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1802,7 +1963,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 });
                 server!.post(`${base}/actions/:object/:action`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/actions/${req.params.object}/${req.params.action}`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/actions/${req.params.object}/${req.params.action}`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1810,12 +1971,24 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 });
                 server!.post(`${base}/actions/:object/:action/:recordId`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/actions/${req.params.object}/${req.params.action}/${req.params.recordId}`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/actions/${req.params.object}/${req.params.action}/${req.params.recordId}`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
                     }
                 });
+                // [#24228] `POST` is the one verb these paths serve, and the only
+                // one mounted. Every other verb reaches the domain through the
+                // fallback seam, so its anonymous baseline — the FIRST statement
+                // of `handleActionsRequest` (ADR-0138 D2) — answers `401`, and a
+                // signed-in caller gets the domain's own `405` + `Allow: POST`.
+                // Before this, the transport answered both `405` itself.
+                // ⛔ Not refusal-only `GET`/`PUT`/`PATCH`/`DELETE` mounts (the
+                // `/keys` shape): the transport would list each one in the
+                // `Allow` it builds for the verbs left over.
+                domainDecidesEveryVerb('POST', `${base}/actions//:action`);
+                domainDecidesEveryVerb('POST', `${base}/actions/:object/:action`);
+                domainDecidesEveryVerb('POST', `${base}/actions/:object/:action/:recordId`);
             };
 
             // ── Security catalog activation (ADR-0126 §3 regime C, ADR-0131 D3/D6) ──
@@ -1841,7 +2014,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         const result = await dispatcher.dispatch(
                             'POST',
                             `/security/_activation/${req.params.type}/${req.params.name}`,
-                            req.body,
+                            deferRequestBody(req),
                             req.query,
                             { request: req },
                         );
@@ -1855,7 +2028,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         const result = await dispatcher.dispatch(
                             'POST',
                             `/security/permission-sets/${encodeURIComponent(req.params.name)}/clone`,
-                            req.body,
+                            deferRequestBody(req),
                             req.query,
                             { request: req },
                         );
@@ -1944,9 +2117,63 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     logger: ctx.logger,
                 });
 
+                // ── [#24228] Does an unrouted request belong to a domain that
+                // decides every verb? The router's own verdict: the path belongs
+                // to a declared route when the transport resolves it, under that
+                // route's verb, to that route's pattern — one router match per
+                // declared verb. Read per request, never cached: the declarations
+                // are made during this same `start()`. Optional on `IHttpServer`,
+                // so feature-detected; without it the transport's own answer
+                // stands, and the boot says so below.
+                const resolveMountedRoute = typeof rawServer.resolveMountedRoute === 'function'
+                    ? rawServer.resolveMountedRoute.bind(rawServer)
+                    : undefined;
+                const isDomainDecidedPath = (path: string): boolean => {
+                    if (!resolveMountedRoute || !path.startsWith(prefix)) return false;
+                    for (const [verb, patterns] of domainDecidedRoutes) {
+                        const route = resolveMountedRoute(verb, path);
+                        if (route && route.method === verb && patterns.has(route.pattern)) return true;
+                    }
+                    return false;
+                };
+                if (!resolveMountedRoute) {
+                    ctx.logger.warn(
+                        '[dispatcher] http.server exposes no `resolveMountedRoute`: on /actions, /keys, '
+                        + '/notifications and /mcp/skill a verb the transport cannot route is answered by the '
+                        + 'transport\'s own 405, not by the domain — an anonymous caller is told the route\'s '
+                        + 'shape instead of 401, and `Allow` names verbs mounted only to be refused. '
+                        + 'Fix: compose an HTTP adapter that implements `resolveMountedRoute` '
+                        + '(e.g. `@objectstack/plugin-hono-server`).',
+                        { domainDecidedRoutes: [...domainDecidedRoutes].map(([verb, p]) => `${verb}: ${[...p].join(', ')}`) },
+                    );
+                }
+
                 rawServer.setFallbackHandler(async (req: any, res: any) => {
                     try {
                         const path: string = req.path ?? '';
+                        // ── [#24228] A path whose domain decides every verb ─────
+                        // The router found no route for this verb, but the path is
+                        // one a declared route serves: the domain answers, so its
+                        // anonymous baseline runs first and its `405` carries its
+                        // own `Allow` (see `domainDecidesEveryVerb`). Handed on as
+                        // `createHonoApp`'s catch-all hands it: the whole sub-path
+                        // after the prefix, `/environments/:id` included — an
+                        // unrouted request has no route params, so `dispatch()`
+                        // reads the environment off the path itself. No body: no
+                        // domain reads one for a verb it refuses, and reading
+                        // `req.body` would let the transport's `400` for a body it
+                        // cannot parse answer ahead of the floor's `401`.
+                        if (isDomainDecidedPath(path)) {
+                            const result = await dispatcher.dispatch(
+                                req.method,
+                                path.substring(prefix.length),
+                                undefined,
+                                req.query,
+                                { request: req },
+                            );
+                            sendResult(result, res);
+                            return;
+                        }
                         // ── Scoping test FIRST, before any resolution ────────
                         // Everything below costs something (a kernel resolve, a
                         // session lookup), and an unmatched request that is not
@@ -2061,7 +2288,15 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                     path,
                                     query: req.query ?? {},
                                     headers: req.headers ?? {},
-                                    body: req.body,
+                                    // [#24252] Deferred, ⛔ never `req.body`: this
+                                    // object is built before the step matches an
+                                    // endpoint or runs its policies, and reading a
+                                    // body the transport could not parse here would
+                                    // answer its `400` ahead of the miss's `404`
+                                    // and `authRequired`'s `401`. The step reads it
+                                    // with `readDispatchedBody` once the policy
+                                    // chain admitted the caller.
+                                    body: deferRequestBody(req),
                                     ...(req.remoteAddress ? { remoteAddress: req.remoteAddress } : {}),
                                 },
                                 deps: {
@@ -2147,7 +2382,9 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 //   remedy — compose an adapter that implements the seam.
                 ctx.logger.warn(
                     '[dispatcher] http.server exposes no `setFallbackHandler`: every metadata-declared '
-                    + '`apis:` endpoint is UNREACHABLE on this transport and will answer a bare 404. '
+                    + '`apis:` endpoint is UNREACHABLE on this transport and will answer a bare 404, and on '
+                    + '/actions, /keys, /notifications and /mcp/skill a verb the transport cannot route is '
+                    + 'answered by the transport, not by the domain. '
                     + 'Fix: compose an HTTP adapter that implements `setFallbackHandler` '
                     + '(e.g. `@objectstack/plugin-hono-server`).',
                     { mount: appEndpointMountPrefix(prefix), declarativeEndpoints: 'unreachable' },

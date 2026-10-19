@@ -1,5 +1,315 @@
 # @objectstack/plugin-dev
 
+## 18.0.0-next.4
+
+### Patch Changes
+
+- Updated dependencies [b2e7870]
+- Updated dependencies [6a49efb]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [646303e]
+- Updated dependencies [e9bc60b]
+- Updated dependencies [52ff308]
+- Updated dependencies [d1f082d]
+- Updated dependencies [f5ef054]
+- Updated dependencies [0d34066]
+- Updated dependencies [8d3dd6f]
+- Updated dependencies [03ac4ec]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [6e43b7b]
+- Updated dependencies [727091c]
+- Updated dependencies [f792290]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [d702b18]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [9975c26]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [5a9a80b]
+- Updated dependencies [1489952]
+- Updated dependencies [aaaeeac]
+- Updated dependencies [8eccf51]
+- Updated dependencies [8a88901]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [8259ea0]
+- Updated dependencies [9040945]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [2bcd406]
+- Updated dependencies [58a2faa]
+- Updated dependencies [e74ec56]
+- Updated dependencies [58a2faa]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [cbfa5e4]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [83dfbc0]
+- Updated dependencies [9822b05]
+- Updated dependencies [889bf12]
+- Updated dependencies [7a8733f]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [d79dc48]
+- Updated dependencies [1173017]
+- Updated dependencies [51ad8e4]
+- Updated dependencies [ec749fb]
+- Updated dependencies [c4526a7]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [6868514]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [d65826f]
+- Updated dependencies [741aa85]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [d8e11b5]
+- Updated dependencies [44a5011]
+- Updated dependencies [f573976]
+- Updated dependencies [2a1e48a]
+- Updated dependencies [e22defb]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/plugin-security@18.0.0-next.4
+  - @objectstack/plugin-auth@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/rest@18.0.0-next.4
+  - @objectstack/service-storage@18.0.0-next.4
+  - @objectstack/runtime@18.0.0-next.4
+  - @objectstack/plugin-hono-server@18.0.0-next.4
+  - @objectstack/driver-memory@18.0.0-next.4
+  - @objectstack/service-i18n@18.0.0-next.4
+  - @objectstack/service-realtime@18.0.0-next.4
+  - @objectstack/account@18.0.0-next.4
+  - @objectstack/setup@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
+## 18.0.0-next.3
+
+### Patch Changes
+
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [b9dbc3d]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [1eac7ad]
+- Updated dependencies [9fcea20]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [7428da0]
+- Updated dependencies [b55be42]
+- Updated dependencies [abb6df0]
+- Updated dependencies [0b1179f]
+- Updated dependencies [8776119]
+- Updated dependencies [f7a5ebe]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9d4fb3c]
+- Updated dependencies [c5cf546]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [34b740f]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [0cfd0c4]
+- Updated dependencies [ae4dfaf]
+- Updated dependencies [099cc9d]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2e15620]
+- Updated dependencies [0cb45e9]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [605aa01]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [d050a8f]
+- Updated dependencies [9e797a8]
+- Updated dependencies [b25d98a]
+- Updated dependencies [75ced06]
+- Updated dependencies [5fb8d15]
+- Updated dependencies [5c2ac83]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [aefab7c]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [6dede7a]
+- Updated dependencies [62f959d]
+- Updated dependencies [c1c0a90]
+- Updated dependencies [ab3ba2c]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+- Updated dependencies [cdf3777]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/service-storage@18.0.0-next.3
+  - @objectstack/plugin-security@18.0.0-next.3
+  - @objectstack/rest@18.0.0-next.3
+  - @objectstack/runtime@18.0.0-next.3
+  - @objectstack/objectql@18.0.0-next.3
+  - @objectstack/plugin-hono-server@18.0.0-next.3
+  - @objectstack/plugin-auth@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/account@18.0.0-next.3
+  - @objectstack/setup@18.0.0-next.3
+  - @objectstack/driver-memory@18.0.0-next.3
+  - @objectstack/service-i18n@18.0.0-next.3
+  - @objectstack/service-realtime@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
+## 18.0.0-next.2
+
+### Minor Changes
+
+- 086fa46: feat(cli,plugin-dev): an app under `os serve` or `DevPlugin` that declares its own `sys_organization` default record page boots, and its page is the only default
+  
+  Clause-②: yes (widening)
+  
+  A deployment holds at most one `isDefault: true` record page per object, and a second one is refused at registration with `DEFAULT_RECORD_PAGE_CONFLICT`. `plugin-auth` registers `sys_organization_detail` as the default record page of `sys_organization` unless it is constructed with `registerOrganizationRecordPage: false`. `os serve` and `DevPlugin` construct `AuthPlugin` themselves and never passed that option, so an app served by either one that shipped its own default page for `sys_organization` was refused at boot, with no switch to set.
+  
+  - **What changes.** Both roots now read the app's own pages before they construct `AuthPlugin`. When the app declares an `isDefault: true` record page for `sys_organization`, they pass `registerOrganizationRecordPage: false`, and the app's page is the only default. When it does not, `plugin-auth`'s page registers as before. There is no new configuration key: the page the author already wrote is the switch. Plugin order and precedence rules play no part.
+  - **One rule for both roots.** The reading is `stackDeclaresOrganizationRecordPage(stack, plugins?)`, a new export of `@objectstack/core`. It reads the stack's `pages` (or each package body's, for a multi-package stack) and the bundle of each app plugin already in `plugins`, and judges each page with `defaultRecordPageObject` from `@objectstack/spec/ui`, the reading the registration refusal uses.
+  - **The refusal's remedy (`@objectstack/objectql`).** `DEFAULT_RECORD_PAGE_CONFLICT`'s message now says to set `isDefault: false` on one of the two pages, "or compose the deployment without the other package's page". It said to compose the deployment without the other package, which a host cannot do when that package is the platform's auth plugin. The code, the `422` status and the named pages are unchanged.
+  - **Nothing to adopt.** An app that ships its own `sys_organization` default record page boots under `os serve` and `DevPlugin` with no further change. A deployment that composes its own kernel still sets `registerOrganizationRecordPage: false` on `AuthPlugin` itself.
+
+### Patch Changes
+
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [cb9841a]
+- Updated dependencies [584e737]
+- Updated dependencies [3d231ba]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [0be162c]
+- Updated dependencies [fc1a55a]
+- Updated dependencies [249130f]
+- Updated dependencies [b1e9280]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [e1cefa5]
+- Updated dependencies [1d79556]
+- Updated dependencies [c980d11]
+- Updated dependencies [0ecac96]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [0d784da]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [650933e]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [cac0be8]
+- Updated dependencies [1f3ac4f]
+- Updated dependencies [57994c3]
+- Updated dependencies [70d4c06]
+- Updated dependencies [989aa48]
+- Updated dependencies [23e689d]
+- Updated dependencies [19c554d]
+- Updated dependencies [5bb9a83]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c263588]
+- Updated dependencies [7c6b7f4]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [f7cd580]
+- Updated dependencies [c9810dd]
+- Updated dependencies [e611e2b]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [30c33e3]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [cd86e41]
+- Updated dependencies [c03077e]
+- Updated dependencies [3bc407d]
+- Updated dependencies [f77ba41]
+- Updated dependencies [395ca21]
+- Updated dependencies [76560a1]
+- Updated dependencies [9e0945c]
+- Updated dependencies [069fd40]
+- Updated dependencies [6ee483c]
+- Updated dependencies [941c78a]
+  - @objectstack/plugin-security@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/rest@18.0.0-next.2
+  - @objectstack/runtime@18.0.0-next.2
+  - @objectstack/objectql@18.0.0-next.2
+  - @objectstack/plugin-auth@18.0.0-next.2
+  - @objectstack/service-storage@18.0.0-next.2
+  - @objectstack/service-i18n@18.0.0-next.2
+  - @objectstack/plugin-hono-server@18.0.0-next.2
+  - @objectstack/driver-memory@18.0.0-next.2
+  - @objectstack/account@18.0.0-next.2
+  - @objectstack/setup@18.0.0-next.2
+  - @objectstack/service-realtime@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Patch Changes

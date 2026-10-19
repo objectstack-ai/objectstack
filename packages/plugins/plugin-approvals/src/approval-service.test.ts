@@ -1271,6 +1271,47 @@ describe('ApprovalService (node era)', () => {
     expect(req.step_label).toBe('Approve Step');     // from `approve_step`
   });
 
+  // [#24281] The record page's step chip lists `current_step_label`, a declared
+  // field of `sys_approval_request`, and the console reads the page's request
+  // through this get. So the get serves the step label under that name too,
+  // with exactly `step_label`'s value, while `current_step` stays the raw id.
+  describe('the get serves the step label as current_step_label, beside step_label', () => {
+    /** The id of the request an ordinary open answers (never an auto-outcome here). */
+    const openId = async (input: ReturnType<typeof openInput>): Promise<string> =>
+      ((await svc.openNodeRequest(input, CTX)) as { id: string }).id;
+    const stored = (id: string) => engine._tables['sys_approval_request'].find((r) => r.id === id)!;
+    const stepFields = (row: any) => ({
+      current_step_label: row?.current_step_label,
+      step_label: row?.step_label,
+      current_step: row?.current_step,
+    });
+
+    it('a labelled row serves its stored label', async () => {
+      const id = await openId(openInput(['u9'], { nodeLabel: 'Manager Review' }));
+      expect(stored(id).current_step_label).toBe('Manager Review');
+      expect(stepFields(await svc.getRequest(id, SYS))).toEqual({
+        current_step_label: 'Manager Review', step_label: 'Manager Review', current_step: 'approve_step',
+      });
+      // The list door builds its rows the same way.
+      const [listed] = await svc.listRequests({ status: 'pending' }, SYS);
+      expect(stepFields(listed)).toEqual(stepFields(await svc.getRequest(id, SYS)));
+    });
+
+    it('a row opened before the column serves the snapshot label, else the humanized machine id', async () => {
+      const snap = await openId(openInput(['u9'], { nodeLabel: 'Manager Review' }));
+      const bare = await openId(openInput(['u9'], { recordId: 'opp2' }));
+      // No stored label: the row the boot backfill has not reached.
+      stored(snap).current_step_label = null;
+      stored(bare).current_step_label = null;
+      expect(stepFields(await svc.getRequest(snap, SYS))).toEqual({
+        current_step_label: 'Manager Review', step_label: 'Manager Review', current_step: 'approve_step',
+      });
+      expect(stepFields(await svc.getRequest(bare, SYS))).toEqual({
+        current_step_label: 'Approve Step', step_label: 'Approve Step', current_step: 'approve_step',
+      });
+    });
+  });
+
   it('listRequests enriches record_title and submitter_name', async () => {
     engine._tables['opportunity'] = [{ id: 'opp1', name: 'Acme Renewal', amount: 100 }];
     engine._tables['sys_user'] = [{ id: 'u1', name: 'Ada Lovelace', email: 'ada@example.com' }];
@@ -3508,7 +3549,12 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
     expect(req.pending_approvers).toEqual([`${type}:${value}`]);
     const hit = warnings.find(([msg]) => String(msg).includes('expanded to nobody'));
     expect(hit, `no warning for ${type}`).toBeTruthy();
-    expect(String(hit[0])).toContain('cannot advance until someone is added or the approver is re-pointed');
+    // [#23556] The line names the slot and points at the node's policy; the
+    // request's fate is the node-level line's to state, so this one never says
+    // the request "cannot advance" — false on the default admin_rescue path.
+    expect(String(hit[0])).toContain(`'${type}:${value}'`);
+    expect(String(hit[0])).toContain('onEmptyApprovers');
+    expect(String(hit[0])).not.toMatch(/cannot advance/);
     expect(hit[1]).toMatchObject({ type, value, organizationId: 't1' });
   });
 

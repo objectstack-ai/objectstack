@@ -70,8 +70,9 @@ export const SysMetadataActivation = ObjectSchema.create({
   icon: 'badge-check',
   isSystem: true,
   managedBy: 'engine-owned',
+  // ADR-0126 §4 — the reference lives in the docblock above, not in the copy.
   description:
-    'Activation ledger for metadata artifacts (ADR-0126 §4): one row per artifact whose armed state has been changed from its default. No row means the default — active. Packaged artifacts and positions or permission sets authored in this environment are both recorded here.',
+    'Activation ledger for metadata artifacts: one row per artifact whose armed state has been changed from its default. No row means the default — active. Packaged artifacts and positions or permission sets authored in this system are both recorded here.',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   highlightFields: ['metadata_type', 'name', 'package_id', 'active'],
@@ -147,7 +148,7 @@ export const SysMetadataActivation = ObjectSchema.create({
       label: 'Package',
       maxLength: 255,
       description:
-        'The package that ships the artifact. Empty when no package ships it: an item authored in this environment.',
+        'The package that ships the artifact. Empty when no package ships it: an item authored in this system.',
       group: 'Identity',
     }),
 

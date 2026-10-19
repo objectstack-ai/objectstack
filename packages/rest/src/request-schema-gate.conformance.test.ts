@@ -117,6 +117,9 @@ const CASES: GateCase[] = [
       // fallback and an ordinary sum on every SQL datasource — one query, two
       // numbers, both plausible.
       { aggregations: [{ function: 'sum', field: 'amount', alias: 'total', distinct: true }] },
+      // #23574 — `null` was read as no query (`req.body ?? {}`) and answered
+      // the full record set; `query` declares a QueryAST or nothing.
+      null,
     ],
     valid: { where: { status: 'active' }, limit: 5 },
     spy: 'findData',
@@ -124,14 +127,18 @@ const CASES: GateCase[] = [
   {
     route: 'POST /api/v1/data/:object',
     params: PARAMS,
-    violating: ['garbage', 42, [{ name: 'x' }]],
+    // #23574 — `null` was read as an empty record (`req.body ?? {}`) and
+    // created an empty row.
+    violating: ['garbage', 42, [{ name: 'x' }], null],
     valid: { name: 'ACME' },
     spy: 'createData',
   },
   {
     route: 'PATCH /api/v1/data/:object/:id',
     params: PARAMS_ID,
-    violating: ['garbage', 42, [{ name: 'x' }]],
+    // #23491 — `null` was read as an empty patch (`data ?? {}`) and answered
+    // 200, an update that changed no field and still moved the version.
+    violating: ['garbage', 42, [{ name: 'x' }], null],
     valid: { name: 'ACME (renamed)' },
     spy: 'updateData',
   },

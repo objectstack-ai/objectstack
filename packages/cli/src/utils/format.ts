@@ -685,7 +685,40 @@ export function collectMetadataStats(config: any): MetadataStats {
 
 // ─── Server Ready Banner ────────────────────────────────────────────
 
+/**
+ * Whether this boot serves HTTP at all — the fact every address row in the
+ * ready banner rests on (#23623).
+ *
+ * - `'composed'`: the kernel holds an `http.server` service. That is serve's
+ *   own transport, or one the config mounts itself, which `--no-server` does
+ *   not skip.
+ * - `'skipped-by-no-server'`: none is registered, and `--no-server` is what
+ *   skipped serve's own.
+ * - `'not-composed'`: none is registered although the flag asked for one (the
+ *   transport plugin did not load).
+ *
+ * Read off the booted kernel, never off the `--server` flag: the flag says
+ * whether SERVE composes one, not whether the boot has one.
+ */
+export type HttpServerComposition = 'composed' | 'skipped-by-no-server' | 'not-composed';
+
 export interface ServerReadyOptions {
+  /**
+   * Whether an HTTP server is composed on this boot (#23623) — see
+   * {@link HttpServerComposition}.
+   *
+   * `'composed'` prints the address rows: `API:`, `Console:`, `MCP:` with its
+   * connect hint, and the paths-only note. Anything else prints none of them
+   * and ONE line saying no HTTP server is served. A `--no-server` boot used to
+   * print `API:` and an MCP connect URL for a port nothing listened on, and an
+   * operator, or an AI client configured from the banner, was sent to connect
+   * to a server the flag had deliberately not started.
+   *
+   * Required on purpose, like {@link externalBaseOrigin}: an omitted field must
+   * not be able to mean "a server is listening" by default, which is the
+   * defect itself.
+   */
+  httpServer: HttpServerComposition;
   /**
    * The origin an operator can actually reach this deployment on — the base
    * every absolute URL in the banner is built from — or `null` when none could
@@ -930,6 +963,11 @@ export interface ServerReadyOptions {
    * (Claude Code, Cursor, …) can operate the running app the instant a
    * developer knows the endpoint is there. The banner is where they look, so
    * print the URL + the SKILL.md pointer when it's live.
+   *
+   * It says whether the MCP surface is switched on AND the route's owner (the
+   * runtime dispatcher) is composed (#23743) — `serve` passes both — not
+   * whether a transport serves it: the row also needs {@link httpServer} to
+   * be `'composed'` (#23623).
    */
   mcpEnabled?: boolean;
 }
@@ -1080,22 +1118,40 @@ export function printServerReady(opts: ServerReadyOptions) {
     console.error(chalk.bold.green('  ✓ Server is ready'));
   }
   console.error('');
-  console.error(chalk.cyan('  ➜') + chalk.bold('  API:       ') + chalk.cyan(link('/')));
-  if (opts.uiEnabled && opts.consolePath) {
-    console.error(chalk.cyan('  ➜') + chalk.bold('  Console:   ') + chalk.cyan(link(opts.consolePath + '/')));
-  }
-  if (opts.mcpEnabled) {
-    console.error(chalk.cyan('  ➜') + chalk.bold('  MCP:       ') + chalk.cyan(link('/api/v1/mcp')));
-    console.error(chalk.dim(`      connect an AI client (Claude Code, Cursor, …) · skill: ${link('/api/v1/mcp/skill')}`));
-  }
-  if (base === null) {
-    // Say why the origin is missing and name the one variable that fixes it,
-    // rather than leaving the operator to infer it from truncated links. The
-    // boot already complains in more detail (formatUnusableAuthBaseUrlDiagnostic
-    // in `serve`), but only on the branch that registers auth — so on every
-    // other boot shape this line is the only notice there is.
-    console.error(chalk.dim('      paths only — this deployment\'s external base URL could not be resolved;'));
-    console.error(chalk.dim('      set OS_AUTH_URL to its public origin (e.g. https://app.example.com)'));
+  // [#23623] Every row below names an address, so every one of them rests on
+  // an HTTP server being composed. With none, the banner prints none of them
+  // and says so once, instead of an `API:` URL and an MCP connect URL for a
+  // port nothing listens on. ⛔ The rows that name no address (the ready line
+  // above; driver, tenancy, plugins, seeds and the rest below) do not move.
+  if (opts.httpServer === 'composed') {
+    console.error(chalk.cyan('  ➜') + chalk.bold('  API:       ') + chalk.cyan(link('/')));
+    if (opts.uiEnabled && opts.consolePath) {
+      console.error(chalk.cyan('  ➜') + chalk.bold('  Console:   ') + chalk.cyan(link(opts.consolePath + '/')));
+    }
+    if (opts.mcpEnabled) {
+      console.error(chalk.cyan('  ➜') + chalk.bold('  MCP:       ') + chalk.cyan(link('/api/v1/mcp')));
+      console.error(chalk.dim(`      connect an AI client (Claude Code, Cursor, …) · skill: ${link('/api/v1/mcp/skill')}`));
+    }
+    if (base === null) {
+      // Say why the origin is missing and name the one variable that fixes it,
+      // rather than leaving the operator to infer it from truncated links. The
+      // boot already complains in more detail (formatUnusableAuthBaseUrlDiagnostic
+      // in `serve`), but only on the branch that registers auth — so on every
+      // other boot shape this line is the only notice there is.
+      console.error(chalk.dim('      paths only — this deployment\'s external base URL could not be resolved;'));
+      console.error(chalk.dim('      set OS_AUTH_URL to its public origin (e.g. https://app.example.com)'));
+    }
+  } else {
+    // `--no-server` is named only when it is what left the boot without one:
+    // a config can mount its own transport under that flag, and then the rows
+    // above print.
+    const why = opts.httpServer === 'skipped-by-no-server'
+      ? '--no-server was given and no plugin composed one'
+      : 'no plugin composed one';
+    console.error(
+      chalk.cyan('  ➜') + chalk.bold('  No HTTP server: ') +
+      chalk.dim(`${why}, so no API or MCP address is served`),
+    );
   }
   if (opts.seededAdmin) {
     console.error('');

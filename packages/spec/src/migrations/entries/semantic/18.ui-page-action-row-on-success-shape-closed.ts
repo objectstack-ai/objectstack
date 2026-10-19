@@ -24,8 +24,7 @@ export const entry: SemanticMigration = {
     + 'with the url scheme set, opening a new tab only on `openIn: \'newTab\'`. Anything else gets no reading, and '
     + 'a refused `navigate` performs no navigation. The rows declared `z.unknown()`, so all of it parsed clean and '
     + 'did nothing after the action succeeded. The rows now hold the action\'s own block by reference — one shape, '
-    + 'and the one url grammar (`navigation-target.ts`). A page\'s `properties` is not parsed on the metadata save '
-    + 'or load path, so a stored page still saves and loads; `os validate`\'s props gate parses the bag against the '
+    + 'and the one url grammar (`navigation-target.ts`). A page\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door, so a stored page still loads; `os validate`\'s props gate parses the bag against the '
     + 'rows and reports a refused value as a `component-props-invalid` finding. No conversion is registered: the '
     + 'authored census finds no row `onSuccess` outside the block in this repository or in objectui (its row tests '
     + 'write `{ navigate: \'/app/records/${result.id}\' }`, admitted). Deployed metadata NOT MEASURED.',

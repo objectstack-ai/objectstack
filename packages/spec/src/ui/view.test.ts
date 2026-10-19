@@ -54,6 +54,14 @@ import {
   originOf,
 } from '../../scripts/lib/export-origins-testkit';
 
+// The three published entries the dual-source pins below compare. Loaded
+// here, at module top, and not by an `await import()` inside a case: a clocked
+// window measures behaviour, never loading, and these three loads were most
+// of this file's test time.
+import * as sharedEntry from '../shared/index';
+import * as uiEntry from '../ui/index';
+import * as apiEntry from '../api/index';
+
 // [#16577] The door that carries the `type: '<layout>'` axis these view
 // schemas deliberately leave open — imported so the two-door split is asserted
 // from the side that can see both.
@@ -625,7 +633,17 @@ describe('FormSectionSchema', () => {
     const result = FormSectionSchema.parse(section);
     expect(result.collapsible).toBe(false);
     expect(result.collapsed).toBe(false);
-    expect(result.columns).toBe(1);
+    // An undeclared density is the renderer's (by available width): the parse
+    // adds no `columns`, so "said nothing" stays distinguishable from `1`.
+    expect('columns' in result).toBe(false);
+  });
+
+  it('keeps a declared `columns` as the author\'s ceiling — string spellings parse to the number, out-of-range is refused', () => {
+    expect(FormSectionSchema.parse({ fields: ['name'], columns: 1 }).columns).toBe(1);
+    expect(FormSectionSchema.parse({ fields: ['name'], columns: '2' }).columns).toBe(2);
+    expect(FormSectionSchema.parse({ fields: ['name'], columns: 4 }).columns).toBe(4);
+    expect(FormSectionSchema.safeParse({ fields: ['name'], columns: 5 }).success).toBe(false);
+    expect(FormSectionSchema.safeParse({ fields: ['name'], columns: '0' }).success).toBe(false);
   });
 
   it('should accept form section with all properties', () => {
@@ -886,16 +904,17 @@ describe('FormViewSchema', () => {
       expect(issue?.message).not.toMatch(/#\d+/);
     });
 
-    it('refuses the deprecated `visibleOn` spelling the same way (folded to `visibleWhen` pre-refine)', () => {
+    it('refuses the retired `visibleOn` spelling at its own key, with the tombstone prescription (#23543 F4)', () => {
       const r = FormViewSchema.safeParse({
         type: 'wizard',
         sections: [{ label: 'Later', visibleOn: 'record.stage == "won"', fields: ['amount'] }, STEP],
       });
       expect(r.success).toBe(false);
-      // The fold runs at SECTION parse, so the reported path names the
-      // canonical key — the message says so out loud.
-      const issue = issueAt(r, 'sections.0.visibleWhen');
-      expect(issue?.message).toMatch(/`visibleOn` alias folds into `visibleWhen`/);
+      // No fold runs any more, so the section refuses the key where it was
+      // written — and the wizard rule, which reads `visibleWhen`, adds nothing.
+      expect(issueAt(r, 'sections.0.visibleOn')?.message)
+        .toMatch(/`view\.form\.sections\[\]\.visibleOn` was removed in @objectstack\/spec 18.*Use `visibleWhen`/s);
+      expect(issueAt(r, 'sections.0.visibleWhen')).toBeUndefined();
     });
 
     it.each(['collapsible', 'collapsed'] as const)('refuses `%s: true` on a wizard step', (key) => {
@@ -3931,7 +3950,7 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (every reade
 // 2026-08-12, option A). The spec published a bare format array while the only
 // renderer read `exportOptions.formats`, so no declaration was both type-legal
 // and functional. The object form declares exactly the five renderer-read keys
-// (measured objectui origin/main@878140b, ObjectGrid.tsx:1596–1642); the
+// (read points recorded in `liveness/view.json`, row `list.exportOptions`); the
 // legacy bare array stays accepted and lifts to `{ formats }` at parse.
 // `'pdf'` left the enum in the same change (#1301 NOT_PLANNED). The removal
 // stands under the 2026-10-08 ruling on #8346 (B′), which re-planned PDF
@@ -4040,20 +4059,14 @@ describe('HttpMethodSubsetSchema/HttpRequestSchema backward compat', () => {
 // re-exports `./shared`'s const — so the only thing that ever split was the type
 // alias, which is exactly the part runtime cannot see. Hence two layers.
 describe('HttpRequest is single-source across ./shared and ./ui', () => {
-  it('both entry points expose the very same schema declaration at runtime', async () => {
-    const sharedEntry = await import('../shared/index');
-    const uiEntry = await import('../ui/index');
-
+  it('both entry points expose the very same schema declaration at runtime', () => {
     // Identity, not shape: `lazySchema` returns one Proxy per declaration site,
     // so two declarations could never be `toBe`-equal however alike they look.
     // A re-introduced local `HttpRequestSchema` in view.zod.ts fails here.
     expect(uiEntry.HttpRequestSchema).toBe(sharedEntry.HttpRequestSchema);
   });
 
-  it('the shared declaration validates identically on both entries', async () => {
-    const sharedEntry = await import('../shared/index');
-    const uiEntry = await import('../ui/index');
-
+  it('the shared declaration validates identically on both entries', () => {
     for (const [entry, schema] of [
       ['./shared', sharedEntry.HttpRequestSchema],
       ['./ui', uiEntry.HttpRequestSchema],
@@ -4144,10 +4157,7 @@ describe('`HttpMethod` is not exported from ./ui', () => {
     expect(originFileOf('./shared', 'HttpMethod')).toBe('src/shared/http.zod.ts');
   });
 
-  it('keeps the two value ranges distinct: 7 for `HttpMethod`, 5 for `HttpMethodSubsetSchema`', async () => {
-    const sharedEntry = await import('../shared/index');
-    const apiEntry = await import('../api/index');
-
+  it('keeps the two value ranges distinct: 7 for `HttpMethod`, 5 for `HttpMethodSubsetSchema`', () => {
     // `./api` re-exports the const, so this is one object seen twice.
     expect(apiEntry.HttpMethod).toBe(sharedEntry.HttpMethod);
 
@@ -4163,9 +4173,7 @@ describe('`HttpMethod` is not exported from ./ui', () => {
     expect(sharedEntry.HttpMethodSubsetSchema.options).not.toContain('HEAD');
   });
 
-  it('rejects `HEAD` at the parse layer — the runtime the ./ui type must not out-promise', async () => {
-    const uiEntry = await import('../ui/index');
-
+  it('rejects `HEAD` at the parse layer — the runtime the ./ui type must not out-promise', () => {
     expect(() => uiEntry.HttpMethodSubsetSchema.parse('HEAD')).toThrow();
     expect(() => uiEntry.HttpMethodSubsetSchema.parse('OPTIONS')).toThrow();
     expect(() => uiEntry.HttpRequestSchema.parse({ url: '/api/data', method: 'HEAD' })).toThrow();
@@ -4176,34 +4184,48 @@ describe('`HttpMethod` is not exported from ./ui', () => {
   });
 });
 
-describe('ADR-0089 — visibleWhen unification (view form)', () => {
-  it('normalizes a deprecated `visibleOn` alias to `visibleWhen` on a form field', () => {
-    const parsed = FormFieldSchema.parse({ field: 'state', visibleOn: "record.country == 'US'" });
-    expect(parsed.visibleWhen).toBeDefined();
-    expect(parsed.visibleOn).toBeUndefined();
+// #23543 F4 — `visibleOn` retired at 18: a tombstone on both shapes, the
+// fold onto `visibleWhen` gone with it.
+describe('ADR-0089 — `visibleOn` is retired on the view form (#23543 F4)', () => {
+  const refusedAt = (res: { success: boolean; error?: { issues: { code: string; path: PropertyKey[]; message: string }[] } }) => {
+    expect(res.success).toBe(false);
+    const issues = res.error!.issues;
+    expect(issues.map((i) => i.path.join('.'))).toEqual(['visibleOn']);
+    // The tombstone's own prescription, not a bare unrecognized-key report.
+    expect(issues[0]!.code).not.toBe('unrecognized_keys');
+    return issues[0]!.message;
+  };
+
+  it('refuses `visibleOn` on a form field at the key, naming `visibleWhen`', () => {
+    const m = refusedAt(FormFieldSchema.safeParse({ field: 'state', visibleOn: "record.country == 'US'" }));
+    expect(m).toMatch(/`view\.form\.sections\[\]\.fields\[\]\.visibleOn` was removed in @objectstack\/spec 18.*Use `visibleWhen`\. Rename the key/s);
   });
 
-  it('normalizes a deprecated `visibleOn` alias to `visibleWhen` on a form section', () => {
-    const parsed = FormSectionSchema.parse({
+  it('refuses `visibleOn` on a form section at the key, naming `visibleWhen`', () => {
+    const m = refusedAt(FormSectionSchema.safeParse({
       label: 'Shipping',
-      visibleOn: "record.needs_shipping == true",
+      visibleOn: 'record.needs_shipping == true',
       fields: ['address'],
-    });
-    expect(parsed.visibleWhen).toBeDefined();
-    expect((parsed as Record<string, unknown>).visibleOn).toBeUndefined();
+    }));
+    expect(m).toMatch(/`view\.form\.sections\[\]\.visibleOn` was removed in @objectstack\/spec 18.*Use `visibleWhen`\. Rename the key/s);
   });
 
-  it('keeps the canonical `visibleWhen` when both are present (canonical wins)', () => {
-    const parsed = FormFieldSchema.parse({
+  it('refuses it beside `visibleWhen` too — no canonical-wins fold remains', () => {
+    const m = refusedAt(FormFieldSchema.safeParse({
       field: 'state',
-      visibleWhen: "record.a == 1",
-      visibleOn: "record.b == 2",
-    });
-    const src = typeof parsed.visibleWhen === 'string'
-      ? parsed.visibleWhen
-      : (parsed.visibleWhen as { source?: string }).source;
-    expect(src).toBe('record.a == 1');
-    expect(parsed.visibleOn).toBeUndefined();
+      visibleWhen: 'record.a == 1',
+      visibleOn: 'record.b == 2',
+    }));
+    expect(m).toContain('delete `visibleOn`');
+  });
+
+  it('CONTROL — the canonical `visibleWhen` parses on both shapes, and no output carries `visibleOn`', () => {
+    const field = FormFieldSchema.parse({ field: 'state', visibleWhen: "record.country == 'US'" });
+    expect(field.visibleWhen).toBeDefined();
+    expect(field).not.toHaveProperty('visibleOn');
+    const section = FormSectionSchema.parse({ label: 'Shipping', visibleWhen: 'record.needs_shipping == true', fields: ['address'] });
+    expect(section.visibleWhen).toBeDefined();
+    expect(section).not.toHaveProperty('visibleOn');
   });
 });
 
@@ -4224,10 +4246,6 @@ describe('ADR-0089 D3a — strict view form schemas (loud mis-layered keys)', ()
     }
   });
 
-  it('the deprecated `visibleOn` alias is still accepted under strict (declared key)', () => {
-    expect(() => FormFieldSchema.parse({ field: 'state', visibleOn: "record.a == 1" })).not.toThrow();
-  });
-
   it('rejects a stale `visibility` key on a form field (that is the page-component alias, not a view one)', () => {
     const res = FormFieldSchema.safeParse({ field: 'state', visibility: "record.a == 1" });
     expect(res.success).toBe(false);
@@ -4242,9 +4260,8 @@ describe('ADR-0089 D3a — strict view form schemas (loud mis-layered keys)', ()
     }
   });
 
-  it('a strict form section still accepts canonical + alias keys', () => {
+  it('a strict form section still accepts the canonical key', () => {
     expect(() => FormSectionSchema.parse({ label: 'S', visibleWhen: 'record.a == 1', fields: [] })).not.toThrow();
-    expect(() => FormSectionSchema.parse({ label: 'S', visibleOn: 'record.a == 1', fields: [] })).not.toThrow();
   });
 });
 
@@ -4302,12 +4319,13 @@ describe('visibility unknown-key message order — fix before history', () => {
     expect(m.endsWith(` ${HISTORY}`)).toBe(true);
   });
 
-  it('still emits the whole alias table after the reorder — nothing was trimmed', () => {
-    // The prescription names all three spellings; a reorder that quietly lost
-    // one of them would still satisfy the order assertions above.
+  it('names the canonical key and no longer offers a retired alias as accepted (#23543 F4)', () => {
+    // Until 18 the prescription also named `visibleOn` (view form) and
+    // `visibility` (page component) as accepted deprecated aliases; both
+    // retired, so the sentence that promised them is gone.
     const m = messageFor({ visibleWhenn: 'record.a == 1' });
-    expect(m).toContain('`visibleOn` (view form)');
-    expect(m).toContain('`visibility` (page component) are still accepted as deprecated aliases.');
+    expect(m).toContain('the canonical key is `visibleWhen` (ADR-0089).');
+    expect(m).not.toMatch(/still accepted|deprecated alias/);
   });
 
   it('is unchanged in SHAPE when there is no visibility hint to offer', () => {

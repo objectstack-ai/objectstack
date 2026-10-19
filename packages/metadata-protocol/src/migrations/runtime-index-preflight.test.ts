@@ -123,14 +123,16 @@ describe('kernel:ready index pre-flight (#8725)', () => {
             'uniq_sys_setting_organization_id_namespace_key_scope_user_id:table-absent',
         ]);
 
-        // The overlay conflict — and here `organization_id` is BARE, because
-        // #6418 deliberately did not fold it. A NULL stays a NULL in the key.
+        // The overlay conflict. [ADR-0131 C7b] The organization is no part of
+        // the key, so the probe and the index agree: two ACTIVE package-less
+        // rows of one (type, name) collide. Before the re-key the index's bare,
+        // NULL-distinct `organization_id` accepted this pair while the probe's
+        // GROUP BY folded the NULLs and reported it — a false "blocked".
         expect(by('idx_sys_metadata_overlay_active', results).groups).toEqual([
             {
                 key: {
                     type: 'view',
                     name: 'crm_case.board',
-                    organization_id: null,
                     package_id_key: '',
                     // [#22877] A row of a name-only type is the canonical member.
                     bundle_member_key: '',
@@ -155,6 +157,26 @@ describe('kernel:ready index pre-flight (#8725)', () => {
         expect(by('uniq_sys_setting_organization_id_namespace_key_scope_user_id', results).groups).toEqual([]);
     });
 
+    it('[ADR-0131 C7b] names the legacy organization rows the re-keyed index now refuses: two organizations, or an organization and the environment, on one key', async () => {
+        const meta = db.prepare(
+            'INSERT INTO sys_metadata (id, type, name, organization_id, package_id, state) VALUES (?,?,?,?,?,?)',
+        );
+        meta.run('m6', 'dashboard', 'sales', 'org_a', null, 'active');
+        meta.run('m7', 'dashboard', 'sales', 'org_b', null, 'active');
+        meta.run('m8', 'report', 'pipeline', 'org_a', 'pkg_crm', 'active');
+        meta.run('m9', 'report', 'pipeline', null, 'pkg_crm', 'active');
+        // Control: one organization's row alone on its key is no conflict.
+        meta.run('m10', 'view', 'deal_list', 'org_a', null, 'active');
+
+        const groups = by('idx_sys_metadata_overlay_active', await collectRuntimeIndexPreflight(exec, { client: 'better-sqlite3' })).groups;
+
+        expect(groups.map((g) => [g.key.type, g.key.name, g.key.package_id_key, g.rowCount]).sort()).toEqual([
+            ['dashboard', 'sales', '', 2],
+            ['report', 'pipeline', 'pkg_crm', 2],
+            ['view', 'crm_case.board', '', 2],
+        ]);
+    });
+
     it('carries the row scope and key parts each migration actually builds', async () => {
         const results = await collectRuntimeIndexPreflight(exec);
 
@@ -162,13 +184,13 @@ describe('kernel:ready index pre-flight (#8725)', () => {
             migration: 'ensureMetadataOverlayIndexes',
             table: 'sys_metadata',
             rowScope: "state = 'active'",
-            keyParts: ['type', 'name', 'organization_id', "COALESCE(package_id, '')", "COALESCE(bundle_member, '')"],
+            keyParts: ['type', 'name', "COALESCE(package_id, '')", "COALESCE(bundle_member, '')"],
         });
         expect(by('idx_sys_metadata_overlay_draft', results)).toMatchObject({
             migration: 'ensureMetadataOverlayIndexes',
             table: 'sys_metadata',
             rowScope: "state = 'draft'",
-            keyParts: ['type', 'name', 'organization_id', "COALESCE(package_id, '')", "COALESCE(bundle_member, '')"],
+            keyParts: ['type', 'name', "COALESCE(package_id, '')", "COALESCE(bundle_member, '')"],
         });
         // `sys_setting` has no lifecycle column: the declaration means every row.
         expect(by('uniq_sys_setting_organization_id_namespace_key_scope_user_id', results).rowScope).toBeNull();
@@ -292,7 +314,6 @@ describe('kernel:ready index pre-flight (#8725)', () => {
                     key: {
                         type: 'view',
                         name: 'crm_case.board',
-                        organization_id: null,
                         package_id_key: '',
                         bundle_member_key: '',
                     },

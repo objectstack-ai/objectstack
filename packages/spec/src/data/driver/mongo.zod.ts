@@ -184,7 +184,8 @@ export const MongoDriverSpec = {
   // `mongodb`, not `mongo`, since commit e2798fab7: the canonical driver id was renamed to
   // the spelling both boot hosts, the `@objectstack/driver-mongodb` package and
   // every URL scheme already used, so driver selection and config-contract
-  // selection are one string. `mongo` remains an accepted alias.
+  // selection are one string. `mongo` was retired as a value at 18: refused
+  // when authored, it still resolves this contract for a stored legacy row.
   id: 'mongodb',
   label: 'MongoDB',
   description: 'Official MongoDB Driver for ObjectStack. Supports rich queries, aggregation, and atomic updates.',

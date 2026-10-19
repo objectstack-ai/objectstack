@@ -5,6 +5,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 // redeliver door on the session it already reads (see `serveRedeliver`).
 import { evaluateAuthGate } from '@objectstack/core';
 import type {
+    AuthSessionApi,
     IDataEngine,
     II18nService,
     IMetadataService,
@@ -14,6 +15,9 @@ import type {
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { AutoEnqueuer, type AutoEnqueuerOptions } from './auto-enqueuer.js';
+
+/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 import { SysWebhook } from './sys-webhook.object.js';
 import { bootstrapDeclaredWebhooks } from './bootstrap-declared-webhooks.js';
 import { migrateLegacyWebhookSecrets } from './migrate-webhook-secrets.js';
@@ -614,8 +618,12 @@ export class WebhookOutboxPlugin implements Plugin {
      * (`session.activeOrganizationId`, the tenant threaded into the write).
      * Resolving them separately would mean two `getSession` calls that can
      * disagree.
+     *
+     * [#24222] Typed as `AuthSessionApi` declares the answer, not `any`: the
+     * route's three reads (`user.id`, `user` for the posture gate,
+     * `session.activeOrganizationId`) are all declared there.
      */
-    private async resolveSession(ctx: PluginContext, c: any): Promise<any | undefined> {
+    private async resolveSession(ctx: PluginContext, c: any): Promise<SessionRead | null> {
         try {
             const authService: any = this.tryGetService<any>(ctx, ['auth']);
             if (!authService) return undefined;

@@ -181,6 +181,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       metadata: {
         label: "Metadata",
         help: "JSON-serialized additional context"
+      },
+      changed_fields: {
+        label: "Changed Fields",
+        help: "The key set of the recorded change: for an update, every field its recorded old/new values name; empty for every other row. Stamped by the platform at write time; served narrowed to the fields the reader is served. NULL means the row is not stamped yet (run `os migrate activity-changed-fields`)."
+      },
+      milestone_key: {
+        label: "Milestone Key",
+        help: "For a fired activity milestone, one sorted, comma-joined key of every field the object's activityMilestones declaration watched when it fired; NULL for every other row. Stamped by the platform at write time and never served: the read rule compares it with the current declaration."
       }
     }
   },
@@ -194,7 +202,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       thread_id: {
         label: "Thread",
-        help: "Thread identifier — conventionally `{object}:{record_id}` (e.g. `sys_user:abc123`)"
+        help: "Thread identifier — conventionally `{object}:{record_id}` (e.g. `account:9001`)"
+      },
+      object_name: {
+        label: "Parent Object",
+        help: "The object of the record `thread_id` names — stamped by the platform, never written by authors"
+      },
+      record_id: {
+        label: "Parent Record",
+        help: "The id of the record `thread_id` names — stamped by the platform, never written by authors"
       },
       parent_id: {
         label: "Parent Comment",

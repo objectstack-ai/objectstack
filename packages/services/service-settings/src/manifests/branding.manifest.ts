@@ -8,7 +8,7 @@ export const brandingSettingsManifest: SettingsManifest = {
   version: 1,
   label: 'Branding',
   icon: 'Palette',
-  description: 'Workspace name, logo, and accent colour.',
+  description: 'Organization name, logo, and accent colour.',
   scope: 'tenant',
   readPermission: 'setup.access',
   writePermission: 'setup.write',
@@ -16,7 +16,7 @@ export const brandingSettingsManifest: SettingsManifest = {
   order: 5,
   specifiers: [
     { type: 'group', id: 'identity', label: 'Identity', required: false },
-    { type: 'text', key: 'workspace_name', label: 'Workspace name', required: true,
+    { type: 'text', key: 'workspace_name', label: 'Organization name', required: true,
       default: 'ObjectStack', minLength: 1, maxLength: 60 },
     { type: 'email', key: 'support_email', label: 'Support email', required: false,
       description: 'Example: support@example.com' },

@@ -66,6 +66,7 @@ import {
 // choice against the registry rather than trusting a literal.
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { RestServer } from './rest-server.js';
+import { REST_SERVER_REGISTRAR_FILES } from './rest-server-registrar-files.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
@@ -76,30 +77,163 @@ const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
  * are still `this.resolveExecCtx(environmentId, req)` on a `RestServer` route, so
  * they are still this census's population. A site is therefore identified by
  * `file:line`, never by a line alone.
+ *
+ * [#23050 slice 2] `RestServer#registerBatchEndpoints`' body followed, unedited, to
+ * `batch-routes.ts`, and its five sites with it — on the same terms.
+ *
+ * [#23050 slice 3] …and `RestServer#registerApprovalsEndpoints`' body to
+ * `approvals-routes.ts`, with its seven. The files are no longer spelt here: the
+ * census reads every file on THE list of the files `RestServer`'s registrars
+ * live in (`rest-server-registrar-files.ts`), so the slice that moves the next
+ * body widens it by adding its module there. §2 pins the list's length.
+ *
+ * [#23050 slice 4] …and `registerSharingEndpoints`' and
+ * `registerSharingRuleEndpoints`' bodies to `sharing-routes.ts`, with their eight
+ * (three and five) — the first module on the list to carry TWO registrars.
+ *
+ * [#23050 slice 5] …and `registerAnalyticsEndpoints`' body to
+ * `analytics-routes.ts`, with its one.
+ *
+ * [#23050 slice 6] …and `registerSecurityExplainEndpoints`' and
+ * `registerSecurityEndpoints`' bodies to `security-routes.ts`, with their five
+ * (two and three) — the second module on the list to carry TWO registrars.
+ *
+ * [#23050 slice 7] …and `registerDiscoveryEndpoints`' and
+ * `registerOpenApiEndpoints`' bodies to `discovery-routes.ts`, with their two
+ * (none and two) — the third module to carry TWO registrars, and the first
+ * moved registrar whose body reads no `resolveExecCtx` at all (the discovery
+ * document resolves no caller).
+ *
+ * [#23050 slice 8] …and `registerEmailEndpoints`' body to `email-routes.ts`,
+ * with its one.
+ *
+ * [#23050 slice 9] …and `registerSearchEndpoints`' body to `search-routes.ts`,
+ * with its one.
+ *
+ * [#23050 slice 10] …and `registerUiEndpoints`' body to `ui-routes.ts`, with
+ * its one.
+ *
+ * [#23050 slice 11] …and `registerFormEndpoints`' body to `form-routes.ts`,
+ * with none: the public form doors resolve no caller (their authorization is
+ * the form's own declaration).
+ *
+ * [#23050 slice 12] …and `registerCrudEndpoints`' body to `crud-routes.ts`,
+ * with its six: one per CRUD door, each bare and guarded on its next line.
+ *
+ * [#23050 slice 13a] …and the first three `/meta` groups of
+ * `registerMetadataEndpointsInner`' body to `meta-collection-routes.ts`, with
+ * their three: the `_drafts` and `_migrate-stored` doors' and the per-type
+ * list's, each locally caught (the list's on its continuation line), as before.
+ *
+ * [#23050 slice 13b] …and the fourth, the per-item reads, to
+ * `meta-item-read-routes.ts`, with its one: the item read's, locally caught on
+ * its continuation line, as before — one of §7's and §8's four continuation
+ * sites, which those sections find there because they read every file here.
+ *
+ * [#23050 slice 13c] …and the fifth, the per-item writes, to
+ * `meta-item-write-routes.ts`, with their two: the item save's and the reset's,
+ * each locally caught on its invocation line, as before.
+ *
+ * [#23050 slice 13d] …and the sixth, the history family, to
+ * `meta-item-history-routes.ts`, with its five, each locally caught as before:
+ * the audit trail's, the publish's and the rollback's on their invocation
+ * lines, the change log's and the comparison's on their continuation lines —
+ * two of §7's and §8's four continuation sites, which those sections find there
+ * because they read every file here.
+ *
+ * [#23050 slice 13e] …and the seventh and eighth, the object state-machine read
+ * to `meta-object-state-routes.ts` and the published read to
+ * `meta-item-history-routes.ts`, with none: neither door resolves a caller
+ * itself (the umbrella's wrapper does, before either handler runs).
  */
-const SITE_FILES = ['rest-server.ts', 'data-action-routes.ts'] as const;
+const SITE_FILES = REST_SERVER_REGISTRAR_FILES;
 const SOURCES = new Map<string, string>(SITE_FILES.map((file) => [
     file, file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'),
 ]));
 const siteKey = (file: string, line: number) => `${file}:${line}`;
 
 /**
- * The one frame in `rest-server.ts` that is NOT a consumer: the host literal
- * `registerDataActionEndpoints` hands the moved body forwards each member to the
- * server with `(...a) => this.<member>(...a)`, so a moved site's stack shows that
- * forwarder above the site itself. The site is the first censused frame that is
- * not it. Found by its spelling, so a respelt forwarder is a control failure in
- * §2 rather than every moved site silently attributed to it.
+ * The frames in `rest-server.ts` that are NOT consumers: the host literal each
+ * moved registrar (`registerDataActionEndpoints`, `registerBatchEndpoints`,
+ * `registerApprovalsEndpoints`, `registerSharingEndpoints`,
+ * `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`,
+ * `registerSecurityExplainEndpoints`, `registerSecurityEndpoints`,
+ * `registerOpenApiEndpoints`, `registerEmailEndpoints`,
+ * `registerSearchEndpoints`, `registerUiEndpoints`,
+ * `registerCrudEndpoints`) hands its moved body — and each one
+ * `registerMetadataEndpointsInner` builds for a moved `/meta` group's module
+ * (#23050 slices 13a to 13e), counted as that module's registrar —
+ * forwards each member to the server with `(...a) => this.<member>(...a)`, so
+ * a moved site's stack shows
+ * that forwarder above the site itself. The site is the first censused frame
+ * that is not one. Found by their spelling, and §2 pins ONE per moved
+ * REGISTRAR whose body reads the seam — one per moved module, plus
+ * {@link EXTRA_MOVED_REGISTRARS}, less {@link MOVED_REGISTRARS_READING_NO_EXECCTX}
+ * — so a respelt forwarder — or a module moved without joining `SITE_FILES` —
+ * is a control failure there rather than every moved site silently attributed
+ * to it.
  */
-const FORWARDER_LINE = SOURCE.split('\n').findIndex((l) =>
-    l.includes('resolveExecCtx: (...a) => this.resolveExecCtx(...a),')) + 1;
-const FORWARDER = siteKey('rest-server.ts', FORWARDER_LINE);
+const FORWARDER_LINES = SOURCE.split('\n').flatMap((l, i) =>
+    l.includes('resolveExecCtx: (...a) => this.resolveExecCtx(...a),') ? [i + 1] : []);
+const FORWARDERS = new Set(FORWARDER_LINES.map((line) => siteKey('rest-server.ts', line)));
+/**
+ * [#23050 slice 4] The moved registrars beyond one per moved module:
+ * `sharing-routes.ts` carries two registrars' bodies, each handed over by its
+ * own host literal and so through its own forwarder.
+ *
+ * [#23050 slice 6] `security-routes.ts` carries two as well, on the same terms.
+ *
+ * [#23050 slice 7] So does `discovery-routes.ts` (the discovery and OpenAPI
+ * bodies), each handed over by its own host literal — but see
+ * {@link MOVED_REGISTRARS_READING_NO_EXECCTX}: only one of its two literals
+ * carries the forwarder.
+ *
+ * [#23050 slice 13e] So does `meta-item-history-routes.ts` (the history family
+ * and the published read), each handed over by its own host literal the inner
+ * method builds at its own position — and, as for the discovery module, only
+ * the first of the two carries the forwarder.
+ */
+const EXTRA_MOVED_REGISTRARS: Readonly<Partial<Record<(typeof SITE_FILES)[number], number>>> = {
+    'sharing-routes.ts': 1,
+    'security-routes.ts': 1,
+    'discovery-routes.ts': 1,
+    'meta-item-history-routes.ts': 1,
+};
+/**
+ * [#23050 slice 7] The moved registrars whose bodies read no `resolveExecCtx`,
+ * so whose host literals hand over no forwarder — measured by the AST walk of
+ * the body, not assumed. `registerDiscoveryEndpoints`' body resolves no caller
+ * (the discovery document is served to anyone), so its host literal names no
+ * `resolveExecCtx` member; its module's other registrar, the OpenAPI pair,
+ * reads it twice and carries the forwarder. A body that starts reading the
+ * seam gains a forwarder, and §2's exact count reds until this entry goes.
+ *
+ * [#23050 slice 11] `registerFormEndpoints`' body reads no `resolveExecCtx`
+ * either (the AST walk of the body finds no read): the public form doors run
+ * as the form grant and resolve no caller, so their host literal names no
+ * `resolveExecCtx` member.
+ *
+ * [#23050 slice 13e] Neither the object state-machine read's body
+ * (`meta-object-state-routes.ts`) nor the published read's
+ * (`meta-item-history-routes.ts`' second registrar) reads it either (the AST
+ * walk of each body finds no read): both doors leave the caller to the
+ * umbrella's wrapper, so neither host literal names a `resolveExecCtx` member.
+ */
+const MOVED_REGISTRARS_READING_NO_EXECCTX: Readonly<Partial<Record<(typeof SITE_FILES)[number], number>>> = {
+    'discovery-routes.ts': 1,
+    'form-routes.ts': 1,
+    'meta-item-history-routes.ts': 1,
+    'meta-object-state-routes.ts': 1,
+};
+
+/** A stack frame in any censused file, as `<file>:<line>:<column>`. */
+const SITE_FRAME = new RegExp(`(${SITE_FILES.map((file) => file.replace(/\./g, '\\.')).join('|')}):(\\d+):\\d+`, 'g');
 
 /** The census site a `resolveExecCtx` call came from, read off its stack. */
 function siteOfStack(stack: string): string | undefined {
-    for (const m of stack.matchAll(/(rest-server|data-action-routes)\.ts:(\d+):\d+/g)) {
-        const key = siteKey(`${m[1]}.ts`, Number(m[2]));
-        if (key !== FORWARDER) return key;
+    for (const m of stack.matchAll(SITE_FRAME)) {
+        const key = siteKey(m[1], Number(m[2]));
+        if (!FORWARDERS.has(key)) return key;
     }
     return undefined;
 }
@@ -534,9 +668,179 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // RestServer['resolveExecCtx']`, two). The forwarder is the one
         // `rest-server.ts` frame `siteOfStack` steps over; the control below
         // proves it is still where that spelling says it is.
+        //
+        // [#23050 slice 2] 62 sites UNCHANGED / 81 → 85 mentions — the same MOVE.
+        // `registerBatchEndpoints`' body left for `batch-routes.ts` with its five
+        // BARE sites, so this census reads three files: 48 + 9 + 5 = 62 sites.
+        // The four new mentions are that slice's seam, the same two spellings
+        // (its host literal's forwarder, two; its host interface's member, two).
+        // There are now two forwarders, one per moved module, and the control
+        // pins that pairing.
+        //
+        // [#23050 slice 3] 62 sites UNCHANGED / 85 → 89 mentions — the same MOVE.
+        // `registerApprovalsEndpoints`' body left for `approvals-routes.ts` with
+        // its seven BARE sites: 41 + 9 + 5 + 7 = 62 sites, read off the registrar
+        // list, whose length is pinned here. The four new mentions are this
+        // slice's seam, the same two spellings; three forwarders now, one per
+        // moved module.
+        //
+        // [#23050 slice 4] 62 sites UNCHANGED / 89 → 97 mentions — the same MOVE.
+        // `registerSharingEndpoints`' and `registerSharingRuleEndpoints`' bodies
+        // left for `sharing-routes.ts` with their eight BARE sites (three and
+        // five): 33 + 9 + 5 + 7 + 8 = 62 sites. The eight new mentions are this
+        // slice's seam, the same two spellings TWICE — two host literals'
+        // forwarders (four) and two host interfaces' members (four) — because
+        // the module carries two registrars. Five forwarders now: one per moved
+        // registrar, which is one per moved module plus `EXTRA_MOVED_REGISTRARS`.
+        //
+        // [#23050 slice 5] 62 sites UNCHANGED / 97 → 101 mentions — the same MOVE.
+        // `registerAnalyticsEndpoints`' body left for `analytics-routes.ts` with
+        // its one BARE site: 32 + 9 + 5 + 7 + 8 + 1 = 62 sites. The four new
+        // mentions are this slice's seam, the same two spellings once (its host
+        // literal's forwarder, two; its host interface's member, two). Six
+        // forwarders now, one per moved registrar: (6 - 1) + 1.
+        //
+        // [#23050 slice 6] 62 sites UNCHANGED / 101 → 109 mentions — the same MOVE.
+        // `registerSecurityExplainEndpoints`' and `registerSecurityEndpoints`'
+        // bodies left for `security-routes.ts` with their five BARE sites (two
+        // and three): 27 + 9 + 5 + 7 + 8 + 1 + 5 = 62 sites. The eight new
+        // mentions are this slice's seam, the same two spellings TWICE, as slice
+        // 4's (two host literals' forwarders, four; two host interfaces'
+        // members, four). Eight forwarders now, one per moved registrar:
+        // (7 - 1) + 2, the second module carrying two registrars counted in
+        // `EXTRA_MOVED_REGISTRARS`.
+        //
+        // [#23050 slice 7] 62 sites UNCHANGED / 109 → 113 mentions — the same MOVE.
+        // `registerOpenApiEndpoints`' body left for `discovery-routes.ts` with its
+        // two BARE sites (the document and its viewer), and
+        // `registerDiscoveryEndpoints`' with none: 25 + 9 + 5 + 7 + 8 + 1 + 5 + 2
+        // = 62 sites. The four new mentions are this slice's seam, the two
+        // spellings ONCE (one host literal's forwarder, two; one host
+        // interface's member, two): `rest-server.ts` stays at 57 (two sites
+        // out, one forwarder's two mentions in). Nine forwarders now:
+        // (8 - 1) + 3 - 1 — the third module carrying two registrars counted in
+        // `EXTRA_MOVED_REGISTRARS`, and the discovery registrar, which reads no
+        // `resolveExecCtx`, in `MOVED_REGISTRARS_READING_NO_EXECCTX`.
+        //
+        // [#23050 slice 8] 62 sites UNCHANGED / 113 → 117 mentions — the same MOVE.
+        // `registerEmailEndpoints`' body left for `email-routes.ts` with its one
+        // BARE site: 24 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 = 62 sites. The four new
+        // mentions are this slice's seam, the two spellings once (its host
+        // literal's forwarder, two; its host interface's member, two):
+        // `rest-server.ts` goes 57 → 58 (one site out, one forwarder's two
+        // mentions in). Ten forwarders now: (9 - 1) + 3 - 1, the module carrying
+        // one registrar that reads the seam, so neither map gains an entry.
+        //
+        // [#23050 slice 9] 62 sites UNCHANGED / 117 → 121 mentions — the same MOVE.
+        // `registerSearchEndpoints`' body left for `search-routes.ts` with its one
+        // BARE site: 23 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 = 62 sites. The four
+        // new mentions are this slice's seam, the two spellings once (its host
+        // literal's forwarder, two; its host interface's member, two):
+        // `rest-server.ts` goes 58 → 59 (one site out, one forwarder's two
+        // mentions in). Eleven forwarders now: (10 - 1) + 3 - 1, the module
+        // carrying one registrar that reads the seam, so neither map gains an
+        // entry.
+        //
+        // [#23050 slice 10] 62 sites UNCHANGED / 121 → 125 mentions — the same MOVE.
+        // `registerUiEndpoints`' body left for `ui-routes.ts` with its one BARE
+        // site (guarded on its next line, as before):
+        // 22 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 = 62 sites. The four new
+        // mentions are this slice's seam, the two spellings once (its host
+        // literal's forwarder, two; its host interface's member, two):
+        // `rest-server.ts` goes 59 → 60 (one site out, one forwarder's two
+        // mentions in). Twelve forwarders now: (11 - 1) + 3 - 1, the module
+        // carrying one registrar that reads the seam, so neither map gains an
+        // entry.
+        //
+        // [#23050 slice 11] 62 sites / 125 mentions UNCHANGED — the same MOVE.
+        // `registerFormEndpoints`' body left for `form-routes.ts` with NO site:
+        // 22 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 = 62 sites. Its host
+        // literal and host interface name no `resolveExecCtx` member, so no
+        // mention moved and `rest-server.ts` stays at 60. Still twelve
+        // forwarders: (12 - 1) + 3 - 2, the module counted in
+        // `MOVED_REGISTRARS_READING_NO_EXECCTX`.
+        //
+        // [#23050 slice 12] 62 sites UNCHANGED / 125 → 129 mentions — the same MOVE.
+        // `registerCrudEndpoints`' body left for `crud-routes.ts` with its six BARE
+        // sites (each guarded on its next line, as before):
+        // 16 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 = 62 sites. The four new
+        // mentions are this slice's seam, the two spellings once (its host
+        // literal's forwarder, two; its host interface's member, two):
+        // `rest-server.ts` goes 60 → 56 (six sites out, one forwarder's two
+        // mentions in). Thirteen forwarders now: (13 - 1) + 3 - 2, the module
+        // carrying one registrar that reads the seam, so neither map gains an
+        // entry.
+        //
+        // [#23050 slice 13a] 62 sites UNCHANGED / 129 → 133 mentions — the same MOVE.
+        // The first three `/meta` groups of `registerMetadataEndpointsInner` left for
+        // `meta-collection-routes.ts` with their three LOCALLY CAUGHT sites (`_drafts`
+        // and `_migrate-stored` on the invocation line, the per-type list on its
+        // continuation line, as before):
+        // 13 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 + 3 = 62 sites. The four
+        // new mentions are this slice's seam, the two spellings once (the host
+        // literal the inner method builds, its forwarder, two; the host interface's
+        // member, two): `rest-server.ts` goes 56 → 55 (three sites out, one
+        // forwarder's two mentions in). Fourteen forwarders now: (14 - 1) + 3 - 2,
+        // the module carrying one host literal that reads the seam, so neither map
+        // gains an entry.
+        //
+        // [#23050 slice 13b] 62 sites UNCHANGED / 133 → 137 mentions — the same MOVE.
+        // The fourth `/meta` group, the per-item reads, left for
+        // `meta-item-read-routes.ts` with its one LOCALLY CAUGHT site (the item read's,
+        // on its continuation line, as before):
+        // 12 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 + 3 + 1 = 62 sites. The
+        // body also carries one prose mention, which moved with it. The four new
+        // mentions are this slice's seam, the two spellings once (the second host
+        // literal the inner method builds, its forwarder, two; the host interface's
+        // member, two): `rest-server.ts` stays at 55 (the site and the prose mention
+        // out, one forwarder's two mentions in). Fifteen forwarders now:
+        // (15 - 1) + 3 - 2, the module carrying one host literal that reads the
+        // seam, so neither map gains an entry.
+        //
+        // [#23050 slice 13c] 62 sites UNCHANGED / 137 → 141 mentions — the same MOVE.
+        // The fifth `/meta` group, the per-item writes, left for
+        // `meta-item-write-routes.ts` with its two LOCALLY CAUGHT sites (the item
+        // save's and the reset's, each on its invocation line, as before):
+        // 10 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 + 3 + 1 + 2 = 62 sites. The
+        // four new mentions are this slice's seam, the two spellings once (the third
+        // host literal the inner method builds, its forwarder, two; the host
+        // interface's member, two): `rest-server.ts` stays at 55 (the two sites out,
+        // one forwarder's two mentions in). Sixteen forwarders now: (16 - 1) + 3 - 2,
+        // the module carrying one host literal that reads the seam, so neither map
+        // gains an entry.
+        //
+        // [#23050 slice 13d] 62 sites UNCHANGED / 141 → 145 mentions — the same MOVE.
+        // The sixth `/meta` group, the history family, left for
+        // `meta-item-history-routes.ts` with its five LOCALLY CAUGHT sites (the audit
+        // trail's, the publish's and the rollback's on their invocation lines, the
+        // change log's and the comparison's on their continuation lines, as before):
+        // 5 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 + 3 + 1 + 2 + 5 = 62 sites.
+        // The four new mentions are this slice's seam, the two spellings once (the
+        // fourth host literal the inner method builds, its forwarder, two; the host
+        // interface's member, two): `rest-server.ts` goes 55 → 52 (the five sites
+        // out, one forwarder's two mentions in). Seventeen forwarders now:
+        // (17 - 1) + 3 - 2, the module carrying one host literal that reads the seam,
+        // so neither map gains an entry.
+        //
+        // [#23050 slice 13e] 62 sites / 145 mentions UNCHANGED — the same MOVE. The
+        // seventh and eighth `/meta` groups, the object state-machine read and the
+        // published read, left for `meta-object-state-routes.ts` (a new module on the
+        // list) and `meta-item-history-routes.ts` (already on it) with NO site, and
+        // neither host literal the inner method builds for them names a
+        // `resolveExecCtx` member, so no mention moved either:
+        // 5 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 + 3 + 1 + 2 + 5 + 0 = 62
+        // sites. Still seventeen forwarders: (18 - 1) + 4 - 4, the published read
+        // counted as the history module's second registrar in BOTH maps and the new
+        // module in `MOVED_REGISTRARS_READING_NO_EXECCTX`.
+        expect(SITE_FILES).toHaveLength(18);
         expect(SITES.length).toBe(62);
-        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(81);
-        expect(FORWARDER_LINE, 'the host literal\'s resolveExecCtx forwarder was respelt or removed').toBeGreaterThan(0);
+        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(145);
+        const extraMovedRegistrars = Object.values(EXTRA_MOVED_REGISTRARS).reduce((n, k) => n + (k ?? 0), 0);
+        expect(extraMovedRegistrars).toBe(4);
+        const registrarsReadingNoExecCtx = Object.values(MOVED_REGISTRARS_READING_NO_EXECCTX).reduce((n, k) => n + (k ?? 0), 0);
+        expect(registrarsReadingNoExecCtx).toBe(4);
+        expect(FORWARDER_LINES, 'one host-literal resolveExecCtx forwarder per moved registrar whose body reads it: one was respelt or removed, or a module moved without joining SITE_FILES')
+            .toHaveLength(SITE_FILES.length - 1 + extraMovedRegistrars - registrarsReadingNoExecCtx);
     });
 
     it('the split is 16 locally caught / 46 bare — NOT 12 / 46, which does not add to 62', () => {

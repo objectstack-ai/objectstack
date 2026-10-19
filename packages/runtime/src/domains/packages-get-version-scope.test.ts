@@ -82,7 +82,7 @@ const ABSENT = '99.0.0';
 
 function make() {
     const registry = new SchemaRegistry({ logLevel: 'silent' } as any);
-    registry.installPackage({ id: PKG, name: PKG, version: INSTALLED, scope: 'project', type: 'app' } as any);
+    registry.installPackage({ id: PKG, name: PKG, version: INSTALLED, scope: 'project', type: 'app' } as any, 'code');
     const objectql = { registry, manifests: new Map<string, any>() };
     const kernel: any = {
         context: { getService: (name: string) => (name === 'objectql' ? objectql : null) },

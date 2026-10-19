@@ -18,7 +18,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_record_share: {
     label: "レコード共有",
     pluralLabel: "レコード共有",
-    description: "レコードごとの共有付与 — OWD に明示的なアクセスを追加",
+    description: "所有者以外にも共有されたレコード。付与ごとに 1 行です。",
     fields: {
       id: {
         label: "共有 ID"

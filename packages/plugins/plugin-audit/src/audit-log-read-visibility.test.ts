@@ -2,20 +2,29 @@
 
 /**
  * [#21175] The `sys_audit_log` read gate's row classes and fail-closed
- * branches, against a stand-in engine — plus the shape of what it emits. What
- * the emitted filter SELECTS is pinned against a real driver in
+ * branches, against stand-in engines — plus the shape of what it emits: the
+ * leaf path (ADR-0139 D4) against an engine that answers the gate's three
+ * classifying questions, and the bounded probe against one that answers none
+ * of them. What the emitted filter SELECTS is pinned against a real driver in
+ * `parent-record-read-leaf.integration.test.ts` and
  * `audit-log-read-visibility.integration.test.ts`.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
+import { isReadableIds } from '@objectstack/spec/data';
 import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
+import { SystemObjectName } from '@objectstack/spec/system';
 import {
   LEDGER_AUDIT_CAPABILITY,
+  LEDGER_NAMED_PARENTS,
   installAuditLogReadVisibility,
   isLedgerRowAboutNoRecord,
+  ledgerRowAboutNoRecordWhere,
 } from './audit-log-read-visibility.js';
+import { AUDIT_EXCLUDED_OBJECTS } from './audit-writers.js';
 import type { CommentAccessEngine, CommentReadMiddlewareCtx } from './comment-access-hooks.js';
+import type { ParentObjectReadAdmissionSource, ParentRecordGateEngine } from './parent-record-read-gate.js';
 
 const DENY = { id: '__audit_log_parent_denied__' };
 const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
@@ -26,6 +35,8 @@ function install(opts: {
   /** parentObject -> readable ids (for any caller), or a thrower. */
   readable?: Record<string, string[] | (() => never)>;
   logger?: ReturnType<typeof silentLogger>;
+  /** The security service's object-level read admission the gate resolves per read; absent: none composed. */
+  admission?: ParentObjectReadAdmissionSource;
 }) {
   let mw!: Mw;
   const calls = { scans: [] as any[], probes: [] as Array<{ object: string; ids: string[] }> };
@@ -48,7 +59,7 @@ function install(opts: {
     },
     findOne: async () => null,
   };
-  installAuditLogReadVisibility(engine, opts.logger ?? silentLogger());
+  installAuditLogReadVisibility(engine, opts.logger ?? silentLogger(), opts.admission ?? (() => undefined));
   return { mw, calls };
 }
 
@@ -87,8 +98,24 @@ describe('isLedgerRowAboutNoRecord', () => {
   });
 });
 
-describe('installAuditLogReadVisibility', () => {
-  it('keeps rows about a readable record by their parent pair, as stored', async () => {
+/** The outside class's predicate, as the gate ORs it in. */
+const OUTSIDE = ledgerRowAboutNoRecordWhere();
+
+describe('ledgerRowAboutNoRecordWhere', () => {
+  it('is the outside class as a predicate on the ledger’s own columns, a fresh tree per call', () => {
+    expect(OUTSIDE).toEqual({
+      $and: [
+        { $or: [{ record_id: null }, { record_id: '' }] },
+        { action: { $ne: null } },
+        { action: { $nin: ['', 'create', 'update', 'delete', 'read'] } },
+      ],
+    });
+    expect(ledgerRowAboutNoRecordWhere()).not.toBe(ledgerRowAboutNoRecordWhere());
+  });
+});
+
+describe('installAuditLogReadVisibility — the bounded probe (an engine that cannot classify a parent)', () => {
+  it('keeps rows about a readable record by their parent pair, as stored, beside the outside class', async () => {
     const { mw } = install({
       scan: () => [
         { id: 'l1', action: 'create', object_name: 'crm_case', record_id: 'c1' },
@@ -103,11 +130,12 @@ describe('installAuditLogReadVisibility', () => {
       $or: [
         { object_name: 'crm_case', record_id: { $in: ['c1'] } },
         { object_name: 'sys_session', record_id: { $in: ['s1'] } },
+        OUTSIDE,
       ],
     });
   });
 
-  it('keeps the rows about no record by their stored id, beside the record branches', async () => {
+  it('the rows about no record are kept by the predicate, never by a stored id the scan saw', async () => {
     const { mw, calls } = install({
       scan: () => [
         { id: 'l1', action: 'create', object_name: 'crm_case', record_id: 'c1' },
@@ -116,19 +144,56 @@ describe('installAuditLogReadVisibility', () => {
       ],
       readable: { crm_case: [] },
     });
-    expect((await read(mw)).where).toEqual({ id: { $in: ['l2', 'l3'] } });
+    expect((await read(mw)).where).toEqual(OUTSIDE);
     expect(calls.probes.map((p) => p.object)).toEqual(['crm_case']);
+  });
+
+  it('asks the object-level read admission first: a refused object is never read, and the WHERE is unchanged', async () => {
+    const scan = () => [
+      { id: 'l1', action: 'create', object_name: 'crm_case', record_id: 'c1' },
+      { id: 'l2', action: 'update', object_name: 'sys_migration', record_id: 'm1' },
+      { id: 'l3', action: 'config_change', object_name: 'sys_setting', record_id: null },
+    ];
+    const readable = {
+      crm_case: ['c1'],
+      sys_migration: () => {
+        throw Object.assign(new Error('denied'), { code: 'PERMISSION_DENIED' });
+      },
+    };
+    const without = install({ scan, readable });
+    const before = (await read(without.mw)).where;
+    expect(without.calls.probes.map((p) => p.object).sort()).toEqual(['crm_case', 'sys_migration']);
+
+    const canReadObject = vi.fn(async (object: string) => object !== 'sys_migration');
+    const { mw, calls } = install({ scan, readable, admission: () => ({ canReadObject }) });
+    expect((await read(mw)).where).toEqual(before);
+    expect(before).toEqual({ $or: [{ object_name: 'crm_case', record_id: { $in: ['c1'] } }, OUTSIDE] });
+    expect(calls.probes.map((p) => p.object)).toEqual(['crm_case']);
+    expect(canReadObject.mock.calls.map(([object]) => object).sort()).toEqual(['crm_case', 'sys_migration']);
+  });
+
+  it('a holder of the audit capability is exempt before the admission is asked', async () => {
+    const canReadObject = vi.fn(async () => true);
+    const { mw, calls } = install({
+      scan: () => [{ id: 'l1', action: 'create', object_name: 'crm_case', record_id: 'c1' }],
+      admission: () => ({ canReadObject }),
+    });
+    const { where } = await read(mw, { context: { userId: 'u1', systemPermissions: [LEDGER_AUDIT_CAPABILITY] } });
+    expect(where).toBeUndefined();
+    expect(calls.scans).toEqual([]);
+    expect(canReadObject).not.toHaveBeenCalled();
   });
 
   it('a record action that names no record is excluded, never kept as a row about none', async () => {
     const { mw, calls } = install({
       scan: () => [{ id: 'l1', action: 'update', object_name: 'crm_case', record_id: null }],
     });
-    expect((await read(mw)).where).toEqual(DENY);
+    expect((await read(mw)).where).toEqual(OUTSIDE);
+    expect(isLedgerRowAboutNoRecord({ id: 'l1', action: 'update', object_name: 'crm_case', record_id: null })).toBe(false);
     expect(calls.probes).toEqual([]);
   });
 
-  it('denies all when no scanned record is readable and no row is about no record', async () => {
+  it('no scanned record readable: only the outside class remains', async () => {
     const { mw } = install({
       scan: () => [
         { id: 'l1', action: 'delete', object_name: 'crm_case', record_id: 'c1' },
@@ -138,7 +203,7 @@ describe('installAuditLogReadVisibility', () => {
       ],
       readable: { crm_case: [] },
     });
-    expect((await read(mw)).where).toEqual(DENY);
+    expect((await read(mw)).where).toEqual(OUTSIDE);
   });
 
   it('a parent object whose read throws contributes nothing (fail closed)', async () => {
@@ -154,10 +219,10 @@ describe('installAuditLogReadVisibility', () => {
         },
       },
     });
-    expect((await read(mw)).where).toEqual({ object_name: 'crm_case', record_id: { $in: ['c1'] } });
+    expect((await read(mw)).where).toEqual({ $or: [{ object_name: 'crm_case', record_id: { $in: ['c1'] } }, OUTSIDE] });
   });
 
-  it('denies all, and says so, when the pre-scan itself fails', async () => {
+  it('denies all, and says so, when the pre-scan itself fails — the outside class included', async () => {
     const logger = silentLogger();
     const { mw } = install({
       scan: () => {
@@ -168,17 +233,18 @@ describe('installAuditLogReadVisibility', () => {
     const { where, ran } = await read(mw);
     expect(where).toEqual(DENY);
     expect(ran).toBe(true);
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('audit log read visibility: filter failed, denying all'));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('audit log read visibility: the bounded probe'));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('failed, denying all'));
   });
 
-  it('scans under SYSTEM context with the caller’s where and order, the class columns included, bounded', async () => {
+  it('scans under SYSTEM context with the caller’s where and order, the parent pair only, bounded', async () => {
     const { mw, calls } = install({ scan: () => [] });
     const where = { action: 'update' };
     const orderBy = [{ field: 'created_at', order: 'desc' }];
     const { where: after } = await read(mw, { ast: { object: 'sys_audit_log', where, orderBy } });
-    expect(after).toEqual(where);
+    expect(after).toEqual({ $and: [where, OUTSIDE] });
     expect(calls.scans).toEqual([
-      { where, fields: ['object_name', 'record_id', 'id', 'action'], orderBy, limit: 2000, context: { isSystem: true } },
+      { where, fields: ['object_name', 'record_id'], orderBy, limit: 2000, context: { isSystem: true } },
     ]);
   });
 
@@ -189,7 +255,7 @@ describe('installAuditLogReadVisibility', () => {
     });
     const existing = { action: 'create' };
     const { where } = await read(mw, { ast: { object: 'sys_audit_log', where: existing } });
-    expect(where).toEqual({ $and: [existing, { object_name: 'crm_case', record_id: { $in: ['c1'] } }] });
+    expect(where).toEqual({ $and: [existing, { $or: [{ object_name: 'crm_case', record_id: { $in: ['c1'] } }, OUTSIDE] }] });
   });
 
   it('warns when the scan hits its bound', async () => {
@@ -197,14 +263,15 @@ describe('installAuditLogReadVisibility', () => {
     const rows = Array.from({ length: 2000 }, (_, i) => ({ id: `l${i}`, action: 'update', object_name: 'crm_case', record_id: `c${i}` }));
     const { mw } = install({ scan: () => rows, readable: { crm_case: ['c1'] }, logger });
     await read(mw);
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('audit log read visibility: candidate pre-scan hit the 2000-row cap'));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("audit log read visibility: the bounded probe's candidate pre-scan"));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('hit the 2000-row cap'));
   });
 
   it('narrows count, aggregate and findOne, and leaves writes, system and context-less reads alone', async () => {
     const scan = () => [{ id: 'l1', action: 'create', object_name: 'crm_case', record_id: 'c1' }];
     for (const operation of ['count', 'aggregate', 'findOne'] as const) {
       const { mw } = install({ scan, readable: { crm_case: [] } });
-      expect((await read(mw, { operation })).where).toEqual(DENY);
+      expect((await read(mw, { operation })).where).toEqual(OUTSIDE);
     }
     const { mw, calls } = install({ scan, readable: { crm_case: [] } });
     expect((await read(mw, { operation: 'insert' })).where).toBeUndefined();
@@ -215,7 +282,90 @@ describe('installAuditLogReadVisibility', () => {
 
   it('is inert on an engine without the middleware seam', () => {
     const engine: CommentAccessEngine = { registerHook: () => {}, find: async () => [], findOne: async () => null };
-    expect(() => installAuditLogReadVisibility(engine, silentLogger())).not.toThrow();
+    expect(() => installAuditLogReadVisibility(engine, silentLogger(), () => undefined)).not.toThrow();
+  });
+});
+
+/** A stand-in engine that answers the three questions the gate classifies a parent by. */
+/** The comment-gate engine double, recording its middleware and its reads. */
+function baseEngine(onMiddleware: (fn: Mw) => void, onFind: (object: string, options: any) => void): CommentAccessEngine {
+  return {
+    registerHook: () => {},
+    registerMiddleware: (fn) => onMiddleware(fn as Mw),
+    find: async (object: string, options: any) => {
+      onFind(object, options);
+      return [];
+    },
+    findOne: async () => null,
+  };
+}
+
+function installClassifying(objects: string[]) {
+  let mw!: Mw;
+  const calls = { scans: [] as any[] };
+  // The classifying questions, over the comment-gate double.
+  const engine: ParentRecordGateEngine = Object.assign(
+    baseEngine((fn) => (mw = fn), (object, options) => calls.scans.push({ object, options })),
+    {
+      registry: { getAllObjects: () => objects.map((name) => ({ name })) } as any,
+      hasObjectMiddleware: () => false,
+      resolveEffectiveDatasource: () => undefined,
+    },
+  );
+  installAuditLogReadVisibility(engine, silentLogger(), () => ({ canReadObject: async () => true }));
+  return { mw, calls };
+}
+
+describe('[ADR-0139 D4] the ledger on the leaf path', () => {
+  const leafOf = (branch: any): string | null => {
+    const comparand = branch?.record_id?.$in;
+    return isReadableIds(comparand) ? comparand.object : null;
+  };
+
+  it('one leaf per parent object, the outside class as a predicate beside them, nothing scanned', async () => {
+    const { mw, calls } = installClassifying(['crm_case', 'crm_deal', 'sys_audit_log']);
+    const where = (await read(mw)).where as any;
+    expect(where.$or.map(leafOf)).toEqual(['crm_case', 'crm_deal', null]);
+    expect(where.$or[2]).toEqual(OUTSIDE);
+    expect(calls.scans).toEqual([]);
+  });
+
+  it('names the session its auth-event sink writes about, which the audit writer excludes', async () => {
+    expect(LEDGER_NAMED_PARENTS).toEqual([SystemObjectName.SESSION]);
+    expect(AUDIT_EXCLUDED_OBJECTS).toContain(SystemObjectName.SESSION);
+    const others = AUDIT_EXCLUDED_OBJECTS.filter((o) => o !== SystemObjectName.SESSION && o !== 'sys_audit_log');
+    const { mw } = installClassifying(['crm_case', SystemObjectName.SESSION, ...others]);
+    const where = (await read(mw)).where as any;
+    expect(where.$or.map(leafOf)).toEqual(['crm_case', SystemObjectName.SESSION, null]);
+  });
+
+  it('a read naming its parent objects keeps a leaf for each named one, and the outside class beside them, whole', async () => {
+    const { mw } = installClassifying(['crm_case', 'crm_deal', 'crm_lead', 'sys_audit_log']);
+    const named = { object_name: { $in: ['crm_deal', 'sys_setting'] } };
+    const where = (await read(mw, { ast: { object: 'sys_audit_log', where: named } })).where as any;
+    expect(where.$and[0]).toBe(named);
+    expect(where.$and[1].$or.map(leafOf)).toEqual(['crm_deal', null]);
+    expect(where.$and[1].$or[1]).toEqual(OUTSIDE);
+    // Naming no parent it enumerates: the outside class alone, never the deny-all sentinel.
+    const none = (await read(mw, { ast: { object: 'sys_audit_log', where: { object_name: 'sys_setting' } } })).where as any;
+    expect(none.$and[1]).toEqual(OUTSIDE);
+  });
+
+  it('the exemption is decided before anything is enumerated', async () => {
+    const getAllObjects = vi.fn(() => [{ name: 'crm_case' }]);
+    let mw!: Mw;
+    const engine: ParentRecordGateEngine = Object.assign(
+      baseEngine((fn) => (mw = fn), () => {}),
+      { registry: { getAllObjects } as any, hasObjectMiddleware: () => false, resolveEffectiveDatasource: () => undefined },
+    );
+    installAuditLogReadVisibility(engine, silentLogger(), () => undefined);
+    const existing = { action: 'delete' };
+    const { where } = await read(mw, {
+      context: { userId: 'u1', systemPermissions: [LEDGER_AUDIT_CAPABILITY] },
+      ast: { object: 'sys_audit_log', where: existing },
+    });
+    expect(where).toBe(existing);
+    expect(getAllObjects).not.toHaveBeenCalled();
   });
 });
 
@@ -243,7 +393,7 @@ describe('[#21260] the ledger audit capability', () => {
     }
   });
 
-  it('its holder’s broad read never meets the pre-scan bound', async () => {
+  it('its holder’s broad read never meets the probe’s bound', async () => {
     const logger = silentLogger();
     const rows = Array.from({ length: 2000 }, (_, i) => ({ id: `l${i}`, action: 'update', object_name: 'crm_case', record_id: `c${i}` }));
     const { mw, calls } = install({ scan: () => rows, readable: { crm_case: [] }, logger });
@@ -255,7 +405,7 @@ describe('[#21260] the ledger audit capability', () => {
   it('a caller without it gets exactly the parent-record gate: other capabilities, a non-list, or none', async () => {
     for (const systemPermissions of [['setup.access', 'manage_users'], LEDGER_AUDIT_CAPABILITY, undefined]) {
       const { mw, calls } = install({ scan: unreadable, readable: { crm_case: [], sys_session: [] } });
-      expect((await read(mw, { context: { userId: 'u1', systemPermissions } })).where).toEqual(DENY);
+      expect((await read(mw, { context: { userId: 'u1', systemPermissions } })).where).toEqual(OUTSIDE);
       expect(calls.scans).toHaveLength(1);
     }
   });

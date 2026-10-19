@@ -51,19 +51,19 @@ function makeImpl(overrides?: {
   /**
    * Manifests to replay into the fresh registry before the test runs — a
    * stand-in for the boot hydration `PackageServicePlugin.start()` performs
-   * (`for (const rec of await packageService.list()) registry.installPackage(rec.manifest)`,
+   * (`for (const rec of await packageService.list()) registry.installPackage(rec.manifest, 'authored')`,
    * `packages/services/service-package/src/index.ts`). A host composed with
    * the rows a previous host persisted IS that process after a restart; a host
    * composed with none is a restart that found `sys_packages` empty.
    */
   hydrate?: readonly { id: string; [key: string]: unknown }[];
 }) {
-  const registryCalls: Array<{ manifest: any; settings: any }> = [];
+  const registryCalls: Array<{ manifest: any; source: string; settings: any }> = [];
   const installed = new Map<string, any>();
   const registry = {
-    installPackage: (manifest: any, settings?: any) => {
-      registryCalls.push({ manifest, settings });
-      const pkg = { manifest, status: 'installed', enabled: true };
+    installPackage: (manifest: any, source: string, settings?: any) => {
+      registryCalls.push({ manifest, source, settings });
+      const pkg = { manifest, source, status: 'installed', enabled: true };
       installed.set(manifest.id, pkg);
       return pkg;
     },
@@ -78,7 +78,7 @@ function makeImpl(overrides?: {
   };
   const engine = { registry, find: overrides?.find ?? (async () => []) };
   // Seeded through the registry's own verb, exactly as the boot hydration does.
-  for (const manifest of overrides?.hydrate ?? []) registry.installPackage(manifest);
+  for (const manifest of overrides?.hydrate ?? []) registry.installPackage(manifest, 'authored');
   registryCalls.length = 0; // hydration is the fixture, not an observation
 
   const publish = vi.fn(overrides?.publish ?? (async () => ({ success: true })));
@@ -95,7 +95,7 @@ describe('installPackage — durable persistence (#2532)', () => {
   it('persists a VERSIONLESS manifest by defaulting version (the vanish-on-restart bug)', async () => {
     const { impl, registryCalls, publish } = makeImpl();
     const res: any = await (impl as any).installPackage({
-      manifest: { id: 'com.example.orders', name: '订单中心' },
+      manifest: { id: 'com.example.orders', name: '订单中心', type: 'app' },
     });
 
     // In-memory half.
@@ -111,7 +111,7 @@ describe('installPackage — durable persistence (#2532)', () => {
 
   it('keeps an explicit version untouched', async () => {
     const { impl, publish } = makeImpl();
-    await (impl as any).installPackage({ manifest: { id: 'com.example.v', version: '2.3.4' } });
+    await (impl as any).installPackage({ manifest: { id: 'com.example.v', name: 'V', type: 'app', version: '2.3.4' } });
     expect((publish.mock.calls[0][0] as any).manifest.version).toBe('2.3.4');
   });
 
@@ -208,7 +208,7 @@ describe("service-ABSENT host — the degraded path (#17676 ruling A' items 2/3)
       const { impl, registryCalls, publish, registry } = makeImpl({ packageService: false });
 
       const res: any = await (impl as any).installPackage({
-        manifest: { id: 'com.example.leave', name: '请假' },
+        manifest: { id: 'com.example.leave', name: '请假', type: 'app' },
       });
 
       // The door still answers 201 — which is exactly why the card calls the
@@ -282,7 +282,7 @@ describe("the restart split this card reported (#17676 ruling A' items 3/5)", ()
       // ── process 1 ─────────────────────────────────────────────────────────
       const before = makeImpl({ packageService: false, publish: sysPackages.publish });
       await (before.impl as any).installPackage({
-        manifest: { id: 'com.example.leave', name: '请假' },
+        manifest: { id: 'com.example.leave', name: '请假', type: 'app' },
       });
       expect(before.registry.getPackage('com.example.leave')).toBeTruthy();
       expect([...sysPackages.rows.keys()]).toEqual([]);
@@ -310,7 +310,7 @@ describe("the restart split this card reported (#17676 ruling A' items 3/5)", ()
 
     const before = makeImpl({ publish: sysPackages.publish });
     await (before.impl as any).installPackage({
-      manifest: { id: 'com.example.leave', name: '请假' },
+      manifest: { id: 'com.example.leave', name: '请假', type: 'app' },
     });
     // The durable half ran, so the restart has something to replay.
     expect([...sysPackages.rows.keys()]).toEqual(['com.example.leave']);

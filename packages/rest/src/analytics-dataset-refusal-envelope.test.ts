@@ -268,7 +268,8 @@ describe('[#5367] a dataset refusal answers 400 DATASET_INVALID from its own env
    *
    * The route replaces every parse failure's `message` with a generic
    * "Invalid dataset definition." and puts the real one in `detail`, capped at
-   * 1000 characters (`rest-server.ts`). The prescription's zod-wrapped message
+   * 1000 characters (`analytics-routes.ts` since #23050 slice 5,
+   * `rest-server.ts` before). The prescription's zod-wrapped message
    * is 1076 chars for `array_agg` and 1304 for `string_agg`, so the two clauses
    * an author must act on — "was removed" (~index 192) and the imperative
    * "Delete the aggregation" (690 / 918) — arrive, and the closing

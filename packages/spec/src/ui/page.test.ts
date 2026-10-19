@@ -184,7 +184,6 @@ describe('PageSchema', () => {
         },
         {
           name: 'main',
-          width: 'large',
           components: [
             { type: 'related.list', properties: { objectName: 'contact' } },
           ],
@@ -344,21 +343,22 @@ describe('PageSchema', () => {
     expect(issue.message).not.toContain('assignedProfiles');
   });
 
-  it('should accept page with custom template', () => {
+  it('should accept page with a registered template', () => {
     const page = PageSchema.parse({
       name: 'custom_layout_page',
       label: 'Custom Layout Page',
-      template: 'three-column-layout',
+      template: 'three-column',
       regions: [],
     });
 
-    expect(page.template).toBe('three-column-layout');
+    expect(page.template).toBe('three-column');
   });
 
-  it('should accept default page', () => {
+  it('should accept a default record page bound to an object', () => {
     const page = PageSchema.parse({
       name: 'default_page',
       label: 'Default Page',
+      object: 'account',
       isDefault: true,
       regions: [],
     });
@@ -373,7 +373,7 @@ describe('PageSchema', () => {
       regions: [
         { name: 'header', components: [] },
         { name: 'sidebar', width: 'small', components: [] },
-        { name: 'main', width: 'large', components: [] },
+        { name: 'main', components: [] },
         { name: 'footer', components: [] },
       ],
     });
@@ -1199,27 +1199,29 @@ describe('PageSchema - no cross-field requirements', () => {
   });
 });
 
-describe('ADR-0089 — visibleWhen unification (page component)', () => {
-  it('normalizes a deprecated `visibility` alias to `visibleWhen`', () => {
-    const parsed = PageComponentSchema.parse({
-      type: 'element:text',
-      visibility: "page.selectedId != ''",
-    });
-    expect(parsed.visibleWhen).toBeDefined();
-    expect((parsed as Record<string, unknown>).visibility).toBeUndefined();
+// #23543 F4 — `visibility` retired at 18: a tombstone, the fold gone with it.
+describe('ADR-0089 — page component `visibility` is retired (#23543 F4)', () => {
+  const PRESCRIPTION =
+    /`page\.components\[\]\.visibility` was removed in @objectstack\/spec 18.*Use `visibleWhen`\. Rename the key/s;
+
+  it('refuses `visibility` at the key, naming `visibleWhen` — not a bare unrecognized-key report', () => {
+    const res = PageComponentSchema.safeParse({ type: 'element:text', visibility: "page.selectedId != ''" });
+    expect(res.success).toBe(false);
+    expect(res.error!.issues.map((i) => i.path.join('.'))).toEqual(['visibility']);
+    expect(res.error!.issues[0]!.code).not.toBe('unrecognized_keys');
+    expect(res.error!.issues[0]!.message).toMatch(PRESCRIPTION);
   });
 
-  it('keeps the canonical `visibleWhen` when both are present (canonical wins)', () => {
-    const parsed = PageComponentSchema.parse({
-      type: 'element:text',
-      visibleWhen: "page.a == 1",
-      visibility: "page.b == 2",
-    });
-    const src = typeof parsed.visibleWhen === 'string'
-      ? parsed.visibleWhen
-      : (parsed.visibleWhen as { source?: string }).source;
-    expect(src).toBe('page.a == 1');
-    expect((parsed as Record<string, unknown>).visibility).toBeUndefined();
+  it('refuses it beside `visibleWhen` too — no canonical-wins fold remains', () => {
+    const res = PageComponentSchema.safeParse({ type: 'element:text', visibleWhen: 'page.a == 1', visibility: 'page.b == 2' });
+    expect(res.success).toBe(false);
+    expect(res.error!.issues[0]!.message).toContain('delete `visibility`');
+  });
+
+  it('CONTROL — the canonical `visibleWhen` parses, and the output carries no `visibility`', () => {
+    const parsed = PageComponentSchema.parse({ type: 'element:text', visibleWhen: "page.selectedId != ''" });
+    expect(parsed.visibleWhen).toBeDefined();
+    expect(parsed).not.toHaveProperty('visibility');
   });
 });
 
@@ -1238,10 +1240,6 @@ describe('ADR-0089 D3a — strict page component schema (loud mis-layered keys)'
     if (!res.success) {
       expect(res.error.issues[0].message).toContain('visibleWhen');
     }
-  });
-
-  it('the deprecated `visibility` alias is still accepted under strict (declared key)', () => {
-    expect(() => PageComponentSchema.parse({ type: 'element:text', visibility: "page.a == 1" })).not.toThrow();
   });
 
   it('rejects a stale `visibleOn` key on a page component (that is the view-form alias, not a page one)', () => {

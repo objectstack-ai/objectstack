@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 50 — whole-package import: the walk imports every module of this package's src tree so the strictObject registry is complete, and its floor is vitest's transform of the whole package; slowest CI reading 34.9 s (hourly run 38651452634) x 1.25, rounded up
 
 /**
  * #5013 — repo-wide alias-table integrity for every `strictObject(` authoring

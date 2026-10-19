@@ -30,7 +30,7 @@ export const companySettingsManifest: SettingsManifest = {
     { type: 'group', id: 'identity', label: 'Identity', required: false },
     {
       type: 'text', key: 'legal_name', label: 'Legal name', required: false,
-      description: 'Registered legal name of the organization (may differ from the workspace name).',
+      description: 'Registered legal name of the organization (may differ from the organization name set under Branding).',
       maxLength: 200,
     },
     {

@@ -390,8 +390,8 @@ describe('DatabaseLoader', () => {
     });
   });
 
-  describe('multi-tenant isolation', () => {
-    it('should filter by organizationId when configured (environmentId accepted but ignored — ADR-0008 §0)', async () => {
+  describe('organization scope (ADR-0131 D6/D7)', () => {
+    it('accepts organizationId and environmentId for back-compat and scopes nothing by either', async () => {
       const tenantLoader = new DatabaseLoader({
         driver: mockDriver,
         organizationId: 'org-1',
@@ -400,28 +400,20 @@ describe('DatabaseLoader', () => {
 
       await tenantLoader.save('object', 'account', { name: 'account' });
 
-      // The create call should include organization_id but NOT environment_id
-      // (environment_id was removed from the metadata layer in the ADR-0008 §0
-      // branch/project-removal amendment).
-      expect(mockDriver.create).toHaveBeenCalledWith(
-        'sys_metadata',
-        expect.objectContaining({ organization_id: 'org-1' })
-      );
-      expect(mockDriver.create).not.toHaveBeenCalledWith(
-        'sys_metadata',
-        expect.objectContaining({ environment_id: expect.anything() })
-      );
+      // The family declares no organization column (ADR-0131 D7) and the
+      // metadata layer lost environment_id (ADR-0008 §0): the create names
+      // neither.
+      for (const [table, row] of (mockDriver.create as any).mock.calls) {
+        expect(row, String(table)).not.toHaveProperty('organization_id');
+        expect(row, String(table)).not.toHaveProperty('environment_id');
+      }
+      expect(mockDriver.create).toHaveBeenCalledWith('sys_metadata', expect.anything());
 
-      // The find calls should filter by organization_id (no environment_id).
       await tenantLoader.load('object', 'account');
-      expect(mockDriver.findOne).toHaveBeenCalledWith(
-        'sys_metadata',
-        expect.objectContaining({
-          where: expect.objectContaining({ organization_id: 'org-1' }),
-        })
-      );
       const findOneCalls = (mockDriver.findOne as any).mock.calls;
+      expect(findOneCalls.length).toBeGreaterThan(0);
       for (const [, opts] of findOneCalls) {
+        expect((opts?.where ?? {})).not.toHaveProperty('organization_id');
         expect((opts?.where ?? {})).not.toHaveProperty('environment_id');
       }
     });

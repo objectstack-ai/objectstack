@@ -859,9 +859,12 @@ export function gateCouldNotRun(output, exitCode, fromDir, gate = null) {
   return null;
 }
 
+// `--silent`, never `-s`: a global pnpm 11+/12 `@pnpm/exe` frontend parses the argv
+// before handing off to the pinned pnpm and rejects `-s` with exit 2 — every artifact
+// would read as stale and every commit would be refused.
 function runCheck(script, cwd) {
   try {
-    execSync(`pnpm -s ${script}`, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    execSync(`pnpm --silent ${script}`, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     return { ok: true, output: '', code: 0 };
   } catch (err) {
     return {
@@ -1396,7 +1399,7 @@ function fixtureSelfTest() {
   /**
    * The pnpm the fixture's stub gate runs under, pinned to the repository's own.
    *
-   * `runCheck` spawns every gate with `pnpm -s`, and CI reaches pnpm through
+   * `runCheck` spawns every gate with `pnpm --silent`, and CI reaches pnpm through
    * Corepack (`.github/actions/setup-pnpm`). Corepack resolves the version from
    * the project it is invoked IN, so a fixture carrying no `packageManager` field
    * does not inherit this repo's pin and does not get "whatever the machine has"
@@ -1405,8 +1408,10 @@ function fixtureSelfTest() {
    * published that morning: the day `latest` moved to a major whose CLI rejects
    * `-s`, the "clean" stub exited 2 without ever running, and every case that
    * reads the stub's own exit code went red on a tree nobody had touched. It is
-   * the FIXTURE that was unpinned, never production — the real hook runs `pnpm -s`
-   * in this repository, which is pinned.
+   * the FIXTURE that was unpinned, never production — the real hook runs in this
+   * repository, which is pinned. A pin does not reach the argv parser of a global
+   * pnpm 11+ `@pnpm/exe` frontend, though, which is why the spawn is spelled
+   * `--silent` rather than `-s`.
    *
    * Read off the ROOT manifest rather than written as a literal, so the fixture
    * cannot drift from the pnpm this repo pins. The case below asserts both halves,
@@ -1508,7 +1513,7 @@ function fixtureSelfTest() {
     const merge = runHook('stale');
 
     // The fixture's OWN prerequisite, asserted before any verdict is read out of a
-    // gate's exit code: every case below spawns `pnpm -s` inside this directory, so
+    // gate's exit code: every case below spawns `pnpm --silent` inside this directory, so
     // an unpinned fixture grades the registry's `latest` pnpm instead of the one
     // this repository pins, and the failure lands on cases that have nothing to do
     // with pnpm. ⛔ Not `=== rootPackageManager` on its own: were the root manifest

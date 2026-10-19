@@ -266,7 +266,7 @@ describe('ADR-0130 D1 — the relaxation does not widen the same-id reinstall ex
     manifest: { id: string; namespace: string; objects?: Array<{ name: string }> },
     scope?: { packageIds: string[] },
   ) => {
-    registry.installPackage(manifest as never, undefined, scope);
+    registry.installPackage(manifest as never, 'code', undefined, scope);
     for (const obj of manifest.objects ?? []) {
       registry.registerObject(obj as never, manifest.id, manifest.namespace, 'own');
     }
@@ -293,7 +293,7 @@ describe('ADR-0130 D1 — the relaxation does not widen the same-id reinstall ex
 
     let caught: Envelope | undefined;
     try {
-      registry.installPackage(crmBillingColliding() as never, undefined, scope);
+      registry.installPackage(crmBillingColliding() as never, 'code', undefined, scope);
     } catch (e) { caught = e as Envelope; }
 
     expect(caught?.code).toBe('DUPLICATE_ARTIFACT_OBJECT_NAME');
@@ -306,9 +306,9 @@ describe('ADR-0130 D1 — the relaxation does not widen the same-id reinstall ex
     // id, so same package, so a reload — including a reload arriving from a
     // different artifact, which is what a version upgrade is.
     install(crmCore(), scopeOf('com.acme.crm'));
-    expect(() => registry.installPackage(crmCore() as never, undefined, scopeOf('com.acme.crm'))).not.toThrow();
-    expect(() => registry.installPackage(crmCore() as never)).not.toThrow();
-    expect(() => registry.installPackage(crmCore() as never, undefined, scopeOf('com.acme.crm', 'com.acme.crm.billing')))
+    expect(() => registry.installPackage(crmCore() as never, 'code', undefined, scopeOf('com.acme.crm'))).not.toThrow();
+    expect(() => registry.installPackage(crmCore() as never, 'code')).not.toThrow();
+    expect(() => registry.installPackage(crmCore() as never, 'code', undefined, scopeOf('com.acme.crm', 'com.acme.crm.billing')))
       .not.toThrow();
   });
 
@@ -323,7 +323,7 @@ describe('ADR-0130 D1 — the relaxation does not widen the same-id reinstall ex
 
     let caught: Envelope | undefined;
     try {
-      registry.installPackage(stranger as never, undefined, scopeOf('com.other.suite'));
+      registry.installPackage(stranger as never, 'code', undefined, scopeOf('com.other.suite'));
     } catch (e) { caught = e as Envelope; }
 
     expect(caught).toBeUndefined();
@@ -340,12 +340,12 @@ describe('ADR-0130 D1 — the relaxation does not widen the same-id reinstall ex
     warnReg.logLevel = 'silent';
     const scope = scopeOf('com.acme.crm', 'com.acme.crm.billing');
     const base = crmCore();
-    warnReg.installPackage(base as never, undefined, scope);
+    warnReg.installPackage(base as never, 'code', undefined, scope);
     for (const obj of base.objects) warnReg.registerObject(obj as never, base.id, base.namespace, 'own');
 
     let caught: Envelope | undefined;
     try {
-      warnReg.installPackage(crmBillingColliding() as never, undefined, scope);
+      warnReg.installPackage(crmBillingColliding() as never, 'code', undefined, scope);
     } catch (e) { caught = e as Envelope; }
 
     expect(caught?.code).toBe('DUPLICATE_ARTIFACT_OBJECT_NAME');

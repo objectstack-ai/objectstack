@@ -103,9 +103,11 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); vi.restoreAllMo
 
 /**
  * Boot the real plugin. `posture` is the `tenancy` service's posture in force;
- * `activeOrg` what the session's `activeOrganizationId` says (absent: none).
+ * `activeOrg` what the session's `activeOrganizationId` says (absent: none);
+ * `topLevelOrg` an `activeOrganizationId` beside `user` and `session` instead,
+ * a shape `AuthSessionApi` does not declare.
  */
-async function boot(opts: { posture: 'single' | 'isolated'; activeOrg?: string }) {
+async function boot(opts: { posture: 'single' | 'isolated'; activeOrg?: string; topLevelOrg?: string }) {
     const routes = new Map<string, Handler>();
     const rawApp = {
         get: (p: string, h: Handler) => routes.set(`GET ${p}`, h),
@@ -135,6 +137,7 @@ async function boot(opts: { posture: 'single' | 'isolated'; activeOrg?: string }
                 getSession: async () => ({
                     user: { id: INSTALLER_USER_ID },
                     session: opts.activeOrg ? { activeOrganizationId: opts.activeOrg } : {},
+                    ...(opts.topLevelOrg ? { activeOrganizationId: opts.topLevelOrg } : {}),
                 }),
             },
         },
@@ -209,6 +212,22 @@ describe('walled, no active organization — refused at every sample-data door, 
         expect(res.payload.error.message).toContain('this session has no active organization');
         expect(m.reads.filter((r) => r.object === 'noorg_x')).toEqual([]);
         expect(ledgerEntry()?.sampleDataPurged).toBeUndefined();
+    });
+});
+
+describe('walled, an `activeOrganizationId` only at the top level — not read', () => {
+    it('reseed: 403 PERMISSION_DENIED as for no active organization, and no seed run', async () => {
+        // [#24222] `resolveActiveOrgId` reads `session.activeOrganizationId`, where
+        // `AuthSessionApi` declares it. The top-level operand it dropped tolerated
+        // a shape no in-process producer answers (better-auth: `{ user, session }`).
+        const m = await boot({ posture: 'isolated', topLevelOrg: 'org_b' });
+        await m.install();
+        const res = await m.reseed();
+
+        expect(res.status).toBe(403);
+        expect(res.payload.error.code).toBe('PERMISSION_DENIED');
+        expect(res.payload.error.message).toContain('this session has no active organization');
+        expect(loadCalls).toHaveLength(0);
     });
 });
 

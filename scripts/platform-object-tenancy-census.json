@@ -25,12 +25,12 @@
   "population": "every object registered by a tracked packages/**/*.object.ts module whose name carries a platform prefix (sys_ / cloud_ / ai_). The cloud repository's own cloud_ objects are not in this tree and so not in this census.",
   "totals": {
     "registered": 83,
-    "inReach": 48,
-    "outOfReach": 35
+    "inReach": 44,
+    "outOfReach": 39
   },
   "reasonTotals": {
     "managedBy: 'better-auth'": 25,
-    "systemFields.tenant: false": 10,
+    "systemFields.tenant: false": 14,
     "tenancy.enabled: false": 2
   },
   "unexplained": [],
@@ -299,9 +299,11 @@
     {
       "name": "sys_metadata",
       "file": "packages/metadata-core/src/objects/sys-metadata.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_metadata_activation",
@@ -315,23 +317,29 @@
     {
       "name": "sys_metadata_audit",
       "file": "packages/metadata-core/src/objects/sys-metadata-audit.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_metadata_commit",
       "file": "packages/metadata-core/src/objects/sys-metadata-commit.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_metadata_history",
       "file": "packages/metadata-core/src/objects/sys-metadata-history.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_migration",

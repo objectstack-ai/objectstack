@@ -51,6 +51,27 @@
 // - `⑦ the cold start stays outside every clocked window` — pins WHERE the
 //   first scenario's one-time cost is paid (next section).
 //
+// ## [#23181] Why every case reads ONE registration and ONE sign-in
+//
+// Every case here judges the result of a `register()`, a `login()`, or both,
+// and none of them writes: no case changes the server's state or the returned
+// values, and the reads they add (`principalFor`, `auth.me()`) leave the
+// session as it was. So they read one arrangement (`theRegistration()`,
+// `theSignIn()`), built once per file, instead of one fresh arrangement each.
+// Measured at `252775d1d` (4 vCPU, a box shared with sibling agents, the file
+// run alone): 13 of the 16 cases built their own, paying 27
+// production-parameter scrypt derivations between them (2.7 s), and the file's
+// clocked wall was 4.4-4.9 s over five runs. With the arrangement shared it is
+// 0.44-0.46 s, every assertion unchanged.
+//
+// ⛔ It is built LAZILY, inside the first case that asks for it, and never at
+// module scope. That sign-up and sign-in are the behaviour these cases judge,
+// so they belong inside a clock. Module scope is for the loading below, and
+// moving the arrangement there would take behaviour out of every clock.
+//
+// ⛔ A case that writes, to the server or to a shared value, builds its own
+// `scenario()` instead of reading this one.
+//
 // ## [#20242] Why one throwaway scenario runs at MODULE SCOPE
 //
 // The first scenario in a worker pays a one-time cost no later one sees.
@@ -86,21 +107,19 @@
 // them all, without a list of specifiers that could drift.
 //
 // ⛔ It shares nothing a case asserts on. Its engine and manager are its own
-// and are closed before any case starts. Every case still builds a fresh
-// engine, a fresh `AuthManager` and a fresh first sign-up (`scenario`). What
-// it leaves warm is process-level: the module registry, sql.js's compiled
-// WASM and the JIT. The first case used to leave exactly that to every later
-// case.
+// and are closed before any case starts. The cases read their own shared
+// arrangement (previous section), a separate engine, `AuthManager` and first
+// sign-up (`scenario`). What the warm-up leaves warm is process-level: the
+// module registry, sql.js's compiled WASM and the JIT. The first case used to
+// leave exactly that to every later case.
 //
 // ⛔ Do not move it into a hook, and do not answer a recurrence by raising a
-// timeout. A case's window now holds only its own work: a fresh-engine sync
-// and real scrypt sign-ups and logins. That is 222-574 ms idle, and 525-1708
-// ms under eight CPU-bound busy loops on this box. Twenty-four busy loops
-// reproduced CI's `Test timed out in 5000ms` on the cold case (2 runs of 2),
-// and there the heaviest cases (two sign-ups plus a login) took 3.7-4.5 s.
-// That residual is behaviour, which is what a clock is for.
+// timeout. A case's window holds only its own work. The first case to read
+// the shared arrangement pays one fresh-engine sync, one real scrypt sign-up
+// and one sign-in; every other case pays only its reads. That residual is
+// behaviour, which is what a clock is for.
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ObjectQL } from '@objectstack/objectql';
@@ -295,13 +314,32 @@ const registered = async () => {
 };
 
 /** …and a SECOND client that signed that user back in. */
-const signedIn = async () => {
-  const base = await registered();
+const signedIn = async (base: Awaited<ReturnType<typeof registered>>) => {
   const client = base.mkClient();
   const res = await client.auth.login({ email: base.email, password: PASSWORD });
   const wire = base.lastWire();
   return { ...base, client, res, wireRes: wire, wireBody: (await wire.json()) as RawKeys };
 };
+
+/**
+ * [#23181] The ONE registration and the ONE sign-in of that user that every
+ * case reads (header: "Why every case reads ONE registration and ONE
+ * sign-in"). Built by the first case that asks, inside that case's clock, and
+ * then shared.
+ */
+let arrangement:
+  | Promise<{
+      reg: Awaited<ReturnType<typeof registered>>;
+      log: Awaited<ReturnType<typeof signedIn>>;
+    }>
+  | undefined;
+const shared = () =>
+  (arrangement ??= (async () => {
+    const reg = await registered();
+    return { reg, log: await signedIn(reg) };
+  })());
+const theRegistration = async () => (await shared()).reg;
+const theSignIn = async () => (await shared()).log;
 
 /** WHO a credential resolves to, asked through better-auth's own API. */
 const principalFor = async (manager: AuthManager, token: string | undefined) => {
@@ -314,7 +352,7 @@ const principalFor = async (manager: AuthManager, token: string | undefined) => 
   return session?.user?.id ?? null;
 };
 
-/** Close every engine a scenario opened: after each case, and after the warm-up. */
+/** Close every engine a scenario opened: after the warm-up, and after the file. */
 const closeEngines = async (): Promise<void> => {
   while (engines.length) {
     const engine = engines.pop();
@@ -328,12 +366,13 @@ const closeEngines = async (): Promise<void> => {
 await registered();
 await closeEngines();
 
-afterEach(closeEngines);
+// The shared arrangement's engine serves every case, so it closes once, after the last.
+afterAll(closeEngines);
 
 describe('[#17234] auth.login / auth.register deliver the SessionResponse envelope they declare', () => {
   describe('① the declared envelope is delivered', () => {
     it('register() parses as the declared envelope, with the payload under `data`', async () => {
-      const { res } = await registered();
+      const { res } = await theRegistration();
 
       // The decisive assertion: the DECLARATION judges the body. On the defect
       // the method returned `{ …raw, data }` with no `success` at all, so this
@@ -351,7 +390,7 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
     });
 
     it('login() parses as the declared envelope, with the payload under `data`', async () => {
-      const { res } = await signedIn();
+      const { res } = await theSignIn();
 
       const envelope = BaseResponseSchema.safeParse(res);
       expect(
@@ -384,13 +423,13 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
     const RESIDUE: string[] = [];
 
     it('register() parses as the full declared type', async () => {
-      const { res } = await registered();
+      const { res } = await theRegistration();
       const issues = SessionResponseSchema.safeParse(res).error?.issues ?? [];
       expect(issues.map((i) => i.path.join('.'))).toEqual(RESIDUE);
     });
 
     it('login() parses as the full declared type', async () => {
-      const { res } = await signedIn();
+      const { res } = await theSignIn();
       const issues = SessionResponseSchema.safeParse(res).error?.issues ?? [];
       expect(issues.map((i) => i.path.join('.'))).toEqual(RESIDUE);
     });
@@ -398,7 +437,7 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
 
   describe('③ the instrument can still fail — negative control', () => {
     it('the same parse reports `success` again once it is taken back out', async () => {
-      const { res } = await signedIn();
+      const { res } = await theSignIn();
 
       // Not a fabricated body: the value the method REALLY returned, with the
       // one member this card added removed again. So a green ① cannot be a
@@ -412,7 +451,7 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
     });
 
     it('and reports `data.session` again once the fix is taken back out — a fabricated body without a session still fails', async () => {
-      const { res } = await signedIn();
+      const { res } = await theSignIn();
 
       // The other half of criterion 3(a): the SAME instrument, on a body this
       // test fabricates rather than one the server returned, with `session`
@@ -430,7 +469,7 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
 
   describe('④ the credential survives the lift byte-identical', () => {
     it('login() keeps the body token at `data.token` and still arms `client.token`', async () => {
-      const { manager, client, res, wireBody } = await signedIn();
+      const { manager, client, res, wireBody } = await theSignIn();
 
       // Byte-identity against the WIRE, on the same call — not against a
       // remembered constant. Routing these methods through the shared lift is
@@ -452,14 +491,14 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
     });
 
     it('register() keeps the body token at `data.token` and still arms `client.token`', async () => {
-      const { client, res, wireBody } = await registered();
+      const { client, res, wireBody } = await theRegistration();
       expect(typeof wireBody.token).toBe('string');
       expect(res.data.token).toBe(wireBody.token);
       expect(storedToken(client)).toBe(wireBody.token);
     });
 
     it('the token at `data.token` is the UNSIGNED spelling the body carries', async () => {
-      const { res, wireRes, wireBody } = await signedIn();
+      const { res, wireRes, wireBody } = await theSignIn();
 
       // The two spellings of one session credential, measured on ONE response:
       // the body's `token` is UNSIGNED, and `bearer()` publishes the SIGNED
@@ -478,17 +517,17 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
 
   describe('⑤ `data.session` is now obtainable on these routes — #17234 closes', () => {
     it('both routes now carry a session in the body, alongside the pre-existing keys', async () => {
-      const reg = await registered();
+      const reg = await theRegistration();
       expect(Object.keys(reg.wireBody as object)).toEqual(['token', 'user', 'session']);
       expect(reg.res.data.session).toBeTruthy();
 
-      const log = await signedIn();
+      const log = await theSignIn();
       expect(Object.keys(log.wireBody as object)).toEqual(['redirect', 'token', 'user', 'session']);
       expect(log.res.data.session).toBeTruthy();
     });
 
     it('the session parses as the declared SessionSchema and names the right user', async () => {
-      const reg = await registered();
+      const reg = await theRegistration();
       const regSession = SessionSchema.safeParse(reg.res.data.session);
       expect(
         regSession.success,
@@ -496,7 +535,7 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
       ).toBe(true);
       expect(reg.res.data.session?.userId).toBe(reg.res.data.user?.id);
 
-      const log = await signedIn();
+      const log = await theSignIn();
       const logSession = SessionSchema.safeParse(log.res.data.session);
       expect(
         logSession.success,
@@ -506,7 +545,7 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
     });
 
     it('is the SAME row a following /get-session reads — a lookup, not an invention', async () => {
-      const { client, res } = await signedIn();
+      const { client, res } = await theSignIn();
 
       // The decisive proof that this is a READ: a second, independent call
       // through better-auth's own `/get-session` route names the identical
@@ -519,7 +558,7 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
     });
 
     it('the session token is the SAME unsigned credential the body already carried at `data.token`', async () => {
-      const { res } = await signedIn();
+      const { res } = await theSignIn();
       // `session.token` is the row's own token column — the same unsigned
       // string `data.token` already held before this card, not a second
       // credential this fix introduced.
@@ -539,7 +578,7 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
 
   describe('⑥ the raw keys survive the lift', () => {
     it('keeps `.user` / `.token` — and login keeps `.redirect` — alongside `data`', async () => {
-      const { res } = await signedIn();
+      const { res } = await theSignIn();
       const raw = res as unknown as RawKeys;
       // Callers were pushed onto the raw keys by the very misdeclaration this
       // card fixes. Buying the declared shape by breaking them would trade one

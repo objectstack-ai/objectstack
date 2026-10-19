@@ -3,29 +3,26 @@
 /**
  * [ADR-0131 D6] Every metadata read is environment → code.
  *
- *  1. A legacy organization-scoped row — one per formerly org-overridable
- *     (tier-A) type, stored before the per-organization overlay axis retired —
- *     is invisible to the item, list, layered, history, diff, audit, drafts,
- *     commits, lock and ETag reads, whatever organization a caller still
- *     names: the environment's row, or the code definition, is served.
- *     `overlayScope` is `'env'` or `null`, never `'org'`.
+ *  1. Whatever organization a caller still names, the item, list, layered,
+ *     audit, drafts, commits, lock and ETag reads of each formerly
+ *     org-overridable (tier-A) type serve the environment's rows:
+ *     `overlayScope` is `'env'`, never `'org'`. [ADR-0131 D6/D7] No stored row
+ *     carries an organization: the family declares no organization column,
+ *     and the runtime refuses to boot on a database still holding one.
  *  2. [Triage ruling Q1 → C] An environment overlay row of SEALED managed
  *     content — a managed action or hook, written through the
  *     `OS_METADATA_WRITABLE` hatch before the seal — is not served: the
  *     package's definition wins. `permission` keeps its own fork ruling, so a
  *     fork of a packaged permission set is still served (the control).
- *  3. The boot report names both populations, per type, with their remedies
- *     — the v18 migration ceremony for the legacy organization rows, and the
- *     two remedies for the sealed overlays. Nothing is deleted or rewritten.
- *  4. [Triage ruling Q3 A] The one read left that reaches a legacy
- *     organization's rows: the anonymous form doors' `view` list read
- *     (`legacyFormOrganizationId`), kept fail-closed until the ceremony. Any
- *     other type reads the environment alone, whoever passes the key.
+ *  3. The boot report names the sealed overlays, per type, with their two
+ *     remedies. Nothing is deleted or rewritten.
+ *  4. [ADR-0131 C7] The anonymous form doors' `view` read of the Default
+ *     Organization's layer (`legacyFormOrganizationId`) was deleted when the
+ *     v18 ceremony began carrying those withdrawals onto the environment. A
+ *     caller still passing the key reads the environment.
  *
- * Reverse verification (one-shot, recorded in the PR): restoring an
- * organization row to the served-row lookup (`findServedOverlayRow` with its
- * `organization_id` predicate removed) turns §1's item-read pin red; removing
- * the sealed arm from `declinesStoredRow` turns §2 red.
+ * Reverse verification (one-shot, recorded in the PR): removing the sealed arm
+ * from `declinesStoredRow` turns §2 red.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -132,11 +129,10 @@ function harness(seed: Record<string, Row[]>, artifacts: Artifact[] = []) {
     return { protocol, tables, finds };
 }
 
-const metaRow = (type: string, name: string, org: string | null, body: Row, over: Row = {}): Row => ({
-    id: `r_${type}_${name}_${org ?? 'env'}_${String(over.state ?? 'active')}`,
+const metaRow = (type: string, name: string, body: Row, over: Row = {}): Row => ({
+    id: `r_${type}_${name}_env_${String(over.state ?? 'active')}`,
     type,
     name,
-    organization_id: org,
     package_id: null,
     state: 'active',
     version: 1,
@@ -150,59 +146,37 @@ const asCaller = <R extends object>(request: R, caller: object) => ({ ...request
 
 afterEach(() => vi.restoreAllMocks());
 
-describe('§1 [ADR-0131 D6] a legacy organization row is invisible to every read, whatever organization the caller names', () => {
+describe('§1 [ADR-0131 D6] every read serves the environment\'s rows, whatever organization the caller names', () => {
     for (const type of TIER_A) {
         const seed = () => ({
-            sys_metadata: [
-                metaRow(type, 'shared', null, { label: 'env' }),
-                metaRow(type, 'shared', ORG, { label: 'org', _lock: 'full' }),
-                metaRow(type, 'org_only', ORG, { label: 'org only' }),
-                metaRow(type, 'org_draft', ORG, { label: 'org draft' }, { state: 'draft' }),
-            ],
-            sys_metadata_history: [
-                {
-                    id: 'h_org', type, name: 'org_only', organization_id: ORG, version: 1, event_seq: 1,
-                    operation_type: 'put', metadata: JSON.stringify({ name: 'org_only' }), checksum: 'x',
-                    recorded_at: '2026-01-01T00:00:00.000Z',
-                },
-            ],
+            sys_metadata: [metaRow(type, 'shared', { label: 'env' })],
             sys_metadata_audit: [
-                { id: 'a_env', type, name: 'shared', organization_id: null, operation: 'save', outcome: 'allowed', code: 'ok' },
-                { id: 'a_org', type, name: 'shared', organization_id: ORG, operation: 'save', outcome: 'allowed', code: 'ok' },
+                { id: 'a_env', type, name: 'shared', operation: 'save', outcome: 'allowed', code: 'ok' },
             ],
             sys_metadata_commit: [
-                { id: 'c_env', package_id: PKG, organization_id: null, operation: 'apply', items: '[]', item_count: 0 },
-                { id: 'c_org', package_id: PKG, organization_id: ORG, operation: 'apply', items: '[]', item_count: 0 },
+                { id: 'c_env', package_id: PKG, operation: 'apply', items: '[]', item_count: 0 },
             ],
         });
 
         for (const caller of CALLERS) {
             const who = 'organizationId' in caller ? `a caller naming ${ORG}` : 'a caller naming none';
-            it(`${type} · ${who}: item, list, layered, history, diff, audit, drafts, commits, lock and ETag`, async () => {
+            it(`${type} · ${who}: item, list, layered, audit, drafts, commits, lock and ETag`, async () => {
                 const { protocol } = harness(seed());
 
-                // item: the environment's row, its lock; the org-only name answers nothing
+                // item: the environment's row, its lock
                 const shared = await protocol.getMetaItem(asCaller({ type, name: 'shared' }, caller));
                 expect(shared.item?.label).toBe('env');
                 expect(shared.lock).toBe('none');
-                expect((await protocol.getMetaItem(asCaller({ type, name: 'org_only' }, caller))).item).toBeUndefined();
 
                 // list
                 const list = await protocol.getMetaItems(asCaller({ type }, caller));
                 const listed = (list.items as Row[]).map((i) => `${String(i.name)}=${String(i.label)}`);
                 expect(listed).toEqual(['shared=env']);
 
-                // layered: overlayScope is 'env' or null, never 'org'
+                // layered: overlayScope is 'env', never 'org'
                 const layeredShared = await protocol.getMetaItemLayered(asCaller({ type, name: 'shared' }, caller));
                 expect({ label: layeredShared.overlay?.label, scope: layeredShared.overlayScope, lock: layeredShared.lock })
                     .toEqual({ label: 'env', scope: 'env', lock: 'none' });
-                const layeredOrgOnly = await protocol.getMetaItemLayered(asCaller({ type, name: 'org_only' }, caller));
-                expect([layeredOrgOnly.overlay, layeredOrgOnly.overlayScope]).toEqual([null, null]);
-
-                // history and diff: the legacy organization's change log is not read
-                expect((await protocol.historyMetaItem(asCaller({ type, name: 'org_only' }, caller))).events).toEqual([]);
-                const diff = await settle(protocol.diffMetaItem(asCaller({ type, name: 'org_only' }, caller)));
-                expect(JSON.stringify(diff)).not.toContain('org_only"}');
 
                 // audit
                 const audit = await protocol.auditMetaItem(asCaller({ type, name: 'shared' }, caller));
@@ -226,15 +200,6 @@ describe('§1 [ADR-0131 D6] a legacy organization row is invisible to every read
     }
 });
 
-/** A promise's value, or the error it rejected with. */
-async function settle<T>(p: Promise<T>): Promise<T | Error> {
-    try {
-        return await p;
-    } catch (e) {
-        return e as Error;
-    }
-}
-
 describe('§2 [triage ruling Q1 → C] an environment overlay of sealed managed content is not served: the package definition wins', () => {
     const packaged = (type: string, name: string): Artifact => ({
         type, name, body: { name, label: 'packaged', _packageId: PKG },
@@ -243,7 +208,7 @@ describe('§2 [triage ruling Q1 → C] an environment overlay of sealed managed 
     for (const type of ['action', 'hook'] as const) {
         it(`a managed ${type}: the item, list and layered reads serve the package's definition, not the hatch-written row`, async () => {
             const { protocol } = harness(
-                { sys_metadata: [metaRow(type, 'managed', null, { label: 'hatch-written' })] },
+                { sys_metadata: [metaRow(type, 'managed', { label: 'hatch-written' })] },
                 [packaged(type, 'managed')],
             );
             expect(protocol.declinesStoredRow(type, 'managed')).toBe(true);
@@ -259,7 +224,7 @@ describe('§2 [triage ruling Q1 → C] an environment overlay of sealed managed 
         });
 
         it(`control: an environment ${type} no managed package ships is served from its row`, async () => {
-            const { protocol } = harness({ sys_metadata: [metaRow(type, 'authored', null, { label: 'authored' })] });
+            const { protocol } = harness({ sys_metadata: [metaRow(type, 'authored', { label: 'authored' })] });
             expect(protocol.declinesStoredRow(type, 'authored')).toBe(false);
             expect((await protocol.getMetaItem({ type, name: 'authored' })).item?.label).toBe('authored');
         });
@@ -267,7 +232,7 @@ describe('§2 [triage ruling Q1 → C] an environment overlay of sealed managed 
 
     it('control: a regime-O type keeps its overlay of a packaged item (a view)', async () => {
         const { protocol } = harness(
-            { sys_metadata: [metaRow('view', 'managed', null, { label: 'overlay' })] },
+            { sys_metadata: [metaRow('view', 'managed', { label: 'overlay' })] },
             [packaged('view', 'managed')],
         );
         expect(protocol.declinesStoredRow('view', 'managed')).toBe(false);
@@ -276,14 +241,14 @@ describe('§2 [triage ruling Q1 → C] an environment overlay of sealed managed 
 
     it('control: a fork of a packaged permission set keeps its own ruling and is still served', async () => {
         const { protocol } = harness(
-            { sys_metadata: [metaRow('permission', 'managed', null, { label: 'fork', objects: {} })] },
+            { sys_metadata: [metaRow('permission', 'managed', { label: 'fork', objects: {} })] },
             [packaged('permission', 'managed')],
         );
         expect(protocol.declinesStoredRow('permission', 'managed')).toBe(false);
     });
 });
 
-describe('§3 the boot report names both populations, per type, with their remedies', () => {
+describe('§3 the boot report names the sealed overlays, per type, with their remedies', () => {
     async function boot(seed: Record<string, Row[]>, artifacts: Artifact[] = []) {
         const warns: string[] = [];
         vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => { warns.push(a.map(String).join(' ')); });
@@ -292,15 +257,13 @@ describe('§3 the boot report names both populations, per type, with their remed
         return { result, warns, finds };
     }
 
-    it('one line per population: the legacy organization rows (the ceremony), the sealed overlays (the two remedies)', async () => {
+    it('one line: the sealed overlays (the two remedies)', async () => {
         const { warns } = await boot(
             {
                 sys_metadata: [
-                    metaRow('view', 'org_grid', ORG, { label: 'org' }),
-                    metaRow('dashboard', 'org_board', ORG, { label: 'org' }),
-                    metaRow('action', 'managed', null, { label: 'hatch-written' }),
-                    metaRow('hook', 'managed', null, { label: 'hatch-written' }),
-                    metaRow('view', 'env_grid', null, { label: 'env' }),
+                    metaRow('action', 'managed', { label: 'hatch-written' }),
+                    metaRow('hook', 'managed', { label: 'hatch-written' }),
+                    metaRow('view', 'env_grid', { label: 'env' }),
                 ],
             },
             [
@@ -309,12 +272,7 @@ describe('§3 the boot report names both populations, per type, with their remed
             ],
         );
 
-        const legacy = warns.filter((w) => w.includes('[metadata_org_scoped_unserved]'));
-        expect(legacy).toHaveLength(1);
-        expect(legacy[0]).toContain('view×1 (org_grid@org_a)');
-        expect(legacy[0]).toContain('dashboard×1 (org_board@org_a)');
-        expect(legacy[0]).toContain('os migrate');
-        expect(legacy[0]).toContain('Nothing is deleted or rewritten');
+        expect(warns.filter((w) => w.includes('[metadata_org_scoped_unserved]'))).toEqual([]);
 
         const sealed = warns.filter((w) => w.includes('[metadata_sealed_overlay_unserved]'));
         expect(sealed).toHaveLength(1);
@@ -325,31 +283,8 @@ describe('§3 the boot report names both populations, per type, with their remed
         expect(sealed[0]).not.toContain('env_grid');
     });
 
-    it('it reads no ledger row and no row body: the three ledgers are counted, sys_metadata yields the four columns the line prints', async () => {
-        const LEDGERS = ['sys_metadata_commit', 'sys_metadata_history', 'sys_metadata_audit'];
-        const { warns, finds } = await boot({
-            sys_metadata: [metaRow('view', 'org_grid', ORG, { label: 'org' })],
-            sys_metadata_commit: [{ id: 'c1', organization_id: ORG, payload: 'body' }, { id: 'c2', organization_id: null }],
-            sys_metadata_history: [{ id: 'h1', organization_id: ORG, metadata: 'body' }],
-            sys_metadata_audit: [{ id: 'a1', organization_id: '' }],
-        });
-
-        const legacy = warns.filter((w) => w.includes('[metadata_org_scoped_unserved]'));
-        expect(legacy).toHaveLength(1);
-        expect(legacy[0]).toContain('view×1 (org_grid@org_a)');
-        expect(legacy[0]).toContain('sys_metadata_commit×1, sys_metadata_history×1');
-        expect(legacy[0]).not.toContain('sys_metadata_audit×');
-
-        // No ledger row is read at all…
-        expect(finds.filter((f) => LEDGERS.includes(f.object))).toEqual([]);
-        // …and the legacy sys_metadata read projects the printed columns, never `metadata`.
-        const legacyReads = finds.filter((f) => f.object === 'sys_metadata' && JSON.stringify(f.where ?? {}).includes('$ne'));
-        expect(legacyReads).toHaveLength(1);
-        expect(legacyReads[0].fields).toEqual(['type', 'name', 'organization_id', 'state']);
-    });
-
     it('silence on a store with neither population', async () => {
-        const { warns } = await boot({ sys_metadata: [metaRow('view', 'env_grid', null, { label: 'env' })] });
+        const { warns } = await boot({ sys_metadata: [metaRow('view', 'env_grid', { label: 'env' })] });
         expect(warns.filter((w) => w.includes('_unserved]'))).toEqual([]);
     });
 
@@ -358,8 +293,8 @@ describe('§3 the boot report names both populations, per type, with their remed
         vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => { warns.push(a.map(String).join(' ')); });
         const { protocol } = harness({
             sys_metadata: [
-                metaRow('datasource', 'host_ds', null, { label: 'stored' }),
-                metaRow('datasource', 'pkg_ds', null, { label: 'stored' }),
+                metaRow('datasource', 'host_ds', { label: 'stored' }),
+                metaRow('datasource', 'pkg_ds', { label: 'stored' }),
             ],
         });
         protocol.getServicesRegistry = () => new Map([['code-datasource-names', new Set(['host_ds'])]]);
@@ -377,29 +312,18 @@ describe('§3 the boot report names both populations, per type, with their remed
     });
 });
 
-describe('§4 [triage ruling Q3 A] the anonymous form doors\' legacy layer is the one read left that reaches a legacy organization', () => {
+describe('§4 [ADR-0131 C7] the anonymous form doors\' legacy organization read is deleted', () => {
     const seed = () => ({
         sys_metadata: [
-            metaRow('view', 'intake', null, { label: 'env intake' }),
-            metaRow('view', 'intake', ORG, { label: 'org intake' }),
-            metaRow('dashboard', 'board', ORG, { label: 'org board' }),
+            metaRow('view', 'intake', { label: 'env intake' }),
         ],
     });
 
-    it('a view list read with legacyFormOrganizationId prefers that organization\'s body', async () => {
-        const { protocol } = harness(seed());
-        const list = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: ORG });
-        expect((list.items as Row[]).map((i) => i.label)).toEqual(['org intake']);
-        // …and nothing else reads it: the same list without the key, and with the retired key.
-        for (const caller of CALLERS) {
-            const plain = await protocol.getMetaItems(asCaller({ type: 'view' }, caller));
-            expect((plain.items as Row[]).map((i) => i.label)).toEqual(['env intake']);
-        }
-    });
-
-    it('the key reaches no other type', async () => {
-        const { protocol } = harness(seed());
-        const list = await protocol.getMetaItems({ type: 'dashboard', legacyFormOrganizationId: ORG });
-        expect(list.items).toEqual([]);
-    });
+    for (const type of ['view', 'dashboard'] as const) {
+        it(`a ${type} list read passing the deleted legacyFormOrganizationId key reads the environment`, async () => {
+            const { protocol } = harness(seed());
+            const list = await protocol.getMetaItems({ type, legacyFormOrganizationId: ORG } as { type: string });
+            expect((list.items as Row[]).map((i) => i.label)).toEqual(type === 'view' ? ['env intake'] : []);
+        });
+    }
 });

@@ -69,14 +69,16 @@ describe('[#22739] an import matches a lookup cell only against a target whose d
   const rowsFor = (rels: readonly string[], tag: string) =>
     rels.flatMap((rel) => [{ name: `${tag}-${rel}-m`, [rel]: MARK(rel) }, { name: `${tag}-${rel}-x`, [rel]: `IMPX-NONE-${rel}` }]);
 
+  // [#24348] No `runAutomations: false`: the fixture binds no automation, and the import
+  // doors refuse that opt-out to every caller but the system principal.
   const doors = {
     sync: async (who: string, rows: object[]): Promise<Row[]> => {
-      const res = await stack.apiAs(who, 'POST', '/data/sox_source/import', { format: 'json', rows, runAutomations: false });
+      const res = await stack.apiAs(who, 'POST', '/data/sox_source/import', { format: 'json', rows });
       expect(res.status, await res.clone().text()).toBe(200);
       return ((await res.json()) as { results: Row[] }).results;
     },
     jobs: async (who: string, rows: object[]): Promise<Row[]> => {
-      const res = await stack.apiAs(who, 'POST', '/data/sox_source/import/jobs', { format: 'json', rows, runAutomations: false });
+      const res = await stack.apiAs(who, 'POST', '/data/sox_source/import/jobs', { format: 'json', rows });
       expect(res.status, await res.clone().text()).toBe(201);
       const { jobId } = (await res.json()) as { jobId: string };
       for (let i = 0; i < 200; i++) {

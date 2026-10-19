@@ -26,8 +26,8 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *  3. What outcome?                     → outcome + code
  *  4. Was an override involved?         → lock_overridden + lock_state
  *
- * Indexed on `(organization_id, occurred_at)` for the per-org timeline
- * query and `(type, name, occurred_at)` for the per-item history tab
+ * Indexed on `(occurred_at)` for the environment timeline query and
+ * `(type, name, occurred_at)` for the per-item history tab
  * Studio surfaces on the editor page.
  */
 export const SysMetadataAuditObject = ObjectSchema.create({
@@ -45,7 +45,8 @@ export const SysMetadataAuditObject = ObjectSchema.create({
     retention: { maxAge: '365d' },
     archive: { after: '365d', to: 'archive' },
   },
-  description: 'Append-only audit trail of metadata write decisions (ADR-0010).',
+  // ADR-0010 — the reference lives in the docblock above, not in the copy.
+  description: 'Append-only audit trail of metadata write decisions.',
 
   fields: {
     /** Primary Key (UUID) */
@@ -107,13 +108,6 @@ export const SysMetadataAuditObject = ObjectSchema.create({
       readonly: true,
       searchable: true,
       maxLength: 255,
-    }),
-
-    /** Organization for multi-tenant filtering. NULL for env-wide writes. */
-    organization_id: Field.lookup('sys_organization', {
-      label: 'Organization',
-      required: false,
-      readonly: true,
     }),
 
     /** Operation kind. */
@@ -222,8 +216,30 @@ export const SysMetadataAuditObject = ObjectSchema.create({
     }),
   },
 
+  // [ADR-0131 D6/D7, C7b] Tenant-less, like the overlays it records: the
+  // declared organization column is retired (ADR-0087 semantic entry
+  // 18.sys-metadata-audit-organization-column-retired), and `systemFields.tenant: false`
+  // keeps the engine from injecting one back. The v18 ceremony
+  // (`os migrate organization-ownership --apply`) drops the physical column.
+  systemFields: { tenant: false },
+  // [ADR-0131 D7, the #22107 precedent] With no organization column there is
+  // no tenant wall, and a walled deployment's `organization_admin` holds a
+  // `'*'` grant — so without an object-level gate the generic data door would
+  // serve every organization's rows of this table (the metadata-protection trail: actors, refused-write notes). D7 governs it by
+  // object permission: `studio.access`, platform-scoped (no tenant
+  // administrator holds it by role) and admitted by every door that serves
+  // this table's trail (`/meta/:type/:name/history`, `/audit` and `/diff` admit
+  // it beside `manage_metadata`; `/packages/:id/commits` admits it alone).
+  // `requiredPermissions` is an AND-gate, so it names the one capability all
+  // of those doors admit — and not `setup.access`, which organization admins
+  // DO hold (plugin-security's `PLATFORM_ADMIN_ONLY_CAPABILITIES` excludes it
+  // on purpose). [#23546] None of those doors admits `setup.access` either, so
+  // the data door and the trail doors refuse an organization admin alike.
+  // Platform code reads under the system context, which the gate does not stop.
+  requiredPermissions: ['studio.access'],
+
   indexes: [
-    { fields: ['organization_id', 'occurred_at'] },
+    { fields: ['occurred_at'] },
     { fields: ['type', 'name', 'occurred_at'] },
     { fields: ['actor', 'occurred_at'] },
     { fields: ['outcome'] },

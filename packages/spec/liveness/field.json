@@ -54,7 +54,49 @@
     },
     "options": {
       "status": "live",
-      "note": "select options {label,value,description,color,default} — renderers + validation. `description` joined 2026-08-31 (objectui#6153, inheriting the objectui#6140 ruling frame): objectui LookupField searches it on authored static options (LookupField.tsx:526) and recordToOption produces it for fetched options. `icon` is NOT an option key (withdrawn from the object.form options repeater under ADR-0049, #13671; pinned by packages/spec/src/data/field-rows-option-description.test.ts). Read points moved out of spec source (#23434), measured at objectui @d8ec8d6d4f011b11c8eb1e6dbd364ef206711391 and on objectui main with the same answer: objectui @d8ec8d6d4f01 packages/fields/src/index.tsx#SelectCellRenderer (its `renderOne` badge/dot branch reads `option?.label` and `option?.color` off a `SelectOptionMetadata[]`, never `option?.icon`); no field-option render path reads `icon`; the one `opt.icon` read in that tree is the config-panel `ConfigField` vocabulary (a `React.ReactNode` an authored option cannot reach)."
+      "note": "select options {label,value,description,color,default} — renderers + validation. `description` joined 2026-08-31 (objectui#6153, inheriting the objectui#6140 ruling frame): objectui LookupField searches it on authored static options (LookupField.tsx:526) and recordToOption produces it for fetched options. `icon` is NOT an option key (withdrawn from the object.form options repeater under ADR-0049, #13671; pinned by packages/spec/src/data/field-rows-option-description.test.ts). Read points moved out of spec source (#23434), measured at objectui @d8ec8d6d4f011b11c8eb1e6dbd364ef206711391 and on objectui main with the same answer: objectui @d8ec8d6d4f01 packages/fields/src/index.tsx#SelectCellRenderer (its `renderOne` badge/dot branch reads `option?.label` and `option?.color` off a `SelectOptionMetadata[]`, never `option?.icon`); no field-option render path reads `icon`; the one `opt.icon` read in that tree is the config-panel `ConfigField` vocabulary (a `React.ReactNode` an authored option cannot reach). No per-option `disabled` on the object-field pipeline (packages/spec/src/shared/editability-boundary.ts, the SelectOptionSchema prescription; moved out of spec source, #23434): measured on objectui main @aca27fa, packages/fields/src/widgets/SelectField.tsx#SingleSelectField calls the root `disabled` the single authority and packages/fields/src/widgets/RadioField.tsx#hostGroupProps reads only `props.disabled`; the per-option `disabled` that exists is the SDUI family's own vocabulary, objectui @aca27fa packages/components/src/renderers/form/select.tsx#SelectRenderer. #23809 (2026-10-16) DRILLED this container: `kind` joined the option shape as the one child with no reader yet, so the blanket `live` verdict could no longer cover it and the `field/options` debt row left `undrilled-containers.baseline.json`. The children carry the read points this note already cites.",
+      "children": {
+        "label": {
+          "status": "live",
+          "evidence": "objectui @63d00da: packages/fields/src/index.tsx#SelectCellRenderer",
+          "verifiedAt": "2026-10-16",
+          "note": "The badge text of a select cell (`option?.label`), and every select / radio control's item label."
+        },
+        "value": {
+          "status": "live",
+          "evidence": "packages/objectql/src/validation/record-validator.ts#optionValues",
+          "verifiedAt": "2026-10-16",
+          "note": "The stored code: the record validator refuses a write whose value is not one of the field's option values."
+        },
+        "description": {
+          "status": "live",
+          "evidence": "objectui @63d00da: packages/fields/src/widgets/LookupField.tsx#LookupField",
+          "verifiedAt": "2026-10-16",
+          "note": "Lookup option search matches it beside the label (objectui#6153)."
+        },
+        "color": {
+          "status": "live",
+          "evidence": "objectui @63d00da: packages/fields/src/index.tsx#SelectCellRenderer",
+          "verifiedAt": "2026-10-16",
+          "note": "The badge / dot colour of a select cell (`option?.color`)."
+        },
+        "default": {
+          "status": "live",
+          "evidence": "packages/objectql/src/engine.ts#resolveOptionDefault",
+          "verifiedAt": "2026-10-16",
+          "note": "The insert path falls back to the option marked `default: true` when the field declares no `defaultValue` (#7246)."
+        },
+        "visibleWhen": {
+          "status": "live",
+          "evidence": "packages/objectql/src/validation/rule-validator.ts#evaluateOptionVisibility",
+          "verifiedAt": "2026-10-16",
+          "note": "The one visibility predicate the server also enforces: a write picking an option whose predicate is false, or cannot be evaluated, is refused (ADR-0068, ADR-0137 D2)."
+        },
+        "kind": {
+          "status": "planned",
+          "note": "#23809 (2026-10-16): the option's lifecycle category (`open` / `won` / `lost`), declared contract-first under the maintainer's ruling on that card (「同意」). Its REFUSALS are live at parse: `FieldSchema` refuses it off a single-value select / radio, and `ObjectSchema` refuses a `stageField` whose options do not each declare it (`refuseStageFieldWithoutKinds`). No renderer reads the key yet: the readers are the objectui record path and kanban follow-up card (the path renderer already honours the same vocabulary on `record:path` `stages[].terminal`, objectui @63d00da packages/plugin-detail/src/renderers/record-path.tsx#RecordPath classify) and HotCRM's lead / opportunity declarations. No `authorWarn`: under `stageField` the key is mandatory, so a warning would fire on every compliant stage field. Flip to `live` with the objectui evidence pointer when the path renderer reads `kind` off the stage field's options."
+        }
+      }
     },
     "picklist": {
       "status": "live",
@@ -192,7 +234,7 @@
     "step": {
       "status": "live",
       "verifiedAt": "2026-08-08",
-      "note": "CAVEAT — RENDERER-only: objectui SliderField.tsx:14 reads `field.step ?? 1`; the write path never validates the grid (record-validator.ts's numeric branch enforces min/max for slider and reads step nowhere). Ruled UI-only and deliberately unenforced 2026-08-08 (#6514) — see docs/audits/2026-06-dead-surface-disposition-plan.md (P2 field) and the comment beside the declaration in src/data/field.zod.ts."
+      "note": "CAVEAT — RENDERER-only: objectui @b9814b334 packages/fields/src/widgets/SliderField.tsx#SliderField reads `sliderField?.step ?? 1` and hands it to the Slider (re-read 2026-10-15; first cited by line, sha-less, here and in packages/spec/src/data/field.zod.ts beside the declaration — moved out of spec source, #23434); the write path never validates the grid (record-validator.ts's numeric branch enforces min/max for slider and reads step nowhere). Ruled UI-only and deliberately unenforced 2026-08-08 (#6514) — see docs/audits/2026-06-dead-surface-disposition-plan.md (P2 field) and the comment beside the declaration in src/data/field.zod.ts."
     },
     "group": {
       "status": "live",
@@ -245,6 +287,25 @@
       "evidence": "packages/metadata-protocol/src/seed-loader.ts (load step 4.5 collects declared pointer pairs; loadDataset derives a per-row reference through the sibling column and routes it through the shared resolution loop — same probes, pass-2 deferral, loud refusal); packages/plugins/plugin-audit/src/objects/sys-activity.object.ts (record_id via object_name, source_id via source_object)",
       "note": "[#11339] Polymorphic pointer pair (ADR-0052 §5 ActivityPointer): marks a text field as the id half whose target object the SIBLING column names per row. Consumer (seed-time natural-key resolution + loud refusal of unresolvable/un-addressable pointers) lands in the same PR (ADR-0049 declare = enforce; the maskingRule precedent). Authoring contradictions refused at parse (text-only, exclusive with reference) and create (sibling must be declared). Proven in packages/metadata-protocol/src/seed-loader-pointer-pair.test.ts and packages/spec/src/data/field.test.ts."
     },
+    "referenceDeletedWhen": {
+      "status": "planned",
+      "verifiedAt": "2026-10-15",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/spec/src/data/field.zod.ts#referenceDeletedWhen (the parse-time door, field half: the FieldSchema superRefine refuses the key on a field that declares no `referenceVia`); packages/spec/src/data/object.zod.ts#refuseDishonestReferenceDeletedWhen (the parse-time door, sibling half: the ObjectSchema superRefine refuses a `field` that is not a declared single-value `select` with inline `options` on the same object, and a `value` that is not one of its option values); packages/spec/src/data/field-reference-deleted-when.test.ts (the accept and refuse pins)",
+      "note": "PLANNED — declared ahead of both carriers by the ruling's own sequencing (objectui#12489 ruling 6203737086, letter A; this key is its spec half). PRODUCER: objectstack #23736 (Blocked-by this key) declares it on `sys_approval_request.record_id` as `{ field: 'cancel_reason', value: 'record_deleted' }` — the cancel reason plugin-approvals already writes when a request's record is deleted. CONSUMER: objectui#12489 step 4, the record pointer renderer, which draws the tombstone from the option's own label, reads nothing and links nothing; dispatched once the spec is installable at objectui's pin. Measured in this repo at 3b46855fb: no author of the key and no reader outside packages/spec (it is new). objectui was not walked from this seat, so the scope is in-repo. No `authorWarn`, on the `field.settledWhen` precedent: a display refinement with named, blocked carriers, whose authoring half (parse, sibling and option checks) is already enforced; an author who sets it today loses nothing and re-authors nothing when the renderer lands. Flip to `live` on the objectui#12489 step 4 landing, citing its renderer at the pin that carries it, with #23736's object declaration as `producer`.",
+      "children": {
+        "field": {
+          "status": "planned",
+          "verifiedAt": "2026-10-15",
+          "note": "The sibling `select` field whose value marks the target deleted. Judged at parse by the container's evidence (snake_case; a declared single-value `select` with inline `options` on the same object, never the declaring field itself); read by nothing until the objectui#12489 step 4 renderer lands. Shares the container's verdict and its flip."
+        },
+        "value": {
+          "status": "planned",
+          "verifiedAt": "2026-10-15",
+          "note": "The option value meaning 'deleted by the platform'; its option's label is the tombstone's text. Judged at parse by the container's evidence (one of the sibling's declared option values); read by nothing until the objectui#12489 step 4 renderer lands. Shares the container's verdict and its flip."
+        }
+      }
+    },
     "mailAssociation": {
       "status": "live",
       "verifiedAt": "2026-10-13",
@@ -288,27 +349,33 @@
     },
     "descriptionField": {
       "status": "live",
-      "note": "objectui LookupField — secondary line under each option in the quick-select popover (reads descriptionField || description_field)."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui LookupField — secondary line under each option in the quick-select popover. The picker reads it camelCase-only at objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#descriptionField. Outside the picker, one reader keeps a snake leg behind the declared key: objectui @daeb77fc84: packages/fields/src/resolveActionParams.ts#resolveActionParam reads `descriptionField ?? description_field` when it builds a lookup action param."
     },
     "lookupColumns": {
       "status": "live",
-      "note": "objectui RecordPickerDialog — record-picker table columns; renderer auto-derives from the referenced object when omitted (reads lookupColumns || lookup_columns)."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui RecordPickerDialog — record-picker table columns; renderer auto-derives from the referenced object when omitted. Read camelCase-only. The lookup keys' snake_case twins (the docblock above `displayField` in packages/spec/src/data/field.zod.ts, for all seven lookup keys): none of the seven is read as a snake_case alias by the picker. At objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#lookupColumns, #lookupPageSize, #explicitAllowCreate, #descriptionField, #lookupFilters and #dependsOn, and #declaredDisplayField, read the camelCase key alone (`displayField` keeps `reference_field`, objectui's own leg and not a spec key, behind it); objectui#12157 retired the last three snake reads (`lookup_columns`, `lookup_page_size`, `allow_create`). A stored snake spelling is folded onto the declared key at ingestion: objectui @daeb77fc84: packages/core/src/utils/reference-keys.ts#normalizeSchemaReferenceKeys, applied by packages/app-shell/src/providers/MetadataProvider.tsx to every stored object. Outside the picker two snake legs survive behind the declared key at the same pin: packages/fields/src/resolveActionParams.ts ranks `description_field` and `lookup_filters` after `descriptionField` / `lookupFilters` when it builds a lookup action param, and the metadata-admin ObjectFieldInspector reads `lookup_filters` / `depends_on` after the camelCase key from a stored document. Claim dated 2026-10-16 — a reading of a pinned foreign tree that nothing in this repo re-checks."
     },
     "lookupPageSize": {
       "status": "live",
-      "note": "objectui RecordPickerDialog — rows per page in the record-picker dialog (reads lookupPageSize || lookup_page_size)."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui RecordPickerDialog — rows per page in the record-picker dialog. Read camelCase-only at objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#lookupPageSize (objectui#12157 retired the `lookup_page_size` read)."
     },
     "lookupFilters": {
       "status": "live",
-      "note": "objectui LookupField + RecordPickerDialog — base scoping filters honoured by BOTH popover and dialog; structured supported form of referenceFilters (reads lookupFilters || lookup_filters)."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui LookupField + RecordPickerDialog — base scoping filters honoured by BOTH popover and dialog; structured supported form of referenceFilters. The picker reads it camelCase-only at objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#lookupFilters. Outside the picker, two readers keep a snake leg behind the declared key: objectui @daeb77fc84: packages/fields/src/resolveActionParams.ts#resolveActionParam reads `lookupFilters ?? lookup_filters` when it builds a lookup action param, and objectui @daeb77fc84: packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx#readLookupFilters reads `lookupFilters ?? lookup_filters` from a stored document."
     },
     "dependsOn": {
       "status": "live",
-      "note": "objectui LookupField — dependent/cascading lookup; restricts candidates by another field's value (reads dependsOn || depends_on)."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui LookupField — dependent/cascading lookup; restricts candidates by another field's value. The picker reads it camelCase-only at objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#dependsOn (objectui#7357 retired the `depends_on` read). Outside the picker, one reader keeps a snake leg behind the declared key: objectui @daeb77fc84: packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx#readDependsOn reads `dependsOn ?? depends_on` from a stored document."
     },
     "allowCreate": {
       "status": "live",
-      "note": "objectui LookupField — opt-in inline quick-create (dataSource.create from typed text) (reads allowCreate || allow_create)."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui LookupField — opt-in inline quick-create (dataSource.create from typed text). Read camelCase-only at objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#explicitAllowCreate (objectui#12157 retired the `allow_create` read)."
     },
     "searchable": {
       "status": "live",
@@ -325,11 +392,11 @@
       "verifiedAt": "2026-09-27",
       "evidenceScope": "cross-repo",
       "evidence": "objectui: packages/i18n/src/currency.ts:60 reads field.currencyConfig.defaultCurrency ONLY when currencyConfig.currencyMode is 'fixed' — the second step of resolveFieldCurrency's precedence chain; a 'dynamic' config, or one naming no mode, skips it for the tenant default localization.currency; objectui: packages/fields/src/widgets/CurrencyField.tsx:55 calls resolveFieldCurrency and applies the resolved code at :91 through formatAmount, which passes it to Intl.NumberFormat via formatDisplayNumber — measured objectui @25c7d584",
-      "note": "RE-CITED 2026-09-27 (#20126): since objectui#10461 the reader takes defaultCurrency only under currencyMode 'fixed', and the chain no longer cites the date/datetime-semantics ADR, which never names currency; line pointers moved with it (currency.ts :32 → :60, CurrencyField.tsx :45/:51 → :55/:91). Verdict unchanged: LIVE. RE-CITED 2026-08-10 (#7133/#7142): the old pointer 'packages/fields/src/index.tsx:469' now lands in formatRelativeDays, a date-phrase helper with no currency involvement — the resolver moved to @object-ui/i18n and packages/fields/src/currency.ts:14 only re-exports it, which is why the old line drifted onto unrelated code rather than disappearing. Verdict unchanged: LIVE, and now cited at both the reader that consumes the key and the widget that applies the resolved currency."
+      "note": "RE-CITED 2026-09-27 (#20126): since objectui#10461 the reader takes defaultCurrency only under currencyMode 'fixed', and the chain no longer cites the date/datetime-semantics ADR, which never names currency; line pointers moved with it (currency.ts :32 → :60, CurrencyField.tsx :45/:51 → :55/:91). Verdict unchanged: LIVE. RE-CITED 2026-08-10 (#7133/#7142): the old pointer 'packages/fields/src/index.tsx:469' now lands in formatRelativeDays, a date-phrase helper with no currency involvement — the resolver moved to @object-ui/i18n and packages/fields/src/currency.ts:14 only re-exports it, which is why the old line drifted onto unrelated code rather than disappearing. Verdict unchanged: LIVE, and now cited at both the reader that consumes the key and the widget that applies the resolved currency. The removed `currencyConfig.precision` (#19992; packages/spec/src/data/field.zod.ts; moved out of spec source, #23434): the widget's one width is the currency's ISO 4217 minor unit, objectui @b9814b334 packages/fields/src/widgets/CurrencyField.tsx#CurrencyField through objectui @b9814b334 packages/fields/src/widgets/number-format.ts#currencyDisplayWidth over objectui @b9814b334 packages/fields/src/currency.ts#currencyFractionDigits, and no objectui code reads `currencyConfig.precision`; re-read 2026-10-15, first cited sha-less (the source then named `currencyFractionDigits(currency)` as the widget's own line)."
     },
     "dimensions": {
       "status": "live",
-      "note": "vector field — objectui VectorField.tsx:11 reads the flat `dimensions` prop. The live authoring path; `Field.vector(n)` emits this. (The dead nested `vectorConfig` block was removed in 16.0, #2377.)"
+      "note": "vector field — objectui @b9814b334 packages/fields/src/widgets/VectorField.tsx#VectorField reads the flat `dimensions` prop (`vectorField?.dimensions`, the value's length when unset; re-read 2026-10-15; first cited by line, sha-less, here and in packages/spec/src/data/field.zod.ts beside the declaration — moved out of spec source, #23434). The live authoring path; `Field.vector(n)` emits this. (The dead nested `vectorConfig` block was removed in 16.0, #2377.)"
     },
     "inlineTitle": {
       "status": "live",
@@ -456,7 +523,7 @@
       "verifiedAt": "2026-09-20",
       "evidenceScope": "cross-repo",
       "evidence": "objectui: packages/app-shell/src/utils/deriveRelatedLists.ts#deriveRelatedLists:276 puts the authored value on the derived descriptor as `filter`, gated by the same file's #isDeclaredFilter predicate — the declared-vs-absent discrimination its relatedListTitle / relatedListColumns siblings do, with no alias accepted and no shape coerced; objectui: packages/app-shell/src/views/RecordDetailView.tsx#synthParts:2079 destructures that descriptor key as `declaredFilter` (:2041) and writes it onto the synthesized `record:related_list` node, the same `filter` slot the component-level input already lowers, so RelatedList AND-composes it with { [referenceField]: parentId } and the tab strip's count probe composes the same pair — measured objectui @53ded82bf7, which is this repo's `.objectui-sha` pin, so both pointers were read AT THE PIN this repo builds against rather than on objectui main",
-      "note": "[#8704] Contract-first spec half (maintainer ruling 2026-08-15, 「接受全部建议。」 item 3): the declarative default filter the auto-derived related list AND-composes with { [referenceField]: parentId }, badge-count parity included — both clauses normative in the key's describe()/JSDoc and pinned in field.test.ts. Reuses FilterConditionSchema, so the #8793 bare-preset schema door judges it at parse (pinned at this position) and the engine FILTER doors (#8296 formula refusal etc.) judge the composed query at run time. Seeded `planned` + authorWarn per enforce-or-mark, the app.navigation runAction (#4848) shape rather than the useGrouping one, and that seeding wrote its own flip condition: 「Flip to `live` (and drop authorWarn) with a deriveRelatedLists/RecordDetailView evidence pointer when objectui#4664 lands.」 **FLIPPED `planned` → `live` 2026-09-20 (#19187), and the condition was re-measured rather than relayed**: objectui#4664 landed as objectui d796c8dde (objectui PR #6946, 2026-08-31) and `git merge-base --is-ancestor d796c8dde 53ded82bf7` exits 0, so the consumer is inside the console this repo pins — the #10068 discipline (read both pointers at the pin, never at objectui main) one row over. What the flip drops is not bookkeeping: the authorHint it carried told an author 「the auto-derived related list does not apply this filter yet」 about a key the pinned console applies, and `packages/lint`'s ledger-driven advisory repeated that sentence at every compile, steering authors off a working key. The sentence is recorded rather than deleted because it was TRUE from #8704 until the pin absorbed d796c8dde — a `planned` row falsifies by its consumer landing, which is the one direction no citation check can see (the pointer never rots; there was no pointer)."
+      "note": "[#8704] Contract-first spec half (maintainer ruling 2026-08-15, 「接受全部建议。」 item 3): the declarative default filter the auto-derived related list AND-composes with { [referenceField]: parentId }, badge-count parity included — both clauses normative in the key's describe()/JSDoc and pinned in field.test.ts. Reuses FilterConditionSchema, so the #8793 bare-preset schema door judges it at parse (pinned at this position) and the engine FILTER doors (#8296 formula refusal etc.) judge the composed query at run time. Seeded `planned` + authorWarn per enforce-or-mark, the app.navigation runAction (#4848) shape rather than the useGrouping one, and that seeding wrote its own flip condition: 「Flip to `live` (and drop authorWarn) with a deriveRelatedLists/RecordDetailView evidence pointer when objectui#4664 lands.」 **FLIPPED `planned` → `live` 2026-09-20 (#19187), and the condition was re-measured rather than relayed**: objectui#4664 landed as objectui d796c8dde (objectui PR #6946, 2026-08-31) and `git merge-base --is-ancestor d796c8dde 53ded82bf7` exits 0, so the consumer is inside the console this repo pins — the #10068 discipline (read both pointers at the pin, never at objectui main) one row over. What the flip drops is not bookkeeping: the authorHint it carried told an author 「the auto-derived related list does not apply this filter yet」 about a key the pinned console applies, and `packages/lint`'s ledger-driven advisory repeated that sentence at every compile, steering authors off a working key. The sentence is recorded rather than deleted because it was TRUE from #8704 until the pin absorbed d796c8dde — a `planned` row falsifies by its consumer landing, which is the one direction no citation check can see (the pointer never rots; there was no pointer). The form hint's face today (packages/spec/src/data/field.form.ts; moved out of spec source, #23434): objectui @b9814b334 packages/app-shell/src/views/metadata-admin/SchemaForm.tsx#resolveFieldFace lands the `filter-condition` hint on `{ kind: 'raw-json', hint }`, past both structural fallbacks, because objectui @b9814b334 packages/app-shell/src/views/metadata-admin/widgets.tsx#WIDGETS registers no `filter-condition`; re-read 2026-10-15, first cited sha-less."
     },
     "trackHistory": {
       "status": "live",

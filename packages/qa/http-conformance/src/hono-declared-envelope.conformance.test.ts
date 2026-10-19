@@ -28,7 +28,11 @@
  *  - `If-Match: ""` — the protocol's `MalformedVersionTokenError` (400);
  *  - an authorization-store outage — `AuthzStoreUnavailableError` (503),
  *    raised by the dispatcher's own ADR-0069 gate when an active gate's session
- *    read fails (`enforceAuthGate`, which sits above `dispatch()`'s `try`).
+ *    read fails (`enforceAuthGate`, which sits above `dispatch()`'s `try`);
+ *  - a restricted delete — the engine's referential `restrict` (409
+ *    `DELETE_RESTRICTED`), and an unknown field filter or an unregistered
+ *    object — the protocol's list normalizer (400 `INVALID_FIELD`) and its
+ *    registry gate (404 `OBJECT_NOT_FOUND`).
  *
  * Each row reads the answer on the wire (status, `success`, nested
  * `error.code`), and the write rows also read the STORE afterwards.
@@ -38,8 +42,8 @@
  * A throw that is NOT a declared envelope keeps the arm's answer: a bare
  * `Error` is still `500 INTERNAL_ERROR` carrying `code` and `message` only, with
  * no `cause` in the body; a throw that declares `statusCode` and no registered
- * code (the shape `callData`'s exposure gate throws) keeps the status it
- * declared. The declared 503 also carries no `cause`: the session read's own
+ * code (the shape `callData` throws when no data service resolves) keeps the
+ * status it declared. The declared 503 also carries no `cause`: the session read's own
  * failure stays off the wire.
  *
  * ## The auth-mount arm
@@ -96,6 +100,38 @@ const TASK = {
     },
 };
 
+/** [#23587] A parent whose delete a child's `restrict` lookup refuses. */
+const ACCOUNT = {
+    name: 'account',
+    label: 'Account',
+    fields: {
+        name: { name: 'name', type: 'text' as const, label: 'Name' },
+    },
+};
+const CONTACT = {
+    name: 'contact',
+    label: 'Contact',
+    fields: {
+        name: { name: 'name', type: 'text' as const, label: 'Name' },
+        account: { name: 'account', type: 'lookup' as const, reference: 'account', label: 'Account', deleteBehavior: 'restrict' as const },
+    },
+};
+
+/**
+ * [#23531] An object whose `secret` a caller's read masks (see the
+ * `[#23531]` block). The stored row keeps it; only a read issued with a
+ * caller's context loses it.
+ */
+const LEDGER = {
+    name: 'ledger',
+    label: 'Ledger',
+    fields: {
+        name: { name: 'name', type: 'text' as const, label: 'Name' },
+        secret: { name: 'secret', type: 'text' as const, label: 'Secret' },
+    },
+};
+const SECRET_TEXT = 'ledger-secret-the-caller-may-not-read';
+
 const liveKernels: LiteKernel[] = [];
 afterEach(async () => {
     vi.restoreAllMocks();
@@ -132,8 +168,10 @@ async function boot(auth?: Record<string, unknown>) {
     await kernel.bootstrap();
 
     const ql = kernel.getService<ObjectQL>('objectql');
-    ql.registerObject(TASK as any);
-    await ql.syncObjectSchema('task');
+    for (const object of [TASK, ACCOUNT, CONTACT, LEDGER]) {
+        ql.registerObject(object as any);
+        await ql.syncObjectSchema(object.name);
+    }
 
     vi.spyOn(HttpDispatcher.prototype as any, 'timedResolveExecutionContext')
         .mockImplementation(async () => ({ ...MEMBER }));
@@ -161,7 +199,7 @@ async function boot(auth?: Record<string, unknown>) {
         return rows[0]?.name;
     };
 
-    return { send, seed, stored, protocol: kernel.getService<any>('protocol') };
+    return { ql, send, seed, stored, protocol: kernel.getService<any>('protocol') };
 }
 
 /** The ADR-0112 envelope's three load-bearing slots. */
@@ -237,6 +275,203 @@ describe('[#23365] a real createHonoApp host: the dispatch() catch-all renders a
         const answer = await host.send('GET', `/data/task/${id}`);
         expect(answer.status, JSON.stringify(answer.body)).toBe(503);
         expect(answer.body).toEqual({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'Data service not available' } });
+    }, 60_000);
+});
+
+/**
+ * [#23531] The stale-`If-Match` `409` above carries the server's
+ * `currentVersion` and `currentRecord`, as `RestServer`'s does. The wire
+ * contract and `ConcurrentUpdateError`'s docblock name both, and objectui's
+ * conflict bar reads both. Before this card the body was `code` and `message`
+ * only.
+ *
+ * The fields ride `error.details`, the wrapped envelope's declared context
+ * slot, which is where `@objectstack/client` reads a wrapped body's context
+ * from. `currentVersion` is proved by USE, not by spelling: echoed back as the
+ * next `If-Match`, it is accepted ("Overwrite anyway" in the conflict bar), so
+ * it is the record's real version token. `error.details` is compared with the
+ * throw the real protocol raised, read off the protocol call, so the door is
+ * shown to relay the producer's two fields rather than to build its own.
+ *
+ * ## The record is the caller's read
+ *
+ * On a version mismatch the protocol re-reads the row under the caller's own
+ * context (#23586, PR #23628), so a field the caller's read masks is absent
+ * from `currentRecord` on this door, while the store still holds it. The mask
+ * here is an engine middleware that rewrites a read issued with a caller's
+ * context after `next()`: the seam `@objectstack/plugin-security`'s
+ * field-level rules rewrite a read at. The security plugin itself is not
+ * booted, because this package does not depend on it. Its real field- and
+ * row-level rules are pinned at the producer, on `RestServer` and on the
+ * dispatcher, by `packages/runtime`'s `data-conflict-caller-visibility.test.ts`.
+ */
+describe('[#23531] a real createHonoApp host: the 409 CONCURRENT_UPDATE carries currentVersion and currentRecord', () => {
+    type ProtocolWrite = 'updateData' | 'deleteData';
+    const protocolWrite = (method: string): ProtocolWrite => (method === 'PATCH' ? 'updateData' : 'deleteData');
+
+    /** Each throw the real protocol raises from `write`, read off the call and rethrown. */
+    const captureThrows = (protocol: any, write: ProtocolWrite): any[] => {
+        const produced: any[] = [];
+        const real = protocol[write].bind(protocol);
+        vi.spyOn(protocol, write).mockImplementation(async (...args: any[]) => {
+            try {
+                return await real(...args);
+            } catch (thrown) {
+                produced.push(thrown);
+                throw thrown;
+            }
+        });
+        return produced;
+    };
+    /** A thrown value as the wire carries it. */
+    const asWire = (value: unknown) => JSON.parse(JSON.stringify(value));
+
+    it('PATCH with a stale If-Match: currentVersion and currentRecord in `error.details` as the protocol threw them, and the version accepted when echoed', async () => {
+        const host = await boot();
+        const id = await host.seed('original');
+        const produced = captureThrows(host.protocol, 'updateData');
+        const answer = await host.send('PATCH', `/data/task/${id}`, { headers: { 'If-Match': STALE_VERSION }, body: { name: 'lost update' } });
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'CONCURRENT_UPDATE' });
+
+        // The real producer stated both; without this the equality below
+        // could hold between two absences.
+        expect(produced).toHaveLength(1);
+        expect(produced[0].currentRecord, JSON.stringify(produced[0])).toMatchObject({ id, name: 'original' });
+        const details = answer.body.error.details;
+        expect(details, JSON.stringify(answer.body)).toEqual({
+            currentVersion: produced[0].currentVersion,
+            currentRecord: asWire(produced[0].currentRecord),
+        });
+        expect(typeof details.currentVersion).toBe('string');
+        expect(await host.stored(id)).toBe('original');
+
+        const overwrite = await host.send('PATCH', `/data/task/${id}`, { headers: { 'If-Match': `"${details.currentVersion}"` }, body: { name: 'overwritten' } });
+        expect(overwrite.status, JSON.stringify(overwrite.body)).toBe(200);
+        expect(await host.stored(id)).toBe('overwritten');
+    }, 60_000);
+
+    it('DELETE with a stale If-Match: currentVersion and currentRecord in `error.details` as the protocol threw them, and the version accepted when echoed', async () => {
+        const host = await boot();
+        const id = await host.seed('kept');
+        const produced = captureThrows(host.protocol, 'deleteData');
+        const answer = await host.send('DELETE', `/data/task/${id}`, { headers: { 'If-Match': STALE_VERSION } });
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'CONCURRENT_UPDATE' });
+
+        expect(produced).toHaveLength(1);
+        expect(produced[0].currentRecord, JSON.stringify(produced[0])).toMatchObject({ id, name: 'kept' });
+        const details = answer.body.error.details;
+        expect(details, JSON.stringify(answer.body)).toEqual({
+            currentVersion: produced[0].currentVersion,
+            currentRecord: asWire(produced[0].currentRecord),
+        });
+        expect(typeof details.currentVersion).toBe('string');
+        expect(await host.stored(id)).toBe('kept');
+
+        const overwrite = await host.send('DELETE', `/data/task/${id}`, { headers: { 'If-Match': `"${details.currentVersion}"` } });
+        expect(overwrite.status, JSON.stringify(overwrite.body)).toBe(200);
+        expect(await host.stored(id)).toBeUndefined();
+    }, 60_000);
+
+    it.each(['PATCH', 'DELETE'])('%s with a stale If-Match on a row whose field the caller\'s read masks: currentRecord is the caller\'s read, without that field', async (method) => {
+        const host = await boot();
+        host.ql.registerMiddleware(async (op: any, next: () => Promise<void>) => {
+            await next();
+            if (op.object !== 'ledger' || (op.operation !== 'find' && op.operation !== 'findOne')) return;
+            if (!op.context || op.context.isSystem === true) return;
+            const rows = Array.isArray(op.result) ? op.result : op.result ? [op.result] : [];
+            for (const row of rows) delete row.secret;
+        });
+        const created: any = await host.ql.insert('ledger', { name: 'visible', secret: SECRET_TEXT });
+        const id = String(created.id);
+        const produced = captureThrows(host.protocol, protocolWrite(method));
+
+        const answer = await host.send(method, `/data/ledger/${id}`, {
+            headers: { 'If-Match': STALE_VERSION },
+            ...(method === 'PATCH' ? { body: { name: 'lost update' } } : {}),
+        });
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'CONCURRENT_UPDATE' });
+
+        const record = answer.body.error.details?.currentRecord;
+        expect(record, JSON.stringify(answer.body)).toMatchObject({ id, name: 'visible' });
+        expect(record).not.toHaveProperty('secret');
+        expect(JSON.stringify(answer.body)).not.toContain(SECRET_TEXT);
+        // It is the caller's own read of the row, and the record the protocol threw.
+        const callerRead = await host.ql.findOne('ledger', { where: { id }, context: { ...MEMBER } });
+        expect(callerRead).not.toHaveProperty('secret');
+        expect(record).toEqual(asWire(callerRead));
+        expect(produced).toHaveLength(1);
+        expect(record).toEqual(asWire(produced[0].currentRecord));
+        // The store still holds the field and the row, so the absence is the
+        // caller's mask, not the row's content.
+        const systemRead: any = await host.ql.findOne('ledger', { where: { id } });
+        expect(systemRead).toMatchObject({ name: 'visible', secret: SECRET_TEXT });
+    }, 60_000);
+});
+
+/**
+ * [#23587] The other structured refusals the real engine and protocol raise on
+ * this host carry `RestServer`'s fields in `error.details`, as the `409
+ * CONCURRENT_UPDATE` above carries `currentVersion`. Before this card each
+ * answered `code` and `message` only. Measured on this host at `16abea884`:
+ *
+ *     DELETE /api/v1/data/account/ID   (a contact's `restrict` lookup names it)
+ *       409 {"success":false,"error":{"code":"DELETE_RESTRICTED",
+ *            "message":"This Account is still referenced by 1 Contact record(s) through …"}}
+ *
+ * while `RestServer`'s `mapDataError` answers the same throw with
+ * `developerMessage`, `dependentObject` and `dependentCount` beside its code.
+ * The `DELETE_RESTRICTED` row compares each field with the throw the engine
+ * really raised, read off the protocol call, so the door is shown to relay the
+ * producer's values rather than to spell its own. `object` is not among them:
+ * that arm adds the ROUTE's object, and this recogniser has no route.
+ */
+describe('[#23587] a real createHonoApp host: a structured refusal carries RestServer’s fields in `error.details`', () => {
+    it('DELETE of a restricted parent: 409 DELETE_RESTRICTED with the engine’s developerMessage, dependentObject and dependentCount; the row is kept', async () => {
+        const host = await boot();
+        const account: any = await host.ql.insert('account', { name: 'acme' });
+        await host.ql.insert('contact', { name: 'ada', account: account.id });
+
+        const produced: any[] = [];
+        const deleteData = host.protocol.deleteData.bind(host.protocol);
+        vi.spyOn(host.protocol, 'deleteData').mockImplementation(async (...args: any[]) => {
+            try {
+                return await deleteData(...args);
+            } catch (thrown) {
+                produced.push(thrown);
+                throw thrown;
+            }
+        });
+
+        const answer = await host.send('DELETE', `/data/account/${account.id}`);
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'DELETE_RESTRICTED' });
+
+        // The real producer stated all three; without this the equality below
+        // could hold between two absences.
+        expect(produced).toHaveLength(1);
+        expect(typeof produced[0].developerMessage, JSON.stringify(produced[0])).toBe('string');
+        expect(answer.body.error.details, JSON.stringify(answer.body)).toEqual({
+            developerMessage: produced[0].developerMessage,
+            dependentObject: 'contact',
+            dependentCount: 1,
+        });
+        expect(answer.body.error.message).toBe(produced[0].message);
+
+        const kept: any[] = await host.ql.find('account', { where: { id: account.id } }) ?? [];
+        expect(kept).toHaveLength(1);
+    }, 60_000);
+
+    it('GET with an unknown field filter: 400 INVALID_FIELD with the field and the object it names', async () => {
+        const host = await boot();
+        const answer = await host.send('GET', '/data/task?nosuchfield=1');
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 400, success: false, code: 'INVALID_FIELD' });
+        expect(answer.body.error.details, JSON.stringify(answer.body)).toEqual({ field: 'nosuchfield', object: 'task' });
+    }, 60_000);
+
+    it('GET of an unregistered object: 404 OBJECT_NOT_FOUND with the object it names', async () => {
+        const host = await boot();
+        const answer = await host.send('GET', '/data/ghost');
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 404, success: false, code: 'OBJECT_NOT_FOUND' });
+        expect(answer.body.error.details, JSON.stringify(answer.body)).toEqual({ object: 'ghost' });
     }, 60_000);
 });
 

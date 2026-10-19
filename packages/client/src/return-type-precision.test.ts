@@ -84,6 +84,8 @@ import type {
     AnalyticsResult,
     AutomationResult,
     DelegableScope,
+    FlowRuntimeState,
+    FlowUnboundCause,
     ImportObjectResult,
     RecordShare,
     RemoteTable,
@@ -305,9 +307,9 @@ export function searchResultIsNotTheGlobalSearchShape(): void {
 export async function returnTypePrecisionPins11925(): Promise<void> {
     // ── bound 1/3: both surfaces agree on this envelope ──────────────────
     // `runtime`'s `/packages` domain and `rest`'s `GET {base}/packages` both
-    // send `{ packages, total: packages.length }`. The REST rows also carry a
-    // `source` discriminator the dispatcher rows lack, so it stays undeclared
-    // — the same treatment #8140 gave the scoped sibling directly above.
+    // send `{ packages, total: packages.length }`. (The REST twin's
+    // `source: 'registry' | 'database' | 'both'` stamp left with its routes in
+    // #14503; the `source` the rows carry now is the declared origin, #23972.)
     // ⚠️ [#17536] The ELEMENT moved, the envelope did not — this pin is still
     // #11925's statement that both mounted surfaces agree on
     // `{ packages, total }`, and that half is unchanged.
@@ -643,8 +645,10 @@ export async function returnTypePrecisionPins12034(): Promise<void> {
     void (await scoped.packages.get('com.acme.crm')).package;
 }
 
-declare const authoringRow: InstalledPackage;
-declare const assembledRow: AssembledInstalledPackage;
+// A SERVED row is the registry record plus the read door's own verdict,
+// `writable` (#23972 declared it on the served row, not on the record).
+declare const authoringRow: InstalledPackage & { writable: boolean };
+declare const assembledRow: AssembledInstalledPackage & { writable: boolean };
 
 /**
  * [#17536] The four `/packages` READ members declare the stage the DOOR is
@@ -1418,6 +1422,45 @@ export function metaResetResponseDeclaresTheWireReceipt(): void {
     void metaResetBody.projectionApplied;
 }
 
+/**
+ * [#23859] `automation.getRuntimeStatus()` hand-typed its rows as
+ * `{ name, enabled, bound }`. `GET /automation/_status` serves the engine's
+ * `getFlowRuntimeStates()` rows unchanged (that pass-through is pinned in
+ * `packages/runtime/src/domain-handler-registry.test.ts`), and those rows are
+ * the declared contract `FlowRuntimeState`. The narrower annotation hid
+ * `status`, `triggerType`, `object`, `reason` and `unboundCause` from every SDK
+ * caller, who then cast past it or concluded the fields did not exist.
+ *
+ * Type-level for the reason this file's header gives: the runtime pin in
+ * `meta-automation-descriptors.test.ts` is green against either annotation.
+ */
+type RuntimeStatusRow = Awaited<ReturnType<ObjectStackClient['automation']['getRuntimeStatus']>>['flows'][number];
+
+export async function returnTypePrecisionPins23859(): Promise<void> {
+    // ── the answer IS the contract, envelope and element ──────────────────
+    // RED BEFORE: the hand-typed element is not `FlowRuntimeState`.
+    expectTypeOf(await client.automation.getRuntimeStatus()).toEqualTypeOf<{
+        flows: FlowRuntimeState[];
+        total: number;
+    }>();
+
+    // ── the optional fields a caller can now read, with the contract's own
+    //    optionality and vocabulary ──────────────────────────────────────
+    // RED BEFORE: each indexed access is TS2339 on the hand-typed row.
+    expectTypeOf<RuntimeStatusRow['reason']>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<RuntimeStatusRow['unboundCause']>().toEqualTypeOf<FlowUnboundCause | undefined>();
+    expectTypeOf<RuntimeStatusRow['status']>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<RuntimeStatusRow['triggerType']>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<RuntimeStatusRow['object']>().toEqualTypeOf<string | undefined>();
+
+    // ⚠️ GREEN IN BOTH STATES, a compatibility guard rather than evidence: the
+    // three fields the old annotation named stay REQUIRED, so a caller that
+    // read them still compiles.
+    expectTypeOf<RuntimeStatusRow['name']>().toEqualTypeOf<string>();
+    expectTypeOf<RuntimeStatusRow['enabled']>().toEqualTypeOf<boolean>();
+    expectTypeOf<RuntimeStatusRow['bound']>().toEqualTypeOf<boolean>();
+}
+
 describe('client SDK return-type precision (#8140)', () => {
     it('exposes the type-level pins to tsc without executing a request', () => {
         // The assertions above are evaluated by `tsc` under
@@ -1439,6 +1482,7 @@ describe('client SDK return-type precision (#8140)', () => {
         expect(typeof returnTypePrecisionPins13023).toBe('function');
         expect(typeof deleteDataResponseIsNotTheMetaResetShape).toBe('function');
         expect(typeof metaResetResponseDeclaresTheWireReceipt).toBe('function');
+        expect(typeof returnTypePrecisionPins23859).toBe('function');
         expect(typeof commitRollbackResponseIsNotTheVersionRollbackShape).toBe('function');
         // `environmentIsNotTheCloudWireRow` left with its subject (#16325): the
         // guard is now the `@ts-expect-error`'d import at the top of the file.

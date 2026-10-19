@@ -144,6 +144,8 @@
     "InstalledPackage": "src/kernel/package-registry.zod.ts#InstalledPackage (type)",
     "InstalledPackageParsed": "src/kernel/package-registry.zod.ts#InstalledPackageParsed (type)",
     "InstalledPackageSchema": "src/kernel/package-registry.zod.ts#InstalledPackageSchema (const)",
+    "InstalledPackageSource": "src/kernel/package-registry.zod.ts#InstalledPackageSource (type)",
+    "InstalledPackageSourceSchema": "src/kernel/package-registry.zod.ts#InstalledPackageSourceSchema (const)",
     "KernelContext": "src/kernel/context.zod.ts#KernelContext (type)",
     "KernelContextParsed": "src/kernel/context.zod.ts#KernelContextParsed (type)",
     "KernelContextSchema": "src/kernel/context.zod.ts#KernelContextSchema (const)",

@@ -97,6 +97,8 @@
     "InstallPackageResponseSchema": "kernel/InstallPackageResponse",
     "InstalledPackage": "kernel/InstalledPackage",
     "InstalledPackageSchema": "kernel/InstalledPackage",
+    "InstalledPackageSource": "kernel/InstalledPackageSource",
+    "InstalledPackageSourceSchema": "kernel/InstalledPackageSource",
     "KernelContext": "kernel/KernelContext",
     "KernelContextSchema": "kernel/KernelContext",
     "KernelSecurityPolicy": "kernel/KernelSecurityPolicy",

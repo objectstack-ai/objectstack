@@ -55,10 +55,9 @@ import {
   CLI,
   childEnv,
   E2E_SECRET_KEY,
-  portContentionError,
-  portDriftError,
+  KERNEL_ASSIGNED_PORT,
   probeThroughChild,
-  randomPort,
+  readKernelAssignedPort,
   TSX,
 } from './helpers/serve-process.js';
 
@@ -153,9 +152,9 @@ interface LiveStart {
   output: () => string;
 }
 
-function bootStart(cwd: string, home: string, port: string, extra: string[] = []): Promise<LiveStart> {
+function bootStart(cwd: string, home: string, extra: string[] = []): Promise<LiveStart> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, 'start', '-p', port, '--home', home, '--auth-secret', E2E_SECRET_KEY, '--no-ui', ...extra], {
+    const child = spawn(TSX, [CLI, 'start', '-p', KERNEL_ASSIGNED_PORT, '--home', home, '--auth-secret', E2E_SECRET_KEY, '--no-ui', ...extra], {
       cwd,
       // `childEnv`, never a bare `...process.env` — see its header.
       env: childEnv({ NO_COLOR: '1', OS_CLOUD_URL: 'off', OS_LOG_LEVEL: 'warn', OS_SECRET_KEY: E2E_SECRET_KEY }),
@@ -166,12 +165,12 @@ function bootStart(cwd: string, home: string, port: string, extra: string[] = []
     groups.push(child);
     let out = '';
     let settled = false;
-    const settle = (err: Error | null) => {
+    const settle = (verdict: Error | number) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (err) rejectBoot(err);
-      else resolveBoot({ child, base: `http://localhost:${port}`, output: () => out });
+      if (verdict instanceof Error) rejectBoot(verdict);
+      else resolveBoot({ child, base: `http://localhost:${verdict}`, output: () => out });
     };
     const timer = setTimeout(
       () => settle(new Error(`os start never printed ${READY}\n--- output ---\n${out.slice(-4000)}`)),
@@ -179,14 +178,13 @@ function bootStart(cwd: string, home: string, port: string, extra: string[] = []
     );
     const onData = (d: unknown) => {
       out += String(d);
-      // The child is the authority on the port it bound.
-      if (READY.test(out)) settle(portDriftError(out, 'os start', port));
+      // The child is the authority on the port it bound: a kernel-assigned one (#24342).
+      if (READY.test(out)) settle(readKernelAssignedPort(out, 'os start'));
     };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
     child.on('exit', (code) =>
-      settle(portContentionError(out, 'os start', port)
-        ?? new Error(`os start exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
+      settle(new Error(`os start exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
     );
   });
 }
@@ -320,24 +318,23 @@ beforeAll(async () => {
   const hostArtifact = join(runtimeDir, 'host.json');
   writeFileSync(hostArtifact, JSON.stringify(HOST_ARTIFACT, null, 2), 'utf8');
   const home = join(runtimeDir, 'home');
-  const port = randomPort();
 
   // ── boot 1: the host, hot install, probe ───────────────────────────────
-  const first = await bootStart(runtimeDir, home, port, ['--artifact', hostArtifact]);
+  const first = await bootStart(runtimeDir, home, ['--artifact', hostArtifact]);
   const token = await authenticate(first);
   installs.push(await packageInstall(appDir, first));
   phases.install = await probe(first, token);
   await stopGroup(first.child);
 
   // ── boot 2: same host, home and cwd — the ledger rehydrates on kernel:ready ──
-  const second = await bootStart(runtimeDir, home, port, ['--artifact', hostArtifact]);
+  const second = await bootStart(runtimeDir, home, ['--artifact', hostArtifact]);
   phases.restart = await probe(second, await authenticate(second));
   await stopGroup(second.child);
 
   // ── boot 3: the CONTROL — the same file as the boot artifact ───────────
   const controlDir = join(root, 'control');
   mkdirSync(controlDir, { recursive: true });
-  const third = await bootStart(controlDir, join(controlDir, 'home'), port, ['--artifact', join(appDir, 'dist', 'objectstack.json')]);
+  const third = await bootStart(controlDir, join(controlDir, 'home'), ['--artifact', join(appDir, 'dist', 'objectstack.json')]);
   phases.control = await probe(third, await authenticate(third));
   await stopGroup(third.child);
 }, 4 * BOOT_TIMEOUT_MS);

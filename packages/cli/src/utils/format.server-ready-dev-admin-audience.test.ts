@@ -60,6 +60,7 @@ function render(opts: Partial<ServerReadyOptions>): string[] {
   try {
     printServerReady({
       externalBaseOrigin: 'http://localhost:4721',
+      httpServer: 'composed',
       uiEnabled: true,
       consolePath: '/_console',
       isDev: true,

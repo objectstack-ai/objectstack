@@ -110,11 +110,28 @@
  * that. When no title is in hand the sentence degrades to the object's label,
  * and when that is missing too, to "This record" — ⛔ never back to the id.
  *
+ * ## The title is the WRITER's to be served (#23618)
+ *
+ * `ctx.previous` is the row as STORED (a raw driver read, declared columns
+ * only), narrowed by no caller's field-level security — and the sentence is
+ * served to the writer. So the title is picked from the pre-image AS SERVED to
+ * the writer, by the rule every approval-path title answers to
+ * (`payload-redaction.ts`, #10749: keyed on the caller): the served-fields
+ * answer, `resolveReadableSnapshotFields` (readable, and not masked for this
+ * caller), asked with the writer's own envelope ({@link writerEnvelope}). A
+ * display field the writer may not be served gives no title, and the sentence
+ * degrades as above. Still no record read: the cost is one field-visibility
+ * question, on the deny path only, so a write the lock does not refuse asks
+ * nothing. With no field-visibility authority wired, the title passes through
+ * as before, exactly as the payload snapshot does.
+ *
  * Registered under `packageId: 'plugin-approvals:lock'` so it can be cleanly
  * unbound on plugin stop.
  */
 
+import { withoutOperationPrivateKeys } from '@objectstack/core';
 import { resolveDisplayField } from '@objectstack/spec/data';
+import { redactSnapshot, resolveReadableSnapshotFields, type FieldVisibilitySource } from './payload-redaction.js';
 
 export const APPROVALS_HOOK_PACKAGE = 'plugin-approvals:lock';
 
@@ -236,6 +253,23 @@ function recordTitleOf(
   if (!title) return undefined;
   if (recordId && title === recordId) return undefined;
   return title;
+}
+
+/**
+ * [#23618] The WRITER's own execution envelope — the one riding on the
+ * operation (`input.options.context`), minus its operation-private keys — or
+ * `undefined` when the write carried none.
+ *
+ * ⛔ Never rebuilt from `ctx.session`: the session is a projection of the
+ * envelope that drops `permissions` (and spells the org `organizationId`), so a
+ * field-visibility question asked with it would be a second derivation of the
+ * writer's authority beside the envelope the security middleware judged the
+ * write by. The `__` keys go for the reason `withoutOperationPrivateKeys`
+ * states, and the copy keeps a callee from writing back into the operation.
+ */
+function writerEnvelope(ctx: any): unknown {
+  const exec = ctx?.input?.options?.context;
+  return exec && typeof exec === 'object' ? withoutOperationPrivateKeys(exec as Record<string, unknown>) : undefined;
 }
 
 /**
@@ -439,8 +473,17 @@ async function gatingRequests(
 /**
  * Bind the global record-lock hook. Caller is responsible for calling
  * {@link unbindAllHooks} first if re-binding.
+ *
+ * `fieldVisibility` resolves the field-visibility authority the refusal's title
+ * is narrowed by (#23618) — lazily, per refusal, because the security plugin may
+ * start after this one. Absent, or resolving nothing, the title is served as
+ * before, exactly as the payload snapshot is (`resolveReadableSnapshotFields`).
  */
-export function bindApprovalLockHook(engine: MinimalEngine, logger?: MinimalLogger): void {
+export function bindApprovalLockHook(
+  engine: MinimalEngine,
+  logger?: MinimalLogger,
+  fieldVisibility?: () => FieldVisibilitySource | undefined,
+): void {
   engine.registerHook('beforeUpdate', async (ctx: any) => {
     const object = (ctx?.object ?? ctx?.objectName) as string | undefined;
     // No object name (shouldn't happen) or our own bookkeeping objects → skip.
@@ -518,12 +561,25 @@ export function bindApprovalLockHook(engine: MinimalEngine, logger?: MinimalLogg
       const previous = ctx?.previous as Record<string, unknown> | undefined;
       const previousId = previous ? String(previous.id ?? previous._id ?? '') : '';
       const record = previousId && previousId === recordId ? previous : undefined;
+      // [#23618] …and it is the row as STORED, narrowed by no caller's
+      // field-level security, while this sentence is served to the WRITER. So
+      // the title is picked from it AS SERVED to the writer: the served-fields
+      // answer the approval inbox narrows its titles and snapshots by (readable,
+      // and not masked for this caller), asked with the writer's own envelope.
+      // A display field the writer may not be served gives no title, and the
+      // sentence degrades to the label — ⛔ never to the id.
+      const served = record
+        ? await resolveReadableSnapshotFields(fieldVisibility?.(), object, writerEnvelope(ctx), logger)
+        : undefined;
+      const asServed = record && served !== undefined
+        ? redactSnapshot(record, served).payload as Record<string, unknown>
+        : record;
 
       logger?.info?.(
         `[approvals] update refused RECORD_LOCKED: record '${recordId}' of '${object}' ` +
         `is held by pending approval request '${String(pending?.id ?? '')}'`,
       );
-      lockedError(recordLockRefusal(objectLabel, recordTitleOf(schema, record, recordId)));
+      lockedError(recordLockRefusal(objectLabel, recordTitleOf(schema, asServed, recordId)));
     }
   }, { packageId: APPROVALS_HOOK_PACKAGE, priority: 50 });
 

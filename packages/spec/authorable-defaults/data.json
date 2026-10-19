@@ -101,6 +101,7 @@
     "data/Seed:externalId = \"name\"",
     "data/Seed:mode = \"upsert\"",
     "data/SeedLoadResult:errors = []",
+    "data/SeedLoadResult:landedIds = []",
     "data/SeedLoadResult:referencesDropped = 0",
     "data/SeedLoadResult:summariesStale = 0",
     "data/SeedLoaderConfig:batchSize = 1000",

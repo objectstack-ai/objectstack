@@ -727,8 +727,10 @@ describe('ObjectQL Engine', () => {
         // the context (e.g. an intended isSystem bypass), a real source of
         // "empty result once scoping was added" bugs. Reads now ALSO accept the
         // trailing options.context, aligning with insert/update. `tenantId` is a
-        // convenient observable: buildDriverOptions forwards it to the driver.
+        // convenient observable: buildDriverOptions forwards it to the driver
+        // — as the read scope, so only under a wall (ADR-0131 D8).
         beforeEach(async () => {
+            (engine as any).setTenancyPostureProvider(() => 'isolated');
             engine.registerDriver(mockDriver, true);
             await engine.init();
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({ name: 'task', fields: {} });
@@ -809,10 +811,24 @@ describe('ObjectQL Engine', () => {
             expect(lastFindOpts()).toMatchObject({ tenantId: 'org_a', tenantIds: ['org_a', 'org_b'] });
         });
 
-        it('no provider (no enforcement layer) → equality only, never widened', async () => {
-            await engine.find('task', {}, { context: groupCtx });
-            expect(lastFindOpts()?.tenantIds).toBeUndefined();
-            expect(lastFindOpts()).toMatchObject({ tenantId: 'org_a' });
+        it('no provider (no enforcement layer) → the env posture decides: `single` scopes nothing, a wall is equality', async () => {
+            // [ADR-0131 D8] With no `tenancy` service the engine reads the
+            // posture the operator ASKED for (`resolveEnginePosture`), and
+            // derives the same verdict Layer 0 would: nothing under `single`.
+            const prior = process.env.OS_TENANCY_POSTURE;
+            try {
+                delete process.env.OS_TENANCY_POSTURE;
+                await engine.find('task', {}, { context: groupCtx });
+                expect(lastFindOpts()?.tenantId).toBeUndefined();
+                expect(lastFindOpts()?.tenantIds).toBeUndefined();
+                process.env.OS_TENANCY_POSTURE = 'isolated';
+                await engine.find('task', {}, { context: groupCtx });
+                expect(lastFindOpts()?.tenantIds).toBeUndefined();
+                expect(lastFindOpts()).toMatchObject({ tenantId: 'org_a' });
+            } finally {
+                if (prior === undefined) delete process.env.OS_TENANCY_POSTURE;
+                else process.env.OS_TENANCY_POSTURE = prior;
+            }
         });
 
         it('isolated posture → equality only (the union is a group-only widening)', async () => {
@@ -852,12 +868,14 @@ describe('ObjectQL Engine', () => {
         });
 
         it('still stamps tenantId for objects without a tenancy declaration', async () => {
+            (engine as any).setTenancyPostureProvider(() => 'isolated');
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({ name: 'task', fields: {} } as any);
             await engine.find('task', {}, { context: { tenantId: 'org_a' } as any });
             expect(lastFindOpts()).toMatchObject({ tenantId: 'org_a' });
         });
 
         it('still stamps tenantId for an explicit tenancy.enabled:true object', async () => {
+            (engine as any).setTenancyPostureProvider(() => 'isolated');
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({
                 name: 'task', tenancy: { enabled: true }, fields: {},
             } as any);

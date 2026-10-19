@@ -84,17 +84,21 @@ import { dirname, resolve } from 'node:path';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import type { FindDataRequest } from '@objectstack/spec/api';
 import { RestServer } from './rest-server.js';
+import { REST_SERVER_REGISTRAR_FILES, type RestServerRegistrarFile } from './rest-server-registrar-files.js';
 import type { ImportProtocolLike } from '@objectstack/core';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const sourceOf = (file: string) => readFileSync(resolve(HERE, file), 'utf8');
 
-const REST_SERVER = sourceOf('rest-server.ts');
+// [#23050 slice 3] Every file on THE list of the files `RestServer`'s
+// registrars live in, imported rather than spelt here, so a registrar body the
+// split moves next stays inside this census.
+const REGISTRAR_SOURCES = new Map<string, string>(REST_SERVER_REGISTRAR_FILES.map((file) => [file, sourceOf(file)]));
 // [#23050 slice 1] `RestServer#registerDataActionEndpoints`' body — the
 // import-job read, the import-job listing and the export chunk loop — moved to
 // its own module. Its literals are the same server-built literals, so the
 // census follows them there rather than losing them.
-const DATA_ACTION_ROUTES = sourceOf('data-action-routes.ts');
+const DATA_ACTION_ROUTES = REGISTRAR_SOURCES.get('data-action-routes.ts')!;
 // [#20919] The runner moved to `@objectstack/core`, beside `bulkWrite`.
 const IMPORT_RUNNER = readFileSync(resolve(HERE, '../../core/src/utils/import-runner.ts'), 'utf8');
 
@@ -116,6 +120,106 @@ interface CensusEntry {
     noDoor: boolean;
 }
 
+/**
+ * [#23050 slice 3] Each registrar file's floor, its own measured `querySlots`
+ * count: a file the split adds to the list needs a floor here before this
+ * census reads it. The §1 controls pin the list's length and the census's sum
+ * over it (4 = 1 + 3 + 0 + 0; the batch and approval bodies build no `query:`
+ * literal).
+ *
+ * [#23050 slice 4] 4 = 1 + 3 + 0 + 0 + 0: the two record-sharing bodies
+ * (`sharing-routes.ts`) build no `query:` literal either — the rule list hands
+ * `listRules` an `object` / `activeOnly` pair read off `req.query`, never a
+ * `query:` slot.
+ *
+ * [#23050 slice 5] 4 = 1 + 3 + 0 + 0 + 0 + 0: the analytics dataset body
+ * (`analytics-routes.ts`) builds no `query:` literal either — it hands
+ * `queryDataset` the caller's own `selection`, never a `query:` slot.
+ *
+ * [#23050 slice 6] 4 = 1 + 3 + 0 + 0 + 0 + 0 + 0: the two security bodies
+ * (`security-routes.ts`) build no `query:` literal either — the explain doors
+ * hand the security service a parsed explain request, and the suggestion list
+ * a `status` / `packageId` pair read off `req.query`, never a `query:` slot.
+ *
+ * [#23050 slice 7] 4 = 1 + 3 + 0 + 0 + 0 + 0 + 0 + 0: the discovery and
+ * OpenAPI bodies (`discovery-routes.ts`) build no `query:` literal either —
+ * they read the protocol's discovery document and its `getMetaItems` listings
+ * by `type`, never through a `query:` slot.
+ *
+ * [#23050 slice 8] 4 = 1 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0: the email send body
+ * (`email-routes.ts`) builds no `query:` literal either — it hands the email
+ * service the caller's own JSON body, never a `query:` slot.
+ *
+ * [#23050 slice 9] 4 = 1 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0: the global search
+ * body (`search-routes.ts`) builds no `query:` literal either — it hands
+ * `searchAll` a `q` / `objects` / `limit` / `perObject` request read off
+ * `req.query`, never a `query:` slot.
+ *
+ * [#23050 slice 10] 4 = 1 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0: the UI view
+ * body (`ui-routes.ts`) builds no `query:` literal either — it hands
+ * `getUiView` an `{ object, type }` request read off the path, never a
+ * `query:` slot.
+ *
+ * [#23050 slice 11] 4 = 1 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0: the
+ * public form doors (`form-routes.ts`) build no `query:` literal either — they
+ * list the environment's views and objects by `type` and insert through
+ * `createData`, never through a `query:` slot.
+ *
+ * [#23050 slice 12] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1, a
+ * MOVE: `rest-server.ts`' one slot, the list door's caller-supplied
+ * `query: req.query`, left with `registerCrudEndpoints`' body for
+ * `crud-routes.ts` (the QueryAST door's `query` is a shorthand member, which
+ * `querySlots` does not read, as before). Each floor equals its file's
+ * measured count, so `rest-server.ts`' goes 1 → 0 and the moved slot keeps
+ * its floor of 1 there.
+ *
+ * [#23050 slice 13a] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0,
+ * unchanged: the first three `/meta` groups (`meta-collection-routes.ts`) build
+ * no `query:` slot. The per-type list's one `query` key sits mid-line in the
+ * list chain's options literal, which `querySlots` (a line-initial `query:`)
+ * does not read, as before the move, so the moved module's floor is 0.
+ *
+ * [#23050 slice 13b] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0 + 0,
+ * unchanged: the per-item reads (`meta-item-read-routes.ts`) build no `query:`
+ * slot either, so the moved module's floor is 0.
+ *
+ * [#23050 slice 13c] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0 + 0 + 0,
+ * unchanged: the per-item writes (`meta-item-write-routes.ts`) build no `query:`
+ * slot either. The item save's one `query` key sits mid-line in the argument of
+ * its request mapping (`metaSaveRequestOptions`), which `querySlots` (a
+ * line-initial `query:`) does not read, as before the move, so the moved
+ * module's floor is 0.
+ *
+ * [#23050 slice 13d] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0 + 0 + 0 + 0,
+ * unchanged: the history family (`meta-item-history-routes.ts`) builds no
+ * `query:` slot either, so the moved module's floor is 0.
+ *
+ * [#23050 slice 13e] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0 + 0 + 0 + 0 + 0,
+ * unchanged: neither the object state-machine read (`meta-object-state-routes.ts`)
+ * nor the published read (now in `meta-item-history-routes.ts`) builds a `query:`
+ * slot, so the new module's floor is 0 and the history module's stays 0.
+ */
+const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
+    'rest-server.ts': 0,
+    'data-action-routes.ts': 3,
+    'batch-routes.ts': 0,
+    'approvals-routes.ts': 0,
+    'sharing-routes.ts': 0,
+    'analytics-routes.ts': 0,
+    'security-routes.ts': 0,
+    'discovery-routes.ts': 0,
+    'email-routes.ts': 0,
+    'search-routes.ts': 0,
+    'ui-routes.ts': 0,
+    'form-routes.ts': 0,
+    'crud-routes.ts': 1,
+    'meta-collection-routes.ts': 0,
+    'meta-item-read-routes.ts': 0,
+    'meta-item-write-routes.ts': 0,
+    'meta-item-history-routes.ts': 0,
+    'meta-object-state-routes.ts': 0,
+};
+
 const CENSUS: CensusEntry[] = [
     // [#21180] 5 -> 4: the anonymous lookup picker's `pickerRequest` literal
     // left with its route. Re-derived with `querySlots` itself: 5 slots on the
@@ -129,8 +233,12 @@ const CENSUS: CensusEntry[] = [
     // parses `filter` / `orderby` off the caller's querystring too, so it is a
     // door). Re-derived with `querySlots`: 1 slot left here (`req.query`), 3
     // there, the same 4 in all. Each floor equals its file's measured count.
-    { file: 'rest-server.ts', source: REST_SERVER, minQuerySlots: 1, noDoor: false },
-    { file: 'data-action-routes.ts', source: DATA_ACTION_ROUTES, minQuerySlots: 3, noDoor: false },
+    //
+    // [#23050 slice 3] The registrar files are read off the list, each with its
+    // floor from `REGISTRAR_QUERY_SLOT_FLOORS` above.
+    ...REST_SERVER_REGISTRAR_FILES.map((file): CensusEntry => ({
+        file, source: REGISTRAR_SOURCES.get(file)!, minQuerySlots: REGISTRAR_QUERY_SLOT_FLOORS[file], noDoor: false,
+    })),
     { file: 'import-runner.ts', source: IMPORT_RUNNER, minQuerySlots: 3, noDoor: true },
 ];
 
@@ -293,6 +401,35 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // The two shapes `import-runner.ts` actually contains.
         expect(wireKeysAnywhere('const filter: Record<string, any> = {};')).toEqual([]);
         expect(wireKeysAnywhere('const a = { where: filter, limit: 2 };')).toEqual([]);
+    });
+
+    it('[#23050 slice 3] censuses every file on the registrar list — its length and the slot sum are pinned', () => {
+        // A module added to the list makes this re-read its number rather than
+        // widening unnoticed. [#23050 slice 4] Length 4 → 5, the sum unchanged.
+        // [#23050 slice 5] Length 5 → 6, the sum unchanged.
+        // [#23050 slice 6] Length 6 → 7, the sum unchanged.
+        // [#23050 slice 7] Length 7 → 8, the sum unchanged.
+        // [#23050 slice 8] Length 8 → 9, the sum unchanged.
+        // [#23050 slice 9] Length 9 → 10, the sum unchanged.
+        // [#23050 slice 10] Length 10 → 11, the sum unchanged.
+        // [#23050 slice 11] Length 11 → 12, the sum unchanged.
+        // [#23050 slice 12] Length 12 → 13, the sum unchanged (its one slot moved
+        // from `rest-server.ts` to `crud-routes.ts`).
+        // [#23050 slice 13a] Length 13 → 14, the sum unchanged (the moved `/meta`
+        // groups carry no slot).
+        // [#23050 slice 13b] Length 14 → 15, the sum unchanged (the per-item reads
+        // carry no slot).
+        // [#23050 slice 13c] Length 15 → 16, the sum unchanged (the per-item writes
+        // carry no slot).
+        // [#23050 slice 13d] Length 16 → 17, the sum unchanged (the history family
+        // carries no slot).
+        // [#23050 slice 13e] Length 17 → 18, the sum unchanged (neither the object
+        // state-machine read nor the published read carries a slot).
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
+        expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
+        expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
+            .toEqual([...REST_SERVER_REGISTRAR_FILES]);
+        expect([...REGISTRAR_SOURCES.values()].reduce((n, source) => n + querySlots(source).length, 0)).toBe(4);
     });
 
     it('dropping comment lines leaves the code that is being censused', () => {

@@ -2,6 +2,7 @@
 
 import { ObjectQL, SECURITY_SERVICE_SOURCE_SLOT } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
+import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
@@ -9,10 +10,6 @@ import { resolveArtifactPackageOrder, artifactPackageId, readDeploymentOrgScopin
 // multi-package stack no body declares, and the id they take. See
 // `unclaimedTopLevelObjects` below.
 import { unclaimedTopLevel } from '@objectstack/metadata';
-// [ADR-0131 D6] The one row-value test for a legacy organization's
-// `sys_metadata` row: no metadata read serves one, so the authored hook and
-// action binders skip it too.
-import { isLegacyOrganizationRow } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -293,6 +290,35 @@ export interface ObjectQLPluginOptions {
  */
 const SKIP_SCHEMA_SYNC_ENGINE_KEY = 'skipSchemaSync';
 
+/**
+ * [#23649] The kernel-bus event {@link ObjectQLPlugin.start} triggers once per
+ * boot, with the live engine as its one argument, at the last moment a routing
+ * decision can still be made for free: every boot-registered driver has been
+ * adopted (`driver.*` services) and connected (`ObjectQL.init()`), and nothing
+ * has been schema-synced, hydrated from `sys_metadata`, read or written yet.
+ *
+ * It exists for the stack's `datasourceMapping` (ADR-0062 D2 (d), #4462). A
+ * mapping rule is routing, not a hint: from the moment it is installed, every
+ * object it matches resolves to the named datasource and never falls back to
+ * the default store. Installed any later than this (it used to be installed in
+ * `AppPlugin.start()`, after this plugin's schema sync and after the auth
+ * plugin wrote the Default Organization), the rules re-route platform objects
+ * whose tables and rows already sit in the default store, and the boot reports
+ * ready over two stores. The app plugin subscribes in its `init()`: it installs
+ * the rules and connects every datasource they route a registered object to,
+ * so the first DDL and every boot write land where the mapping routes them.
+ *
+ * After driver adoption on purpose, never in Phase 1: the engine makes its
+ * first registered driver the default, so a datasource connected before a
+ * stack plugin's `driver.*` service is adopted would take the default slot
+ * from it and move every unbound object with it. A handler's throw propagates
+ * and fails the boot (a mapped datasource that cannot connect has no fallback).
+ *
+ * Not in `IPluginLifecycleEvents`: the bus is open to custom names, and this
+ * one has one emitter (here) and one subscriber (`AppPlugin`).
+ */
+export const OBJECTQL_DRIVERS_READY_HOOK = 'objectql:drivers-ready';
+
 export class ObjectQLPlugin implements Plugin {
   name = 'com.objectstack.engine.objectql';
   type = 'objectql' as const;
@@ -349,6 +375,16 @@ export class ObjectQLPlugin implements Plugin {
    * the fix off in marketplace install-local's primary home.
    */
   private bridgeLateManifests = false;
+
+  /**
+   * [#24182] For each package the late bridge bridged as an EXTENDER, the
+   * names of the objects whose copy it rewrote: copies stamped with another
+   * package's id (the owner's), re-registered with the merged body that
+   * carries this package's extension. Read and cleared by
+   * {@link restoreExtendedObjectCopies} when the package is withdrawn, the one
+   * moment the registry no longer says which objects it extended.
+   */
+  private readonly extendedObjectCopies = new Map<string, Set<string>>();
 
   /**
    * Set at `kernel:ready`, once the boot audit has found every picklist a
@@ -515,6 +551,10 @@ export class ObjectQLPlugin implements Plugin {
       const unsubscribe = (protocol as any).onMetadataMutation(
         (evt: { type: string; name: string; state: string }) => {
           if (evt?.state === 'draft') return;
+          // The metadata service's copy of a runtime-authored object follows
+          // the registry the moment the authoring door lands. See
+          // {@link followRuntimeObjectCopy}.
+          if (evt?.type === 'object') this.followRuntimeObjectCopy(ctx, evt);
           if (evt?.type === 'hook') {
             void this.resyncAuthoredHooks(ctx).catch((e: any) => {
               ctx.logger.warn('[ObjectQLPlugin] authored-hook rebind after mutation failed', {
@@ -637,7 +677,24 @@ export class ObjectQLPlugin implements Plugin {
       // register/bridge interleave would bridge a body that the very next
       // package is about to change. For the single-package artifact this is the
       // same one register followed by the same one bridge as before (D7).
-      register: (artifact: any) => {
+      //
+      // [#23972] `options.source` is where every package in this artifact came
+      // from, stamped on each registry row (`InstalledPackageSchema.source`).
+      // Absent means `'code'`, the deployment's own code (`registerApp`'s
+      // default); the marketplace install-local plugin states `'marketplace'`.
+      register: (registeredArtifact: any, options?: { source?: 'code' | 'marketplace' }) => {
+        // ADR-0087 D2 at the registration door, for an artifact that carries
+        // `packages[]`: its bodies are strictly parsed by the ordering below
+        // BEFORE `registerApp` could convert each one, so a bundle handed here
+        // as authored (a marketplace install, a hosted kernel's own loader)
+        // converts once as a whole first — the window is the artifact's, read
+        // off its own declared range, and every body replays under it. A
+        // single-body payload converts at `registerApp` (the body door) and is
+        // handed through untouched here; a bundle an artifact door already
+        // converted comes back by reference. See `ObjectQL.convertPackageBodyForward`.
+        const artifact = Array.isArray(registeredArtifact?.packages)
+          ? ql.convertPackageBodyForward(registeredArtifact)
+          : registeredArtifact;
         const ordered = resolveArtifactPackageOrder(artifact) as any[];
         // [ADR-0130 D4] The objects of the stack's RESIDUAL — top-level objects
         // no package body declares — as the residual rule answers it. See
@@ -692,7 +749,7 @@ export class ObjectQLPlugin implements Plugin {
         }
 
         for (const manifest of ordered) {
-          ql.registerApp(manifest, scope);
+          ql.registerApp(manifest, scope, options?.source);
           ctx.logger.debug('Manifest registered via manifest service', {
             id: manifest.id || manifest.name
           });
@@ -719,7 +776,14 @@ export class ObjectQLPlugin implements Plugin {
           ? [...ordered, { id: residual.ownerId }]
           : ordered;
         return this.bridgeArtifactObjectsToMetadataService(ctx, bridged);
-      }
+      },
+      // [#24182] The withdrawal counterpart of the bridge's extender rewrite:
+      // a door that withdrew a package from the registry calls this so the
+      // copies of OTHER packages' objects that the package's extensions
+      // rewrote serve the registry's definition again. Never rejects. See
+      // {@link restoreExtendedObjectCopies}.
+      restoreExtendedObjectCopies: (packageId: string): Promise<void> =>
+        this.restoreExtendedObjectCopies(ctx, packageId),
     });
 
     ctx.logger.info('ObjectQL engine registered', {
@@ -1015,6 +1079,16 @@ export class ObjectQLPlugin implements Plugin {
     // Initialize drivers (calls driver.connect() which sets up persistence)
     await this.ql?.init();
 
+    // [#23649] The drivers are live and nothing has been synced, hydrated, read
+    // or written: the moment a subscriber can still decide WHERE objects live
+    // (the stack's `datasourceMapping`). See {@link OBJECTQL_DRIVERS_READY_HOOK}.
+    // Spelled as the literal here, not the constant: the settings bind-window
+    // guard derives the hooks fired before the settings bind from their call
+    // sites and can only read a literal name. The constant is the subscribers'
+    // spelling; the runtime pin `datasource-mapping-before-schema-sync.test.ts`
+    // subscribes through it and goes red if the two ever differ.
+    if (this.ql) await ctx.trigger('objectql:drivers-ready', this.ql);
+
     // Phase 1: Sync built-in schemas so sys_metadata table exists before reading it.
     //
     // Cold-start-sensitive runtimes (Cloudflare Containers, Lambda) can
@@ -1067,6 +1141,10 @@ export class ObjectQLPlugin implements Plugin {
     // skip it in that case.
     if (this.environmentId === undefined) {
         await this.bridgeObjectsToMetadataService(ctx);
+    } else if (this.hydrateMetadataFromDb) {
+        // The runtime-authored objects the hydration above just put in this
+        // kernel's own registry. See {@link bridgeRuntimeObjectsToMetadataService}.
+        await this.bridgeRuntimeObjectsToMetadataService(ctx);
     }
     // Arm the incremental per-manifest bridge for everything after start() —
     // marketplace install / rehydrate register through the `manifest`
@@ -2137,6 +2215,54 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
+   * The storage fixes for a deployment where nothing serves `sys_metadata`,
+   * worded exactly as the CLI's boot-time `⚠ No storage:` line names them
+   * (`packages/cli` `serve.ts`, `noStorageRemedies`): the operator meets the
+   * same three remedies from either line, never two vocabularies. ⛔ Not a
+   * place to add a fourth — a remedy the CLI line does not name belongs there
+   * first.
+   */
+  private static readonly NO_STORAGE_REMEDIES = [
+    'set OS_DATABASE_URL (e.g. file:./data/app.db, or a postgres:// or mysql:// URL)',
+    "mount a storage driver in the stack's plugins (e.g. new DriverPlugin(driver) from @objectstack/runtime)",
+    'run with --dev (an in-memory SQLite store, for development)',
+  ] as const;
+
+  /**
+   * Is `sys_metadata` unreadable because NO STORAGE exists — no datasource
+   * declared, no driver registered — rather than because a datasource that
+   * exists failed to answer?
+   *
+   * Read off the engine's own routing, the facts `getDriver` throws on, and
+   * never off the text of the error the read produced (that string is the
+   * driver's and the engine's to reword):
+   *
+   * - a driver serves it ⇒ the read itself failed: a datasource problem;
+   * - it is bound to a named datasource (explicit, mapping, lifecycle or
+   *   package binding) whose driver is missing ⇒ that datasource is declared:
+   *   a datasource problem;
+   * - the datasource layer recorded a declared datasource it could not use
+   *   (policy-refused, or a connect failure the operator waved through) ⇒ a
+   *   datasource problem.
+   *
+   * Only when all three are empty does nothing at all stand behind the
+   * object, which is the case the datasource remedy cannot help with.
+   *
+   * Asked ONLY once the read has already failed, so a healthy boot pays
+   * nothing, and answered as of this moment of the boot — which is the same
+   * moment, against the same registries, that the failed read was judged at.
+   * A start() that registers a driver later does not undo the verdict the
+   * line already states for this process.
+   */
+  private sysMetadataHasNoStorage(): boolean {
+    const ql = this.ql;
+    if (!ql) return false;
+    if (ql.getDriverForObject('sys_metadata')) return false;
+    if (ql.resolveEffectiveDatasource('sys_metadata') !== undefined) return false;
+    return ql.listUnavailableDatasources().length === 0;
+  }
+
+  /**
    * Restore persisted metadata from the database (sys_metadata) on startup.
    *
    * Calls `protocol.loadMetaFromDb()` to bulk-load all active metadata
@@ -2162,6 +2288,10 @@ export class ObjectQLPlugin implements Plugin {
    * still continues in the degraded state (refusing to boot on an unreadable
    * overlay store would turn a transient outage into an outright outage),
    * it just no longer claims that state is health.
+   *
+   * The outage line names the fix that matches its cause
+   * ({@link sysMetadataHasNoStorage}): the storage remedies when no datasource
+   * is declared and no driver is registered, the datasource remedy when one is.
    */
   private async restoreMetadataFromDb(ctx: PluginContext): Promise<void> {
     // Phase 1: Resolve protocol service (separate from DB I/O for clearer diagnostics)
@@ -2189,12 +2319,26 @@ export class ObjectQLPlugin implements Plugin {
         // ranks any count taken from a read that did not happen. The line owes
         // the two things AGENTS.md requires of a durability `error` — the
         // concrete consequence, and the fix.
+        //
+        // The fix depends on WHY the read did not happen, and the engine knows:
+        // a deployment that declared no datasource and registered no driver has
+        // no connection or credentials to check, so the datasource remedy would
+        // send the operator hunting for a store nobody configured. Level and
+        // consequence are the same in both arms; only the cause and the fix
+        // differ.
+        const noStorage = this.sysMetadataHasNoStorage();
         ctx.logger.error(
-          'sys_metadata could NOT be read at boot — persisted metadata was NOT restored, and this kernel will keep reporting healthy. ' +
+          'sys_metadata could NOT be read at boot — ' +
+            (noStorage
+              ? 'no storage is configured: no datasource is declared and no driver is registered, so nothing serves sys_metadata. Persisted metadata was NOT restored, '
+              : 'persisted metadata was NOT restored, ') +
+            'and this kernel will keep reporting healthy. ' +
             'Every overlay object, view, app, permission and hook stored in the database is absent from the SchemaRegistry for the life of this process: ' +
             'registry lookups answer "not declared" rather than "unavailable", so unknown-column query guards, hooks and relationships silently degrade, ' +
             'and overlay objects get neither a synced table nor a metadata bridge. Authoring against this kernel writes on top of state it never loaded. ' +
-            'Fix: check the datasource behind sys_metadata — connection, credentials, and that the table exists — then restart. ' +
+            (noStorage
+              ? `Fix: ${ObjectQLPlugin.NO_STORAGE_REMEDIES[0]}; ${ObjectQLPlugin.NO_STORAGE_REMEDIES[1]}; or ${ObjectQLPlugin.NO_STORAGE_REMEDIES[2]} — then restart. `
+              : 'Fix: check the datasource behind sys_metadata — connection, credentials, and that the table exists — then restart. ') +
             'A store that merely has not been provisioned yet is NOT this case; that first-boot path stays quiet.',
           // `Logger.error(message, error?: Error, meta?)` — the error slot is
           // genuinely empty here: `loadMetaFromDb` swallows the driver error
@@ -2276,6 +2420,11 @@ export class ObjectQLPlugin implements Plugin {
    * carries no `_packageId` would have its true package provenance
    * overwritten with 'metadata-service'. Nothing is stale either: the
    * registry is the source here, and it already holds what we just copied.
+   *
+   * One-shot: what the registry holds AFTER this pass reaches the service
+   * through {@link followRuntimeObjectCopy} (a runtime-authored object saved or
+   * deleted through an authoring door) and
+   * {@link bridgeManifestObjectsToMetadataService} (a package registered late).
    */
   private async bridgeObjectsToMetadataService(ctx: PluginContext): Promise<void> {
     try {
@@ -2323,6 +2472,194 @@ export class ObjectQLPlugin implements Plugin {
         error: e instanceof Error ? e.message : String(e),
       });
     }
+  }
+
+  /**
+   * The boot half of {@link followRuntimeObjectCopy} on a kernel with an
+   * `environmentId` that hydrates its own `sys_metadata`
+   * (`hydrateMetadataFromDb`: `os dev`, `os serve`, `os start` and the cloud
+   * single-environment runtime): copy each RUNTIME-AUTHORED object the
+   * hydration put in the registry into the `metadata` service.
+   *
+   * The full {@link bridgeObjectsToMetadataService} stays off on this shape
+   * (cross-project leakage, and the code packages' objects come from the
+   * artifact). But nothing else gives a hydrated runtime object a copy, and no
+   * mutation fires for it after boot: an object saved with `apiEnabled: false`
+   * and then restarted was served by both exposure gates, which read an absent
+   * copy as "no declaration". `hydrateMetadataFromDb` is set only on a kernel
+   * whose registry is its own, so every object this pass copies is one this
+   * environment authored. Same write as the follow: tenant-authored owner rows
+   * only, through `registerInMemory` (no persistence, no announce).
+   */
+  private async bridgeRuntimeObjectsToMetadataService(ctx: PluginContext): Promise<void> {
+    if (!this.ql?.registry) return;
+    let metadataService: IMetadataService | undefined;
+    try {
+      metadataService = ctx.getService<IMetadataService>('metadata');
+    } catch {
+      return; // no metadata service on this kernel — there is no copy to keep
+    }
+    if (!metadataService) return;
+    const failed: string[] = [];
+    let copied = 0;
+    for (const obj of this.ql.registry.getAllObjects()) {
+      try {
+        if (await this.mirrorRuntimeObject(metadataService, obj.name)) copied++;
+      } catch {
+        failed.push(obj.name);
+      }
+    }
+    if (copied > 0) {
+      ctx.logger.debug('Copied runtime-authored objects into the metadata service', { count: copied });
+    }
+    if (failed.length > 0) {
+      ctx.logger.error(
+        `[ObjectQLPlugin] the metadata service holds no copy of runtime-authored object(s) ${failed.map((n) => `'${n}'`).join(', ')}: `
+        + 'the registry, the data door and REST serve them, but the MCP exposure gates read an absent copy as "no '
+        + 'declaration" and serve them even when their API exposure is off, and MCP does not list them. Fix: restart '
+        + 'this process; if it recurs, check that the metadata service accepts in-memory registration.',
+        undefined,
+        { objects: failed },
+      );
+    }
+  }
+
+  /**
+   * Keep the metadata service's copy of a RUNTIME-AUTHORED object current after
+   * boot, and take it out when the object is deleted.
+   *
+   * {@link bridgeObjectsToMetadataService} copies each registry object into the
+   * `metadata` service once, at boot, and no authoring door writes to that
+   * service. So on a kernel where the bridge ran, the service's answer for a
+   * runtime-authored object was whatever the boot saw: an object created
+   * afterwards had NO copy, a re-saved one kept its boot body, a deleted one
+   * kept answering. The readers of `IMetadataService.getObject` / `listObjects`
+   * inherit that, and one of them decides exposure: the MCP stdio door gates
+   * every data verb on the copy's `enable.apiEnabled`, and an absent copy reads
+   * as "no declaration" (its gate falls open by design, parity with the HTTP
+   * gate), so an object whose API exposure was switched off after boot was
+   * still served, and a deleted one was still listed and described.
+   *
+   * The landing point is the copy's producer, on the seam every authoring door
+   * already funnels through (`onMetadataMutation`, which also replays on a
+   * cluster peer once its registry has converged), not the readers: the HTTP
+   * gate (`refuseUnexposedDataAction`), the AI tools and the MCP resources read
+   * the same service. A copy is refreshed IN PLACE, never dropped on save: an
+   * absent copy is the state that falls open.
+   *
+   * What it touches, and what it never does:
+   *
+   *  - Only a copy of a RUNTIME-AUTHORED object: the registry's owner row for
+   *    the name is tenant-authored (`isTenantAuthored`), or the copy already in
+   *    the service says it is. A code package's copy is the code layer the
+   *    protocol restores baselines from; it is sealed against runtime edits and
+   *    kept by {@link bridgeManifestObjectsToMetadataService}, so it is left
+   *    exactly as it is.
+   *  - A refresh goes through `registerInMemory` (synchronous, no persistence,
+   *    no announce), so it has landed before the authoring call returns and
+   *    never writes a row through a writable loader. A service without it gets
+   *    the bridge's own `register(..., { notify: false })`.
+   *  - The one removal the service has, `unregister`, also deletes through its
+   *    writable `datasource:` loaders, so it is called only when the mutation
+   *    says `deleted` (the stored row is already gone) AND the registry no
+   *    longer serves the name AND the copy is the runtime-authored one.
+   *    Afterwards the registry is asked again: a re-creation that landed while
+   *    the removal was awaiting its loaders has its copy put back.
+   *
+   * Armed on every kernel shape. On a kernel with an `environmentId` (`os dev`
+   * as `env_local`, the cloud single-environment runtime) the service is
+   * sourced from the artifact and the boot bridge does not run, so a
+   * runtime-authored object had no copy there at all: both exposure gates read
+   * that absence as "no declaration" and served an object saved with
+   * `apiEnabled: false`. The copy written here is the object THIS kernel's
+   * authoring door just saved, so the cross-project leakage the full bridge is
+   * gated against does not arise. Its boot half on that shape is
+   * {@link bridgeRuntimeObjectsToMetadataService}.
+   */
+  private followRuntimeObjectCopy(ctx: PluginContext, evt: { name: string; state: string }): void {
+    if (typeof evt?.name !== 'string' || evt.name === '') return;
+    // An async function runs synchronously up to its first `await`: the
+    // refresh of a served runtime object is done before this call returns.
+    void this.settleRuntimeObjectCopy(ctx, evt.name, evt.state).catch((e: unknown) => {
+      // Registry and service now disagree about an object while everything
+      // looks normal, and the exposure an author set is what the disagreement
+      // is about: an `error`, with the consequence and the way out.
+      ctx.logger.error(
+        `[ObjectQLPlugin] the metadata service's copy of object '${evt.name}' could not be brought up to date after it was `
+        + 'saved or deleted: the registry, the data door and REST already serve the new definition, but readers of the '
+        + 'metadata service (the MCP stdio door\'s exposure gate and object listing among them) keep the previous one, '
+        + 'and nothing retries. Fix: restart this process (the boot bridge re-copies every object); if it recurs, '
+        + 'check that the metadata service accepts in-memory registration.',
+        e instanceof Error ? e : new Error(String(e)),
+        { object: evt.name },
+      );
+    });
+  }
+
+  /** @see followRuntimeObjectCopy */
+  private async settleRuntimeObjectCopy(ctx: PluginContext, name: string, state: string): Promise<void> {
+    if (!this.ql?.registry) return;
+    let metadataService: IMetadataService | undefined;
+    try {
+      metadataService = ctx.getService<IMetadataService>('metadata');
+    } catch {
+      return; // no metadata service on this kernel — there is no copy to keep
+    }
+    if (!metadataService) return;
+
+    // The registry serves a runtime-authored object under this name: the copy
+    // IS its current definition.
+    if (await this.mirrorRuntimeObject(metadataService, name)) return;
+
+    // It does not. Only a runtime-authored copy is this method's to change.
+    const existing = await metadataService.getObject(name);
+    if (!isTenantAuthored(existing)) return;
+    const served = this.currentObjectCopyBody(name);
+    if (served) {
+      // The registry now serves something else under the name (a code
+      // package's definition, once a runtime layer over it was removed): the
+      // copy follows what is served.
+      await this.putObjectCopy(metadataService, name, served);
+      return;
+    }
+    if (state !== 'deleted') return;
+    await metadataService.unregister('object', name, { notify: false });
+    await this.mirrorRuntimeObject(metadataService, name);
+  }
+
+  /**
+   * Put the registry's current definition of `name` into the service when the
+   * registry's owner row for it is tenant-authored. `false` = it is not (or the
+   * name is not registered), nothing was written.
+   */
+  private async mirrorRuntimeObject(metadataService: IMetadataService, name: string): Promise<boolean> {
+    const owner = this.ql?.registry.getObjectOwner(name);
+    if (!owner || !isTenantAuthored(owner.definition)) return false;
+    const body = this.currentObjectCopyBody(name);
+    if (!body) return false;
+    await this.putObjectCopy(metadataService, name, body);
+    return true;
+  }
+
+  /**
+   * The definition the registry serves for `name`, shaped as the boot bridge
+   * copies it: the merged object, tagged with its owner's package the way
+   * `SchemaRegistry.getAllObjects` tags it.
+   */
+  private currentObjectCopyBody(name: string): ServiceObject | undefined {
+    const registry = this.ql?.registry;
+    const current = registry?.getObject(name);
+    if (!registry || !current) return undefined;
+    const packageId = registry.getObjectOwner(name)?.packageId;
+    return { ...current, ...(packageId !== undefined ? { _packageId: packageId } : {}) } as ServiceObject;
+  }
+
+  private putObjectCopy(metadataService: IMetadataService, name: string, body: ServiceObject): void | Promise<void> {
+    if (typeof metadataService.registerInMemory === 'function') {
+      metadataService.registerInMemory('object', name, body);
+      return;
+    }
+    return metadataService.register('object', name, body, { notify: false });
   }
 
   /**
@@ -2472,6 +2809,14 @@ export class ObjectQLPlugin implements Plugin {
           if (!existing || ownPreviousCopy) {
             await metadataService.register('object', obj.name, obj, { notify: false });
             bridged++;
+            // [#24182] Another package owns this object: the copy just written
+            // carries this package's extension. Remembered, so its withdrawal
+            // can put the owner's definition back.
+            if ((obj as any)._packageId !== packageId) {
+              let names = this.extendedObjectCopies.get(packageId);
+              if (!names) this.extendedObjectCopies.set(packageId, names = new Set());
+              names.add(obj.name);
+            }
           }
         } catch (e: unknown) {
           ctx.logger.debug('Failed to bridge manifest object to metadata service', {
@@ -2493,6 +2838,71 @@ export class ObjectQLPlugin implements Plugin {
         package: packageId,
         error: e instanceof Error ? e.message : String(e),
       });
+    }
+  }
+
+  /**
+   * [#24182] The withdrawal counterpart of {@link bridgeManifestObjectsToMetadataService}
+   * for a package that EXTENDS objects other packages own: put the registry's
+   * current definition back into each owner's copy the package's bridge rewrote.
+   *
+   * When an extender is bridged, the objects it contributes to resolve to the
+   * merged body stamped with the OWNER's id, and the bridge re-registers the
+   * owner's copy with it (its own-previous-copy rule is keyed on that stamp).
+   * Withdrawing the extender (`SchemaRegistry.uninstallPackage`) drops its
+   * contribution from the registry, so the object listing and the data door
+   * stop serving the extension's fields; but the copy keeps them, and
+   * `GET /meta/object/NAME` reads the copy before the registry, so it kept
+   * serving them until a restart. A withdrawal of the package's OWN copies
+   * never touches these: they are stamped with another package's id.
+   *
+   * The names come from {@link extendedObjectCopies}, recorded when the bridge
+   * wrote each copy. Only a copy the bridge itself would overwrite is written
+   * (its stamp is the registry owner's), through the bridge's own verb, so an
+   * authored copy stays as it is; a name the registry no longer serves is left
+   * to the owner's own withdrawal. A package the registry still holds is not
+   * withdrawn, and nothing is done.
+   *
+   * Never rejects: the withdrawal has already happened. A copy that could not
+   * be written disagrees with what the registry serves while everything looks
+   * normal, so that is said once at `error`, with the remedy.
+   */
+  private async restoreExtendedObjectCopies(ctx: PluginContext, packageId: string): Promise<void> {
+    const names = this.extendedObjectCopies.get(packageId);
+    const registry = this.ql?.registry;
+    if (!names || !registry || registry.getPackage(packageId) !== undefined) return;
+    this.extendedObjectCopies.delete(packageId);
+    let metadataService: IMetadataService | undefined;
+    try {
+      metadataService = ctx.getService<IMetadataService>('metadata');
+    } catch {
+      return; // no metadata service on this kernel — there is no copy to restore
+    }
+    if (!metadataService || typeof metadataService.register !== 'function') return;
+
+    const failed: string[] = [];
+    for (const name of names) {
+      try {
+        const served = this.currentObjectCopyBody(name);
+        const owner = (served as any)?._packageId;
+        if (!served || owner === undefined) continue;
+        const existing = await metadataService.getObject(name);
+        if (existing == null || (existing as any)._packageId !== owner) continue;
+        await metadataService.register('object', name, served, { notify: false });
+      } catch {
+        failed.push(name);
+      }
+    }
+    if (failed.length > 0) {
+      ctx.logger.error(
+        `[ObjectQLPlugin] package '${packageId}' was withdrawn, but the metadata service's copy of the object(s) it extended `
+        + `${failed.map((n) => `'${n}'`).join(', ')} could not be restored: the object listing and the data door already `
+        + 'serve them without its fields, while GET /api/v1/meta/object/NAME keeps serving those fields until a restart. '
+        + 'Fix: restart this process (the boot bridge re-copies every object); if it recurs, check that the metadata '
+        + 'service accepts registration.',
+        undefined,
+        { package: packageId, objects: failed },
+      );
     }
   }
 
@@ -2548,17 +2958,30 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
+   * [ADR-0131 D6/D7] The ids of a legacy organization's `sys_metadata` rows,
+   * read off the physical column through the table's driver — empty on a
+   * migrated or fresh database. Throws when the read cannot answer.
+   */
+  private async legacyOrganizationRowIds(): Promise<ReadonlySet<string>> {
+    const driver = (this.ql as { getDriverForObject?: (objectName: string) => unknown } | undefined)
+      ?.getDriverForObject?.('sys_metadata');
+    return new Set((await readLegacyOrganizationRows(driver)).keys());
+  }
+
+  /**
    * Read the ACTIVE runtime-authored hook rows from `sys_metadata`.
    *
    * Reads the table directly (like `protocol.getMetaItems` does) instead of
    * going through the metadata service, because env-scoped kernels have no
    * DatabaseLoader so the service never surfaces these rows.
    *
-   * [ADR-0131 D6] The environment's rows only (`organization_id IS NULL`),
-   * the rule every metadata read follows: a legacy organization-scoped hook
-   * row is not bound — the protocol's boot report
-   * (`reportUnhydratableOrgScopedRows`) names it, and the v18 migration
-   * ceremony carries it.
+   * [ADR-0131 D6/D7] The environment's rows only: a legacy
+   * organization-scoped hook row is not bound, and the v18 migration ceremony
+   * carries it. The family declares no organization column, so the engine row
+   * never carries one; on a database the ceremony has not migrated (which
+   * `os serve` refuses, but an `os migrate` boot binds on) the legacy rows are
+   * told apart by the physical column ({@link legacyOrganizationRowIds}). A
+   * read of it that cannot answer is a failed read (`null`) like any other.
    *
    * Returns `null` when the read failed (e.g. no sys_metadata table on this
    * kernel) — callers must treat that as "couldn't read", NOT "zero hooks",
@@ -2587,10 +3010,11 @@ export class ObjectQLPlugin implements Plugin {
           context: { isSystem: true },
         })) ?? [];
       }
+      const legacy = await this.legacyOrganizationRowIds();
       const hooks: any[] = [];
       for (const row of rows) {
-        // [ADR-0131 D6] The environment's rows only — see the TSDoc.
-        if (isLegacyOrganizationRow(row)) continue;
+        // [ADR-0131 D6/D7] The environment's rows only — see the TSDoc.
+        if (legacy.has(String(row.id))) continue;
         try {
           const data = this.convertStoredRow(
             ctx,
@@ -2775,9 +3199,11 @@ export class ObjectQLPlugin implements Plugin {
           context: { isSystem: true },
         })) ?? [];
       }
+      // [ADR-0131 D6/D7] The environment's rows only — see readAuthoredHookRows.
+      const legacy = await this.legacyOrganizationRowIds();
       const actions: any[] = [];
       for (const row of rows) {
-        if (isLegacyOrganizationRow(row)) continue; // [ADR-0131 D6]
+        if (legacy.has(String(row.id))) continue;
         const data = parseRow(row, 'action');
         if (data && typeof data.name === 'string') actions.push(data);
       }
@@ -2790,7 +3216,7 @@ export class ObjectQLPlugin implements Plugin {
         context: { isSystem: true },
       })) ?? [];
       for (const row of objectRows) {
-        if (isLegacyOrganizationRow(row)) continue; // [ADR-0131 D6]
+        if (legacy.has(String(row.id))) continue; // [ADR-0131 D6/D7]
         const obj = parseRow(row, 'object');
         if (!obj || typeof obj.name !== 'string' || !Array.isArray(obj.actions)) continue;
         for (const action of obj.actions) {

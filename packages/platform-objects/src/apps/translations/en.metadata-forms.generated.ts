@@ -204,6 +204,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "fields.options.description": {
         label: "Description"
       },
+      "fields.options.kind": {
+        label: "Kind",
+        helpText: "Lifecycle category (single-value select / radio only): a step on the way, the successful end, or the unsuccessful end. Required on every option of the stage field."
+      },
       "fields.reference": {
         label: "Reference",
         helpText: "Target object name. For a tree field it is optional and, if given, must be this object (a tree is a hierarchy within its own object — link a different object with a lookup)"
@@ -632,6 +636,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Reference Via",
         helpText: "Makes this text field the id half of a polymorphic pointer: names the SIBLING field on the same object that holds the target object name, per row (ADR-0052 §5). snake_case; text fields only, and mutually exclusive with `reference`."
       },
+      referenceDeletedWhen: {
+        label: "Reference Deleted When",
+        helpText: "Only beside referenceVia: on rows where a sibling select field holds one of its options, the record this pointer names was deleted by the platform, and the pointer is shown as a tombstone labelled by that option. Unset: no row is marked deleted."
+      },
+      "referenceDeletedWhen.field": {
+        label: "Field",
+        helpText: "The sibling select field on this object (snake_case), e.g. cancel_reason. It must be a single-value select declaring inline options."
+      },
+      "referenceDeletedWhen.value": {
+        label: "Value",
+        helpText: "The option value of that select field meaning the target was deleted, e.g. record_deleted. It must be one of its declared option values."
+      },
       mailAssociation: {
         label: "Match Inbound Mail",
         helpText: "Links inbound mail to records of this object whose value in this field matches the message's sender or a recipient (case-insensitive; the mailbox's own address excluded). Email fields only. Takes effect only where a mailbox service is set up."
@@ -665,6 +681,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "options.visibleWhen": {
         label: "Visible When"
+      },
+      "options.kind": {
+        label: "Kind"
       },
       reference: {
         label: "Reference",
@@ -1000,7 +1019,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       end_user_controls: {
         label: "End-user controls",
-        description: "What end users can do on this view — quick filters, filter tabs, visualization switching (ADR-0047, Airtable Interface parity)."
+        description: "What end users can do on this view — quick filters, filter tabs, visualization switching."
       },
       navigation_sharing: {
         label: "Navigation & sharing",
@@ -1204,7 +1223,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       source: {
         label: "Source",
-        helpText: "Page source text. For kind 'html' (alias 'jsx') it is constrained JSX compiled to the component tree at save time — parsed, never executed. For kind 'react' it is real React executed at render by the trusted runtime."
+        helpText: "Page source text. For kind 'html' it is constrained JSX compiled to the component tree at save time — parsed, never executed. For kind 'react' it is real React executed at render by the trusted runtime."
       },
       object: {
         label: "Object",
@@ -2190,7 +2209,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "API Endpoint",
-    description: "Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)"
+    description: "A stable HTTP URL that other systems call to run a flow or work with records in the app"
   },
   translation: {
     label: "Translation"
@@ -2270,11 +2289,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "Documentation",
-    description: "Package documentation — flat Markdown items (ADR-0046)"
+    description: "A help page written in Markdown that a package ships or you write yourself"
   },
   book: {
     label: "Documentation Book",
-    description: "Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)"
+    description: "A table of contents that groups help pages into ordered sections"
   },
   permission: {
     label: "Permission Set",
@@ -2311,15 +2330,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       isDefault: {
         label: "Is Default",
-        helpText: "App baseline for the everyone position (ADR-0090 D5): an app-level set is auto-bound at boot; a package-level set becomes an install-time suggestion an admin confirms. Default false."
-      },
-      managedBy: {
-        label: "Managed By",
-        helpText: "Record provenance (ADR-0086 D3): who owns this set across upgrades."
+        helpText: "Gives this set to everyone who signs in, through the built-in everyone position. A set the app itself declares is granted at startup; a set from an installed package becomes a suggestion an admin confirms in Setup. A set with high-privilege permissions is never granted this way. Default false."
       },
       packageId: {
         label: "Package Id",
-        helpText: "Owning package id for a package-shipped set (ADR-0086 D3). Leave empty for an environment-authored set."
+        helpText: "The package that ships this set; a value naming any other package is refused. Leave empty for a set created in this environment."
       },
       systemPermissions: {
         label: "System Permissions",
@@ -2327,7 +2342,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       adminScope: {
         label: "Admin Scope",
-        helpText: "Delegated administration (ADR-0090 D12): lets holders of this set administer one business-unit subtree. businessUnit is the subtree root (sys_business_unit.name) and is required, non-blank; includeSubtree defaults to true; manageAssignments, manageBindings and authorEnvironmentSets default to false; a delegate may hand out only the sets named in assignablePermissionSets. Leave empty for a set that delegates nothing."
+        helpText: "Delegated administration: lets holders of this set administer one business-unit subtree. businessUnit is the subtree root (sys_business_unit.name) and is required, non-blank; includeSubtree defaults to true; manageAssignments defaults to false and lets the holder assign people to positions, and grant sets directly, inside that subtree; a delegate may hand out only the sets named in assignablePermissionSets. Leave empty for a set that delegates nothing."
       },
       objects: {
         label: "Objects",
@@ -2372,13 +2387,13 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       delegatable: {
         label: "Delegatable",
-        helpText: "Holders may delegate this position themselves, time-boxed and with a reason (ADR-0091 D3). Default false — delegation is admin-only."
+        helpText: "Holders may delegate this position themselves, time-boxed and with a reason. Default false — delegation is admin-only."
       }
     }
   },
   capability: {
     label: "Capability",
-    description: "Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)"
+    description: "A permission a package defines; you grant it through permission sets"
   },
   agent: {
     label: "AI Agent",

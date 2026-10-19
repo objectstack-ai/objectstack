@@ -27,9 +27,31 @@ export const NotificationTemplate = ObjectSchema.create({
     // CRUD, so no `userActions` block is needed — affordance is a declaration
     // only; permission sets remain the authz.
     managedBy: 'system-data',
-    description: 'Per (topic × channel × locale) render template for notifications.',
+    // Admin-facing copy; one row per (topic, channel, locale) — see the docblock.
+    description: 'The subject and body each notification topic sends, per channel and language.',
     titleFormat: '{topic} · {channel} · {locale}',
     highlightFields: ['topic', 'channel', 'locale', 'is_active'],
+
+    // The one list view this object ships, declared for its `emptyState`: with
+    // no view at all the console synthesizes an "All records" tab and draws
+    // the generic "Nothing here yet" under it, which says nothing about what
+    // belongs on this page. `columns: []` declares no projection on purpose —
+    // the spec's "left to the renderer" form — so the grid keeps exactly the
+    // columns it derived from `highlightFields` before this view existed, and
+    // the view adds no filter, sort or page size of its own.
+    listViews: {
+        all: {
+            type: 'grid',
+            name: 'all',
+            label: 'All',
+            data: { provider: 'object', object: 'sys_notification_template' },
+            columns: [],
+            emptyState: {
+                title: 'No templates yet',
+                message: 'Add a template per topic, channel and locale; until then, a notification is sent with the title and body its sender provides.',
+            },
+        },
+    },
 
     fields: {
         id: Field.text({ label: 'Template ID', required: true, readonly: true }),

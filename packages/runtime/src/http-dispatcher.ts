@@ -17,10 +17,10 @@ import {
     AuthzStoreUnavailableError,
     type AuthGate,
 } from '@objectstack/core';
-import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage, inProcessSessionReadInput } from '@objectstack/types';
+import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage, inProcessSessionReadInput, isEngineDuplicateRecordEnvelope, structuredCodeAnswer } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
-import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { AuthSessionApi, IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { PrimaryDatasourceVerdict } from '@objectstack/objectql';
 import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import type { ServiceInfo } from '@objectstack/spec/api';
@@ -56,6 +56,9 @@ import { createActionsDomain, handleActionsRequest } from './domains/actions.js'
 import { createMcpDomains, handleMcpRequest, handleMcpSkillRequest, buildMcpBridge } from './domains/mcp.js';
 import { createMetaDomain, handleMetadataRequest } from './domains/meta.js';
 import { createDataDomain, handleDataRequest } from './domains/data.js';
+
+/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 /** Minimal local interface — full EnvironmentScopeManager was removed in Phase R. */
 interface EnvironmentScopeManager {
@@ -378,6 +381,43 @@ type ClassifiedServiceLookup =
     | { readonly outcome: 'resolved'; readonly value: any }
     | { readonly outcome: 'never-registered' }
     | { readonly outcome: 'no-instance-in-scope'; readonly scopeId: string };
+
+/**
+ * [#23686] The structured context `RestServer`'s duplicate-record arm states
+ * beside its `UNIQUE_VIOLATION`, for the dispatcher envelope's `details`.
+ * Asked only for the engine's own `DuplicateRecordError` (see
+ * `HttpDispatcher.errorFromThrown`, "One wire spelling").
+ *
+ * ONE classification, not a third spelling: the fields are read off the arm
+ * `structuredCodeAnswer` (`@objectstack/types`) answers the same throw
+ * through, so this door carries what the REST door and the Hono doors carry,
+ * each field only when the producer stated it, and an arm that grows a field
+ * grows it here too. ⛔ Never list the fields here. The arm's own sentence
+ * (`error`) and `code` are dropped because the envelope already carries both,
+ * as `message` and `code`.
+ *
+ * The arm must AGREE with the envelope already decided, as at the Hono doors:
+ * its status must be the thrown one and its code the envelope's, so it can
+ * only add context, never change the answer. Disagreeing, it adds nothing.
+ * The envelope's code for this class is itself read off the same arm
+ * (`HttpDispatcher.errorFromThrown`, #23714), so this function spells no copy
+ * of it either.
+ *
+ * ⛔ Deliberately not every arm. The dispatcher's other 409s
+ * (`CONCURRENT_UPDATE`, `DELETE_RESTRICTED`) keep the body they have; widening
+ * the context this door carries for them is a change of its own.
+ */
+function duplicateArmContext(
+    thrown: unknown,
+    envelope: { status: number; code: string },
+): Record<string, unknown> | undefined {
+    const arm = structuredCodeAnswer(thrown);
+    if (arm === undefined || arm.status !== envelope.status || arm.body.code !== envelope.code) return undefined;
+    const context = Object.fromEntries(
+        Object.entries(arm.body).filter(([key]) => key !== 'error' && key !== 'code'),
+    );
+    return Object.keys(context).length > 0 ? context : undefined;
+}
 
 /**
  * The HTTP dispatch engine — translates an inbound (method, path, body, ctx)
@@ -1107,8 +1147,10 @@ export class HttpDispatcher {
      * `details` — the precedence `buildApiError` already declares. Only
      * {@link errorFromThrown} passes it, because the shared resolver it
      * delegates to has already answered the code question for both package
-     * doors; every other call site still expresses its code the way it did (a
-     * `details.code` to promote, or none at all and let the status derive one).
+     * doors (and, for the engine's `DuplicateRecordError` alone, the method
+     * passes the ruled wire spelling instead — #23686); every other call site
+     * still expresses its code the way it did (a `details.code` to promote, or
+     * none at all and let the status derive one).
      *
      * [#9106] `extra` carries declared siblings of `code` (today only the
      * demoted `declaredCode`); again only {@link errorFromThrown} passes it.
@@ -1158,9 +1200,60 @@ export class HttpDispatcher {
      * The one thing that stayed here is DISCLOSURE: `this.error` withholds a
      * leaky 5xx message (#3867), which is a property of this surface's answer
      * rather than of the throw.
+     *
+     * ## One wire spelling for a unique-constraint refusal (#23686)
+     *
+     * Maintainer ruling (2026-09-03, recorded in commit 65846bc46): one wire
+     * spelling on every route, `UNIQUE_VIOLATION`; the row reports it too.
+     *
+     * The engine's `DuplicateRecordError` declares `409` and its in-process
+     * identity, `DUPLICATE_RECORD`, which an in-process caller (a hook, a flow
+     * node) branches on and which is ⛔ not renamed. The shared resolver
+     * passes that registered code through unchanged, so every domain whose
+     * catch arm hands the throw here (an action body's write, an action or
+     * catalog activation flip losing a race on the ledger's unique key)
+     * answered `409 DUPLICATE_RECORD`, while `RestServer`'s arm, the batch and
+     * import rows and both Hono doors answer the same throw as
+     * `UNIQUE_VIOLATION`.
+     *
+     * So this method decides the code for that class before writing it, keyed
+     * exactly as those doors key it: the registered code AND the class name
+     * ({@link isEngineDuplicateRecordEnvelope}, `@objectstack/types`), never
+     * message text. The code itself is read off `RestServer`'s arm
+     * (`structuredCodeAnswer`, #23714), never spelled here. A producer that
+     * merely SPEAKS `DUPLICATE_RECORD` (a handler or hook throwing the
+     * registered code without being the engine's class) keeps its own code
+     * and its own body. Beside the code,
+     * the envelope's `details` carries what `RestServer`'s arm carries beside
+     * its own, read off that one classification ({@link duplicateArmContext})
+     * rather than listed here: `developerMessage`, `object`, and `field` when
+     * the driver named the column. `message` stays the thrown one, as on every
+     * other code at this door and at the Hono doors; `declaredCode` stays
+     * absent, as `DUPLICATE_RECORD` is a registered member.
+     *
+     * ⚠️ `dispatcher-plugin`'s `errorResponseBase`, the exit for a throw that
+     * LEAVES `dispatch()`, does not carry this translation. No domain it
+     * serves was measured handing it the engine's class (every write those
+     * routes reach is caught in its domain and answered here), so the
+     * divergence is declared rather than closed by a second translator.
      */
     private errorFromThrown(e: any, fallbackStatus = 500) {
         const thrown = resolveThrownHttpError(e, fallbackStatus);
+        // [#23686] The code this envelope carries: the resolver's, except the
+        // engine's unique-constraint envelope, which crosses HTTP as the one
+        // ruled wire spelling (see "One wire spelling" above).
+        //
+        // [#23714] That wire code is read off the shared classification's arm
+        // for the class (`structuredCodeAnswer`, the arm `RestServer` answers
+        // with), so this package spells no copy of it: the stamp stays where
+        // the error-code ledger lists it, under `@objectstack/types`. The
+        // resolver's code is kept only if that arm ever answered no string
+        // code for the class.
+        const engineDuplicate = isEngineDuplicateRecordEnvelope(e);
+        const duplicateArmCode = engineDuplicate ? structuredCodeAnswer(e)?.body.code : undefined;
+        const code = typeof duplicateArmCode === 'string' ? duplicateArmCode : thrown.code;
+        const armContext = engineDuplicate ? duplicateArmContext(e, { status: thrown.status, code }) : undefined;
+        const details = armContext ? { ...thrown.details, ...armContext } : thrown.details;
         // [#9106] `code`, the NARROWED spelling — the same one the REST door
         // has served since #8016, so the two doors now agree on `error.code`
         // unconditionally (maintainer ruling 2026-08-16: `error.code` is a
@@ -1193,7 +1286,7 @@ export class HttpDispatcher {
             ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
         };
         return this.error(
-            thrown.message, thrown.status, thrown.details, thrown.code,
+            thrown.message, thrown.status, details, code,
             Object.keys(extra).length > 0 ? extra : undefined,
         );
     }
@@ -1439,7 +1532,8 @@ export class HttpDispatcher {
             // `.catch(() => undefined)` on it — that converts a THROW into the
             // same `undefined` a gate-less session produces, which is the
             // collapse #23245 repaired.
-            let session: any;
+            // [#24222] Typed as `AuthSessionApi` declares the answer, not `any`.
+            let session: SessionRead | null;
             try {
                 let api: any = authService.api;
                 if (!api && typeof authService.getApi === 'function') api = await authService.getApi();
@@ -1585,7 +1679,8 @@ export class HttpDispatcher {
             const authService = await this.resolveService(this.requestKernel(context), CoreServiceName.enum.auth);
             const api = authService?.api ?? (typeof authService?.getApi === 'function' ? await authService.getApi() : undefined);
             // [#22258] The in-process session-read rule, as in `enforceAuthGate`.
-            const sessionData = await api?.getSession?.(inProcessSessionReadInput(context.request?.headers));
+            // [#24222] Typed as `AuthSessionApi` declares the answer, not `any`.
+            const sessionData: SessionRead | null = await api?.getSession?.(inProcessSessionReadInput(context.request?.headers));
             userId = sessionData?.user?.id ?? sessionData?.session?.userId;
             activeOrganizationId = sessionData?.session?.activeOrganizationId;
         } catch {

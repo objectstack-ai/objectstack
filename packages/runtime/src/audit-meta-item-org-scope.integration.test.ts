@@ -17,8 +17,9 @@
 //     the audit tab goes blank on every deployment that authors through REST.
 //
 // That second one is not hypothetical. The REST `PUT /meta/:type/:name` door
-// passes NO `organizationId`, so every row it writes is stamped
-// `organization_id: null`. A fix that kept only the equality limb would look
+// passes NO `organizationId`, so every row it writes is the environment's
+// (since ADR-0131 D7 no audit row carries an organization column at all). A
+// fix that kept only the equality limb would look
 // correct in a shape assertion and return nothing in production. So the
 // env-wide row below is the DISCRIMINATING control, not a courtesy case: it is
 // the assertion that separates "correctly scoped" from "hides everything".
@@ -45,11 +46,9 @@ import {
 
 const ORG_A = 'org_alpha';
 const ORG_B = 'org_beta';
-const ORG_C = 'org_gamma';
 const NAME = 'shared_grid';
 
 const ACTOR_A = 'alice@alpha.example';
-const ACTOR_B = 'bob@beta.example';
 const ACTOR_ENV = 'package-installer';
 
 let cleanup: Array<() => void> = [];
@@ -93,129 +92,64 @@ const viewBody = (name: string) => ({
 });
 
 /**
- * Three audit-bearing rows on ONE view name: two tenant overlays and one
- * env-wide package write.
+ * Two audit-bearing saves on ONE view name, both through the production writer
+ * (`saveMetaItem`): a package install and a later Studio edit.
  *
- * [ADR-0131 D6] The protocol now refuses every organization-scoped write, so
- * the two tenant overlays — and the audit rows that recorded them — are
- * planted AT REST as the legacy rows a release before D6 left behind, shaped
- * as `SysMetadataRepository.put` and `recordMetadataAudit` wrote them. The
- * env-wide row is still written by the production writer (`saveMetaItem`),
- * so the discriminating control keeps the stamp production produces. The
- * organization-scoped READ this file pins is S5's to re-premise.
+ * [ADR-0131 D6/D7] The protocol refuses every organization-scoped write, and
+ * the audit table declares no organization column, so no organization's row
+ * can exist to be hidden: the read under test is the environment's trail,
+ * whatever organization a caller names. #8747's disclosure stays closed by
+ * construction; what this file still pins against a real driver is that the
+ * read SELECTS that trail — every save of the item, and no other item's.
  */
-/** One legacy organization-scoped save, at rest: its overlay row and its audit row. */
-async function plantLegacyOrgSave(engine: any, org: string, name: string, actor: string) {
-  await engine.insert('sys_metadata', {
-    type: 'view', name, organization_id: org, package_id: null, state: 'active',
-    metadata: JSON.stringify(viewBody(name)), checksum: `legacy_${org}_${name}`, version: 1,
-  }, { context: { isSystem: true } });
-  await engine.insert('sys_metadata_audit', {
-    occurred_at: new Date().toISOString(), actor, source: 'studio',
-    type: 'view', name, organization_id: org,
-    operation: 'save', outcome: 'allowed', code: 'ok',
-    lock_state: 'none', lock_overridden: false, note: 'active',
-  }, { context: { isSystem: true } });
-}
-
-async function seedThreeOrgs(protocol: any, engine: any) {
-  await plantLegacyOrgSave(engine, ORG_A, NAME, ACTOR_A);
-  await plantLegacyOrgSave(engine, ORG_B, NAME, ACTOR_B);
+async function seedTwoSaves(protocol: any) {
   await protocol.saveMetaItem({
     type: 'view', name: NAME, item: viewBody(NAME),
     actor: ACTOR_ENV, source: 'package',
+  });
+  await protocol.saveMetaItem({
+    type: 'view', name: NAME, item: { ...viewBody(NAME), label: 'Shared grid (edited)' },
+    actor: ACTOR_A, source: 'studio',
   });
 }
 
 const actorsOf = (result: any) => (result.events as any[]).map((e) => e.actor).sort();
 
-describe('#8747 auditMetaItem organization scope (real engine + real SqlDriver)', () => {
-  it('seeds three organizations onto one (type, name) — the precondition the scope is judged against', async () => {
+describe('#8747 auditMetaItem reads the environment\'s trail (real engine + real SqlDriver)', () => {
+  it('seeds two saves onto one (type, name), and no audit row carries an organization column', async () => {
     const { engine, protocol } = await boot();
-    await seedThreeOrgs(protocol, engine);
+    await seedTwoSaves(protocol);
 
-    const raw = (await engine.find('sys_metadata_audit', { where: {} })) as any[];
-    const stamps = raw
-      .filter((r) => r.name === NAME)
-      .map((r) => `${r.actor}:${r.organization_id ?? 'ENV'}`)
-      .sort();
-
-    // The write path stamps all three distinctly. If this ever collapses, the
-    // scope assertions below would pass vacuously, so it is asserted first.
-    expect(stamps).toEqual([
-      `${ACTOR_A}:${ORG_A}`,
-      `${ACTOR_B}:${ORG_B}`,
-      `${ACTOR_ENV}:ENV`,
-    ]);
+    const raw = ((await engine.find('sys_metadata_audit', { where: {} })) as any[]).filter((r) => r.name === NAME);
+    // The write path records both. If this ever collapses, the read
+    // assertions below would pass vacuously, so it is asserted first.
+    expect(raw.map((r) => r.actor).sort()).toEqual([ACTOR_A, ACTOR_ENV].sort());
+    for (const row of raw) expect(row).not.toHaveProperty('organization_id');
   });
 
-  it('[ADR-0131 D6] a read naming an organization sees the env-wide rows only — not its own legacy rows, not another organization\'s', async () => {
-    const { engine, protocol } = await boot();
-    await seedThreeOrgs(protocol, engine);
+  it('[ADR-0131 D6] every caller — an organization, another, none, an explicit null — reads the same trail', async () => {
+    const { protocol } = await boot();
+    await seedTwoSaves(protocol);
 
-    for (const organizationId of [ORG_A, ORG_B]) {
+    for (const organizationId of [ORG_A, ORG_B, undefined, null]) {
       const actors = actorsOf(await (protocol as any).auditMetaItem({
-        type: 'view', name: NAME, organizationId,
+        type: 'view', name: NAME, ...(organizationId === undefined ? {} : { organizationId }),
       }));
-      // The env-wide rows stay — THE discriminating control: every write is
-      // env-wide and must stay in the tab. No organization's legacy row is
-      // read: the trail is the environment's (#8747's disclosure stays closed
-      // in both directions).
-      expect(actors, organizationId).toEqual([ACTOR_ENV]);
+      expect(actors, String(organizationId)).toEqual([ACTOR_A, ACTOR_ENV].sort());
     }
   });
 
-  it('an organization with no rows of its own still sees the env-wide rows, and only those', async () => {
-    const { engine, protocol } = await boot();
-    await seedThreeOrgs(protocol, engine);
+  it('the (type, name) key holds — a different item is excluded', async () => {
+    const { protocol } = await boot();
+    await seedTwoSaves(protocol);
+    await protocol.saveMetaItem({
+      type: 'view', name: 'other_grid', item: viewBody('other_grid'),
+      actor: 'carol@alpha.example', source: 'studio',
+    });
 
-    // A tenant that has never overlaid this item must still see the package
-    // install that put it there — and nobody else's overlays.
-    const actors = actorsOf(await (protocol as any).auditMetaItem({
-      type: 'view', name: NAME, organizationId: ORG_C,
-    }));
-
-    expect(actors).toEqual([ACTOR_ENV]);
-  });
-
-  it('an org-less read is fail-closed: env-wide rows only, never every tenant\'s', async () => {
-    const { engine, protocol } = await boot();
-    await seedThreeOrgs(protocol, engine);
-
-    // This is the exact call shape that leaked before the fix — the production
-    // route omitted `organizationId` entirely. It must no longer be a skeleton
-    // key. `?? null` folds it onto the env-wide read, symmetric with what an
-    // org-less write produces.
-    const actors = actorsOf(await (protocol as any).auditMetaItem({
-      type: 'view', name: NAME,
-    }));
-
-    expect(actors).toEqual([ACTOR_ENV]);
-    expect(actors).not.toContain(ACTOR_A);
-    expect(actors).not.toContain(ACTOR_B);
-  });
-
-  it('an explicit organizationId: null reads env-wide rows, same as omitting it', async () => {
-    const { engine, protocol } = await boot();
-    await seedThreeOrgs(protocol, engine);
-
-    const actors = actorsOf(await (protocol as any).auditMetaItem({
-      type: 'view', name: NAME, organizationId: null,
-    }));
-
-    expect(actors).toEqual([ACTOR_ENV]);
-  });
-
-  it('scoping does not disturb the (type, name) key — a different item is still excluded', async () => {
-    const { engine, protocol } = await boot();
-    await seedThreeOrgs(protocol, engine);
-    await plantLegacyOrgSave(engine, ORG_A, 'other_grid', 'carol@alpha.example');
-
-    const actors = actorsOf(await (protocol as any).auditMetaItem({
-      type: 'view', name: NAME,
-    }));
+    const actors = actorsOf(await (protocol as any).auditMetaItem({ type: 'view', name: NAME }));
 
     expect(actors).not.toContain('carol@alpha.example');
-    expect(actors).toEqual([ACTOR_ENV]);
+    expect(actors).toEqual([ACTOR_A, ACTOR_ENV].sort());
   });
 });

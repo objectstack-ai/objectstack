@@ -181,6 +181,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       metadata: {
         label: "メタデータ",
         help: "JSON シリアライズされた追加コンテキスト"
+      },
+      changed_fields: {
+        label: "変更フィールド",
+        help: "記録された変更のキー集合:更新の場合は、記録された旧値/新値が含むすべてのフィールド。その他の行では空。書き込み時にプラットフォームが付与し、閲覧者に提供されるフィールドに絞り込んで返されます。NULL はその行がまだ付与されていないことを示します(`os migrate activity-changed-fields` を実行してください)。"
+      },
+      milestone_key: {
+        label: "マイルストーンキー",
+        help: "発火したアクティビティマイルストーンについて、発火時にオブジェクトの activityMilestones 宣言が監視していた全フィールドをソートしてカンマで連結したキー。その他の行では NULL。書き込み時にプラットフォームが付与し、決して返されません。読み取りルールが現在の宣言と比較します。"
       }
     }
   },
@@ -194,7 +202,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       thread_id: {
         label: "スレッド",
-        help: "スレッド識別子 — 通常は `{object}:{record_id}`（例: `sys_user:abc123`）"
+        help: "スレッド識別子 — 通常は `{object}:{record_id}`（例: `account:9001`）"
+      },
+      object_name: {
+        label: "親オブジェクト",
+        help: "`thread_id` が指すレコードのオブジェクト — プラットフォームが記録し、作成者は書き込めません"
+      },
+      record_id: {
+        label: "親レコード",
+        help: "`thread_id` が指すレコードの ID — プラットフォームが記録し、作成者は書き込めません"
       },
       parent_id: {
         label: "親コメント",

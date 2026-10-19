@@ -58,6 +58,9 @@ import { STRUCTURED_JSON_TYPES, isMultiValueField } from '@objectstack/spec/data
 // candidate rule every SQL dialect binds (`@objectstack/core`), read here as
 // JSON values instead of as JSON text. See {@link containsMembers}.
 import { jsonMembershipCandidates } from '@objectstack/core';
+// [ADR-0139 D3] The walk that finds a `ReadableIds` leaf and the one refusal
+// every driver answers it with — this driver refuses every one.
+import { findMisplacedReadableIds, refuseReadableIdsOnce } from '@objectstack/core';
 import {
   coerceTemporalValue,
   type TemporalFieldKind,
@@ -899,6 +902,14 @@ function safeShapePreview(value: unknown): string {
 }
 
 /**
+ * [ADR-0139 D3] Whether this process has logged the `ReadableIds` refusal: once
+ * per driver. This driver carries no injectable logger, and the refusal is
+ * raised in this module's pure translation, so the line goes to the console
+ * once per process; every refusal still reaches the caller.
+ */
+const READABLE_IDS_REFUSAL_LOG = { logged: false };
+
+/**
  * Translate an ObjectStack `where` clause into a MongoDB filter document.
  *
  * The `where` clause can be:
@@ -932,6 +943,15 @@ export function translateFilter(
   }
 
   if (typeof where !== 'object') return {};
+
+  // [ADR-0139 D3] This driver REFUSES the `ReadableIds` leaf — composed or not,
+  // at any position — until a card measures a pipeline form of the
+  // tenant-walled semi-join (ADR-0139 open item O3): INTERNAL_ERROR / 500,
+  // ahead of the shape gate, which would answer the leaf `INVALID_FILTER` as
+  // an author error. Every door and the aggregation pipeline translate their
+  // `where` here, so one check covers them all. ⛔ No `DriverCapabilities` bit.
+  const leaf = findMisplacedReadableIds(where, false);
+  if (leaf) throw refuseReadableIdsOnce('driver-mongodb', leaf, console, READABLE_IDS_REFUSAL_LOG);
 
   // [#5239] Shape gate + structural reduction FIRST, over the WHOLE tree. Only
   // a `'clause'` node reaches the emitter, so `translateCondition` never has to

@@ -21,14 +21,13 @@
  * ruling now, on a **re-measured** version of the ruling's own premise rather
  * than by analogy — the premise that carries it is "no editability semantics
  * exist here to enforce", and for an option that is a fact about the renderer,
- * not an argument. Measured on objectui `origin/main` @ `aca27fa`: the
- * object-field pipeline these options actually feed has **zero** per-option
- * `disabled` consumers — `packages/fields/src/widgets/SelectField.tsx:161`
- * calls the root-level `disabled` "the single authority" in its own comment,
- * and `RadioField.tsx:124` reads only `props.disabled`. A shown-but-unselectable
- * option does exist in objectui's **SDUI** family
- * (`packages/components/src/renderers/form/select.tsx:62`), but on that
- * package's own select-option vocabulary in `packages/types` — a different
+ * not an argument. Measured on objectui `main` (read points recorded in
+ * `liveness/field.json`, row `options`): the object-field pipeline these
+ * options actually feed has **zero** per-option `disabled` consumers — the
+ * select widget calls the root-level `disabled` "the single authority" in its
+ * own comment, and the radio widget reads only `props.disabled`. A
+ * shown-but-unselectable option does exist in objectui's **SDUI** family
+ * select renderer, but on that package's own select-option vocabulary in `packages/types` — a different
  * shape from this one, so it makes no key here enforced.
  *
  * The prescription it gets is NOT the siblings' text, because the siblings'

@@ -55,6 +55,7 @@ import type { IDataEngine } from './data-engine';
 import type { IDataDriver } from './data-driver';
 import type { FlowFunctionEffect, FlowFunctionEntry } from '../automation/flow-function.zod';
 import type { ServiceObject } from '../data/object.zod';
+import type { Hook, HookContext } from '../data/hook.zod';
 import type { BaseEngineOptions, EngineQueryOptions } from '../data/data-engine.zod';
 
 /**
@@ -110,8 +111,16 @@ export interface EngineSchemaRegistryView {
     // protocol service writes through.
     /** One installed package by id, or `undefined` — the duplicate-install guard's reader. */
     getPackage(id: string): unknown;
-    /** Register a package manifest in the in-memory registry. */
-    installPackage(manifest: unknown, settings?: Record<string, unknown>): unknown;
+    /**
+     * Register a package manifest in the in-memory registry. `source` is the
+     * caller's statement of where the package came from, stamped on the row; a
+     * value outside the closed set is refused. The union is
+     * `InstalledPackageSource` (`kernel/package-registry.zod`), spelled here
+     * rather than imported so this contract module does not pull the manifest
+     * schema graph into its importers; `objectql-engine.test.ts`
+     * holds the two equal.
+     */
+    installPackage(manifest: unknown, source: 'code' | 'marketplace' | 'authored', settings?: Record<string, unknown>): unknown;
     /** Drop a package from the registry; `false` when no package had that id. */
     uninstallPackage(id: string): boolean;
     /** Flip a package to enabled; `undefined` when no package had that id. */
@@ -395,6 +404,20 @@ export interface IObjectQLEngine extends IDataEngine {
             strict?: boolean;
             warnLegacyHandler?: boolean;
             metrics?: unknown;
+            /**
+             * Wraps each handler the hook runs IN-PROCESS: an inline `handler`
+             * function, and the function a string `handler` names (resolved from
+             * `functions` or the package's registered functions). Never applied to
+             * the handler `bodyRunner` builds from a `body`. Called once per hook,
+             * at bind; what it returns is what the engine calls. The engine awaits
+             * a handler and discards its return value. The runtime passes the
+             * wrap that hands an in-process handler `ctx.title(field?)` (#24289).
+             * Absent: every handler binds exactly as resolved.
+             */
+            wrapHandler?: (
+                handler: (context: HookContext) => unknown,
+                hook: Hook,
+            ) => (context: HookContext) => unknown;
         },
     ): void;
 

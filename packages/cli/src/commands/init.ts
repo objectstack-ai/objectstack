@@ -20,6 +20,7 @@ import {
   isExitSignal,
 } from '../utils/format.js';
 import { validateScaffold } from '../utils/scaffold-validate.js';
+import { makeDirectorySync } from '../utils/make-directory.js';
 import { summarizeTree, describeEntry } from 'create-objectstack/created-summary';
 import { GENERATOR_SCAFFOLD_TARGETS } from './generate.js';
 
@@ -390,9 +391,13 @@ export const SCAFFOLD_TYPESCRIPT_RANGE = '^5.3.0';
  * `--cache` and a manifest holding only this one devDependency (the full matrix
  * is in the PR that set this value): on npm 10.9.4 and 10.9.9, `npm install`
  * exits 1 with `Cannot read properties of null (reading 'edgesOut')` from
- * arborist's `#loadPeerSet`, and npm 11.21.0 installs it. `~4.0.0` installs on
- * all three (vitest 4.0.18, vite 7.3.7), and so do both CLI-emitted plugin
- * manifests. The cost: a scaffold gets vitest 4.0.18 rather than 4.1.11.
+ * arborist's `#loadPeerSet`, and npm 11.21.0 installs it. `~4.0.0` installed on
+ * all three (vitest 4.0.18, vite 7.3.7), and so did both CLI-emitted plugin
+ * manifests. The cost: a scaffold gets vitest 4.0.18 rather than 4.1.x.
+ *
+ * ⚠️ The range alone stopped being enough, so it is also emitted as an npm
+ * OVERRIDE — see {@link SCAFFOLD_NPM_OVERRIDES}, which is built from this
+ * constant, so the declared range and the override cannot disagree.
  *
  * The cause is upstream, in the peer graph. Every vitest 4.1.x admits vite 8.
  * vite 8 declares an optional `@vitejs/devtools` peer, which reaches
@@ -414,6 +419,56 @@ export const SCAFFOLD_TYPESCRIPT_RANGE = '^5.3.0';
  * both exit 0, widen this.
  */
 export const SCAFFOLD_VITEST_RANGE = '~4.0.0';
+
+/**
+ * The npm `overrides` block every STANDALONE scaffold emits: `os init`'s three
+ * templates, `os create plugin` outside the monorepo, and — by generation, not
+ * import — `create-objectstack`'s bundled template (the `overrides.vitest` row
+ * in `scripts/sync-scaffold-emission-policy.mjs`'s `POLICY_STAMPS`).
+ *
+ * Why it exists. vitest 4.1.12 (published 2026-10-15) peers
+ * `@vitest/browser-webdriverio ^4.1.11`, and that package's only match, 4.1.11,
+ * peers `vitest: 4.1.11` exactly — a peer set that contradicts itself. A
+ * scaffold reaches it even with vitest pinned to `~4.0.0` at its root, through
+ * OPTIONAL `vitest` peers deeper in the closure (`@objectstack/metadata-core`
+ * peers `^4.0.0`, better-auth peers `^2 || ^3 || ^4`), which npm 10 resolves to
+ * vitest's newest 4.x. Measured 2026-10-16, each manifest in an empty
+ * directory with a fresh `--cache`, against the published `18.0.0-next.2`:
+ *
+ *   without the override   npm 10.9.9   `os init -t app`, `-t plugin` and
+ *                                       `-t empty` all exit 1 with `Cannot
+ *                                       read properties of null (reading
+ *                                       'edgesOut')`; `os create plugin` (no
+ *                                       `@objectstack/cli` in its closure)
+ *                                       exits 0
+ *   with the override      npm 10.9.9   all four exit 0
+ *                          npm 11.21.1  all four exit 0
+ *
+ * So the override goes on EVERY template, not only the ones that declare
+ * vitest: `-t app` and `-t empty` declare none and crashed all the same,
+ * because what they share is `@objectstack/cli`. Where a manifest does declare
+ * vitest, the override equals that declaration — npm refuses an override that
+ * differs from the direct dependency's own spec (`EOVERRIDE`).
+ *
+ * The cost, measured on an emitted `-t app` (npm 10.9.9): a later bare `npm
+ * install -D vitest` is refused with `EOVERRIDE: Override for vitest@*
+ * conflicts with direct dependency`; `npm install -D vitest@~4.0.0` (this
+ * range) installs. Loud and self-describing, where the alternative was a
+ * project that could not install at all. pnpm ignores npm's `overrides` field,
+ * so pnpm users see no change.
+ *
+ * ⛔ Not `"$vitest"`: it needs a direct dependency to point at (two of the
+ * three `os init` templates have none), and where it does apply, npm stops
+ * hoisting `@objectstack/metadata-core` and nests copies of it (measured on the
+ * bundled template) — a duplicated module is a duplicated `instanceof` identity.
+ *
+ * The re-check that lets this go: the same empty-directory install of an
+ * emitted `-t app` manifest WITHOUT this block, on the newest npm 10 and on npm
+ * 11. When both exit 0, delete it here and its `POLICY_STAMPS` row together.
+ */
+export const SCAFFOLD_NPM_OVERRIDES: Readonly<Record<string, string>> = Object.freeze({
+  vitest: SCAFFOLD_VITEST_RANGE,
+});
 
 /** The `@types/node` range a scaffolded project declares. */
 export const SCAFFOLD_TYPES_NODE_RANGE = '^22.0.0';
@@ -495,6 +550,9 @@ export function renderScaffoldPackageJson(
     scripts: template.scripts,
     dependencies: template.dependencies,
     devDependencies: template.devDependencies,
+    // Every template, whether or not it declares vitest itself — without it
+    // npm 10 cannot install any of them (see SCAFFOLD_NPM_OVERRIDES).
+    overrides: { ...SCAFFOLD_NPM_OVERRIDES },
   };
 }
 
@@ -1205,7 +1263,10 @@ export default class Init extends Command {
           this.exit(2);
         }
       } else {
-        fs.mkdirSync(targetDir, { recursive: true });
+        // Bounded (#23858): a target that can never be made — this command
+        // run inside `/proc` — is refused at once with the OS's code and the
+        // path. Node's recursive mkdir looped on it, printing nothing.
+        makeDirectorySync(targetDir);
       }
     } else {
       targetDir = startCwd;

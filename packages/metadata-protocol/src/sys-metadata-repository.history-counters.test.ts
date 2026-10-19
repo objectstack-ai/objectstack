@@ -194,7 +194,7 @@ describe('#4867 — history counters are never invented from a failed read', () 
   beforeEach(() => {
     discriminator.mockClear();
     engine = makeFakeEngine();
-    repo = new SysMetadataRepository({ engine, organizationId: 'org_alpha', orgLabel: 'org_alpha' });
+    repo = new SysMetadataRepository({ engine, orgLabel: 'org_alpha' });
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
   });
@@ -350,7 +350,6 @@ describe('#4867 — history counters are never invented from a failed read', () 
     const engine2 = makeFakeEngine();
     const repo2 = new SysMetadataRepository({
       engine: engine2,
-      organizationId: 'org_alpha',
       orgLabel: 'org_alpha',
     });
     engine2.breakHistoryReads(connectionReset);
@@ -386,7 +385,7 @@ describe('#4867 — the discriminator is the shared exported one, not a local co
 
   it('consults the exported `isMissingTableError` with the driver error itself', async () => {
     const engine = makeFakeEngine();
-    const repo = new SysMetadataRepository({ engine, organizationId: 'org_alpha', orgLabel: 'org_alpha' });
+    const repo = new SysMetadataRepository({ engine, orgLabel: 'org_alpha' });
 
     engine.breakHistoryReads(noSuchTable);
     await repo.put({ org: 'org_alpha', type: 'view', name: 'case_grid' }, view('A'), {
@@ -400,7 +399,7 @@ describe('#4867 — the discriminator is the shared exported one, not a local co
 
   it("follows the shared function's verdict — flipping it flips the behaviour", async () => {
     const engine = makeFakeEngine();
-    const repo = new SysMetadataRepository({ engine, organizationId: 'org_alpha', orgLabel: 'org_alpha' });
+    const repo = new SysMetadataRepository({ engine, orgLabel: 'org_alpha' });
 
     // A connection reset, declared benign BY THE SHARED MODULE. A local copy
     // (or an inlined `catch { return 1 }`) would ignore this and answer 1 for

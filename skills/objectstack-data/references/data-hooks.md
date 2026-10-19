@@ -244,15 +244,18 @@ in neither). So:
   `previous.done != true && record.done == true`. `previous` is the stored
   pre-write row, made total over the same declared fields, and it is the same
   binding a validation predicate reads.
-- **`previous` is UNBOUND where there is no prior state**, and a reference to an
-  unbound root makes the whole condition unevaluable. One case: insert events
-  (`beforeInsert` / `afterInsert`) — write those over `record` alone. The
-  `before*` dispatch of a predicate (`multi: true`) write is **not** a second
-  case: `beforeUpdate` / `beforeDelete` dispatch once per matched row, each on a
-  single-record-shaped context whose `previous` is that row's pre-image and whose
-  `input.id` names the row (ADR-0058 Addendum II, D1/D2), so a transition
-  condition evaluates there exactly as on a single-record write, and `record` is
-  that row's state, stored ⊕ payload. Only the *payload* stays batch-scoped (D3):
+- **`previous` is `null` on insert** (`beforeInsert` / `afterInsert`), so
+  `previous == null || …` judges an insert and `previous != null && …` skips
+  one; a column read off it there (`previous.done`) has no value and faults.
+  `previous` is UNBOUND only for a write to an existing row whose prior state
+  is not in hand, which fails closed rather than reading an update as an
+  insert. The `before*` dispatch of a predicate (`multi: true`) write is
+  **not** such a case: `beforeUpdate` / `beforeDelete` dispatch once per
+  matched row, each on a single-record-shaped context whose `previous` is that
+  row's pre-image and whose `input.id` names the row (ADR-0058 Addendum II,
+  D1/D2), so a transition condition evaluates there exactly as on a
+  single-record write, and `record` is that row's state, stored ⊕ payload. Only
+  the *payload* stays batch-scoped (D3):
   every row's dispatch carries the one payload, so a rewrite made on any row
   applies to every matched row, and a rewrite *decided* per row must assign the
   same key set on every row, in place (`ctx.input.x = …`, never a replaced
@@ -274,20 +277,18 @@ in neither). So:
   question about your spelling, not about your data.
 
 ⚠️ **An unevaluable condition ABORTS the operation.** A typo'd key
-(`record.stauts`), a `previous` reference on an insert, or a comparison CEL has
-no overload for does **not** degrade to "the hook did not fire" — it **fails the
-write**. Until protocol 17 the gate emitted a `logger.warn` and returned `false`,
-which is why the unbound-`previous` and `has(...)` bullets above are load-bearing
-rather than stylistic: a `before*` guard swallowed into `false` silently let
-writes through, and an audit hook swallowed into `false` silently dropped
-records. Those are opposite failures, so "the condition said no" and "the
-platform could not work out what the condition says" are now different outcomes
-and the second one is loud.
+(`record.stauts`), a column read off `previous` on an insert, or a comparison
+CEL has no overload for does **not** degrade to "the hook did not fire" — it
+**fails the write**. Until protocol 17 the gate emitted a `logger.warn` and
+returned `false`, which is why the `previous`-on-insert and `has(...)` bullets
+above are load-bearing rather than stylistic: a `before*` guard swallowed into
+`false` silently let writes through, and an audit hook swallowed into `false`
+silently dropped records.
 
 Practical consequence when authoring: spell keys against the object's **declared**
-fields, and put a condition that reads `previous` on an update or delete event —
-either phase — never on an insert event. That mistake used to cost you a hook
-that quietly never ran, and now costs you every write the hook is attached to.
+fields, and on an insert event read `previous` only against `null` — a column
+read off it there is the mistake that used to cost you a hook that quietly never
+ran, and now costs you every write the hook is attached to.
 
 #### `onError` — Error Handling
 

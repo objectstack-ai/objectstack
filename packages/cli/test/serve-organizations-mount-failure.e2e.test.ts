@@ -40,7 +40,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runServe, randomPort } from './helpers/serve-process.js';
+import { runServe } from './helpers/serve-process.js';
 
 const CONFIG = `
 export default {
@@ -156,8 +156,7 @@ describe('os serve — organizations import stage vs mount stage (#4818)', () =>
     it(
       'refuses to boot with the ADR-0093 D5 "could not be loaded" diagnosis',
       async () => {
-        const port = randomPort();
-        const { stdout, stderr } = await runServe(appAbsent, ['--port', port], {
+        const { stdout, stderr } = await runServe(appAbsent, [], {
           waitFor: BANNER_RE,
           env: { ...SERVE_ENV, OS_ALLOW_DEGRADED_TENANCY: undefined },
           timeoutMs: 240_000,
@@ -183,8 +182,7 @@ describe('os serve — organizations import stage vs mount stage (#4818)', () =>
         // The escape hatch keeps its one legitimate meaning: "the capability is
         // absent and I accept running without it". Pinned so the stage split
         // cannot regress it.
-        const port = randomPort();
-        const { stdout, stderr } = await runServe(appAbsent, ['--port', port], {
+        const { stdout, stderr } = await runServe(appAbsent, [], {
           waitFor: BANNER_RE,
           env: { ...SERVE_ENV, OS_ALLOW_DEGRADED_TENANCY: '1' },
           timeoutMs: 240_000,
@@ -203,8 +201,7 @@ describe('os serve — organizations import stage vs mount stage (#4818)', () =>
     it(
       "surfaces the plugin's own error verbatim and exits, without the absent-package wording",
       async () => {
-        const port = randomPort();
-        const { stdout, stderr } = await runServe(appRefusing, ['--port', port], {
+        const { stdout, stderr } = await runServe(appRefusing, [], {
           waitFor: BANNER_RE,
           env: { ...SERVE_ENV, OS_ALLOW_DEGRADED_TENANCY: undefined },
           timeoutMs: 240_000,
@@ -241,8 +238,7 @@ describe('os serve — organizations import stage vs mount stage (#4818)', () =>
       async () => {
         // THE issue. Before the fix this booted with a warning: an env var
         // silently overrode whatever gate the plugin was enforcing.
-        const port = randomPort();
-        const { stdout, stderr } = await runServe(appRefusing, ['--port', port], {
+        const { stdout, stderr } = await runServe(appRefusing, [], {
           waitFor: BANNER_RE,
           env: { ...SERVE_ENV, OS_ALLOW_DEGRADED_TENANCY: '1' },
           timeoutMs: 240_000,

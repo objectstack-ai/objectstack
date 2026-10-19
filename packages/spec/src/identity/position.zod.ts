@@ -162,7 +162,9 @@ export const PositionSchema = lazySchema(() => strictObject(
  * tenant's default grants (resolved per-request; additive, no fallback
  * cliff). `guest` is held implicitly (and exclusively) by unauthenticated
  * principals; its bindings face the strictest lint tier. Packages SUGGEST
- * bindings to these anchors at install time — never auto-bind.
+ * bindings to `everyone` at install time and the admin confirms each — never
+ * auto-bind. No door binds a set to `guest` until ADR-0138 D3 item 5's bind
+ * door is built, an act of the environment's administrator, never a package's.
  */
 export const EVERYONE_POSITION = 'everyone';
 export const GUEST_POSITION = 'guest';

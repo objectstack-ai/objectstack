@@ -93,8 +93,7 @@ export const esES: TranslationData = {
         nav_notification_templates: { label: 'Plantillas de Notificación' },
 
         nav_sessions: { label: 'Sesiones' },
-        nav_audit_logs: { label: 'Registros de Auditoría' },
-        nav_audit_log_browser: { label: 'Explorador de registros de auditoría' },
+        nav_audit_logs: { label: 'Registro de auditoría' },
         nav_notifications: { label: 'Notificaciones' },
 
         // Integrations — contributed at RUNTIME by the owning capability
@@ -104,8 +103,6 @@ export const esES: TranslationData = {
         nav_datasources: { label: 'Fuentes de datos' },
 
         nav_oauth_apps: { label: 'Aplicaciones OAuth' },
-        nav_accounts: { label: 'Enlaces de Identidad' },
-        nav_user_preferences: { label: 'Preferencias de Usuario' },
       },
     },
     studio: {
@@ -170,10 +167,6 @@ export const esES: TranslationData = {
   },
 
   pages: {
-    marketplace_installed: {
-      label: 'Aplicaciones instaladas',
-      subtitle: 'Paquetes del marketplace instalados actualmente en el kernel de este runtime.',
-    },
     cloud_connection_settings: {
       label: 'Conexión a la nube',
       subtitle:
@@ -183,7 +176,7 @@ export const esES: TranslationData = {
     connect_agent: {
       label: 'Conectar un agente',
       subtitle:
-        'Concede a cualquier cliente de IA compatible con MCP acceso controlado a este entorno: '
+        'Concede a cualquier cliente de IA compatible con MCP acceso controlado a este sistema: '
         + 'cada llamada se ejecuta con los permisos propios de quien la realiza y con seguridad a nivel de fila.',
     },
 

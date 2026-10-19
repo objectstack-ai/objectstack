@@ -230,8 +230,8 @@
  * evaluator once per matched row — one payload, N priors (#3106).
  */
 
-import { ExpressionEngine, collectCelRootIdentifiers, analyzeRelationshipTraversals, findTraversalConflicts } from '@objectstack/formula';
-import type { EvalPermissions, RelationshipTraversalAnalysis } from '@objectstack/formula';
+import { ExpressionEngine, collectCelRootIdentifiers, analyzeRelationshipTraversals, findTraversalConflicts, DEFAULT_TRAVERSAL_ROOT } from '@objectstack/formula';
+import type { EvalContext, EvalPermissions, RelationshipTraversalAnalysis, TraversalConflict, TraversalSubject } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES, referenceTargetOf, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import type { ValidationAdvisoryEvent } from '@objectstack/spec/data';
@@ -323,9 +323,11 @@ interface RuleContext {
   /** Prior state overlaid with the PATCH, made TOTAL over the declared fields
    *  (#4649) — see {@link materializeDeclaredFields}. */
   merged: Record<string, unknown>;
-  /** The prior record, likewise made total (a COPY — the engine's own
-   *  `hookContext.previous` must not gain materialised nulls). */
-  previous: Record<string, unknown> | undefined;
+  /** The `previous` CEL binding (#23910): `null` on insert, the prior record
+   *  made total on update (a COPY — the engine's own `hookContext.previous`
+   *  must not gain materialised nulls), unbound when an update's prior row is
+   *  not in hand. See {@link previousBinding}. */
+  previous: PreviousBinding;
   mode: Mode;
   logger: EvaluateRulesOptions['logger'];
   /** Declared fields — the source of a violation's display label (#3957). */
@@ -551,28 +553,7 @@ export function collectPredicateRelationships(
   const fields = objectSchema?.fields;
   if (!fields) return out;
 
-  const addFrom = (cond: unknown): void => {
-    // The DIALECT is checked, not assumed: a `template` or `js` source that
-    // happens to parse as CEL would otherwise be analysed and hydrated, and the
-    // hop list would describe an expression no CEL engine ever evaluates.
-    // A bare string is CEL by the envelope's own default.
-    if (cond && typeof cond === 'object' && (cond as Expression).dialect !== undefined
-        && (cond as Expression).dialect !== 'cel') return;
-    const source = typeof cond === 'string'
-      ? cond
-      : (cond && typeof cond === 'object' ? (cond as Expression).source : undefined);
-    if (typeof source !== 'string' || !source) return;
-    const analysis = analysisFor(source);
-    if (!analysis) return;
-    for (const [field, related] of analysis.traversals) {
-      // `referenceTargetOf` answers undefined for a non-reference field AND for
-      // a reference field naming no target — both mean "nothing to preload".
-      if (!referenceTargetOf(fields[field])) continue;
-      let set = out.get(field);
-      if (!set) out.set(field, (set = new Set()));
-      for (const name of related) set.add(name);
-    }
-  };
+  const addFrom = (cond: unknown): void => { addReferenceTraversals(out, cond, fields); };
 
   const visit = (rule: unknown, depth: number): void => {
     if (!rule || typeof rule !== 'object' || depth > 8) return;
@@ -587,6 +568,90 @@ export function collectPredicateRelationships(
   };
   for (const rule of rules) visit(rule, 0);
   return out;
+}
+
+/**
+ * [#18682 / #24197] The CEL source of an authored expression slot, or
+ * `undefined` when it is not CEL. The DIALECT is checked, not assumed: a
+ * `template` or `js` source that happens to parse as CEL would otherwise be
+ * analysed and hydrated, and the hop list would describe an expression no CEL
+ * engine ever evaluates. A bare string is CEL by the envelope's own default.
+ */
+function celSourceOfSlot(cond: unknown): string | undefined {
+  if (cond && typeof cond === 'object' && (cond as Expression).dialect !== undefined
+      && (cond as Expression).dialect !== 'cel') return undefined;
+  const source = typeof cond === 'string'
+    ? cond
+    : (cond && typeof cond === 'object' ? (cond as Expression).source : undefined);
+  return typeof source === 'string' && source ? source : undefined;
+}
+
+/**
+ * [#18682] Fold the one-hop reads `cond` takes through REFERENCE fields into
+ * `out` (reference field → the related fields named on it). The one judgement
+ * behind both seams that preload a hop: {@link collectPredicateRelationships}
+ * for validation rules and {@link collectReferenceTraversals} for formula
+ * fields (#24197), so "which hops does this expression take" cannot answer
+ * differently for the two.
+ */
+function addReferenceTraversals(
+  out: Map<string, Set<string>>,
+  cond: unknown,
+  fields: Record<string, ConditionalFieldDef>,
+): void {
+  const source = celSourceOfSlot(cond);
+  if (!source) return;
+  const analysis = analysisFor(source);
+  if (!analysis) return;
+  for (const [field, related] of analysis.traversals) {
+    // `referenceTargetOf` answers undefined for a non-reference field AND for
+    // a reference field naming no target — both mean "nothing to preload".
+    if (!referenceTargetOf(fields[field])) continue;
+    let set = out.get(field);
+    if (!set) out.set(field, (set = new Set()));
+    for (const name of related) set.add(name);
+  }
+}
+
+/**
+ * [#24197] The reference fields `expressions` read ONE hop through, and the
+ * related fields each names — {@link collectPredicateRelationships}' judgement
+ * for an arbitrary set of expressions, which the engine's formula read path
+ * asks of one formula field at a time (see `planFormulaProjection`).
+ *
+ * Empty for an expression that traverses nothing, which is the common case and
+ * what lets a formula read skip the related read entirely.
+ */
+export function collectReferenceTraversals(
+  expressions: Iterable<unknown>,
+  fields: Record<string, ConditionalFieldDef> | undefined | null,
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  if (!fields) return out;
+  for (const expression of expressions) addReferenceTraversals(out, expression, fields);
+  return out;
+}
+
+/**
+ * [#24197] The traversal conflicts in one authored expression — the shapes a
+ * one-hop preload cannot serve (a second hop; a reference read both through
+ * and as a value) — judged against `fields` by the same `referenceTargetOf`
+ * arbiter {@link resolveTraversalScope} asks, and worded for `subject`.
+ *
+ * The engine's formula read path asks it at planning time, so a formula the
+ * lint would refuse also reads `null` WITH a reason at run time — metadata
+ * that never met the lint (Studio, `sys_metadata`, an agent) included.
+ */
+export function referenceTraversalConflicts(
+  expression: unknown,
+  fields: Record<string, ConditionalFieldDef> | undefined | null,
+  subject: TraversalSubject,
+): TraversalConflict[] {
+  const source = celSourceOfSlot(expression);
+  if (!source) return [];
+  const analysis = analysisFor(source);
+  if (!analysis || (analysis.traversals.size === 0 && analysis.multiHopFields.size === 0)) return [];
+  return findTraversalConflicts(analysis, (field) => !!referenceTargetOf(fields?.[field]), DEFAULT_TRAVERSAL_ROOT, subject);
 }
 
 /**
@@ -1446,15 +1511,15 @@ function isReadonlyWhenLocked(
   parent?: ParentBinding,
   fields?: Record<string, ConditionalFieldDef>,
 ): boolean {
-  const res = ExpressionEngine.evaluate<boolean>(toExpression(def.readonlyWhen!), {
-    record: merged,
+  const res = ExpressionEngine.evaluate<boolean>(toExpression(def.readonlyWhen!), ruleScope(
+    merged,
     previous,
     // Bound ONLY when resolved. An absent binding is what makes the unbound-root
     // fault below reachable, and that fault is the signal — binding `null` here
     // would turn it into a `No such key`, which the arm after it REFUSES
     // (ADR-0137 D2) instead of holding the lock.
-    ...(parent != null ? { extra: { parent } } : {}),
-  });
+    parent != null ? { parent } : undefined,
+  ));
   if (!res.ok) {
     const unbound = unknownVariableOf(res.error);
     if (unbound) {
@@ -2994,7 +3059,7 @@ function evaluateOptionVisibility(
   fields: Record<string, ConditionalFieldDef> | undefined,
   data: Record<string, unknown>,
   merged: Record<string, unknown>,
-  previous: Record<string, unknown> | undefined,
+  previous: PreviousBinding,
   currentUser: EvaluateRulesOptions['currentUser'],
   permissions: EvaluateRulesOptions['permissions'],
   errors: FieldValidationError[],
@@ -3005,8 +3070,7 @@ function evaluateOptionVisibility(
   const user = (currentUser ?? undefined) as any;
   for (const { name, def, value, opt } of pickedGatedOptions(fields, data)) {
     const res = ExpressionEngine.evaluate<boolean>(toExpression(opt.visibleWhen!), {
-      record: merged,
-      previous,
+      ...ruleScope(merged, previous),
       user,
       // [#18783] What `current_user.can(object, verb)` is answered from. Passed
       // through as the engine resolved it: `undefined` leaves `can` loudly
@@ -3031,7 +3095,7 @@ function evaluateOptionVisibility(
       // [ADR-0137 D2, #22402 ruling A] Every other fault REFUSES the write,
       // naming the option, the field and the fault. Said in the log too: the
       // operator needs the broken gate there even though the caller is told.
-      const refusal = unevaluableOptionGateError(name, value, res.error, opt.visibleWhen!, fields);
+      const refusal = unevaluableOptionGateError(name, value, res.error, opt.visibleWhen!, fields, previous);
       logger?.warn?.(
         `option visibleWhen for '${name}=${String(value)}' failed to evaluate `
           + `(${noActingUser ? 'system write' : 'authenticated caller'}: ${String(refusal.constraint?.fault)}) — write rejected`,
@@ -3241,6 +3305,113 @@ function writesOnlyInjectedSystemColumns(
 }
 
 /**
+ * The `previous` root of a rule's CEL scope: a row, `null`, or unbound
+ * (`undefined`). See {@link previousBinding}. Package-internal export: a
+ * declarative hook condition binds the same root (`pickPreviousPayload`,
+ * `hook-wrappers.ts`).
+ */
+export type PreviousBinding = Record<string, unknown> | null | undefined;
+
+/**
+ * [#23910] What `previous` IS for one evaluation — decided here, once, by
+ * {@link evaluateValidationRules}, and handed unchanged to every predicate that
+ * evaluation runs (a `script` / `cross_field` condition, a `conditional`'s
+ * `when`, a field's `requiredWhen`, an option's `visibleWhen`) through
+ * {@link ruleScope}. One decision, so no seam can answer the question
+ * differently from its neighbour.
+ *
+ *  - **INSERT → `null`.** There is no prior row, and that is a FACT the rule may
+ *    read: `previous == null` is how a rule says "this write creates the row" —
+ *    the binding the flow engine gives a record-after-write start condition on
+ *    its create leg. Until #23910 an insert left it unbound, and the scope
+ *    builder omits an `undefined` root (`buildScope`, `@objectstack/formula`),
+ *    so ANY reference to it — the guard `previous == null` included — faulted
+ *    `Unknown variable: previous`. A rule written "on insert, or on an update
+ *    that moves a bound" then refused every violating insert as
+ *    `unevaluable`, naming the fault, and its own message never reached the
+ *    caller. A read of a COLUMN off it (`previous.x`) still has no value on an
+ *    insert and still refuses the write — see {@link nullPreviousReadDetail}.
+ *  - **UPDATE with the prior row in hand → that row**, made total over the
+ *    declared fields (#4649: a declared column the driver did not return reads
+ *    as `null` instead of faulting). Copied, never mutated in place — the same
+ *    object is the engine's `hookContext.previous`, which after-hooks observe.
+ *  - **UPDATE without it → unbound.** The row exists; its state is not in hand
+ *    (the bulk seam's `previous: null`, an update-mode preview naming no row).
+ *    `null` there would answer `previous == null` with "this is an insert" — a
+ *    fabricated fact that would ADMIT a write a rule like
+ *    `previous != null && …` exists to refuse. Unbound, such a predicate fails
+ *    closed. `ruleNeedsPrior` keeps every rule that reads the prior state off
+ *    the bulk seam, so this arm is a guard, not a path.
+ */
+function previousBinding(
+  mode: Mode,
+  priorRecord: Record<string, unknown> | undefined,
+  fields: Record<string, ConditionalFieldDef> | undefined,
+): PreviousBinding {
+  if (mode === 'insert') return null;
+  return priorRecord ? materializeDeclaredFields({ ...priorRecord }, fields) : undefined;
+}
+
+/**
+ * [#23910] The CEL scope a rule predicate is evaluated in: `record`, the
+ * `previous` {@link previousBinding} decided, and the caller's `extra` roots
+ * (`parent`). Every rule-evaluation `ExpressionEngine.evaluate` in this file
+ * builds its scope here, so the `previous` binding cannot be dropped at one
+ * seam and kept at another — the `previous ?? undefined` each seam used to
+ * spell turned an explicit `null` back into "unbound".
+ *
+ * `null` rides `extra`, the bag `buildScope` merges onto the variable scope —
+ * the channel the flow engine binds its own `previous: null` through —
+ * because `EvalContext.previous` is typed for a row. `undefined` is simply
+ * omitted, which is what leaves the root unbound.
+ *
+ * Package-internal export: a declarative hook condition is evaluated in this
+ * same scope (`hook-wrappers.ts`), so the two surfaces cannot drift apart on
+ * what `previous` is.
+ */
+export function ruleScope(
+  record: Record<string, unknown>,
+  previous: PreviousBinding,
+  extra?: Record<string, unknown>,
+): EvalContext {
+  if (previous === null) return { record, extra: { ...extra, previous: null } };
+  return { record, ...(previous ? { previous } : {}), ...(extra ? { extra } : {}) };
+}
+
+/**
+ * [#23910] The trailing sentence for a predicate that read a column off
+ * `previous` where `previous` is `null` — an insert — or `undefined` when the
+ * fault is anything else.
+ *
+ * CEL answers `null.x` with `No such key: x`, the same fault an undeclared key
+ * raises, so the generic sentences would mislead twice over: "this object does
+ * not declare" is false for a declared column, and "its value was not
+ * supplied" sends the author to a payload that did supply it. On insert the
+ * record is total over the declared fields, so a declared key that faults can
+ * only have been read off `previous`. The repair is a guard, either way round.
+ *
+ * Package-internal export: a declarative hook condition's refusal words the
+ * same read the same way (`unevaluableConditionError`, `hook-wrappers.ts`).
+ */
+export function nullPreviousReadDetail(
+  error: { kind: string; message: string },
+  pred: string | Expression,
+  previous: PreviousBinding,
+  fields: Record<string, unknown> | undefined,
+  what: string,
+): string | undefined {
+  if (previous !== null || !fields) return undefined;
+  const key = missingKeyOf(error);
+  const source = celSourceOfPredicate(pred);
+  if (!key || !source || !Object.prototype.hasOwnProperty.call(fields, key)) return undefined;
+  const reads = analyzeRelationshipTraversals(source, 'previous');
+  if (!reads || !(reads.bareFields.has(key) || reads.traversals.has(key))) return undefined;
+  return ` The ${what} reads 'previous.${key}', and an insert has no prior row: \`previous\` is null there.`
+    + ' Guard the read — `previous == null || …` to judge an insert, `previous != null && …` to skip one —'
+    + ` so the ${what} decides an insert without it.`;
+}
+
+/**
  * Evaluate an object's declared validation rules against an incoming write.
  *
  * Throws `ValidationError` (the same envelope `validateRecord` uses, so REST
@@ -3282,14 +3453,10 @@ export function evaluateValidationRules(
   // it is and let the (rare) unevaluable predicate fail closed. `ruleNeedsPrior`
   // makes this path unreachable for every rule that reads the merged record.
   const groundTruth = mode === 'insert' || priorRecord !== undefined;
-  // The `previous` CEL binding is made total too (#4649): a predicate reading
-  // `previous.x` for a declared column the driver did not return would
-  // otherwise fault — and now that faults are rejections, that would 422 a
-  // perfectly good rule. Copied, never mutated in place: the same object is the
-  // engine's `hookContext.previous`, which after-hooks observe.
-  const previous = mode === 'update' && priorRecord
-    ? materializeDeclaredFields({ ...priorRecord }, fields)
-    : priorRecord;
+  // [#23910] The `previous` CEL binding — `null` on insert, the prior row made
+  // total on update (#4649), unbound when an update's row is not in hand —
+  // decided ONCE here for every predicate below. See {@link previousBinding}.
+  const previous = previousBinding(mode, priorRecord, fields);
   // Merged view used by predicate rules: prior state overlaid with the PATCH,
   // so a rule referencing an unchanged field still sees its persisted value.
   const merged: Record<string, unknown> = { ...(previous ?? {}), ...data };
@@ -3327,15 +3494,15 @@ export function evaluateValidationRules(
     // and bound ONLY when the engine actually resolved one. An absent binding
     // is left absent rather than bound to `null`: `null.status` would fault as
     // `No such key` and lose the "which root was unbound" diagnostic below.
-    const parentScope = opts.parent != null ? { extra: { parent: opts.parent } } : {};
+    const parentExtra = opts.parent != null ? { parent: opts.parent } : undefined;
     // The pre-check's header (see `EvaluateRulesOptions.previousParent`). Same
     // row as `parent` unless this write repoints the detail at another master.
     const prevParent = opts.previousParent !== undefined ? opts.previousParent : opts.parent;
-    const prevParentScope = prevParent != null ? { extra: { parent: prevParent } } : {};
+    const prevParentExtra = prevParent != null ? { parent: prevParent } : undefined;
     for (const [name, def] of Object.entries(fields)) {
       const pred = def?.requiredWhen;
       if (!pred) continue;
-      const res = ExpressionEngine.evaluate<boolean>(toExpression(pred), { record: merged, previous, ...parentScope });
+      const res = ExpressionEngine.evaluate<boolean>(toExpression(pred), ruleScope(merged, previous, parentExtra));
       if (!res.ok) {
         // [ADR-0137 D2] A `requiredWhen` that cannot be evaluated REFUSES the
         // write and names the field and the rule; nothing is persisted (the
@@ -3357,7 +3524,7 @@ export function evaluateValidationRules(
         opts.logger?.warn?.(
           `requiredWhen for '${name}' failed to evaluate (${res.error.kind}: ${String(res.error.message).split('\n')[0]}) — write rejected`,
         );
-        errors.push(unevaluableFieldRuleError('requiredWhen', name, res.error, pred, fields));
+        errors.push(unevaluableFieldRuleError('requiredWhen', name, res.error, pred, fields, previous));
         continue;
       }
       if (res.value === true && isMissing(merged[name])) {
@@ -3366,7 +3533,7 @@ export function evaluateValidationRules(
         // record, treat the pre state as COMPLIANT — enforcement stays on
         // unless a legacy violation is proven.
         if (mode === 'update' && previous) {
-          const pre = ExpressionEngine.evaluate<boolean>(toExpression(pred), { record: previous, previous, ...prevParentScope });
+          const pre = ExpressionEngine.evaluate<boolean>(toExpression(pred), ruleScope(previous, previous, prevParentExtra));
           const preViolated = pre.ok && pre.value === true && isMissing(previous[name]);
           if (preViolated) continue; // legacy rows rest
         }
@@ -3605,7 +3772,7 @@ function checkStateMachine(
   rule: StateMachineRule,
   mode: Mode,
   data: Record<string, unknown>,
-  previous: Record<string, unknown> | undefined,
+  previous: PreviousBinding,
   ctx?: Pick<RuleContext, 'fields' | 'messages'>,
 ): FieldValidationError | null {
   // An author-written `rule.message` wins over the built-in fallback, and is
@@ -3768,12 +3935,17 @@ function unevaluableFieldRuleError(
   error: { kind: string; message: string },
   pred: string | Expression,
   fields: Record<string, ConditionalFieldDef> | undefined,
+  previous?: PreviousBinding,
 ): FieldValidationError {
   const source = celSourceOfPredicate(pred);
   let detail: string | undefined;
   const missing = missingKeyOf(error);
   const through = missing && source ? referenceReadThrough(missing, source, fields) : undefined;
-  if (through) {
+  // [#23910] A column read off an insert's `null` previous — see {@link nullPreviousReadDetail}.
+  const nullRead = nullPreviousReadDetail(error, pred, previous, fields, 'predicate');
+  if (nullRead !== undefined) {
+    detail = nullRead;
+  } else if (through) {
     detail =
       ` The predicate reads '${missing}' through '${through.ref}', a reference to '${through.target}'. A field-level`
       + ` \`${slot}\` is evaluated against this record alone and never reads the related record`
@@ -3886,13 +4058,18 @@ function unevaluableOptionGateError(
   error: { kind: string; message: string },
   pred: string | Expression,
   fields: Record<string, ConditionalFieldDef> | undefined,
+  previous?: PreviousBinding,
 ): FieldValidationError {
   const source = celSourceOfPredicate(pred);
   let detail: string | undefined;
   const missing = missingKeyOf(error);
   const unbound = missing ? undefined : unknownVariableOf(error);
   const through = missing && source ? referenceReadThrough(missing, source, fields) : undefined;
-  if (through) {
+  // [#23910] A column read off an insert's `null` previous — see {@link nullPreviousReadDetail}.
+  const nullRead = nullPreviousReadDetail(error, pred, previous, fields, 'predicate');
+  if (nullRead !== undefined) {
+    detail = nullRead;
+  } else if (through) {
     detail =
       ` The predicate reads '${missing}' through '${through.ref}', a reference to '${through.target}'. An option's`
       + ' `visibleWhen` is evaluated against this record alone and never reads the related record'
@@ -4150,14 +4327,14 @@ function referenceGuardRepair(field: string): string {
 function readsAnOwnColumnItLacks(
   source: string,
   record: Record<string, unknown>,
-  previous: Record<string, unknown> | undefined,
+  previous: PreviousBinding,
   fields: Record<string, ConditionalFieldDef> | undefined,
 ): boolean {
   const lacks = (holder: unknown, key: string): boolean =>
     !(holder && typeof holder === 'object' && key in holder);
   const faultsOn = (
     analysis: RelationshipTraversalAnalysis | null,
-    holder: Record<string, unknown> | undefined,
+    holder: Record<string, unknown> | null | undefined,
     skipReferences: boolean,
   ): boolean => {
     if (!analysis) return false;
@@ -4202,7 +4379,7 @@ function referentialClearRefusal(
   expr: Expression,
   fault: FieldValidationError,
   record: Record<string, unknown>,
-  previous: Record<string, unknown> | undefined,
+  previous: PreviousBinding,
   related: RelatedRecordBinding | undefined,
   fields: Record<string, ConditionalFieldDef> | undefined,
 ): FieldValidationError | null {
@@ -4255,7 +4432,7 @@ function referentialClearRefusal(
 function checkPredicate(
   rule: PredicateRule,
   record: Record<string, unknown>,
-  previous: Record<string, unknown> | undefined,
+  previous: PreviousBinding,
   logger: EvaluateRulesOptions['logger'],
   messages?: ValidationMessageContext,
   related?: RelatedRecordBinding,
@@ -4285,10 +4462,7 @@ function checkPredicate(
     record = scope.record;
   }
 
-  const result = ExpressionEngine.evaluate<boolean>(expr, {
-    record,
-    previous: previous ?? undefined,
-  });
+  const result = ExpressionEngine.evaluate<boolean>(expr, ruleScope(record, previous));
 
   if (!result.ok) {
     // Still logged — the operator needs the fault in the log even though the
@@ -4296,8 +4470,10 @@ function checkPredicate(
     logger?.warn?.(
       `Validation rule '${rule.name}' predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected: a rule that cannot be evaluated fails closed, it is never skipped`,
     );
+    const nullRead = nullPreviousReadDetail(result.error, rule.condition, previous, fields, 'predicate');
     const unevaluable = unevaluableRuleError(
-      rule.name, field, result.error, 'predicate', undefined,
+      rule.name, field, result.error, 'predicate',
+      nullRead !== undefined ? { prose: `Validation rule '${rule.name}'`, detail: nullRead } : undefined,
       declaredColumnRead(fields, celSourceOfPredicate(rule.condition)),
     );
     // [#20006] Same verdict; on a delete's reference cleanup, a text that names it.
@@ -4454,17 +4630,16 @@ function checkConditional(
   rule: ConditionalRule,
   ctx: RuleContext,
 ): FieldValidationError | null {
-  const result = ExpressionEngine.evaluate<boolean>(toExpression(rule.when), {
-    record: ctx.merged,
-    previous: ctx.previous ?? undefined,
-  });
+  const result = ExpressionEngine.evaluate<boolean>(toExpression(rule.when), ruleScope(ctx.merged, ctx.previous));
 
   if (!result.ok) {
     ctx.logger?.warn?.(
       `Validation rule '${rule.name}' when-predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected: a rule that cannot be evaluated fails closed, it is never skipped`,
     );
+    const nullRead = nullPreviousReadDetail(result.error, rule.when, ctx.previous, ctx.fields, 'when-predicate');
     return unevaluableRuleError(
-      rule.name, '_record', result.error, 'when-predicate', undefined,
+      rule.name, '_record', result.error, 'when-predicate',
+      nullRead !== undefined ? { prose: `Validation rule '${rule.name}'`, detail: nullRead } : undefined,
       declaredColumnRead(ctx.fields, celSourceOfPredicate(rule.when)),
     );
   }

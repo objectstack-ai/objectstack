@@ -2117,6 +2117,11 @@ export class SettingsService {
               alg: handle.alg,
               version: handle.version,
               ciphertext: handle.ciphertext,
+              // [ADR-0131 D3/D9] The ciphertext of a tenant or user value is
+              // that organization's, as its `sys_setting` row is. A global
+              // value's is deployment-level and names none (see
+              // `SettingsSecretStore.insert`).
+              ...(organizationId ? { organization_id: organizationId } : {}),
             });
             storedEnc = handle.id;
             digest = await this.secretAuditDigest(namespace, key, plain);
@@ -2202,6 +2207,9 @@ export class SettingsService {
             action: isNull ? 'reset' : 'set',
             source: 'api',
             actorId: ctx.userId,
+            // [ADR-0131 D3/D9] The organization whose value changed — the same
+            // owner the settings row carries; none for a global value.
+            ...(organizationId ? { organizationId } : {}),
             oldHash: null,
             newHash: isNull ? null : digest,
             encrypted: isEncrypted,

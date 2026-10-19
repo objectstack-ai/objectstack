@@ -10,6 +10,7 @@ export { TaskWorkbenchPage } from './task-workbench.page.js';
 export { TaskTriagePage } from './task-triage.page.js';
 export { ActiveProjectsPage } from './active-projects.page.js';
 export { TaskDetailPage } from './task-detail.page.js';
+export { InvoiceDocumentPage } from './invoice-document.page.js';
 export { ReviewQueuePage } from './review-queue.page.js';
 export { NewProjectWizardPage } from './new-project-wizard.page.js';
 export { MyWorkPage } from './my-work.page.js';
@@ -62,7 +63,6 @@ export const ComponentGalleryPage = definePage({
     },
     {
       name: 'main',
-      width: 'large',
       components: [
         { type: 'element:text', properties: { content: 'A working project-delivery workspace that exercises every metadata type, view, chart, and capability chain. Use the navigation to explore — start with My Work, the Delivery Operations dashboard, or the eight Task visualizations.' } },
         // Live KPI row over the seeded data (object-metric in the layout grid).

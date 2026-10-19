@@ -4,6 +4,9 @@
 · **Amended** (2026-10-13, ADR-0138 D3/D4) — D9's `guest` anchor bindings resolve for anonymous requests, in the organization ADR-0138 D4 resolves; an empty set denies all.
 · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13) — two of the row objects D3 renames into, `sys_position` and `sys_position_permission_set`, and the `sys_capability` D5 names, are retired by #15204 stage 8 (`66949b7729`, 2026-10-13): a position is a metadata-registry definition that names its sets in `PositionSchema.permissionSets`; `sys_user_position` stays. See the notes under D3, D5 and D8.
 · **Amended** (2026-10-14, ruling of record 6159300530 on #23268, letter A) — D11's external org-wide default is retired: external visibility is the [ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md) `EXTERNAL` rung, explicitly shared rows only. See the note under D11.
+· **Amended** (2026-10-15, ruling of record 6181988435 on #23488, letter A) — D12's position↔set binding right and its environment-set authoring right are retired (`AdminScope.manageBindings` and `AdminScope.authorEnvironmentSets`, ADR-0049 enforce-or-remove): a position's sets and a permission set's body are environment definitions, and the definition write is `manage_metadata`'s per [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3, never a delegate scope's. D12's *what* is user↔position assignments (and direct set grants) inside the subtree; read its bindings and authoring clauses as superseded by this line.
+· **Amended** (2026-10-14, [ADR-0138](./0138-guest-model-anonymous-principal-doors-grants-and-organization.md) D3 item 5, ruling C of record 6159279205 on #23267) — D9's last bullet holds for `everyone` alone: a package suggests `everyone` bindings and the admin confirms each, while no door binds a set to `guest` (no package suggestion, no confirmation, no operator bind) until ADR-0138 D3 item 5's bind door is built, an act of the environment's administrator, never of a package. Read that bullet's `guest` half as superseded by this line.
+· **Amended** (2026-10-17, ruling of record 6228728551 on #23960, letter B) — D12 names three kinds of administrator, tenant-level, organization-level and delegated: an organization administrator (`organization_admin` / `organization_admin_no_bypass` for the organization, not a platform administrator) creates and removes `sys_user_position` / `sys_user_permission_set` rows for that organization's members when every set the row distributes has no `*` wildcard superuser bit, no `adminScope` and only `scope: 'org'` capabilities; `admin_full_access`, platform sets, `organization_admin` itself and every delegated set stay outside, and organization-administrator status is conferred by membership grade only. Strict containment and the `everyone` / `guest` anchors are unchanged. See the note under D12.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove),
 [ADR-0056](./0056-permission-model-landing-verification.md) (permission-model landing verification),
@@ -528,6 +531,80 @@ declaring:
 Security-domain publishes (D7) and the `everyone`/`guest` anchors stay tenant-level only — no
 delegated scope can touch them. Explain (D6) learns to answer "who *could have* granted this",
 not just "who did".
+
+> **Amended 2026-10-17 (ruling of record 6228728551 on #23960, letter B — the maintainer's
+> 「同意」) — the organization administrator's assignment boundary.**
+> [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3 has an organization's
+> admins create and remove the assignments of its own members, while the shipped `organization_admin`
+> keeps both assignment tables read-only: nothing said what a built-in organization administrator may
+> hand out, and an unbounded one could bind `admin_full_access`, which the organization wall does not
+> bound, to itself. This note is that boundary. D12 names three kinds of administrator:
+>
+> 1. **Tenant-level** — the environment's administrator: the platform administrator, an unscoped
+>    `admin_full_access` holder ([ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md)'s
+>    `PLATFORM_ADMIN` rung). It defines the catalog (`manage_metadata`, ADR-0131 D3), owns
+>    security-domain publishes (D7) and the `everyone` / `guest` anchors, and assigns any set to
+>    anyone. ADR-0095 names the next kind's rung `TENANT_ADMIN`; in D12, "tenant-level" means this
+>    kind alone.
+> 2. **Organization-level** — a holder of `organization_admin` (under a posture that enforces the
+>    organization wall) or `organization_admin_no_bypass` (under a wall-less posture,
+>    [ADR-0105](./0105-group-tenancy-posture-and-first-class-org-scope.md) D4) for one organization,
+>    who is not a platform administrator. It creates and removes `sys_user_position` and
+>    `sys_user_permission_set` rows of that organization, for that organization's members, when
+>    every permission set the row distributes — the granted set, or each set the assigned position
+>    carries — meets all three conditions:
+>    - (a) no wildcard superuser bit: its `objects['*']` entry carries neither `viewAllRecords` nor
+>      `modifyAllRecords`;
+>    - (b) no `adminScope`;
+>    - (c) organization capabilities only: every name in its `systemPermissions` is declared
+>      `scope: 'org'` — `PlatformCapability.scope` in `packages/spec/src/security/capabilities.ts`
+>      for a platform capability, the declaration's `scope` (default `'platform'`) for a package's
+>      `defineCapability`; a name no declaration carries is not an organization capability.
+>
+>    The sets a position carries are every set an assignment of it grants: the names its
+>    definition's `PositionSchema.permissionSets` lists and, while the resolver folds held position
+>    names into the requested set names (`plugin-security` `security-plugin.ts`,
+>    `[...positions, ...explicitPermissionSets]`), the permission set of the position's own name.
+>    One set outside the boundary puts the whole position outside. The right is create and remove;
+>    an assignment row is not edited in place.
+>
+>    Outside the boundary, by the conditions or by name: `admin_full_access`; every set carrying a
+>    platform capability; `organization_admin` itself, in both variants (`organization_admin_no_bypass`
+>    lacks the superuser bits and is outside by (c) today, and by name whatever a capability's scope
+>    later becomes); and every delegated set. Organization-administrator status is conferred by
+>    membership grade only — an owner or admin `sys_member` row, from which `auto-org-admin-grant.ts`
+>    grants the set — and is never copied by an assignment.
+> 3. **Delegated** — an `adminScope` holder, decided by the bullets above (subtree, allowlist,
+>    strict containment) as amended on 2026-10-15.
+>
+> Unchanged: strict containment; the `everyone` / `guest` anchors, which no organization-level or
+> delegated administrator binds and no caller assigns (D9); and the ADR-0068 D2 identity names,
+> which `sys_user_position.position` refuses from every writer.
+>
+> **Measured on `origin/main` `eda6f14b7b`.** Of the eight permission sets `plugin-security` ships
+> (`default-permission-sets.ts`), the three conditions settle five. Inside: `member_default` and
+> `viewer_readonly`. Outside: `admin_full_access` (a, c), `organization_admin` (a, c) and
+> `organization_admin_no_bypass` (c: `setup.access`). Outside (denylist): the three D10 agent
+> ceilings — `mcp_agent_data_read`, `mcp_agent_data_write` and, by kind, `mcp_agent_restricted`, since
+> an agent ceiling is not a person's set. The conditions place them inside and so mis-settle them: an
+> agent ceiling's bound is the delegating principal's own grants (D10 rule 1), not the organization
+> wall. Held by a person as a direct grant, the two reading ceilings carry no row scope on the
+> Layer-0-inert SCIM projection tables (no organization column), and in a walled deployment with no
+> platform baseline they read every organization's rows there — a read the granting organization
+> administrator does not hold. The ruling's fallback — an explicit denylist for a shipped set the conditions cannot settle,
+> in place of a wider rule — therefore names those three sets; a set shipped later that the conditions
+> cannot settle joins that denylist by an amendment here. The general case — an authored set with a
+> `'*'` read and no row scope on a Layer-0-inert readable object, in a deployment with no platform
+> baseline — is not settled by this note: it is held for the maintainer's decision on #24164.
+> The delegated-administration gate's `isTenantAdmin` (a wildcard `modifyAllRecords` holder) reads
+> the walled `organization_admin` as tenant-level today; under this note it is organization-level.
+> No spec key is added, and the v18 upgrade entry's `replacement` text
+> (`18.walled-catalog-tenant-writes-retired`) stands as published: this note makes it true.
+>
+> The case held for #24164 is ruled (2026-10-18, ruling of record 6250748677, letter E′): an
+> object is to carry its own default row scope, to apply when no held set carries a row policy for
+> it ([ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md)'s 2026-10-18 note under
+> D1), so #24136 keeps the three conditions above and gains no fourth.
 
 ---
 

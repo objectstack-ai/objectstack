@@ -39,7 +39,9 @@ export const SysNotification = ObjectSchema.create({
     class: 'telemetry',
     retention: { maxAge: '90d' },
   },
-  description: 'Notification events — one row per emit() (ADR-0030 Layer 2 ingress)',
+  // Admin-facing copy. The design reference (one row per `emit()`, the
+  // ADR-0030 Layer 2 ingress) lives in the docblock above.
+  description: 'Every notification the platform sent, one row per event.',
   displayNameField: 'topic',
   nameField: 'topic', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{topic}',

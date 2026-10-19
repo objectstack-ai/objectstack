@@ -7,9 +7,10 @@ import type { SemanticMigration } from '../../types.js';
 // while the other two carriers — a relationship field's `inlineColumns` and a
 // form view's `subforms[].columns` (#20901) — were the strict
 // `InlineGridColumnSchema`; the entry is now a strict shape of the twelve keys
-// objectui's `MasterDetailForm` reads, and its `columns` REFERENCES that schema.
-// D3 only: page-component `properties` is not parsed on the metadata save or
-// load path, so a stored page is never refused and there is no load-path
+// objectui's `MasterDetailForm` reads, and its `columns` REFERENCES that
+// schema. D3 only: page-component `properties` is not parsed on the metadata
+// load path, so a stored page is never refused at load (its next save meets the
+// component-props gate at the metadata save door) and there is no load-path
 // refusal for a conversion to pre-empt; the authored census found no `field`
 // spelling to respell. `defineStack`'s identity-only check reaches this carrier
 // too, the reach `inline-grid-column-identity-only-currency-scale-refused`
@@ -41,9 +42,7 @@ export const entry: SemanticMigration = {
     + 'that schema holds applies here too, with its own prescription. The entry half is read where '
     + 'every page component\'s props are: the component-props gate reports a failing entry or '
     + 'column as a `component-props-unknown-key` / `component-props-invalid` error on '
-    + '`objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still '
-    + 'saves and loads, because a page component\'s `properties` is not parsed on the metadata save '
-    + 'or load path. The identity-only half is `defineStack`\'s cross-reference check, which already '
+    + '`objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still loads, because a page component\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. The identity-only half is `defineStack`\'s cross-reference check, which already '
     + 'judged the other two carriers: it now reaches the block wherever a page carries it and '
     + 'refuses an identity-only column over a `currency` child field that carries `scale`, with the '
     + 'column schema\'s own message; reach: the child object must be declared in the same stack, '

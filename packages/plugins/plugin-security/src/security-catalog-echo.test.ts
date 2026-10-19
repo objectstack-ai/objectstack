@@ -286,6 +286,30 @@ describe('#23233 — controls: the owner is carried, never invented', () => {
     expect(suggestionRows(engine, 'org_member_default')).toEqual([]);
   });
 
+  it('[#24210] a disabled package\'s set echoes owned, and stays owned after the package is re-enabled', async () => {
+    // The by-name read withholds a disabled package's item and keeps its
+    // envelope; the binding is a resolution read, so it reads the envelope.
+    const { engine, metadata, protocol } = boot();
+    await publishThroughPackageDoor(protocol, RUNTIME_PKG, runtimeDefault());
+    const disabled = new Set<string>([RUNTIME_PKG]);
+    engine.registry.isPackageDisabled = ((id: unknown) => typeof id === 'string' && disabled.has(id)) as never;
+    // Anti-vacuity: the by-name read withholds the item now.
+    expect((await protocol.getMetaItem({ type: 'permission', name: RUNTIME_SET })).item).toBeUndefined();
+
+    metadata.store.delete(RUNTIME_SET);
+    const out = await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, {
+      type: 'permission', name: RUNTIME_SET, state: 'active',
+    });
+    expect(out).toBe('registered');
+    expect(metadata.store.get(RUNTIME_SET)).toMatchObject({ name: RUNTIME_SET, _packageId: RUNTIME_PKG, _envProjection: true });
+
+    disabled.delete(RUNTIME_PKG);
+    expect(metadata.store.get(RUNTIME_SET)).toMatchObject({ _packageId: RUNTIME_PKG });
+    await echoSecurityCatalogMutation(protocol, { ql: engine, metadata }, { type: 'permission', name: RUNTIME_SET, state: 'active' });
+    expect(metadata.store.get(RUNTIME_SET)).toMatchObject({ _packageId: RUNTIME_PKG });
+    expect((await protocol.getMetaItem({ type: 'permission', name: RUNTIME_SET })).item?._packageId).toBe(RUNTIME_PKG);
+  });
+
   it('a binding read that fails leaves the echo registered and unowned, as before, and says so once', async () => {
     const { engine, metadata, warnings } = boot();
     // The layered read answers an overlay; the by-name read is refused.
@@ -320,7 +344,11 @@ function stubProtocol(overlays: Record<string, { body: Row; packageId?: string }
     },
     getMetaItem: async ({ type, name }: { type: string; name: string }) => {
       const stored = overlays[`${type}/${name}`];
-      return { type, name, item: stored ? { ...stored.body, ...(stored.packageId ? { _packageId: stored.packageId } : {}) } : declared[`${type}/${name}`] };
+      // The protection envelope states the served document's `_packageId` as
+      // `packageId`, as the protocol's `servedLockState` does.
+      const item = stored ? { ...stored.body, ...(stored.packageId ? { _packageId: stored.packageId } : {}) } : declared[`${type}/${name}`];
+      const packageId = item?._packageId;
+      return { type, name, item, ...(typeof packageId === 'string' ? { packageId } : {}) };
     },
   };
 }
@@ -498,11 +526,25 @@ describe('the boot pass echoes every stored env-wide overlay, and only those', (
       { type: 'position', name: 'env_position', state: 'active', organization_id: null },
       { type: 'permission', name: 'org_set', state: 'active', organization_id: 'org_a' },
     ];
+    rows.forEach((row, i) => { (row as Row & { id?: string }).id = `row_${i}`; });
     const engine = {
       registry: { listItems: () => [] },
+      // [ADR-0131 D7] The engine shapes a read to the declared columns (no
+      // `organization_id`): an organization's row is told apart through the
+      // driver's physical column.
       find: async (object: string, query: { where: Row; limit?: number }) => {
         const hits = object === 'sys_metadata' ? rows.filter((row) => matches(row, query.where)) : [];
-        return typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
+        const bounded = typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
+        return bounded.map(({ organization_id: _physical, ...declared }) => declared);
+      },
+      getDriverForObject: (object: string) => object !== 'sys_metadata' ? undefined : {
+        dialectName: 'sqlite',
+        async execute(sql: string) {
+          return /column_name/.test(sql)
+            ? [{ column_name: 'id' }, { column_name: 'organization_id' }]
+            : rows.filter((r) => r.organization_id != null && r.organization_id !== '')
+              .map((r) => ({ id: (r as Row & { id?: string }).id, organization_id: r.organization_id }));
+        },
       },
     };
     const overlays: Record<string, { body: Row }> = {};

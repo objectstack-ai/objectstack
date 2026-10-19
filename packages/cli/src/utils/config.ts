@@ -617,8 +617,9 @@ const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
  * A call the current schema ACCEPTS has already run the producer's load-time
  * ADR-0087 D2 conversion pass when it returns. That pass runs in both of its
  * modes, and no option skips it. So its result is canonical already. Handed
- * to the chain as it was, a conversion the load still applies
- * (`driver: 'mongo'`) had already happened: `applied` came back empty,
+ * to the chain as it was, a conversion the load still applies (it was
+ * measured on `driver: 'mongo'`, a spelling since retired from the load path
+ * at 18) had already happened: `applied` came back empty,
  * `--write` wrote nothing, and every later load still printed the notice
  * that sends the author to this command.
  *
@@ -651,7 +652,8 @@ const AUTHORED_SOURCE_PRELUDE: readonly string[] = [
  * what the author wrote. It asks in the producer's `strict: false` mode, with
  * the producer's internal parameter that skips the load-time ADR-0087 D2
  * conversion pass ({@link SPEC_AUTHORED_INPUT_OPTION}, #22256). Without that
- * parameter a conversion the load still applies (`driver: 'mongo'`) was
+ * parameter a conversion the load still applies (measured on
+ * `driver: 'mongo'`, since retired from the load path at 18) was
  * applied while the input was produced again, so the chain never listed it
  * and `--write` never wrote it — the one-package defect, inside every package
  * body. With it, composition runs its own rule over the authored inputs, and

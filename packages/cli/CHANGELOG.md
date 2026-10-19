@@ -1,5 +1,1433 @@
 # @objectstack/cli
 
+## 18.0.0-next.4
+
+### Minor Changes
+
+- 78652c0: feat(cli,plugin-sharing)!: in the 17 → 18 ownership ceremony, a row whose owner cannot be derived blocks certification, and a declared-rule mirror's grants are renamed only onto a rule plugin-sharing serves
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, option, error code or stored shape is added, removed or renamed, and nothing exported is removed: the ceremony's report gains one field (`TableOutcome.held`), its verdict counts change, and plugin-sharing gains one export. The only stored state that moves is the operator's own: a row whose owner cannot be derived is given its organization or deleted by hand, which `objectstack migrate meta` has nothing to rewrite for. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no Zod schema in packages/spec changes (not runtime-interface-only or type-surface-only in the spec sense); and nothing exported is retired (not runtime-export-retired). -->
+  
+  **BREAKING** (narrowings), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM** (`@objectstack/cli`): `os migrate organization-ownership --apply` on a database holding a row whose owner cannot be derived exited `0` with `blocking: 0`, counted the row in `advisory`, and verified the `sys_migration` marker. This covers a reported (fate 4) row, and a row whose anchor is missing under a wall (fate 3). **TO:** it exits `1`, counts the row in `blocking`, and leaves the marker unverified, so a v18 `os serve` / `os start` does not start on the database. **Fix:** give each row its organization (write its `organization_id`, or repair the anchor its reason names), or delete it by hand, then re-run `--apply` with the same plan file.
+  - **FROM** (`@objectstack/cli`): a database an earlier version of this command certified while it held such a row was certified again by the next `--apply`. **TO:** that run leaves its marker unverified, for the same rows. **Fix:** the same as above.
+  - **FROM** (`@objectstack/cli`): `os dev`'s in-place upgrade of a development database started the server again whenever every ceremony step finished. **TO:** it starts it only when the post-check also holds nothing (`blocking` 0); otherwise it prints each table that holds, with its count and remedy, and the command that resumes the run. **Fix:** resolve the rows it names, then run the printed command.
+  - **FROM** (`@objectstack/cli`): the `mirror-deletion` step renamed the grants of a declared-rule mirror onto its rule's name, and deleted the mirror, even when plugin-sharing does not serve that rule (a condition that does not translate, an unmappable recipient, a retired owner-based rule); the next boot's orphaned-grant sweep then revoked those grants. **TO:** while `sys_record_share` grants name such a mirror, the step blocks, naming the rule, its rows and the reason, and writes nothing. **Fix:** correct the rule's declaration in its package so it is served, or delete each mirror row and the grants that name it, then re-run `--apply`.
+  
+  `@objectstack/cli` — **unattributable rows hold certification (ADR-0131 D10 fate 4).** The ceremony still never guesses an owner for such a row and never deletes it. The post-check now holds each one against the verdict:
+  
+  - Each table that holds one carries `held: { rows, remedy }` in the apply report, and counts those rows in its `remaining`. The terminal output names each table, its row count and the remedy.
+  - `advisory` now counts only the rows of an advisory departure and the reported rows of a table whose `organization_id` is not the tenancy anchor (`sys_sso_provider`, the retired `sys_scim_provider`). A row there that is bound to no organization is legitimate, is reported, and does not block.
+  - So a verified marker means no organization-less row on any table that the tenancy anchor governs.
+  - The plan's summary line says that such rows will hold `--apply`'s certification until they are resolved.
+  
+  `@objectstack/cli` — **the ceremony asks plugin-sharing which declared sharing rules it serves.** The port the `mirror-deletion` step reads (`DeclaredSharingRulesPort.rules()`, formerly `names()`) judges each declared rule through plugin-sharing's own translation. A mirror's grants are renamed only onto a rule that is served. A mirror of a refused rule that no grant names is still deleted.
+  
+  `@objectstack/plugin-sharing` — **exports `translateDeclaredSharingRule`** with its `DeclaredSharingRule` and `DeclaredSharingRuleSkip` types. It is the one translation enforcement serves a declared rule through. It is pure, and it is unchanged.
+- 5e97907: feat(plugin-sharing,cli)!: declared sharing rules are read from the registry — the boot writes no `sys_sharing_rule` row for them, and the 17 → 18 ownership ceremony deletes the copies the retired seeder wrote
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered sharing-rule-declared-mirror-retired -->
+  
+  The narrowings, FROM → TO, each with its one-line remedy:
+  
+  - `DELETE /api/v1/sharing/rules/:idOrName` on a declared rule — FROM `204`, the seeded row deleted (and written again by the next boot), TO `403 PERMISSION_DENIED`. Remedy: change or remove the rule in its declaration in the package; an organization's own rule is deleted as before.
+  - `sys_sharing_rule` — FROM one `managed_by: package` row per declared rule, TO none: the boot writes none and the ownership ceremony deletes the copies the seeder wrote (Setup's Sharing Rules object list, which lists rows, no longer shows declared rules). Remedy: read declared rules through `GET /api/v1/sharing/rules`, which lists them beside the organization's own; on an upgraded database run `os migrate organization-ownership --apply` with a fresh plan.
+  
+  The retirement note for the seeder is the ADR-0087 semantic entry `sharing-rule-declared-mirror-retired`.
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `@objectstack/plugin-sharing` no longer copies a stack's declared `sharingRules` into `sys_sharing_rule` at boot. ADR-0131 D2 retires that seeder (`bootstrapDeclaredSharingRules`). The sharing-rule service reads each declared rule from the registry whenever it reads the rule set: listing, getting, evaluating, the per-record hooks, the boot backfill and the orphaned-grant sweep. Rules an organization authors keep their `sys_sharing_rule` rows.
+  
+  - **A declared rule still grants, and stops granting when its declaration goes.** It is translated from the registry's copy exactly as the seeder translated it: the CEL `condition` is lowered to a `criteria` filter, and `sharedWith` becomes the recipient. A condition that does not lower is not served, and never as a match-all. It says so in one WARN line per rule per process. A declared rule's id is its NAME, and the grants it materialises carry the name as `sys_record_share.source_id`. Remove the declaration and the next boot's orphaned-grant sweep revokes those grants.
+  - **Scopes follow the posture, as the seeder's passes did.** Under `single` a declared rule is served once, organization-less, so every organization reads it. Under a wall it is served once per organization — every organization, read page by page. An organization created after boot is served from its creation on. If the organizations cannot be read at boot, no declared rule is served until the next boot, and the boot's orphaned-grant sweep revokes none of their grants meanwhile: a failed read is never a revocation.
+  - **A stored row of the same name answers for it.** Under `single` that is a row of that name in any organization, and under a wall that organization's own row. Such a row is an organization's own rule, a seeded copy an administrator customized, or a seeded copy the ceremony has not deleted yet. The declared rule is not served beside it, the same as while the seeder ran: it never overwrote an admin-authored or customized row.
+  - **`DELETE /api/v1/sharing/rules/:idOrName` refuses a declared rule** with `403 PERMISSION_DENIED`. It has no row: it is changed or removed in its declaration. Before this release a platform administrator could delete the seeded row, and the next boot wrote it again. An organization's own rule is deleted as before.
+  - **Setup's Sharing Rules object list no longer shows declared rules.** It lists `sys_sharing_rule` rows. `GET /api/v1/sharing/rules` lists both.
+  
+  `@objectstack/cli` — **`os migrate organization-ownership --apply` deletes the declared-rule mirrors.** The `declared-rule-mirrors` rows on `sys_sharing_rule` are the seeder's uncustomized copies (`managed_by` `package` or `platform`, `customized` not true). They now block certification until the ceremony's `mirror-deletion` step removes them. It works in the ruled order. It renames every grant naming a mirror by row id (`sys_record_share.source_id`, `source = 'rule'`) to the rule's name and verifies that no grant names a mirror any more. Only then does it delete the mirrors. Under a wall it deletes the organization-stamped copies too.
+  - A mirror whose rule no installed package declares, and that grants still name, blocks with nothing written. The blocker names the rows and the remedy. A mirror no grant names is deleted.
+  - The step also runs on a database whose ceremony already completed while an earlier release still seeded the rows, where they were advisory. Re-run `--apply` with a fresh plan.
+  - `DECLARED_SHARING_RULE_SEEDER_RUNS` is now `false`. A customized copy and an organization's own rule stay. Under `single` they take the Default Organization, as before.
+  
+  `@objectstack/lint` — the sharing-rule enforceability verdicts and `os explain` say what now happens to a declared rule whose condition does not lower. It is "never served", not "never seeded", because it is never written to `sys_sharing_rule`. The rule ids, severities, paths and what each rule accepts or refuses are unchanged.
+
+### Patch Changes
+
+- 1eae21f: fix(cli): `os verify --dashboard-windows` describes the measures it proves: counts, sums and derived measures
+  
+  Clause-②: no (the flag, its default and what it accepts are unchanged; only its help text moves)
+  
+  The `--dashboard-windows` flag description ended "(date and datetime fields; count measures)". The date-window family in `@objectstack/verify` now also proves sums and derived measures over counts or sums, so it reads FROM "(date and datetime fields; count measures)" TO "(date and datetime fields; count, sum and derived measures)". Nothing else about the flag changes.
+- 7d6ec91: Clause-②: no
+  
+  fix(cli): `os start` with the stdio MCP transport answers the `initialize` an MCP client writes when it spawns the server, and boots the configured app
+  
+  - **What was wrong.** An MCP client writes `initialize` to the server's stdin as soon as it spawns it. `os start` hands its stdin down to the processes it starts, and the CLI's argument parser fills an omitted positional argument from a pending stdin line. So the client's `initialize` became a config path. In a project with no `dist/objectstack.json`, the automatic compile step failed with `Config file not found: …/{"jsonrpc":"2.0",…}` and `os start` exited 1. In a project with a compiled artifact, the server printed `No objectstack.config.ts found — booting from artifact`, booted without the config's own plugins, and never answered `initialize`.
+  - **What changed.** The automatic compile step now gets no stdin, and `os start` names the config path when it starts `os serve` (the same `objectstack.config.ts` in the working directory that `os serve` used by default). The client's first message stays in the pipe for the stdio transport, and the config is loaded.
+  - **Unchanged:** the flags and environment variables of `os start`, `os serve` and `os compile`, and which config and artifact a boot uses.
+- d3d0644: fix(cli): `os migrate plan` no longer lists `sys_packages` among the tables "declared by no object in this plan" after `os migrate apply` has created it
+  
+  Clause-②: no
+  
+  `sys_packages` is the package registry's table. It is not an object: `PackageServicePlugin` creates it with its own DDL, and `os migrate apply` creates it from the registry's `package.storage` declaration. The plan's unmanaged-table sweep built its known set from the planned drivers' managed tables and the declared objects only, so on every applied deployment the plan reported the live registry table as if it were stranded.
+  
+  - **Now:** the sweep also counts the tables the boot's composition declares outside the object set. It reads that name from the same `package.storage` declaration the plan creates the table from. It reads it on every boot, whether or not the table exists yet, the skip-schema-sync boot of a Turso remote primary included. On `examples/app-crm` after `os migrate apply --yes`, the plan lists only a genuinely stranded `sys_*` table.
+  - **Still reported:** a `sys_packages` table in the database of a deployment that composes no package registry. Nothing there declares it.
+  - **Refused in one more case:** a `package.storage` service whose shape this CLI does not read now fails `plan`, `apply` and `organization-ownership` on a skip-schema-sync boot too, with the error those commands already gave on every other boot: `@objectstack/cli` and `@objectstack/service-package` must come from the same release.
+  - **Unchanged:** the `--json` keys, the section's wording, and what `apply` creates.
+- d702b18: fix(cli,runtime): a dangling symlink standing as the SQLite database's directory is refused at once by `os dev` and `os serve`, naming the database file and the directory, instead of failing the boot later in a plugin's start
+  
+  Clause-②: no
+  
+  **What was wrong.** `os dev` (for its default database under `OS_HOME/data`) and the standalone host behind `os serve` and `os start` (for a `file:` or `wasm-sqlite://` database URL) make the database file's directory before the driver opens it. Both accepted any `EEXIST` answer while making a missing level. A symbolic link that points nowhere answers `EEXIST` to `mkdir`, so it was taken for a directory, and the boot went on until the driver could not open the file. `os dev` then exited 1 with `Plugin com.objectstack.auth failed to start - rollback complete: The database refused to run this query for object 'sys_organization'`, and `os serve` with `Plugin package-service failed to start - rollback complete: The database refused to run a raw statement`. Neither message named the file, the directory or the link.
+  
+  **What an operator sees now.** Both make the directory with the same bounded walk as the other `OS_HOME` paths, which accepts `EEXIST` only when a directory stands there. A dangling link as the directory is refused before the boot starts: `os dev` prints `The default database '…/data/objectstack.db' cannot be created: its directory '…/data' could not be made: EEXIST: …` and exits 1, and `os serve` prints `[StandaloneStack] SQLite database file '…' cannot be created: its directory '…' could not be made: EEXIST: …` and exits 1. Remove the link, or point it at a directory that exists. A dangling link higher up the path was already refused at once, with `ENOENT` at the level below the link; it is now refused with `EEXIST` at the link itself.
+  
+  Nothing else changes. A directory that can be made is still made, every missing level of it; a directory that exists, or a symbolic link to one, is used as it stands; and a path the operating system refuses for any other reason (`ENOENT`, `ENOTDIR`, a regular file holding the directory's name) is refused with the same code and text as before.
+- 7715d04: `os serve` says once when it cannot write its runtime state file, naming the file and the operating system's error, and goes on booting
+  
+  Clause-②: no
+  
+  - **Before:** when `runtime.<environment>.<project>.json` could not be written — an `OS_HOME` under `/proc`, or one below a regular file (`ENOTDIR`) — the write's catch printed nothing. The boot printed its ready banner, an `os dev` parent got its `objectstack:listening` message, and a supervisor that then read the file got `ENOENT` with no reason anywhere.
+  - **Now:** one warning on stderr, among the other boot warnings and before the banner, names the file it could not write and carries the operating system's error verbatim (for example `ENOTDIR: not a directory, stat '…'`). It says the server runs on without the file and that `OS_HOME` must point at a directory the process can write.
+  - **Unchanged:** the file stays best-effort, so the boot never fails on it; its name, its payload and its removal on exit; the banner and the IPC message; stdout, which stays the stdio MCP transport's alone.
+- f963d8e: fix(cli): `os migrate plan` and `os migrate apply` examine the objects a `datasourceMapping` rule routes to a declared datasource, the declared default included, in that datasource, as `os serve` connects it (#24120)
+  
+  Clause-②: no
+  
+  A project whose primary store is a declared datasource routed as the default (`datasources: [{ name: 'qa_main', … }]` with `datasourceMapping: [{ default: true, datasource: 'qa_main' }]`) got a plan that examined nothing. The plan resolved `qa_main`'s database as its primary, but it registered no driver under the name `qa_main`, so every object the rule routes there, platform objects included, was bound to no driver. The plan printed `Examined 0 managed table(s)` and a PARTIAL plan. Meanwhile `os dev` on the same project reported drift in that database and named `os migrate` as the remedy.
+  
+  - **Now:** `plan` and `apply` connect the project's declared **managed** datasources the way `os serve` connects them: through the same `datasource-connection` service, under the declared name, for the datasources a mapping rule routes objects to, an object binds to, or that set `autoConnect`. Each datasource that objects live in is diffed and applied beside the primary. A composition note names each one and its database, in both the human output and the `--json` output. On a `datasourceMapping`-default project, the plan's drift is the drift `os dev` reports there.
+  - **Not connected:** a datasource whose schema the remote owns (`schemaMode: 'external'` or `'validate-only'`). Its objects are federated, and a plan has no table on it.
+  - **Refused now:** a routed managed datasource that cannot connect fails `plan`, `apply` and `unmapped-columns` with the connect error `os serve` gives for it. It is no longer skipped with a PARTIAL plan. `OS_ALLOW_DRIVER_CONNECT_FAILURE` degrades it here as it does there.
+  - **`os migrate unmapped-columns` follows:** it filters the plan's own findings, so it composes the same datasources. On such a project it reads an object's unmapped columns from the declared datasource. Before, it refused with "not in the set os migrate plan diffs: it is bound to no driver".
+  - **Unchanged:** a project that declares no datasource gets the plan it got before. `os migrate security-catalog-overlays` and `organization-ownership` boot as before. The unmanaged-table sweep's `physicalTables` counts each database once, although the primary and a declared default resolved from it are two connections to one file.
+- b7f29dd: Clause-②: no
+  
+  fix(cli): `os serve` with the stdio MCP transport and no config argument answers the `initialize` an MCP client writes when it spawns the server, and boots the configured app
+  
+  - **What was wrong.** An MCP client writes `initialize` to the server's stdin as soon as it spawns it. The CLI's argument parser fills an omitted positional argument from a pending stdin line, and `os serve`'s config path is an optional positional. So, started without a config path, `os serve` took the client's `initialize` as its config path. In a project with a compiled `dist/objectstack.json`, it printed `No objectstack.config.ts found — booting from artifact`, booted without the config's own plugins, and never answered `initialize`. `os start` already named the path when it started `os serve`; this is the same defect for `os serve` started directly.
+  - **What changed.** `os serve` no longer reads its config path from stdin. Without the argument it uses `objectstack.config.ts` in the working directory, as its help says, and the client's first message stays in the pipe for the stdio transport. Reading the config path from stdin was never documented, and no script, test or doc in this repository relied on it; to serve another config, pass its path as the argument.
+  - **Unchanged:** the flags and environment variables of `os serve`, and which config and artifact a boot uses when the path is given or when nothing waits on stdin.
+- a8adf66: Clause-②: no
+  
+  fix(cli): on a first run, `os start` writes its compile step's progress to stderr, so stdout carries only the stdio MCP transport's JSON-RPC frames
+  
+  - **What was wrong.** With `OS_MCP_STDIO_ENABLED=true`, stdout is the stdio MCP transport's protocol channel, and an MCP client parses every line it reads there as JSON-RPC. `os start` already writes its own banner and progress to stderr, but in a project with no `dist/objectstack.json` it compiles the config first, and that compile step wrote its progress (`◆ Compile`, `✓ Build complete`, `Artifact: …`, 24 lines for a one-object app) to stdout, ahead of the answer to the client's `initialize`.
+  - **What changed.** The automatic compile step's output now goes to stderr, next to the rest of `os start`'s own output, with or without the stdio transport. Nothing is dropped: the same lines still print, on stderr.
+  - **Unchanged:** the flags and environment variables of `os start` and `os compile`, when `os start` compiles, the artifact it writes, and `os compile`'s own output when you run it directly.
+- 51ad8e4: Clause-②: yes (widening)
+  
+  fix(cli,runtime): the 17 → 18 organization-ownership upgrade of a single-posture database that holds no organization leaves no row without one, the boot the ceremony prescribes writes nothing before it is refused, and a ceremony that did not verify is never served (ADR-0131 D3, D10)
+  
+  A 17.x single-posture install whose seed ran before any organization existed holds rows of organization-owned objects with `organization_id` NULL and an empty `sys_organization`. Upgrading it took this path: the ceremony's attribution checkpointed itself done at zero rows; the boot its rewrite step asks for created the Default Organization and let the inline seed stamp some rows before it refused; the second `--apply` did not run attribution again, dropped the columns and recorded discrepancies with `verified_at` NULL; and `os start` then served that database.
+  
+  - **The ceremony creates the Default Organization (`@objectstack/cli`).** Under the `single` posture, on a database that holds no organization and rows no anchor names, `os migrate organization-ownership` plans those rows as the Default Organization's and says so in a plan warning (`defaultOrganizationCreatedByApply: true` in the plan file). `--apply` creates it before its first write, through plugin-auth's boot invariant (the row a single-posture boot creates), and gives it every such row. A run that cannot create it — a boot without the auth family that declares `sys_organization` — blocks at attribution, naming why, instead of attributing nothing and certifying. Nothing is created under a walled posture, or when the database holds organizations.
+  - **The ceremony names the Default Organization as the boot does (`@objectstack/cli`).** Under `single` it is the organization with `slug = 'default'`, else the sole organization whatever its slug — the boot invariant's and the tenancy service's definition (ADR-0093 D3). Before, the plan required `slug = 'default'`, so a database whose only organization had another slug kept its unanchored rows NULL through the ceremony while v18 derives every owner from that organization. Several organizations, none of them `default`, still name none, and their rows are reported. In the plan file (the command's own output, not a published schema) `defaultOrganization.slug` is now that organization's own slug, no longer always `'default'`.
+  - **A checkpointed attribution runs again (`@objectstack/cli`)** whenever the plan derives an owner for rows still NULL: a row the operator made attributable since, or one an earlier run found no Default Organization for. It writes only where `organization_id` is NULL, so no owner already written is derived again. A database left by an earlier release's ceremony in that state is completed by re-running `--apply`.
+  - **The boot guard judges before any plugin writes (`@objectstack/runtime`, `@objectstack/plugin-auth`).** `OrganizationOwnershipBootGuardPlugin` judges in its own `start()`, after the engine's schema sync (the column the rewrite step waits for is still added) and before every plugin that writes rows at start: `AppPlugin` (the inline seed), `AuthPlugin` and the identity-objects plugin (the Default Organization) name it (`com.objectstack.organization-ownership-boot-guard`) in `optionalDependencies`. A refused boot leaves every row as it found it.
+  - **A ceremony that did not verify is refused (`@objectstack/runtime`).** With no table left in the v17 shape, a boot whose `adr-0131-organization-ownership` marker exists and is not verified — the post-check found rows the ceremony has not carried — is refused with `ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED`, naming the re-run. A database with no marker (a fresh one) boots as before.
+  - **The refusal now arrives as a `cause` (`@objectstack/runtime`).** A failed `start()` is reported by the kernel as its own error ("Plugin … failed to start"), with the plugin's error as its `cause`. A host that composes the guard and inspects the boot error asks `isOrganizationOwnershipBootRefusal` of each `cause` down the chain: asked of the kernel's own error it now answers `false`. `assertOrganizationOwnershipMigrated(engine)` still throws the refusal itself. `os serve` and `os dev` read it from the chain.
+  - **One new export (`@objectstack/plugin-auth`, `minor`).** `ensureDefaultOrganizationExists(ql, options?)` — the Default Organization's boot invariant, find-or-create under `single` — for the ceremony, so the organization it creates is the row a single-posture boot creates, from one producer. A host composing a kernel still never calls it: `AuthPlugin` and the identity-objects plugin keep the invariant on every boot. No other package entry changes.
+  
+  Unchanged: the ceremony's steps, fates and refusals otherwise; a walled posture's unattributable rows (reported, never assigned); the boot of a fresh or verified database; and every plugin's order on a kernel that does not compose the guard. Repairing a database whose organization-scoped seed load already inserted twins of NULL-organization rows is an operator's data repair.
+- 538f923: fix: an activity row is written only when an organization is derivable, never with a NULL organization, and the v18 ownership ceremony deletes the existing NULL activity rows it cannot attribute (ADR-0131 D9)
+  
+  Clause-②: no
+  
+  - **`@objectstack/plugin-audit`.** The audit writer's activity mirror (`sys_activity`) takes its organization from the record, then from the acting session, then from the `tenancy` service's Default Organization under `single`. When none of them names one, the mirror now writes no activity row at all. Before, it wrote a row with `organization_id` NULL. Under a wall that row was readable by no organization member. The change is still recorded: the compliance ledger row (`sys_audit_log`) is written as before, with its `tenant_id` attribution. Under `single` the Default Organization is always derivable, so nothing changes there. A record that names its organization keeps its activity row, with that organization.
+  - **`@objectstack/cli`.** `os migrate organization-ownership` still attributes a NULL `sys_activity` row when its record carries an organization. On a walled database (any posture but `single`), the mirror-deletion step now deletes the NULL rows no anchor attributes, such as activity about a sign-up's `sys_user`. Before, those rows were reported as unattributable and held certification. They are 14-day telemetry that the mirror no longer writes, and `sys_audit_log` keeps each change. The plan counts them as the departure `underivable-activity`, and warns before the first write that `--apply` deletes them. The apply report lists the count as the table's `deleted`. Under `single` the Default Organization takes these rows, as before, and nothing is deleted.
+- Updated dependencies [b2e7870]
+- Updated dependencies [6a49efb]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [78652c0]
+- Updated dependencies [1eae21f]
+- Updated dependencies [9c74d40]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [646303e]
+- Updated dependencies [e9bc60b]
+- Updated dependencies [52ff308]
+- Updated dependencies [d1f082d]
+- Updated dependencies [f5ef054]
+- Updated dependencies [0d34066]
+- Updated dependencies [0c3db0f]
+- Updated dependencies [8d3dd6f]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [03ac4ec]
+- Updated dependencies [5e97907]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [6e43b7b]
+- Updated dependencies [727091c]
+- Updated dependencies [8692a08]
+- Updated dependencies [62c4441]
+- Updated dependencies [f792290]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [2bcaefb]
+- Updated dependencies [f3174ef]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [d702b18]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [9975c26]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [5a9a80b]
+- Updated dependencies [1489952]
+- Updated dependencies [04fd88a]
+- Updated dependencies [aaaeeac]
+- Updated dependencies [6973014]
+- Updated dependencies [669296b]
+- Updated dependencies [8eccf51]
+- Updated dependencies [8a88901]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [8259ea0]
+- Updated dependencies [9040945]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [2bcd406]
+- Updated dependencies [2bcd406]
+- Updated dependencies [58a2faa]
+- Updated dependencies [e74ec56]
+- Updated dependencies [58a2faa]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [cbfa5e4]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [77e9f79]
+- Updated dependencies [83dfbc0]
+- Updated dependencies [9822b05]
+- Updated dependencies [889bf12]
+- Updated dependencies [7a8733f]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [e15897c]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [d79dc48]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [5da2e88]
+- Updated dependencies [51ad8e4]
+- Updated dependencies [f5e98a3]
+- Updated dependencies [ec749fb]
+- Updated dependencies [ec749fb]
+- Updated dependencies [c4526a7]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [85be049]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [41c7405]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [6868514]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [538f923]
+- Updated dependencies [d65826f]
+- Updated dependencies [741aa85]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [d8e11b5]
+- Updated dependencies [44a5011]
+- Updated dependencies [1827571]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+- Updated dependencies [2a1e48a]
+- Updated dependencies [71fa166]
+- Updated dependencies [71fa166]
+- Updated dependencies [e22defb]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/plugin-security@18.0.0-next.4
+  - @objectstack/plugin-auth@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/plugin-sharing@18.0.0-next.4
+  - @objectstack/verify@18.0.0-next.4
+  - @objectstack/lint@18.0.0-next.4
+  - @objectstack/rest@18.0.0-next.4
+  - @objectstack/service-settings@18.0.0-next.4
+  - @objectstack/service-storage@18.0.0-next.4
+  - @objectstack/plugin-audit@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/cloud-connection@18.0.0-next.4
+  - @objectstack/runtime@18.0.0-next.4
+  - @objectstack/plugin-hono-server@18.0.0-next.4
+  - @objectstack/metadata-protocol@18.0.0-next.4
+  - @objectstack/plugin-email@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/plugin-webhooks@18.0.0-next.4
+  - @objectstack/client@18.0.0-next.4
+  - @objectstack/plugin-approvals@18.0.0-next.4
+  - @objectstack/console@18.0.0-next.4
+  - @objectstack/mcp@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/driver-memory@18.0.0-next.4
+  - @objectstack/driver-mongodb@18.0.0-next.4
+  - @objectstack/driver-sql@18.0.0-next.4
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.4
+  - @objectstack/driver-turso@18.0.0-next.4
+  - @objectstack/metadata@18.0.0-next.4
+  - @objectstack/plugin-pinyin-search@18.0.0-next.4
+  - @objectstack/service-analytics@18.0.0-next.4
+  - @objectstack/service-automation@18.0.0-next.4
+  - @objectstack/service-cache@18.0.0-next.4
+  - @objectstack/service-datasource@18.0.0-next.4
+  - @objectstack/service-job@18.0.0-next.4
+  - @objectstack/service-mailbox@18.0.0-next.4
+  - @objectstack/service-messaging@18.0.0-next.4
+  - @objectstack/service-package@18.0.0-next.4
+  - @objectstack/service-queue@18.0.0-next.4
+  - @objectstack/service-realtime@18.0.0-next.4
+  - @objectstack/service-sms@18.0.0-next.4
+  - @objectstack/trigger-api@18.0.0-next.4
+  - @objectstack/trigger-record-change@18.0.0-next.4
+  - @objectstack/trigger-schedule@18.0.0-next.4
+  - @objectstack/account@18.0.0-next.4
+  - @objectstack/setup@18.0.0-next.4
+  - create-objectstack@18.0.0-next.4
+  - @objectstack/observability@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
+## 18.0.0-next.3
+
+### Minor Changes
+
+- 5b6c257: feat(plugin-audit): `sys_activity` rows carry two writer-stamped read-rule columns, and the withheld-row rule is a predicate over them, with no SYSTEM pre-scan (ADR-0139 E6)
+  
+  **Run `os migrate activity-changed-fields --apply` at once after upgrading.** After the upgrade, and until it runs, the `sys_activity` rows written before the upgrade carry no stamp and are withheld from every non-system reader: activity feeds, the header bell and record timelines show only the rows written since the upgrade. The door is `os migrate activity-changed-fields`, dry run by default, `--apply` to write, idempotent, and it stamps both columns in one run. Its flags are `os migrate audit-metadata-bodies`'s, one for one (`--database-url`, `--apply`, `--yes`, `--force`, `--json`). The columns arrive with the upgraded deployment's schema sync, which an `--apply` run performs itself; a dry run against a database no upgraded process has opened cannot read them and exits `1`.
+  
+  Clause-②: yes
+  
+  `sys_activity` gains two columns, stamped at write time by one derivation (`planActivityStamp`): the CRUD mirror stamps its own rows, and a `sys_activity` before-insert hook stamps every row any other writer inserts (an app's own server action, the seed loader), over whatever value that writer sent.
+  
+  - `changed_fields` (`tags`) — the key set of the recorded change: for an update, every field its recorded `old` / `new` values name; `[]` for a create, a delete, a note, or an update that touched only `internal` fields. It is served narrowed to the fields the reader is served.
+  - `milestone_key` (`text`) — for a fired activity milestone, one sorted, comma-joined key of every field the object's `activityMilestones` declaration watched when it fired; `null` for every other row. It is never served.
+  
+  The withheld-row rule is now a WHERE over those two columns, one branch per parent object, on `find`, `findOne`, `count` and `aggregate`. It reads no row, so the 2,000-row SYSTEM pre-scan and its window are gone: a broad read of the stream is served every row the caller may read, with a true `total`. What the rule withholds:
+  
+  - an update row whose `changed_fields` is non-empty and names no field the reader is served (unchanged);
+  - a fired milestone row, unless its key equals the key of the object's CURRENT `activityMilestones` declaration and the reader is served every field that declaration watches. **The cost:** a milestone row written under an earlier declaration, or naming a since-removed field, is withheld from every non-exempt reader until retention ages it out (14 days declared; `lifecycle.retention_overrides` may lengthen it);
+  - an unstamped row, from every non-system reader: one at rest from before the upgrade until the backfill stamps it, and one the planner cannot judge (a milestone row naming no readable watched-field list), which stays unstamped.
+  
+  The parent-field query guard covers both columns as it covers `metadata`: a reader withheld any field of the parent is refused a filter, sort, group or aggregate over `changed_fields` or `milestone_key` (`PERMISSION_DENIED` / 403).
+  
+  `@objectstack/plugin-audit` exports the backfill, `backfillActivityChangedFields` (with `ACTIVITY_BACKFILL_PAGE_SIZE` and its report and engine types), and the planner, `planActivityStamp` (with `ACTIVITY_CHANGED_FIELDS_COLUMN`, `ACTIVITY_MILESTONE_KEY_COLUMN` and `ActivityStamp`). Inside the module (none of it is exported from the package), `computeWithheldUpdateFilter` keeps its name and now builds the predicate, `isWithheldOnlyUpdate` keeps its name as the update half over `changed_fields`, and `isWithheldMilestone` / `isWithheldRow` are gone with the pre-scan they judged for.
+- ae4dfaf: feat(driver-turso,cli): the v18 organization-ownership ceremony runs on a Turso remote database
+  
+  Clause-②: yes (widening)
+  
+  `os migrate organization-ownership`, the plan and `--apply --backup-taken`, now completes against a Turso database reached over the remote transport (`libsql://…`), the transport hosted environments use. Before, the plan stopped at its boot with `Deferred schema DDL is not supported by the Turso REMOTE transport`, and the apply's column drops had no remote path either.
+  
+  - **`@objectstack/driver-turso`**, remote face:
+    - `detectManagedDrift()` answers instead of refusing with `NOT_IMPLEMENTED` / 501. The verdict is the shared differ's, the one the local face runs; the physical schema it diffs is read from the remote catalog (`pragma_table_info`, `sqlite_master`, `pragma_index_list` / `pragma_index_info`, and the ADR-0120 D4 duplicate probe). The declarations it diffs against are recorded by every remote schema door and by the DDL-free `registerObjectMetadata`, so a boot that skipped schema sync is covered too.
+    - `applyMigrationEntries()` applies `drop_index`, `create_index`, `recreate_index`, `replace_unique_index` and `drop_column` instead of refusing. Each entry runs as one libSQL `write` batch, so it lands whole or not at all: a `drop_column` drops the column's indexes with it in the same transaction, and a re-created index that fails to build leaves the old one in place. An entry is reported `applied` only once a read-back shows its target state. Every other column entry (nullability, width, a dropped DEFAULT) needs the SQLite table rebuild, which this transport does not run, so it is reported `skipped` and logged, as the in-place dialects report an op they cannot perform.
+    - The remote face declares `driftReportCaveat`: a sentence saying its drift report is for reading only and naming the reason. The OS_ARTIFACT_URL boot gate reads it (below). The local and embedded-replica faces declare `null`.
+    - The remote driver's `config` now carries its `url`, so the CLI labels a remote database by its URL (credential-free) instead of `better-sqlite3`. The ceremony writes that label into its plan and refuses an apply whose plan names another database; that refusal can now tell two remote databases apart.
+  - **`@objectstack/cli`**: the ceremony's plan and apply boots skip schema sync, instead of arming deferred DDL, when the primary datasource is a Turso remote one. No DDL is attempted, so the plan stays read-only, and every other datasource the boot connects is still deferred. The environment's own boot has already run the additive sync the ceremony reads. Every other `os migrate` command keeps refusing on that transport: their dry runs list held-back schema work, which a boot that holds nothing back cannot list.
+  - **`@objectstack/runtime`**: `createStandaloneStack` takes `skipSchemaSync`, passed to `ObjectQLPlugin` as the option `OS_SKIP_SCHEMA_SYNC=1` names. Unset, the plugin reads the variable as before.
+  
+  On a Turso remote primary, the `OS_ARTIFACT_URL` boot migration gate on `os serve` keeps its earlier answer: cannot judge, warn and boot. It applies no drift and refuses no boot. Only its warning's wording changes, from `Could not check the physical schema` to `Did not check the physical schema against the artifact: …`, followed by the driver's reason. The gate now decides this from a capability the driver declares (`driftReportCaveat`, a string on the remote face and `null` on the local and embedded-replica faces), not from a refusal it catches. Two follow-ups, filed separately and not closed by this change, have to land before that gate may act on a remote report:
+  - #23847: the remote transport's schema sync honours `storage.notNull` on create and add column, so the report stops naming a tightening its own sync produced;
+  - #23848: `os migrate apply` works on a Turso remote database, so the destructive drift the gate would refuse on has a remedy there.
+- 61e5ee9: fix(cli,driver-turso): `os migrate plan` and `os migrate apply` run on a Turso REMOTE database, and the apply names every drift entry it could not apply
+  
+  Clause-②: yes
+  
+  On a primary reached over the Turso REMOTE transport (`libsql://…`, every hosted tenant), `os migrate plan` and `os migrate apply` used to stop at their boot with `Deferred schema DDL is not supported by the Turso REMOTE transport`, so the remedy the drift report and the `OS_ARTIFACT_URL` boot gate print for destructive drift, `os migrate apply --allow-destructive`, could not run there at all. Both commands now boot the way `os migrate organization-ownership` does on that transport: with schema sync skipped instead of deferred. What an operator on a remote primary now sees:
+  
+  - **The drift half runs.** `os migrate plan` lists the drift; `os migrate apply` applies what the transport can express, after the same confirmation: a column drop (with the indexes keyed on it, in one transaction) and every index entry. Nothing is written before the prompt, as before.
+  - **The additive half is reported as NOT examined, never as "nothing to create".** Both commands print a warning under the database line saying that tables and columns the metadata declares and the database lacks are neither listed nor created by this run, and that the serving boot (`os serve` / `os start`) creates them on this transport. The `--json` documents carry `schemaSync: "skipped"`, so their `pending: []` reads as not examined; an apply with no drift answers `message: "in_sync_partial"`, not `"in_sync"`.
+  - **Every entry the driver did not apply is named,** by table, column and kind, in both faces (`--json`: a new `notApplied` array on the post-apply document). The REMOTE transport runs no SQLite table rebuild, so a tightening, a relaxed NOT NULL, a width change or a dropped DEFAULT is not applied there.
+  - **A destructive entry confirmed with `--allow-destructive` that was not applied makes the run PARTIAL:** the human face ends `PARTIAL apply: …` and the command exits `1`; `--json` carries `message: "partial"` and exits `1`. A non-destructive entry that was not applied is named and the exit stays `0`.
+  
+  On every other database the apply behaves as before, with one difference in the same direction: a destructive change confirmed with `--allow-destructive` that the driver could not apply (its DDL failed, or the dialect cannot perform it) now exits `1` and is named, where the run used to exit `0` with a count. Its human line for the entries held back without `--allow-destructive` now reads `Skipped N destructive change(s) (re-run with --allow-destructive to include them)`.
+  
+  `@objectstack/driver-turso`: the REMOTE face's `driftReportCaveat` no longer says a destructive entry has no remedy on this transport; it says `os migrate apply --allow-destructive` applies a column drop or an index change there and names the rest.
+  
+  The other `os migrate` commands whose dry run arms deferred DDL (`duplicates`, `account-issuer`, `unmapped-columns`, `multi-value-columns`, and the dry runs of the data commands) still refuse on the REMOTE transport, unchanged.
+- 67e8792: feat(plugin-audit): `sys_comment` rows carry a writer-stamped parent pair, `object_name` + `record_id`, and the comment-thread read gate narrows by it with one `ReadableIds` leaf per parent object, with no pre-scan (ADR-0139 E7)
+  
+  **Run `os migrate comment-parent-pair --apply` at once after upgrading.** After the upgrade, and until it runs, the `sys_comment` rows written before the upgrade carry no pair, and the read gate answers them as it answered every comment before: by a SYSTEM pre-scan of at most 2,000 candidate rows per read, fail closed. So a broad comment list — one not scoped to a single record's thread — can omit comments the reader may see, and its `total` agrees with the short list; a record's own comment thread is unaffected. The door is `os migrate comment-parent-pair`, dry run by default, `--apply` to write, idempotent, and it stamps both columns in one run, keeping each row's `updated_at`. Its flags are `os migrate activity-changed-fields`'s, one for one (`--database-url`, `--apply`, `--yes`, `--force`, `--json`). The columns arrive with the upgraded deployment's schema sync, which an `--apply` run performs itself; a dry run against a database no upgraded process has opened cannot read them and exits `1`.
+  
+  Clause-②: yes
+  
+  `sys_comment` gains two `readonly` text columns and an index over them. They are derived from `thread_id` (`{object}:{record_id}`, split on the first colon) by one planner, `planCommentParentPair`, and `thread_id` stays the key authors write: nothing changes for a writer. A `sys_comment` before-insert hook stamps every inserted row, whoever writes it, over whatever value the writer sent; an update that names `thread_id` (a re-point) is re-stamped from it; and an update that names either column without a thread has the pair re-derived from the row's stored thread, for every caller — a historical import (`preserveAudit`) included, where the engine's update-side `readonly` strip keeps a value — so no writer's value for either column lands. A multi-row update that names either column without a thread is refused whole (`VALIDATION_ERROR` / 400, nothing written) when its rows' threads name different records, since one write cannot store each row's own pair; over rows sharing one thread it stores that thread's pair. A thread that names no record stamps `null` / `null`, and such a comment stays hidden from every non-system reader, as before.
+  
+  The comment-thread read gate (`installCommentReadVisibility`) is now the parent-record gate the activity stream and the compliance ledger use, over the comment's own pair: one branch `{ object_name: P, record_id: { $in: ReadableIds.of(P) } }` per registered object other than `sys_comment`, ORed and ANDed into the read's `where`, on `find`, `findOne`, `count` and `aggregate`. A broad comment read is served every comment the reader may read, on any table size, with a true `total`. What keeps the bounded 2,000-row fail-closed probe, chosen up front by name, never by catching a refusal:
+  
+  - ADR-0139 D5's three classes: a delegated (on-behalf-of) caller (the whole read); a parent narrowed by an object-scoped read middleware (`sys_attachment`, `sys_comment_reaction`, `sys_approval_request`, …); a parent bound to another datasource;
+  - a security service that answers no `canReadObject`, or none at all (no leaf is written without it), and an engine that cannot classify a parent — each sends the whole read to the probe and is said once;
+  - a row with no stamped pair (until the backfill reaches it): probed by its `thread_id`, restricted to rows with no pair, never leafed;
+  - a composition whose registered `sys_comment` declares no pair: the thread probe over every row, said once.
+  
+  **The cost:** a deployment whose driver compiles no `ReadableIds` leaf — `driver-mongodb`, until ADR-0139's O3 — now fails a non-system comment read with `INTERNAL_ERROR` / 500 naming the driver in the log, as the activity, ledger and attachment reads already do (ADR-0139 D3); the gate does not catch that refusal into an empty list.
+  
+  Comment reactions are unchanged: their only parent is `sys_comment`, which this gate narrows by an object-scoped middleware, so the reaction gate keeps the bounded probe (ADR-0139 D5.2).
+  
+  `installCommentReadVisibility` takes an optional third argument, the security source whose `canReadObject` admits a leaf (`ParentObjectReadAdmissionSource`); without it every comment read is the bounded probe, as before. Its first parameter widens from `CommentAccessEngine` to `ParentRecordGateEngine` (`CommentAccessEngine` plus three optional members: a registry view, `hasObjectMiddleware` and `resolveEffectiveDatasource`); every existing caller's engine still satisfies it. Both types reach the published declaration through that signature. `CommentAccessEngine` gains an optional `getSchema`. `@objectstack/plugin-audit` exports the backfill, `backfillCommentParentPair` (with `COMMENT_PARENT_PAIR_BACKFILL_PAGE_SIZE` and its report and engine types), the planner `planCommentParentPair` (with `COMMENT_PARENT_OBJECT_COLUMN`, `COMMENT_PARENT_RECORD_COLUMN` and the `CommentParentPair` type).
+- adce192: feat(cli): `os migrate organization-ownership --apply` certifies a database whose packages declare sharing rules — the declared sharing-rule mirrors this release's boot still seeds are reported as advisory, not as discrepancies
+  
+  Clause-②: yes (widening — the apply report file, the plan file and both `--json` payloads gain an `advisory` field on a departure entry, and the run's `advisory` count includes that departure's rows)
+  
+  - **What an operator saw.** On a v17 database whose packages declare sharing rules (HotCRM declares eleven), `--apply` ended with `complete: true` and `blocking: 11`, and never certified: the `adr-0131-organization-ownership` row of `sys_migration` kept `verified_at` null. The post-check waited for the `declared-rule-mirrors` departure on `sys_sharing_rule` to leave. That departure is the uncustomized `managed_by` `package` / `platform` rows with no organization. This release's own served boot writes those rows on every start, including the first v18 boot that the organization-ownership refusal stops, so they could never leave on this release.
+  - **What it sees now.** `--apply` reports `blocking: 0` and certifies: `verified_at` is set, with `blocking` 0 in the marker every reader checks. The mirror rows are named, counted and kept:
+    - the plan and the apply print a warning before the first write: `sys_sharing_rule holds N organization-less row(s) of … which stay: …`. The plan file's and the report's `warnings` carry it too;
+    - in the plan file and in the apply report (`--json` and the `--out` file), the `declared-rule-mirrors` entry of `tables[].departures[]` keeps `id`, `label`, `as` and `rows`, and gains `advisory`: why the rows stay, and what removes them. A departure without `advisory` still blocks;
+    - `tables[].remaining` no longer counts these rows. The run's `advisory` and the ledger's `advisory` count them, beside the unattributable rows;
+    - the rows keep `organization_id` NULL, so `sys_sharing_rule`'s `notNull` reads `willReceive: false` with `N row(s) stay NULL on this release, reported as advisory: …`. The plan file used to read `willReceive: true` for that table;
+    - the human summary prints `N row(s) advisory, not held against certification — …` under the table. Its closing warnings name the unattributable rows and the advisory rows separately;
+    - nothing is deleted. Every rule row stays as it was.
+  - **What still blocks.** Every other departure: `global-rung-move`, `template-promotion`, and a host fate supplement's own departures, even one named `declared-rule-mirrors`. Every other remaining row blocks too.
+  - **Already ran `--apply` and stopped at `blocking: 11`?** Plan again on this release, review the plan, and run `--apply` with it. This change leaves the inventory digest as it was, so a checkpoint recorded under this release's inventory resumes: only the post-check runs, and it certifies. A checkpoint recorded by a release whose inventory differed is superseded: every step runs again, each one idempotent, and the post-check certifies.
+  - **When blocking returns.** The release that retires the declared sharing-rule seeder (ADR-0131 D2) sets `DECLARED_SHARING_RULE_SEEDER_RUNS` to `false` in the same change. From that release on, these rows hold certification again until its ceremony deletes them.
+- cdf3777: The v18 organization-ownership ceremony now completes on a long-lived 17.x database, and `os dev` runs it for you on a local development database (ADR-0131, amendment 2026-10-16).
+  
+  **`os dev` upgrades a v17-shape development database in place.** When the boot refuses a local SQLite development database that is still in the v17 organization-ownership shape, `os dev` first copies the database and its `telemetry` sibling (with `-wal` / `-shm`) into `<data dir>/backups/organization-ownership-<timestamp>/`. It then runs `os migrate organization-ownership --dev` (the plan), applies that plan, and starts the server again. The plan, the apply report and the ceremony's log are kept beside the copy. If a step blocks, `os dev` stops and prints the blocker, where the copy is, and how to resume. `os serve` / `os start`, and any database that is not a local SQLite file, keep the manual ceremony and the boot refusal unchanged.
+  
+  **What the ceremony decides for you is printed as a warning before it writes anything.** The plan carries a `warnings` list. The plan prints it, `--apply` prints it again before its first write, and the apply report keeps it.
+  
+  **The `telemetry` sibling is covered.** A development boot (or an `OS_TELEMETRY_DB` deployment) keeps `sys_audit_log`, `sys_job_run`, `sys_notification` and the other lifecycle objects in a sibling database. The ceremony now plans, attributes and drops columns for each object in the database it lives in, reading anchors across databases. Before, the boot refusal read those tables in the sibling while the ceremony only read the primary, so an upgraded database could still never boot. A copy of such a table that an older boot left in the primary is listed under `staleCopies`, warned about, and left untouched; it no longer blocks the column drops.
+  
+  **The shipped permission sets an install seeded before 2026-08-15 are adopted.** Those installs store the eight shipped sets (`organization_admin`, `member_default`, …) as `managed_by: 'admin'` rows. The authored-conversion step used to refuse them with "rename the authored row". The ceremony now re-owns them as the platform seeds they are and deletes them as mirrors once every grant names its set, so the shipped definitions apply. The warning names each row; a Setup edit to one of them is not carried over, and the pre-upgrade backup keeps it.
+  
+  **`os migrate organization-ownership --dev`** composes the stack as `os serve --dev` does: the development auth secret's fallback (so the security and audit plugins), the development `.env*` files, and the `telemetry` sibling. A development boot's refusal now names the command with `--dev`, and every refusal now names an apply the ceremony accepts: `--out PLAN` first, then `--apply --plan-file PLAN --backup-taken`. A bare `--apply` is refused without a reviewed plan file. Before, running the ceremony from a shell without `NODE_ENV=development` composed neither plugin, and its apply blocked on the shipped permission sets and on `sys_audit_log`.
+  
+  `OrganizationOwnershipBootGuardPlugin` (`@objectstack/runtime`) takes `{ dev }`; `organizationOwnershipRefusalMessage` and `assertOrganizationOwnershipMigrated` take the same option.
+
+### Patch Changes
+
+- 8684079: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  fix(metadata-protocol,metadata): on a database the organization-ownership ceremony has not migrated, the paged family reads, `DatabaseLoader`'s count and the package rollback agree with the environment-only reads; the ceremony's apply is named with `--plan-file` (ADR-0131 D6/D7)
+  
+  Clause-②: no
+  
+  Every change below matters only where legacy organization rows still sit in the `sys_metadata` family, the database `os serve` refuses to start on until `os migrate organization-ownership` has verified. On a migrated or fresh database every answer is unchanged.
+  
+  - **`@objectstack/metadata-protocol`: a paged read leaves the legacy rows out before the page is cut.** `auditMetaItem` (`limit`), `listCommits` (`limit`), `revertStoredPackage`'s first-active-row probe and `SysMetadataRepository.list({ limit })` used to filter a legacy organization's rows out after the limit. A page they sat in came back short, and `revertStoredPackage` answered `RESOURCE_CONFLICT` (409) "has never been published" for a package the environment had published when its first active row was an organization's. When a page holds a legacy row, the read is now repeated with those rows excluded in the query.
+  - **`@objectstack/metadata-protocol`: `rollbackToPackageCommit` refuses a legacy organization's commit by name.** It answered `COMMIT_NOT_FOUND` (404) for a commit that is there. It now gives `revertCommit`'s refusal: `NOT_OVERRIDABLE` (403), the same sentence, naming the commit and its organization.
+  - **`@objectstack/metadata`: `DatabaseLoader` counts what it reads.** `exists()` answered true for an address only a legacy organization row held, while `load()` answered null, and `queryHistory`'s `total` counted legacy history rows no page serves. Neither counts them now.
+  - **`@objectstack/metadata-protocol`: internal cleanup.** The organization plumbing that only ever carried the environment (`null`) is removed from the list merge and the served-row resolution. No export changes.
+  - **`@objectstack/spec`: wording.** The four ADR-0087 entries `18.sys-metadata{,-audit,-commit,-history}-organization-column-retired` now name the ceremony's reviewed apply, `os migrate organization-ownership --out PLAN` and then `--apply --plan-file PLAN`, which `--plan-file`'s own entry requires. No id, category, version or field the migration engine reads changes.
+  - **`@objectstack/cli`: wording.** `os migrate apply --allow-destructive`'s refusal on an unmigrated database now reads "a drop the organization-ownership ceremony owns, and the ceremony has not verified on this database". Its `--json` payload is unchanged.
+- b485122: fix(cli): `os serve` refuses an `OS_DATABASE_URL` whose scheme no driver recognises, reads `pg://` and a scheme-less path as the runtime host does, and opens `sqlite://x.db` as `./x.db`
+  
+  Clause-②: no
+  
+  This is the `os serve` path a host config takes (one whose `plugins` hold plugin instances), and the one `OS_MODE=off|none|legacy` takes. `os dev` and `os start` reach it through their `serve` child.
+  
+  - **Before, an unrecognised scheme (`OS_DATABASE_URL=redis://127.0.0.1:6399/0`).** `os serve --dev` and `os dev` printed `✓ Server is ready` and the banner `Driver: SqlDriver(better-sqlite3) → :memory:`. The database the operator named was dropped without a word, and every write was lost at restart. In production (`os serve`, `os start`) the boot met the no-storage refusal, which tells the operator to set `OS_DATABASE_URL` even though they had set it.
+  - **After.** Both postures exit 1 before any plugin starts with `✗ Unsupported database URL scheme "redis://" (OS_DATABASE_URL / --database). Supported: …`. The message lists the recognised spellings and names only the scheme, never the URL, so credentials in the URL are not printed. The standalone runtime host (`os dev` / `os start` over a plain config, `os migrate`) already refused these schemes, so the two hosts now agree. A `.db` or `.wasm.db` ending no longer rescues an unrecognised scheme: `redis://h/app.db` and `redis://h/app.wasm.db` used to be handed to SQLite as a file path, and both are now refused. A `*.wasm.db` name still selects the WASM engine for a `file:` / `sqlite:` URL or a path with no scheme.
+  - **`pg://…` and a path with no scheme (`./data/app`, `/var/lib/objectstack/app`).** The runtime host already reads these as postgres and as a SQLite file. Before, this path booted `--dev` on `:memory:` for them and production met the no-storage refusal. Now `pg://` is a postgres datasource and a scheme-less path is that SQLite file, in dev and production.
+  - **An opaque scheme (two or more characters and a `:` with no `//`, such as `jdbc:postgresql://h/db` or `redis:h`).** Before, `--dev` booted on `:memory:` for these and production met the no-storage refusal. Now they get the same refusal, naming the scheme (`"jdbc:"`), in both postures. A one-letter drive is a path, not a scheme (`C:\data\app`, `C:/data/app`). A file name whose first segment contains a colon now reads as a scheme too: `backup:2026.db` was a SQLite file, and is now refused. Write `./backup:2026.db` or `file:backup:2026.db` for that file.
+  - **`sqlite://x.db`.** Before, this path stripped `sqlite:` and opened `//x.db`, a file at the filesystem root. The banner read `→ sqlite://x.db`. The runtime host already reads `sqlite:` and `sqlite://` as aliases of `file:` and opens `./x.db`. This path now uses that same rule (`normalizeDatabaseUrl` from `@objectstack/runtime`), so `sqlite://x.db` and `sqlite:x.db` open `./x.db` and `sqlite:///abs/x.db` opens `/abs/x.db`, on both hosts. `sqlite://x.wasm.db` likewise opens `./x.wasm.db` on the WASM engine.
+  
+  `postgres://`, `postgresql://`, `mysql://`, `mongodb://`, `libsql://`, `wasm-sqlite://`, `file:`, `:memory:` and `*.db` paths resolve as before. An unset or blank `OS_DATABASE_URL` keeps the dev SQLite default. An explicit `OS_DATABASE_DRIVER` still wins over the URL, which is then not classified.
+- abb6df0: Clause-②: no
+  
+  fix(cli): `os storage orphans`, the `os secret rewrap` dry run and the `os migrate summary-nulls` dry run say they write no row or table, and that opening a SQLite file can still switch its journal mode, instead of saying nothing was written
+  
+  **What was wrong.** Each of these runs boots through the SQL driver before it prints, and the driver's connect switches a SQLite file to the journal mode it asks for (WAL, unless `OS_DATABASE_SQLITE_JOURNAL_MODE=delete` is set in the command's own environment or the project's `.env`). Measured on a file still on a rollback journal, each run moved the header's journal-mode bytes (18 and 19, from 1,1 to 2,2) and its change counter, and changed no row or table, while printing "nothing was written". Nothing was lost.
+  
+  **What changed.** Each sentence below now claims no row or table. Where the run opened a SQLite file, the report's line is followed by the note the other read-only arms already carry: "Opening a SQLite file can still switch its journal mode (to WAL by default), which changes its header only." On PostgreSQL or MySQL the line ends without it.
+  
+  - `os storage orphans` (`formatStrandedOrphanInventory`, `@objectstack/service-storage`). FROM: "This pass is READ-ONLY: nothing was written, tombstoned or deleted." TO: "This pass is READ-ONLY: no row or table was written, tombstoned or deleted." and the note.
+  - `os secret rewrap` (the dry run's note, `REWRAP_NOTES.dryRun`, also in `--json` `report.notes`). FROM: "Dry run: every attributed row was opened, re-sealed and verified in memory, and nothing was written. Re-run with --apply to write." TO: "… and no row or table was written. Re-run with --apply to write." The note already follows the dry run's closing line on a SQLite file, so this sentence carries none.
+  - `os migrate summary-nulls` (the dry run that found NULL roll-ups, `formatSummaryBackfillReport`, `@objectstack/objectql`). FROM: "Dry run — nothing was written. Re-run with --apply to backfill." TO: "Dry run — no row or table was written. Re-run with --apply to backfill." and the note.
+  
+  **Unchanged.** No exit code, flag, prompt, refusal or export signature changes, and no `--json` document gains a field; the note is printed in the text output only. What the driver does on connect is unchanged: once a file is in the mode the driver asks for, these runs leave it byte-identical.
+- f7a5ebe: fix(runtime,cli): `os start` and `os dev` refuse a SQLite database whose directory cannot be made, at once, instead of hanging
+  
+  Clause-②: no
+  
+  **What was wrong.** The standalone host (`createStandaloneStack`, which `os start`, `os dev`'s standalone boot and every embedder run) prepared the directory of a file-backed SQLite database with Node's recursive `mkdirSync`. Node's recursive mkdir never returns when a level answers `ENOENT` although its parent exists: for `OS_DATABASE_URL=file:/proc/os-x/ctl.db` it looped `mkdir("/proc/os-x")` and `mkdir("/proc")` without end, holding the event loop. `os start` printed `→ Starting server...` and hung with no timeout and no message. The `sqlite-wasm` arm (`wasm-sqlite://…`, or `OS_DATABASE_DRIVER=sqlite-wasm`) did the same. `os dev` hung the same way in its own process when its default database lived under a state directory that cannot be made (for example `OS_HOME=/proc/os-x`).
+  
+  **What an operator sees now.** The boot exits non-zero within its normal start-up time, naming the database file, the directory and the operating system's error:
+  
+  ```text
+  ✗ [StandaloneStack] SQLite database file '/proc/os-x/ctl.db' cannot be created: its directory '/proc/os-x' could not be made: ENOENT: no such file or directory, mkdir '/proc/os-x'
+  ```
+  
+  `os dev` with an unusable state directory prints `✗ The default database '…/data/objectstack.db' cannot be created: its directory '…/data' could not be made: …`, followed by the remedy: point `OS_HOME` at a directory that can be created, or choose the database with `--database`.
+  
+  Nothing else changes. A creatable path is still made, every missing level of it. The read-only boot (`os migrate plan` over an absent database file) still creates no directory. The refusal names the path, never the database URL.
+- 161aee1: fix(cli): an `os serve` boot that binds no HTTP server sends no `objectstack:listening` message and writes no runtime state file, and the banner's `MCP:` row prints only when the MCP route is mounted
+  
+  Clause-②: no
+  
+  - **Before.** `os serve --no-server`, with no transport composed, sent `{ type: 'objectstack:listening', port, url: 'http://localhost:PORT' }` over an `ipc` channel and wrote `runtime.<environment>.<project>.json` with the same `port` and `url`. Nothing listened on that port: a `GET` to it was refused. The docs define `objectstack:listening` as "The HTTP server is bound".
+  - **After, for a supervisor of a boot that binds no HTTP server** (`--no-server` with no config-mounted transport, or a transport plugin that did not load). It receives no `objectstack:listening` message. It still receives `objectstack:seed-settled`, which is then the boot's only message, so a parent waiting for the seed to settle does not hang. No `runtime.<environment>.<project>.json` is written, so "is my server running, and where?" gets no answer naming an address. The file's payload, where it is written, is unchanged.
+  - **After, with an HTTP server composed.** Unchanged: the state file is written first, then the banner prints, then `objectstack:listening` is sent with the port actually bound, and `objectstack:seed-settled` follows it. That includes a `--no-server` boot whose config mounts its own `HonoServerPlugin`. The banner, the IPC message and the state file read the same check, a registered `http.server` service on the booted kernel, so they agree on whether there is an address.
+  - **The banner's `MCP:` row.** It and its "connect an AI client" hint now also require the plugin that mounts `/api/v1/mcp`, the runtime dispatcher, to be registered on the kernel. `os serve` composes the dispatcher only under `--server`. So a `--no-server` boot whose config mounts its own `HonoServerPlugin` prints `API:` but no longer prints an `MCP:` address, which answered 404 there.
+- bb14934: fix(cli): an `os serve` boot that composes no HTTP server now stays up until it is stopped, as its banner's `Press Ctrl+C to stop` says
+  
+  Clause-②: no
+  
+  - **Before.** `os serve --no-server --preset minimal`, in production with no storage driver (no `OS_DATABASE_URL`), printed the ready banner ending `Press Ctrl+C to stop` and then exited 0 by itself, about 50 ms later, with no signal and without the kernel shutting down. The same command stayed up whenever the storage driver kept a connection pool (`--dev --no-server`, or `--no-server` with `OS_DATABASE_URL` set). Measured, that pool's reaping interval was the only thing keeping those boots alive, so whether a kernel-only boot stayed up depended on the driver.
+  - **After, for an operator or supervisor of a boot with no HTTP server composed** (`--no-server` with no config-mounted transport, or a transport plugin that did not load). The process stays up after its banner, whatever the driver, until SIGINT, SIGTERM or SIGQUIT. The kernel's own signal handling then drains it and exits with the kernel's code, 0 on a clean shutdown, as on a server boot. No signal listener is added.
+  - **Why "stay up" and not "run and exit".** The banner says `Press Ctrl+C to stop`. The kernel is built to own the process: a signal drains it, then exits it. The platform's background loops never keep a process alive by themselves, so the host decides the lifetime. The run-and-exit kernel boot already exists, and is explicit: `OS_MIGRATE_AND_EXIT=1`. Every in-repo kernel-only boot that is meant to exit sets it, and every other one is stopped by a signal.
+  - **Unchanged.** A boot with an HTTP server composed, including a `--no-server` boot whose config mounts its own `HonoServerPlugin`. `OS_MIGRATE_AND_EXIT=1`, which still shuts the kernel down and exits 0 before any banner. The IPC messages and the runtime state file.
+  - **If you relied on the exit.** A script that ran `os serve --no-server` and waited for the process to end now has to set `OS_MIGRATE_AND_EXIT=1` (bootstrap once, then exit 0), or stop the process with a signal.
+- 66d456d: fix(cli): `os serve`'s refusal of a `memory://` or `mingo://` `OS_DATABASE_URL` names the URL's scheme and never prints the URL, so a password or token in it no longer reaches the console
+  
+  Clause-②: no
+  
+  This is the `os serve` path a host config takes (one whose `plugins` hold plugin instances), and the one `OS_MODE=off|none|legacy` takes. `os dev` and `os start` reach it through their `serve` child. Both schemes name the retired in-memory (mingo) engine, and both accept anything after the `//`, a `user:password@` and a query string included. The refusal interpolated the whole URL, and the CLI prints it as it exits 1.
+  
+  With `OS_DATABASE_URL=memory://PLACEHOLDER-USER:PLACEHOLDER-SECRET@127.0.0.1:6399/0?authToken=PLACEHOLDER-TOKEN`:
+  
+  - FROM: `✗ OS_DATABASE_URL "memory://PLACEHOLDER-USER:PLACEHOLDER-SECRET@127.0.0.1:6399/0?authToken=PLACEHOLDER-TOKEN" selects the in-memory (mingo) engine, …`
+  - TO: `✗ An OS_DATABASE_URL with the "memory://" scheme selects the in-memory (mingo) engine, …`
+  
+  `mingo://` reads the same way, with `"mingo://"`. These are the runtime host's words for the same URL (`os dev` / `os start` over a plain config, and `os migrate`), so the two hosts print one sentence. The rest of the sentence, which names the SQLite replacements (`os dev --fresh`, and the URL `:memory:`), is unchanged.
+  
+  What does not change: both schemes are still refused, with the same error class and exit code, in dev and production; every other URL resolves as before, to the same driver.
+- 34b740f: fix(runtime,cli): an upper-case `FILE:` database URL opens the file its lower-case spelling opens, `file://NAME` opens `NAME` on both hosts, and the URL-to-filename rule is exported as `sqliteFilenameFromUrl`
+  
+  Clause-②: yes (widening)
+  
+  - **`FILE:` is stripped case-insensitively.** The standalone host classified `FILE:./app.db` as SQLite case-insensitively but stripped the prefix case-sensitively, so the prefix stayed in the file name: `OS_DATABASE_URL=FILE:./app.db` created a directory literally named `FILE:.` and put the database inside it, and `File:///tmp/app.db` was refused as an unsupported `File://` scheme. Both now open the file the lower-case spelling opens (`./app.db`, `/tmp/app.db`), as the `sqlite-wasm` path already did. Lower-case `file:` URLs and bare paths are unchanged.
+  - **New export: `sqliteFilenameFromUrl(url, kind)`** from `@objectstack/runtime`, `kind` being `'sqlite'` or `'sqlite-wasm'`. It is the one rule that turns a SQLite database URL (after `normalizeDatabaseUrl`) into a file name: `file:` / `file://` stripped case-insensitively, plus `wasm-sqlite:` for the WASM kind. For `'sqlite'` it throws a plain `Error` on a URL that is not a file path, naming the URL's scheme and never the URL. Nothing is removed.
+  - **`os serve`'s legacy storage path (`OS_MODE=off`, `bootMode: 'off'`, or a host config) turns a SQLite URL into a file by that same rule**, so both hosts open one file per URL. It used to strip only a lower-case `file:`: `OS_DATABASE_URL=file://NAME` opened `//NAME` at the filesystem root, where the standalone host opens `./NAME`, and `FILE:./app.db` made a `FILE:.` directory there too. `file:///abs/app.db` opens `/abs/app.db`; `sqlite:` / `sqlite://` URLs are unchanged.
+  - **What that rule refuses, the legacy path now refuses too, and fatally**, with the standalone host's own sentence (it names the URL's scheme, never the URL): an explicit `OS_DATABASE_DRIVER=sqlite` over a server URL such as `postgres://user:password@host/db`, which used to create directories named after the URL, credentials included, and a `file:` URL that names no file, which used to declare a database with an empty file name. Fix: point `OS_DATABASE_URL` at a file (`file:./app.db`), or select the driver the URL is for. The undocumented `sql://` prefix that path also stripped under an explicit `sqlite` selection is refused the same way; write `file:` instead. A blank `OS_DATABASE_URL` under an explicit `sqlite` selection is read as absent (`:memory:`), as an absent one always was.
+- a31ff2e: Clause-②: no
+  
+  `os init` (every template: `app`, `plugin`, `empty`) and `os create plugin` now emit
+  `"overrides": { "vitest": "~4.0.0" }` in the scaffolded `package.json`, so the project installs on
+  npm 10, the npm Node 22 bundles. Since vitest 4.1.12 shipped a peer set that contradicts itself,
+  `npm install` of a fresh `os init` project crashed on npm 10.9.x with
+  `Cannot read properties of null (reading 'edgesOut')`. The override routes every `vitest` edge in
+  the npm graph to the range the scaffold declares; npm 11 installs the same tree, and pnpm ignores
+  the field.
+  
+  The override equals `devDependencies.vitest` wherever the manifest declares vitest directly,
+  because npm refuses an override that differs from the direct dependency (`EOVERRIDE`). In an `app`
+  or `empty` project, add vitest at the same range (`npm install -D vitest@~4.0.0`); a bare
+  `npm install -D vitest` is refused with `EOVERRIDE` while the override is in place. Existing
+  projects can add the same `overrides` block by hand. `os create plugin --in-repo` is unchanged.
+- 41e84c0: fix(cli): `os dev` (and `pnpm dev` on a scaffold) prints why a watched save was refused, not only `✗ compile failed`
+  
+  Clause-②: no
+  
+  When a saved file makes the compile refuse, the watcher now prints the compile's output under its failure line: the same lines `pnpm build` prints on that tree, without `--verbose`.
+  
+  - **Before.** On a fresh `os init my-app -t app` scaffold (namespace `my_app`), saving an object named `task` printed `↻ recompiling (2 files)...` and then a bare `✗ compile failed (3782ms)`. The reason never appeared. The compile writes its refusals to stdout, and the watcher discarded stdout and printed stderr only.
+  - **After.** The failure line is followed by the compile's stdout, then its stderr. For that save it shows `✗ Object 'task' is missing the package namespace prefix. Rename it to 'my_app_task' (namespace = 'my_app').` and the lines around it.
+  
+  What does not change: a successful recompile prints exactly what it printed before, and the compile's progress output stays hidden on success. `--verbose` still passes the compile's output straight through, so on a failure nothing is printed twice. A failed compile still writes no artifact and still triggers no restart.
+- 98ba1bf: fix(cli): `os migrate organization-ownership --apply` refuses an `--out` it cannot write before it executes anything
+  
+  Clause-②: no
+  
+  **What was wrong.** The apply wrote its report file only after the ceremony had run, with an exclusive create. Handed an `--out` that already existed (a re-run with the same path), it executed every step (attribution, the id-to-name rewrite, mirror deletion, the column drops) and only then exited 1 with `apply_refused` / `report-file-unwritable`, the same `--json` code a refusal before any write prints. An operator read a completed ceremony as one that never ran.
+  
+  **What an operator now sees.**
+  
+  - An `--out` that cannot be written (an existing file, a directory that does not exist, no write permission) is refused before the database is opened: exit 1, `{"error":"apply_refused","reason":"report-file-unwritable","file":"FILE","code":"EEXIST",…}`, and nothing is executed. The existing file is left as it was. Re-run with `--out` naming a new path.
+  - The report file is reserved (created exclusively) before the boot, and the report is written into that same file at the end, so no other process can take the path in between. Until then the file holds a short JSON note (`"kind": "organization-ownership-apply-reservation"`) saying a run reserved it. A run that is refused, fails a step or cannot boot removes it again; a run killed before its report leaves that note behind, never an empty file.
+  - A report that still cannot be kept after the ceremony executed (a write error, or the reserved file removed while the run went on) gets its own code: exit 1, `{"error":"apply_report_unwritable","reason":"report-write-failed","executed":true,"report":{…}}`, with the full report in the payload. The text output still says "The ceremony ran". Re-run `--apply` with a new `--out` to write the report; finished steps are not repeated.
+  - Without `--out`, the default `organization-ownership-apply-TIMESTAMP.json` is stamped with the moment the run reserves it (before the boot), no longer with the moment the report was generated.
+  
+  The plan run (without `--apply`) is unchanged: it changes nothing in the database, so writing its file last was never a hazard.
+- 570c7a2: fix(cli): `os serve` no longer hangs after binding its port when its runtime state file's directory can never be made
+  
+  Clause-②: no
+  
+  This covers the runtime state file that the entry `fix(cli,runtime): a state, output or cache directory that can never be made is refused at once, naming the path and the operating system's code, instead of hanging` lists as `Not covered yet`.
+  
+  **What was wrong.** Once listening, `os serve` writes its runtime state file, `runtime.<environment>.<project>.json`, into `OS_HOME` before it prints the ready banner. It made that directory with Node's recursive `mkdir`, which never returns when a level answers `ENOENT` although its parent exists, as `/proc` and `/sys` answer for a name they do not have. Under such an `OS_HOME`, with the database outside it, the server bound its port and then looped in its own process, holding the event loop: no `Press Ctrl+C to stop`, no listening message to an `os dev` parent, and no request answered.
+  
+  **What an operator sees now.** The directory is made with the same bounded walk as the other `OS_HOME` paths, so a directory that can never be made is refused at once. The state file has always been best-effort: the boot goes on without it and prints its banner, as it already did when the file could not be written for any other reason.
+  
+  Nothing else changes. Every state file written before is still written, in the same place, before the banner; a home that can be made is still made, every missing level of it.
+- 2e15620: fix(cli,runtime): a state, output or cache directory that can never be made is refused at once, naming the path and the operating system's code, instead of hanging
+  
+  Clause-②: no
+  
+  **What was wrong.** These commands and runtime paths created their directories with Node's recursive `mkdir`. Node's recursive mkdir never returns when a level answers `ENOENT` although its parent exists — what `/proc` and `/sys` answer for a name they do not have. It looped `mkdir("/proc/x")` and `mkdir("/proc")` without end, holding the event loop, so the command printed nothing more and no timeout could fire:
+  
+  - `os start` with `--home` / `OS_HOME` on such a path hung after its header.
+  - `os serve` hung the same way on the empty-boot artifact stub under `OS_HOME`, and on the cache of an `http(s):` `OS_ARTIFACT_URL` under `OS_HOME`.
+  - `os create --dir`, `os init <name>`, `os compile --output`, `os generate` (`--dir`, and `--output` for types, client and migration), `os i18n extract --out` and `os plugin build --out` hung on an output path there.
+  - `os login` and `os cloud login` never finished writing credentials under a `HOME` there, and the package enable / disable state the packages routes write under `OS_HOME` held the event loop of the host serving them.
+  
+  **What an operator sees now.** The command exits non-zero at once with the operating system's own error, which names the level that cannot be made:
+  
+  ```text
+  ✗ Cannot create home directory at /proc/os-x: ENOENT: no such file or directory, mkdir '/proc/os-x'
+  ```
+  
+  Not covered yet: the runtime state file `os serve` writes into `OS_HOME` once it is listening.
+  
+  Nothing else changes. Every directory these paths made before is still made, every missing level of it; every path that was refused before is still refused, with the operating system's code. The one difference is the path that was never answered at all.
+- a33f3d5: Clause-②: no
+  
+  fix(cli): `os migrate plan`, a refused `os migrate summary-nulls --recompute-undefined-on-empty` name and every `os secret rewrap` run say what they vouch for, and that opening a SQLite file can still switch its journal mode, instead of saying nothing was written
+  
+  **What was wrong.** Each of these runs boots through the SQL driver before it prints, and the driver's connect switches a SQLite file to the journal mode it asks for (WAL, unless `OS_DATABASE_SQLITE_JOURNAL_MODE=delete` is set in the command's own environment or the project's `.env`). Measured on a file still on a rollback journal, each run moved the header's journal-mode bytes (18 and 19, from 1,1 to 2,2) and its change counter, and changed no row or table, while printing "a plan writes nothing", "nothing was written" or "a finished run writes nothing". Nothing was lost.
+  
+  **What changed.** Each sentence below now names what it vouches for. On a SQLite file, its line is followed by the note the other read-only arms already carry: "Opening a SQLite file can still switch its journal mode (to WAL by default), which changes its header only." On PostgreSQL or MySQL the line ends without it.
+  
+  - `os migrate plan`, the unmanaged-table section. FROM: "They are reported for information only — nothing here drops them, and a plan writes nothing." TO: "… and a plan writes no row or table." and the note.
+  - `os migrate plan`, the declaration boot's note when a plugin's write was refused. FROM: "Refused N write(s) during the declaration boot — a plan writes nothing: …" TO: "… — a plan writes no row or table: …", and the note at the end of that note's line.
+  - `os migrate plan`, the same note when a raw command was forwarded. FROM: "If those commands only read, nothing was written; if one wrote, it landed." TO: "If those commands only read, no row or table was written; if one wrote, it landed.", and the note at the end of that note's line.
+  - `os migrate summary-nulls --recompute-undefined-on-empty` naming a roll-up the run cannot find (`backfillSummaryNulls`, `@objectstack/objectql`), in either mode. FROM: "Refused before any row was read; nothing was written." TO: "Refused before the walk read or wrote any row." and the note. Under `--apply` the boot before it can also create a table a never-started database lacks, so the sentence speaks for the walk only.
+  - `os secret rewrap`, the "Re-running is safe" note, in both modes and in `--json` `report.notes`. FROM: "… and a finished run writes nothing." TO: "… and a finished run writes no sys_secret row." Under `--apply` the note follows it; a dry run's closing line already carries it. A finished `--apply` run on a database that has never been started also creates its tables, so the sentence names the rows the re-wrap writes.
+  
+  **Unchanged.** No exit code, flag, prompt, refusal or export signature changes, and no `--json` document gains a field: the `--json` documents carry the changed sentences, and the note is printed in the text output only. What the driver does on connect is unchanged.
+- c4111c6: fix(cli,driver-turso): `os migrate plan` and `os migrate apply` on a Turso REMOTE database no longer offer `--allow-destructive` for a change that database cannot apply
+  
+  Clause-②: yes (widening)
+  
+  On a primary reached over the Turso REMOTE transport (`libsql://…`), `os migrate plan` listed a NOT NULL tightening with the remedy `Run "os migrate apply --allow-destructive".` and closed with `(add --allow-destructive for drops / tightenings)`. That transport runs no SQLite table rebuild, so the apply then named the tightening as not applied and exited 1. The plan now says so before the apply: each change the database cannot apply (a tightened or relaxed NOT NULL, a dropped DEFAULT) is still listed, with its finding and `"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE transport does not run.` in place of the remedy. The footer offers `--allow-destructive` only for the destructive changes the database can apply (a column drop, an index change) and says how many listed changes remain drift after the apply. The listing `os migrate apply` prints before its prompt reads the same way. Its counts of held-back destructive changes, before the prompt and after the run, offer a re-run with `--allow-destructive` only for the ones that re-run could apply, and name the rest as drift it cannot apply either. On every other database both commands read exactly as before, and their `--json` documents are unchanged on every database.
+  
+  `@objectstack/driver-turso`: `TursoDriver.driftApplyLimit(opType)` is new. It returns why the driver's `applyMigrationEntries` cannot perform a drift op of that type on this face, or `null` when it can. It answers from the same per-op declaration the REMOTE apply door dispatches by, and returns `null` for every op on the local and embedded-replica faces. A driver that does not implement it is read as applying every op the differ means it to.
+  
+  `@objectstack/driver-sql`: `driftFindingWithoutRemedy(entry)` is a new export. It returns a drift entry's finding without the `os migrate apply --allow-destructive` sentence that a destructive column entry's message ends with, and returns every other message unchanged; the messages themselves keep their exact text.
+- 27d7c2a: `os serve --no-server` no longer reports an ordering fault for the datasource admin routes or for the unknown-hostname guard. A boot that composes no HTTP server used to print, in its boot diagnostics, `WARN [datasource-admin] route registration failed: [Kernel] Service 'http.server' not found (… a composition/ordering fault; registration order is not a contract.)`, although nothing was at fault. With `OS_ROOT_DOMAIN` set, the same boot also printed `WARN [unknown-hostname-guard] install failed` with the same kernel text. Each now prints its own degrade line, beside the same boot's other "not mounted" lines: `WARN [datasource-admin] http.server unavailable; REST routes not installed`, and `WARN [unknown-hostname-guard] http.server unavailable; guard not installed`.
+  
+  What still warns: on a boot that does compose an HTTP server, a route registration that throws still prints `[datasource-admin] route registration failed` with the error, and a guard install that throws still prints `[unknown-hostname-guard] install failed` with the error. A composed boot mounts `/api/v1/datasources` and installs the hostname guard as before, including under `--no-server` when the config mounts its own `HonoServerPlugin`. Both plugins now read only the canonical `http.server` service. Their old fallback to the deprecated `http-server` alias never ran: on a boot without `http.server` the canonical read threw first. So every boot that mounted these routes or installed the guard before still does.
+- bef7bdc: fix(cli): `os migrate organization-ownership` plans a v17 database that still holds the retired `sys_scim_provider` table, listing it as fate 4 instead of refusing it (ADR-0131 D10)
+  
+  Clause-②: no
+  
+  `sys_scim_provider` was retired from the platform before the ceremony's inventory was taken, so the inventory had no row for it. Its ADR-0087 entry (`scim-provider-object-retired`) leaves the table in place, untouched, by ruling, so every database that booted a release from before the retirement still holds it, `organization_id` column included. The plan refused such a database with `uninventoried-platform-table` (`sys_scim_provider carries organization_id but the ADR-0131 D10 inventory gives it no fate`), and so did `--apply`, so the ceremony could not run there at all and `os dev` / `os serve` stayed refused.
+  
+  - **Now** the inventory lists `sys_scim_provider` with fate 4 (`report`), under a new census population, `retired-before-census`. The plan reports its rows and its NULL-organization rows by id. It never attributes them, not even to the Default Organization under `single`, and never deletes them.
+  - **NOT NULL:** the table is exempt, so the plan reports it as not receiving NOT NULL. The object is retired, no declaration anchors tenancy on the column, and a SCIM connection scoped to no organization was a legitimate row.
+  - The plan's `inventoryDigest` changes with the new row. A plan file written by an earlier CLI no longer matches, so `--apply --plan-file` refuses it with `plan-digest-mismatch`. Re-run `os migrate organization-ownership --out PLAN`, review it, and apply that.
+- Updated dependencies [e375315]
+- Updated dependencies [cbbd96a]
+- Updated dependencies [b6805ac]
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [b9dbc3d]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [1eac7ad]
+- Updated dependencies [9fcea20]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [14aff67]
+- Updated dependencies [7428da0]
+- Updated dependencies [b55be42]
+- Updated dependencies [abb6df0]
+- Updated dependencies [5b6c257]
+- Updated dependencies [0b1179f]
+- Updated dependencies [8776119]
+- Updated dependencies [74b4362]
+- Updated dependencies [f7a5ebe]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9d4fb3c]
+- Updated dependencies [c5cf546]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [cf07168]
+- Updated dependencies [d795719]
+- Updated dependencies [f846cc2]
+- Updated dependencies [34b740f]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [94114c1]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [0cfd0c4]
+- Updated dependencies [ae4dfaf]
+- Updated dependencies [099cc9d]
+- Updated dependencies [77efc66]
+- Updated dependencies [747c8e9]
+- Updated dependencies [6422da5]
+- Updated dependencies [6422da5]
+- Updated dependencies [2034975]
+- Updated dependencies [61e5ee9]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [67e8792]
+- Updated dependencies [2e15620]
+- Updated dependencies [6d1660d]
+- Updated dependencies [0cb45e9]
+- Updated dependencies [0b69564]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [b74434c]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [605aa01]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [6e18016]
+- Updated dependencies [d050a8f]
+- Updated dependencies [9e797a8]
+- Updated dependencies [b25d98a]
+- Updated dependencies [75ced06]
+- Updated dependencies [75ced06]
+- Updated dependencies [5fb8d15]
+- Updated dependencies [c4111c6]
+- Updated dependencies [2054a08]
+- Updated dependencies [5c2ac83]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [33228c5]
+- Updated dependencies [d731b89]
+- Updated dependencies [19955fb]
+- Updated dependencies [905f57b]
+- Updated dependencies [aefab7c]
+- Updated dependencies [66d2757]
+- Updated dependencies [c7168ac]
+- Updated dependencies [44fe210]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b75129f]
+- Updated dependencies [6dede7a]
+- Updated dependencies [077b75f]
+- Updated dependencies [62f959d]
+- Updated dependencies [c1c0a90]
+- Updated dependencies [ab3ba2c]
+- Updated dependencies [d6bd98a]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [544b8d7]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+- Updated dependencies [265ef64]
+- Updated dependencies [a69a40a]
+- Updated dependencies [e66f13c]
+- Updated dependencies [cdf3777]
+  - @objectstack/lint@18.0.0-next.3
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/service-storage@18.0.0-next.3
+  - @objectstack/plugin-security@18.0.0-next.3
+  - @objectstack/rest@18.0.0-next.3
+  - @objectstack/runtime@18.0.0-next.3
+  - @objectstack/service-job@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/service-automation@18.0.0-next.3
+  - @objectstack/metadata-protocol@18.0.0-next.3
+  - @objectstack/metadata@18.0.0-next.3
+  - @objectstack/objectql@18.0.0-next.3
+  - @objectstack/plugin-hono-server@18.0.0-next.3
+  - @objectstack/plugin-audit@18.0.0-next.3
+  - @objectstack/driver-sql@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/plugin-approvals@18.0.0-next.3
+  - @objectstack/plugin-auth@18.0.0-next.3
+  - create-objectstack@18.0.0-next.3
+  - @objectstack/service-messaging@18.0.0-next.3
+  - @objectstack/driver-turso@18.0.0-next.3
+  - @objectstack/plugin-sharing@18.0.0-next.3
+  - @objectstack/service-settings@18.0.0-next.3
+  - @objectstack/client@18.0.0-next.3
+  - @objectstack/cloud-connection@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/plugin-email@18.0.0-next.3
+  - @objectstack/service-package@18.0.0-next.3
+  - @objectstack/console@18.0.0-next.3
+  - @objectstack/mcp@18.0.0-next.3
+  - @objectstack/service-mailbox@18.0.0-next.3
+  - @objectstack/account@18.0.0-next.3
+  - @objectstack/setup@18.0.0-next.3
+  - @objectstack/driver-memory@18.0.0-next.3
+  - @objectstack/driver-mongodb@18.0.0-next.3
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.3
+  - @objectstack/formula@18.0.0-next.3
+  - @objectstack/observability@18.0.0-next.3
+  - @objectstack/plugin-webhooks@18.0.0-next.3
+  - @objectstack/service-analytics@18.0.0-next.3
+  - @objectstack/service-cache@18.0.0-next.3
+  - @objectstack/service-datasource@18.0.0-next.3
+  - @objectstack/service-queue@18.0.0-next.3
+  - @objectstack/service-realtime@18.0.0-next.3
+  - @objectstack/service-sms@18.0.0-next.3
+  - @objectstack/trigger-api@18.0.0-next.3
+  - @objectstack/trigger-record-change@18.0.0-next.3
+  - @objectstack/trigger-schedule@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+  - @objectstack/verify@18.0.0-next.3
+  - @objectstack/plugin-pinyin-search@18.0.0-next.3
+
+## 18.0.0-next.2
+
+### Minor Changes
+
+- 869a381: feat(cli): the organization-ownership ceremony carries the `sys_metadata` organization layer into the environment (ADR-0131 D10)
+  
+  Clause-②: yes (widening)
+  
+  The plan of `os migrate organization-ownership` gains a key, `metadataConflicts` on the `sys_metadata` table. It lists every overlay key that more than one row would hold once the organization leaves the key, with each row's id. `--apply` gains a flag, `--metadata-choice ROW_ID`. Nothing is removed from the plan or the apply.
+  
+  `--apply` shipped in 18.0.0-next.1. This adds to it, and refuses no invocation that release could finish: a conflict now blocks the new step until it is chosen, but on such a database 18.0.0-next.1's `--apply` already stopped at `column-drops`, which never drops `sys_metadata`'s still-declared column.
+  
+  `--apply` gains a step, `metadata-promotion`, after the authored catalog conversion:
+  
+  - **Form withdrawals are carried first, under every posture, and fail-closed.** When an organization withdrew a public form (`sharing.enabled` or `sharing.allowAnonymous` set to `false`, link kept), every view the environment serves under that name that still serves the form open takes the withdrawal. That covers stored views and views served from code, in every package. The ceremony saves it through the metadata door, into the view's own package, and any organization's withdrawal wins.
+  - **Under `single`, an organization customization whose key no other row holds becomes the environment's, in place.** This covers the `sys_metadata` rows of `view`, `dashboard`, `report`, `translation` and `email_template`; the key is type, name, package and bundle member. The row takes its history with it.
+  - **A key held by more than one row is a conflict, listed in the plan.** Under `single` it blocks the step until the operator chooses one row with `--metadata-choice ROW_ID`, once per conflict.
+    - The key ends with exactly one environment row. Where the key has an environment row, that row takes the chosen body in place, and its version names the chosen row's snapshot. Where it has none, the chosen organization row is promoted in place. A withdrawal the body keeps is also saved through the metadata door.
+    - The in-place write does to the row what the door does. It asks the door's lock verdict first, so a locked item stays locked and the conflict blocks. It keeps the row's stored `_lock` keys. It restamps `checksum`.
+    - Any public-form withdrawal another row of the key holds is kept on that body.
+    - The environment row is read back. Only then are the key's organization rows deleted, in one statement, by id.
+    - A rerun after an interruption accepts the same `--metadata-choice` and finishes.
+  - **Under a wall (`isolated`, `group`), nothing is promoted unless the operator names the row, and nothing is ever deleted.** A named row's body becomes the environment's as above. Every organization row left, the chosen one included where the key has an environment row, is named in the report as remaining and blocking `column-drops`, with the remedy.
+  
+  **A choice deletes only rows the reviewed plan listed.** `--metadata-choice` and `--template-choice` delete the other rows of their conflict. So the apply reads the conflict groups the plan file records (`metadataConflicts` and `templateConflicts`). It refuses, before anything is written, a choice whose conflict now holds other rows than the reviewed plan listed, with a new reason, `plan-conflict-mismatch`. The refusal names the conflict, the rows added and the rows gone. Plan again, review, and pass the new file.
+  
+  `event_seq` and every `(type, name, version)` of `sys_metadata_history` become unique environment-wide. The metadata door numbers a save from history in its own scope, so each lineage is placed where no environment save can land on it:
+  
+  - **A promoted row takes its history with it.** Before the row leaves its organization, that organization's lineage of the item is moved above the environment's numbers, and above every other number that organization holds, then becomes environment history. Every later environment save of the item numbers above it, and the row's version still names its own snapshot.
+  - **A new step, `history-renumber`, runs just before `column-drops`, on every apply, even after a checkpoint.** It lays out every lineage still tagged to an organization above the environment's: each organization's event range by one offset, its commit ranges with it, and each item's version lineage, the organization's rows with it.
+    - Under `single`, that history then becomes the environment's too.
+    - Under a wall it stays its organization's.
+  
+  `column-drops` runs only after that same apply's `history-renumber` has verified `event_seq` and every `(type, name, version)` unique environment-wide. A duplicate it cannot lay out is named, and blocks.
+  
+  Order within an organization, and the version a rollback resolves, are unchanged. Nothing in history is deleted.
+  
+  On a 17.x database `sys_metadata` has no `bundle_member` column. The ceremony boots with schema changes held, so it reads that column as absent, the overlay key's NULL member, and plans the table rather than refusing it.
+  
+  ```bash
+  os migrate organization-ownership --out plan.json   # review plan.json: metadataConflicts lists every conflict
+  os migrate organization-ownership --apply --backup-taken --plan-file plan.json --metadata-choice ROW_ID   # one per listed conflict
+  ```
+- f9b4217: feat(cli)!: `os migrate organization-ownership --apply` executes only the plan the operator reviewed (ADR-0131 D10)
+  
+  Clause-②: yes (widening)
+  
+  <!-- adr-0087: registered cli-organization-ownership-apply-plan-file-required -->
+  
+  **BREAKING** (a narrowing of `--apply`'s accept set, released in 18.0.0-next.1), shipped as `minor` under the launch-window convention for breaking changes. It also widens the command: a new flag, `--plan-file`, new refusal reasons, and two new keys on the apply report.
+  
+  `--apply` now requires `--plan-file FILE`, the plan file a plan run wrote. Before it writes anything, it compares that file with the plan it computes, and refuses when any of these differs:
+  
+  - **The inventory digest** (`plan-digest-mismatch`). The fates it would run are not the ones the reviewed plan showed: a different `--fate-supplement`, or another release's inventory. Without this check, planning with supplement A and applying with supplement B ran B's fates unreviewed, including a mirror deletion A never listed.
+  - **The tenancy posture** (`plan-posture-mismatch`). The plan file records the posture it was computed under (`OS_TENANCY_POSTURE` / `OS_MULTI_ORG_ENABLED`), and the posture decides which rows attribution gives an owner and which it reports. A plan reviewed under a wall, which lists rows as reported, would otherwise give them owners when applied under `single`.
+  - **The database** (`plan-database-mismatch`).
+  
+  The refusal names both values and the remedy: run the plan again with the same flags (or run the apply under the plan's posture), review it, and pass the new file. No flag skips the comparison.
+  
+  A file that is not an organization-ownership plan, or that lacks its digest, posture or database, or cannot be read, is refused as `plan-file-unusable`. `--apply` without the flag is refused as `plan-file-required`. Both refusals come before the backup question and before the database is opened.
+  
+  A checkpoint recorded under another digest is no longer discarded silently. The reviewed plan supersedes it: every step runs again (each is idempotent), and the apply report names the discarded checkpoint in `restartedFrom`, beside `reviewedPlan`.
+  
+  ## FROM → TO
+  
+  | invocation | FROM (18.0.0-next.1) | TO |
+  |:--|:--|:--|
+  | `os migrate organization-ownership --apply --backup-taken` | performed the plan it computed at apply time | refused, `plan-file-required`: run `os migrate organization-ownership --out plan.json`, review it, then `--apply --backup-taken --plan-file plan.json` |
+  | `os migrate organization-ownership --fate-supplement host-fates.json --apply --backup-taken` | performed the plan it computed with that supplement | refused, `plan-file-required`: plan with the same `--fate-supplement`, then add `--plan-file plan.json` |
+  | `--apply … --plan-file plan.json`, where the file was planned with another supplement, release, posture or database | (no such flag) | refused with `plan-digest-mismatch`, `plan-posture-mismatch` or `plan-database-mismatch`, naming both values |
+  
+  ```bash
+  os migrate organization-ownership --out plan.json                                  # plan, then review plan.json
+  os migrate organization-ownership --apply --plan-file plan.json --backup-taken      # perform exactly that plan
+  ```
+- 086fa46: feat(cli,plugin-dev): an app under `os serve` or `DevPlugin` that declares its own `sys_organization` default record page boots, and its page is the only default
+  
+  Clause-②: yes (widening)
+  
+  A deployment holds at most one `isDefault: true` record page per object, and a second one is refused at registration with `DEFAULT_RECORD_PAGE_CONFLICT`. `plugin-auth` registers `sys_organization_detail` as the default record page of `sys_organization` unless it is constructed with `registerOrganizationRecordPage: false`. `os serve` and `DevPlugin` construct `AuthPlugin` themselves and never passed that option, so an app served by either one that shipped its own default page for `sys_organization` was refused at boot, with no switch to set.
+  
+  - **What changes.** Both roots now read the app's own pages before they construct `AuthPlugin`. When the app declares an `isDefault: true` record page for `sys_organization`, they pass `registerOrganizationRecordPage: false`, and the app's page is the only default. When it does not, `plugin-auth`'s page registers as before. There is no new configuration key: the page the author already wrote is the switch. Plugin order and precedence rules play no part.
+  - **One rule for both roots.** The reading is `stackDeclaresOrganizationRecordPage(stack, plugins?)`, a new export of `@objectstack/core`. It reads the stack's `pages` (or each package body's, for a multi-package stack) and the bundle of each app plugin already in `plugins`, and judges each page with `defaultRecordPageObject` from `@objectstack/spec/ui`, the reading the registration refusal uses.
+  - **The refusal's remedy (`@objectstack/objectql`).** `DEFAULT_RECORD_PAGE_CONFLICT`'s message now says to set `isDefault: false` on one of the two pages, "or compose the deployment without the other package's page". It said to compose the deployment without the other package, which a host cannot do when that package is the platform's auth plugin. The code, the `422` status and the named pages are unchanged.
+  - **Nothing to adopt.** An app that ships its own `sys_organization` default record page boots under `os serve` and `DevPlugin` with no further change. A deployment that composes its own kernel still sets `registerOrganizationRecordPage: false` on `AuthPlugin` itself.
+- a1285f2: feat(cli): `os meta delete` and `os meta register` take `--package <id>`, so a CLI user can follow the `409 RESOURCE_CONFLICT` remedy the metadata doors prescribe for an item two packages hold (#23350)
+  
+  Clause-②: yes (widening)
+  
+  **What is new.** Both commands declare an optional `--package` flag, a package id such as `com.acme.crm`, and forward it verbatim as the SDK's `packageId`, sent as `?package=<id>`:
+  
+  ```bash
+  os meta delete view shared_grid --package com.acme.crm              # removes com.acme.crm's row of the item, no other package's row
+  os meta register view --data view-def.json --package com.acme.crm   # writes com.acme.crm's row of the item
+  ```
+  
+  **Why.** A metadata item can hold one row per package (ADR-0048). When two or more packages hold an item, the reset door `DELETE /api/v1/meta/:type/:name` and the save door `PUT /api/v1/meta/:type/:name` both refuse a request that names no package, with `409 RESOURCE_CONFLICT`. The refusal names the packages and prescribes `?package=`. Neither command could send it, so a CLI user was told to do something the CLI could not do.
+  
+  **Unchanged.** Without `--package`, both commands send the same request as before: `os meta delete` adds no query string unless `--draft` is given, and `os meta register` saves active with no query string. `--package` combines with `--draft` and `--if-match` on `os meta delete`. An empty `--package` (for example `--package "$PKG"` with `PKG` unset) is refused before anything is sent, as an empty `--if-match` already is, because a package-less request is not always refused: the server may resolve it to a row the operator did not mean.
+  
+  **`@objectstack/client` (patch).** The `DeleteMetaItemOptions` docblock now names the reset door's carriers (`If-Match`, `state`, `package`, `dropStorage`, `member`) instead of stating a count that had gone stale. No type or behavior changes.
+- 0b9391b: fix(cli)!: `os migrate organization-ownership --apply` refuses to run beside a process holding the SQLite database open, as its sibling migrate commands do, and the plan warns
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is rewritten, converted or deleted, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is one CLI invocation: the ceremony's --apply run against a SQLite file another process holds open is refused before the database is opened; the remedy is stopping that process, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  **FROM.** `os migrate organization-ownership --apply` opened a SQLite database that another process held open (a running `os dev` or `os serve`, or a runtime's pooled connection) without checking for it, and ran the ceremony beside that process. `os migrate apply` and the other data migrations probe the database first; this command did not. One measured run of the plan and then `--apply` beside a runtime holding a connection left that runtime writing to a deleted `-wal` file, and a row it wrote afterwards never reached the database.
+  
+  **TO.** Before it boots the stack, the command probes the database the way its siblings do. Beside a holder, `--apply` is refused with exit 1: the ceremony boots nothing and writes nothing (the probe itself opens the file only briefly, to check). The check runs first, so a busy `--apply` that also lacks its plan file or its backup acknowledgement answers reason `database-busy` rather than `plan-file-required` or `backup-unacknowledged`; it is refused either way. The text output names the file and, when the probe can tell, the process holding it, then the remedy: stop the process using it and re-run. With `--json` the refusal uses this command's own envelope: `{ "error": "apply_refused", "reason": "database-busy", "database", "signal", "detail", "hint" }`. There is no `--force`: the ceremony has no flag that skips its reviewed plan or its backup either, and its refusal never names one. The plan (no `--apply`) writes no row or table, so it still runs. Its text output warns that `--apply` will refuse until the database is free, and its `--json` document is unchanged.
+  
+  **Unchanged.** A PostgreSQL, MySQL or remote libSQL target is not probed. A probe that cannot tell (for example, the database file cannot be read) warns in the text output and proceeds; under `--json` it is silent. The probe reads the project's `.env` files, as the run itself does.
+  
+  **Remedy.** Stop the process that holds the database file, then re-run `--apply`.
+- dd29bbe: feat(runtime,cli)!: `os serve` refuses to start against a database still in the v17 organization-ownership shape, and `os migrate apply` refuses to drop its `organization_id` columns, until `os migrate organization-ownership` has verified it (ADR-0131 D10 item 5)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered sys-audit-log-organization-column-retired, sys-flow-dispatch-organization-column-retired, sys-job-organization-column-retired, sys-job-queue-organization-column-retired, sys-job-run-organization-column-retired, sys-migration-journal-organization-column-retired, sys-migration-organization-column-retired, sys-presence-organization-column-retired) The step-18 D3 entries named here, registered before this change, record the retirement of each organization column this refusal reads, with the remedy that clears it; the metadata family's four entries land with its schema change, which this refusal ships beside. This change adds no authorable surface, moves no spec key and rewrites no stored row: it refuses to boot while a retired column is still physically present, and the remedy is the operator's own migration: the ceremony, whose column-drops step drops what those entries prescribe dropping. No new D3 entry and no D2 conversion. -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  A v18 runtime no longer serves a database it was never migrated for. At `kernel:ready`, `os serve` (and so `os dev`) checks every table whose object declares no organization column (`systemFields.tenant: false`). If one still carries a physical `organization_id`, the boot is refused unless the `sys_migration` row `adr-0131-organization-ownership` is verified. The refusal names the tables and the command. It is thrown before `kernel:listening`, so no request is served. Its code is `ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED`.
+  
+  FROM → TO:
+  
+  - A 17.x database started by an 18.x `os serve` → run `os migrate organization-ownership`, review its plan, then `os migrate organization-ownership --apply --plan-file FILE` with that plan file, and start again. To keep 17.x semantics on an unmigrated database, run a 17.x runtime.
+  - `os migrate apply --allow-destructive` on such a database (`@objectstack/cli`, BREAKING `minor`: the command narrows) → it now refuses to drop `organization_id` from any table (the D7 tables and the `sys_metadata` family among them) while the ceremony's marker is not verified. Before, the drift report offered each such column as an unmapped destructive column, and the apply dropped it. Dropped ahead of the ceremony, that column takes the ceremony's promotion and report steps with it, turns every legacy organization row into an environment row, and leaves the boot refusal no column to find. The refusal names `os migrate organization-ownership`, exits 1, and under `--json` answers `message: 'refused_organization_ownership_unmigrated'` with the `tables`, as the `sys_account.issuer` (#17440) and `sys_comment.reactions` (#23281) refusals do. The refusal holds the WHOLE `--allow-destructive` run, as those two do: nothing in it is created, applied or dropped, every other destructive drop and the additive work included. A run without `--allow-destructive` is unchanged. The ceremony drops these columns itself, in its column-drops step, before it records the run verified.
+  - There is no escape hatch: no `OS_ALLOW_*` or `OS_SKIP_*` variable and no flag skips either check.
+  
+  What does not change:
+  
+  - A fresh database boots: no table it creates carries a retired column, so no marker is needed.
+  - A database whose ceremony verified boots, whatever its columns.
+  - The `os migrate` commands boot as before, the ceremony's own among them: the boot guard is composed by `os serve` only, never by the shared standalone stack (`createStandaloneStack`, which `bootSchemaStack` and every other CLI data and schema boot build on). Only an `os migrate apply --allow-destructive` run that would drop an `organization_id` column is refused, as above.
+  - A driver with no physical columns to read (memory, MongoDB) is not checked.
+  - A host that composes its own kernel can add the guard itself: `OrganizationOwnershipBootGuardPlugin`, or `assertOrganizationOwnershipMigrated(engine)` from `@objectstack/runtime`. `ORGANIZATION_OWNERSHIP_MIGRATION_ID` is now exported from `@objectstack/spec/system`.
+- 6f21216: feat(plugin-security,cli)!: `sys_user_permission_set.permission_set_id` is retired, the boot-time grant-name backfill is deleted, and a grant is unique per user, set and organization (ADR-0131 D4/D10)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered ups-permission-set-id-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  A permission-set grant names its set by `permission_set`, its one reference (ADR-0131 D4). The legacy id column is no longer declared, and the grant's uniqueness now keys the name.
+  
+  FROM → TO:
+  
+  - `sys_user_permission_set.permission_set_id` → `permission_set`, the machine name of the set the grant holds. A seed row or data-door write that still carries `permission_set_id` is refused with `400 INVALID_FIELD`. Fix: delete the key and name the set, `{ user_id, permission_set: '<set name>', organization_id }`.
+  - The unique index (`user_id`, `permission_set_id`, `organization_id`) and the (`permission_set_id`) index → one unique index on (`user_id`, `permission_set`, `organization_id`), declared `unique: 'organization'`: its organization key part is NULL-safe (ADR-0120 D3), so it refuses a second grant of one set to one user in one organization AND a second platform-wide grant (organization NULL), for every writer and every write path — batches, multi-row updates, concurrent writes and raw SQL included. The data doors answer `409 UNIQUE_VIOLATION` (the engine throws `DuplicateRecordError`, `DUPLICATE_RECORD`). Fix: keep the grant that exists; to change it, update that row.
+  - The boot-time grant-name backfill (`runOneTimeGrantPermissionSetNameBackfill`, the `sys_migration` entry it recorded at `kernel:bootstrapped`) → the v18 ceremony: plan it with `os migrate organization-ownership --out plan.json`, review the file it writes, then run `os migrate organization-ownership --apply --backup-taken --plan-file plan.json`. Its verified rewrite names every grant from the physical `permission_set_id` column by raw SQL, verifies each name against the security catalog, and its `column-drops` step then drops the column through the schema-drift ceremony (schema sync is additive, so an undeclared column stays until it is dropped). Fix: run the ceremony on every database upgraded from a release before the `permission_set` column existed, then restart the server: the boot's organization-administrator sweep revokes, by name, a newly named grant whose pair no longer qualifies, and a server left running across `--apply` serves it until then.
+  
+  On a 17.x database every grant names nothing until `--apply` names it, so between the first v18 boot and `--apply` no grant confers anything, the platform administrator's included.
+  
+  What else changes:
+  
+  - The plan run, `os migrate organization-ownership --out plan.json`, reports a `grants` block on `sys_user_permission_set`, keyed like the new index (a NULL organization keyed with NULL):
+    - `duplicates`: groups of named grants holding one set for one user in one organization. `--apply`'s `column-drops` step does not drop `permission_set_id` while one group remains.
+    - `rewriteCollisions`: legacy grants whose derived name their user already holds in the same organization. `--apply`'s rewrite names none of them and blocks, naming both ids.
+    - On a database without the `permission_set` column it counts zero and names the remedy (boot this release once), instead of refusing the plan.
+  
+    The ceremony deletes no grant: remove the one you do not keep, then re-run.
+  - The organization-administrator reconcile and its boot sweep write no grant for a pair holding an unnamed grant in that organization: the ceremony's rewrite names that grant, and a named grant beside it would hold the key the rename needs.
+  - `--apply` drops the two retired indexes before the column, in a separate earlier schema-drift apply: MySQL refuses to drop a column a key still uses.
+  - The organization-administrator reconcile and its boot sweep, the platform-admin bootstrap's unnamed-grant leg (Leg C) and the catalog reference report read grants by name only. A legacy grant that names nothing confers nothing, still withholds the platform-admin promotion while it is unscoped, and is reached by no revocation until the ceremony's rewrite names it; once named, the boot sweep revokes it where its pair no longer qualifies. The report's `UnnamedGrant` entries lose `permissionSetId`.
+  - `GET /meta/object/sys_user_permission_set` no longer serves the hidden `permission_set_id` field.
+- 2811a63: feat(cli): `os meta register` takes `--force`, so a CLI user can send the acknowledgement the `409 DESTRUCTIVE_CHANGE` refusal prescribes (#23480)
+  
+  Clause-②: yes (widening)
+  
+  **What is new.** `os meta register` declares a boolean `--force` flag, off by default and with no short alias. When given, it is forwarded as the SDK's `SaveMetaItemOptions.force`, sent as `?force=true`:
+  
+  ```bash
+  os meta register object --data object-def.json --force   # applies a save that drops or transforms existing data
+  ```
+  
+  **Why.** The save door `PUT /api/v1/meta/:type/:name` refuses an `object` save that removes a field or changes a field's type incompatibly, with `409 DESTRUCTIVE_CHANGE` and a message ending "re-submit with ?force=true to proceed." The command had no way to send that parameter, so a CLI user was told to do something the CLI could not do.
+  
+  **What a refusal now prints.** The server's message is passed through unchanged. On a run without `--force`, one more line names the flag: in the text output as a warning line under the error, and in the `--format json` envelope as a new `hint` key beside `error`, `code` and `httpStatus`. Every other failure is reported exactly as before, with no `hint`.
+  
+  **Unchanged.** Without `--force`, the command sends the same request as before: no `force` parameter at all, never `?force=false`. A non-destructive save with `--force` lands exactly as the same save without it. `--force` combines with `--package`.
+- 6074eaf: fix(cli)!: `os migrate apply --allow-destructive` holds back the `organization_id` drop on every table the organization-ownership ceremony plans, not only the platform inventory's, until the ceremony has verified (ADR-0131 D7, D10 item 5)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is rewritten, converted or deleted, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is one CLI invocation: an `os migrate apply --allow-destructive` run that would drop `organization_id` from a table outside the platform inventory is refused until the organization-ownership ceremony's marker is verified; the remedy is running that ceremony, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  **The contract this meets.** The drop gate's own header (`packages/cli/src/utils/organization-ownership-drop-gate.ts`) already states it: the drop of `organization_id` on a table the ceremony owns waits for the ceremony's verified marker, and "⛔ No flag stands it down". ADR-0131 D10 item 5 is the rule behind it: a v18 runtime refuses to boot against a database the ceremony has not completed, and offers no escape hatch that silently skips that check. A column dropped ahead of the ceremony is that escape hatch, because the boot refusal then finds no column to refuse over.
+  
+  **FROM.** `os migrate apply --allow-destructive` held back no `organization_id` drop. Every one the schema-drift report offered was applied with no ceremony marker on the database, among them those on the objects a host declares platform-global (ADR-0131 D7, the `org-scoping` service's `platformGlobalObjects`) and on any host or application object that declares no organization column of its own. Measured on a host composition that declares two objects platform-global: `os migrate apply --database-url file:v17.db --allow-destructive --yes --json` exited 0 and applied `drop_column organization_id` on both.
+  
+  **TO.** The gate holds back every `organization_id` drop the drift offers. The ceremony's plan meets every physical table that carries the column, with an inventory row, a `--fate-supplement` row, the application-object fate, or a refusal by name; the drift offers only a column that is physically there. So this is the ceremony's own table set, read without a copy of its inventory and without the fate-supplement file `os migrate apply` is never handed. It includes an application object that declares `systemFields: { tenant: false }` over a table that still carries the column: the ceremony plans that table, and the v18 boot refusal refuses over it too. While the `sys_migration` row `adr-0131-organization-ownership` is not verified, the run is refused with the existing refusal. It exits 1 and prints "Refusing this --allow-destructive run: it would drop organization_id from TABLES", naming `os migrate organization-ownership --out PLAN`, then `os migrate organization-ownership --apply --plan-file PLAN`, as the remedy. Under `--json` it answers `message: 'refused_organization_ownership_unmigrated'` with the `tables`, the `detail` and the `marker`. The refusal holds the whole `--allow-destructive` run: nothing in it is created, applied or dropped.
+  
+  **Unchanged.** Once the ceremony's marker is verified, the drop applies. A destructive change to any other column applies as before. A run without `--allow-destructive` is unchanged. There is no new flag, and no flag skips the refusal.
+  
+  **Remedy.** Run `os migrate organization-ownership` (with `--fate-supplement FILE` when the host provides objects of its own), review its plan, run `os migrate organization-ownership --apply --plan-file PLAN`, then re-run `os migrate apply --allow-destructive`.
+
+### Patch Changes
+
+- b9b6189: fix(cli): `os migrate organization-ownership --apply` names the uncomposed security plugin, and no longer prescribes removing the grants or bindings of the platform's own sets and positions, when it runs without an auth secret
+  
+  Clause-②: no
+  
+  **What was wrong.** The ceremony's boot composes the security plugin only where `os serve` would: behind the auth gate, which needs `OS_AUTH_SECRET` or a development boot. That plugin declares the platform's shipped permission sets (`admin_full_access`, `organization_admin_no_bypass`, `member_default` and the rest) and the built-in positions (`everyone`, `org_admin` and the rest). Run without the secret, the catalog resolves none of them, and the ceremony blocked with a remedy aimed at the rows instead of the cause:
+  
+  - `rewrite`, a grant that names a shipped set. FROM: "… which the security catalog does not resolve (…). Declare or author the set, or remove the grants, then re-run." Removing those grants strips the seeded administrator's standing.
+  - `rewrite`, a legacy grant whose set row is a shipped set (a 17.x database). FROM: "… still name no permission set (…). The rewrite could not derive their name (see its notes); name or remove each, then re-run."
+  - `authored-conversion`, the seeded `everyone` binding. FROM: "… the catalog holds no position of that name to carry them. Declare the position (or remove the bindings), then re-run."
+  - The rewrite gate under a wall, the same binding. FROM: "… deleting them would lose a grant. The authored-conversion step carries them; resolve its blocker, then re-run." Under a wall that step only reports, so it has no blocker to resolve.
+  
+  **What changed.** When the boot did not compose the security plugin and the name is one the plugin declares, each blocker keeps its first sentence and its remedy becomes, TO: the composition's own sentence, the one `os migrate security-catalog-overlays` prints ("Did not compose the security plugin: `os serve` composes none here (REASON), so its shipped permission sets are not package-held names on this deployment's boot."), then "NAME is one of the permission sets it ships: keep the grants, and re-run where the security plugin is composed." For a position it reads "NAME is one of the built-in positions it declares: keep the bindings, and re-run where the security plugin is composed." A legacy grant's blocker names its set row: "N grant(s) still name no permission set (…): their set row is NAME, which the security catalog does not resolve."
+  
+  **Unchanged.**
+  
+  - Every step still refuses. Nothing is resolved, skipped or guessed, and nothing is deleted.
+  - A name the plugin does not declare keeps its remedy. So does every name when the boot composed the plugin. Whether it was composed is the boot's own answer, never inferred from a missing name.
+  - A legacy grant left unnamed for any other reason (no id, a missing set row, another organization's row) keeps the general blocker.
+- 3a2adc8: fix(cli): `os migrate meta --stored` no longer tells the operator that a row it could not rewrite is fine; a flow the engine refuses is named as not registered at boot
+  
+  Clause-②: no
+  
+  The closing line of a `--stored` run (human output, not `--json`) that reports `failed` rows said every one of them was fine. That is false for two of the pass's four failed kinds. A stored body that is not valid JSON does not load at all. A flow that does not canonicalize fails the same parse in `AutomationEngine.registerFlow`, so it is not registered at boot and does not run.
+  
+  FROM: "N row(s) could not be rewritten. They keep reading canonically through the chain, so nothing is broken — but their stored bytes stay legacy until the reason above is fixed."
+  
+  TO: "N row(s) could not be rewritten. Each stays as stored, and reads as it did before this run, until the reason printed beside it is fixed. That does not mean it works: a row whose stored body is not valid JSON does not load at all, and a flow whose reason says it does not canonicalize is refused by the engine at boot as well, so it is not registered and does not run."
+  
+  The flow sentence is printed only when a failed row is a flow. The report, its row reasons, the exit code (1) and the `--json` payload are unchanged.
+- 0d784da: fix(cli,plugin-security): `os migrate organization-ownership --apply` resolves the built-in positions and the `everyone` baseline, so a 17.x database's seeded `everyone` binding no longer blocks the ceremony
+  
+  Clause-②: no
+  
+  - **What was wrong.** The ceremony's boot composes the security plugin for its declarations only: `init()` runs, and `start()` and every lifecycle hook do not. The plugin declared the six built-in positions (`platform_admin`, `org_owner`, `org_admin`, `org_member`, `everyone`, `guest`) in `start()`, and the `everyone` baseline at `kernel:ready`. So the ceremony's catalog held neither. Every 17.x environment database carries a seeded binding from `everyone` to `member_default`. On every such database, `authored-conversion` stopped with "Binding rows give position everyone the sets member_default, and the catalog holds no position of that name to carry them". With `OS_MULTI_ORG_ENABLED=true`, the rewrite gate stopped on the same binding ("deleting them would lose a grant").
+  - **What changed.** `SecurityPlugin.init()` now declares the six built-in positions. It also declares `everyone` naming the deployment baseline: the app's `isDefault` set composed with `member_default`. These are registry declarations only, and nothing is read from or written to the database. The ceremony's catalog now resolves `everyone` with `member_default`, as a started kernel does, so that binding converts as declared. A binding that names a position no catalog declares still blocks.
+  - **The baseline in `init()` is the fail-closed reading.** The high-privilege check runs with no declared-capability context there, because the stack's declarations are still arriving while plugins initialize. So a shipped baseline set whose system permission only an app's capability declaration excuses is not named in `init()`. The `everyone` derivation at `kernel:ready` is unchanged. It runs the check against every declared capability, adds the package defaults a `manage_metadata` holder accepted, and replaces the `init()` declaration.
+  - **What a started kernel sees.** Its catalog after boot is the same. Three things move earlier or stay put:
+    - the six positions, and `everyone`'s baseline, are in the engine registry from the plugin's `init()` instead of from its `start()` and `kernel:ready`;
+    - if the `kernel:ready` derivation fails, `everyone` keeps the baseline from `init()`, where it used to name no set;
+    - the "the built-in positions … were NOT declared as position metadata" warning, for an engine that exposes no registry, now prints from `init()`.
+  - **Unchanged.** The cold boot's refusal of an environment-held name still skips the built-in names. A stored definition under a built-in name still shadows the declaration at read. The ceremony's `authored-conversion` and rewrite steps are unchanged. The ceremony still does not read the accepted package defaults: a binding to a set that only an acceptance puts on `everyone` still blocks.
+- 4369677: fix(cli): `os migrate organization-ownership --apply` no longer blames the release for a column the ceremony's composition does not declare (ADR-0131 D10, column drops)
+  
+  Clause-②: no
+  
+  The ceremony drops `organization_id` only through the schema-drift ceremony, so only on an object its boot declares, and its boot declares the composition it is run in (the project directory and environment). Run in a composition that does not mount an object's provider, the step used to answer that table with "the object this runtime declares still carries the column … Run the ceremony with the release whose declaration drops it". That sentence was false: the object was not declared at all, and the same release drops the column wherever it is declared. Measured cases are `sys_flow_dispatch` without `requires: ['automation']`, `sys_presence` without `realtime`, and `sys_audit_log` without the auth family (no `OS_AUTH_SECRET`).
+  
+  Such a table is now answered `not-declared`:
+  
+  - the step still blocks and keeps the column;
+  - its blocker names the table and the remedy: re-run the ceremony where the deployment's composition is declared, from its project directory and environment (the `requires` capability whose provider declares the object, and `OS_AUTH_SECRET` for the objects the auth family declares);
+  - the `column-drops` step's summary counts these tables as `notDeclared` in the apply report (the report file and `--json`).
+  
+  The "not proposed" blocker is unchanged. It is now given only for an object the composition does declare.
+- dd29bbe: feat(metadata-core,metadata-protocol)!: the `sys_metadata` family declares no organization column — `sys_metadata`, `sys_metadata_audit`, `sys_metadata_commit` and `sys_metadata_history` (ADR-0131 D6/D7)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered sys-metadata-organization-column-retired, sys-metadata-audit-organization-column-retired, sys-metadata-commit-organization-column-retired, sys-metadata-history-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Metadata is the environment's (ADR-0131 D6). The four tables of the metadata family no longer declare `organization_id`, and each sets `systemFields.tenant: false`, so the engine injects none back. The engine refuses an undeclared field, so nothing reads or writes the column any more.
+  
+  FROM → TO:
+  
+  - An authored filter, list-view column, report grouping, formula or seed key naming `organization_id` on one of the four tables → delete it; no organization owns a row. The field resolver answers it as an unknown field.
+  - `new SysMetadataRepository({ engine, organizationId, orgLabel })` → `new SysMetadataRepository({ engine, orgLabel })`. The `organizationId` option is gone: every repository reads and writes the environment's rows.
+  - `DatabaseLoader`'s `organizationId` option (and so `MetadataManager.setDatabaseDriver` / `setDataEngine`'s `organizationId` argument) → accepted and ignored, like `environmentId`: no write stamps it and no read filters on it. Drop the argument.
+  - `@objectstack/spec`: the published `ApiError.code` / `ErrorCode` enum widens by `LEGACY_ORGANIZATION_ROWS_UNREADABLE`, registered under `@objectstack/metadata-core`.
+  - `isLegacyOrganizationRow(row)` (`@objectstack/metadata-core`) → `readLegacyOrganizationRows(driver, table?)`. The row-value test read a key the engine no longer returns, so it is removed. The new read answers from the physical column, through the table's driver (`engine.getDriverForObject`): id → organization, empty on a migrated or fresh database. A seam that cannot answer is refused (`LegacyOrganizationRowsUnreadable`), never read as "none".
+  - An existing database → run `os migrate organization-ownership` (review its plan), then `os migrate organization-ownership --apply --plan-file FILE` with that plan file. The ceremony promotes or reports the legacy organization rows, then drops the physical column. Until it has run, the v18 runtime refuses to start against the database.
+  
+  The indexes are re-keyed with the column:
+  
+  - The overlay unique key is (`type`, `name`, `package_id`, `bundle_member`): the declared `idx_sys_metadata_overlay_active` and the runtime partial indexes of the same names. Removing the organization TIGHTENS uniqueness. On a database the ceremony has not cleared, two legacy organizations' rows, or an organization's row and the environment's, can share a key. There the runtime index migration keeps the previous index and names the duplicates (ADR-0120 D4); it never drops a row. `os migrate duplicates` and the boot report group by the same key.
+  - `sys_metadata_history` is unique on (`event_seq`) and on (`type`, `name`, `version`). Its other indexes, and those of `sys_metadata_audit` and `sys_metadata_commit`, lose their organization prefix.
+  - `idx_sys_metadata_org_type` is gone.
+  
+  What else changes:
+  
+  - The boot line `[metadata_org_scoped_unserved]` is gone with the column it read. A database still holding legacy organization rows is refused at boot instead, until the ceremony has run.
+  - The package uninstall no longer removes a legacy organization's row of the package's name: no row carries an organization.
+  - Who reads the family through the generic data door (`/data/sys_metadata_*`), before → after:
+    - `sys_metadata_audit`, `sys_metadata_history`, `sys_metadata_commit`, **under a wall** (`isolated` / `group`): before, the tenant wall filtered each caller to its own organization's rows, and an `organization_admin` read its organization's. With the column gone the wall has nothing to filter on, so without a gate that admin would read every organization's trail, history bodies and commit ranges. After: each requires `studio.access` (`requiredPermissions`, the #22107 precedent). The capability is platform-scoped, so an `organization_admin` holding it by role does not exist, and that admin is refused.
+    - The same three, **under `single`**: before, any caller whose grant covered the table (a read wildcard) read it. After: `studio.access` is required there too. A Studio author (the platform admin among them) reads as before; a plain member is refused.
+    - Every `/meta` door serving these rows admits `studio.access`: `/meta/:type/:name/history`, `/audit` and `/diff` admit `studio.access` or `manage_metadata`, and `/packages/:id/commits` admits `studio.access` alone; `setup.access` alone is refused at all four. `requiredPermissions` is an AND-gate and cannot name an any-of set, and `setup.access` is held by organization admins, so it could not be the gate. A caller holding only `manage_metadata` therefore still reads the history and audit rows through `/meta`, but not the commit rows, and none of them through the data door.
+    - `sys_metadata` stays ungated, before and after: its rows are what `/meta` already serves to every organization.
+  - On a database the ceremony has not migrated (which `os serve` refuses, but every `os migrate` boot opens, the ceremony's own among them), the legacy organization rows are still told apart, off the physical column:
+    - every read the metadata protocol makes of the family goes through one seam that leaves them out. That covers boot hydration; the `/meta` list, by-name, layered and draft-preview reads; the item lock (`_lock`) the reads report and the save and delete gates enforce; the package-less write and read address; and the package, commit, audit, history and diff reads. Two reads keep them on purpose and read the column themselves: `os migrate meta --stored` reports such a row, and the commit revert refuses a legacy commit by name. The authored hook and action binders leave them out too;
+    - the metadata repository's write never resolves to one: before, a save of an address that only a legacy organization's row held rewrote that row in place (measured on the ceremony's template promotion). Now the write targets the environment's row, and with none it creates one, which the re-keyed unique index refuses beside the organization's row until the ceremony settles it;
+    - `os migrate meta --stored` reports such a row `skipped` and never re-saves it;
+    - `os migrate security-catalog-overlays` neither lists nor deletes it;
+    - a commit recorded in a legacy organization's layer is still refused by the revert;
+    - the runtime-datasource reads, the packaged permission-set overlay reading, the kernel:ready security-catalog echo, the stored flow-credential move and a `DatabaseLoader` (engine- or driver-backed) leave them out.
+  - `SqlDriver.listPhysicalColumns(object, options?)` (new, read-only): a table's physical column names, from the catalog, joining `options.transaction`. `TursoDriver`'s remote face answers it from the remote catalog. Every boot asks whether the family still carries the retired column, and it asks this way, not through `execute()`. So `os migrate plan` keeps its "a plan writes nothing" line on a migrated or fresh database. The legacy rows themselves are read with a raw statement only where the column exists.
+  - `GET /forms/:slug` and `POST /forms/:slug/submit` no longer read the Default Organization's legacy layer. Every metadata read is now environment → code. The doors judge each candidate against the environment's view list, which holds one item per package of a view name. So a withdrawal in one package still closes that name's form in every package. On a deployment with no organization this closes more than before, which is the fail-closed direction. A withdrawal saved only at the organization layer is carried onto the environment by the ceremony's `metadata-promotion` step, which the runtime requires before it starts.
+  - The protocol's `getMetaItems` drops its undocumented `legacyFormOrganizationId` request key. It was never in the spec's `GetMetaItemsRequest`, and only those doors passed it. A caller that still passes it now gets the environment's list.
+- 252775d: fix(cli): `os meta delete` no longer prints "✓ Metadata deleted" when the reset door removed nothing (#23479)
+  
+  Clause-②: no
+  
+  **What changed.** The default (human) output of `os meta delete` now reads the reset door's `reset` flag, the same flag `--format json` and `--format yaml` already report as `deleted`. When the door answers `reset: false`, which means the delete's address held no row and nothing was removed, the command prints a warning line instead of the success line:
+  
+  | Run | FROM (before) | TO (now) |
+  |:---|:---|:---|
+  | `os meta delete view x`, nothing stored | `✓ Metadata deleted: view/x` | `⚠ Nothing deleted: view/x — the server found nothing to delete` |
+  | `os meta delete view x --package P`, P holds no row of it | `✓ Metadata deleted: view/x` | `⚠ Nothing deleted: package 'P' holds no row of view/x` |
+  | `os meta delete view x --draft`, no pending draft | `✓ Pending draft discarded: view/x` | `⚠ Nothing discarded: view/x has no pending draft` |
+  | `os meta delete view x --draft --package P`, P holds no pending draft of it | `✓ Pending draft discarded: view/x` | `⚠ Nothing discarded: package 'P' holds no pending draft of view/x` |
+  
+  **Unchanged.** When a row is removed (`reset: true`), the success line is the same as before, byte for byte. The exit code is `0` on both outcomes and on all three output formats, as before: a reset that removed nothing is a completed command, and the JSON and YAML outputs already report it as `success: true` with `deleted: false`. A script that needs to tell the two outcomes apart should read `deleted` from `--format json`, not the exit code. Failures (a refusal or a transport error) still exit `1`.
+- 0f52f32: fix(cli): under a wall, `os migrate organization-ownership --apply` names the act that clears a position binding the rewrite gate refuses, instead of pointing at a step that reports done (#23542)
+  
+  Clause-②: no
+  
+  **What changed.** Under the `group` or `isolated` posture, no ceremony step carries `sys_position_permission_set` rows into a position definition. `authored-conversion` reports and finishes before it reads a binding (ADR-0131 D3). The rewrite gate still refused those rows, rightly, but its remedy sent the operator to `authored-conversion`, which had already reported `done` with no blocker. The gate still refuses, and nothing is deleted or guessed. Only the remedy changes, and it now depends on where the position's definition lives.
+  
+  The blocker's first sentence is unchanged: "Binding rows give position NAME sets its catalog definition does not name (SETS); deleting them would lose a grant." The sentence after it changes, under a wall only:
+  
+  - **A position no catalog declares.**
+    - FROM: "The authored-conversion step carries them; resolve its blocker, then re-run."
+    - TO: "Under the POSTURE posture no ceremony step carries binding rows (ADR-0131 D3). Declare the position NAME with permissionSets naming SETS, through one door only: the deployment's code (compiled into the artifact this ceremony boots), or the metadata door as the platform administrator (PUT /api/v1/meta/position/NAME). A cold boot refuses a position name a package declares and the environment catalog also holds. Then re-run."
+  - **A declared position the metadata door reports editable, whose definition lacks some of the bound sets.**
+    - FROM: the same pointer.
+    - TO: "Under the POSTURE posture no ceremony step carries binding rows (ADR-0131 D3). Add MISSING to the permissionSets of the position NAME through the metadata door as the platform administrator (PUT /api/v1/meta/position/NAME), then re-run."
+  - **A declared position the metadata door reports not editable.** A definition a package ships is sealed (ADR-0131 D6), so no door on the database adds the sets. The text states the fact and names no act.
+    - FROM: the same pointer.
+    - TO, when the definition's provenance names the package: "Under the POSTURE posture no ceremony step carries binding rows (ADR-0131 D3). Package PACKAGE ships the definition of NAME, which is sealed (ADR-0131 D6: the metadata door reports it not editable, lock LOCK), so no door on this database adds those sets."
+    - TO, otherwise: "Under the POSTURE posture no ceremony step carries binding rows (ADR-0131 D3). The metadata door reports the definition of NAME not editable (lock LOCK), so no door on this database adds those sets."
+    - When the door's verdict cannot be read, the text says so and names no act.
+  
+  Whether a definition is editable is the metadata door's own answer, the `editable` flag of its item read, the same verdict the ceremony already asks before its one in-place write.
+  
+  **Unchanged.**
+  
+  - Under `single`, the pointer at `authored-conversion` stays, because that step carries the bindings there.
+  - A built-in position that does not resolve because the boot did not compose the security plugin keeps that composition's remedy, under every posture.
+  - The `conflicting` blocker, for a name that organizations bind differently, keeps its text. It states the fact and names no act, because no door makes the rows agree.
+  - `authored-conversion`'s walled note is unchanged. The rewrite gate's blocker is where the operator reads about binding rows.
+- c5dd7fc: feat(spec)!: the page kind `jsx` is retired — an authored `kind: 'jsx'` is refused with the prescription naming `html`, and `page-kind-jsx-to-html` leaves the load path
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (authoring):** `jsx` was the first name of the constrained-JSX page tier (ADR-0080), which ADR-0081 renamed `html`. Through 17 it stayed a declared `PageSchema.kind` member and the loader rewrote an authored `kind: 'jsx'` to `html` with a notice. At 18 it is retired: `PageSchema.kind` declares it through `enumWithRetiredValues`, so it is refused by name at `os validate`, `os build`, the metadata save door and `defineStack`, so under `os lint` too when the config calls it: "Page `kind: 'jsx'` was removed in @objectstack/spec 18 (ADR-0087 D2) … Use `kind: 'html'`." Writing it in TypeScript no longer compiles either. The ADR-0087 D2 conversion `page-kind-jsx-to-html` is retired from the load path (`retiredAfter: '17.7.0'`), so the authoring funnel no longer rewrites the value. `COMPILED_PAGE_KINDS` is now `['html']`: `requires` is accepted on an `html` page only.
+  
+  Migration:
+  
+  - `kind: 'jsx'` → `kind: 'html'`. Change the value; the page's `source` is compiled and rendered exactly as before, and `requires` stays legal on it.
+  - A script or integration that saves a page through the metadata API with `kind: 'jsx'` → send `kind: 'html'`.
+  
+  `os migrate meta` does not list this edit: the rename belongs to protocol 11, below the migration floor, so make it by hand. The D3 entry `page-kind-jsx-retired` states it for upgraders.
+  
+  Stored metadata needs no edit. Every stored-row rehydration seam replays the retired conversion, so a `sys_metadata` page row written as `jsx` keeps loading as an `html` page, and a built artifact whose declared protocol floor is at or below `17.7.0` is still converted at the artifact-ingestion door.
+  
+  The readers that branched on the retired value dropped it: the metadata save door's html-page compile gate (`@objectstack/metadata-protocol`), the CLI's SDUI-manifest page count, and the lint page walk, `validateJsxPages` and the page-source styling rule (`@objectstack/lint`) now read `html` (and `react` where they did before) only.
+  
+  `@objectstack/platform-objects` publishes the Studio page form's `source` help text in four locales (`en`, `zh-CN`, `ja-JP`, `es-ES`); it no longer names `jsx`.
+  
+  <!-- adr-0087: registered page-kind-jsx-retired -->
+- c2bb302: fix(cli): `os migrate organization-ownership` reads its SQL dialect once, through the driver resolver it shares with metadata-core, and refuses an unresolved dialect before any statement, naming the driver, with no SQLite default left
+  
+  Clause-②: yes (widening)
+  
+  **Who this is for.** An operator who runs the organization-ownership ceremony (plan or `--apply`) on a PostgreSQL or MySQL database whose driver's knex `config.client` is a client CLASS (knex's bring-your-own-dialect hatch) or a client string the ceremony does not recognise.
+  
+  **FROM.** Both arms took the dialect from `String(config.client)` alone, with a reader of their own.
+  
+  - Such a run was refused (`driver-unsupported`, exit 1) by the plan step, which runs first. A client class was stringified, so the refusal printed the class's source text in place of the driver's name.
+  - The apply step and its template lookup each carried a `'sqlite'` default for an unresolved dialect. Neither was reachable, only because the plan step had already refused.
+  
+  **TO.** The dialect is resolved once, from the stack's driver, before either arm runs a statement. The resolver is the one metadata-core's legacy-row reader uses: the driver's `dialectName` first, then a recognised `config.client` string.
+  
+  - Refused: a client class with no recognised `dialectName`, an unrecognised client string, `dialectName: 'unknown'` (what `SqlDriver` answers for either), and a driver with no dialect at all. Each gets `driver-unsupported`, exit 1, with no statement run and no plan file written. The refusal names the driver: its name, its `dialectName`, and its client string or client class name.
+  - No `'sqlite'` default remains. The plan and the apply take the resolved dialect and never re-derive it.
+  - The plan file's `client` field records the client only when it is a string.
+  
+  Measured on each in-repo SQL driver: `SqlDriver` on better-sqlite3, pg and mysql2, and `TursoDriver`, resolve to the dialect they did before.
+  
+  **metadata-core.** `dialectOfDriver(driver)` is exported. It is the one resolver behind `readLegacyOrganizationRows`, and answers:
+  
+  - `'sqlite' | 'postgres' | 'mysql'`;
+  - `'none'` for a driver that is not a SQL driver;
+  - `'unresolved'` otherwise.
+  
+  A `dialectName` string is the whole answer, recognised or not. A `config.client` is read only when there is no `dialectName`, and only as a string.
+- 93f3526: fix(cli): the read-only `os migrate` arms say they write no row or table, and that opening a SQLite file can still switch its journal mode, instead of saying they write nothing
+  
+  **What was wrong.** These arms boot read-only: no DDL, no seed, SELECT statements only. But the boot still opens the database through the SQL driver, and the driver's connect switches a SQLite file to the journal mode it asks for: WAL, unless `OS_DATABASE_SQLITE_JOURNAL_MODE=delete` is set in the command's own environment or the project's `.env` (then a WAL file is switched back to a rollback journal). On a file still on a rollback journal, a plan or a dry run therefore rewrote the file's header (the journal-mode bytes and the change counter) while saying "writes nothing" or "nothing in the database was changed". No row or table changed, and nothing was lost.
+  
+  **What changed.** Each sentence below now claims no row or table, and each warning is followed by one shared note: "Opening a SQLite file can still switch its journal mode (to WAL by default), which changes its header only."
+  
+  - `os migrate organization-ownership` (the plan), beside a process holding the file. FROM: "The plan below writes nothing, but --apply will refuse until the database is free." This sentence has not been published: it arrives in this same release, with the occupancy gate the ceremony's `--apply` now takes. TO: "The plan below writes no row or table, but --apply will refuse until the database is free." and the note.
+  - Its closing line. FROM: "Plan written to FILE — nothing in the database was changed." TO: "Plan written to FILE — no row or table in the database was changed." On a SQLite target the note follows; on PostgreSQL or MySQL the line ends there.
+  - `os migrate plan`, beside a holder. FROM: "The plan below is still accurate — nothing is written — but "os migrate apply" will refuse until it is free (or you pass --force)." TO: "The plan below is still accurate — it writes no row or table — but …", the rest unchanged, and the note.
+  - The dry runs of `os migrate audit-metadata-bodies`, `comment-reactions`, `files-to-references` and `summary-nulls`, beside a holder. FROM: "The dry run below writes nothing, but its counts may shift while that process is running." TO: "The dry run below writes no row or table, but its counts may shift while that process is running." and the note.
+  - The dry run of `os migrate multi-value-columns`, beside a holder. FROM: "The dry run below writes nothing." TO: "The dry run below writes no row or table." and the note.
+  - The help description of `os migrate multi-value-columns` (`os migrate multi-value-columns --help`). FROM: "… Dry-run by default: prints the exact statements and the database they would run against, and writes nothing." TO: "… and writes no row or table." The help text carries no note.
+  - The preview of `os migrate meta --stored`, beside a holder. FROM: "The preview below writes nothing, but a live process may be saving metadata while it runs." TO: "The preview below writes no row or table, but a live process may be saving metadata while it runs." and the note.
+  
+  **Unchanged.** No exit code, `--json` document or refusal changes; the warnings are still printed in the text output only. What the driver does on connect is unchanged: once a file is in the mode the driver asks for, a read-only run leaves it byte-identical.
+- edac218: fix(cli): a production `os serve` of a host config that resolves no storage says so before any plugin starts, and refuses to boot when its auth service needs a driver
+  
+  Clause-②: no
+  
+  A host config (one whose `plugins` hold plugin instances) served in production with no recognized `OS_DATABASE_URL`, no `--dev` and no plugin named like a driver declares no default datasource. Nothing said so.
+  
+  - **Before.** The boot went on and died when `AuthPlugin` started: `✗ Plugin com.objectstack.auth failed to start - rollback complete: [ObjectQL] No driver available for object 'sys_organization'`. Before that line, objectql logged `ERROR sys_metadata could NOT be read at boot`, whose fix read `check the datasource behind sys_metadata — connection, credentials, and that the table exists`, for a datasource the operator never declared. No line named `OS_DATABASE_URL` or `--dev`. `examples/app-showcase` under a bare `os serve` took this path.
+  - **After, when the auth service runs under the `single` tenancy posture (the default) and no plugin registered a driver by the end of plugin init.** The boot is refused before any plugin starts, exit 1, with `✖ This production serve has no storage: …` and three fixes: set `OS_DATABASE_URL` (for example `file:./data/app.db`, or a `postgres://` or `mysql://` URL), mount a storage driver in the stack's `plugins` (for example `new DriverPlugin(driver)` from `@objectstack/runtime`), or run with `--dev`. Neither of the two lines above prints. Every configuration refused here failed to boot before this change.
+  - **After, when no driver is registered and the auth service does not need one at start** (no auth composed, as under `--no-server --preset minimal`, or a walled tenancy posture): one `⚠ No storage: …` line names the same fixes, and the boot goes on as before. A plugin that registers a driver in its `start()`, such as a module's `onEnable`, still works.
+  - **When a plugin registers a driver during init**, under any name, nothing is printed and nothing changes.
+  
+  `os start`, a standalone (non-host) config, `--dev` and any recognized `OS_DATABASE_URL` take other paths and are unchanged.
+- fdbcec0: fix(cli): `os migrate security-catalog-overlays`, `recorded-by` and `resume`, `os secret orphans` and `rewrap`, and `os storage orphans` say they write no row or table, and that opening a SQLite file can still switch its journal mode, instead of saying they write nothing
+  
+  **What was wrong.** Each of these commands boots through the SQL driver before it prints, and the driver's connect switches a SQLite file to the journal mode it asks for (WAL, unless `OS_DATABASE_SQLITE_JOURNAL_MODE=delete` is set in the command's own environment or the project's `.env`). Measured on a file still on a rollback journal, every command's default mode moved the header's journal-mode bytes (18 and 19, from 1,1 to 2,2) and its change counter, and changed no row or table, while printing "writes nothing", "nothing was written" or "Nothing was changed". The same held for an `--apply`, `--run` or `--delete` declined at its prompt, whose plain boot can also create a table the database is missing. Nothing was lost.
+  
+  **What changed.** Each sentence below now claims no row or table (no row, after a declined prompt) and, where the command opened a SQLite file, is followed by the note the read-only `os migrate` arms already carry: "Opening a SQLite file can still switch its journal mode (to WAL by default), which changes its header only." On PostgreSQL or MySQL the sentence ends without it.
+  
+  - `os migrate security-catalog-overlays` (the preview), beside a process holding the file. FROM: "The preview below writes nothing." TO: "The preview below writes no row or table." and the note.
+  - `os migrate recorded-by` (the dry run). FROM: "Nothing was changed. Re-run with --apply to rewrite them to NULL." TO: "No row or table was changed. Re-run with --apply to rewrite them to NULL." Its `--apply` declined at the prompt. FROM: "Aborted — nothing changed." TO: "Aborted — no row was changed."
+  - `os migrate resume` (the list). FROM: `Nothing was changed. Re-run with --run <id> to act on one.` TO: `No row or table was changed. Re-run with --run <id> to act on one.` Its `--run` declined at the prompt. FROM: "Aborted — nothing changed." TO: "Aborted — no row was changed."
+  - `os secret orphans` (the report). FROM: "Report only — nothing was written or deleted." TO: "Report only — no row or table was written or deleted." The note sits before the elapsed time. Its `--delete` declined at the prompt. FROM: "Aborted — nothing was written or deleted." TO: "Aborted — no export was written and no row was deleted." Its help description. FROM: "… Report-only by default: it writes nothing and deletes nothing." TO: "… it writes no row or table and deletes nothing." Its `--delete` flag description. FROM: "(default is a report that writes nothing)" TO: "(default is a report that writes no row or table)".
+  - `os secret rewrap` (the dry run). FROM: "Dry run — nothing was written." TO: "Dry run — no row or table was written." The note sits before the elapsed time. Its `--apply` declined at the prompt. FROM: "Aborted — nothing was opened or written." TO: "Aborted — no row was opened or written." Its help description. FROM: "… A dry run by default: it writes nothing without --apply." TO: "… it writes no row or table without --apply." Its `--apply` flag description. FROM: "(default is a dry run that writes nothing)" TO: "(default is a dry run that writes no row or table)".
+  - `os storage orphans`, its help description. FROM: "… Writes nothing, tombstones nothing, deletes nothing." TO: "… Writes no row or table, tombstones nothing, deletes nothing." Help text carries no note.
+  
+  **Unchanged.** No exit code, `--json` document, flag, prompt or refusal changes; the note is printed in the text output only. What the driver does on connect is unchanged: once a file is in the mode the driver asks for, these runs leave it byte-identical.
+- 2906cd8: fix(cli): `os serve`'s ready banner prints an `API:` or MCP address only when an HTTP server is composed, and otherwise says once that none is served
+  
+  Clause-②: no
+  
+  - **Before.** `os serve --no-server` printed `➜ API: http://localhost:PORT/` and `➜ MCP: http://localhost:PORT/api/v1/mcp` with its "connect an AI client" hint, though `--no-server` had started no HTTP server and nothing listened on that port. An operator, or an AI client configured from the banner, was sent to an address that refused the connection.
+  - **After, with no HTTP server composed.** The banner prints no `API:`, `Console:` or `MCP:` row, and no connect hint or paths-only note. It prints one line instead: `➜ No HTTP server: --no-server was given and no plugin composed one, so no API or MCP address is served`. The line names `--no-server` only when that flag is the reason; a boot that asked for a server but composed none says `no plugin composed one`.
+  - **After, with an HTTP server composed.** The address rows are unchanged. That includes a `--no-server` boot whose config mounts its own `HonoServerPlugin`, because the banner checks the booted kernel for a registered `http.server` service rather than reading the flag.
+  
+  The ready line (`✓ Server is ready` or `⚠ … DEGRADED`) and every row that names no address are unchanged. So are the `objectstack:listening` IPC message and the `runtime.<environment>.<project>.json` state file.
+- a4b87ef: fix(cli): `os migrate` finds the SQL driver on a SQLite database served by `SqliteWasmDriver` (`wasm-sqlite://`, `*.wasm.db`, and the dev boot's step-down from better-sqlite3), so the organization-ownership ceremony and every `os migrate` command run on it instead of answering that no SQL driver is active
+  
+  Clause-②: no
+  
+  **Who this is for.** An operator whose database is served by `SqliteWasmDriver`, and in particular one who must run `os migrate organization-ownership` to bring a 17.x database through 18's boot refusal (ADR-0131 D10).
+  
+  **FROM.** The schema boot behind every `os migrate` command looked its SQL driver up by a list of kernel service names that did not include the one `SqliteWasmDriver` is published under (`driver.com.objectstack.driver.sqlite-wasm`). On such a database:
+  
+  - `os migrate organization-ownership` refused both the plan and `--apply` with `driver-unsupported` ("no SQL driver with a raw-SQL seam is active"), exit 1, while its own text said the ceremony supports SQLite.
+  - `os migrate plan` answered `{"error":"no_sql_driver","changes":[]}` and `os migrate apply` answered `{"error":"no_sql_driver"}`, both exit 0, and `apply` created nothing.
+  - `os migrate multi-value-columns` and `os migrate unmapped-columns` answered `no_sql_driver`, and the other commands in the family named the database `unknown`.
+  
+  **TO.** The lookup lists that key, so these commands find the driver and run on the database. The ceremony resolves its dialect to `sqlite` through the driver's `dialectName`. A driver without the schema-migration seam is still not found under any key, and a driver under a key the list does not name is still not found: the ceremony refuses both with `driver-unsupported`, as before.
+  
+  `os migrate plan`'s unmanaged-table section on such a database reads the table catalog. It now resolves the dialect from the driver's `dialectName` first; reading `config.client` as a string only, it had reported the section unreadable for this driver, whose client is a knex client class.
+  
+  An `os serve` boot pinned to an artifact by `OS_ARTIFACT_URL` uses the same lookup for its boot-time migration gate. On such a database that gate used to find no driver and let the boot go ahead with the artifact's schema changes unapplied, a destructive one included. It now runs as on every other SQL database: safe changes are applied at boot, and a destructive change refuses the boot and names the change and `os migrate apply --allow-destructive`.
+- eea7649: fix(cli): `os migrate organization-ownership --apply` drops `organization_id` from an object the host declares platform-global when its fate is `column-drop`, for a host that brings its own engine plugin (ADR-0131 D7, D10 fate 1)
+  
+  Clause-②: no
+  
+  ADR-0131 D7: an object a deployment declares platform-global (the `org-scoping` service's `platformGlobalObjects`) gets no organization column on that deployment. The engine installs that declaration at the top of `ObjectQLPlugin.start()`, before it hands any object to its driver.
+  
+  **FROM.** A host config that brings its own `ObjectQLPlugin`, under the framework's plugin name, displaces the CLI's engine, and the migration boot composes host plugins for their declarations only, so that engine's `start()` does not run. The boot's own binding pass (the one that hands every declared object to its driver in place of that `start()`) did not install the declaration. Every object the host declared platform-global was planned with its organization column. The schema-drift ceremony therefore proposed no drop, and the ceremony's column-drops step blocked on a `column-drop` fate for such an object with "was not proposed for dropping by the schema-drift ceremony". `os migrate plan` showed no drift for the column either.
+  
+  **TO.** The binding pass installs the declaration first, as `start()` does, through the same reader (`readDeploymentOrgScopingEntitlement`, `@objectstack/core`) and the registry's own re-plan. A declared object is planned without the column, the drift proposes its drop, and the column-drops step drops it through the schema-drift ceremony. `os migrate plan` lists the column as an unmapped, destructive column, as a served boot of the same stack plans it, and the plan's notes name the objects re-planned.
+  
+  **Unchanged.** A host whose engine is the CLI's own already had the declaration installed by that engine's `start()`, and installing it again re-plans nothing. An object the host does not declare platform-global keeps its column, and a `column-drop` fate on it still blocks with `not-proposed`. A declared object whose column still holds a category's rows still blocks before any drop.
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [c911ab6]
+- Updated dependencies [87d0619]
+- Updated dependencies [fba3712]
+- Updated dependencies [4e0838d]
+- Updated dependencies [cb9841a]
+- Updated dependencies [b60eb78]
+- Updated dependencies [584e737]
+- Updated dependencies [54af6c0]
+- Updated dependencies [be16feb]
+- Updated dependencies [3d231ba]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [94924e0]
+- Updated dependencies [0f05907]
+- Updated dependencies [47d569e]
+- Updated dependencies [05e3b8e]
+- Updated dependencies [086fa46]
+- Updated dependencies [c245986]
+- Updated dependencies [0be162c]
+- Updated dependencies [fc1a55a]
+- Updated dependencies [fc1a55a]
+- Updated dependencies [a1285f2]
+- Updated dependencies [b1e9280]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [e1cefa5]
+- Updated dependencies [1d79556]
+- Updated dependencies [c980d11]
+- Updated dependencies [0ecac96]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [0d784da]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [3b28905]
+- Updated dependencies [1baf976]
+- Updated dependencies [222293f]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [650933e]
+- Updated dependencies [7cb33cf]
+- Updated dependencies [d1e2841]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [cac0be8]
+- Updated dependencies [1f3ac4f]
+- Updated dependencies [57994c3]
+- Updated dependencies [70d4c06]
+- Updated dependencies [989aa48]
+- Updated dependencies [b1cfa3d]
+- Updated dependencies [56147a8]
+- Updated dependencies [23e689d]
+- Updated dependencies [a869ea6]
+- Updated dependencies [7b64a3d]
+- Updated dependencies [0fb55fc]
+- Updated dependencies [19c554d]
+- Updated dependencies [5bb9a83]
+- Updated dependencies [8226755]
+- Updated dependencies [cdc42eb]
+- Updated dependencies [7ffc578]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c263588]
+- Updated dependencies [30b0fc2]
+- Updated dependencies [a6d0715]
+- Updated dependencies [c2bb302]
+- Updated dependencies [7c6b7f4]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [7dc7d22]
+- Updated dependencies [f7cd580]
+- Updated dependencies [c9810dd]
+- Updated dependencies [9f81260]
+- Updated dependencies [e611e2b]
+- Updated dependencies [b513343]
+- Updated dependencies [954bf72]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [c7dd48a]
+- Updated dependencies [30c33e3]
+- Updated dependencies [7e6e4e1]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [cad343e]
+- Updated dependencies [cbe7712]
+- Updated dependencies [cd86e41]
+- Updated dependencies [c03077e]
+- Updated dependencies [361a1c4]
+- Updated dependencies [3bc407d]
+- Updated dependencies [69351e9]
+- Updated dependencies [f77ba41]
+- Updated dependencies [395ca21]
+- Updated dependencies [76560a1]
+- Updated dependencies [9bb9370]
+- Updated dependencies [53646fc]
+- Updated dependencies [4c21e57]
+- Updated dependencies [9e0945c]
+- Updated dependencies [069fd40]
+- Updated dependencies [6ee483c]
+- Updated dependencies [941c78a]
+- Updated dependencies [53e3638]
+- Updated dependencies [140238a]
+  - @objectstack/plugin-security@18.0.0-next.2
+  - @objectstack/platform-objects@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/metadata-protocol@18.0.0-next.2
+  - @objectstack/lint@18.0.0-next.2
+  - @objectstack/rest@18.0.0-next.2
+  - @objectstack/runtime@18.0.0-next.2
+  - @objectstack/service-mailbox@18.0.0-next.2
+  - @objectstack/objectql@18.0.0-next.2
+  - @objectstack/verify@18.0.0-next.2
+  - @objectstack/plugin-audit@18.0.0-next.2
+  - @objectstack/plugin-auth@18.0.0-next.2
+  - @objectstack/plugin-sharing@18.0.0-next.2
+  - @objectstack/service-datasource@18.0.0-next.2
+  - @objectstack/service-settings@18.0.0-next.2
+  - @objectstack/service-storage@18.0.0-next.2
+  - @objectstack/plugin-email@18.0.0-next.2
+  - @objectstack/client@18.0.0-next.2
+  - @objectstack/plugin-hono-server@18.0.0-next.2
+  - @objectstack/mcp@18.0.0-next.2
+  - @objectstack/cloud-connection@18.0.0-next.2
+  - @objectstack/metadata-core@18.0.0-next.2
+  - @objectstack/metadata@18.0.0-next.2
+  - @objectstack/service-automation@18.0.0-next.2
+  - @objectstack/driver-sql@18.0.0-next.2
+  - @objectstack/driver-turso@18.0.0-next.2
+  - @objectstack/driver-mongodb@18.0.0-next.2
+  - @objectstack/plugin-approvals@18.0.0-next.2
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.2
+  - @objectstack/driver-memory@18.0.0-next.2
+  - @objectstack/console@18.0.0-next.2
+  - @objectstack/account@18.0.0-next.2
+  - @objectstack/setup@18.0.0-next.2
+  - @objectstack/plugin-webhooks@18.0.0-next.2
+  - @objectstack/service-job@18.0.0-next.2
+  - @objectstack/service-messaging@18.0.0-next.2
+  - @objectstack/service-queue@18.0.0-next.2
+  - @objectstack/service-realtime@18.0.0-next.2
+  - create-objectstack@18.0.0-next.2
+  - @objectstack/formula@18.0.0-next.2
+  - @objectstack/observability@18.0.0-next.2
+  - @objectstack/service-analytics@18.0.0-next.2
+  - @objectstack/service-cache@18.0.0-next.2
+  - @objectstack/service-package@18.0.0-next.2
+  - @objectstack/service-sms@18.0.0-next.2
+  - @objectstack/trigger-api@18.0.0-next.2
+  - @objectstack/trigger-record-change@18.0.0-next.2
+  - @objectstack/trigger-schedule@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+  - @objectstack/plugin-pinyin-search@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

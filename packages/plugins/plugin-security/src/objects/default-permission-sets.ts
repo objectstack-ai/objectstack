@@ -1429,7 +1429,7 @@ const baseDefaultPermissionSets: PermissionSet[] = [
     label: 'MCP Agent — Read Only',
     description:
       'Read-only ceiling for an AI agent acting on behalf of a user (OAuth `data:read`). ' +
-      'Bounded by the delegating user via the ADR-0090 D10 intersection.',
+      'Bounded by the delegating user\'s own permissions.',
     objects: {
       '*': { allowRead: true },
     },
@@ -1439,7 +1439,7 @@ const baseDefaultPermissionSets: PermissionSet[] = [
     label: 'MCP Agent — Read & Write',
     description:
       'Read+write ceiling for an AI agent acting on behalf of a user (OAuth `data:write`). ' +
-      'Full CRUD, still bounded by the delegating user via the ADR-0090 D10 intersection. ' +
+      'Full CRUD, still bounded by the delegating user\'s own permissions. ' +
       'Identity tables stay read-only (better-auth managed).',
     objects: {
       '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
@@ -1484,6 +1484,8 @@ const baseDefaultPermissionSets: PermissionSet[] = [
  * not (grant this).
  */
 function deriveWallLessOrgAdmin(base: PermissionSet): PermissionSet {
+  // [ADR-0105 D4 / finding F2] The description is admin copy on Setup's
+  // Permission Sets page, so the decision ids stay here, not in the string.
   const objects: Record<string, any> = { ...(base.objects ?? {}) };
   const { viewAllRecords: _v, modifyAllRecords: _m, ...wildcardWithoutBypass } =
     (objects['*'] ?? {}) as Record<string, unknown>;
@@ -1495,7 +1497,7 @@ function deriveWallLessOrgAdmin(base: PermissionSet): PermissionSet {
     description:
       'Organization administration WITHOUT blanket record visibility. Granted instead of ' +
       '`organization_admin` when the tenancy posture enforces no organization wall, where nothing ' +
-      'would bound the superuser bits (ADR-0105 D4 / finding F2). Ownership, sharing and business ' +
+      'would bound the superuser bits. Ownership, sharing and business ' +
       'RLS still apply; grant `admin_full_access` (or an explicit set carrying the bits) when a ' +
       'deployment-wide data superuser is genuinely intended.',
     objects,

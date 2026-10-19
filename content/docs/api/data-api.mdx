@@ -23,7 +23,7 @@ Query records with filtering, sorting, selection, and pagination.
 | `top` | query | Max records to return. No default — omitting it returns all matching records. |
 | `skip` | query | Offset |
 | `expand` | query | Comma-separated list of relations to eager-load. Must name a reference field (`lookup` / `master_detail` / `user` / `tree`) — otherwise `400 INVALID_FIELD`. |
-| `search` | query | Full-text search term, scanned case-insensitively across the object's searchable fields (its declared `searchableFields`, or a text-like auto-default when none are declared). |
+| `search` | query | Full-text search term, scanned case-insensitively across the object's searchable fields (its declared `searchableFields`, or a text-like auto-default when none are declared). When that set is empty — no `searchableFields` entry names a stored field, and the auto-default finds none — a non-blank term is `400 INVALID_FIELD`, never every row. |
 | `searchFields` | query | Comma-separated subset of the searchable fields for `search` to scan — narrows the scan, never widens it. A name outside the searchable set is `400 INVALID_FIELD`. |
 
 > **Note:** OData-style `$`-prefixed parameters (`$filter`, `$select`, `$orderby`, `$top`, `$skip`, `$expand`, `$count`, `$search`) are also accepted directly on this same endpoint as aliases — they're normalized internally to the parameter names above. There is no separate standalone OData endpoint.
@@ -156,14 +156,17 @@ corrupts something the earlier axes do not:
 | `?search=alpha&searchFields=no_such_field` | `400 INVALID_FIELD` |
 | `?search=alpha&searchFields=amount` | `400 INVALID_FIELD` — real field, but not searchable |
 | `?search=alpha&searchFields=project_id.name` | `400 INVALID_FIELD` — search scans this object's own columns; mirror the related title instead (see below) |
+| `?search=alpha` on an object with no searchable field (two lookups and a `formula` title, say) | `400 INVALID_FIELD` — nothing to scan; declare a stored field searchable or mirror the title (see below) |
 | `groupBy: ["status"]` | one bucket per status value |
 | `groupBy: ["no_such_field"]` | `400 INVALID_FIELD` |
 | `aggregations: [{function:"sum", field:"amount", alias:"total"}]` | the real total |
 | `aggregations: [{function:"sum", field:"no_such_field", alias:"total"}]` | `400 INVALID_FIELD` |
 | `aggregations: [{function:"count", alias:"n"}]` | `count(*)` — the one legitimate field-less form |
 
-- **`searchFields`** — the only parameter whose failure changed which **rows**
-  came back. An unknown name used to be dropped, and an override left empty
+- **`search`** and **`searchFields`** — the only parameters whose failure
+  changed which **rows** came back. A `search` over an object with nothing to
+  scan added no predicate, so every row came back as if every row matched. An
+  unknown `searchFields` name used to be dropped, and an override left empty
   fell back to scanning *every* searchable column: a parameter that exists
   only to **narrow** a search failed by **widening** it. Three causes get
   three messages, because the fixes differ: a name that is no field (a typo in

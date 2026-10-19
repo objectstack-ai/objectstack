@@ -270,8 +270,9 @@ describe('RetryPolicySchema', () => {
   // `backoffMultiplier` to 2 while this shape was job-only; the converged
   // declaration takes the automation side's 0 / 1, because a retry replays the
   // handler's writes and callouts and that has to be asked for. Existing job
-  // documents keep the old numbers — `retry-policy-converged` writes them in —
-  // so what changed is only what a NEWLY authored omission means.
+  // documents keep the old numbers — `retry-policy-converged` writes them in.
+  // This is the SHARED schema's default; on a job, a block that leaves the
+  // count at 0 is refused since 18 (#23543 F2, `JobSchema` below).
   it('applies opt-in defaults: a declared but empty policy does not retry', () => {
     const policy = RetryPolicySchema.parse({});
 
@@ -513,6 +514,38 @@ describe('JobSchema', () => {
 // its L2 member only — and `handler` is deprecated beside it. The four presence
 // shapes, the L1 refusal and the one time-limit spelling are pinned here; the
 // runtime binder that SCHEDULES a body is a separate change.
+// #23543 F2 (ruling 6182001882 item 2): a job's retry block must buy a retry.
+describe('JobSchema.retryPolicy — a block with no attempts is refused', () => {
+  const job = (retryPolicy?: Record<string, unknown>) => ({
+    name: 'nightly_sync',
+    schedule: { type: 'cron' as const, expression: '0 0 * * *' },
+    handler: 'syncOrders',
+    ...(retryPolicy === undefined ? {} : { retryPolicy }),
+  });
+
+  it.each([
+    ['omitted', {}],
+    ['omitted beside other keys', { backoffMs: 5000, jitter: true }],
+    ['written 0', { maxRetries: 0 }],
+  ])('refuses `maxRetries` %s at the key, with the prescription', (_name, policy) => {
+    const parsed = JobSchema.safeParse(job(policy));
+    expect(parsed.success).toBe(false);
+    expect(parsed.error!.issues).toHaveLength(1);
+    const [issue] = parsed.error!.issues;
+    expect(issue!.code).toBe('custom');
+    expect(issue!.path).toEqual(['retryPolicy', 'maxRetries']);
+    expect(issue!.message.startsWith(
+      'A retry block with no attempts is no retry block: state `maxRetries` ≥ 1, for example 3, or delete the block.',
+    )).toBe(true);
+  });
+
+  it('CONTROL — no block is a single attempt, and `maxRetries: 1` parses with the multiplier at its default', () => {
+    expect(JobSchema.safeParse(job()).success).toBe(true);
+    const parsed = JobSchema.parse(job({ maxRetries: 1 }));
+    expect(parsed.retryPolicy).toMatchObject({ maxRetries: 1, backoffMultiplier: 1 });
+  });
+});
+
 describe('JobSchema.body', () => {
   const base = { name: 'nightly_sweep', schedule: { type: 'interval' as const, intervalMs: 60000 } };
   const body = { language: 'js' as const, source: "await ctx.api.object('task').find({});", capabilities: ['api.read' as const] };
@@ -791,9 +824,8 @@ describe('Job Scheduling Integration', () => {
         at: '2024-12-31T00:00:00Z',
       },
       handler: 'jobs/migration.ts',
-      retryPolicy: {
-        maxRetries: 0, // No retries for migrations
-      },
+      // No retries for migrations: no `retryPolicy` block. A block with
+      // `maxRetries: 0` is refused (#23543 F2).
       timeoutMs: 7200000, // 2 hours
     };
 

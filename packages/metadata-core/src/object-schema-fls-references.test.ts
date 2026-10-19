@@ -115,6 +115,29 @@ describe('[ADR-0106 D1] references to a denied field — object level', () => {
         expect(served).not.toHaveProperty('activityMilestones');
     });
 
+    it('drops the default row scope whose predicate reads the denied field WHOLE, and keeps one that does not (#24338)', () => {
+        // One row policy (`defaultRowScope`), a rule entry in all but arity: deleting
+        // only its `using` would serve a policy that reads as restricting nothing.
+        const scope = (using: string) => ({ name: 'thing_self', operation: 'select', using });
+        const denied = mask({
+            name: 'thing',
+            fields: fieldsWith(),
+            defaultRowScope: scope('secret_score > 0 && owner_id == current_user.id'),
+        });
+        expect(denied).not.toHaveProperty('defaultRowScope');
+
+        const readable = scope('title != null && owner_id == current_user.id');
+        const served = mask({ name: 'thing', fields: fieldsWith(), defaultRowScope: readable });
+        expect(served.defaultRowScope).toEqual(readable);
+
+        // The leg that tells the classification from the unclassified fail-safe, which
+        // drops on a mention too: a denied field named like one of the policy's own
+        // schema words (`operation`) costs the scope nothing, because in a classified
+        // position a key is a schema word, never a field reference.
+        const wordy = mask({ name: 'thing', fields: { ...fieldsWith(), operation: { type: 'text' } }, defaultRowScope: readable });
+        expect(wordy.defaultRowScope).toEqual(readable);
+    });
+
     it('scrubs the nested policy blocks: tenancy, lifecycle, publicSharing, external, userActions', () => {
         const served = mask({
             name: 'thing',
@@ -349,6 +372,24 @@ describe('[ADR-0106 D1] references to a denied field — inside a READABLE field
         });
         expect(served.fields.title).not.toHaveProperty('inlineColumns');
         expect(served.fields.title.inlineAmountField).toBe('id');
+    });
+
+    it('deletes a `referenceDeletedWhen` predicate whose sibling is denied, and keeps one over a readable sibling', () => {
+        // #23735 — `field` names a sibling `select` of this object; `value` is an
+        // option value, never a field, so a value spelled like a denied field
+        // costs nothing.
+        const denied = mask({
+            name: 'thing',
+            fields: fieldsWith({ referenceVia: 'id', referenceDeletedWhen: { field: 'secret_score', value: 'gone' } }),
+        });
+        expect(denied.fields.title).not.toHaveProperty('referenceDeletedWhen');
+        expect(denied.fields.title.referenceVia).toBe('id');
+
+        const readable = mask({
+            name: 'thing',
+            fields: fieldsWith({ referenceVia: 'id', referenceDeletedWhen: { field: 'id', value: 'secret_score' } }),
+        });
+        expect(readable.fields.title.referenceDeletedWhen).toEqual({ field: 'id', value: 'secret_score' });
     });
 
     it('leaves names of ANOTHER object\'s fields alone — they are that object\'s projection', () => {
@@ -688,4 +729,31 @@ describe('[ADR-0106] the shared contract table, driven through the bare projecti
             assertObjectSchemaMaskCase('applyObjectSchemaMask', testCase, { kind: 'document', document });
         });
     }
+});
+
+describe('the published contract fixture meets the stage-field rule', () => {
+    // [#23809] `ObjectSchema` requires every option of the `stageField` field to
+    // declare `kind`. The fixture is not a whole spec-valid object (its `script`
+    // actions carry no `body` / `target` on purpose — it exercises the mask's
+    // reference positions, not the action contract), so this asserts the one
+    // rule that names its stage field: no issue at `stageField` or under
+    // `fields.salary_grade.options`. The positive control strips one `kind` and
+    // must raise exactly there.
+    const stageIssues = (doc: unknown) => {
+        const parsed = ObjectSchema.safeParse(doc);
+        const issues = parsed.success ? [] : parsed.error.issues;
+        return issues
+            .map((i) => i.path.join('.'))
+            .filter((p) => p === 'stageField' || p.startsWith('fields.salary_grade.options'));
+    };
+
+    it('`FLS_CONTRACT_OBJECT` raises no stage-field issue: both `salary_grade` options declare `kind`', () => {
+        expect(stageIssues(FLS_CONTRACT_OBJECT)).toEqual([]);
+    });
+
+    it('positive control: the same fixture with one option\'s `kind` removed is refused at that option', () => {
+        const copy = JSON.parse(JSON.stringify(FLS_CONTRACT_OBJECT));
+        delete copy.fields.salary_grade.options[1].kind;
+        expect(stageIssues(copy)).toEqual(['fields.salary_grade.options.1.kind']);
+    });
 });

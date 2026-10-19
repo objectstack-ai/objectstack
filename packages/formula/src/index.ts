@@ -93,6 +93,7 @@ export type {
   RelationshipTraversalAnalysis,
   TraversalConflict,
   TraversalConflictKind,
+  TraversalSubject,
 } from './relationship-traversal';
 export { resolveSeed, resolveSeedRecord } from './seed-eval';
 export { normalizeExpression, normalizeExpressionTree } from './normalize';

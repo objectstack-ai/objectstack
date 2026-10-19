@@ -11,7 +11,7 @@
  * | security-owd-unset            (error)   | objectui#2348 leave_request 事故 |
  * | security-owd-alias            (error)   | ADR-0090 D4 canonical enum — UNPARSED intakes only, see § Intake |
  * | security-wildcard-vama        (error)   | ADR-0066 superuser wildcard     |
- * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors — declared `everyone` suggestions (`isDefault: true`) only; a `guest`-bound set is outside a package-time linter's sight and is the bind-time gate's alone (#16110) |
+ * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors — declared `everyone` suggestions (`isDefault: true`) only; no door binds a set to `guest` until ADR-0138 D3 item 5's bind door is built (#16110) |
  * | security-role-word            (error)   | ADR-0090 D3 vocabulary freeze — own function/registry entry since #8310; CLI + runtime publish gate since commit a227afa41 |
  * | security-book-audience-unknown-set(warn)| ADR-0046 §6.7 { permissionSet } |
  * | security-private-no-readscope (info)    | admin-intent mismatch class     |
@@ -28,13 +28,13 @@
  * — the lint moves the failure from runtime-deny to author-time fix-it.
  * `security-anchor-high-privilege` mirrors that gate for the one suggestion a
  * package can actually declare (`isDefault: true` → the `everyone` anchor,
- * `suggested-audience-bindings.ts`'s "the only declarable suggestion"); a set
- * an operator binds to `guest` at install time is a decision ADR-0090 D9
- * ("a package may suggest bindings … the admin confirms each individually")
- * puts past authoring, so this rule is not — and cannot be — coverage for an
- * app-authored anchor set bound to `guest` (#16110). No runtime door binds a
- * set to `guest` today; ADR-0138 D3 item 5's bind door runs
- * `describeAnchorForbiddenBits(set, 'guest')` when it is built.
+ * `suggested-audience-bindings.ts`'s "the only declarable suggestion"). A
+ * package never suggests a `guest` binding, and no door binds a set to
+ * `guest` until ADR-0138 D3 item 5's bind door is built (it amends ADR-0090
+ * D9's "a package may suggest bindings to `everyone` or `guest`"), so this
+ * rule is not — and cannot be — coverage for a set bound to `guest` (#16110).
+ * That door, when built, is an act of the environment's administrator, never
+ * of a package, and runs `describeAnchorForbiddenBits(set, 'guest')` itself.
  *
  * `security-cbp-ambiguous-relation` used to be the one exception: the runtime
  * did not refuse two candidate masters, it silently PICKED one by field
@@ -932,10 +932,10 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // D5: an isDefault set is a SUGGESTED binding to the `everyone` anchor —
     // hold it to the anchor tier at author time (the runtime gate enforces the
     // same predicate at bind time; this moves the failure to the author).
-    // Scope: `isDefault: true` is the only declarable suggestion today — a set
-    // an operator binds to `guest` at install carries no author-time flag for
-    // this rule to key off, so that binding is outside what a package-time
-    // linter can see and is judged by the bind-time gate alone (#16110).
+    // Scope: `isDefault: true` is the only declarable suggestion, and it names
+    // `everyone` alone. No door binds a set to `guest` until ADR-0138 D3 item
+    // 5's bind door is built (an administrator's act, never a package's), so
+    // no `guest` binding exists for a package-time linter to see (#16110).
     if (ps.isDefault === true) {
       const offending = describeAnchorForbiddenBits(ps, 'everyone', anchorContext);
       if (offending) {

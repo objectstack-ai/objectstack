@@ -33,10 +33,11 @@
  *
  * ## Why a dataset's dangling reference is worse than most
  *
- * `filter-token-unknown`'s own wording states the failure mode it exists to
- * prevent: the value is *"sent to the data engine as a literal string, matches
- * no record, and the surface renders empty."* A dangling field path produces
- * the same outcome from the same node.
+ * `filter-token-unknown` judges the VALUE at that same node, and the value it
+ * reports does not fail quietly: the data engine refuses the query
+ * (`FILTER_TOKEN_UNKNOWN`, 400). A dangling field path there is the quiet
+ * failure. By the severity note below, every outcome it produces reaches a
+ * human as a chart that rendered successfully.
  *
  * A dataset is the semantic layer — dashboards and reports bind its dimensions
  * and measures BY NAME (ADR-0021) — and the CONSUMER end of that binding is

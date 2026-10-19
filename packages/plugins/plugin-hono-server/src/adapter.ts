@@ -33,6 +33,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 // the same drain, one different server factory. See {@link HttpsListenerMaterial}.
 import { createServer as createHttpsServer } from 'node:https';
 import { matchesRoutePattern } from './route-pattern';
+import { readRequestBody, type RequestBodyReading, type RequestBodyRefusal } from './request-body';
 // The ADR-0112 wire vocabulary, read as DATA rather than restated: `ErrorCode`
 // is the closed union (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`) a registered
 // code must be a member of, and `HttpStatusErrorCodeMap` IS the set of statuses
@@ -47,6 +48,8 @@ import {
     resolveThrownHttpError,
     looksLikeInternalErrorLeak,
     INTERNAL_ERROR_MESSAGE,
+    structuredCodeAnswer,
+    isEngineDuplicateRecordEnvelope,
 } from '@objectstack/types';
 
 /**
@@ -277,9 +280,34 @@ function toLoggableError(thrown: unknown): Error {
  * not carved out.
  *
  * ⛔ `declaredCode` is deliberately NOT forwarded. Under this gate the
- * producer's spelling IS the registered member sitting in `code`, so
- * `demotedDeclaredCode` returns `undefined` by construction — forwarding it
- * would put two spellings of one fact on every envelope this seam renders.
+ * producer's spelling IS a registered member, so `demotedDeclaredCode`
+ * returns `undefined` by construction — forwarding it would put two
+ * spellings of one fact on every envelope this seam renders. That holds for
+ * the one throw whose `code` is translated below as well: `DUPLICATE_RECORD`
+ * is registered, and `RestServer`'s arm sends no `declaredCode` beside its
+ * `UNIQUE_VIOLATION` either.
+ *
+ * ## One wire spelling for a unique-constraint refusal (#23587)
+ *
+ * Maintainer ruling (2026-09-03, recorded in commit 65846bc46): one wire
+ * spelling on every route, `UNIQUE_VIOLATION`. The engine's
+ * `DuplicateRecordError` declares `409` and its in-process identity,
+ * `DUPLICATE_RECORD`, which an in-process caller (a hook, a flow node)
+ * branches on and which is ⛔ not renamed. What crosses the HTTP boundary is
+ * translated: `RestServer`'s arm, `metadata-protocol`'s batch rows and the
+ * import runner's rows already answer that class as `UNIQUE_VIOLATION`, and
+ * the Hono doors answered `DUPLICATE_RECORD` until this.
+ *
+ * So this seam decides the envelope's `code` for that class BEFORE the arm
+ * is consulted, keyed exactly as the arm keys it: the registered code AND the
+ * class name ({@link isEngineDuplicateRecordEnvelope}, `@objectstack/types`,
+ * the same predicate the import runner asks), never message text. The code
+ * itself is read off that arm (`structuredCodeAnswer`, #23714), never spelled
+ * here. Then the arm agrees with the envelope, and its fields ride `details`
+ * under the rule {@link declaredArmContext} states for every arm. A producer
+ * that merely SPEAKS `DUPLICATE_RECORD` (a hook throwing the registered code
+ * without being the engine's class) keeps its own code and its own body. The
+ * `message` stays the thrown one, as on every other code at these doors.
  *
  * ## Exported for the other Hono door (#23365)
  *
@@ -291,6 +319,17 @@ function toLoggableError(thrown: unknown): Error {
  * is not restated there: a second recogniser is how the doors would start
  * disagreeing about what counts as declared. Each caller keeps its own
  * fallback arm for the `undefined` answer.
+ *
+ * ## A structured refusal's context (#23531, #23587)
+ *
+ * A refusal `RestServer`'s classification answers with structured fields
+ * (`409 CONCURRENT_UPDATE`'s `currentVersion` and `currentRecord`, `409
+ * DELETE_RESTRICTED`'s `developerMessage` / `dependentObject` /
+ * `dependentCount`, …) also carries them here, in `details`, read off that
+ * classification by {@link declaredArmContext}. Before this, both Hono doors
+ * answered those refusals with `code` and `message` only. `currentRecord` is
+ * forwarded because the producer reads it under the caller's own context
+ * (#23586, PR #23628); that helper's docblock says why that matters.
  */
 export function declaredEnvelopeForThrow(thrown: unknown): {
     status: number;
@@ -318,23 +357,131 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
         ? INTERNAL_ERROR_MESSAGE
         : resolved.message;
 
+    // [#23587] The envelope's code: the producer's own, except the engine's
+    // unique-constraint envelope, which crosses HTTP as the one ruled wire
+    // spelling (see "One wire spelling" above). Decided here, before the arm
+    // is consulted, so the arm's agreement rule below is unchanged.
+    //
+    // [#23714] That wire code is read off the shared classification's arm
+    // for the class (`structuredCodeAnswer`, the arm `RestServer` answers
+    // with), so this package spells no copy of it: the stamp stays where the
+    // error-code ledger lists it, under `@objectstack/types`. The thrown code
+    // is kept only if that arm ever answered no string code for the class.
+    const duplicateArmCode = isEngineDuplicateRecordEnvelope(thrown)
+        ? structuredCodeAnswer(thrown)?.body.code
+        : undefined;
+    const code = typeof duplicateArmCode === 'string' ? duplicateArmCode : resolved.code;
+
+    // [#23531, #23587] The structured context `RestServer`'s classification
+    // states for this refusal joins the producer's own context in `details`.
+    // Absent unless the producer stated it.
+    const armContext = declaredArmContext(thrown, { status: resolved.status, code });
+    const details = armContext ? { ...resolved.details, ...armContext } : resolved.details;
+
     return {
         status: resolved.status,
         body: {
             success: false,
             error: {
-                code: resolved.code,
+                code,
                 message,
                 // The producer's structured context and its END-USER-addressed
                 // refusal text (commit 79c46da90), forwarded exactly as the REST twin
                 // forwards them. Both are absent unless the producer declared
                 // them, so a throw that carried neither renders the same two
                 // keys it always did.
-                ...(resolved.details ? { details: resolved.details } : {}),
+                ...(details ? { details } : {}),
                 ...(resolved.userMessage !== undefined ? { userMessage: resolved.userMessage } : {}),
             },
         },
     };
+}
+
+/**
+ * [#23531, #23587] The structured context `RestServer`'s classification states
+ * for this refusal, or `undefined` when no arm of it answers the envelope
+ * already decided, and when the arm states none.
+ *
+ * ## Why
+ *
+ * `structuredCodeAnswer` (`@objectstack/types`) is the classification BOTH
+ * REST doors ask first, so that a refusal's structured fields survive their
+ * generic catch-alls: a `409 CONCURRENT_UPDATE` carries the server's
+ * `currentVersion`, a `409 DELETE_RESTRICTED` the engine's `developerMessage`,
+ * `dependentObject` and `dependentCount`, a `400 INVALID_FIELD` the `field`
+ * and `object` it names, and so on. The two Hono doors answered those refusals
+ * with `code` and `message` only: {@link declaredEnvelopeForThrow} forwards
+ * only the `details` that `resolveThrownHttpError` derives, and these fields
+ * are own properties of the thrown error that resolver never reads.
+ *
+ * ## ONE classification, not a third spelling
+ *
+ * The fields are read off the arm `RestServer`'s `mapDataError` answers the
+ * same throw through. So the Hono doors forward what the REST door forwards,
+ * under the same rule (each field only when the producer stated it), and an
+ * arm that grows a field grows it at every door. ⛔ Never list the fields or
+ * the codes here. The arm's own sentence and code are dropped because this
+ * envelope already carries both, as `message` and `code`. No field is held
+ * back by name (the ⚠️ paragraph below says what that rests on).
+ *
+ * ## The arm must agree with the envelope
+ *
+ * Both the status and the code must match the envelope already decided, so
+ * an arm can only add context to that envelope, never change it. An arm that
+ * answers a different code is not consulted. `DuplicateRecordError`'s arm
+ * answers `UNIQUE_VIOLATION`, and it agrees because the envelope's code for
+ * that class is decided as `UNIQUE_VIOLATION` before this function is asked
+ * ({@link declaredEnvelopeForThrow}, "One wire spelling"); this rule does not
+ * move a code itself.
+ *
+ * ## Where they land
+ *
+ * In `details`, the wrapped envelope's declared context slot
+ * (`ApiErrorSchema.details`). That is where `@objectstack/client` reads a
+ * wrapped body's context from (`errorBody.error.details`), and so where
+ * objectui's `normaliseClientError` finds them. The REST door's flat body has
+ * no envelope, so it carries them at the top level, beside its `code`. A
+ * validation failure's `fields` is the one key both halves state, and it is
+ * the same array (`validationFailureDetails` and the arm read it alike).
+ *
+ * ## What this function cannot add: the ROUTE's object
+ *
+ * Several arms add `object` only from the object the ROUTE named
+ * (`DELETE_RESTRICTED`, `CONCURRENT_UPDATE`, `METADATA_CONFLICT`). This
+ * function has no route, so the arm is asked without one, and those answers
+ * carry no `object`; the caller named that object in its own URL. ⛔ It is not
+ * substituted from the error's own `object`: a cascade's restrict names the
+ * child it was deleting, not the object the route addressed, so that would be
+ * a different answer from the REST door's. Arms that take the error's own
+ * `object` (`INVALID_FIELD`, `OBJECT_NOT_FOUND`, the 403 access arms) carry it
+ * here as they do there.
+ *
+ * ⚠️ Row data rides here only because its producer reads it as the caller.
+ * `CONCURRENT_UPDATE`'s `currentRecord` is a row: on a version mismatch the
+ * protocol re-reads it under the caller's own `context`, so every row- and
+ * field-level rule of the read door applies (#23586, PR #23628). A row the
+ * caller cannot read answers `404 RECORD_NOT_FOUND` with neither field, and a
+ * readable row's `currentRecord` is that field-masked read, which these doors
+ * forward as the REST door does. It was held here until that landed, while
+ * the record was the row the existence probe (`probeRecord`) reads with a
+ * system context. Every other field an arm carries today is a version token,
+ * an API name, the caller's own input, or a count the producer has already
+ * narrowed to what the caller may read (`dependentCountIsDisclosable` in
+ * `@objectstack/objectql`). An arm that grows a field read with a system
+ * context must be held here by name until its producer reads it as the caller.
+ */
+function declaredArmContext(
+    thrown: unknown,
+    resolved: { status: number; code: string },
+): Record<string, unknown> | undefined {
+    const arm = structuredCodeAnswer(thrown);
+    if (arm === undefined || arm.status !== resolved.status || arm.body.code !== resolved.code) {
+        return undefined;
+    }
+    const context = Object.fromEntries(
+        Object.entries(arm.body).filter(([key]) => key !== 'error' && key !== 'code'),
+    );
+    return Object.keys(context).length > 0 ? context : undefined;
 }
 
 /**
@@ -542,35 +689,17 @@ export class HonoHttpServer implements IHttpServer {
             renderDeclaredEnvelope?: boolean;
         } = {},
     ): Promise<{ response: Response | null; failed: boolean }> {
-        let body: any = {};
-
         // Ambient per-request timing collector — present only when the
         // Server-Timing / perf-tuning middleware established one for this
         // request. All marks below are no-ops otherwise (zero overhead).
         const _perf = currentPerfTiming();
         const _endParse = _perf?.start('parse', 'Body parse');
 
-        const contentType = c.req.header('content-type') ?? '';
-        const isOctetStream = contentType.includes('application/octet-stream');
-
-        // Try to parse JSON body first if content-type is JSON
-        if (contentType.includes('application/json')) {
-            try {
-                body = await c.req.json();
-            } catch(e) {
-                // If JSON parsing fails, try parseBody
-                try {
-                    body = await c.req.parseBody();
-                } catch(e2) {}
-            }
-        } else if (!isOctetStream) {
-            // For non-JSON / non-binary content types, use parseBody
-            // (Skipping for octet-stream so the raw stream stays consumable
-            //  via `req.rawBody()` for binary uploads.)
-            try {
-                body = await c.req.parseBody();
-            } catch(e) {}
-        }
+        // [#23914] Parsed by the declared content type, or a refusal, never an
+        // invented `{}`. `readRequestBody` (`./request-body.ts`) says what each
+        // media type answers and why the refusal waits for `req.body` to be read.
+        let bodyReading: RequestBodyReading = await readRequestBody(c);
+        let refusedBodyRead: RequestBodyRefusal | undefined;
 
         _endParse?.();
 
@@ -589,7 +718,23 @@ export class HonoHttpServer implements IHttpServer {
         const req = {
             params: readRouteParams(c),
             query: readQuery(c),
-            body,
+            /**
+             * [#23914] An accessor rather than a value: reading a body this
+             * adapter could not parse throws the refusal, which stops the
+             * handler before it acts on the request, and is answered below
+             * whatever the handler made of the throw. A route that reads
+             * `rawBody()` instead never reaches it. Writable as before.
+             */
+            get body(): any {
+                if (bodyReading.refusal) {
+                    refusedBodyRead = bodyReading.refusal;
+                    throw bodyReading.refusal;
+                }
+                return bodyReading.body;
+            },
+            set body(value: any) {
+                bodyReading = { body: value };
+            },
             headers: rawHeaders,
             method: c.req.method,
             path: c.req.path,
@@ -727,6 +872,19 @@ export class HonoHttpServer implements IHttpServer {
         });
 
         const outcome = await streamPromise;
+
+        // [#23914] The handler read a body this adapter refused. Its answer,
+        // whatever it is, was built on a body the request never had: a catch
+        // arm's 500, a classification's own dialect, or nothing. The refusal
+        // is the answer, and it is not this handler's failure to report.
+        if (refusedBodyRead) {
+            const envelope = declaredEnvelopeForThrow(refusedBodyRead);
+            if (envelope) {
+                closeStream();
+                return { response: c.json(envelope.body, envelope.status), failed: false };
+            }
+        }
+
         // A handler that WROTE and then threw keeps what it wrote — unchanged,
         // and the reason the render decision is taken here rather than in the
         // `catch`: `capturedResponse` is not visible from inside the executor's

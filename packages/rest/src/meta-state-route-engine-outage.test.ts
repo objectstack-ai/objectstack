@@ -105,7 +105,8 @@
 // never inside a clocked window.
 //
 // The route reaches `legalNextStates` through a dynamic
-// `await import('@objectstack/objectql')` in `rest-server.ts`, kept dynamic on
+// `await import('@objectstack/objectql')` in `meta-object-state-routes.ts` (in
+// `rest-server.ts` until #23050 slice 13e moved the route), kept dynamic on
 // purpose (a devDependency there: a host without the data engine degrades to
 // 501 rather than failing to load). This package's tests resolve that specifier
 // through `dist/`, so the first request to reach that line pays the vite
@@ -130,7 +131,7 @@
 // raised timeout: either only moves the window around the cost, and
 // `dev-plugin-security-enforcement-warning.test.ts` (plugin-dev) records such a
 // hook budget being exhausted on a heavier shard. The dynamic call in
-// `rest-server.ts` stays where it is; this only decides where the first load is
+// `meta-object-state-routes.ts` stays where it is; this only decides where the first load is
 // paid. §0's multi-kernel case pins it with a budget on its own work.
 import '@objectstack/objectql';
 

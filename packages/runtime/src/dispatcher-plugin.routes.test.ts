@@ -48,7 +48,11 @@ function makeCtx(fakeServer: any) {
 }
 
 describe('createDispatcherPlugin — HTTP route registration', () => {
-  it('mounts /mcp (GET/POST/DELETE) and /keys (POST) so they reach dispatch()', async () => {
+  // /keys carries all five verbs (#23909): POST is the only one it serves, but
+  // the v18 contract answers an anonymous caller 401 for EVERY verb, and the
+  // domain's floor can only answer a verb that is mounted. The wire answer is
+  // pinned in `keys-every-verb.hono.integration.test.ts`.
+  it('mounts /mcp (GET/POST/DELETE) and /keys (GET/POST/PUT/PATCH/DELETE) so they reach dispatch()', async () => {
     const { server, routes } = makeFakeServer();
     const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
     await plugin.start?.(makeCtx(server));
@@ -56,7 +60,9 @@ describe('createDispatcherPlugin — HTTP route registration', () => {
     expect(routes).toContain('POST /api/v1/mcp');
     expect(routes).toContain('GET /api/v1/mcp');
     expect(routes).toContain('DELETE /api/v1/mcp');
-    expect(routes).toContain('POST /api/v1/keys');
+    for (const verb of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+      expect(routes).toContain(`${verb} /api/v1/keys`);
+    }
   });
 
   // Regression (#7649): /mcp/skill was mounted for GET ONLY. The route serves
@@ -125,6 +131,24 @@ describe('createDispatcherPlugin — HTTP route registration', () => {
     expect(routes).toContain('GET /api/v1/notifications');
     expect(routes).toContain('POST /api/v1/notifications/read');
     expect(routes).toContain('POST /api/v1/notifications/read/all');
+  });
+
+  // Each notifications face carries all five verbs (#24024): it serves one, but
+  // the v18 contract answers an anonymous caller 401 on EVERY face, and the
+  // domain's floor can only answer a verb that is mounted. No sub-path beyond
+  // the three faces is mounted. The wire answer is pinned in
+  // `notifications-every-verb.hono.integration.test.ts`.
+  it('mounts every verb on each of the three /notifications faces, and no sub-path beyond them', async () => {
+    const { server, routes } = makeFakeServer();
+    const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+    await plugin.start?.(makeCtx(server));
+
+    for (const face of ['/notifications', '/notifications/read', '/notifications/read/all']) {
+      for (const verb of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+        expect(routes.filter((r) => r === `${verb} /api/v1${face}`), `${verb} ${face}`).toHaveLength(1);
+      }
+    }
+    expect(routes.filter((r) => r.includes('/notifications'))).toHaveLength(15);
   });
 
   it('also mounts a known existing route (sanity that start() ran)', async () => {

@@ -123,14 +123,19 @@ import { parseBooleanParam } from '../query-param.js';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 // [#19328] The install door's DECLARED body contract, asked whole at
 // `POST /api/v1/packages` — the union of the wrapped request and a bare
-// manifest — plus the wrapped branch by name, which the refusal re-reads to
-// locate a failure on the form the caller wrote. Both are the declarations
+// manifest — plus each branch by name, which the refusal re-reads to locate a
+// failure on the form the caller wrote. All three are the declarations
 // `@objectstack/spec` publishes for this door; nothing here restates them.
 // Its own line on purpose: the `@objectstack/spec/kernel` import above carries
 // the id/version legs' names and is not this import's to share.
-import { PackageInstallBodySchema, PackageInstallRequestSchema } from '@objectstack/spec/api';
+import {
+    PackageInstallBodySchema,
+    PackageInstallManifestSchema,
+    PackageInstallRequestSchema,
+} from '@objectstack/spec/api';
 
 /**
  * [#13598] The `protocol` service slot **as this domain reaches it** — one
@@ -268,6 +273,9 @@ export function createPackagesDomain(deps: DomainHandlerDeps): DomainRoute {
  */
 const INSTALLED_PACKAGE_RESPONSE_FIELDS = [
     'manifest',
+    // [#23972] The origin the registering door stamped on the row — read off
+    // the record as-is, ⛔ never derived here from `writable` or a second list.
+    'source',
     'status',
     'enabled',
     'installedAt',
@@ -325,9 +333,9 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
  *
  * Package reads disclose authored metadata — the `GET /packages` id
  * ENUMERATION face (the first step of the survey's attack chain), the
- * `GET /packages/:id` detail, the `GET /packages/:id/commits` history and the
- * `GET /packages/:id/export` whole-package export (27 metadata types) — so each
- * requires one of the two "builder" capabilities the object-schema mask exempts
+ * `GET /packages/:id` detail and the `GET /packages/:id/export` whole-package
+ * export (27 metadata types) — so each requires one of the two "builder"
+ * capabilities the object-schema mask exempts
  * read-only ({@link OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES} =
  * `studio.access` / `setup.access`), or `isSystem`. The read cohort is not the
  * write cohort: an `organization_admin` holding `setup.access` (but not
@@ -336,6 +344,8 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
  * pinned in `packages-capability-gate.test.ts`, beside this file. (#7020
  * unified the object-schema MASK exemption with the write gate; it did not
  * re-rule this cohort, which is why this site names the read-only half.)
+ * [#23546] `GET /packages/:id/commits` left this cohort: the commit trail has
+ * its own gate, {@link requireCommitTrailReadCapability}.
  *
  * Returns a 403 result to short-circuit on, or `null` to proceed. Callers MUST
  * run this BEFORE reading, so the answer never leaks the package inventory to a
@@ -348,6 +358,45 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
         return {
             handled: true,
             response: deps.error('Reading packages requires the `studio.access` or `setup.access` capability.', 403),
+        };
+    }
+    return null;
+}
+
+/**
+ * [#23546] The READ gate of `GET /packages/:id/commits` alone — a package's
+ * commit trail (ADR-0067), read from `sys_metadata_commit`.
+ *
+ * It admits `studio.access` or `isSystem`. That is the data door's rule on the
+ * same table (`requiredPermissions: ['studio.access']`, ADR-0131 D7), and the
+ * `/meta` trail doors' rule (`GET /meta/:type/:name/history`, `/audit` and
+ * `/diff` in `RestServer`).
+ *
+ * `setup.access` is left out on purpose. Organization administrators hold it,
+ * and under a wall it handed each organization's administrator every
+ * package's commit trail: who published what, and when. No organization
+ * authors that trail (ADR-0131 C5).
+ *
+ * `manage_metadata` is not admitted either. This door's read cohort never
+ * admitted it, and narrowing a door does not widen it. The other three reads
+ * (`GET /packages`, `/packages/:id` and `/export`) keep
+ * {@link requireReadCapability}. Pinned in `packages-capability-gate.test.ts`,
+ * beside this file.
+ *
+ * Returns a 403 result to short-circuit on, or `null` to proceed. It runs
+ * BEFORE the protocol is resolved, as the read gate does.
+ */
+function requireCommitTrailReadCapability(deps: DomainHandlerDeps, context: HttpProtocolContext): HttpDispatcherResult | null {
+    const ec: any = context?.executionContext;
+    const held = new Set<string>(ec?.systemPermissions ?? []);
+    if (!ec?.isSystem && !held.has('studio.access')) {
+        return {
+            handled: true,
+            response: deps.error(
+                'Reading a package\'s commit history requires the `studio.access` capability; '
+                + '`setup.access`, which organization administrators hold, does not admit it.',
+                403,
+            ),
         };
     }
     return null;
@@ -816,7 +865,10 @@ interface InstallBodyIssue {
  */
 function installBodyRefusal(body: unknown, unionIssues: ReadonlyArray<InstallBodyIssue>): string {
     const wrapped = body !== null && typeof body === 'object' && 'manifest' in body;
-    const branch = (wrapped ? PackageInstallRequestSchema : ManifestSchema).safeParse(body);
+    // The bare branch is the union's own, `PackageInstallManifestSchema` — ⛔ not
+    // `ManifestSchema`, which admits the platform scopes this door refuses, so a
+    // re-parse through it passed and the bare-form refusal lost its sentence.
+    const branch = (wrapped ? PackageInstallRequestSchema : PackageInstallManifestSchema).safeParse(body);
     // By the disjointness above the branch cannot pass where the union failed;
     // if a future union ever made it, the union's own issues still say what
     // was refused rather than an empty sentence.
@@ -1019,6 +1071,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             };
         }
     }
+    // [#24151] The body is read once the floor above has admitted the caller,
+    // never ahead of it (`../deferred-request-body.ts`).
+    body = readDispatchedBody(body);
 
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
 
@@ -1337,6 +1392,23 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     response: deps.error(`Package '${pkgId}' already exists`, 409),
                 };
             }
+            // [#24030] ADR-0070 D2 — the READ-ONLY gate, asked for the manifest's
+            // id before either install limb below writes. `overwrite` only ever
+            // bypassed the 409 above; nothing asked whether the id is a package
+            // the deployment ships, so an overwrite over a code-booted or
+            // marketplace-installed id answered 201, replaced its registry row
+            // with an authored one (and, on the protocol limb, wrote its
+            // `sys_packages` row) while `engine.manifests` kept judging it
+            // read-only. Disable, publish, revert and delete refuse that id with
+            // this same answer; ⛔ the rule is not re-derived here — it is
+            // {@link requireWritablePackage}, i.e. {@link isWritablePackage}.
+            //
+            // Placed AFTER the 409, so an install that does not ask to overwrite
+            // keeps its 409 answer for any existing id. An id nothing installed
+            // is writable by the predicate's own rule, so a fresh install —
+            // `overwrite` set or not — answers as before.
+            const readOnly = requireWritablePackage(deps, qlService, pkgId, overwrite ? 'overwrite' : 'install');
+            if (readOnly) return readOnly;
             // ⚠️ The MANIFEST handed on is the one the caller sent, ⛔ not the
             // parsed copy. `ManifestSchema` applies defaults at parse time
             // (`scope`, `defaultDatasource`), and this door has always stored
@@ -1365,7 +1437,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // the primitive's, so no-range and unparsed ranges warn the
                     // same way on both arms.
                     assertProtocolCompat(manifest);
-                    pkg = registry.installPackage(manifest, settings);
+                    // [#23972] The same origin the protocol primitive stamps:
+                    // a package installed through this door is authored.
+                    pkg = registry.installPackage(manifest, 'authored', settings);
                 }
             } catch (err) {
                 // [#21727] The protocol refusal's typed carrier, recognised
@@ -1578,6 +1652,14 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     const result = await protocol.publishPackageDrafts({
                         packageId: id,
                         ...(body?.actor ? { actor: body.actor } : {}),
+                        // [#24253] Passed through as sent: the protocol judges
+                        // its shape and what it names, and refuses the whole
+                        // request before anything is published. The writes run
+                        // as THIS caller, so the request's own execution
+                        // context rides with it, never a system one.
+                        ...(body?.backfill !== undefined
+                            ? { backfill: body.backfill, context: _context?.executionContext }
+                            : {}),
                     });
                     // Publishing a `seed` draft is what actually loads its
                     // rows. The objectql protocol now batch-applies seeds
@@ -1926,7 +2008,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
 
         // GET /packages/:id/commits → the commit timeline (newest-first).
         if (parts.length === 2 && parts[1] === 'commits' && m === 'GET') {
-            const denied = requireReadCapability(deps, _context); if (denied) return denied;
+            // [#23546] The commit trail's own gate: `studio.access`, not the
+            // package read cohort's `setup.access`.
+            const denied = requireCommitTrailReadCapability(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.listCommits === 'function') {

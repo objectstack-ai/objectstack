@@ -24,7 +24,8 @@
  * DEPTH vs VAMA, in one line: depth widens a grant along the org geometry
  * (BU tree + manager chain) and still flows through sharing/RLS; VAMA
  * bypasses record-level checks outright and is therefore high-privilege
- * (lint-blocked on `everyone`/`guest` bindings).
+ * (the publish lint refuses it on a set suggested for the `everyone` anchor,
+ * `isDefault: true`; no door binds a set to `guest`).
  */
 
 import { definePermissionSet } from '@objectstack/spec/security';
@@ -163,8 +164,9 @@ export const ExecutivePermissionSet = definePermissionSet({
 /**
  * Compliance read-only: `viewAllRecords` bypasses OWD/sharing/depth on the
  * named objects — the auditor sees every private note, inquiry, and invoice,
- * but holds no write bit anywhere. High-privilege by definition: the D7 lint
- * blocks binding this set to the `everyone`/`guest` anchors.
+ * but holds no write bit anywhere. High-privilege by definition: suggested
+ * for the `everyone` anchor (`isDefault: true`) it would fail the publish
+ * lint's anchor rule, and no door binds a set to `everyone` or `guest` by hand.
  */
 export const AuditorPermissionSet = definePermissionSet({
   name: 'showcase_auditor',
@@ -354,12 +356,14 @@ export const MemberDefaultPermissionSet = definePermissionSet({
 /**
  * Capability shaped for the built-in `guest` position: anonymous visitors
  * may read announcements and file an inquiry (public form intake) — nothing
- * else. Guest bindings face the STRICTEST lint tier: named objects only (no
- * wildcard), read-only by default (create case-by-case), never `allowEdit`,
- * never VAMA/system permissions.
+ * else. It is shaped to pass the anchor predicate's `guest` tier, the
+ * strictest: named objects only (no wildcard), read-only by default (create
+ * case-by-case), never `allowEdit`, never VAMA/system permissions.
  *
- * Binding is an ADMIN action (Setup → Access Control → bind `guest` →
- * `showcase_guest_portal`); the app only ships the capability.
+ * No door runs that tier yet, because no door binds a set to `guest`: a save
+ * of the packaged `guest` position answers 403 `NOT_OVERRIDABLE` (ADR-0138 D3
+ * item 5), and the tier check belongs to the bind door when it is built (item
+ * 4). Here the set reaches people through the `client_portal_user` position.
  */
 export const GuestPortalPermissionSet = definePermissionSet({
   name: 'showcase_guest_portal',
@@ -381,8 +385,9 @@ export const GuestPortalPermissionSet = definePermissionSet({
  * The `adminScope` authorizes WHAT may be administered; the plain CRUD bits
  * on the RBAC link tables below let the requests through at all (both are
  * required — holders of table CRUD with NO scope are refused).
- * `manageBindings` stays false: this delegate re-staffs positions, they do
- * not re-compose what a position means.
+ * This delegate re-staffs positions; what a position distributes is its
+ * definition, written through the metadata door by a `manage_metadata`
+ * holder (ADR-0131 D3), which no `adminScope` reaches.
  */
 export const FieldOpsDelegatePermissionSet = definePermissionSet({
   name: 'showcase_field_ops_delegate',
@@ -397,8 +402,6 @@ export const FieldOpsDelegatePermissionSet = definePermissionSet({
     businessUnit: 'Field Operations',
     includeSubtree: true,
     manageAssignments: true,
-    manageBindings: false,
-    authorEnvironmentSets: false,
     assignablePermissionSets: ['showcase_contributor', 'showcase_manager'],
   },
 });

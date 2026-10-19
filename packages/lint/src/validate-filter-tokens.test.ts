@@ -3,8 +3,24 @@
 import { describe, it, expect } from 'vitest';
 import { PageSchema } from '@objectstack/spec/ui';
 
+import { CONTEXT_TOKENS } from '@objectstack/spec/data';
+
 import { walkAuthoredFilters } from './filter-walk';
-import { validateFilterTokens, FILTER_TOKEN_UNKNOWN } from './validate-filter-tokens';
+import { explainRule } from './rule-explanations';
+import {
+  validateFilterTokens as validateFilterTokensUnrecorded,
+  FILTER_TOKEN_UNKNOWN,
+} from './validate-filter-tokens';
+
+// [#22161] Slice 21: every finding this file fires is recorded, and the block at
+// the foot of the file holds each recorded `fix:` line to one line of at most
+// 200 characters.
+const fired: Array<{ rule: string; hint: string }> = [];
+const validateFilterTokens: typeof validateFilterTokensUnrecorded = (...args) => {
+  const findings = validateFilterTokensUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 describe('validateFilterTokens', () => {
   it('returns nothing for an empty / absent stack', () => {
@@ -38,6 +54,18 @@ describe('validateFilterTokens', () => {
     expect(findings[0].where).toBe('dashboard "service_dashboard" · widget "my_open_cases"');
     expect(findings[0].path).toBe('dashboards[0].widgets[0].filter.owner');
     expect(findings[0].hint).toContain('{current_user_id}');
+  });
+
+  // [#24293] The message states the runtime's answer: the data engine refuses a
+  // query carrying the value (`UnknownFilterTokenError` in `@objectstack/core`,
+  // `FILTER_TOKEN_UNKNOWN` / 400). Held as that code, the named subject, not as
+  // the prose around it.
+  it('names the code the data engine refuses the query with, near miss or not', () => {
+    const findings = validateFilterTokens({
+      dashboards: [{ name: 'd', widgets: [{ id: 'w', filter: { a: '{current_user}', b: '{whoever_is_watching}' } }] }],
+    });
+    expect(findings.map((f) => f.path)).toEqual(['dashboards[0].widgets[0].filter.a', 'dashboards[0].widgets[0].filter.b']);
+    for (const f of findings) expect(f.message, f.path).toContain('`FILTER_TOKEN_UNKNOWN`');
   });
 
   it('accepts the correct spelling alongside date macros', () => {
@@ -427,6 +455,45 @@ describe('validateFilterTokens — {record_id}', () => {
       const found = validateFilterTokens(stack).map((f) => `${f.where} @ ${f.path}`);
       expect(walked.length).toBeGreaterThan(0);
       expect(found).toEqual(walked);
+    }
+  });
+});
+
+// [#22161] Slice 21: a placeholder with no near miss prints one remedy line —
+// the two vocabularies, briefly — and the vocabularies in full, why a literal
+// shaped like a placeholder cannot be filtered on, and where `{record_id}`
+// resolves are the id's `os explain` entry.
+describe('[#22161] one-line fix — filter-token-unknown', () => {
+  it('a placeholder with no near miss prints the one remedy line', () => {
+    const findings = validateFilterTokens({
+      dashboards: [{ name: 'd', widgets: [{ id: 'w', filter: { owner: '{whoever_is_watching}' } }] }],
+    });
+    expect(findings.map((f) => f.hint)).toEqual([
+      'Use a context token ({current_user_id}, {current_org_id}) or a date macro such as {today} or ' +
+        '{30_days_ago}; a literal value that looks like a placeholder must be renamed.',
+    ]);
+  });
+
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === FILTER_TOKEN_UNKNOWN);
+    // Coverage control: the no-near-miss line, a "Did you mean" line and the
+    // no-record-in-context line all fired.
+    expect(converted.some((f) => f.hint.startsWith('Use a context token'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Did you mean'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Move this filter'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint).not.toContain('\n');
+      expect(f.hint.length, f.hint).toBeLessThanOrEqual(200);
+      expect(f.hint).not.toContain('this is not supported');
+    }
+  });
+
+  it('`os explain filter-token-unknown` carries what the `fix:` line no longer says', () => {
+    const text = explainRule(FILTER_TOKEN_UNKNOWN)!.paragraphs.join('\n');
+    // Held to the spec's own vocabulary: the module that holds the text imports nothing.
+    expect(text).toContain(`The context tokens: ${CONTEXT_TOKENS.map((t) => `\`{${t}}\``).join(', ')}.`);
+    for (const fact of ['{week_start}', 'rename the value', '`{record_id}`', 'FILTER_TOKEN_UNKNOWN']) {
+      expect(text, fact).toContain(fact);
     }
   });
 });

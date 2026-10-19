@@ -1,0 +1,229 @@
+---
+title: Cloud Connection — connect a self-hosted server to ObjectStack Cloud
+navTitle: Cloud Connection
+description: Connect your own ObjectStack server to an ObjectStack Cloud account from Setup → Cloud Connection with a one-time code, then rename or disconnect it. What the server stores, and what disconnecting removes.
+---
+
+A self-hosted ObjectStack server can be connected to an ObjectStack Cloud
+account. You start the connection on your own server, in **Setup → Apps →
+Cloud Connection**, and approve it in the cloud account with a one-time code.
+Nothing is typed into the server: no id, no key, no password. Under the hood
+this is the OAuth 2.0 device authorization grant
+([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)), run by the
+`@objectstack/cloud-connection` package on your server.
+
+This page covers the server half of that flow, which is what the framework
+decides. The cloud account's own screens are described only as far as the
+server determines them: the link and code it shows you, and the answers the
+cloud sends back.
+
+## What connecting gives you [#what-you-get]
+
+- **A registration in your cloud organization.** When you approve, the cloud
+  answers with a runtime id, the organization the connection belongs to, the
+  email of the account that approved it, and the time it was made. The server
+  keeps them and shows them on its Cloud Connection page.
+- **Your organization's own packages in this server's Marketplace.** While the
+  server is connected, it asks the cloud for your organization's catalog with
+  its own credential, and it presents the same credential when it fetches a
+  package from the cloud catalog to install it. Not connected, those requests
+  go out anonymously and the organization catalog is empty.
+
+What you do **not** need a connection for: browsing the public marketplace and
+installing public packages work on an unconnected server, and air-gapped
+installs from a compiled artifact (`os package install ./dist/objectstack.json`)
+never call the cloud at all.
+
+## Before you start [#before-you-start]
+
+**The Cloud Connection plugin is mounted.** `os start`, `os serve` and `os dev`
+mount it for you whenever a control-plane URL resolves, unless your
+`objectstack.config.ts` already composes it. The URL is `OS_CLOUD_URL`; unset,
+it is `https://cloud.objectos.ai`. Setting `OS_CLOUD_URL` to `off`, `none`,
+`local` or `disabled` mounts no cloud surface at all: Setup shows no Cloud
+Connection entry and `/api/v1/cloud-connection/*` answers `404`. A host that
+composes its plugins by hand adds it in single-environment mode:
+
+```ts
+import { CloudConnectionPlugin, resolveCloudUrl } from '@objectstack/cloud-connection';
+
+const cloudUrl = resolveCloudUrl(); // OS_CLOUD_URL; '' when declared off
+
+// ...in your plugin list:
+...(cloudUrl ? [new CloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: cloudUrl })] : []),
+```
+
+To check a running server, request `GET /api/v1/cloud-connection/status`. It
+needs no sign-in, and a `200` means the plugin is mounted.
+
+**The server can reach the cloud.** Every call to the cloud is made by the
+server, not by your browser: the code request, the polling, the connection
+itself and the disconnect. The server needs outbound HTTPS to the control-plane
+URL. Your browser only opens the approval link.
+
+**The server's working directory is persistent.** The connection is stored in
+a file under the server's working directory,
+`.objectstack/cloud-connection.json` (see
+[What the server stores](#what-the-server-stores)). In the official runtime
+image the working directory is `/srv/app`. If that directory lives on the
+container's own filesystem, replacing the container loses the connection, and
+the server reads as not connected until you connect it again.
+
+**The right people on each side.**
+
+- *On the server*, you sign in with a user of this server. The Cloud
+  Connection page is in the Setup app, which takes the **Setup Access**
+  permission (`setup.access`); the default platform-administrator and
+  organization-administrator permission sets carry it. The connect and
+  disconnect requests take the same permission: a signed-in user without
+  Setup Access is refused with `403` (`PERMISSION_DENIED`) before the server
+  calls the cloud. A session
+  that the authentication policy is holding (an expired password, or
+  multi-factor sign-in required but not yet set up) is refused with `403`
+  until it is fixed.
+- *In the cloud*, the approval is made by whoever signs in to the cloud
+  account behind the link and approves the request. The server records that
+  account's email as **Approved by**. Which cloud accounts may approve, and
+  with what permissions, is decided by the cloud account, not by your server.
+
+## Connect [#connect]
+
+1. **Open the page.** Sign in to your server and go to **Setup → Apps →
+   Cloud Connection**. The header reads *Cloud Connection — Connect this
+   runtime to an ObjectStack control plane to browse your organization's
+   private packages and install them here.* The panel shows *Checking
+   connection…*, then **Not connected** and a **Connect** button.
+2. **Click Connect.** The server asks the cloud for a device code and hands
+   the panel four things: the user code, the approval link, how often to
+   check (5 seconds unless the cloud says otherwise) and how long the code
+   lives (600 seconds unless the cloud says otherwise). The approval link
+   names your server, so the approver can see what they are approving: it
+   carries `runtime_name` (the server's host name) and `runtime_version`.
+3. **The approval page opens.** The panel opens the approval link in a new
+   window and says *Approve the connection in the window that just opened —
+   this page updates by itself.* If the browser blocked the window, the panel
+   says *Waiting for approval in the cloud console…* and shows an **Open the
+   approval page** button instead. Either way the user code is shown in large
+   type, with a **Copy** button and a **Cancel** button.
+4. **Approve in the cloud account.** Open the link, sign in to the cloud
+   account, and approve the request whose code matches the code on your
+   server's page.
+5. **The server finishes on its own.** While you approve, the panel asks the
+   server at that interval (never more often than every 2 seconds) whether the
+   request is approved, and the server asks the cloud. Once it is, the server completes the connection, stores the
+   credential it receives, and the panel turns to **Connected to ObjectStack
+   Cloud**, listing whichever of these the cloud reported: **Runtime** (the
+   name), **Organization**, **Approved by**, **Runtime ID**, **Environment**
+   and **Since**. Below the list: *Your organization's private packages now
+   appear in the Marketplace under “Your organization”.*
+
+When the flow stops instead, the panel shows a message and a **Try again**
+button:
+
+| The panel says | Why |
+|:---|:---|
+| *The request expired before it was approved. Start again.* | The code's lifetime ran out, or the cloud answered `expired_token`. |
+| *The connection request was denied. Start again.* | The cloud answered `access_denied`. |
+| *Device authorization failed: …* | The cloud ended the request with another error, named after the colon. |
+| *Sign in to connect a cloud account.* (or *Sign in.* while waiting) | Your session on the server has ended. |
+| *No cloud control plane configured.* | The plugin is mounted without a control-plane URL. |
+| a network error such as *fetch failed* | The server could not reach the cloud. |
+
+**Cancel** only stops the panel from checking; nothing is sent to the cloud.
+The server completes a connection only while the panel is checking, so a
+request approved after you cancelled never completes, and an unapproved code
+simply expires.
+
+## What the server stores [#what-the-server-stores]
+
+The connection lives in one file, `.objectstack/cloud-connection.json` under
+the server's working directory, written with mode `0600`:
+
+| Field | What it is |
+|:---|:---|
+| `runtimeToken` | The credential the cloud issued for this server. It is the secret: anyone holding it acts as this server towards the cloud. |
+| `runtimeId` | The cloud's id for this server. It is kept across disconnects (see [Disconnect](#disconnect)). |
+| `controlPlaneUrl` | The cloud the connection was made against. |
+| `organizationId`, `accountEmail`, `boundAt` | The organization, the approving account and the time, as the cloud reported them. |
+
+The credential never reaches the browser: the server keeps it and removes it
+from the answer it sends the page. The server reads the file on every cloud
+call, so a connection made while the server is running takes effect without a
+restart, and so does a disconnect. Keep the file on persistent storage and
+protect it like any other secret.
+
+## Rename [#rename]
+
+The name your server is known by is its **host name** at the moment you
+connect. The server sends it with the connection request, and the **Runtime**
+row of the Cloud Connection page shows the name the cloud reports back.
+
+The server has no rename action: neither the page nor any
+`/api/v1/cloud-connection/*` request changes the name. What the server does
+is send its host name again every time it connects, together with the stored
+runtime id. So to give the server a different name from its side, change the
+host name, then [disconnect](#disconnect) and [connect](#connect) again. In a
+container the host name is whatever the container runtime assigned, so set an
+explicit one before you connect if you want a readable, stable name. Whether
+the cloud account also lets you rename the entry directly is decided by the
+cloud account.
+
+The version shown next to the name is the release your server runs: the
+`version` its discovery document (`GET /api/v1/discovery`) reports. You do not
+need to set anything for it. `OS_RUNTIME_VERSION` is an override: set it to
+report something else, such as an image tag or a commit, and the server sends
+that value as it is.
+
+## Disconnect [#disconnect]
+
+On the connected panel, click **Disconnect**. The server then:
+
+1. **Asks the cloud to revoke the connection**, presenting the stored
+   credential. This is best effort: if the cloud cannot be reached, the server
+   carries on.
+2. **Clears its credential either way.** The file is rewritten to hold only
+   the runtime id: `runtimeToken` is emptied, and `organizationId`,
+   `accountEmail`, `boundAt` and `controlPlaneUrl` are dropped. With no runtime
+   id on record, the file is deleted instead.
+
+The panel then reads **Not connected**, and the Marketplace's organization
+catalog is empty again.
+
+What disconnecting **keeps**:
+
+- **The runtime id.** Connecting again sends it along, so the cloud can attach
+  the new connection to the same registration rather than a new one. To start
+  over as a brand-new server, delete `.objectstack/cloud-connection.json`
+  after disconnecting.
+- **Everything installed.** Disconnecting touches only the connection file.
+  Packages already installed into this server stay installed and keep working.
+
+The answer to `POST /api/v1/cloud-connection/unbind` carries `revoked` and
+`cleared`. `revoked: false` means the cloud was not reached or refused the
+revocation: the server dropped its credential anyway, but the cloud was not
+told. The panel does not show this field and reads **Not connected** either
+way, so if you disconnect while the cloud is unreachable, check the cloud
+account afterwards.
+
+## Reference [#reference]
+
+The routes the Cloud Connection page uses, all on the server's own origin:
+
+| Route | Sign-in | What it does |
+|:---|:---|:---|
+| `GET /api/v1/cloud-connection/status` | not required | Every caller gets `bound`, `runtimeId` and `provider`. A signed-in user with Setup Access (`setup.access`) also gets `environmentId` and `connection`, the connection as the cloud reports it (the approving account and the organization). `bound` is `true` whenever the server holds a credential; `connection` is `null` when the cloud cannot be reached. |
+| `POST /api/v1/cloud-connection/bind/start` | required | Asks the cloud for a device code; answers with `user_code`, `verification_uri`, `verification_uri_complete`, `interval`, `expires_in`. |
+| `POST /api/v1/cloud-connection/bind/poll` | required | Body `{ "device_code": "…" }`. Answers `{ "pending": true }` while the cloud waits for approval, and the connection once it is approved. |
+| `POST /api/v1/cloud-connection/unbind` | required | Disconnects; answers `{ "revoked", "cleared" }`. |
+
+The settings that shape the flow are listed in
+[Environment variables](/docs/deployment/environment-variables#multi-tenant--cloud-control-plane):
+`OS_CLOUD_URL` picks the cloud, `OS_CLI_CLIENT_ID` overrides the OAuth client
+id the server presents (default `objectstack-cli`), and `OS_RUNTIME_VERSION`
+sets the version it reports. `OS_CLOUD_API_KEY` and `OS_ENVIRONMENT_ID` belong
+to cloud-hosted runtimes; a self-hosted server leaves both unset, and a set
+`OS_CLOUD_API_KEY` is used instead of the stored credential.
+
+The Setup app itself, and how plugins add entries to it, is described in
+[Setup app](/docs/ui/setup-app). Running the server is covered in
+[Self-hosting](/docs/deployment/self-hosting).

@@ -37,6 +37,28 @@
  * `GET /api/v1/notifications` through the real messaging service — is the
  * dogfood pin `packages/qa/dogfood/test/approval-notification-body.dogfood.test.ts`.
  *
+ * ## And how it names the record (#23978)
+ *
+ * Ruling B of #23556 / #23594 names the record an approval notification is
+ * about by its object's label and its id (`Deal D_123`), with no title, through
+ * `nameSubjectRecord`. `approval.requested` used it; every other body that
+ * names the record built `<object_name>/<record_id>`, so an approver read the
+ * API name and a slash in the reminder, the SLA breach, the escalation, the
+ * hand-off, both send-back sentences and both out-of-office sentences. The same
+ * battery pins the record's name in each of those bodies, and a control: a
+ * record of an object whose schema has no label is named by the object's API
+ * name and the id, the helper's own fallback.
+ *
+ * ## And whom the out-of-office bodies name (#24065)
+ *
+ * The two out-of-office bodies also name a person: the delegate is told whom
+ * they cover, and the absent approver is told who covers for them. Both used to
+ * interpolate the raw `sys_user` id (`… while u_ooo is out of office.`). They
+ * now name each person through `resolveUserNames`, the chain the approvals door
+ * names people with. The battery pins each person's name in each body, and a
+ * control: an approver id no account row answers to is named by that id, the
+ * way every reader of the chain renders an unresolved address.
+ *
  * ## And whose notification it is (#23284)
  *
  * The same battery pins the organization every call site hands messaging: the
@@ -68,6 +90,13 @@ const USERS = [
   { id: 'u_boss', name: 'Boss', email: 'boss@example.com' },
 ];
 
+/**
+ * [#24065] An approver id no `sys_user` row answers to, such as an account
+ * removed after its out-of-office delegation was written. Deliberately not in
+ * {@link USERS}.
+ */
+const GONE = 'u_gone';
+
 /** The text each person writes — distinct, so no one can pass for another. */
 const COMMENT = 'The signed contract is attached to the record now.';
 const QUESTION = 'Which cost centre should this be booked against?';
@@ -97,6 +126,14 @@ const sysUser = {
 const deal = {
   name: 'crm_deal',
   label: 'Deal',
+  fields: {
+    id: { name: 'id', label: 'Id', type: 'text' as const, primaryKey: true },
+    title: { name: 'title', label: 'Title', type: 'text' as const },
+  },
+};
+/** [#23978] The control: an object whose schema declares no label. */
+const memo = {
+  name: 'crm_memo',
   fields: {
     id: { name: 'id', label: 'Id', type: 'text' as const, primaryKey: true },
     title: { name: 'title', label: 'Title', type: 'text' as const },
@@ -142,10 +179,10 @@ describe('every approval notification carries its text in body', () => {
   const emits: Emitted[] = [];
   const ids: Record<string, string> = {};
 
-  const open = async (key: string, approvers: any[], extra: Record<string, unknown> = {}) => {
-    await engine.insert('crm_deal', { id: `D_${key}`, title: key, organization_id: orgOfDeal(key) }, { context: SYSTEM } as any);
+  const open = async (key: string, approvers: any[], extra: Record<string, unknown> = {}, object: string = deal.name) => {
+    await engine.insert(object, { id: `D_${key}`, title: key, organization_id: orgOfDeal(key) }, { context: SYSTEM } as any);
     const row: any = await svc.openNodeRequest({
-      object: 'crm_deal', recordId: `D_${key}`, runId: `run_${key}`, nodeId: 'review', flowName: FLOW.name,
+      object, recordId: `D_${key}`, runId: `run_${key}`, nodeId: 'review', flowName: FLOW.name,
       config: { approvers, behavior: 'first_response', ...extra } as any,
       submitterId: 'u_sub', record: { id: `D_${key}`, title: key },
     }, asUser('u_sub'));
@@ -167,7 +204,7 @@ describe('every approval notification carries its text in body', () => {
       client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true,
     }), true);
     await engine.init();
-    for (const def of [sysUser, deal, ...(await packageObjects())]) {
+    for (const def of [sysUser, deal, memo, ...(await packageObjects())]) {
       engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
     }
     await engine.syncSchemas();
@@ -202,6 +239,13 @@ describe('every approval notification carries its text in body', () => {
     await svc.sendBack(ids.revise, { actorId: 'u_alice', comment: SEND_BACK } as any, asUser('u_alice'));
     await open('budget', [{ type: 'user', value: 'u_alice' }], { maxRevisions: 0 });
     await svc.sendBack(ids.budget, { actorId: 'u_alice' } as any, asUser('u_alice'));
+    // [#23978] Within budget and with no note, the body is the service's own sentence.
+    await open('rework', [{ type: 'user', value: 'u_alice' }]);
+    await svc.sendBack(ids.rework, { actorId: 'u_alice' } as any, asUser('u_alice'));
+
+    // ── [#23978] The control: a reminder about a record of an object with no label ──
+    await open('bare', [{ type: 'user', value: 'u_alice' }], {}, memo.name);
+    await svc.remind(ids.bare, { actorId: 'u_sub' }, asUser('u_sub'));
 
     // ── Out of office: the routing substitutes a delegate ──
     await engine.insert('sys_approval_delegation', {
@@ -211,6 +255,15 @@ describe('every approval notification carries its text in body', () => {
     }, { context: SYSTEM } as any);
     const ooo = await open('ooo', [{ type: 'user', value: 'u_ooo' }]);
     expect(ooo.pending_approvers).toEqual(['u_bob']);
+    // [#24065] The control: the absent approver names no account, so no name
+    // can be read for them; the delegate the same hop routes to does.
+    await engine.insert('sys_approval_delegation', {
+      id: 'dlg_2', delegator_id: GONE, delegate_id: 'u_alice', reason: 'leave',
+      valid_from: '2026-09-01T00:00:00.000Z', valid_until: '2026-12-31T00:00:00.000Z',
+      created_at: '2026-09-01T00:00:00.000Z', updated_at: '2026-09-01T00:00:00.000Z',
+    }, { context: SYSTEM } as any);
+    const oooGone = await open('ooo_gone', [{ type: 'user', value: GONE }]);
+    expect(oooGone.pending_approvers).toEqual(['u_alice']);
 
     // ── The SLA sweep: a notify (submitter told) and a reassign (submitter not) ──
     await open('sla_notify', [{ type: 'user', value: 'u_alice' }],
@@ -228,19 +281,25 @@ describe('every approval notification carries its text in body', () => {
   it('the battery reaches every call site that can notify anyone — twelve of the thirteen', () => {
     expect(new Set(emits.map(siteOf))).toEqual(new Set([
       // The opening tells each concrete approver on every request the battery
-      // opens — all but `ooo`, whose one approver is the delegate, told once
-      // by `approval.ooo_substituted` instead.
+      // opens — all but `ooo` and `ooo_gone`, whose one approver is the
+      // delegate, told once by `approval.ooo_substituted` instead.
       'approval.requested@thread',
       'approval.requested@revise',
       'approval.requested@budget',
       'approval.requested@sla_notify',
       'approval.requested@sla_reassign',
+      'approval.requested@rework',
+      'approval.requested@bare',
       'approval.ooo_substituted@ooo',
       'approval.ooo_skipped@ooo',
+      'approval.ooo_substituted@ooo_gone',
+      'approval.ooo_skipped@ooo_gone',
       'approval.returned@budget',
       'approval.returned@revise',
+      'approval.returned@rework',
       'approval.reassigned@thread',
       'approval.reminder@thread+links',
+      'approval.reminder@bare+links',
       'approval.request_info@thread',
       'approval.comment@thread',
       'approval.escalated@sla_reassign',
@@ -261,6 +320,77 @@ describe('every approval notification carries its text in body', () => {
     expect([question.audience, question.payload?.body]).toEqual([['u_sub'], QUESTION]);
     const sentBack = one('approval.returned', 'revise');
     expect([sentBack.audience, sentBack.payload?.body]).toEqual([['u_sub'], SEND_BACK]);
+  });
+
+  it('[#23978] every body that names the record names it by its object label and its id, as approval.requested does', () => {
+    // Ruling B of #23556 / #23594: label and id, no title — one form for every
+    // body, the one `approval.requested` already sends. The pin is the record's
+    // name in each body, not the rest of the sentence around it.
+    const NAMED: Record<string, string> = {
+      'approval.requested@thread': 'Deal D_thread',
+      'approval.reminder@thread+links': 'Deal D_thread',
+      'approval.sla_breached@sla_notify': 'Deal D_sla_notify',
+      'approval.sla_breached@sla_notify>submitter': 'Deal D_sla_notify',
+      'approval.escalated@sla_reassign': 'Deal D_sla_reassign',
+      'approval.reassigned@thread': 'Deal D_thread',
+      'approval.returned@budget': 'Deal D_budget',
+      'approval.returned@rework': 'Deal D_rework',
+      'approval.ooo_substituted@ooo': 'Deal D_ooo',
+      'approval.ooo_skipped@ooo': 'Deal D_ooo',
+      // The control: the object's schema has no label, so the record is named
+      // by the object's API name and the id.
+      'approval.reminder@bare+links': 'crm_memo D_bare',
+    };
+    const offenders = Object.entries(NAMED).flatMap(([site, name]) => {
+      const bodies = emits.filter((e) => siteOf(e) === site).map((e) => String(e.payload?.body));
+      if (!bodies.length) return [`${site}: sent nothing`];
+      return bodies.filter((body) => !body.includes(name)).map((body) => `${site}: ${body}`);
+    });
+    expect(offenders).toEqual([]);
+
+    // And no body anywhere in the battery joins the API name and the id with a slash.
+    const slashed = emits
+      .map((e) => `${siteOf(e)}: ${String(e.payload?.body)}`)
+      .filter((line) => /\bcrm_(deal|memo)\/D_/.test(line));
+    expect(slashed).toEqual([]);
+  });
+
+  /** [#24065] Every body one call site sent. */
+  const bodiesAt = (site: string): string[] =>
+    emits.filter((e) => siteOf(e) === site).map((e) => String(e.payload?.body));
+
+  it('[#24065] both out-of-office bodies name the absent approver and the delegate by display name, never by user id', () => {
+    // The pin is each person's name in each body, not the sentence around it.
+    const NAMED: Record<string, { name: string; id: string }> = {
+      // The delegate is told whom they cover …
+      'approval.ooo_substituted@ooo': { name: 'Olive Away', id: 'u_ooo' },
+      // … and the absent approver who covers for them.
+      'approval.ooo_skipped@ooo': { name: 'Bob', id: 'u_bob' },
+      // The control's resolvable half: the delegate on the same hop as an
+      // approver no account answers to.
+      'approval.ooo_skipped@ooo_gone': { name: 'Alice', id: 'u_alice' },
+    };
+    const offenders = Object.entries(NAMED).flatMap(([site, { name, id }]) => {
+      const bodies = bodiesAt(site);
+      if (!bodies.length) return [`${site}: sent nothing`];
+      return bodies.filter((body) => !body.includes(name) || body.includes(id)).map((body) => `${site}: ${body}`);
+    });
+    expect(offenders).toEqual([]);
+
+    // And no out-of-office body anywhere in the battery names one of its
+    // people by their user id.
+    const byId = emits
+      .filter((e) => e.topic === 'approval.ooo_substituted' || e.topic === 'approval.ooo_skipped')
+      .flatMap((e) => USERS.filter((u) => String(e.payload?.body).includes(u.id))
+        .map((u) => `${siteOf(e)}: names ${u.id} in ${String(e.payload?.body)}`));
+    expect(byId).toEqual([]);
+  });
+
+  it('[#24065] a person no name can be read for is named by their stored id, as every reader of the chain renders an unresolved address', () => {
+    // `u_gone` names no `sys_user` row, so the chain answers no name for it.
+    // The body still names the person, by the id the delegation stores: never
+    // an empty slot, never `undefined`.
+    expect(bodiesAt('approval.ooo_substituted@ooo_gone')).toEqual([expect.stringContaining(GONE)]);
   });
 
   it('every notification carries a non-empty body, and no field the payload does not declare', () => {

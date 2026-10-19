@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import {
   isDevelopmentBoot,
+  readDeploymentOrgScopingEntitlement,
   resolveAuthSecret,
   resolvePlatformAuthComposition,
   resolveStackTiers,
@@ -1144,7 +1145,7 @@ export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
         .join(', ');
       parts.push(
         `Refused ${total} write(s) during the declaration boot`
-        + `${writesNothingHeld ? ' — a plan writes nothing' : ''}: ${detail}. `
+        + `${writesNothingHeld ? ' — a plan writes no row or table' : ''}: ${detail}. `
         + 'A plugin in this stack registers a writing hook outside start(); the plan below is '
         + 'unaffected, but that write WOULD have landed on a served boot of the same stack.',
       );
@@ -1159,7 +1160,7 @@ export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
         + 'FORWARDED, not refused: a raw command is opaque to this guard — the contract admits '
         + 'any native shape, and SQL text cannot be classified as read-vs-write reliably — so '
         + 'whether this boot wrote is NOT verified, and this run does NOT claim to have '
-        + 'written nothing. If those commands only read, nothing was written; if one wrote, it '
+        + 'written nothing. If those commands only read, no row or table was written; if one wrote, it '
         + 'landed. Issue row writes through the contract methods (refused and reported here), '
         + 'or move raw commands out of the boot path.',
       );
@@ -1744,6 +1745,7 @@ export async function buildSchemaMigrationPlugins(opts: {
         composed: [...opts.basePlugins, ...plugins],
         artifactRequires: opts.servedPlatform.artifactRequires,
         packageRoot: hostConfigPath ? path.dirname(hostConfigPath) : cwd,
+        ...(opts.serveFlags ? { serveFlags: opts.serveFlags } : {}),
       });
       // The auth family where `serve` registers it — ahead of the host plugins,
       // so a config's own instance of the same name supersedes it here as
@@ -1948,6 +1950,13 @@ async function composeServedPlatform(input: {
   composed: readonly unknown[];
   artifactRequires?: readonly string[];
   packageRoot: string;
+  /**
+   * `serve`'s flags as the command was given them: `--dev` is a development
+   * boot for the auth secret's fallback, exactly as {@link composeAuthGatedSecurity}
+   * reads it — so `--dev` composes the auth family (and with it the audit
+   * plugin's `sys_audit_log`) where `os dev` does, without `NODE_ENV`.
+   */
+  serveFlags?: { readonly dev?: boolean; readonly preset?: string };
 }): Promise<{ authFamily: unknown[]; plugins: unknown[]; notes: string[] }> {
   const { CAPABILITY_PROVIDERS, providesCapability, resolveServedCapabilities } = await import('@objectstack/core');
   const config = input.config ?? {};
@@ -1963,7 +1972,7 @@ async function composeServedPlatform(input: {
   const decision = resolvePlatformAuthComposition({
     plugins: [...input.basePlugins, ...input.hostPlugins],
     tiers: resolveStackTiers({ declaredTiers, requires }),
-    secret: resolveAuthSecret({ isDev: isDevelopmentBoot(undefined) }),
+    secret: resolveAuthSecret({ isDev: isDevelopmentBoot(input.serveFlags?.dev) }),
   });
   if (decision.composes) {
     const { createIdentityObjectsPlugin } = await import('@objectstack/plugin-auth');
@@ -2317,6 +2326,25 @@ export function refuseWhenHostConfigUnloadable(
  * all. This is the framework driving its own registry→driver pass over the
  * declarations the host's `init()` already made.
  *
+ * ## …and the step that pass begins with: the platform-global declaration
+ *
+ * `ObjectQLPlugin.start()` does one thing BEFORE its registry→driver pass: it
+ * installs the deployment's platform-global declaration — the `org-scoping`
+ * service's `platformGlobalObjects` — on the registry (ADR-0131 D7: "an object
+ * a deployment declares platform-global gets no organization column on that
+ * deployment (the injected-columns plan reads the declaration)"). Where that
+ * `start()` is suppressed, this pass takes that step first, through the same
+ * two pieces the engine uses: core's one reader
+ * (`readDeploymentOrgScopingEntitlement`) and the registry's own re-plan
+ * (`setDeploymentPlatformGlobalObjects`). Without it, a host that brings its
+ * own engine and declares objects platform-global was planned WITH their
+ * organization column: `os migrate plan` saw no drift on it, and the
+ * organization-ownership ceremony's column-drops step answered `not-proposed`
+ * for the `column-drop` fate D10 gives exactly those objects. Where the
+ * engine's own `start()` did run, the declaration is already installed and
+ * installing it again re-plans nothing (see
+ * {@link installDeploymentPlatformGlobalObjects}).
+ *
  * ⛔ And it must NOT run on a boot that did not defer: the same call would then
  * take the DDL path and a "plan" would create tables. The caller passes
  * `deferred` rather than this function deducing it — a capability that appears
@@ -2330,12 +2358,18 @@ export function refuseWhenHostConfigUnloadable(
  *   (#22579): an object routed to the sibling is examined there, not reported
  *   as bound to a different datasource.
  * @param deferred whether this boot armed deferred DDL. `false` reports the
- *   coverage as UNMEASURED instead of syncing.
+ *   coverage as UNMEASURED instead of syncing, unless `ddlFree` is set.
+ * @param options.ddlFree [#23816] the boot SKIPPED schema sync instead
+ *   (`skipSchemaSync`, for a primary whose transport cannot defer DDL): each
+ *   object is bound through the driver's DDL-free `registerObjectMetadata`,
+ *   the binding the engine's own skip-sync `start()` uses, so nothing can run
+ *   DDL either way. A driver without that member counts as `unsupported`.
  */
 export async function measureComposedCoverage(
   kernel: unknown,
   plannedDrivers: readonly unknown[],
   deferred: boolean,
+  options: { ddlFree?: boolean } = {},
 ): Promise<{ coverage: SchemaMigrationCoverage; notes: string[] }> {
   const notes: string[] = [];
   const empty: SchemaMigrationCoverage = {
@@ -2345,7 +2379,8 @@ export async function measureComposedCoverage(
     reasons: { federated: 0, unbound: 0, unsupported: 0, otherDriver: 0, failed: 0 },
   };
 
-  if (!deferred) {
+  const ddlFree = !deferred && options.ddlFree === true;
+  if (!deferred && !ddlFree) {
     notes.push(
       'This boot did not defer schema DDL, so the declared object set was NOT bound to the driver here — '
       + 'binding it would have run DDL. Coverage below is UNMEASURED, not full.',
@@ -2360,6 +2395,10 @@ export async function measureComposedCoverage(
   } catch {
     engine = undefined;
   }
+  // [ADR-0131 D7] FIRST, as `ObjectQLPlugin.start()` does: the declaration is
+  // the injected-columns plan's input, so it is installed before one object
+  // is bound. See this function's docblock.
+  notes.push(...installDeploymentPlatformGlobalObjects(kernel, engine?.registry));
   const objects: unknown = engine?.registry?.getAllObjects?.();
   if (
     !Array.isArray(objects)
@@ -2394,9 +2433,14 @@ export async function measureComposedCoverage(
     const driver = engine.getDriverForObject(obj.name);
     if (!driver) { unbound++; continue; }
     if (!plannedDrivers.includes(driver)) { otherDriver++; continue; }
-    if (typeof (driver as { syncSchema?: unknown }).syncSchema !== 'function') { unsupported++; continue; }
+    const register = (driver as { registerObjectMetadata?: unknown }).registerObjectMetadata;
+    if (ddlFree ? typeof register !== 'function' : typeof (driver as { syncSchema?: unknown }).syncSchema !== 'function') {
+      unsupported++;
+      continue;
+    }
     try {
-      await engine.syncObjectSchema(obj.name);
+      if (ddlFree) (register as (objects: unknown[]) => void).call(driver, [obj]);
+      else await engine.syncObjectSchema(obj.name);
       examined++;
     } catch (e: unknown) {
       failed++;
@@ -2436,4 +2480,68 @@ export async function measureComposedCoverage(
   }
 
   return { coverage, notes };
+}
+
+/** The registry member the engine installs the platform-global declaration through. */
+interface PlatformGlobalDeclarationRegistry {
+  setDeploymentPlatformGlobalObjects(names: Iterable<string>): {
+    readonly replanned: readonly string[];
+    readonly keptAuthoredColumn: readonly string[];
+  };
+}
+
+/**
+ * [ADR-0131 D7] Install the deployment's platform-global declaration on the
+ * composed engine's registry — the step `ObjectQLPlugin.start()` takes first
+ * (`installDeploymentPlatformGlobalObjects` there), taken here for a boot whose
+ * engine `start()` the declaration composition suppressed. Returns the notes
+ * the plan prints about it; none when nothing was declared and nothing refused.
+ *
+ * The same two pieces the engine uses, never a copy of either: core's one
+ * reader, which fails closed (no service, an absent key, or a refused key
+ * declare nothing), and the registry's re-plan of every registered object.
+ * Installing a declaration the engine already installed re-plans nothing —
+ * an object already planned without the column does not plan it again — so
+ * `replanned` is non-empty exactly when this boot's engine had not installed
+ * it.
+ */
+function installDeploymentPlatformGlobalObjects(kernel: unknown, registry: unknown): string[] {
+  const notes: string[] = [];
+  let service: unknown;
+  try {
+    service = (kernel as { getService?: (name: string) => unknown })?.getService?.call(kernel, 'org-scoping');
+  } catch {
+    service = undefined;
+  }
+  const reading = readDeploymentOrgScopingEntitlement(service);
+  for (const refusal of reading.refused) {
+    if (refusal.key !== 'platformGlobalObjects') continue;
+    notes.push(`The org-scoping service's platformGlobalObjects declaration is REFUSED — ${refusal.problem}.`);
+  }
+  const declared = [...reading.platformGlobalObjects].sort();
+  if (declared.length === 0) return notes;
+  const install = (registry as Partial<PlatformGlobalDeclarationRegistry> | undefined)?.setDeploymentPlatformGlobalObjects;
+  if (typeof install !== 'function') {
+    notes.push(
+      `The deployment declares ${declared.length} object(s) platform-global (${declared.join(', ')}), and the composed `
+      + 'engine\'s registry cannot take that declaration, so they are planned WITH the organization column a served '
+      + 'boot does not plan (ADR-0131 D7). The plan over them is UNMEASURED.',
+    );
+    return notes;
+  }
+  const { replanned, keptAuthoredColumn } = install.call(registry, reading.platformGlobalObjects);
+  if (replanned.length > 0) {
+    notes.push(
+      `Planned ${replanned.length} object(s) the deployment declares platform-global (${[...replanned].sort().join(', ')}) `
+      + 'with no organization column, as a served boot of this stack plans them (ADR-0131 D7): this boot\'s engine '
+      + 'start(), where the engine installs the org-scoping service\'s declaration, did not run, so this pass did.',
+    );
+  }
+  if (keptAuthoredColumn.length > 0) {
+    notes.push(
+      `The deployment declares ${[...keptAuthoredColumn].sort().join(', ')} platform-global, but each DECLARES its own `
+      + 'organization_id: that column is the author\'s, so it stays planned (ADR-0131 D7).',
+    );
+  }
+  return notes;
 }

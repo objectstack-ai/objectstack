@@ -28,7 +28,7 @@ const result = ApiErrorSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +331 more>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +339 more>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
@@ -193,7 +193,6 @@ const result = ApiErrorSchema.parse(data);
 * `FILTER_TOKEN_UNRESOLVED`
 * `FIND_HOOK_RESULT_NOT_ARRAY`
 * `FIND_ONE_HOOK_RESULT_NOT_RECORD`
-* `FLOW_CONVERSION_CONFLICT`
 * `FLOW_DISABLED`
 * `FLOW_FAILED`
 * `FLOW_INPUT_SCHEMA_INVALID`
@@ -220,11 +219,17 @@ const result = ApiErrorSchema.parse(data);
 * `INVALID_SIGNATURE`
 * `INVALID_STATE`
 * `INVITE_EMAIL_FAILED`
+* `INVITE_ISSUER_MEMBER_ONLY`
+* `INVITE_ISSUER_UNVERIFIED`
+* `INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE`
+* `INVITE_PLACEMENT_UNSUPPORTED`
 * `INVITE_REQUIRES_EMAIL`
+* `INVITE_ROLE_ABOVE_ISSUER`
 * `INVITE_SMS_FAILED`
 * `IP_NOT_ALLOWED`
 * `ITEM_LOCKED`
 * `LAST_LOCAL_CREDENTIAL`
+* `LEGACY_ORGANIZATION_ROWS_UNREADABLE`
 * `MANIFEST_CONFLICT`
 * `MAPPING_FORMAT_MISMATCH`
 * `MAPPING_FORMAT_UNSUPPORTED`
@@ -265,6 +270,9 @@ const result = ApiErrorSchema.parse(data);
 * `OBJECT_OWNERSHIP_CONFLICT`
 * `OBJECT_PACKAGE_DISABLED`
 * `OPENAPI_UNAVAILABLE`
+* `ORGANIZATION_CREATION_DISABLED`
+* `ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED`
+* `ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS`
 * `OS_PROTOCOL_INCOMPATIBLE`
 * `PACKAGE_DELETE_FAILED`
 * `PACKAGE_DELETE_PARTIAL`

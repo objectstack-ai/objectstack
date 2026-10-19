@@ -1,5 +1,373 @@
 # @objectstack/plugin-sharing
 
+## 18.0.0-next.4
+
+### Minor Changes
+
+- 78652c0: feat(cli,plugin-sharing)!: in the 17 → 18 ownership ceremony, a row whose owner cannot be derived blocks certification, and a declared-rule mirror's grants are renamed only onto a rule plugin-sharing serves
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, option, error code or stored shape is added, removed or renamed, and nothing exported is removed: the ceremony's report gains one field (`TableOutcome.held`), its verdict counts change, and plugin-sharing gains one export. The only stored state that moves is the operator's own: a row whose owner cannot be derived is given its organization or deleted by hand, which `objectstack migrate meta` has nothing to rewrite for. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no Zod schema in packages/spec changes (not runtime-interface-only or type-surface-only in the spec sense); and nothing exported is retired (not runtime-export-retired). -->
+  
+  **BREAKING** (narrowings), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM** (`@objectstack/cli`): `os migrate organization-ownership --apply` on a database holding a row whose owner cannot be derived exited `0` with `blocking: 0`, counted the row in `advisory`, and verified the `sys_migration` marker. This covers a reported (fate 4) row, and a row whose anchor is missing under a wall (fate 3). **TO:** it exits `1`, counts the row in `blocking`, and leaves the marker unverified, so a v18 `os serve` / `os start` does not start on the database. **Fix:** give each row its organization (write its `organization_id`, or repair the anchor its reason names), or delete it by hand, then re-run `--apply` with the same plan file.
+  - **FROM** (`@objectstack/cli`): a database an earlier version of this command certified while it held such a row was certified again by the next `--apply`. **TO:** that run leaves its marker unverified, for the same rows. **Fix:** the same as above.
+  - **FROM** (`@objectstack/cli`): `os dev`'s in-place upgrade of a development database started the server again whenever every ceremony step finished. **TO:** it starts it only when the post-check also holds nothing (`blocking` 0); otherwise it prints each table that holds, with its count and remedy, and the command that resumes the run. **Fix:** resolve the rows it names, then run the printed command.
+  - **FROM** (`@objectstack/cli`): the `mirror-deletion` step renamed the grants of a declared-rule mirror onto its rule's name, and deleted the mirror, even when plugin-sharing does not serve that rule (a condition that does not translate, an unmappable recipient, a retired owner-based rule); the next boot's orphaned-grant sweep then revoked those grants. **TO:** while `sys_record_share` grants name such a mirror, the step blocks, naming the rule, its rows and the reason, and writes nothing. **Fix:** correct the rule's declaration in its package so it is served, or delete each mirror row and the grants that name it, then re-run `--apply`.
+  
+  `@objectstack/cli` — **unattributable rows hold certification (ADR-0131 D10 fate 4).** The ceremony still never guesses an owner for such a row and never deletes it. The post-check now holds each one against the verdict:
+  
+  - Each table that holds one carries `held: { rows, remedy }` in the apply report, and counts those rows in its `remaining`. The terminal output names each table, its row count and the remedy.
+  - `advisory` now counts only the rows of an advisory departure and the reported rows of a table whose `organization_id` is not the tenancy anchor (`sys_sso_provider`, the retired `sys_scim_provider`). A row there that is bound to no organization is legitimate, is reported, and does not block.
+  - So a verified marker means no organization-less row on any table that the tenancy anchor governs.
+  - The plan's summary line says that such rows will hold `--apply`'s certification until they are resolved.
+  
+  `@objectstack/cli` — **the ceremony asks plugin-sharing which declared sharing rules it serves.** The port the `mirror-deletion` step reads (`DeclaredSharingRulesPort.rules()`, formerly `names()`) judges each declared rule through plugin-sharing's own translation. A mirror's grants are renamed only onto a rule that is served. A mirror of a refused rule that no grant names is still deleted.
+  
+  `@objectstack/plugin-sharing` — **exports `translateDeclaredSharingRule`** with its `DeclaredSharingRule` and `DeclaredSharingRuleSkip` types. It is the one translation enforcement serves a declared rule through. It is pure, and it is unchanged.
+- 5e97907: feat(plugin-sharing,cli)!: declared sharing rules are read from the registry — the boot writes no `sys_sharing_rule` row for them, and the 17 → 18 ownership ceremony deletes the copies the retired seeder wrote
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered sharing-rule-declared-mirror-retired -->
+  
+  The narrowings, FROM → TO, each with its one-line remedy:
+  
+  - `DELETE /api/v1/sharing/rules/:idOrName` on a declared rule — FROM `204`, the seeded row deleted (and written again by the next boot), TO `403 PERMISSION_DENIED`. Remedy: change or remove the rule in its declaration in the package; an organization's own rule is deleted as before.
+  - `sys_sharing_rule` — FROM one `managed_by: package` row per declared rule, TO none: the boot writes none and the ownership ceremony deletes the copies the seeder wrote (Setup's Sharing Rules object list, which lists rows, no longer shows declared rules). Remedy: read declared rules through `GET /api/v1/sharing/rules`, which lists them beside the organization's own; on an upgraded database run `os migrate organization-ownership --apply` with a fresh plan.
+  
+  The retirement note for the seeder is the ADR-0087 semantic entry `sharing-rule-declared-mirror-retired`.
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `@objectstack/plugin-sharing` no longer copies a stack's declared `sharingRules` into `sys_sharing_rule` at boot. ADR-0131 D2 retires that seeder (`bootstrapDeclaredSharingRules`). The sharing-rule service reads each declared rule from the registry whenever it reads the rule set: listing, getting, evaluating, the per-record hooks, the boot backfill and the orphaned-grant sweep. Rules an organization authors keep their `sys_sharing_rule` rows.
+  
+  - **A declared rule still grants, and stops granting when its declaration goes.** It is translated from the registry's copy exactly as the seeder translated it: the CEL `condition` is lowered to a `criteria` filter, and `sharedWith` becomes the recipient. A condition that does not lower is not served, and never as a match-all. It says so in one WARN line per rule per process. A declared rule's id is its NAME, and the grants it materialises carry the name as `sys_record_share.source_id`. Remove the declaration and the next boot's orphaned-grant sweep revokes those grants.
+  - **Scopes follow the posture, as the seeder's passes did.** Under `single` a declared rule is served once, organization-less, so every organization reads it. Under a wall it is served once per organization — every organization, read page by page. An organization created after boot is served from its creation on. If the organizations cannot be read at boot, no declared rule is served until the next boot, and the boot's orphaned-grant sweep revokes none of their grants meanwhile: a failed read is never a revocation.
+  - **A stored row of the same name answers for it.** Under `single` that is a row of that name in any organization, and under a wall that organization's own row. Such a row is an organization's own rule, a seeded copy an administrator customized, or a seeded copy the ceremony has not deleted yet. The declared rule is not served beside it, the same as while the seeder ran: it never overwrote an admin-authored or customized row.
+  - **`DELETE /api/v1/sharing/rules/:idOrName` refuses a declared rule** with `403 PERMISSION_DENIED`. It has no row: it is changed or removed in its declaration. Before this release a platform administrator could delete the seeded row, and the next boot wrote it again. An organization's own rule is deleted as before.
+  - **Setup's Sharing Rules object list no longer shows declared rules.** It lists `sys_sharing_rule` rows. `GET /api/v1/sharing/rules` lists both.
+  
+  `@objectstack/cli` — **`os migrate organization-ownership --apply` deletes the declared-rule mirrors.** The `declared-rule-mirrors` rows on `sys_sharing_rule` are the seeder's uncustomized copies (`managed_by` `package` or `platform`, `customized` not true). They now block certification until the ceremony's `mirror-deletion` step removes them. It works in the ruled order. It renames every grant naming a mirror by row id (`sys_record_share.source_id`, `source = 'rule'`) to the rule's name and verifies that no grant names a mirror any more. Only then does it delete the mirrors. Under a wall it deletes the organization-stamped copies too.
+  - A mirror whose rule no installed package declares, and that grants still name, blocks with nothing written. The blocker names the rows and the remedy. A mirror no grant names is deleted.
+  - The step also runs on a database whose ceremony already completed while an earlier release still seeded the rows, where they were advisory. Re-run `--apply` with a fresh plan.
+  - `DECLARED_SHARING_RULE_SEEDER_RUNS` is now `false`. A customized copy and an organization's own rule stay. Under `single` they take the Default Organization, as before.
+  
+  `@objectstack/lint` — the sharing-rule enforceability verdicts and `os explain` say what now happens to a declared rule whose condition does not lower. It is "never served", not "never seeded", because it is never written to `sys_sharing_rule`. The rule ids, severities, paths and what each rule accepts or refuses are unchanged.
+
+### Patch Changes
+
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [ec749fb]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
+## 18.0.0-next.3
+
+### Patch Changes
+
+- 099cc9d: Clause-②: no
+  
+  The approval, security, automation and sharing objects describe their records in plain admin
+  sentences. Approval Delegations now reads "While someone is away, approvals assigned to them
+  personally go to their delegate.", Record Shares "Records shared beyond their owner, one row per
+  grant.", User Positions "Which positions each user holds, one row per assignment.", Audience
+  Binding Suggestions "A package's suggestion to give one of its permission sets to everyone who
+  signs in, and the decision taken on it." and Automation Runs "Paused automation runs waiting to
+  resume, and the recent history of finished runs." Field help on Approval Requests, Approval
+  Delegations, User Positions, User Permission Sets and Audience Binding Suggestions, the
+  descriptions of the `organization_admin_no_bypass`, `mcp_agent_data_read` and
+  `mcp_agent_data_write` permission sets, the flow-dispatch ledger's description and the
+  reserved-position refusal no longer carry design-record numbers or runtime vocabulary; those
+  references stay in the code comments. The zh-CN, ja-JP and es-ES translations follow. Wording
+  only: no field, permission or behaviour changes.
+- 6dede7a: fix(runtime, plugin-sharing): on the standalone server, an anonymous caller of any `/api/v1/notifications` verb or any `/api/v1/share-links` path off the two token faces is answered `401 UNAUTHENTICATED` in the dispatcher's standard envelope
+  
+  Clause-②: no
+  
+  The v18 text for these two doors reads "`/notifications`: `401 UNAUTHENTICATED` on every face" and "`/share-links`: `401 UNAUTHENTICATED` on the create, list and revoke faces and on every path the domain does not serve", in "the dispatcher's standard envelope … with the shared message every other dispatcher domain answers with". A host that reaches the dispatcher through `@objectstack/hono`'s catch-all already answered that way. The standalone server (the one `os dev` and `os serve` run) did not:
+  
+  - `/api/v1/notifications`, `/api/v1/notifications/read` and `/api/v1/notifications/read/all` were each mounted for the one verb they serve, so any other verb never reached the `notifications` domain and the HTTP adapter answered `405`, naming the allowed methods, to an anonymous caller as well.
+  - `/api/v1/share-links` is served there by `@objectstack/plugin-sharing`'s routes, not by the dispatcher. They registered five routes and nothing else, so another verb or path got the adapter's `405` or `404`, and the create, list and revoke faces answered `401` with a sentence of their own ("Sign in to list share links") and no `error.httpStatus`.
+  
+  What the standalone server answers now:
+  
+  - **Anonymous caller.** `401 UNAUTHENTICATED`, `{ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication is required to access this endpoint.', httpStatus: 401 } }`, on every verb of the three notifications paths, and on every verb and path under `/api/v1/share-links` except `GET /share-links/:token/resolve` and `GET /share-links/:token/messages`, which the capability token still admits. A body the server cannot parse does not outrank this answer anywhere under `/api/v1/share-links`, nor on the notifications verbs no face serves.
+  - **Signed-in caller of a verb or path that is not served.** Still refused. On the notifications paths the domain answers it: `404 ROUTE_NOT_FOUND` from the dispatcher (or the `501` capability answer on a deployment with no inbox), where the adapter used to answer `405`. Under `/api/v1/share-links` the share-link routes answer it themselves: `404 ENDPOINT_NOT_FOUND`, naming the request, where the adapter used to answer `405` or `404`. No `Allow` header is sent on either.
+  
+  Every request that was served is served as before. A notifications sub-path no face names, such as `/api/v1/notifications/<anything>`, is still not mounted on the standalone server and is answered `404`.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [abb6df0]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [d050a8f]
+- Updated dependencies [b25d98a]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/objectql@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/formula@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
+## 18.0.0-next.2
+
+### Minor Changes
+
+- 0f05907: feat(spec,core,plugin-auth)!: an API key answers as its owner's session does when the ADR-0069 policy holds the account, the forced reset gets its own code and an explicit revocation switch
+  
+  Clause-②: yes (narrowing) — the published contract widens (the posture codes become a closed vocabulary with a declared scope, a new `PASSWORD_RESET_REQUIRED` code, a per-user posture member on the auth service contract, new `@objectstack/core` exports) and the API-key door narrows (a key whose owner holds an account-scope posture is refused where it was served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key admission seam plus one new error code, not a metadata change. No authorable spec key, stored shape or metadata surface is removed or renamed, so `objectstack migrate meta` has nothing to rewrite. `ExecutionContext.authGate.code` narrows from a bare string to the closed posture vocabulary, but that field is server-constructed only and never authored; its one producer already wrote only members of it. What narrows is which API keys are served (a key whose owner owes MFA enrolment is refused with 403 MFA_REQUIRED), and the administrator-forced password change answers its own code. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key door, and a changed code for the administrator-forced password change), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling C′ on #23287: posture codes are a closed vocabulary, and each code declares what it holds.
+  
+  - **The vocabulary and its scope (`@objectstack/spec/kernel`).** `AuthGateCodeSchema` is the closed set of codes an `authGate` may carry: `PASSWORD_EXPIRED`, `PASSWORD_RESET_REQUIRED` and `MFA_REQUIRED`. `AUTH_GATE_SCOPES` declares each code's scope once: `MFA_REQUIRED` holds the **account** (every credential of the user); `PASSWORD_EXPIRED` and `PASSWORD_RESET_REQUIRED` hold the **credential** (password sign-in alone). `ExecutionContext.authGate.code` is typed against the vocabulary, and `PASSWORD_RESET_REQUIRED` is registered for `@objectstack/plugin-auth` in the error-code ledger.
+  - **One per-user posture computation (`@objectstack/plugin-auth`, `IAuthService.resolveUserAuthGates`).** It answers every posture a user holds, most urgent first, keyed by user id and the organization the credential operates in. The session gate shows its first entry, as before.
+  - **One judgment at the shared key-admission seam (`@objectstack/core`).** `resolveApiKeyAdmission` asks that computation for the key's owner and holds the key on an account-scope posture (a new `held` outcome). `resolveAuthzContext` resolves a held key as a held principal: the owner, `credential: 'api_key'`, and the posture on `authGate`. Both new inputs are optional (`userAuthGates`), and `userAuthGateSourceOf(authService)` binds one from an auth service.
+  - **REST and the runtime dispatcher** judge a key-admitted request by the key's answer, and re-read the session cookie for the gate only when a session admitted the caller. The declared-endpoint fallback does the same.
+  - **The raw-host families** take the same answer through the shared seam: datasource admin, share links, settings, and the storage family's door. The webhook-redeliver door admits no API key at all, and still does not.
+  - **The forced reset (`POST /api/v1/auth/admin/set-user-password`, the `set_user_password` action).** `must_change_password` now answers `PASSWORD_RESET_REQUIRED` instead of reusing `PASSWORD_EXPIRED`. The act carries `revokeSessionsAndKeys`, **on by default**: it ends every live session of the user and revokes every API key they own, and the response reports what landed (`revoked: { sessions, apiKeys, failed, complete }`).
+  
+  What changes for you:
+  
+  - **Refused now:** an API key whose owner owes MFA enrolment past the grace window gets `403 MFA_REQUIRED`, with the message the session gets, on every face that admits keys. It works again the moment the owner enrols, with nothing reissued: the refusal is not a revocation.
+  - **Unchanged:** a key whose owner's password expired, or whose administrator forced a password change, keeps working. A session sent beside an API key no longer answers for the key.
+  - **A forced password change answers `PASSWORD_RESET_REQUIRED`.** A client that recognises `PASSWORD_EXPIRED` to show its change-password flow should recognise `PASSWORD_RESET_REQUIRED` the same way.
+  - **An administrator's password reset now signs the user out everywhere and revokes their API keys by default.** For a routine reset, pass `revokeSessionsAndKeys: false` (or clear the switch in the Set Password dialog). Revoked keys stay revoked after the password change; an administrator can restore a key a routine reset revoked with the Restore API Key action, or the owner mints a replacement.
+  - **Hosts calling `resolveAuthzContext` or `resolveApiKeyAdmission` directly** pass `userAuthGates: userAuthGateSourceOf(authService)` to have the key's owner asked. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `held` outcome.
+- 1d79556: feat(spec,core,runtime,plugin-auth)!: API keys get a lifecycle: a 90-day default expiry, a one-year ceiling, a 90-day inactivity expiry, a one-year grace for keys created with none, and distinct refusal codes
+  
+  Clause-②: yes (narrowing) — the published contract widens (four `auth` settings keys, the `IAuthService.resolveApiKeyLifecyclePolicy` member and its `ApiKeyLifecyclePolicy` type, four registered error codes, new `@objectstack/core` exports) and the API-key doors narrow (a signing past the ceiling is refused; an inactive key, a key past its grace, and a revoked or expired key sent beside a session are refused where they were served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key signing door and the shared key-admission seam, not a metadata change. No authorable spec key, stored shape or metadata surface is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite: the four new `auth` settings keys are additive and defaulted, `sys_api_key` gains no column (its existing `expires_at` and `last_used_at` are written by the platform), and `ResolveAuthzInput.apiKeyLifecycle` / the sixth parameter of `resolveApiKeyAdmission` and `resolveApiKeyPrincipal` are server-side wiring no author writes. What narrows is which API keys are served and which signings are accepted; the remedy is a new key or a nearer date, never a rewrite of a package source or a stored row. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key doors), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling A on #23367: the key store stays `sys_api_key`, and the policy is auth configuration.
+  
+  - **The policy (`@objectstack/plugin-auth`, `IAuthService.resolveApiKeyLifecyclePolicy`).** Three `auth` settings keys, bound by `bindAuthSettings`: `api_key_default_expiry_days` (90), `api_key_max_expiry_days` (365) and `api_key_inactivity_days` (90; `0` turns it off). A fourth, `api_key_policy_started_at`, is recorded once — on the first boot that runs the policy, at `kernel:bootstrapped` — and anchors the two clocks below; it survives restarts and is never overwritten by the platform.
+  - **The signing door (`POST /api/v1/keys`).** A signing that names no `expires_at` gets the default life and the response echoes it. An `expires_at` further away than the ceiling is refused `400 API_KEY_EXPIRY_TOO_LONG`, naming the latest date allowed; exactly the ceiling is accepted. A kernel with no auth service signs as before.
+  - **The key-admission seam (`resolveApiKeyAdmission`, `@objectstack/core`).** A real key its own state refuses is a new outcome, `lifecycle`, with one of three distinct codes: `API_KEY_REVOKED`, `API_KEY_EXPIRED` (past `expires_at`, or past the grace of a key created with none) or `API_KEY_INACTIVE` (no recorded use for longer than the window). `resolveAuthzContext` raises it as the branded `ApiKeyLifecycleRefusalError` (`403`, a located message naming the key's prefix, the date and the remedy). An unknown key is still `none`.
+  - **`last_used_at` is written.** Its description promised "Automatically updated on each API call", and nothing wrote it. The seam now stamps it on an admitted (or held) call, at most once an hour per key, and the inactivity judgment reads the value as it was BEFORE that call's stamp, so a key's own use cannot revive it. A stamp that fails never fails the request; it is said once, at `error`.
+  - **Keys created before the policy.** A key with no expiry gets one year from `api_key_policy_started_at`; the date is stamped onto its `expires_at` the first time it is admitted, so the keys page shows it, and the refusal after it names it. A key with no recorded use counts its inactivity from the same anchor (or from its own creation, when later) — never from an earlier `created_at`, since no use was ever recorded before the policy.
+  - **Every face that admits keys** passes the policy source (`apiKeyLifecyclePolicySourceOf(authService)`, a required input beside `userAuthGates`). Every one of them answers the refusal's `403` and code: the runtime dispatcher (the MCP HTTP endpoint among its routes), the REST data API, the settings routes, the storage download routes, the datasource admin routes, the share-link routes, the marketplace install-local routes and the MCP stdio transport. Each relays the refusal by its brand, so every other identity fault at those doors keeps its existing answer.
+  - **`OS_CLOUD_API_KEY` is untouched.** It is the runtime's outbound credential to the control plane, never admitted by this seam.
+  
+  What changes for you:
+  
+  - **A key created without an expiry now expires.** It used to live until revoked; it now lives 90 days (or the configured default). Pass `expires_at` to choose, and create a new key before it ends.
+  - **A signing asking for more than a year is refused** `400 API_KEY_EXPIRY_TOO_LONG`, where it used to be accepted. Ask for the date the message names, or an earlier one.
+  - **A key unused for 90 days is refused** `403 API_KEY_INACTIVE`, where it used to be served. It is not revoked; the remedy is a new key.
+  - **A key that already existed with no expiry keeps working for one year** from the date the policy took effect on your deployment (`auth.api_key_policy_started_at`), then answers `403 API_KEY_EXPIRED` naming that date. Replace such keys within the year.
+  - **A revoked or expired key answers its own code** (`403 API_KEY_REVOKED` / `API_KEY_EXPIRED`) on every face that accepts a key, where it used to answer the generic `401`; and a session cookie sent beside such a key no longer answers for it.
+  - **Hosts calling `resolveAuthzContext`, `resolveApiKeyAdmission` or `resolveApiKeyPrincipal` directly** pass `apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService)` (or the sixth argument), or an explicit `undefined` where no auth service exists. A caller of `resolveAuthzContext` that wants the located answer re-raises `ApiKeyLifecycleRefusalError` (`isApiKeyLifecycleRefusalError`) the way it re-raises the store outage. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `lifecycle` outcome.
+
+### Patch Changes
+
+- c245986: fix(plugin-sharing): a record-share grant refused for a non-user recipient names the sharing-rule recipient that delivers it, so a `group` caller is sent to `team`
+  
+  Clause-②: no
+  
+  **What was wrong.** `ISharingService.grant` writes a record share for a `user` only (ADR-0078), and refuses `group`, `position` and `unit_and_subordinates` with one sentence. FROM: "VALIDATION_FAILED: recipientType must be 'user' (received "group") — group/position recipients are delivered via sharing rules (ADR-0111 D7)". The sharing-rule vocabulary has no `group` recipient: a rule spells it `team`, since the ADR-0090 D3 rename. A caller or an AI that followed the remedy wrote a rule naming `group`, which neither the authoring `sharedWith.type` enum nor the `sys_sharing_rule.recipient_type` select offers. A `unit_and_subordinates` caller read a sentence that did not name its value.
+  
+  **What changed.** Each declared value's remedy names its own rule recipient. TO:
+  
+  - `group`: "… — a group recipient is delivered via a sharing rule with recipient type 'team', its name since the ADR-0090 D3 rename (ADR-0111 D7)"
+  - `position`: "… — a position recipient is delivered via a sharing rule with recipient type 'position' (ADR-0111 D7)"
+  - `unit_and_subordinates`: "… — a unit_and_subordinates recipient is delivered via a sharing rule with recipient type 'unit_and_subordinates' (ADR-0111 D7)"
+  
+  A value no record share declares (an untyped REST body sending `team`, say) is told so, and is named no route: "… — "team" is not a record-share recipient type (ADR-0111 D7)".
+  
+  **Unchanged.** Which values `grant()` accepts (`user` only), the `VALIDATION_FAILED` code and its 400, the first clause of every refusal, the retired `guest` value's own prescription, and the record-share vocabulary. Nothing is written for a refused grant.
+- c980d11: fix(plugin-sharing, runtime): a shared conversation's messages open for exactly the callers its share link opens for, on both mounts
+  
+  Clause-②: no — `/messages` now reaches the answer `/resolve` already gives the same caller for the same link, on the same mount; who can open a share link is unchanged.
+  
+  A share link to an AI conversation has two public routes: `/resolve` returns the conversation, and `/messages` returns its messages. Both check the link through the same service call. `/resolve` passed it every input an audience is judged by. `/messages` passed fewer, so it refused callers `/resolve` served:
+  
+  - **A `signed_in` link, a signed-in caller:** plugin-sharing's share-link routes answered `/messages` with `404 NOT_FOUND`, so the console's shared-conversation page showed the conversation with no messages. It now returns the messages, as the runtime dispatcher's share-links domain already did.
+  - **An `email` link, an allowlisted `?email=`:** both mounts answered `/messages` with `404 NOT_FOUND`. Both now read `?email=` on `/messages` exactly as on `/resolve`, and return the messages.
+  - **Unchanged:** every caller `/resolve` refuses is still refused on `/messages` with `404 NOT_FOUND`: an anonymous caller of a `signed_in` link, and a caller of an `email` link with no email or an off-list email, signed in or not. A password-protected link still needs its password on both routes. `/resolve` is unchanged.
+- 0ecac96: fix(plugin-sharing, runtime): a share link limited to an email allowlist answers every caller it does not open for with `404 INVALID_OR_EXPIRED`, whatever email and password were sent
+  
+  Clause-②: no — every request refused before is still refused, and every request served before is still served; only which refusal code a caller reads changes.
+  
+  A share link can carry a password and the `email` audience together. For such a link, the share-link resolve door answered a caller it did not open for from the password, never the audience: `401 NEEDS_PASSWORD` with no password, and `401 WRONG_PASSWORD` with any password, the correct one included, when the email sent was missing or not on the allowlist. A caller with the right password read "Incorrect password".
+  
+  - **An `email` link, any caller it does not open for:** `404 INVALID_OR_EXPIRED`, with or without an email, with no password, a wrong one or the correct one, signed in or not. It is the answer a password-less `email` link already gave and an unknown token gives, so it tells the caller neither whether the email is on the allowlist, nor whether the password is right, nor whether the link has a password. The door does not read the email to choose its answer.
+  - **Served, unchanged:** an allowlisted email with the correct password (or, on a link without a password, an allowlisted email alone) still opens the record. An API or SDK caller sends both together; the door no longer prompts for the password first.
+  - **Unchanged:** links with any other audience, including the `signed_in` order (`401 SIGN_IN_REQUIRED` before sign-in, the password arms after), a `public` link's `NEEDS_PASSWORD` / `WRONG_PASSWORD`, and the expired-or-revoked `410 EXPIRED_OR_REVOKED`.
+  - Both mounts of the resolve door answer alike: plugin-sharing's share-link routes and the runtime dispatcher's share-links domain.
+- d1e2841: fix(plugin-sharing): an email-audience share link's refusal does the same work whatever email and password are presented
+  
+  The refusal of an `email`-audience share link no longer does a different amount
+  of work depending on the caller's input, as its answer bytes already did not.
+  The refusal and the served response are byte-for-byte unchanged.
+  
+  Clause-②: no
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [989aa48]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c2bb302]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [30c33e3]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [cd86e41]
+- Updated dependencies [c03077e]
+- Updated dependencies [3bc407d]
+- Updated dependencies [76560a1]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/platform-objects@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/objectql@18.0.0-next.2
+  - @objectstack/metadata-core@18.0.0-next.2
+  - @objectstack/formula@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

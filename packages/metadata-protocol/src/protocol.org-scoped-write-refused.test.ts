@@ -19,8 +19,10 @@
  * lands.
  *
  * Rows stored organization-scoped BEFORE this refusal are residue the
- * promotion ceremony (ADR-0131 C7) carries; they must not be promotable from
- * here, and they are not deleted here either.
+ * promotion ceremony (ADR-0131 C7) carries before its column-drops; since
+ * ADR-0131 D7 the family declares no organization column, so no row this
+ * protocol reads or writes carries one, and the runtime refuses to boot on a
+ * database still holding it (the v18 boot refusal).
  *
  * ## Reverse verification, direction predicted BEFORE running
  *
@@ -54,7 +56,6 @@ interface Row {
     id: string;
     type: string;
     name: string;
-    organization_id: string | null;
     package_id: string | null;
     state: string;
     metadata: string;
@@ -67,18 +68,23 @@ interface HistoryRow {
     type: string;
     name: string;
     version: number;
-    organization_id: string | null;
     metadata: string | null;
     checksum: string | null;
     operation_type: string;
     recorded_at: string;
 }
 
-/** ADR-0048 overlay key — (type, name, org, state, package_id). */
+/** ADR-0048 overlay key — (type, name, state, package_id); ADR-0131 D7: no organization part. */
 const keyOf = (w: Record<string, unknown>) =>
-    `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}|${w.package_id ?? '__nopkg__'}`;
+    `${w.type}|${w.name}|${w.state ?? 'active'}|${w.package_id ?? '__nopkg__'}`;
 
 /** Top-level eq + `$or` + explicit-NULL, the subset these paths emit. */
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 function matchesWhere(r: Row, where: Record<string, unknown>): boolean {
     for (const [k, v] of Object.entries(where)) {
         if (k === '$or') {
@@ -87,7 +93,7 @@ function matchesWhere(r: Row, where: Record<string, unknown>): boolean {
             continue;
         }
         if (v === undefined) continue;
-        if ((r as unknown as Record<string, unknown>)[k] !== v) return false;
+        if (!whereValueMatches((r as unknown as Record<string, unknown>)[k], v)) return false;
     }
     return true;
 }
@@ -121,7 +127,6 @@ function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
                     if (w.type !== undefined && h.type !== w.type) return false;
                     if (w.name !== undefined && h.name !== w.name) return false;
                     if (w.version !== undefined && h.version !== w.version) return false;
-                    if (w.organization_id !== undefined && h.organization_id !== w.organization_id) return false;
                     return true;
                 }) ?? null;
             }
@@ -189,30 +194,6 @@ function makeProtocol(artifacts?: Array<{ type: string; name: string }>, environ
     return { protocol, rows };
 }
 
-/** Seed the residue this PR deliberately does NOT migrate: an org-scoped
- *  draft row written the way `saveMetaItem` used to write it — through the
- *  repository, which is where `organization_id` is stamped. Bypasses only the
- *  new protocol gate, so the row is byte-identical to a legacy one. */
-async function seedLegacyOrgDraft(
-    protocol: any,
-    args: { type: string; name: string; body: unknown; organizationId: string; packageId?: string | null },
-): Promise<void> {
-    await protocol.ensureOverlayIndex();
-    const repo = protocol.legacyOrganizationRepo(args.organizationId);
-    await repo.put(
-        { type: args.type, name: args.name, org: args.organizationId },
-        args.body,
-        {
-            parentVersion: null,
-            actor: null,
-            source: 'test.legacy-residue',
-            intent: 'runtime-only',
-            state: 'draft',
-            packageId: args.packageId ?? null,
-        },
-    );
-}
-
 const OBJECT = {
     name: 'org_widget',
     label: 'Org Widget',
@@ -255,8 +236,9 @@ const VIEW = {
     columns: [{ field: 'title', label: 'Title' }],
 };
 
+/** The stored rows; `org` says whether a row carries an organization column at all (ADR-0131 D7: none does). */
 const orgRows = (rows: Map<string, Row>) =>
-    Array.from(rows.values()).map((r) => ({ type: r.type, name: r.name, org: r.organization_id, state: r.state }));
+    Array.from(rows.values()).map((r) => ({ type: r.type, name: r.name, org: 'organization_id' in r, state: r.state }));
 
 /** One plugin-registered type: no `DEFAULT_METADATA_TYPE_REGISTRY` entry. */
 const PLUGIN_TYPE = 'acme_widget';
@@ -315,29 +297,11 @@ describe('[ADR-0131 D6] no organization-scoped metadata write is accepted', () =
         });
     }
 
-    for (const type of TIER_A) {
-        it(`publishMetaItem of a LEGACY organization-scoped '${type}' draft → refused; the draft stays, no active row is minted`, async () => {
-            const { protocol, rows } = makeProtocol([], 'env_prod');
-            await seedLegacyOrgDraft(protocol, {
-                type, name: 'org_item', body: { name: 'org_item', label: 'Org item' }, organizationId: 'org_a',
-            });
-            await expect(
-                protocol.publishMetaItem({ type, name: 'org_item', organizationId: 'org_a' }),
-            ).rejects.toMatchObject(REFUSED);
-            expect(orgRows(rows)).toEqual([{ type, name: 'org_item', org: 'org_a', state: 'draft' }]);
-        });
-    }
-
     // ── the package publish ───────────────────────────────────────────────
 
     it('publishPackageDrafts naming an organization → 403 NOT_OVERRIDABLE, nothing promoted', async () => {
         const { protocol, rows } = makeProtocol([], 'env_prod');
         await protocol.saveMetaItem({ type: 'view', name: 'org_grid', item: VIEW, packageId: 'app.demo', mode: 'draft' });
-        for (const type of TIER_A) {
-            await seedLegacyOrgDraft(protocol, {
-                type, name: 'org_item', body: { name: 'org_item' }, organizationId: 'org_a', packageId: 'app.demo',
-            });
-        }
         await expect(
             protocol.publishPackageDrafts({ packageId: 'app.demo', organizationId: 'org_a' }),
         ).rejects.toMatchObject(REFUSED);
@@ -380,31 +344,28 @@ describe('[ADR-0131 D6] no organization-scoped metadata write is accepted', () =
 
     // ── the controls: environment-wide writes are accepted ─────────────────
 
-    it('control — an environment-wide view save succeeds and stores organization_id NULL', async () => {
+    it('control — an environment-wide view save succeeds and stores no organization_id', async () => {
         const { protocol, rows } = makeProtocol([], 'env_prod');
         expect((await protocol.saveMetaItem({ type: 'view', name: 'org_grid', item: VIEW })).success).toBe(true);
-        expect(orgRows(rows)).toEqual([{ type: 'view', name: 'org_grid', org: null, state: 'active' }]);
+        expect(orgRows(rows)).toEqual([{ type: 'view', name: 'org_grid', org: false, state: 'active' }]);
     });
 
     it('control — an environment-wide object save succeeds', async () => {
         const { protocol, rows } = makeProtocol([], 'env_prod');
         expect((await protocol.saveMetaItem({ type: 'object', name: 'org_widget', item: OBJECT })).success).toBe(true);
-        expect(orgRows(rows)).toEqual([{ type: 'object', name: 'org_widget', org: null, state: 'active' }]);
+        expect(orgRows(rows)).toEqual([{ type: 'object', name: 'org_widget', org: false, state: 'active' }]);
     });
 
     it('control — an environment-wide brand-new flow saves (the runtime-create tier is intact)', async () => {
         const { protocol, rows } = makeProtocol([], 'env_prod');
         expect((await protocol.saveMetaItem({ type: 'flow', name: 'org_sweep', item: FLOW })).success).toBe(true);
-        expect(orgRows(rows)).toEqual([{ type: 'flow', name: 'org_sweep', org: null, state: 'active' }]);
+        expect(orgRows(rows)).toEqual([{ type: 'flow', name: 'org_sweep', org: false, state: 'active' }]);
     });
 
-    it('control — an environment-wide draft publishes through the package publish, and a legacy organization draft is left as stored', async () => {
+    it('control — an environment-wide draft publishes through the package publish', async () => {
         const { protocol, rows } = makeProtocol([], 'env_prod');
         await protocol.saveMetaItem({
             type: 'view', name: 'org_grid', item: VIEW, packageId: 'app.demo', mode: 'draft',
-        });
-        await seedLegacyOrgDraft(protocol, {
-            type: 'view', name: 'org_legacy', body: { ...VIEW, name: 'org_legacy' }, organizationId: 'org_a', packageId: 'app.demo',
         });
 
         const res = await protocol.publishPackageDrafts({ packageId: 'app.demo' });
@@ -412,13 +373,12 @@ describe('[ADR-0131 D6] no organization-scoped metadata write is accepted', () =
         expect(res.failed).toEqual([]);
         expect(res).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
         expect(orgRows(rows).sort((a, b) => a.name.localeCompare(b.name))).toEqual([
-            { type: 'view', name: 'org_grid', org: null, state: 'active' },
-            { type: 'view', name: 'org_legacy', org: 'org_a', state: 'draft' },
+            { type: 'view', name: 'org_grid', org: false, state: 'active' },
         ]);
     });
 });
 
-describe('a package-less organization overlay, two packages shipping its view name', () => {
+describe('two packages shipping a view name', () => {
     const NAME = 'task.intake_form';
     const LINK = '/forms/shared-intake';
     const formView = (allowAnonymous: boolean, label = 'Intake') => ({
@@ -444,15 +404,19 @@ describe('a package-less organization overlay, two packages shipping its view na
         return { protocol, rows };
     }
 
-    /** The organization read's copies of the view, where the doors find the form. */
+    /**
+     * [ADR-0131 C7] The env-wide read's copies of the view, where the doors
+     * find the form: the legacy organization read is deleted.
+     */
     async function servedCopies(protocol: any): Promise<Array<Record<string, any>>> {
-        const org: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_a' });
-        return (org.items as any[]).filter((v) => v?.name === NAME);
+        const envWide: any = await protocol.getMetaItems({ type: 'view' });
+        return (envWide.items as any[]).filter((v) => v?.name === NAME);
     }
 
     /**
-     * The copies the anonymous doors would serve for the slug: open, and not
-     * withdrawn by the env-wide layer they read beneath the organization's.
+     * The copies the anonymous doors would serve for the slug, by their own
+     * composition: open, and not withdrawn by any body of the view name in
+     * that same env-wide list.
      */
     async function doorsServe(protocol: any): Promise<Array<Record<string, any>>> {
         const envWide: any = await protocol.getMetaItems({ type: 'view' });
@@ -461,37 +425,19 @@ describe('a package-less organization overlay, two packages shipping its view na
             .some((c) => c.slug === 'shared-intake' && !anonymousFormIntakeWithdrawnIn(layer, view, c)));
     }
 
-    /**
-     * The organization overlay, stored package-less while the form is open
-     * everywhere — a LEGACY row (no write lands organization-scoped since
-     * ADR-0131 D6), planted through the repository the way it was written.
-     */
-    async function storeOpenOverlay(protocol: any, rows: Map<string, Row>) {
-        await protocol.ensureOverlayIndex();
-        await protocol.legacyOrganizationRepo('org_a').put(
-            { type: 'view', name: NAME, org: 'org_a' },
-            formView(true, 'Intake (org)'),
-            { parentVersion: null, actor: null, source: 'test.legacy-residue', intent: 'runtime-only', state: 'active', packageId: null },
-        );
-        expect(Array.from(rows.values()).filter((r) => r.organization_id === 'org_a').map((r) => r.package_id))
-            .toEqual([null]);
-    }
-
-    it('the organization read serves the overlay once per package, each copy stamped with that package', async () => {
-        const { protocol, rows } = makeTwoPackageProtocol();
-        await storeOpenOverlay(protocol, rows);
+    it('the doors serve each package\'s shipped copy', async () => {
+        const { protocol } = makeTwoPackageProtocol();
         const copies = await servedCopies(protocol);
-        expect(copies.map((v) => v.label)).toEqual(['Intake (org)', 'Intake (org)']);
+        expect(copies.map((v) => v.label)).toEqual(['Intake', 'Intake']);
         expect(copies.map((v) => v._packageId).sort()).toEqual(['pkg_a', 'pkg_b']);
-        // Control: before any withdrawal the doors serve the overlay.
+        // Control: before any withdrawal the doors serve both copies.
         expect(await doorsServe(protocol)).toHaveLength(2);
     });
 
     for (const [order, withdrawing] of [['first', 'pkg_a'], ['second', 'pkg_b']] as const) {
         describe(`the package ${order} in registry order withdraws the name env-wide`, () => {
-            async function withdrawAfterOverlay() {
+            async function withdrawAfterSave() {
                 const { protocol, rows } = makeTwoPackageProtocol();
-                await storeOpenOverlay(protocol, rows);
                 expect((await protocol.saveMetaItem({
                     type: 'view', name: NAME, item: formView(false), packageId: withdrawing,
                 })).success).toBe(true);
@@ -499,7 +445,7 @@ describe('a package-less organization overlay, two packages shipping its view na
             }
 
             it('the env-wide list the doors read holds the withdrawal beside the other package\'s body', async () => {
-                const { protocol } = await withdrawAfterOverlay();
+                const { protocol } = await withdrawAfterSave();
                 const envWide: any = await protocol.getMetaItems({ type: 'view' });
                 const named = (envWide.items as any[]).filter((v) => v?.name === NAME)
                     .map((v) => [v._packageId, v.config.sharing.allowAnonymous])
@@ -507,20 +453,19 @@ describe('a package-less organization overlay, two packages shipping its view na
                 expect(named).toEqual([['pkg_a', withdrawing !== 'pkg_a'], ['pkg_b', withdrawing !== 'pkg_b']]);
             });
 
-            it('the doors serve no copy of the overlay stored before the withdrawal', async () => {
-                const { protocol } = await withdrawAfterOverlay();
-                // Both stamped copies are still the open overlay, and both are closed.
+            it('the doors serve no copy once one package withdraws the name', async () => {
+                const { protocol } = await withdrawAfterSave();
                 expect((await servedCopies(protocol)).map((v) => v._packageId).sort()).toEqual(['pkg_a', 'pkg_b']);
                 expect(await doorsServe(protocol)).toEqual([]);
             });
 
-            it('a re-save of the overlay is refused (no write is organization-scoped), and nothing changes', async () => {
-                const { protocol, rows } = await withdrawAfterOverlay();
-                const before = Array.from(rows.values()).filter((r) => r.organization_id === 'org_a');
+            it('an organization-scoped save of the name is refused (no write is organization-scoped), and nothing changes', async () => {
+                const { protocol, rows } = await withdrawAfterSave();
+                const before = Array.from(rows.values());
                 await expect(protocol.saveMetaItem({
                     type: 'view', name: NAME, item: formView(true, 'Intake (org, again)'), organizationId: 'org_a',
                 })).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, organizationId: 'org_a' });
-                expect(Array.from(rows.values()).filter((r) => r.organization_id === 'org_a')).toEqual(before);
+                expect(Array.from(rows.values())).toEqual(before);
             });
         });
     }
@@ -584,9 +529,9 @@ describe('a publish promotes only the draft its gate judged', () => {
 
 // The lock a publish consults is the one at the address it promotes: the
 // package key the publish resolved (the caller's stated binding, else the
-// draft row's own), not only the package the request stated. With two
-// packages' env-wide rows of one view both locked, the refusal carries the
-// lock of the package whose draft is being promoted.
+// draft address it resolves), not only the package the request stated. With
+// two packages' env-wide rows of one view both locked, the refusal of a
+// publish naming its package carries that package's lock.
 describe('a publish consults the lock of the package key it resolved', () => {
     const locked = (pkg: string) => ({ ...VIEW, _lock: 'full', _lockReason: `${pkg} keeps this view as shipped` });
 
@@ -604,10 +549,20 @@ describe('a publish consults the lock of the package key it resolved', () => {
         return { protocol, draftsOf };
     }
 
-    it('a publish that states no package consults the lock of the draft row\'s own package', async () => {
+    // [#23495] Replaced, not respelled: this case pinned a publish naming no
+    // package consulting the lock of the draft row a package-agnostic read met
+    // (`pkg_b`), over an item whose active rows two packages hold. Naming no
+    // package, the publish now takes the draft save's address, and an item two
+    // packages hold has none: the publish is judged by the lock the draft save
+    // naming no package is judged by, and answers what that save answers.
+    it('a publish that states no package, of an item two packages hold, is judged by the lock the draft save naming none is', async () => {
         const { protocol, draftsOf } = await seedLockedRowsAndDraft('pkg_b');
+        const saveRefusal = await protocol.saveMetaItem({
+            type: 'view', name: VIEW.name, item: { ...VIEW, label: 'Org grid (edited)' }, mode: 'draft',
+        }).then(() => undefined, (e: any) => e);
+        expect(saveRefusal).toMatchObject({ code: 'ITEM_LOCKED', status: 403, lock: 'full' });
         await expect(protocol.publishMetaItem({ type: 'view', name: VIEW.name }))
-            .rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403, lock: 'full', lockReason: 'pkg_b keeps this view as shipped' });
+            .rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403, lock: 'full', lockReason: saveRefusal.lockReason });
         expect(draftsOf()).toEqual(['pkg_b']);
     });
 
@@ -740,16 +695,6 @@ describe('each package\'s copy of a view container expands into its own package\
         return { protocol, rows, registry: engine.registry };
     }
 
-    /** An organization overlay of the form, open, as a rollback restores it: the save check never judged it. */
-    async function restoreOpenOverlay(protocol: any) {
-        await protocol.ensureOverlayIndex();
-        await protocol.legacyOrganizationRepo('org_a').put(
-            { type: 'view', name: NAME, org: 'org_a' },
-            formView(true, 'Intake (org)'),
-            { parentVersion: null, actor: null, source: 'test.restored', intent: 'runtime-only', state: 'active', packageId: null },
-        );
-    }
-
     /** An env-wide copy of the container, stored for `packageId` (package-less when undefined). */
     async function saveCopy(protocol: any, packageId: string | undefined, allowAnonymous: boolean, title: string) {
         expect((await protocol.saveMetaItem({
@@ -783,13 +728,13 @@ describe('each package\'s copy of a view container expands into its own package\
 
     /**
      * What the anonymous doors serve for the slug, by their own composition
-     * (`registerFormEndpoints`): the organization's read, each open candidate
-     * judged over the env-wide view list beneath it.
+     * (`registerFormEndpoints`): the env-wide read, each open candidate
+     * judged over that same list (the legacy organization read is deleted,
+     * ADR-0131 C7).
      */
     async function doorsServe(protocol: any): Promise<unknown[]> {
-        const org: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_a' });
         const envWide: any = await protocol.getMetaItems({ type: 'view' });
-        return (org.items as any[]).filter((view) => anonymousFormIntakeCandidates(view)
+        return (envWide.items as any[]).filter((view) => anonymousFormIntakeCandidates(view)
             .some((c) => c.slug === SLUG && !anonymousFormIntakeWithdrawnIn(envWide.items, view, c)));
     }
 
@@ -797,9 +742,8 @@ describe('each package\'s copy of a view container expands into its own package\
         for (const [kernel, environmentId] of KERNELS) {
             for (const owner of [undefined, 'pkg_a'] as const) {
                 const where = `${kernel}, ${owner ? 'the copy\'s package owns the object' : 'no code package owns the object'}`;
-                it(`${where}: the env-wide list holds the shipped withdrawal beside the copy, and the doors serve no copy of the overlay`, async () => {
+                it(`${where}: the env-wide list holds the shipped withdrawal beside the copy, and the doors serve no copy`, async () => {
                     const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(false)]], environmentId, owner);
-                    await restoreOpenOverlay(protocol);
                     await saveCopy(protocol, 'pkg_a', true, 'Intake (pkg_a copy)');
 
                     expect(await envWideBodies(protocol)).toEqual([
@@ -811,9 +755,8 @@ describe('each package\'s copy of a view container expands into its own package\
             }
         }
 
-        it('control: with no package withdrawing the form, the doors serve the overlay', async () => {
+        it('control: with no package withdrawing the form, the doors serve the copy', async () => {
             const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(true)]], 'env_prod');
-            await restoreOpenOverlay(protocol);
             await saveCopy(protocol, 'pkg_a', true, 'Intake (pkg_a copy)');
             expect((await doorsServe(protocol)).length).toBeGreaterThan(0);
         });
@@ -822,9 +765,8 @@ describe('each package\'s copy of a view container expands into its own package\
     describe('(b) the same, with the withdrawal saved in the other package\'s own env-wide copy', () => {
         for (const [kernel, environmentId] of KERNELS) {
             for (const order of [['pkg_a', 'pkg_b'], ['pkg_b', 'pkg_a']] as const) {
-                it(`${kernel}, ${order[0]}'s copy saved first: each copy serves its own package's slot, and the doors serve no copy of the overlay`, async () => {
+                it(`${kernel}, ${order[0]}'s copy saved first: each copy serves its own package's slot, and the doors serve no copy`, async () => {
                     const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(true)]], environmentId);
-                    await restoreOpenOverlay(protocol);
                     for (const pkg of order) await saveCopy(protocol, pkg, pkg === 'pkg_a', `Intake (${pkg} copy)`);
 
                     expect(await envWideBodies(protocol)).toEqual([
@@ -841,7 +783,6 @@ describe('each package\'s copy of a view container expands into its own package\
         for (const [kernel, environmentId] of KERNELS) {
             it(`${kernel}: the package-less copy serves each package's slot, so the administrator's switch opens the form for every package`, async () => {
                 const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(false)]], environmentId);
-                await restoreOpenOverlay(protocol);
                 await saveCopy(protocol, undefined, true, 'Intake (env-wide copy)');
 
                 expect(await envWideBodies(protocol)).toEqual([
@@ -854,7 +795,6 @@ describe('each package\'s copy of a view container expands into its own package\
             for (const order of [[undefined, 'pkg_b'], ['pkg_b', undefined]] as const) {
                 it(`${kernel}, ${order[0] ?? 'the package-less'} copy saved first: a package's own copy serves that package's slot ahead of the package-less copy`, async () => {
                     const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(true)]], environmentId);
-                    await restoreOpenOverlay(protocol);
                     for (const pkg of order) {
                         if (pkg === undefined && order[0] === 'pkg_b') {
                             await saveUnboundCopyBeside(protocol, true, 'Intake (env-wide copy)');
@@ -912,9 +852,8 @@ describe('each package\'s copy of a view container expands into its own package\
     // package-less, as the by-name read naming that package decides.
     describe('(e) a stored row of the form\'s own name serves its own package\'s slot, and hides no other package\'s copy', () => {
         for (const [kernel, environmentId] of KERNELS) {
-            it(`${kernel}: one package's row of the name and another package's withdrawing copy are both in the env-wide list, and the doors serve no copy of the overlay`, async () => {
+            it(`${kernel}: one package's row of the name and another package's withdrawing copy are both in the env-wide list, and the doors serve no copy`, async () => {
                 const { protocol } = harness([['pkg_a', container(true)], ['pkg_b', container(true)]], environmentId);
-                await restoreOpenOverlay(protocol);
                 expect((await protocol.saveMetaItem({
                     type: 'view', name: NAME, item: formView(true, 'Intake (pkg_a row)'), packageId: 'pkg_a',
                 })).success).toBe(true);
@@ -1038,15 +977,6 @@ describe('each package\'s copy of a view container expands into its own package\
                 item: { name: 'task', object: 'task', ...p.m.body(COPY_TITLE, allowAnonymous, SLUG) },
             })).success).toBe(true);
         }
-        /** An organization overlay of the form under `name`, open, as a rollback restores it. */
-        async function restoreOpenOverlayAt(protocol: any, name: string) {
-            await protocol.ensureOverlayIndex();
-            await protocol.legacyOrganizationRepo('org_a').put(
-                { type: 'view', name, org: 'org_a' },
-                { name, label: 'Intake (org)', object: 'task', viewKind: 'form', config: form(true, 'Intake (org)', SLUG) },
-                { parentVersion: null, actor: null, source: 'test.restored', intent: 'runtime-only', state: 'active', packageId: null },
-            );
-        }
         const titleOf = (v: any): unknown => v?.config?.title ?? v?.config?.label;
         /** The titles a package's slot of `name` serves in the env-wide list. */
         async function slotTitles(protocol: any, name: string, pkg: string): Promise<unknown[]> {
@@ -1102,11 +1032,10 @@ describe('each package\'s copy of a view container expands into its own package\
                     it(`${kernel}; ${label(p)}: the withdrawal saved in the copy closes the anonymous doors, and saved open the doors serve`, async () => {
                         for (const allowAnonymous of [false, true]) {
                             const { protocol } = harness(shippedIn(p), environmentId, p.owner);
-                            await restoreOpenOverlayAt(protocol, servedName(p));
                             await saveCopyOf(protocol, p, allowAnonymous);
                             const served = await doorsServe(protocol);
-                            if (allowAnonymous) expect(served.length, 'saved open: the doors serve the overlay').toBeGreaterThan(0);
-                            else expect(served, 'withdrawn in the copy: the doors serve no copy of the overlay').toEqual([]);
+                            if (allowAnonymous) expect(served.length, 'saved open: the doors serve the copy').toBeGreaterThan(0);
+                            else expect(served, 'withdrawn in the copy: the doors serve no copy').toEqual([]);
                         }
                     });
                 }
@@ -1470,7 +1399,7 @@ describe('each package\'s copy of a view container expands into its own package\
                         for (const pkg of order) registry.registerItem('page', { name: 'home', label: `Home (shipped by ${pkg})` }, 'name', pkg);
                         engine.registry = registry;
                         rows.set(`page|home|__env__|active|${COPYING}`, {
-                            id: 'r_page_home', type: 'page', name: 'home', organization_id: null, package_id: COPYING, state: 'active',
+                            id: 'r_page_home', type: 'page', name: 'home', package_id: COPYING, state: 'active',
                             metadata: JSON.stringify({ name: 'home', label: ROW_TITLE }),
                         });
                         const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), undefined) as any;

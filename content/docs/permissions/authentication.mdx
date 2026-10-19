@@ -610,9 +610,11 @@ often before the account-level lock engages.
 > enrollment is refused with the same `403 MFA_REQUIRED` and message on every
 > face that admits keys. `PASSWORD_EXPIRED` and `PASSWORD_RESET_REQUIRED` hold
 > *password sign-in* only, so the owner's API keys keep working. The refusal is
-> not a revocation: the same key works again the moment its owner enrolls. A
-> request is judged by the credential that admitted it, so a session cookie
-> sent beside an API key never answers for the key. The auth endpoints (sign-in, change-password, two-factor enrollment
+> not a revocation: the same key works again the moment its owner enrolls. By
+> default a request is judged by the credential that admitted it, so a session
+> cookie sent beside an API key never answers for the key. The storage routes
+> are the exception: there a gated session is refused whatever else the
+> request carries. The auth endpoints (sign-in, change-password, two-factor enrollment
 > and sign-out among them) and a short allow-list kept with that decision
 > (health and discovery among them) still pass, so the user can remediate. Platform administration is not part of that exemption: the
 > platform-admin actions refuse a gated session with the same `403`, a platform

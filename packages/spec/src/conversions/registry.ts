@@ -45,55 +45,61 @@ import {
   type ViewFilterOperator,
 } from '../ui/view.zod.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY } from '../ui/assembled-views.zod.js';
+import { misplacedDefaultPageRefusal } from '../ui/default-record-page.js';
 import { FLOW_REGION_SLOTS_BY_TYPE } from '../automation/region-slots.js';
+import { CONNECTOR_CONFIG_LOOSE_KEYS, WAIT_EVENT_CONFIG_LOOSE_KEYS } from '../automation/flow-sibling-block-loose-keys.js';
+import { FLOW_RESERVED_NODE_TYPES } from '../automation/flow-reserved-node-types.js';
 
 /**
- * Flow callout node type rename (protocol 11.0).
+ * Flow callout node type rename (protocol 11.0; retired from the load path at
+ * 18, #23543 F5-http).
  *
  * The divergent `http_request` / `http_call` / `webhook` node types were
  * unified to the single canonical `http` node (see
  * `services/service-automation/src/builtin/http-nodes.ts`). A pure enum
  * re-spelling — losslessly convertible.
  *
- * **Stays on the load path at 18 — a recorded verdict (#23487).** `flow.node.type`
- * is an open namespace (ADR-0018), so no door refuses `http_request` /
- * `http_call` / `webhook`: retired, this entry would leave an authored node
- * silently carrying a type no builtin executor owns, where today it converts
- * with a notice. It can retire once the authoring doors refuse those three
- * reserved names with the rename to `http`, which is a decision about
- * reserving retired official names inside an open namespace.
+ * ## Retired from the load path at 18 (#23543, ruling F5-http A)
+ *
+ * Through 17 it stayed live because `flow.node.type` is an open namespace
+ * (ADR-0018) and no door refused the three names, so retired alone it would
+ * have left an authored node silently carrying a type no builtin executor owns
+ * (the verdict #23487 recorded). The ruling reserved the names inside the open
+ * namespace: the flow parse refuses each one as a node `type` with the
+ * prescription naming `http`, and the automation engine refuses to register a
+ * node executor under one (`FLOW_RESERVED_NODE_TYPES`,
+ * `automation/flow-reserved-node-types.ts`, the table this entry reads too). So
+ * the authoring funnel (`defineStack`, `os validate` / `os build`) no longer
+ * replays this entry, and an author is taught the canonical type instead of
+ * being rewritten. Stored flows are the `includeRetired` seams: the automation
+ * engine's flow rehydration and stored-row rehydration
+ * (`applyConversionsToStoredItem`) still rewrite a `sys_metadata` flow row
+ * written with an old name before anything parses it, and so does the
+ * artifact-ingestion door inside its window. `os migrate meta` does not reach
+ * it: protocol 11 is below `MIGRATION_SUPPORT_FLOOR`. The family's D3 entry,
+ * `flow-node-http-callout-types-reserved`, states the edit for authored sources.
+ *
+ * The rewrite is unconditional. Until 18 it skipped a node whose old name a
+ * live executor owned and reported a conflict instead (ADR-0078's guard); the
+ * engine now refuses that registration, so no live executor can own a reserved
+ * name and the guard had no case left to judge. Protocol 18 removed the
+ * conflict channel itself with it (#24001, D3 entry
+ * `conversion-conflict-channel-removed`).
  */
 const flowNodeHttpRename: MetadataConversion = {
   id: 'flow-node-http-callout-rename',
   toMajor: 11,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.node.type',
   summary: "flow callout node types 'http_request' / 'http_call' / 'webhook' → 'http'",
-  apply(stack, emit, context) {
-    const aliases = new Set(['http_request', 'http_call', 'webhook']);
+  apply(stack, emit) {
     return mapFlowNodes(stack, (node, path) => {
       const type = node.type;
-      if (typeof type !== 'string' || !aliases.has(type)) return node;
-      // `flow.node.type` is an OPEN namespace (ADR-0018 removed the enum gate),
-      // so a retired official name could be re-registered by a third party. If a
-      // live executor owns this token in this environment, refuse the rewrite —
-      // clobbering it would silently break that node — and report a loud,
-      // actionable conflict instead (ADR-0078). On the pure build/validate seam
-      // `context` is absent, so the historical alias converts as normal.
-      if (context?.reservedNodeTypes?.has(type)) {
-        context.reportConflict?.({
-          token: type,
-          path: `${path}.type`,
-          reason:
-            `'${type}' is a protocol-11 retired official flow-node type, but a live ` +
-            `executor is registered under that exact name in this environment. The ` +
-            `conversion to 'http' was skipped to avoid breaking it. Rename your ` +
-            `custom node to a non-reserved type (the reserved names are ` +
-            `'http_request' / 'http_call' / 'webhook', all superseded by 'http').`,
-        });
-        return node;
-      }
-      emit({ from: type, to: 'http', path: `${path}.type` });
-      return { ...node, type: 'http' };
+      if (typeof type !== 'string' || !Object.prototype.hasOwnProperty.call(FLOW_RESERVED_NODE_TYPES, type)) return node;
+      const canonical = FLOW_RESERVED_NODE_TYPES[type]!;
+      emit({ from: type, to: canonical, path: `${path}.type` });
+      return { ...node, type: canonical };
     });
   },
   fixture: {
@@ -126,22 +132,36 @@ const flowNodeHttpRename: MetadataConversion = {
 };
 
 /**
- * Page `kind: 'jsx'` → `kind: 'html'` (protocol 11.4).
+ * Page `kind: 'jsx'` → `kind: 'html'` (protocol 11.4; retired from the load
+ * path at 18, #23543 F5-jsx).
  *
- * `'jsx'` is a documented deprecated alias of the canonical `'html'` page kind
- * (ADR-0080; see `spec/src/ui/page.zod.ts`). The `source` semantics are
- * identical, so the rename is lossless.
+ * `'jsx'` was the first name of the constrained-JSX page tier (ADR-0080), which
+ * ADR-0081 renamed `'html'`. The `source` semantics are identical, so the
+ * rename is lossless.
  *
- * **Stays on the load path at 18 — a recorded verdict (#23487).** `'jsx'` is
- * still a declared member of `PageSchema.kind` and of `COMPILED_PAGE_KINDS`,
- * which the save-time compile reads, so retired, this entry would leave the
- * value silently accepted at every door rather than refused. It can retire
- * once the value itself is retired from the enum (an `enumWithRetiredValues`
- * prescription naming `html`), together with the paths that still branch on it.
+ * ## Retired from the load path at 18 (#23543, ruling F5-jsx A)
+ *
+ * Through 17 it stayed live because `'jsx'` was still a declared member of
+ * `PageSchema.kind` and of `COMPILED_PAGE_KINDS`, so retired alone it would
+ * have left the value silently accepted at every door (the verdict #23487
+ * recorded). The ruling retired the value: `PageSchema.kind` declares it
+ * through `enumWithRetiredValues` with the prescription naming `html`
+ * (`PAGE_KIND_RETIRED_GUIDANCE`, `ui/page.zod.ts`), and `COMPILED_PAGE_KINDS`
+ * and every reader that branched on it dropped the member. So the authoring
+ * funnel (`defineStack`, `os validate` / `os build` / `os lint`) no longer
+ * replays this entry, and an author is taught the canonical kind instead of
+ * being rewritten. Stored pages are the `includeRetired` seams: stored-row
+ * rehydration (`applyConversionsToStoredItem`) still rewrites a `sys_metadata`
+ * page row written as `jsx` before anything parses it, and so does the
+ * artifact-ingestion door inside its window. `os migrate meta` does not reach
+ * it: protocol 11 is below `MIGRATION_SUPPORT_FLOOR`. The family's D3 entry,
+ * `page-kind-jsx-retired`, states the edit for authored sources.
  */
 const pageKindJsxToHtml: MetadataConversion = {
   id: 'page-kind-jsx-to-html',
   toMajor: 11,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'page.kind',
   summary: "page kind 'jsx' → 'html' (ADR-0080 canonical spelling)",
   apply(stack, emit) {
@@ -492,21 +512,31 @@ function renameVisibilityAlias(
  * `visibleWhen` across all layers. Applies to form sections and (recursively
  * nested) form fields in every FORM payload {@link mapViewPayloads} reaches —
  * `views[].form` / `views[].formViews.*`, a ViewItem record's `config`, and a
- * flattened form overlay's top level (commit b799ac553). **Live window**: the protocol-15 loader accepts the deprecated
- * key (the zod schemas also normalize it at parse — this entry makes the
- * acceptance *declared, loud, and expiring* per ADR-0087 D2, and will
- * graduate into the step-16 chain when the alias is removed).
+ * flattened form overlay's top level (commit b799ac553).
  *
- * **Stays on the load path at 18 — a recorded verdict (#23487).** `visibleOn` is
- * still a declared `[DEPRECATED]` key on the form field and section schemas
- * (`view.zod.ts`), which fold it into `visibleWhen` at parse, so retiring this
- * entry alone changes nothing an author can observe: the old spelling would
- * still be accepted without a word. It retires with the alias itself, once
- * those schemas tombstone `visibleOn` (`retiredKey`, naming `visibleWhen`).
+ * ## Retired from the load path at 18 (#23543, ruling F4 A)
+ *
+ * Through 17 it stayed live because `visibleOn` was still a declared
+ * `[DEPRECATED]` key on the form field and section schemas, which folded it
+ * into `visibleWhen` at parse, so retired alone it would have left the old
+ * spelling silently accepted (the verdict #23487 recorded). The ruling retired
+ * the key: both shapes carry a `retiredKey()` tombstone naming `visibleWhen`
+ * (`FORM_FIELD_VISIBLE_ON_RETIRED` / `FORM_SECTION_VISIBLE_ON_RETIRED`,
+ * `ui/view.zod.ts`), and the fold went with it. So the authoring funnel
+ * (`defineStack`, `os validate` / `os build` / `os lint`) no longer replays
+ * this entry, and an author is taught the canonical key instead of being
+ * rewritten. Stored form views are the `includeRetired` seams: stored-row
+ * rehydration (`applyConversionsToStoredItem`) still renames a `sys_metadata`
+ * view row's `visibleOn` before anything parses it, and so does the
+ * artifact-ingestion door inside its window. `os migrate meta` does not reach
+ * it: protocol 15 is below `MIGRATION_SUPPORT_FLOOR`. The family's D3 entry,
+ * `ui-visibility-alias-keys-retired`, states the edit for authored sources.
  */
 const viewVisibleOnToVisibleWhen: MetadataConversion = {
   id: 'view-visibleOn-to-visibleWhen',
   toMajor: 15,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'view.form.visibleOn',
   summary: "view form section/field key 'visibleOn' → 'visibleWhen' (ADR-0089)",
   apply(stack, emit) {
@@ -600,19 +630,24 @@ const viewVisibleOnToVisibleWhen: MetadataConversion = {
  * The page-component spelling of the same predicate. Applies to every page
  * component {@link mapPageComponents} reaches — `regions[].components[]`,
  * `slots.<slot>`, and the containers a component nests under its `properties`
- * (#6776, #6775). **Live window**, same terms as
- * {@link viewVisibleOnToVisibleWhen}. (An AI agent's `visibility` property is
- * a different, unrelated surface and is not touched.)
+ * (#6776, #6775). (An AI agent's `visibility` property is a different,
+ * unrelated surface and is not touched.)
  *
- * **Stays on the load path at 18 — a recorded verdict (#23487).** `visibility` is
- * still a declared `[DEPRECATED]` key on `PageComponentSchema` (`page.zod.ts`),
- * folded into `visibleWhen` at parse, so retiring this entry alone would leave
- * the old spelling silently accepted. It retires with the alias itself, once
- * that schema tombstones `visibility` (`retiredKey`, naming `visibleWhen`).
+ * ## Retired from the load path at 18 (#23543, ruling F4 A)
+ *
+ * Same terms as {@link viewVisibleOnToVisibleWhen}, retired in the same change:
+ * `PageComponentSchema.visibility` is a `retiredKey()` tombstone naming
+ * `visibleWhen` (`ui/page.zod.ts`) and its parse-time fold is gone, so the
+ * authoring funnel no longer replays this entry. Stored pages are the
+ * `includeRetired` seams (stored-row rehydration, the artifact-ingestion door
+ * inside its window); `os migrate meta` does not reach it, protocol 15 being
+ * below `MIGRATION_SUPPORT_FLOOR`.
  */
 const pageComponentVisibilityToVisibleWhen: MetadataConversion = {
   id: 'page-component-visibility-to-visibleWhen',
   toMajor: 15,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'page.component.visibility',
   summary: "page component key 'visibility' → 'visibleWhen' (ADR-0089)",
   apply(stack, emit) {
@@ -1263,18 +1298,12 @@ const flowNodeNotifyConfigAliases: MetadataConversion = {
 /**
  * The loose `config` keys the `wait` executor used to also accept, in the exact
  * precedence order of the `??` chains it carried, keyed by the declared
- * `waitEventConfig` property each one feeds.
- *
- * `duration` and `signal` are not declared names anywhere in the spec — they
- * only ever existed as the tail of an executor fallback, which is why the
- * declared spelling is listed first in each group.
+ * `waitEventConfig` property each one feeds. Declared once in
+ * `automation/flow-sibling-block-loose-keys.ts`, the table the flow parse's
+ * loose-key refusal reads too (#23543 F3), so the keys refused at authoring and
+ * the keys lifted at rehydration are one set.
  */
-const WAIT_EVENT_CONFIG_LIFTS: ReadonlyArray<readonly [target: string, candidates: readonly string[]]> = [
-  ['eventType', ['eventType']],
-  ['timerDuration', ['timerDuration', 'duration']],
-  ['signalName', ['signalName', 'signal']],
-  ['timeoutMs', ['timeoutMs']],
-];
+const WAIT_EVENT_CONFIG_LIFTS = WAIT_EVENT_CONFIG_LOOSE_KEYS;
 
 /**
  * Lift `wait`'s loose `config.*` event keys onto the declared `waitEventConfig`
@@ -1298,16 +1327,20 @@ const WAIT_EVENT_CONFIG_LIFTS: ReadonlyArray<readonly [target: string, candidate
  * and the example that demonstrates `wait` was itself on the retiring spelling.
  *
  * Precedence mirrors those `??` chains, so the rewrite is behaviour-preserving:
- * a value already on `waitEventConfig` WINS and its loose counterpart is left
- * shadowed in place, and among loose candidates the first one present decides.
+ * a value already on `waitEventConfig` WINS, and among loose candidates the
+ * first one present decides.
  *
- * This is a LIFT between two locations, not an alias pair in one dict, so
- * #4923's by-value split (delete a redundant twin, keep a disagreeing one)
- * deliberately does NOT apply — {@link renameConfigKey} judges two spellings of
- * one slot, while here the loose `config` location is itself the retired thing
- * and `WAIT_EVENT_CONFIG_LIFTS` may map several candidate names onto one
- * target. Extending the rule here would be a separate ruling on a different
- * question; the shadowed loose key is left for the strict contract to reject.
+ * A loose key that does not lift is DELETED (#23543 F3): one the block already
+ * shadows, a later candidate the first present one shadowed, and a `null` the
+ * `??` chain skipped. None of them was ever read — the `??` chain never looked
+ * past the value that won — and since 18 the flow parse refuses every named
+ * loose key under `config` (`siblingBlockLooseConfigRefusals`), so a stored
+ * flow that kept one would stop loading at the rehydration seam that replays
+ * this entry. This is a LIFT between two locations, not an alias pair in one
+ * dict, so #4923's by-value split (keep a disagreeing twin for the author to
+ * decide) does not apply: the loose location is itself the retired thing, its
+ * value lost to the block's under every reading that ever ran, and a stored
+ * row has no author to decide.
  *
  * `eventType` is defaulted to `'timer'` whenever lifting would otherwise leave
  * the block without one. That is load-bearing, not tidiness: the loader parses
@@ -1326,45 +1359,63 @@ function liftWaitEventConfig(stack: Dict, emit: Emit): Dict {
     const wec: Dict = isDict(node.waitEventConfig) ? { ...node.waitEventConfig } : {};
     const nextConfig: Dict = { ...config };
     let lifted = false;
+    let dropped = false;
 
     for (const [target, candidates] of WAIT_EVENT_CONFIG_LIFTS) {
+      let decided = false;
       for (const from of candidates) {
-        if (nextConfig[from] == null) continue;
-        if (wec[target] == null) {
-          wec[target] = nextConfig[from];
-          delete nextConfig[from];
-          emit({ from: `config.${from}`, to: `waitEventConfig.${target}`, path: `${path}.waitEventConfig.${target}` });
-          lifted = true;
-        }
+        if (!(from in nextConfig)) continue;
+        const value = nextConfig[from];
+        delete nextConfig[from];
         // The first candidate PRESENT decides, lifted or shadowed — the `??`
         // chain never looked past it either.
-        break;
+        if (!decided && value != null && wec[target] == null) {
+          wec[target] = value;
+          emit({ from: `config.${from}`, to: `waitEventConfig.${target}`, path: `${path}.waitEventConfig.${target}` });
+          lifted = true;
+        } else {
+          const by = value == null ? 'it carried no value' : `\`waitEventConfig.${target}\` already set, so it was never read`;
+          emit({ from: `config.${from}`, to: `(removed — ${by})`, path: `${path}.config` });
+          dropped = true;
+        }
+        if (value != null) decided = true;
       }
     }
 
-    if (!lifted) return node;
-    if (wec.eventType == null) wec.eventType = 'timer';
-    return { ...node, config: nextConfig, waitEventConfig: wec };
+    if (!lifted && !dropped) return node;
+    if (lifted && wec.eventType == null) wec.eventType = 'timer';
+    return lifted ? { ...node, config: nextConfig, waitEventConfig: wec } : { ...node, config: nextConfig };
   });
 }
 
 /**
  * Wait flow-node loose `config` keys → the declared `waitEventConfig` sibling
- * (protocol 17, #4045). See {@link liftWaitEventConfig} for the precedence rules
- * and why `eventType` is defaulted.
+ * (protocol 17, #4045; retired from the load path at 18, #23543 F3). See
+ * {@link liftWaitEventConfig} for the precedence rules, why `eventType` is
+ * defaulted, and why a loose key that does not lift is deleted.
  *
- * **Stays on the load path at 18 — a recorded verdict (#23487).** `wait` has no
- * `config` contract (its contract is the sibling block), so retired, a loose
- * key beside a declared `waitEventConfig` would be silently ignored, and a node
- * with only loose keys would meet the missing-block refusal, which does not
- * name the move. Refusing the loose keys under `config` would also refuse
- * stored flows whose loose key the block shadows, because the rehydration seam
- * parses the same schema and this entry leaves a shadowed key in place; it can
- * retire once that shadowed shape has a ruling.
+ * ## Retired from the load path at 18 (#23543, ruling F3 A)
+ *
+ * Through 17 it stayed live because `wait` has no `config` contract (its
+ * contract is the sibling block), so retired alone, a loose key beside a
+ * declared `waitEventConfig` would have been silently ignored (the verdict
+ * #23487 recorded). The ruling closed both halves: the flow parse refuses every
+ * named loose key under a `wait` node's `config` with the prescription naming
+ * its `waitEventConfig` key (`siblingBlockLooseConfigRefusals`,
+ * `automation/flow-sibling-block-loose-keys.ts`, which owns the key table this
+ * lift reads), and this lift deletes the loose keys the block shadows, so a
+ * stored flow the refusal would reject keeps loading. The authoring funnel
+ * (`defineStack`, `os validate` / `os build` / `os lint`) no longer replays it.
+ * Stored flows are the `includeRetired` seams: the automation engine's flow
+ * rehydration, stored-row rehydration (`applyConversionsToStoredItem`), the
+ * metadata save door's flow fallback, the artifact-ingestion door inside its
+ * window, and `os migrate meta --from 16` (a step-17 member).
  */
 const flowNodeWaitEventConfigLift: MetadataConversion = {
   id: 'flow-node-wait-event-config-lift',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.node.wait.waitEventConfig',
   summary:
     "wait flow-node loose config keys → the declared `waitEventConfig` block: 'eventType', " +
@@ -1386,7 +1437,7 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
             // Loose `signal` alongside an explicit eventType: both lift.
             { id: 'n3', type: 'wait', config: { eventType: 'signal', signal: 'order_paid' } },
             // Partially shadowed: `timerDuration` is already declared, so the
-            // loose `duration` stays put untouched; only `eventType` lifts.
+            // loose `duration` is deleted (#23543 F3); only `eventType` lifts.
             // (Deliberately not `timeoutMs` — protocol 17 retires that key
             // (#4158), and the fixture harness replays the WHOLE table, so an
             // `after` naming it would describe an end state that no longer
@@ -1413,16 +1464,16 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
               id: 'n4',
               type: 'wait',
               waitEventConfig: { timerDuration: 'PT5M', eventType: 'signal' },
-              config: { duration: 'PT9M' },
+              config: {},
             },
           ],
         },
       ],
     },
     // n2: `duration` → `timerDuration`. n3: `eventType` + `signal` → `signalName`.
-    // n4: only `eventType` (its `duration` is shadowed by a declared
-    // `timerDuration` → no notice, and the key is left in place).
-    expectedNotices: 4,
+    // n4: `eventType` lifts, and its `duration`, shadowed by a declared
+    // `timerDuration`, is deleted with its own notice.
+    expectedNotices: 5,
   },
 };
 
@@ -1563,8 +1614,12 @@ const flowNodeSubflowFlowAlias: MetadataConversion = {
   },
 };
 
-/** The `config` keys a mis-taught `connector_action` node carries, in declared-block order. */
-const CONNECTOR_CONFIG_LIFTS = ['connectorId', 'actionId', 'input'] as const;
+/**
+ * The `config` keys a mis-taught `connector_action` node carries, in
+ * declared-block order — the one table the flow parse's loose-key refusal reads
+ * too (`automation/flow-sibling-block-loose-keys.ts`, #23543 F3).
+ */
+const CONNECTOR_CONFIG_LIFTS = CONNECTOR_CONFIG_LOOSE_KEYS;
 
 /**
  * Lift `connector_action`'s loose `config.*` keys onto the declared
@@ -1583,7 +1638,12 @@ const CONNECTOR_CONFIG_LIFTS = ['connectorId', 'actionId', 'input'] as const;
  * conversion is what makes the flows it mis-taught start working.
  *
  * Precedence matches every other lift here: a key already on the declared
- * block WINS and its loose counterpart is left shadowed in place.
+ * block WINS. Its loose counterpart, never read, is DELETED (#23543 F3), and so
+ * is a loose `null`: since 18 the flow parse refuses every named loose key
+ * under `config`, so a stored flow that kept one would stop loading at the
+ * rehydration seam that replays this entry. The reason it is a deletion and
+ * not #4923's keep-the-disagreeing-twin is the one under
+ * {@link liftWaitEventConfig}.
  *
  * One completeness guard is load-bearing, mirroring `wait`'s `eventType`
  * default: the loader parses the CONVERTED flow, and `connectorConfig` requires
@@ -1593,7 +1653,9 @@ const CONNECTOR_CONFIG_LIFTS = ['connectorId', 'actionId', 'input'] as const;
  * the refusal onto a key the author never wrote. The flow parse then refuses
  * the node for its missing `connectorConfig` block, whose prescription names
  * the move out of `config` (#20418); before the parse required the block, such
- * a node registered and failed every run at the executor's guard.
+ * a node registered and failed every run at the executor's guard. Nothing is
+ * deleted on that path either: the node fails to load whatever happens to its
+ * loose keys, and the refusal names each of them.
  */
 function liftConnectorConfigShape(stack: Dict, emit: Emit): Dict {
   return mapFlowNodes(stack, (node, path) => {
@@ -1604,40 +1666,58 @@ function liftConnectorConfigShape(stack: Dict, emit: Emit): Dict {
     const cc: Dict = isDict(node.connectorConfig) ? { ...node.connectorConfig } : {};
     const nextConfig: Dict = { ...config };
     const lifts: Array<(typeof CONNECTOR_CONFIG_LIFTS)[number]> = [];
+    const drops: Array<{ key: (typeof CONNECTOR_CONFIG_LIFTS)[number]; empty: boolean }> = [];
     for (const key of CONNECTOR_CONFIG_LIFTS) {
-      if (nextConfig[key] == null) continue;
-      if (cc[key] != null) continue; // declared block wins; the loose key stays shadowed
-      cc[key] = nextConfig[key];
+      if (!(key in nextConfig)) continue;
+      const value = nextConfig[key];
       delete nextConfig[key];
-      lifts.push(key);
+      if (value != null && cc[key] == null) {
+        cc[key] = value;
+        lifts.push(key);
+      } else {
+        drops.push({ key, empty: value == null }); // declared block wins, or nothing to carry
+      }
     }
-    if (lifts.length === 0) return node;
+    if (lifts.length === 0 && drops.length === 0) return node;
     // Completeness guard — never materialize a block the loader would reject.
     if (cc.connectorId == null || cc.actionId == null) return node;
 
     for (const key of lifts) {
       emit({ from: `config.${key}`, to: `connectorConfig.${key}`, path: `${path}.connectorConfig.${key}` });
     }
-    return { ...node, config: nextConfig, connectorConfig: cc };
+    for (const { key, empty } of drops) {
+      const by = empty ? 'it carried no value' : `\`connectorConfig.${key}\` already set, so it was never read`;
+      emit({ from: `config.${key}`, to: `(removed — ${by})`, path: `${path}.config` });
+    }
+    return lifts.length > 0 ? { ...node, config: nextConfig, connectorConfig: cc } : { ...node, config: nextConfig };
   });
 }
 
 /**
  * Connector flow-node loose `config` keys → the declared `connectorConfig`
- * sibling (protocol 17, #4045). See {@link liftConnectorConfigShape} for the
- * precedence rules and the completeness guard.
+ * sibling (protocol 17, #4045; retired from the load path at 18, #23543 F3).
+ * See {@link liftConnectorConfigShape} for the precedence rules, the
+ * completeness guard, and why a shadowed loose key is deleted.
  *
- * **Stays on the load path at 18 — a recorded verdict (#23487).** Like `wait`,
- * `connector_action` has no `config` contract, so retired, a loose key beside
- * a complete `connectorConfig` would be silently ignored: a loose `input` next
- * to a declared pair would dispatch the action with no input. Refusing the
- * loose keys under `config` would also refuse stored flows whose loose key the
- * block shadows (the rehydration seam parses the same schema), so it can retire
- * once that shadowed shape has a ruling.
+ * ## Retired from the load path at 18 (#23543, ruling F3 A)
+ *
+ * Through 17 it stayed live because, like `wait`, `connector_action` has no
+ * `config` contract, so retired alone, a loose key beside a complete
+ * `connectorConfig` would have been silently ignored: a loose `input` next to a
+ * declared pair would dispatch the action with no input (the verdict #23487
+ * recorded). The ruling closed both halves: the flow parse refuses
+ * `config.connectorId` / `config.actionId` / `config.input` on a
+ * `connector_action` node with the prescription naming `connectorConfig`
+ * (`siblingBlockLooseConfigRefusals`), and this lift deletes the loose keys the
+ * block shadows, so a stored flow the refusal would reject keeps loading. The
+ * seams that still replay it are the ones listed on
+ * `flow-node-wait-event-config-lift`.
  */
 const flowNodeConnectorConfigLift: MetadataConversion = {
   id: 'flow-node-connector-config-lift',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.node.connector_action.connectorConfig',
   summary:
     "connector_action flow-node loose config keys 'connectorId' / 'actionId' / 'input' → " +
@@ -1663,8 +1743,8 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
                 input: { channel: 'C0WINS000', text: 'Task done: {record.title}' },
               },
             },
-            // A declared block WINS: `config.connectorId` stays shadowed in
-            // place, and since nothing else lifts, the node is untouched.
+            // A declared block WINS: the shadowed `config.connectorId` is
+            // deleted (#23543 F3) and the block is untouched.
             {
               id: 'n3',
               type: 'connector_action',
@@ -1711,7 +1791,7 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
               id: 'n3',
               type: 'connector_action',
               connectorConfig: { connectorId: 'rest', actionId: 'get', input: {} },
-              config: { connectorId: 'ignored' },
+              config: {},
             },
             {
               id: 'n4',
@@ -1728,9 +1808,9 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
         },
       ],
     },
-    // n2: the full trio lifts. n3: shadowed → no lift, no notice. n4: guard —
+    // n2: the full trio lifts. n3: shadowed → deleted, one notice. n4: guard —
     // nothing materializes. n5: the single unshadowed `input`.
-    expectedNotices: 4,
+    expectedNotices: 5,
   },
 };
 
@@ -3601,13 +3681,14 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
 };
 
 /**
- * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, commit e2798fab7).
+ * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, commit e2798fab7;
+ * retired from the load path at 18, #23543 F1).
  *
  * ## Why a stored value has to move at all
  *
- * `mongo` and `mongodb` have both been accepted spellings since #4410, and both
- * still are — this conversion does NOT rescue a broken boot, and a deployment
- * that never runs it keeps connecting exactly as before. What moved is the
+ * `mongo` and `mongodb` were both accepted spellings from #4410 through 17 —
+ * this conversion never rescued a broken boot, and a stored row it has not
+ * reached still resolves the same contract and builds the same driver. What moved is the
  * CANONICAL id: commit e2798fab7 landed the ruling that renamed it to `mongodb`, the spelling both boot
  * hosts, the driver package (`@objectstack/driver-mongodb`) and every URL scheme
  * already used, so that the id which selects a driver and the id which selects
@@ -3635,26 +3716,35 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
  *
  * Losslessness decides only that the data repair is D2. It does not decide
  * whether the family ALSO owes a D3 entry — every retirement family does
- * (`SemanticMigration`, `migrations/types.ts`). This one converts into
- * protocol 17, whose step shipped before that rule and was not back-filled,
- * so it has none.
+ * (`SemanticMigration`, `migrations/types.ts`). The rename into protocol 17
+ * shipped before that rule and was not back-filled; the value's retirement at
+ * 18 is a family of its own, and its D3 entry is
+ * `datasource-driver-mongo-alias-retired`.
  *
- * ## Why it stays on the LIVE load path
+ * ## Retired from the load path at 18 (#23543, ruling F1 A)
  *
- * Unlike the key-alias conversion above, `mongo` is not a spelling the authoring
- * gate rejects — it is still a legal alias, deliberately, so that nothing breaks
- * for a deployment that skipped the migration. There is therefore no loud
- * rejection for a live-window entry to pre-empt, and every rehydration seam
- * converging on one spelling is the whole point.
- *
- * **A recorded verdict at 18 (#23487):** it stays. Retiring it needs a decision
- * first: retire `'mongo'` as a value, refused with a prescription naming
- * `mongodb`, or record this entry as permanent. While the value is legal there
- * is no refusal for a retirement to hand the author to.
+ * Through 17 it stayed live because `mongo` was still a legal alias, so there
+ * was no refusal for a retirement to hand the author to (the verdict #23487
+ * recorded). The ruling retired the value: `mongo` left the selection face, and
+ * `DriverType` refuses an authored `datasource.driver: 'mongo'` by name with
+ * the prescription naming `mongodb` (`DriverVocabularyEntry.retiredAliases`,
+ * `data/driver/config-registry.zod.ts`). So the authoring funnel no longer
+ * replays this entry, and an author is taught the canonical id instead of
+ * being rewritten. Stored rows are the `includeRetired` seams: stored-row
+ * rehydration (`applyConversionsToStoredItem`) and the artifact door still
+ * rewrite them, and `os migrate meta --from 16` lists the edit for existing
+ * sources, as step 17's mechanical member. The spelling keeps resolving the
+ * mongodb CONTRACT, which is what lets
+ * {@link datasourceConfigDriverKeyAliases} — ordered ahead of this entry —
+ * still reach a stored `driver: 'mongo'` row's legacy config keys. That D3
+ * entry names what the chain cannot reach: an environment variable, a REST
+ * caller, a script.
  */
 const datasourceDriverMongoToMongodb: MetadataConversion = {
   id: 'datasource-driver-mongo-to-mongodb',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'datasource.driver',
   summary:
     "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver "
@@ -4187,22 +4277,35 @@ const objectIndexTypePartialRemoved: MetadataConversion = {
  *    default flip 3 → 0 never needed a materialization step while the job one
  *    did: nothing was ever deployed under the old reading.
  *
- * `retiredFromLoadPath` is NOT set, and the base-delay rename is not why:
- * every surface that carried `retryDelayMs` already refuses it with the rename
- * to `backoffMs` (the `RetryPolicySchema` tombstone, which a `try_catch` node's
- * `config.retry` is, and `flow.errorHandling`'s own).
+ * ## Retired from the load path at 18 (#23543, ruling F2 A)
  *
- * **A recorded verdict at 18 (#23487):** it stays, for the job half alone. It
- * writes the pre-17 `maxRetries: 3` / `backoffMultiplier: 2` into a source
- * `job.retryPolicy` that omits them; retired, the authoring funnel would stop
- * doing that, and such a job would silently drop from three retries to none
- * under the merged 0 / 1 defaults — a default flip no gate can see. It can
- * retire once that default flip has a ruling for authored sources (or the entry
- * is recorded as permanent).
+ * The base-delay rename never needed the load path: every surface that carried
+ * `retryDelayMs` refuses it with the rename to `backoffMs` (the
+ * `RetryPolicySchema` tombstone, which a `try_catch` node's `config.retry` is,
+ * and `flow.errorHandling`'s own). It stayed for the job half alone (the
+ * verdict #23487 recorded): retired, the authoring funnel would stop writing
+ * `maxRetries: 3` into a source block that omits it, and such a job would
+ * silently drop from three retries to none — a default flip no gate can see.
+ * The ruling made that drop loud instead: the job parse refuses a
+ * `retryPolicy` whose `maxRetries` is omitted or 0, naming the fix
+ * (`JOB_RETRY_POLICY_NO_ATTEMPTS`, `system/job.zod.ts`), so no authored job
+ * changes its retry count without its author being told. An omitted
+ * `backoffMultiplier` is not refused and now keeps its declared default (1):
+ * it shapes the delay curve, not whether the job retries.
+ *
+ * The authoring funnel (`defineStack`, `os validate` / `os build` / `os lint`)
+ * no longer replays it. Stored documents are the `includeRetired` seams —
+ * stored-row rehydration (`applyConversionsToStoredItem`), the automation
+ * engine's flow rehydration, the metadata save door's flow fallback, the
+ * artifact-ingestion door inside its window — and `os migrate meta --from 16`
+ * (a step-17 member, carried by the D3 entry `job-retry-policy-without-attempts-refused`),
+ * so a job stored or written before 17 keeps the three retries it ran with.
  */
 const retryPolicyConverged: MetadataConversion = {
   id: 'retry-policy-converged',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.errorHandling.retryDelayMs / flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier',
   summary:
     "retry policy unified across job.retryPolicy, try_catch retry and flow.errorHandling: base delay 'retryDelayMs' → 'backoffMs', " +
@@ -6772,6 +6875,76 @@ const fieldMalformedScalePrecisionRemoved: MetadataConversion = {
     },
     // One per removed malformed key — `quantity` (and `weight.scale`,
     // `amount.precision`) are untouched.
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * Permission-set `managedBy` removed (protocol 18, #23891 — ADR-0049
+ * enforce-or-remove; the liveness ledger's `dead` verdict of 2026-10-11).
+ *
+ * The key was the AUTHORED per-record provenance of ADR-0086 D3
+ * (`package | platform | user`), and nothing ever read it: the retired
+ * `bootstrapDeclaredPermissions` seeder stamped the `sys_permission_set.managed_by`
+ * COLUMN and never read `ps.managedBy`, and the packaged-set lock decides
+ * provenance from the package's artifact. Setup's form row nevertheless
+ * promised that package upgrades update a `package` set and leave a
+ * `platform` / `user` set alone. The tombstone on `PermissionSetSchema`
+ * refuses it at parse (`PERMISSION_SET_MANAGED_BY_REMOVED` in
+ * `security/permission.zod.ts`). The column is a different surface and is
+ * untouched.
+ *
+ * ## Why a D2 strip
+ *
+ * Setup's form row wrote the key into stored `permission` rows, and a 17.x
+ * build carried whatever an author wrote into its artifact. After the
+ * tombstone the boot door and the metadata save door refuse such a set, and
+ * only the D2 table is replayed at the rehydration seams
+ * (`applyArtifactForwardConversions`, `applyConversionsToStoredItem`), so a
+ * stored row or an installed package's artifact loads only through this
+ * entry. The key leaves whatever it holds: the tombstone refuses every value,
+ * so a strip that kept one would leave a set that cannot load. The strip is
+ * lossless — no grant, owner or upgrade read the value; what an admin believed
+ * it did is the D3 record, the semantic entry `permission-set-managed-by-retired`.
+ * The emitted path names the set, as
+ * `permission-admin-scope-binding-authoring-removed` does.
+ */
+const permissionSetManagedByRemoved: MetadataConversion = {
+  id: 'permission-set-managed-by-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'permission.managedBy',
+  summary:
+    "permission-set key 'managedBy' removed (ADR-0049 enforce-or-remove — nothing ever read the authored "
+    + "provenance: a set's provenance is the package that ships it, decided from that package's artifact and "
+    + 'recorded as packageId; the sys_permission_set.managed_by column is unaffected. Delete the key)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'permissions', (ps, path) => {
+      // Name the set, not just its index: the notice is the only record an
+      // upgrading author gets of WHICH set lost the key.
+      const where = typeof ps.name === 'string' ? `${path}(${ps.name})` : path;
+      return stripKeys(ps, ['managedBy'], emit, where);
+    });
+  },
+  fixture: {
+    before: {
+      permissions: [
+        // What Setup's form row wrote into a stored row.
+        { name: 'crm_sales_rep', label: 'Sales Rep', packageId: 'crm', managedBy: 'package' },
+        { name: 'env_reviewer', label: 'Env Reviewer', managedBy: 'user' },
+        // Already canonical: rides through untouched, by reference.
+        { name: 'env_reader', label: 'Env Reader' },
+      ],
+    },
+    after: {
+      permissions: [
+        { name: 'crm_sales_rep', label: 'Sales Rep', packageId: 'crm' },
+        { name: 'env_reviewer', label: 'Env Reviewer' },
+        { name: 'env_reader', label: 'Env Reader' },
+      ],
+    },
+    // One per set carrying the key.
     expectedNotices: 2,
   },
 };
@@ -10962,6 +11135,561 @@ const pageHeaderBreadcrumbRemoved: MetadataConversion = {
 };
 
 /**
+ * `page:header.showStar` leaves the contract (protocol 18, #23650 — ADR-0049
+ * enforce-or-remove; ruling record 6203775759, letter A: 「A 退役 showStar
+ * (Recommended)」).
+ *
+ * The key switched a star the reference console no longer draws. Since
+ * objectui#12427 the `page:header` record chip draws the follow star only
+ * where the host wires a favorites toggle into the record context
+ * (`onToggleFavorite`), and no reference host does: the record's favorites
+ * entry is the header's ⋯ overflow menu. `true` drew nothing and `false` hid
+ * nothing. The tombstone on `PageHeaderProps` refuses it for a live author:
+ * `os validate`, `os build` and `os lint` refuse it as an `error` with the
+ * prescription (the component-props gate, `@objectstack/lint`; the load path
+ * keeps the open `properties` bag as written).
+ *
+ * **A delete of both values.** Neither changes what the reference console
+ * draws, so there is no value to preserve and no rewrite target. The host
+ * hook is not the key: a third-party host of the published component library
+ * that wires `onToggleFavorite` keeps its star, and after the strip a header
+ * that said `false` shows it there as an absent key would. The D3 entry
+ * `page-header-show-star-retired` records that.
+ *
+ * Who writes the key: nobody measured. No example app, skill or doc in this
+ * repo, and no objectui app or example, authors it; the entry is for stored
+ * `sys_metadata` pages and built artifacts written by hand.
+ *
+ * ⚠️ Scoped by component `type`, never by key name, exactly as
+ * {@link pageHeaderBreadcrumbRemoved}: `showStar` is an ordinary name for an
+ * open-namespace component's own prop.
+ */
+const pageHeaderShowStarRemoved: MetadataConversion = {
+  id: 'page-header-show-star-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'page.component.page:header.showStar',
+  summary:
+    "page:header prop 'showStar' removed, whether 'true' or 'false' (the reference console draws no star "
+    + 'beside the record title: the record\'s favorites entry is the header\'s ⋯ menu, and metadata does '
+    + 'not control it)',
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'page:header') return component;
+      const properties = component.properties;
+      if (!isDict(properties) || !('showStar' in properties)) return component;
+      const stripped = stripKeys(properties, ['showStar'], emit, `${path}.properties`);
+      return { ...component, properties: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'account_record',
+          regions: [
+            {
+              name: 'header',
+              components: [
+                // The default value, written out.
+                { type: 'page:header', properties: { title: 'Account', showStar: true } },
+                // The switch turned off, beside the live copy-id switch.
+                { type: 'page:header', properties: { title: 'Contract', showStar: false, showCopyId: false } },
+                // A header WITHOUT the key rides through untouched — the strip
+                // dispatches on key presence, and copy-on-write keeps the reference.
+                { type: 'page:header', properties: { title: 'Overview', recordChrome: false } },
+                // ⚠️ The same key name on an open-namespace component that is
+                // NOT a page header — its own prop, not this entry's key.
+                { type: 'acme:rating_badge', properties: { showStar: true } },
+                // The nested position (#6775): a header inside a card's
+                // `children` is still a page header.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Summary',
+                    children: [{ type: 'page:header', properties: { title: 'Inner', showStar: true } }],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape (#6776): a header authored into a slotted page.
+        {
+          name: 'account_record_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:header', properties: { title: 'Account', showStar: false } },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'account_record',
+          regions: [
+            {
+              name: 'header',
+              components: [
+                { type: 'page:header', properties: { title: 'Account' } },
+                { type: 'page:header', properties: { title: 'Contract', showCopyId: false } },
+                { type: 'page:header', properties: { title: 'Overview', recordChrome: false } },
+                { type: 'acme:rating_badge', properties: { showStar: true } },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Summary',
+                    children: [{ type: 'page:header', properties: { title: 'Inner' } }],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'account_record_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:header', properties: { title: 'Account' } },
+          },
+        },
+      ],
+    },
+    // Four notices, one per stripped key: the two region-level headers, the
+    // nested one and the slotted one. The header without the key and the
+    // open-namespace component emit none.
+    expectedNotices: 4,
+  },
+};
+
+/**
+ * `page.isDefault` removed from a page that is not a record page bound to an
+ * object (protocol 18). The #23610 ruling (A on Q1, record 6190536588) refused
+ * the flag there at every door; this entry is the data-at-rest half the P0 that
+ * followed it added: an installed or stored page still carrying the flag
+ * converts at load instead of stopping the environment's kernel build.
+ *
+ * `isDefault` has one meaning — the default record page of the object a record
+ * page binds — and on every other page nothing read it: the console opens an
+ * app on its first navigation item and the root landing follows the app's own
+ * `isDefault`. Deleting the flag from a `home`, `app`, `utility` or `list`
+ * page, or from a record page with no `object`, therefore changes nothing a
+ * page does — a pure lossless delete. The ONE judge of "misplaced" is the
+ * parse's own, `misplacedDefaultPageRefusal` (`ui/default-record-page.ts`), so
+ * this conversion strips exactly the pages `checkPageDefaultPlacement` and the
+ * registry door refuse, and nothing else: a default record page bound to an
+ * object keeps its flag.
+ *
+ * **Retired from the authoring surface from the day it lands.** A live author
+ * meets the parse's refusal, which names where a landing is really set (the
+ * app's navigation) — that decision is the author's, and the refusal is how
+ * they are taught it. Data at rest has no author to teach: `sys_metadata` rows
+ * replay this on read, a compiled artifact replays it inside the window its
+ * manifest opens, and the kernel's package registration door
+ * (`ObjectQL.registerApp`, `@objectstack/objectql`) replays it for a package
+ * body that declares its protocol range — the seam a hosted environment's
+ * installed packages reach without a parse. The paired D3 entry is
+ * `page-is-default-off-record-page-refused`.
+ *
+ * ⚠️ Coverage boundary: this walks `stack.pages[]` ({@link mapPages}), the
+ * collection every door reads a package's pages from. A nested `plugins[]`
+ * entry's pages are code (`ObjectQL.registerPlugin`), never data at rest, and
+ * keep meeting the registry's refusal.
+ */
+const pageIsDefaultOffRecordPageRemoved: MetadataConversion = {
+  id: 'page-is-default-off-record-page-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'page.isDefault',
+  summary:
+    "page key 'isDefault' removed from a page that is not a record page bound to an object (a "
+    + 'home, app, utility or list page, or a record page with no object): it marks the default '
+    + 'record page of an object and nothing read it on any other page — an app opens on its first '
+    + 'navigation item, so the flag decided nothing',
+  apply(stack, emit) {
+    return mapPages(stack, (page, path) => {
+      if (page.isDefault !== true || misplacedDefaultPageRefusal(page) === undefined) return page;
+      return stripKeys(page, ['isDefault'], emit, path);
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        // The shipped shape: a home page marked as a landing that never landed.
+        { name: 'sales_home_page', label: 'Sales Home', type: 'home', isDefault: true, regions: [] },
+        // A record page bound to no object — the flag places nothing here either.
+        { name: 'draft_record', label: 'Draft', type: 'record', isDefault: true },
+        // A default record page bound to an object keeps its flag: that is the
+        // one meaning the key has.
+        { name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', isDefault: true },
+        // `isDefault: false` says nothing and is left as authored.
+        { name: 'team_home', label: 'Team Home', type: 'home', isDefault: false },
+      ],
+    },
+    after: {
+      pages: [
+        { name: 'sales_home_page', label: 'Sales Home', type: 'home', regions: [] },
+        { name: 'draft_record', label: 'Draft', type: 'record' },
+        { name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', isDefault: true },
+        { name: 'team_home', label: 'Team Home', type: 'home', isDefault: false },
+      ],
+    },
+    // One notice per stripped flag: the home page and the unbound record page.
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * A page `list-view` node's `properties.objectName` → `properties.data`, and its
+ * `properties.viewType` → `properties.type` (protocol 18, #22444; ruling C, the
+ * maintainer's 「同意」: the page carrier converges on the spec spelling, and
+ * stored nodes in the old spelling are carried by this conversion, ⛔ never by a
+ * fallback read in objectui).
+ *
+ * The page carrier spelled a list view's binding and kind its own way —
+ * `objectName` and `viewType`, the two words the react tier retired on
+ * `ListView` with no window — while every other list view door spells them
+ * `data` and `type`. The pinned console reads only the spec spelling off a page
+ * `list-view` node (objectui#12668), and the node's props row
+ * (`ComponentPropsMap['list-view']`) refuses both aliases by name.
+ *
+ * ## What converts
+ *
+ * - `objectName: 'deal'` (a non-empty string) → `data: { provider: 'object',
+ *   object: 'deal' }`, the list view's own object source — the meaning the
+ *   console's old fold gave the alias. When `data` already names the same
+ *   object through the `object` provider, the alias is a redundant twin and is
+ *   deleted.
+ * - `viewType: 'kanban'` → `type: 'kanban'` (the value carried verbatim; the
+ *   row judges it against the list view's kind enum). When `type` already
+ *   holds the same value, the alias is a redundant twin and is deleted.
+ *
+ * ## What is left exactly as stored — reported as a TODO
+ *
+ * An alias that is not a non-empty string, an `objectName` beside a `data`
+ * source that names something else, an `objectName` beside a node-level
+ * `dataSource.object` that names a different object, and a `viewType` beside a
+ * different `type`. Each is two answers to one question, and which one the
+ * author meant is not a walker's call; the row refuses the alias by name, so
+ * the next save asks the author.
+ *
+ * ## Reach
+ *
+ * Every page component {@link mapPageComponents} visits (regions, slots,
+ * nested containers such as `page:tabs` items) whose `type` is `list-view`.
+ * The same keys on any other component are not this entry's surface: an
+ * `object-grid`'s `objectName` is that row's own declared binding.
+ *
+ * ## Why `retiredFromLoadPath`
+ *
+ * An author writing either alias meets the row's refusal, which names the
+ * spelling, instead of having it quietly rewritten at `defineStack` /
+ * `validate`. Data at rest has no author to teach: stored `sys_metadata` rows
+ * (`applyConversionsToStoredItem`), the artifact-ingestion door and the
+ * package registration door replay this, and `os migrate meta --write`
+ * rewrites a source where it can prove the edit. The paired D3 entry is
+ * `page-list-view-object-name-view-type-retired`.
+ */
+const pageListViewObjectNameViewTypeToDataType: MetadataConversion = {
+  id: 'page-list-view-object-name-view-type-to-data-type',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'page.component(list-view).properties.objectName / .viewType',
+  summary:
+    "a page `list-view` node's `properties.objectName` becomes `properties.data: { provider: 'object', "
+    + "object }` and its `properties.viewType` becomes `properties.type` — the list view's own spelling of "
+    + 'its object source and its kind, which every other list view door uses (one list view, one set of '
+    + 'property names wherever it is embedded); an alias that disagrees with the spec spelling beside it is '
+    + 'left as stored and reported as a TODO',
+  apply(stack, emit, context) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'list-view' || !isDict(component.properties)) return component;
+      const base = `${path}.properties`;
+      const leave = (key: string, value: unknown, why: string) => {
+        context?.reportTodo?.({
+          path: `${base}.${key}`,
+          from: JSON.stringify(value),
+          reason: `On this page \`list-view\`, \`${key}\` ${why} Left as stored; the node's props refuse \`${key}\` `
+            + 'by name, so rewrite it by hand.',
+        });
+      };
+
+      let props = component.properties;
+
+      if ('objectName' in props) {
+        const objectName = props.objectName;
+        const data = props.data;
+        const bound = isDict(component.dataSource) ? component.dataSource.object : undefined;
+        if (typeof objectName !== 'string' || objectName === '') {
+          leave('objectName', objectName, 'is not an object name.');
+        } else if (typeof bound === 'string' && bound !== '' && bound !== objectName) {
+          leave('objectName', objectName, `names a different object than the node's \`dataSource.object\` (\`${bound}\`).`);
+        } else if (data === undefined) {
+          const source = { provider: 'object', object: objectName };
+          const { objectName: _alias, ...rest } = props;
+          props = { ...rest, data: source };
+          emit({ from: JSON.stringify(objectName), to: JSON.stringify(source), path: `${base}.data` });
+        } else if (isDict(data) && data.provider === 'object' && data.object === objectName) {
+          const { objectName: _twin, ...rest } = props;
+          props = rest;
+          emit({ from: JSON.stringify(objectName), to: JSON.stringify(data), path: `${base}.data` });
+        } else {
+          leave('objectName', objectName, 'sits beside a `data` source that does not name the same object.');
+        }
+      }
+
+      if ('viewType' in props) {
+        const viewType = props.viewType;
+        const renamed = typeof viewType === 'string' && viewType !== '' ? renameKey(props, 'viewType', 'type') : null;
+        if (renamed) {
+          props = renamed;
+          emit({ from: JSON.stringify(viewType), to: JSON.stringify(viewType), path: `${base}.type` });
+        } else {
+          leave(
+            'viewType',
+            viewType,
+            typeof viewType === 'string' && viewType !== ''
+              ? `sits beside a different \`type\` (${JSON.stringify(props.type)}).`
+              : 'is not a list kind.',
+          );
+        }
+      }
+
+      return props === component.properties ? component : { ...component, properties: props };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'sales_home',
+          label: 'Sales Home',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // The shipped shape: both aliases on one node.
+                {
+                  type: 'list-view',
+                  id: 'open_deals',
+                  properties: {
+                    objectName: 'deal',
+                    viewType: 'kanban',
+                    columns: ['name', 'amount'],
+                    kanban: { groupByField: 'stage', columns: ['name'] },
+                  },
+                },
+                // Nested in a tab: reached, and a redundant twin is deleted.
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    items: [
+                      {
+                        label: 'Leads',
+                        children: [
+                          {
+                            type: 'list-view',
+                            properties: {
+                              objectName: 'lead',
+                              data: { provider: 'object', object: 'lead' },
+                              viewType: 'grid',
+                              type: 'grid',
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+                // Two answers to one question: left as stored, reported.
+                {
+                  type: 'list-view',
+                  properties: {
+                    objectName: 'deal',
+                    data: { provider: 'object', object: 'account' },
+                    viewType: 'kanban',
+                    type: 'gallery',
+                  },
+                },
+                // Another component's `objectName` is its own binding: untouched.
+                { type: 'object-grid', properties: { objectName: 'deal' } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'sales_home',
+          label: 'Sales Home',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'list-view',
+                  id: 'open_deals',
+                  properties: {
+                    columns: ['name', 'amount'],
+                    kanban: { groupByField: 'stage', columns: ['name'] },
+                    data: { provider: 'object', object: 'deal' },
+                    type: 'kanban',
+                  },
+                },
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    items: [
+                      {
+                        label: 'Leads',
+                        children: [
+                          {
+                            type: 'list-view',
+                            properties: {
+                              data: { provider: 'object', object: 'lead' },
+                              type: 'grid',
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+                {
+                  type: 'list-view',
+                  properties: {
+                    objectName: 'deal',
+                    data: { provider: 'object', object: 'account' },
+                    viewType: 'kanban',
+                    type: 'gallery',
+                  },
+                },
+                { type: 'object-grid', properties: { objectName: 'deal' } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    // Two per converted node — its `objectName` and its `viewType` — on the
+    // region node and the nested one. The conflicting node and the grid emit none.
+    expectedNotices: 4,
+  },
+};
+
+/**
+ * `width: 'small' | 'medium' | 'large'` removed from a page region named
+ * `main` (protocol 18). The parse refuses those three widths on `main`
+ * (`checkPageMainRegionWidth` in `ui/page.zod.ts`); this entry is the
+ * data-at-rest half: an installed or stored page still carrying one converts
+ * on read instead of failing the strict parse at an artifact door or on a
+ * stored-row read.
+ *
+ * No layout read the key: the console draws `main` at the width its layout
+ * leaves it — the flexible column beside `sidebar` and `aside`, one grid cell
+ * on `dashboard` — and its one reader of `main.width` is the page's
+ * full-bleed, for `'full'` alone (objectui `renderers/layout/page.tsx`, read at
+ * the `.objectui-sha` pin). Deleting one of the three therefore changes
+ * nothing a page draws: a pure lossless delete. `'full'` is left as authored —
+ * it is the one width `main` takes — and so is every other region's width, and
+ * a value the width enum itself refuses (that refusal is the enum's).
+ *
+ * Scoped exactly as the refusal is: every page, whatever its kind or template,
+ * and a region name matched case-insensitively, as the renderer's are.
+ * `page-main-region-width-removed.test.ts` holds the two in step.
+ *
+ * **Retired from the authoring surface from the day it lands**, like its
+ * siblings `page-is-default-off-record-page-removed` and
+ * `page-template-full-width-to-default`: a live author meets the parse's
+ * refusal, which names the one-key edit, and data at rest replays this. The
+ * paired D3 entry is `page-main-region-width-refused`.
+ *
+ * ⚠️ Coverage boundary: this walks `stack.pages[]` ({@link mapPages}), the
+ * collection every door reads a package's pages from.
+ */
+const pageMainRegionWidthRemoved: MetadataConversion = {
+  id: 'page-main-region-width-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'page.regions[].width',
+  summary:
+    "page region key 'width' removed from a region named 'main' when it is 'small', 'medium' or 'large' — the "
+    + "console draws main at the width its layout leaves it and reads main's width only for 'full' (the "
+    + 'page-wide full-bleed), so the page renders exactly as before',
+  apply(stack, emit) {
+    return mapPages(stack, (page, path) => {
+      const regions = page.regions;
+      if (!Array.isArray(regions)) return page;
+      let changed = false;
+      const nextRegions = regions.map((region, ri) => {
+        if (!isDict(region)) return region;
+        const { name, width } = region;
+        if (typeof name !== 'string' || name.toLowerCase() !== 'main') return region;
+        if (width !== 'small' && width !== 'medium' && width !== 'large') return region;
+        changed = true;
+        return stripKeys(region, ['width'], emit, `${path}.regions[${ri}]`);
+      });
+      return changed ? { ...page, regions: nextRegions } : page;
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        // The shipped shape: a three-column home page asking for a `large` main.
+        {
+          name: 'sales_home_page',
+          label: 'Sales Home',
+          type: 'home',
+          template: 'three-column',
+          regions: [
+            { name: 'header', width: 'full', components: [] },
+            { name: 'sidebar', width: 'small', components: [] },
+            { name: 'main', width: 'large', components: [] },
+            { name: 'aside', width: 'medium', components: [] },
+          ],
+        },
+        // Another case of the name, as the renderer matches it; and a dashboard cell.
+        { name: 'team_home', label: 'Team Home', type: 'home', regions: [{ name: 'Main', width: 'medium', components: [] }] },
+        { name: 'kpi_board', label: 'KPIs', type: 'home', template: 'dashboard', regions: [{ name: 'main', width: 'small', components: [] }] },
+        // `'full'` is the one width `main` takes: left as authored.
+        { name: 'wallboard', label: 'Wallboard', type: 'home', regions: [{ name: 'main', width: 'full', components: [] }] },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'sales_home_page',
+          label: 'Sales Home',
+          type: 'home',
+          template: 'three-column',
+          regions: [
+            { name: 'header', width: 'full', components: [] },
+            { name: 'sidebar', width: 'small', components: [] },
+            { name: 'main', components: [] },
+            { name: 'aside', width: 'medium', components: [] },
+          ],
+        },
+        { name: 'team_home', label: 'Team Home', type: 'home', regions: [{ name: 'Main', components: [] }] },
+        { name: 'kpi_board', label: 'KPIs', type: 'home', template: 'dashboard', regions: [{ name: 'main', components: [] }] },
+        { name: 'wallboard', label: 'Wallboard', type: 'home', regions: [{ name: 'main', width: 'full', components: [] }] },
+      ],
+    },
+    // One per stripped width: the three `main` regions that declared small,
+    // medium or large. The rails, the header and the `full` main emit none.
+    expectedNotices: 3,
+  },
+};
+
+/**
  * `page.requires` removed from the page kinds whose source is never compiled at
  * save — `react`, `full` and `slotted`, a page that omits `kind` included
  * (protocol 18, #21459; ruling record 5964312254, letter A).
@@ -11029,6 +11757,202 @@ const pageRequiresNonCompiledKindRemoved: MetadataConversion = {
     // One per stripped key: the react, slotted and kind-less pages. The html
     // page emits none.
     expectedNotices: 3,
+  },
+};
+
+/**
+ * `page.template: 'full-width'` → `'default'` (protocol 18). The #23610 ruling
+ * (A on Q2, record 6190536588) closed the template set and retired `full-width`
+ * by name; this entry is the data-at-rest half the P0 that followed it added.
+ *
+ * `full-width` was a second name for `default`: the console's template
+ * registry mapped both names to the one `FullWidthTemplate` component
+ * (objectui `renderers/layout/page.tsx`, read at the `.objectui-sha` pin), so
+ * the re-spelling draws the page exactly as before — the enum re-spelling D2
+ * was written for. The parse refuses the retired name with that prescription
+ * (`PageTemplateSchema`); an installed or stored page still carrying it
+ * converts here on read instead of failing the strict parse at an artifact
+ * door or on a stored-row read.
+ *
+ * **Retired from the authoring surface from the day it lands**, like its
+ * sibling `page-is-default-off-record-page-removed`: the authoring door keeps
+ * the one-word refusal, data at rest replays this. Only the retired SPELLING
+ * converts — an unregistered template name (`centered`, `two-column`) is not a
+ * shape this entry positively recognizes and stays with the parse, and a
+ * region a template does not place has no lossless rewrite at all (the D3
+ * entry `page-template-closed-region-unplaced-refused` names the hand edit).
+ *
+ * ⚠️ Coverage boundary: this walks `stack.pages[]` ({@link mapPages}).
+ * `template` is a top-level `PageSchema` key with no nested spelling.
+ */
+const pageTemplateFullWidthToDefault: MetadataConversion = {
+  id: 'page-template-full-width-to-default',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'page.template',
+  summary:
+    "page template 'full-width' → 'default' (a second name for the same layout: the console drew "
+    + 'both with one template component, so the page renders exactly as before)',
+  apply(stack, emit) {
+    return mapPages(stack, (page, path) => {
+      if (page.template !== 'full-width') return page;
+      emit({ from: 'full-width', to: 'default', path: `${path}.template` });
+      return { ...page, template: 'default' };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        { name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', template: 'full-width', regions: [] },
+        // A registered template is left as authored; so is a page with none.
+        { name: 'sales_home_page', label: 'Sales Home', type: 'home', template: 'three-column', regions: [] },
+        { name: 'team_home', label: 'Team Home', type: 'home' },
+      ],
+    },
+    after: {
+      pages: [
+        { name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', template: 'default', regions: [] },
+        { name: 'sales_home_page', label: 'Sales Home', type: 'home', template: 'three-column', regions: [] },
+        { name: 'team_home', label: 'Team Home', type: 'home' },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
+/**
+ * The delegated-admin scope's `manageBindings` and `authorEnvironmentSets`
+ * removed (protocol 18, #23488 — ADR-0049 enforce-or-remove; ruling of record
+ * 6181988435, letter A).
+ *
+ * Both named a write door ADR-0131 D3 retired: `manageBindings` the
+ * `sys_position_permission_set` binding rows, `authorEnvironmentSets` the
+ * `sys_permission_set` rows. A position's sets are part of its definition and
+ * a permission set is a definition; both are written through the metadata
+ * door, which admits a `manage_metadata` holder and reads no `adminScope`. So
+ * neither right was honoured anywhere. The tombstones on `AdminScopeSchema`
+ * refuse both at parse (`ADMIN_SCOPE_MANAGE_BINDINGS_REMOVED` and
+ * `ADMIN_SCOPE_AUTHOR_ENVIRONMENT_SETS_REMOVED` in
+ * `security/permission.zod.ts`).
+ *
+ * ## Why a D2 strip
+ *
+ * Both keys carried a schema DEFAULT (`false`), so a 17.x parse wrote both
+ * into every `adminScope` it emitted, whether or not the author wrote them:
+ * a built artifact and a stored `permission` row that carry a scope carry
+ * both. Setup's nested `adminScope` form and Studio's two switches wrote them
+ * explicitly too. After the tombstones the boot door and the metadata save
+ * door refuse such a set, and only the D2 table is replayed at the
+ * rehydration seams (`applyArtifactForwardConversions`,
+ * `applyConversionsToStoredItem`), so a built artifact or a stored row loads
+ * only through this entry.
+ *
+ * Each key leaves whatever it holds, `true` included: the tombstone refuses
+ * every value, so a strip that kept one would leave a set that cannot load.
+ * The strip is lossless for every door that grants a right — nothing granted
+ * either. The one decision the keys moved was the delegated-admin gate's
+ * strict-containment comparison, which no longer reads them; that change is
+ * the D3 record, the semantic entry
+ * `permission-admin-scope-binding-authoring-retired`. The emitted path names
+ * the set, as `email-template-category-is-system-removed` names its template.
+ */
+const permissionAdminScopeBindingAuthoringRemoved: MetadataConversion = {
+  id: 'permission-admin-scope-binding-authoring-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'permission.adminScope.manageBindings / permission.adminScope.authorEnvironmentSets',
+  summary:
+    "delegated-admin scope keys 'manageBindings' and 'authorEnvironmentSets' removed (ADR-0049 "
+    + 'enforce-or-remove — no door honoured either: a position\'s sets and a permission set are '
+    + 'environment definitions written through the metadata door under manage_metadata, which reads '
+    + "no adminScope. Delete both keys; a delegate's scope is placement, assignment and the allowlist)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'permissions', (ps, path) => {
+      const scope = (ps as { adminScope?: unknown }).adminScope;
+      if (!isDict(scope)) return ps;
+      // Name the set, not just its index: the notice is the only record an
+      // upgrading author gets of WHICH set lost the keys.
+      const where = typeof ps.name === 'string' ? `${path}(${ps.name}).adminScope` : `${path}.adminScope`;
+      const stripped = stripKeys(scope, ['manageBindings', 'authorEnvironmentSets'], emit, where);
+      if (stripped === scope) return ps;
+      return { ...ps, adminScope: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      permissions: [
+        {
+          // What Setup's nested form or Studio's switches wrote: both keys
+          // authored, one of them `true`.
+          name: 'east_admin',
+          label: 'East Admin',
+          adminScope: {
+            businessUnit: 'east',
+            manageAssignments: true,
+            manageBindings: true,
+            authorEnvironmentSets: false,
+            assignablePermissionSets: ['sales_user'],
+          },
+        },
+        {
+          // What a 17.x parse emitted for a scope whose author wrote neither
+          // key: both defaults, materialized.
+          name: 'west_admin',
+          label: 'West Admin',
+          adminScope: {
+            businessUnit: 'west',
+            includeSubtree: true,
+            manageAssignments: true,
+            manageBindings: false,
+            authorEnvironmentSets: false,
+            assignablePermissionSets: [],
+          },
+        },
+        {
+          // Already canonical, and a set with no scope at all — both ride
+          // through untouched. The fixture's own control: the strip dispatches
+          // on key presence, and copy-on-write keeps these references.
+          name: 'north_admin',
+          label: 'North Admin',
+          adminScope: { businessUnit: 'north', manageAssignments: true, assignablePermissionSets: ['sales_user'] },
+        },
+        { name: 'sales_user', label: 'Sales User' },
+      ],
+    },
+    after: {
+      permissions: [
+        {
+          name: 'east_admin',
+          label: 'East Admin',
+          adminScope: {
+            businessUnit: 'east',
+            manageAssignments: true,
+            assignablePermissionSets: ['sales_user'],
+          },
+        },
+        {
+          name: 'west_admin',
+          label: 'West Admin',
+          adminScope: {
+            businessUnit: 'west',
+            includeSubtree: true,
+            manageAssignments: true,
+            assignablePermissionSets: [],
+          },
+        },
+        {
+          name: 'north_admin',
+          label: 'North Admin',
+          adminScope: { businessUnit: 'north', manageAssignments: true, assignablePermissionSets: ['sales_user'] },
+        },
+        { name: 'sales_user', label: 'Sales User' },
+      ],
+    },
+    // Four notices, one per STRIPPED KEY: both keys on `east_admin` and on
+    // `west_admin`, none for `north_admin` or `sales_user`.
+    expectedNotices: 4,
   },
 };
 
@@ -11841,8 +12765,9 @@ const hookTimeoutToTimeoutMs: MetadataConversion = {
  * rename `hookTimeoutToTimeoutMs` documents. The sibling `retryPolicy.backoffMs`
  * spelled its unit; the per-attempt limit did not. Same posture: retired from
  * the load path, tombstoned at the schema, replayable here. The fixture stays
- * clear of `retryPolicy` on purpose — `retry-policy-converged` is still in its
- * live window on that block and would fire on it.
+ * clear of `retryPolicy` on purpose — `retry-policy-converged` replays on that
+ * block wherever retired entries do (the fixture harness among them) and would
+ * fire on it.
  */
 const jobTimeoutToTimeoutMs: MetadataConversion = {
   id: 'job-timeout-to-timeout-ms',
@@ -13605,13 +14530,13 @@ const pageAssignedProfilesRemoved: MetadataConversion = {
         // The authored shape: a page whose author believed the list gated it.
         { name: 'deal_desk', label: 'Deal Desk', assignedProfiles: ['admin', 'sales_manager'] },
         // A page with nothing to strip keeps its identity (copy-on-write).
-        { name: 'team_home', label: 'Team Home', isDefault: true },
+        { name: 'team_home', label: 'Team Home' },
       ],
     },
     after: {
       pages: [
         { name: 'deal_desk', label: 'Deal Desk' },
-        { name: 'team_home', label: 'Team Home', isDefault: true },
+        { name: 'team_home', label: 'Team Home' },
       ],
     },
     expectedNotices: 1,
@@ -13640,9 +14565,21 @@ const pageAssignedProfilesRemoved: MetadataConversion = {
  * `master_detail` under this sharing model into `required: true`
  * (`forceCbpMasterDetailRequired`, `data/object.zod.ts`), so the converted row
  * is exactly the object the builder would have produced from the same source.
- * The relation it resolves is the one the second tier resolved, and the write
- * the row could not legally take (an insert without its master, an update
- * nulling it) was refused before as well, by the security gate.
+ * The relation it resolves is the one the second tier resolved. Of the two
+ * writes the row could not legally take, the insert without its master was
+ * refused before as well, by the security gate: on an insert
+ * `packages/plugins/plugin-security/src/security-plugin.ts#assertControlledByParentWrite`
+ * reads the master FK from the incoming body. The update nulling it was not.
+ * On a by-id update that gate reads the STORED row's FK, never the incoming
+ * value, so the write was accepted and left a detail row with a null master
+ * FK, which the `controlled_by_parent` read filter
+ * (`masterFK IN (accessible master ids)`) never matches. The refusal for that
+ * update is the record validator's ADR-0113 check, a PATCH may not null out a
+ * required field (the update branch of
+ * `packages/objectql/src/validation/record-validator.ts#validateRecordInScope`),
+ * and only `required: true` arms it. So the converted row loses no write the
+ * contract allows: it gains the refusal the builder's force already gives an
+ * authored object.
  *
  * **Deliberately narrow — exactly one shape, nothing else.**
  * - An explicit `required: false` is NOT converted. The builder refuses it
@@ -16465,9 +17402,16 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: pageComponentFilterRecordToRuleArray, order: 36 },
   { conversion: pageComponentResponsiveRemoved, order: 13 },
   { conversion: pageHeaderBreadcrumbRemoved, order: 49 },
+  { conversion: pageHeaderShowStarRemoved, order: 66 },
+  { conversion: pageIsDefaultOffRecordPageRemoved, order: 67 },
+  { conversion: pageListViewObjectNameViewTypeToDataType, order: 68 },
+  { conversion: pageMainRegionWidthRemoved, order: 69 },
   { conversion: pageRequiresNonCompiledKindRemoved, order: 58 },
+  { conversion: pageTemplateFullWidthToDefault, order: 67 },
+  { conversion: permissionAdminScopeBindingAuthoringRemoved, order: 65 },
   { conversion: permissionAllowRestorePurgeRemoved, order: 16 },
   { conversion: permissionRlsTagsRemoved, order: 42 },
+  { conversion: permissionSetManagedByRemoved, order: 67 },
   { conversion: recordChatterPositionVocabulary, order: 2 },
   { conversion: recordHighlightsFieldIconRemoved, order: 10 },
   { conversion: reportJoinedChartRemoved, order: 38 },

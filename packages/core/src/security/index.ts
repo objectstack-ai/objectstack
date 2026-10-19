@@ -73,6 +73,14 @@ export {
   type RefusedEntitlementKey,
 } from './deployment-org-scoping-entitlement.js';
 
+// [ADR-0131 D8] The ONE tenant read predicate — the Layer 0 verdict that
+// plugin-security projects onto its `where` wall and the engine projects onto
+// the driver's native scope (`DriverOptions.tenantId` / `tenantIds`).
+export {
+  computeTenantLayer0Verdict,
+  type TenantLayer0Input,
+} from './tenant-layer0-verdict.js';
+
 // `PluginConfigValidator` / `createPluginConfigValidator` were RETIRED here on
 // 2026-08-27 (#11982, ADR-0049 enforce-or-remove; recorded in ADR-0025 §3.7).
 // The kernel never received a plugin's config to validate — factories close
@@ -159,6 +167,19 @@ export {
   classifyAdmissionTenancyPosture,
   type TenancyServiceResolver,
 } from './admission-tenancy-posture.js';
+
+// [ruling record 6227928430, letter A] The ONE request-to-ExecutionContext
+// composition the platform's doors call: the session read, the posture
+// classification above, `resolveAuthzContext`, the localization, the ADR-0069
+// gate and the assembly below, with the anonymous entry and the gate decided
+// once and every door's intentional difference a named parameter.
+export {
+  resolveRequestExecutionContext,
+  type RequestExecutionContextInput,
+  type RequestAuthService,
+  type EstablishedRequestSession,
+  type RequestAdmission,
+} from './request-execution-context.js';
 
 // [commit 6a180e42d] The LOUD failure an unreachable permission store raises, and the
 // brand predicate a fail-closed `catch` uses to re-raise it instead of

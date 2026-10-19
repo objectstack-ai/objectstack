@@ -1,6 +1,6 @@
 # ADR-0131: Organization ownership is total — no NULL `organization_id`; declared metadata stays in code; a row exists only when an organization authored it
 
-**Status**: Accepted (2026-09-04) — accepted by the merge that landed it on `main` ([#14976](https://github.com/objectstack-ai/objectstack/pull/14976), commit `0ed271574`), which is itself the acceptance act for a governed surface (Prime Directive #14). Execution is paused under #15193 and the maintainer's standing instruction; that pause is carried there, not by this status line. · **Amended** (2026-09-17, [#18413](https://github.com/objectstack-ai/objectstack/issues/18413) — maintainer ruling option **B** on [#18336](https://github.com/objectstack-ai/objectstack/issues/18336), 2026-09-16: **D5's assignment of `reportLegacyPlatformAdminGrant` and `resetLegacyPlatformAdminGrantReport` to D13 is withdrawn**. Those two symbols retire on the **17.x** line under [#11663](https://github.com/objectstack-ai/objectstack/issues/11663)'s design, **walled posture only**; the `single` posture keeps its zero-config first-user promotion and its grant row. **D5's Default-Organization ownership of that row is unchanged** and still lands on the v18 line under C3 — nothing about NULL ownership moves here. D14 gains one named exception. See **"Amendment (2026-09-17, #18413): the legacy-anchor retirement leaves D13 for the walled posture"** at the end.)
+**Status**: Accepted (2026-09-04) — accepted by the merge that landed it on `main` ([#14976](https://github.com/objectstack-ai/objectstack/pull/14976), commit `0ed271574`), which is itself the acceptance act for a governed surface (Prime Directive #14). Execution is paused under #15193 and the maintainer's standing instruction; that pause is carried there, not by this status line. · **Amended** (2026-09-17, [#18413](https://github.com/objectstack-ai/objectstack/issues/18413) — maintainer ruling option **B** on [#18336](https://github.com/objectstack-ai/objectstack/issues/18336), 2026-09-16: **D5's assignment of `reportLegacyPlatformAdminGrant` and `resetLegacyPlatformAdminGrantReport` to D13 is withdrawn**. Those two symbols retire on the **17.x** line under [#11663](https://github.com/objectstack-ai/objectstack/issues/11663)'s design, **walled posture only**; the `single` posture keeps its zero-config first-user promotion and its grant row. **D5's Default-Organization ownership of that row is unchanged** and still lands on the v18 line under C3 — nothing about NULL ownership moves here. D14 gains one named exception. See **"Amendment (2026-09-17, #18413): the legacy-anchor retirement leaves D13 for the walled posture"** at the end.) · **Amended** (2026-10-16 — maintainer ruling on the v18 upgrade of long-lived development databases: **`os dev` runs D10's ceremony itself on a local SQLite development database**, after copying it, and boots again; `os serve` / `os start` and every other database keep the manual ceremony and the boot refusal, and **what the ceremony decides on the operator's behalf is printed as a warning before its first write**. The ceremony plans and applies **each object in the database the deployment keeps it in** (the `telemetry` sibling included), and **adopts the shipped permission sets an install seeded as `admin` rows** as the platform seeds they are. See **"Amendment (2026-10-16): the development exception, the telemetry sibling, and the legacy shipped-set seeds"** at the end.)
 **Deciders**: ObjectStack maintainer, 2026-09-03/04, live chat on
 [#13564](https://github.com/objectstack-ai/objectstack/issues/13564), verbatim and untranslated,
 in the order the model was built: the premise 「我理解只有代码定义的元数据是跨租户的，对象、字段、视图等
@@ -327,6 +327,12 @@ organization data. So are the other things an organization writes: business unit
 record shares it authors, approvals, files, and every business row. Every such row carries the
 authoring organization, NOT NULL.
 
+> **Note (2026-10-17, ruling of record `6228728551` on #23960, letter B).** The organization's admins
+> who create and remove assignments in the paragraph above are the organization-level administrators
+> of [ADR-0090](./0090-permission-model-v2-concept-convergence.md) D12's 2026-10-17 amendment, and the
+> sentence runs under that amendment's boundary: they assign only sets with no wildcard superuser bit,
+> no `adminScope` and only `scope: 'org'` capabilities.
+
 Under `single` the authoring organization is the Default Organization
 ([ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md); `ensure-default-organization.ts`), which
 becomes **load-bearing**: it exists before the first write that needs an owner (today it is created on
@@ -376,6 +382,7 @@ half, together with the two symbols that carry the migration window —
 `reportLegacyPlatformAdminGrant` and `resetLegacyPlatformAdminGrantReport` — **left D13 on 2026-09-16**
 and retire on the **17.x** line under #11663's design instead (#18336; see the Amendment at the end).
 The `single` anchor's own disposition is #11979's (Choice 4B), which this record does not pre-empt.
+**Amended** (2026-10-16, [#23385](https://github.com/objectstack-ai/objectstack/issues/23385) — objectstack-ai/cloud#2872 ruling A′, comment `6160165869`, maintainer 「同意」, item 3): under a walled posture the deployment-level acceptance of package defaults for the `everyone` anchor (ADR-0090 D5) is configuration too — the security plugin's `acceptedDefaultPermissionSets` option, read only under a wall, each name held to the anchor's ADR-0090 D7 gate — with no NULL-owner row and no reserved organization (§1.5); the `single` posture keeps its Default-Organization row.
 
 ### D6 — Managed definitions are sealed; customization is environment-level state beside them, never an edit and never per organization
 
@@ -559,7 +566,8 @@ Template rows an admin has customized (`customized: true`) are the one populatio
 rule on (§6 Q1): keep them readable as the Default Organization's overrides (half of the D6 door), or
 accept the loss under the startup posture with a release note.
 
-**The migration is a manual, operator-run ceremony — never an automatic boot step.** Maintainer,
+**The migration is a manual, operator-run ceremony — never an automatic boot step** (one exception, a
+local SQLite development database under `os dev` — see the 2026-10-16 amendment). Maintainer,
 2026-09-04, verbatim: 「我建议 18.0 的主要考虑是客户数据变化比较大，而且需要手工执行升级脚本。」 The v18
 change rewrites customer data at a scale no boot may perform silently — column drops and mirror-row
 deletions are irreversible, attribution rewrites ownership, the constraint locks the shape — so it ships
@@ -581,6 +589,8 @@ as an `os migrate`-family command the operator runs, in this order and with thes
    fail-fast shape as [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md) D5 — naming the
    command to run; it never auto-migrates, never runs degraded on a half-migrated schema, and offers no
    escape hatch that silently skips the check (an operator who wants to run 17.x semantics runs 17.x).
+   (`os dev` alone runs the ceremony for a refused local SQLite development database, after copying it —
+   the 2026-10-16 amendment; the served boot's refusal itself is unchanged.)
 
 The ceremony reuses the [ADR-0120](./0120-unique-scope-vocabulary-and-null-safe-tenant-uniqueness.md)
 D4 migration ceremony where it exists (index and column changes) rather than inventing a second one.
@@ -1122,3 +1132,72 @@ control — the same grep over `packages/`: 15 and 17). The **assignment** is wh
 this amendment edits D5, D14 and §7 and leaves D13's list as it stands. The substance of the card is
 unaffected: before this amendment the retirement was D13's and therefore v18's; after it, it is
 #11663's and 17.x's.
+
+## Amendment (2026-10-16): the development exception, the telemetry sibling, and the legacy shipped-set seeds
+
+**Authority.** Maintainer ruling, taken in a Claude Code session on 2026-10-16 after the v18 ceremony
+refused to complete on two long-lived 17.x development databases (`hotcrm`'s and the showcase's). The
+maintainer's words, verbatim and untranslated, in the order they were given:
+
+> 平台的bug要修正啊，要不然客户的项目也启动不了。
+>
+> 我关注的尤其是开发环境的临时数据不能让客户很麻烦。
+>
+> 生产环境的数据又不能出问题，需要提示告警。
+
+and the options the maintainer selected, verbatim: 「os dev 自动完成（推荐）」 for a v17-shape local
+development database; 「自动当作种子副本」 for the shipped permission sets stored as `admin` rows;
+「完整覆盖：每个对象在它所在的库里处理（推荐）」 for the `telemetry` sibling; 「migrate 命令加 --dev，开发启动的拒绝
+提示带上它（推荐）」 for the ceremony's composition.
+
+Recorded here under **Prime Directive #13**: D10 said **never an automatic boot step**, and this
+amendment makes one exception to it. The record stays **Accepted**.
+
+### What was measured
+
+On both databases the ceremony stopped, in sequence, at:
+
+1. `sys_scim_provider` — retired before the first census, its table left in place by ruling — had no
+   inventory row, so the plan refused every database created before its retirement (fixed beside this
+   amendment as an inventory row, fate 4).
+2. A ceremony run from a shell boots unlike `os dev`: no development auth secret, so no security
+   plugin, so the authored-conversion step could not resolve the shipped permission sets.
+3. The eight shipped permission sets an install created before the 2026-08-15 seeder ruling stores as
+   `managed_by: 'admin'` (the object's `defaultValue`) read as Setup-authored, and the step refused each
+   one whose stored body differs from the shipped definition, prescribing a rename.
+4. The lifecycle-classed objects a development boot keeps in the `telemetry` sibling (ADR-0057 §3.6)
+   were never planned there: the boot refusal reads their columns in the sibling, the ceremony read only
+   the primary, so a database could pass every step and still never boot; and copies of those tables a
+   boot from before the sibling left in the primary blocked the column drops instead.
+
+### What the ruling decided
+
+1. **The development exception.** When the guard refuses the `serve --dev` child of `os dev`, the child
+   says so to its parent and exits; `os dev` copies the database file and its `telemetry` sibling (each
+   with `-wal` / `-shm`) into `<data dir>/backups/organization-ownership-<timestamp>/`, runs the ceremony
+   — the read-only plan, then `--apply` of that plan — with `--dev`, and boots again only when every step
+   finished. A blocked step ends `os dev` with the blocker, the copy's location and how to resume; it is
+   attempted once per session. A database that is not a local SQLite file is not upgraded in place.
+   `os serve` / `os start` keep item 5 exactly: the refusal, naming the ceremony.
+2. **Warnings in production.** What the ceremony decides on the operator's behalf — the legacy seeds it
+   adopts, the leftover copies it leaves alone — is a `warnings` list in the plan, printed by the plan and
+   again by `--apply` before its first write, and kept in the apply report.
+3. **The legacy shipped-set seeds are adopted.** A `sys_permission_set` row named as one of the security
+   plugin's shipped sets and stored as `managed_by: 'admin'` is re-owned `platform` at the start of the
+   authored-conversion step, so mirror deletion (D10 fate 2) takes it once every grant names its set and
+   the shipped definition stands. plugin-security's own resync keeps skipping such rows; the ceremony is
+   the one place they are re-owned, and its warning names each row and where the pre-upgrade copy is read.
+4. **Each object in its own database.** The plan reads every database the deployment keeps objects in —
+   the primary and the `telemetry` sibling — and plans each object where the booted engine routes it,
+   its anchors read where theirs live; attribution writes and column drops land in that database. A
+   table in a database its object no longer lives in, beside the one it does, is listed (`staleCopies`)
+   and warned about, and no step touches it.
+5. **`--dev` on the ceremony.** `os migrate organization-ownership --dev` composes as `os serve --dev`
+   does (development auth secret, `.env*` files, the `telemetry` sibling) — the security plugin and the
+   audit plugin included — and a development boot's refusal names the command with `--dev`.
+
+### Text changed by this amendment
+
+- **Status line** — the second `**Amended**` note.
+- **D10** — the bold sentence and item 5 each name the exception.
+

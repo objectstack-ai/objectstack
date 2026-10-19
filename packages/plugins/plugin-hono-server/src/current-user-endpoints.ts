@@ -39,25 +39,24 @@
  */
 
 import {
-    assembleExecutionContext,
     buildEffectiveObjectPermissions,
     IDataEngine,
     resolveLocalizationContext,
-    resolveUserAuthzGrants,
+    resolveRequestExecutionContext,
+    rethrowAuthzStoreUnavailable,
     type ApiExposureSchemaLike,
     type ManagedSchemaLike,
+    type RequestAuthService,
 } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import type {
-    IAuthService,
     IMetadataService,
     IObjectQLEngine,
     ISecurityService,
     Logger,
 } from '@objectstack/spec/contracts';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
-import { inProcessSessionReadInput } from '@objectstack/types';
 
 /** API prefix these endpoints mount under unless the host overrides it. */
 export const DEFAULT_CURRENT_USER_PREFIX = '/api/v1';
@@ -430,15 +429,32 @@ function permissionSetResolver(
  * names never reached `resolvePermissionSets` either, independently of the
  * position tables.
  *
- * So the session lookup — the genuinely transport-specific part — stays here and
- * ALL grant aggregation delegates to `resolveUserAuthzGrants`, the canonical
- * resolver's userId-driven core, exported for exactly this caller shape: a
- * surface that already knows WHO the principal is and needs the SAME envelope
- * with no HTTP request to resolve it from. `sys_user_position` (null org =
- * global, active-org match, ADR-0091 validity windows), the implicit `everyone`
- * position (ADR-0090 D5), `sys_position_permission_set`, `mapMembershipRole`
- * normalization, the platform-admin derivation and the `ai_seat` synthesis
- * arrive with it instead of being re-implemented — one copy fewer to drift.
+ * So ALL grant aggregation delegates to the canonical resolver.
+ * `sys_user_position` (null org = global, active-org match, ADR-0091 validity
+ * windows), the implicit `everyone` position (ADR-0090 D5),
+ * `sys_position_permission_set`, `mapMembershipRole` normalization, the
+ * platform-admin derivation and the `ai_seat` synthesis arrive with it instead
+ * of being re-implemented — one copy fewer to drift. [#24061] It runs inside
+ * `resolveAuthzContext`'s request-scoped grants memo (`request-grants-memo.ts`):
+ * the session read's `customSession` hook (plugin-auth) resolves the same
+ * principal's grants, and the memo serves this face that resolution instead of
+ * issuing every grant read twice per request. The memo closes when the call
+ * settles and serves only while no write has started or landed on the engine,
+ * so a revocation inside the request is still read fresh. No API-key door is
+ * opened.
+ *
+ * ## The one request-to-context composition (ruling records 6227928430 and 6257816853)
+ *
+ * The steps around that resolver — reading the session, the anonymous entry,
+ * the ADR-0069 gate and the envelope assembly — are not composed here. This
+ * face calls `resolveRequestExecutionContext` (`@objectstack/core`), the one
+ * composition every platform door calls, and states its differences as that
+ * function's named parameters (see the call below). It reads who a session
+ * names the way every door does: a session read that carries `session.userId`
+ * and no `user.id` names that user. What stays here are this door's facts:
+ * the per-request service reads, the kernel the request is resolved against
+ * ({@link resolveRequestContext}, which picks the locator this resolver is
+ * built over), and the fail-closed `catch`.
  */
 export function makeExecutionContextResolver(
     ctx: CurrentUserEndpointsContext,
@@ -449,7 +465,7 @@ export function makeExecutionContextResolver(
      * kernel's does), and an engine-less stack must still resolve the SESSION —
      * a multi-tenant environment kernel carrying `auth` but no `objectql`
      * answers `{authenticated:true}` with empty grants, never a fake anonymous
-     * (cloud#927). `resolveUserAuthzGrants` accepts `undefined` and yields an
+     * (cloud#927). The composition accepts `undefined` and yields an
      * empty-but-valid envelope, so the guard is all this needs.
      */
     const getObjectQL = (): IDataEngine | undefined => {
@@ -457,114 +473,106 @@ export function makeExecutionContextResolver(
     };
     const resolveCtx = async (c: any): Promise<ExecutionContext | undefined> => {
         try {
-            const authService = ctx.getService<IAuthService>('auth');
-            if (!authService) return undefined;
-            let api = authService.api;
-            if (!api && typeof authService.getApi === 'function') {
-                api = await authService.getApi();
-            }
-            if (!api?.getSession) return undefined;
-            // [#22258] The in-process session-read rule: these routes answer
-            // with their own response, so a renewal here would move the
-            // session's expiry while its renewed cookie is discarded. A request
-            // carrying a session cookie reads without renewal; a bearer-only
-            // request renews as before.
-            const session = await api.getSession(inProcessSessionReadInput(c.req.raw.headers));
-            if (!session?.user?.id) return undefined;
-            const userId = session.user.id;
-            const tenantId = session.session?.activeOrganizationId ?? undefined;
-            // THE delegation (#6334). Never throws — fail-closed by
-            // construction: a missing engine or an absent table yields an
-            // empty-but-valid envelope rather than an exception, so no read
-            // here needs its own guard.
+            // Read per request, from the kernel that owns the request. A locator
+            // that THROWS for an absent `auth` slot lands in the `catch` below,
+            // which answers no context; an absent one is handed on as
+            // `undefined`, and `sessionApi: 'required'` admits nobody for it.
+            const authService = ctx.getService<RequestAuthService>('auth');
+            // THE delegation (#6334), ONE resolution per request (#24061), and
+            // the one composition (ruling record 6227928430, letter A; ruling
+            // record 6257816853, slice 5 letter A). This face's differences,
+            // each a named parameter of the composition:
             //
-            // No `seedEmail`: that option exists for a caller holding an email
-            // the resolver cannot read back (the API-key path, which has no
-            // session). Here the resolver's own `sys_user` read — the row it
-            // loads anyway for the `ai_seat` synthesis — answers it, and
-            // `sys_user.email` is unique by the auth invariant, so the two
-            // sources cannot disagree. `AuthSessionApi.getSession` declares
-            // `user: { id?: string }` and nothing more; reading an undeclared
-            // `email` off it through `any` is the #4127 shape, and widening
-            // that contract needs a call site that actually requires it.
-            const grants = await resolveUserAuthzGrants(getObjectQL(), userId, { tenantId });
-            // [#2408 / #3361] Open the per-request `Server-Timing` disclosure
-            // gate for an admin/service principal — the standalone-surface analog
-            // of the runtime dispatcher's `timedResolveExecutionContext`. The rung
-            // is no longer re-derived here onto a throw-away object:
-            // `grants.posture` IS the authoritative derivation (ADR-0095 D2/D3 —
-            // from held capability grants, never a better-auth role), so this
-            // surface and the dispatcher hand the shared predicate the same value.
-            // A no-op when perf-tuning is off (no ambient gate).
-            if (isPerfDisclosurePrincipal({ isSystem: false, posture: grants.posture } as ExecutionContext)) {
-                allowPerfDisclosure();
-            }
-            // [#15747] THE assembly (the second delegation). This used to be a
-            // hand-rolled object literal cast `as any` — beside the very module
-            // that exists to make that shape unrepresentable. It omitted SIX
-            // fields of the closed entry set (`principalKind`, `onBehalfOf`,
-            // `audience`, `accessToken`, `authGate`, `oauthScopes`), which is
-            // the #6071 drift class exactly: a field exists on
-            // `ExecutionContext`, one transport carries it, another silently
-            // does not. `ExecutionContextEntryFields` closes that set with a
-            // type, so a field added to `ExecutionContext` from here on fails
-            // to COMPILE until this face decides it — and the `as any` that
-            // suppressed the whole question is gone.
-            //
-            // The DEFAULT, fail-closed entry (commit f586f1a89, the ruled Option A), not the guest
-            // one: a sessionless request never reaches this line (the
-            // `session?.user?.id` guard above already returned `undefined`) and
-            // all three handlers answer their own no-session body. Adopting
-            // `assembleExecutionContextOrGuest` here would convert those into
-            // an authorization evaluation over a guest envelope, which is not
-            // these faces' semantics.
-            //
-            // Every per-face divergence below is passed EXPLICITLY, which is
-            // what turns each from an invisible omission into a named decision:
-            //
-            //  - `oauth` — this face resolves its principal from the better-auth
-            //    SESSION and opens no OAuth 2.1 door: `acceptOAuthAccessToken`
-            //    is set by the `/mcp` dispatch path alone, on a resolver this
-            //    one does not call. So `principalKind` here is 'human'
-            //    unconditionally, and `onBehalfOf` / `oauthScopes` are not
-            //    representable — pinned in
+            //  - `anonymous: 'fail-closed'` (commit f586f1a89, the ruled
+            //    Option A): a sessionless request yields no context, and all
+            //    three handlers answer their own no-session body. The guest
+            //    entry would convert those into an authorization evaluation
+            //    over a guest envelope, which is not these faces' semantics.
+            //  - `credentials: 'session-only'`: this face never opened an
+            //    API-key door, so no key is extracted and no admission runs.
+            //  - `sessionApi: 'required'`: with no auth service, or one
+            //    exposing no session read, this face authenticates nobody.
+            //  - `session: 'request'`: [#22258] the in-process session-read
+            //    rule. These routes answer with their own response, so a
+            //    renewal here would move the session's expiry while its renewed
+            //    cookie is discarded. A request carrying a session cookie reads
+            //    without renewal; a bearer-only request renews as before.
+            //  - `tenancy: undefined`: no posture is read, so the session's
+            //    claimed organization stands as the session made it, exactly as
+            //    this face has always read `activeOrganizationId`.
+            //  - `oauth: undefined`: this face resolves its principal from the
+            //    better-auth SESSION and opens no OAuth 2.1 door:
+            //    `acceptOAuthAccessToken` is set by the `/mcp` dispatch path
+            //    alone, on a resolver this one does not call. So `principalKind`
+            //    here is 'human' unconditionally, and `onBehalfOf` /
+            //    `oauthScopes` are not representable — pinned in
             //    `current-user-endpoints-execution-context-envelope.test.ts`, so
             //    acquiring such a door turns that pin red rather than silently
             //    making an absent `principalKind` mean something new.
-            //  - `localization` / `requestLocale` — withheld. #15387 moved this
-            //    surface's `locale` / `timezone` / `currency` to the ENDPOINT,
-            //    which reads the cascade itself (`resolveCurrentUserLocalization`);
-            //    resolving it here too would add a `sys_setting` read to every
-            //    request to all three routes and give the localization endpoint
-            //    two readings of one cascade to keep in agreement.
-            //  - `accessToken` — withheld, the same stance the REST face takes:
+            //  - `localization: 'withhold'`, `requestLocale: undefined`: #15387
+            //    moved this surface's `locale` / `timezone` / `currency` to the
+            //    ENDPOINT, which reads the cascade itself
+            //    (`resolveCurrentUserLocalization`); resolving it here too would
+            //    add a `sys_setting` read to every request to all three routes
+            //    and give the localization endpoint two readings of one cascade
+            //    to keep in agreement.
+            //  - `accessToken: 'withhold'`: the same stance the REST face takes;
             //    surfacing the session bearer to hooks on a second transport is
             //    a product decision, not a refactor.
-            //  - `authGate` — withheld. Its consumer reads it off the envelope
+            //  - `authGate: 'withhold'`: its consumer reads it off the envelope
             //    at the REST seam (`RestServer.enforceAuth`); nothing on these
             //    three routes does, and `core/security/auth-gate.ts` allow-lists
             //    `/me/apps` + `/me/localization` as endpoints a GATED user must
             //    still reach, so carrying it here would be an unread copy on a
             //    surface whose whole point is that the gate does not close it.
-            return assembleExecutionContext({
-                // `grants` IS the `ResolvedAuthzContext` core, minus the two
-                // values only the session knows. `positions`, not `roles`: the
-                // ExecutionContext field name every reader uses (ADR-0090 D3),
-                // carrying the ADR-0057 D4 `sys_user_position` assignments, the
-                // normalized org-membership names, the implicit `everyone`
-                // anchor and the derived `platform_admin`. [ADR-0105 D2]
-                // `accessible_org_ids` rides along: the `group` posture's Layer
-                // 0 wall is `organization_id IN (...)`, so a context without it
-                // fails every read closed on this surface.
-                authz: { ...grants, userId, tenantId },
-                oauth: undefined,
-                localization: undefined,
+            //  - `onAdmission: undefined`: nothing here needs a word about
+            //    which credential admitted the caller.
+            //
+            // Never throws for a missing engine or an absent table — an
+            // empty-but-valid envelope (cloud#927); a permission-store read that
+            // FAILS raises, and the `catch` below re-raises that outage.
+            const context = await resolveRequestExecutionContext({
+                headers: c.req.raw.headers,
+                ql: getObjectQL(),
+                authService,
+                tenancy: undefined,
+                anonymous: 'fail-closed',
+                authGate: 'withhold',
+                credentials: 'session-only',
+                sessionApi: 'required',
+                session: 'request',
+                localization: 'withhold',
                 requestLocale: undefined,
-                accessToken: undefined,
-                authGate: undefined,
+                accessToken: 'withhold',
+                oauth: undefined,
+                onAdmission: undefined,
             });
-        } catch {
-            return undefined;
+            if (!context) return undefined;
+            // [#2408 / #3361] Open the per-request `Server-Timing` disclosure
+            // gate for an admin/service principal — the standalone-surface analog
+            // of the runtime dispatcher's `timedResolveExecutionContext`. The rung
+            // is not re-derived here: `context.posture` IS the authoritative
+            // derivation (ADR-0095 D2/D3 — from held capability grants, never a
+            // better-auth role), so this surface and the dispatcher hand the
+            // shared predicate the same value. A no-op when perf-tuning is off
+            // (no ambient gate).
+            if (isPerfDisclosurePrincipal(context)) {
+                allowPerfDisclosure();
+            }
+            return context;
+        } catch (err) {
+            // [commit 6a180e42d — maintainer ruling 2026-08-30, quoted verbatim
+            // in the header of core's `authz-store-unavailable.test.ts`] Fail
+            // closed, with ONE exception: an authorization store that could
+            // not be read is an outage, not an anonymous caller. The
+            // composition propagates it, and it is re-raised to the host's
+            // error seam — `503 SERVICE_UNAVAILABLE` on `HonoHttpServer` —
+            // instead of answering `{ authenticated: false }` or
+            // `{ apps: [] }`, bodies byte-identical to a signed-out caller's.
+            // Every other fault still answers no context, the composition's
+            // own propagated rejections included (an auth service whose
+            // `getApi()` rejects).
+            return rethrowAuthzStoreUnavailable(err);
         }
     };
     return resolveCtx;
@@ -699,8 +707,8 @@ interface CurrentUserLocalization {
  * `currency` and `timezone` come off that same cascade reading, which is the
  * repair #15387 names: they used to be read off the request
  * `ExecutionContext`, and the resolver serving THIS surface
- * ({@link makeExecutionContextResolver}) is a hand-rolled envelope that never
- * carried them — so the endpoint answered `null` for both to every
+ * ({@link makeExecutionContextResolver}) never carried them (it withholds the
+ * localization) — so the endpoint answered `null` for both to every
  * authenticated caller, whatever the `localization` settings said. The
  * dispatcher's shared assembler fills them from this very function
  * (`core/security/assemble-execution-context.ts` ⇒ `resolveLocalizationContext`),

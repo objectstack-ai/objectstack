@@ -5,9 +5,10 @@
  * and each export IS the check its schema runs — the spec half of objectui#7715.
  *
  * Why: objectui derives its zod mirrors from a spec object's `.shape`
- * (`specFieldsExcept(SpecListViewSchema.shape, …)`, six sites at the pinned
- * `.objectui-sha`). `.shape` carries the FIELDS by reference and drops every
- * check attached to the OBJECT, so at 17.3.0 objectui's authoring door accepted
+ * (`specFieldsExcept(SpecListViewSchema.shape, …)`; read points recorded in
+ * `liveness/view.json`, row `list.appearance`). `.shape` carries the FIELDS by
+ * reference and drops every check attached to the OBJECT, so at 17.3.0
+ * objectui's authoring door accepted
  * `appearance.allowedVisualizations: ['calendar']` with no `calendar:` block
  * while the spec's publish door refused it. A mirror needs the rule as a
  * function it can attach, and that function must be the schema's own — never a
@@ -62,7 +63,10 @@ import {
   checkPageRequiresKind,
   checkPagePrintComposition,
   checkPageSlotPair,
-  checkPageComponentViewData,
+  checkPageDefaultPlacement,
+  checkPageRegionPlacement,
+  checkPageRecordBindingPlacement,
+  checkPageMainRegionWidth,
 } from './page.zod';
 import {
   GlobalFilterSchema,
@@ -237,7 +241,6 @@ const PAGE_BASE = { name: 'home_page', label: 'Home', type: 'home' } as const;
 const pageSourceFixtures: Fixture[] = [
   { label: 'an `html` page with no `source`', value: { ...PAGE_BASE, kind: 'html' }, refusesAt: ['source'] },
   { label: 'a `react` page with a whitespace-only `source`', value: { ...PAGE_BASE, kind: 'react', source: '   ' }, refusesAt: ['source'] },
-  { label: 'a `jsx` page with an empty `source`', value: { ...PAGE_BASE, kind: 'jsx', source: '' }, refusesAt: ['source'] },
   { label: 'an `html` page with a `source`', value: { ...PAGE_BASE, kind: 'html', source: 'Card' }, refusesAt: [] },
   { label: 'a `full` page with no `source`', value: { ...PAGE_BASE, kind: 'full' }, refusesAt: [] },
   { label: 'a page with no `kind` (the `full` default)', value: { ...PAGE_BASE }, refusesAt: [] },
@@ -255,7 +258,6 @@ const pageRequiresFixtures: Fixture[] = [
   { label: '`requires` on a page with no `kind` (the `full` default)', value: { ...PAGE_BASE, requires: ['ui'] }, refusesAt: ['requires'] },
   { label: 'an EMPTY `requires` on a `react` page — the key is refused, not its contents', value: { ...PAGE_BASE, kind: 'react', source: 'Card', requires: [] }, refusesAt: ['requires'] },
   { label: '`requires` on an `html` page', value: { ...PAGE_BASE, kind: 'html', source: 'Card', requires: ['ui'] }, refusesAt: [] },
-  { label: '`requires` on a `jsx` page (the deprecated `html` alias)', value: { ...PAGE_BASE, kind: 'jsx', source: 'Card', requires: ['ui'] }, refusesAt: [] },
   { label: 'a `react` page with no `requires`', value: { ...PAGE_BASE, kind: 'react', source: 'Card' }, refusesAt: [] },
 ];
 
@@ -300,51 +302,59 @@ const pageSlotPairFixtures: Fixture[] = [
   { label: 'a slot map with neither', value: { ...SLOT_PAGE, slots: { discussion: [] } }, refusesAt: [] },
 ];
 
-// [#23357] A component's `data` prop naming the retired view-level `api`
-// provider is refused at the component's `properties.data.provider`, at any
-// depth under `regions` and `slots`, on the four types whose `data` is a view
-// data source. No fixture here carries `print`, `source`, `requires` or a
-// `details` + `tabs` pair, so the four siblings stay silent and each row
-// exercises THIS check alone. The provider is spelled through a constant: the
-// spec's tree-scoped absence pin reads authored literals, and these bodies are
-// refusals, not authorings.
-const RETIRED_PROVIDER = 'api' as const;
-const RETIRED_BINDING = { provider: RETIRED_PROVIDER, read: { url: 'https://partner.example.com/cases' } } as const;
-const viewDataBlock = (type: string, data: unknown) => ({ id: 'cases', type, properties: { objectName: 'crm_case', data } });
-const pageComponentViewDataFixtures: Fixture[] = [
+// [#23610] `isDefault: true` off a record page bound to an object, and a
+// region the page's template does not place. No fixture here carries `print`,
+// `source`, `requires`, a `details` + `tabs` pair or a component `data`, so the
+// siblings stay silent and each row exercises ONE check alone. `kind` and
+// `template` are left out on the default rows on purpose: a direct call sees
+// neither while the parse sees the applied `full` / `default` defaults.
+const pageDefaultPlacementFixtures: Fixture[] = [
+  { label: '`isDefault: true` on a `home` page', value: { ...PAGE_BASE, isDefault: true }, refusesAt: ['isDefault'] },
+  { label: '`isDefault: true` on a `list` page', value: { ...PAGE_BASE, type: 'list', isDefault: true }, refusesAt: ['isDefault'] },
+  { label: '`isDefault: true` on a record page bound to no object', value: { ...PAGE_BASE, type: 'record', isDefault: true }, refusesAt: ['isDefault'] },
+  { label: '`isDefault: true` on a page with no `type` (the `record` default) and no object', value: { name: 'untyped_page', label: 'Untyped', isDefault: true }, refusesAt: ['isDefault'] },
+  { label: '`isDefault: true` on a record page bound to an object', value: { ...PAGE_BASE, type: 'record', object: 'account', isDefault: true }, refusesAt: [] },
+  { label: '`isDefault: false` on a `home` page', value: { ...PAGE_BASE, isDefault: false }, refusesAt: [] },
+  { label: 'a `home` page with no `isDefault`', value: { ...PAGE_BASE }, refusesAt: [] },
+];
+
+const region = (name: string, width?: string) => ({ name, ...(width ? { width } : {}), components: [] });
+const pageRegionPlacementFixtures: Fixture[] = [
   {
-    label: 'an `object-grid` in a region binding the retired provider',
-    value: { ...PAGE_BASE, regions: [{ name: 'main', components: [viewDataBlock('object-grid', RETIRED_BINDING)] }] },
-    refusesAt: ['regions.0.components.0.properties.data.provider'],
+    label: '`left_sidebar` and `right_sidebar` on `three-column`',
+    value: { ...PAGE_BASE, template: 'three-column', regions: [region('header'), region('left_sidebar', 'small'), region('main'), region('right_sidebar', 'medium')] },
+    refusesAt: ['regions.1.name', 'regions.3.name'],
   },
-  {
-    label: 'an `object-tree` nested in a `page:tabs` item binding it',
-    value: {
-      ...PAGE_BASE,
-      regions: [{ name: 'main', components: [{ type: 'page:tabs', properties: { items: [{ label: 'Cases', children: [viewDataBlock('object-tree', RETIRED_BINDING)] }] } }] }],
-    },
-    refusesAt: ['regions.0.components.0.properties.items.0.children.0.properties.data.provider'],
-  },
-  {
-    label: 'an `object-map` in a slot binding it',
-    value: { ...SLOT_PAGE, slots: { details: viewDataBlock('object-map', RETIRED_BINDING) } },
-    refusesAt: ['slots.details.properties.data.provider'],
-  },
-  {
-    label: 'an `object-gantt` binding its object',
-    value: { ...PAGE_BASE, regions: [{ name: 'main', components: [viewDataBlock('object-gantt', { provider: 'object', object: 'crm_case' })] }] },
-    refusesAt: [],
-  },
-  {
-    label: 'an `object-kanban` (a row-array `data`, its own contract) carrying the retired provider',
-    value: { ...PAGE_BASE, regions: [{ name: 'main', components: [viewDataBlock('object-kanban', RETIRED_BINDING)] }] },
-    refusesAt: [],
-  },
-  {
-    label: 'a type with no props row carrying the retired provider',
-    value: { ...PAGE_BASE, regions: [{ name: 'main', components: [viewDataBlock('custom:partner-widget', RETIRED_BINDING)] }] },
-    refusesAt: [],
-  },
+  { label: '`content` on a page with no `template` (the `default` default)', value: { ...PAGE_BASE, regions: [region('content')] }, refusesAt: ['regions.0.name'] },
+  { label: '`aside` on `header-sidebar-main`', value: { ...PAGE_BASE, template: 'header-sidebar-main', regions: [region('main'), region('aside')] }, refusesAt: ['regions.1.name'] },
+  { label: 'the five slots on `default`', value: { ...PAGE_BASE, template: 'default', regions: ['header', 'sidebar', 'main', 'aside', 'footer'].map((n) => region(n)) }, refusesAt: [] },
+  { label: 'a slot name in another case (`Main`) — the renderer matches case-insensitively', value: { ...PAGE_BASE, regions: [region('Main')] }, refusesAt: [] },
+  { label: 'any name on `dashboard` — its open grid', value: { ...PAGE_BASE, template: 'dashboard', regions: [region('header'), region('kpis'), region('pipeline')] }, refusesAt: [] },
+  { label: 'a second `main` on the `default` default — not drawn at all', value: { ...PAGE_BASE, regions: [region('main'), region('MAIN')] }, refusesAt: ['regions.1.name'] },
+  { label: 'a second `header` on `dashboard`, beside two `kpis` cells', value: { ...PAGE_BASE, template: 'dashboard', regions: [region('header'), region('kpis'), region('kpis'), region('header')] }, refusesAt: ['regions.3.name'] },
+  { label: 'an unplaced name on a `slotted` page — it renders its slots, not its regions', value: { ...PAGE_BASE, type: 'record', object: 'account', kind: 'slotted', regions: [region('left_sidebar')] }, refusesAt: [] },
+];
+
+// A region named `main` takes only `width: 'full'`; every other region keeps
+// its widths. No fixture here names a region its template does not place, so
+// the placement check stays silent and each row exercises this check alone.
+const pageMainRegionWidthFixtures: Fixture[] = [
+  { label: '`large` on the `main` of a `three-column` page', value: { ...PAGE_BASE, template: 'three-column', regions: [region('sidebar', 'small'), region('main', 'large')] }, refusesAt: ['regions.1.width'] },
+  { label: '`small` on `Main` — the renderer matches case-insensitively', value: { ...PAGE_BASE, regions: [region('Main', 'small')] }, refusesAt: ['regions.0.width'] },
+  { label: '`medium` on the `main` cell of a `dashboard` page', value: { ...PAGE_BASE, template: 'dashboard', regions: [region('main', 'medium')] }, refusesAt: ['regions.0.width'] },
+  { label: '`medium` on the `main` of a `slotted` page — no layout reads it on any kind', value: { ...PAGE_BASE, type: 'record', object: 'account', kind: 'slotted', regions: [region('main', 'medium')] }, refusesAt: ['regions.0.width'] },
+  { label: '`full` on `main` — the one width it takes, page-wide', value: { ...PAGE_BASE, regions: [region('main', 'full')] }, refusesAt: [] },
+  { label: '`large` on `header` and `aside` — the rule is `main`\'s alone', value: { ...PAGE_BASE, template: 'three-column', regions: [region('header', 'large'), region('main'), region('aside', 'large')] }, refusesAt: [] },
+];
+
+const ORG_ROW = { object: 'sys_organization', sort: [{ field: 'created_at', order: 'asc' }] } as const;
+const pageRecordBindingPlacementFixtures: Fixture[] = [
+  { label: 'a `record` binding on an `app` page', value: { ...PAGE_BASE, type: 'app', record: ORG_ROW }, refusesAt: [] },
+  { label: 'an `app` page with no `record` binding', value: { ...PAGE_BASE, type: 'app' }, refusesAt: [] },
+  { label: 'a `record` binding on a `home` page', value: { ...PAGE_BASE, record: ORG_ROW }, refusesAt: ['record'] },
+  { label: 'a `record` binding on a record page — its row is the record it opens', value: { ...PAGE_BASE, type: 'record', object: 'account', record: ORG_ROW }, refusesAt: ['record'] },
+  { label: 'a `record` binding on a page with no `type` (the `record` default)', value: { name: 'untyped_page', label: 'Untyped', record: ORG_ROW }, refusesAt: ['record'] },
+  { label: 'a `record` binding on a `list` page', value: { ...PAGE_BASE, type: 'list', record: ORG_ROW }, refusesAt: ['record'] },
 ];
 
 const DATE_FILTER = { field: 'created_at', type: 'date' } as const;
@@ -562,7 +572,10 @@ const MIRRORED: MirroredSchema[] = [
       { name: 'checkPageRequiresKind', check: checkPageRequiresKind, fixtures: pageRequiresFixtures },
       { name: 'checkPagePrintComposition', check: checkPagePrintComposition, fixtures: pagePrintFixtures },
       { name: 'checkPageSlotPair', check: checkPageSlotPair, fixtures: pageSlotPairFixtures },
-      { name: 'checkPageComponentViewData', check: checkPageComponentViewData, fixtures: pageComponentViewDataFixtures },
+      { name: 'checkPageDefaultPlacement', check: checkPageDefaultPlacement, fixtures: pageDefaultPlacementFixtures },
+      { name: 'checkPageRegionPlacement', check: checkPageRegionPlacement, fixtures: pageRegionPlacementFixtures },
+      { name: 'checkPageRecordBindingPlacement', check: checkPageRecordBindingPlacement, fixtures: pageRecordBindingPlacementFixtures },
+      { name: 'checkPageMainRegionWidth', check: checkPageMainRegionWidth, fixtures: pageMainRegionWidthFixtures },
     ],
     cleanFixtures: [{ ...PAGE_BASE }],
   },
@@ -573,11 +586,10 @@ const MIRRORED: MirroredSchema[] = [
     cleanFixtures: [{ field: 'created_at', type: 'date' }],
   },
   // `dashboard.widgets[]` is mirrored the same way and for the same reason, so
-  // the ADR-0049 `stageOrder` type gate belongs in this catalogue: measured at
-  // the `.objectui-sha` pin `53ded82bf7a494f54e344e19099dbf00854b8694`,
-  // objectui's `packages/types/src/zod/complex.zod.ts` builds its own
-  // `DashboardWidgetSchema` from
-  // `specFieldsExcept(SpecDashboardWidgetSchema.shape, …)` — a `.shape` spread,
+  // the ADR-0049 `stageOrder` type gate belongs in this catalogue: objectui
+  // builds its own `DashboardWidgetSchema` from
+  // `specFieldsExcept(SpecDashboardWidgetSchema.shape, …)` (read point recorded
+  // in `liveness/dashboard.json`, row `widgets`) — a `.shape` spread,
   // which carries the FIELDS and drops every object-level check. That mirror
   // re-attaches none of these exports today, which is a live gap recorded on
   // the check's own docblock rather than a reason to leave the export
@@ -718,13 +730,19 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     expect(attachments(src, 'checkListViewPageMount')).toBe(0);
   });
 
-  it('page.zod.ts declares all five exports and attaches each to PageSchema', () => {
+  it('page.zod.ts declares all eight exports and attaches each to PageSchema', () => {
     const src = read('page.zod.ts');
-    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageSlotPair', 'checkPageComponentViewData']) {
+    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageSlotPair', 'checkPageDefaultPlacement', 'checkPageRegionPlacement', 'checkPageRecordBindingPlacement', 'checkPageMainRegionWidth']) {
       expect(src).toContain(`export function ${name}(`);
       expect(declarations(src, name)).toBe(1);
       expect(attachments(src, name)).toBe(1);
     }
+    // `checkPageComponentViewData` was deleted once `validateComponentProps`
+    // judged a page component's `properties` at the save door too: one
+    // operation, one implementation, the props rule's. A re-attachment would be
+    // a second judge of the same bag.
+    expect(declarations(src, 'checkPageComponentViewData')).toBe(0);
+    expect(attachments(src, 'checkPageComponentViewData')).toBe(0);
   });
 
   it('dashboard.zod.ts declares the export and attaches it to GlobalFilterSchema', () => {
@@ -755,7 +773,10 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
     ['checkPageRequiresKind', checkPageRequiresKind],
     ['checkPagePrintComposition', checkPagePrintComposition],
     ['checkPageSlotPair', checkPageSlotPair],
-    ['checkPageComponentViewData', checkPageComponentViewData],
+    ['checkPageDefaultPlacement', checkPageDefaultPlacement],
+    ['checkPageRegionPlacement', checkPageRegionPlacement],
+    ['checkPageRecordBindingPlacement', checkPageRecordBindingPlacement],
+    ['checkPageMainRegionWidth', checkPageMainRegionWidth],
     ['checkGlobalFilterDateDefaultValue', checkGlobalFilterDateDefaultValue],
   ] as const)('%s — reference identity, and the `(value, ctx)` arity', (name, fn) => {
     expect((ui as Record<string, unknown>)[name]).toBe(fn);
@@ -770,5 +791,9 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
   // above as the lit control that the namespace is really populated.
   it('no longer exports `checkListViewPageMount` — retired with the mount it policed', () => {
     expect('checkListViewPageMount' in (ui as Record<string, unknown>)).toBe(false);
+  });
+
+  it('no longer exports `checkPageComponentViewData` — the props rule judges the component bag', () => {
+    expect('checkPageComponentViewData' in (ui as Record<string, unknown>)).toBe(false);
   });
 });

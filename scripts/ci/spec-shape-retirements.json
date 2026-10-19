@@ -2,36 +2,35 @@
   "$comment": "Intentional spec retirements the Spec Shape Gate reads as `known` instead of red. One entry per retirement, written by the accepting seat when the downstream (objectui) card is filed, deleted when that card closes. Every entry carries exactly: retired, objectstack_pr, objectstack_commit (40-hex merge commit), downstream_card (owner/repo#N), registered_at (YYYY-MM-DD), matches (non-empty; each pattern names a repo-relative objectui `file` -- `*` within a segment, `**` across -- plus at least one of `code` (TS<digits>) or `message` (substring)). A file alone is refused. The reader, its grammar and its refusals: scripts/ci/spec-shape-gate.mjs (THE REGISTRY).",
   "retirements": [
     {
-      "retired": "view-level data source provider 'api' (ViewDataSchema arm; ruling C on #23082, executed by PR #23160) -- the downstream still compares against the '\"api\"' literal, reads the arm's read/write keys, and casts test fixtures to its { data: { read } } shape",
-      "objectstack_pr": 23160,
-      "objectstack_commit": "1912af47ba6e3b250f7c717fea0d56e181029b9c",
-      "downstream_card": "objectstack-ai/objectui#12325",
-      "registered_at": "2026-10-13",
+      "retired": "the page component's `visibility` and the view form's `visibleOn` (field and section), retired as keys -- retiredKey() tombstones naming `visibleWhen` (F4 of #23543) -- objectui still passes the page component's `visibility` to an expression argument, and its expressions test (compiled only by the package's chained test project) still authors that key",
+      "objectstack_pr": 23836,
+      "objectstack_commit": "105902f10ae8124a5e965cb24f7b30681fd9fae2",
+      "downstream_card": "objectstack-ai/objectui#12654",
+      "registered_at": "2026-10-16",
       "matches": [
         {
-          "file": "packages/**",
-          "code": "TS2367",
-          "message": "'\"api\"'"
+          "file": "packages/react/src/SchemaRenderer.tsx",
+          "code": "TS2345",
+          "message": "Argument of type '{ '[REMOVED] Key retired: run `os validate` for its migration.': never; }' is not assignable to parameter of type 'string | boolean | { dialect?: string | undefined; source?: string | undefined; } | undefined'."
         },
         {
-          "file": "packages/**",
-          "code": "TS2678",
-          "message": "'\"api\"'"
-        },
+          "file": "packages/react/src/__tests__/SchemaRenderer.expressions.test.tsx",
+          "code": "TS2322",
+          "message": "Type 'string' is not assignable to type '{ '[REMOVED] Key retired: run `os validate` for its migration.': never; }'."
+        }
+      ]
+    },
+    {
+      "retired": "nothing retired -- the spec ADDED an optional key: the select option's lifecycle `kind` (`open` | `won` | `lost`, required only under a `stageField`, #23809). objectui's select-option convergence pins assert by design that the converged form and metadata faces gained no key beyond `description` / `default`, so a new spec key reds them (TS2344 `Equal` pins, compiled only by the package's chained test project); the entry is deleted when objectui re-pins the faces",
+      "objectstack_pr": 23846,
+      "objectstack_commit": "adad73f71483abf84b470e90367fe8080c44a4e0",
+      "downstream_card": "objectstack-ai/objectui#12711",
+      "registered_at": "2026-10-16",
+      "matches": [
         {
-          "file": "packages/core/src/adapters/resolveDataSource.ts",
-          "code": "TS2339",
-          "message": "does not exist on type 'never'"
-        },
-        {
-          "file": "packages/plugin-gantt/src/ObjectGantt.tsx",
-          "code": "TS2339",
-          "message": "does not exist on type 'never'"
-        },
-        {
-          "file": "packages/types/src/__tests__/*.test.ts",
-          "code": "TS2352",
-          "message": "data: { read: Record<string, unknown>; }"
+          "file": "packages/types/src/__tests__/select-option-tier1-convergence-7014.test.ts",
+          "code": "TS2344",
+          "message": "Type 'false' does not satisfy the constraint 'true'."
         }
       ]
     }

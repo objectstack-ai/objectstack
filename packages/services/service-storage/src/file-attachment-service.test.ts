@@ -43,7 +43,11 @@ import { SystemFile } from './objects/system-file.object.js';
 import { StorageMetadataStoreError } from './metadata-store.js';
 import { StorageServicePlugin } from './storage-service-plugin.js';
 import type { SwappableStorageService } from './swappable-storage-service.js';
-import { FileAttachmentService, type FileAttachmentEngine } from './file-attachment-service.js';
+import {
+  FileAttachmentService,
+  type FileAttachmentEngine,
+  type ICallerFileAttachmentService,
+} from './file-attachment-service.js';
 
 const SYS = { context: { isSystem: true } } as const;
 /** `max_upload_mb` as saved: 0.001 MB ⇒ floor(0.001 × 1 MiB) = 1048 bytes. */
@@ -132,13 +136,15 @@ async function engineWithParents(): Promise<ObjectQL> {
 }
 
 /** Boot the plugin over `ql` through its real phases; `bootstrapped: false` stops before the verb is armed. */
-async function boot(opts: { bootstrapped?: boolean; engine?: boolean } = {}) {
+async function boot(opts: { bootstrapped?: boolean; engine?: boolean; sharing?: unknown; security?: unknown } = {}) {
   const ql = await engineWithParents();
   const rootDir = await fs.mkdtemp(join(tmpdir(), 'oss-23306-'));
   const plugin = new StorageServicePlugin({ adapter: 'local', local: { rootDir }, registerRoutes: false });
   const { ctx, run } = makeCtx();
   if (opts.engine !== false) ctx.registerService('objectql', ql);
   ctx.registerService('settings', storageSettings());
+  if (opts.sharing) ctx.registerService('sharing', opts.sharing);
+  if (opts.security) ctx.registerService('security', opts.security);
   await plugin.init(ctx);
   await plugin.start(ctx);
   await run('kernel:ready');
@@ -416,5 +422,91 @@ describe('FILE_ATTACHMENT_SERVICE: the server-side attach verb (#23306)', () => 
       }
       await expectNothingLeft(ql, storage);
     });
+  });
+});
+
+describe('the file-attachments writer AS THE REQUESTING USER: assertMayAttach and attachFileAs', () => {
+  const ALICE = { userId: 'usr_alice', tenantId: 'org_a', positions: ['org_member'] };
+  const asCaller = (a: IFileAttachmentService) => a as IFileAttachmentService & ICallerFileAttachmentService;
+
+  it('refuses the system context and a context with no user: PERMISSION_DENIED / 403, nothing written', async () => {
+    const { ql, attachments, storage } = await boot();
+    for (const context of [{ isSystem: true }, { tenantId: 'org_a' }]) {
+      const r = await refusalOf(asCaller(attachments).attachFileAs(input(), context as never));
+      expect([r.code, r.status]).toEqual(['PERMISSION_DENIED', 403]);
+      const m = await refusalOf(asCaller(attachments).assertMayAttach('att_case', 'case_a', context as never));
+      expect([m.code, m.status]).toEqual(['PERMISSION_DENIED', 403]);
+    }
+    await expectNothingLeft(ql, storage);
+  });
+
+  it('attaches as the caller: the sys_file is owned by them and the sys_attachment is stamped uploaded_by them', async () => {
+    const { ql, attachments } = await boot();
+    const out = await asCaller(attachments).attachFileAs(input(), ALICE as never);
+    const [file] = await rows(ql, 'sys_file');
+    expect(file).toMatchObject({ id: out.fileId, status: 'committed', owner_id: 'usr_alice', organization_id: 'org_a' });
+    const [link] = await rows(ql, 'sys_attachment');
+    expect(link).toMatchObject({ id: out.attachmentId, parent_id: 'case_a', uploaded_by: 'usr_alice' });
+  });
+
+  it('the attach rule refuses the caller (no edit access): ATTACHMENT_PARENT_ACCESS / 403 from the insert gate, nothing left; assertMayAttach answers the same', async () => {
+    const sharing = { checkEdit: vi.fn(async () => 'deny') };
+    const { ql, attachments, storage } = await boot({ sharing });
+    const pre = await refusalOf(asCaller(attachments).assertMayAttach('att_case', 'case_a', ALICE as never));
+    expect([pre.code, pre.status]).toEqual(['ATTACHMENT_PARENT_ACCESS', 403]);
+    const r = await refusalOf(asCaller(attachments).attachFileAs(input(), ALICE as never));
+    expect([r.code, r.status]).toEqual(['ATTACHMENT_PARENT_ACCESS', 403]);
+    expect(sharing.checkEdit).toHaveBeenCalledWith('att_case', 'case_a', expect.objectContaining({ userId: 'usr_alice' }));
+    await expectNothingLeft(ql, storage);
+  });
+
+  it('a caller who may not create attachments at all: PERMISSION_DENIED / 403, asked of the security service before the attach rule', async () => {
+    const sharing = { checkEdit: vi.fn(async () => 'allow') };
+    const security = { explain: vi.fn(async () => ({ allowed: false })) };
+    const { attachments } = await boot({ sharing, security });
+    const pre = await refusalOf(asCaller(attachments).assertMayAttach('att_case', 'case_a', ALICE as never));
+    expect([pre.code, pre.status]).toEqual(['PERMISSION_DENIED', 403]);
+    expect(security.explain).toHaveBeenCalledWith(
+      { object: 'sys_attachment', operation: 'create' },
+      expect.objectContaining({ userId: 'usr_alice' }),
+    );
+    expect(sharing.checkEdit).not.toHaveBeenCalled();
+  });
+
+  it('assertMayAttach admits what the insert gate admits', async () => {
+    const sharing = { checkEdit: vi.fn(async () => 'allow') };
+    const { attachments } = await boot({ sharing });
+    await expect(asCaller(attachments).assertMayAttach('att_case', 'case_a', ALICE as never)).resolves.toBeUndefined();
+  });
+
+  it('an organizationId other than the caller’s own is refused PERMISSION_DENIED / 403 before anything is written', async () => {
+    const { ql, attachments, storage } = await boot();
+    for (const over of [
+      { parentId: 'case_global', organizationId: 'org_b' },
+      { parentId: 'case_a', organizationId: 'org_b' },
+      { parentId: 'case_global', organizationId: null },
+    ]) {
+      const r = await refusalOf(asCaller(attachments).attachFileAs(input(over), ALICE as never));
+      expect([r.code, r.status]).toEqual(['PERMISSION_DENIED', 403]);
+    }
+    await expectNothingLeft(ql, storage);
+  });
+
+  it('a parent walled into another organization than the caller’s is refused as not found', async () => {
+    const { ql, attachments, storage } = await boot();
+    const r = await refusalOf(
+      asCaller(attachments).attachFileAs(input({ parentId: 'case_b', organizationId: 'org_a' }), ALICE as never),
+    );
+    expect([r.code, r.status]).toEqual(['RECORD_NOT_FOUND', 404]);
+    await expectNothingLeft(ql, storage);
+  });
+
+  it('an object without the files opt-in is refused FILES_DISABLED / 403 by the insert gate, as the caller too', async () => {
+    const { ql, attachments, storage } = await boot();
+    const r = await refusalOf(
+      asCaller(attachments).attachFileAs(input({ parentObject: 'att_memo', parentId: 'memo_a' }), ALICE as never),
+    );
+    expect([r.code, r.status]).toEqual(['FILES_DISABLED', 403]);
+    await expectNothingLeft(ql, storage);
   });
 });

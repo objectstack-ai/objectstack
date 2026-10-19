@@ -1,5 +1,312 @@
 # @objectstack/plugin-audit
 
+## 18.0.0-next.4
+
+### Minor Changes
+
+- d65826f: fix: framework writes on tenant-column objects name the organization they can derive (ADR-0131 D9)
+  
+  Clause-②: yes (widening)
+  
+  A write on a tenant-column object with no organization is derived under `single` and refused under a wall (ADR-0131 D9). Before the engine stops letting such writes through, each of these producers now names the organization it can derive itself. Under `single` that is the Default Organization, which is the owner the engine would derive anyway, so no reader changes. Under a wall the row names an organization only where the producer has one. The rows it cannot attribute are written exactly as before.
+  
+  - **`@objectstack/plugin-auth`.** The self-registration grant (`sys_user_permission_set`) and the auth mails about a user (verification, password reset, account invitation, magic link, change-email notice → `sys_email`) read one derivable organization: the `tenancy` service's `defaultOrgId()`. Under `single` that is the Default Organization. Under a wall it is none, because the registrant belongs to no organization yet. The verification and reset mails used to persist with no organization even under `single`.
+  - **`@objectstack/plugin-audit`.** An activity row (`sys_activity`) about a record with no organization of its own (a `sys_user`, a platform setting), written with no session organization (a sign-up), takes the Default Organization under `single`. The record's own organization and then the session's still win. The ledger's `tenant_id` attribution is unchanged. New optional `AuditWriterOptions.getDefaultOrganizationId()`; `AuditPlugin` wires it to the `tenancy` service.
+  - **`@objectstack/service-settings`.** The `sys_secret` ciphertext and the `sys_setting_audit` history row of a `tenant` or `user` value carry that value's organization, which is the same owner as its `sys_setting` row. A `global` value's rows name none. New optional `organization_id` on `SettingsSecretStore.insert`'s row and `organizationId` on `SettingsAuditWriter.write`'s entry; the built-in writers persist them. A failed `sys_setting_audit` write is now reported at `error`, not `warn`: the settings write succeeds while its history row is lost. The first report names the consequence and the fix. `buildSettingAuditWriter`'s optional logger argument keeps every sink it accepted (none, `{}`, or one with an optional `warn`) and additionally takes a sink that carries `error`. It reports through `error` when the sink has it, else through `warn`.
+  - **`@objectstack/verify`.** The RLS probe and position personas' grants (`sys_user_permission_set`, `sys_user_position`) belong to the organization the persona is a member of (the Default Organization under `single`). They used to be written with an explicit `organization_id: null`. A persona that belongs to no organization, or to several, names none.
+
+### Patch Changes
+
+- f7af839: Clause-②: no
+  
+  Setup's Diagnostics group has one audit entry, "Audit Log", and it opens the audit browser
+  
+  - **What changed.** `@objectstack/plugin-audit` contributed two Setup entries onto the same rows: "Audit Logs" (the `sys_audit_log` record list) and "Audit Log Browser" (the console's `audit:log` page). It now contributes one, "Audit Log", which opens the browser. The browser filters by action, object, actor and date, offers the record list's views (Writes, Auth, Record Views, …) as presets, and links to the record list ("Open as list"). Those two parts of the page ship in the console this release pins.
+  - **Ids.** The entry keeps the id `nav_audit_logs`, so a sidebar pin a user set on "Audit Logs" stays on the new entry. The id `nav_audit_log_browser` is no longer served; a pin set on it no longer shows, and the user can pin "Audit Log" instead.
+  - **Labels.** `@objectstack/platform-objects` serves the entry's label in the four shipped locales (Audit Log, 审计日志, 監査ログ, Registro de auditoría), and drops the "Audit Log Browser" label.
+  - **Unchanged.** The `sys_audit_log` object, its list views, its routes and its data API answer as before. The record list is no longer an entry in Setup's menu, so the ⌘K palette's record search in Setup no longer searches audit rows.
+- 62c4441: Clause-②: no
+  
+  fix(plugin-audit): a read of the activity stream, the compliance ledger or comments that names its parent objects writes one parent-record branch per named object, not one per registered object
+  
+  - **What changed.** The parent-record read gate on `sys_activity`, `sys_audit_log` and `sys_comment` ANDs one branch per parent object into every read: a `ReadableIds` leaf, or the bounded probe for an on-behalf-of caller, a middleware-narrowed parent or a parent on another datasource. It wrote one for every registered object, whatever the read asked for. When the read's own `where` names the objects its rows are about (`object_name` as a plain value, `$eq` or `$in` of machine names, at the top level or inside a top-level `$and`), the gate now writes branches for those objects only, and the bounded probe pre-scans only the named objects of its classes, or does not run. The activity stream's withheld-update rule, which wrote one branch per enumerated object too, narrows the same way.
+  - **What it costs now.** Measured on SQLite with 148 registered objects: a newest-first 20-row activity read filtered to 3 objects went from a 711.8 KB statement with 2,629 bindings to 14.9 KB with 60, for the rows and again for the total, and its two probe pre-scans no longer run.
+  - **Unchanged:** the rows, the totals and the grouped counts every reader is served. A read of any other shape (no `object_name` filter, an `$or`, a `$not`, another operator, a value that is not a machine name) keeps every branch, as before. No export, option or stored shape changes.
+  - **One failure mode is gone:** a leaf or a probe for an object the read does not name is no longer composed or run, so a refusal composing it, or a failing pre-scan for it, no longer fails or denies that read.
+- 77e9f79: fix(plugin-audit): an activity summary written right after a workspace language change is stored in the new language, not the old one
+  
+  Clause-②: no (no export, option key, signature or schema changes; the held write locale is retired sooner, and the option docs say when)
+  
+  - **What was wrong.** The audit writer held the write locale for each tenant/user scope for 30 seconds, and nothing retired it when the `localization.locale` setting changed. A `sys_activity.summary` line is stored once, at write time, so every audited write in that window (a user's create, a seed publish) kept the old language for good.
+  - **What changes.** A write to `sys_setting` or `sys_platform_setting` through the engine now retires every held write locale. That covers a change made through the settings API, which persists through the engine, and a direct row write such as a seeder's, which emits no settings event. These are the same writes that retire `resolveLocalizationContext`'s own cache. A lookup still in flight when such a write lands is not held. The 30-second bound stays for what the writer cannot see: the storage behind a host `getLocale` resolver, and a settings write on another node.
+  - **Unchanged:** the host `getLocale` resolver is still asked first, and a write with no settings change between it and the last one is still answered from the held locale, without a settings read.
+- 538f923: fix: an activity row is written only when an organization is derivable, never with a NULL organization, and the v18 ownership ceremony deletes the existing NULL activity rows it cannot attribute (ADR-0131 D9)
+  
+  Clause-②: no
+  
+  - **`@objectstack/plugin-audit`.** The audit writer's activity mirror (`sys_activity`) takes its organization from the record, then from the acting session, then from the `tenancy` service's Default Organization under `single`. When none of them names one, the mirror now writes no activity row at all. Before, it wrote a row with `organization_id` NULL. Under a wall that row was readable by no organization member. The change is still recorded: the compliance ledger row (`sys_audit_log`) is written as before, with its `tenant_id` attribution. Under `single` the Default Organization is always derivable, so nothing changes there. A record that names its organization keeps its activity row, with that organization.
+  - **`@objectstack/cli`.** `os migrate organization-ownership` still attributes a NULL `sys_activity` row when its record carries an organization. On a walled database (any posture but `single`), the mirror-deletion step now deletes the NULL rows no anchor attributes, such as activity about a sign-up's `sys_user`. Before, those rows were reported as unattributable and held certification. They are 14-day telemetry that the mirror no longer writes, and `sys_audit_log` keeps each change. The plan counts them as the departure `underivable-activity`, and warns before the first write that `--apply` deletes them. The apply report lists the count as the table's `deleted`. Under `single` the Default Organization takes these rows, as before, and nothing is deleted.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [ec749fb]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
+## 18.0.0-next.3
+
+### Minor Changes
+
+- 5b6c257: feat(plugin-audit): `sys_activity` rows carry two writer-stamped read-rule columns, and the withheld-row rule is a predicate over them, with no SYSTEM pre-scan (ADR-0139 E6)
+  
+  **Run `os migrate activity-changed-fields --apply` at once after upgrading.** After the upgrade, and until it runs, the `sys_activity` rows written before the upgrade carry no stamp and are withheld from every non-system reader: activity feeds, the header bell and record timelines show only the rows written since the upgrade. The door is `os migrate activity-changed-fields`, dry run by default, `--apply` to write, idempotent, and it stamps both columns in one run. Its flags are `os migrate audit-metadata-bodies`'s, one for one (`--database-url`, `--apply`, `--yes`, `--force`, `--json`). The columns arrive with the upgraded deployment's schema sync, which an `--apply` run performs itself; a dry run against a database no upgraded process has opened cannot read them and exits `1`.
+  
+  Clause-②: yes
+  
+  `sys_activity` gains two columns, stamped at write time by one derivation (`planActivityStamp`): the CRUD mirror stamps its own rows, and a `sys_activity` before-insert hook stamps every row any other writer inserts (an app's own server action, the seed loader), over whatever value that writer sent.
+  
+  - `changed_fields` (`tags`) — the key set of the recorded change: for an update, every field its recorded `old` / `new` values name; `[]` for a create, a delete, a note, or an update that touched only `internal` fields. It is served narrowed to the fields the reader is served.
+  - `milestone_key` (`text`) — for a fired activity milestone, one sorted, comma-joined key of every field the object's `activityMilestones` declaration watched when it fired; `null` for every other row. It is never served.
+  
+  The withheld-row rule is now a WHERE over those two columns, one branch per parent object, on `find`, `findOne`, `count` and `aggregate`. It reads no row, so the 2,000-row SYSTEM pre-scan and its window are gone: a broad read of the stream is served every row the caller may read, with a true `total`. What the rule withholds:
+  
+  - an update row whose `changed_fields` is non-empty and names no field the reader is served (unchanged);
+  - a fired milestone row, unless its key equals the key of the object's CURRENT `activityMilestones` declaration and the reader is served every field that declaration watches. **The cost:** a milestone row written under an earlier declaration, or naming a since-removed field, is withheld from every non-exempt reader until retention ages it out (14 days declared; `lifecycle.retention_overrides` may lengthen it);
+  - an unstamped row, from every non-system reader: one at rest from before the upgrade until the backfill stamps it, and one the planner cannot judge (a milestone row naming no readable watched-field list), which stays unstamped.
+  
+  The parent-field query guard covers both columns as it covers `metadata`: a reader withheld any field of the parent is refused a filter, sort, group or aggregate over `changed_fields` or `milestone_key` (`PERMISSION_DENIED` / 403).
+  
+  `@objectstack/plugin-audit` exports the backfill, `backfillActivityChangedFields` (with `ACTIVITY_BACKFILL_PAGE_SIZE` and its report and engine types), and the planner, `planActivityStamp` (with `ACTIVITY_CHANGED_FIELDS_COLUMN`, `ACTIVITY_MILESTONE_KEY_COLUMN` and `ActivityStamp`). Inside the module (none of it is exported from the package), `computeWithheldUpdateFilter` keeps its name and now builds the predicate, `isWithheldOnlyUpdate` keeps its name as the update half over `changed_fields`, and `isWithheldMilestone` / `isWithheldRow` are gone with the pre-scan they judged for.
+- 67e8792: feat(plugin-audit): `sys_comment` rows carry a writer-stamped parent pair, `object_name` + `record_id`, and the comment-thread read gate narrows by it with one `ReadableIds` leaf per parent object, with no pre-scan (ADR-0139 E7)
+  
+  **Run `os migrate comment-parent-pair --apply` at once after upgrading.** After the upgrade, and until it runs, the `sys_comment` rows written before the upgrade carry no pair, and the read gate answers them as it answered every comment before: by a SYSTEM pre-scan of at most 2,000 candidate rows per read, fail closed. So a broad comment list — one not scoped to a single record's thread — can omit comments the reader may see, and its `total` agrees with the short list; a record's own comment thread is unaffected. The door is `os migrate comment-parent-pair`, dry run by default, `--apply` to write, idempotent, and it stamps both columns in one run, keeping each row's `updated_at`. Its flags are `os migrate activity-changed-fields`'s, one for one (`--database-url`, `--apply`, `--yes`, `--force`, `--json`). The columns arrive with the upgraded deployment's schema sync, which an `--apply` run performs itself; a dry run against a database no upgraded process has opened cannot read them and exits `1`.
+  
+  Clause-②: yes
+  
+  `sys_comment` gains two `readonly` text columns and an index over them. They are derived from `thread_id` (`{object}:{record_id}`, split on the first colon) by one planner, `planCommentParentPair`, and `thread_id` stays the key authors write: nothing changes for a writer. A `sys_comment` before-insert hook stamps every inserted row, whoever writes it, over whatever value the writer sent; an update that names `thread_id` (a re-point) is re-stamped from it; and an update that names either column without a thread has the pair re-derived from the row's stored thread, for every caller — a historical import (`preserveAudit`) included, where the engine's update-side `readonly` strip keeps a value — so no writer's value for either column lands. A multi-row update that names either column without a thread is refused whole (`VALIDATION_ERROR` / 400, nothing written) when its rows' threads name different records, since one write cannot store each row's own pair; over rows sharing one thread it stores that thread's pair. A thread that names no record stamps `null` / `null`, and such a comment stays hidden from every non-system reader, as before.
+  
+  The comment-thread read gate (`installCommentReadVisibility`) is now the parent-record gate the activity stream and the compliance ledger use, over the comment's own pair: one branch `{ object_name: P, record_id: { $in: ReadableIds.of(P) } }` per registered object other than `sys_comment`, ORed and ANDed into the read's `where`, on `find`, `findOne`, `count` and `aggregate`. A broad comment read is served every comment the reader may read, on any table size, with a true `total`. What keeps the bounded 2,000-row fail-closed probe, chosen up front by name, never by catching a refusal:
+  
+  - ADR-0139 D5's three classes: a delegated (on-behalf-of) caller (the whole read); a parent narrowed by an object-scoped read middleware (`sys_attachment`, `sys_comment_reaction`, `sys_approval_request`, …); a parent bound to another datasource;
+  - a security service that answers no `canReadObject`, or none at all (no leaf is written without it), and an engine that cannot classify a parent — each sends the whole read to the probe and is said once;
+  - a row with no stamped pair (until the backfill reaches it): probed by its `thread_id`, restricted to rows with no pair, never leafed;
+  - a composition whose registered `sys_comment` declares no pair: the thread probe over every row, said once.
+  
+  **The cost:** a deployment whose driver compiles no `ReadableIds` leaf — `driver-mongodb`, until ADR-0139's O3 — now fails a non-system comment read with `INTERNAL_ERROR` / 500 naming the driver in the log, as the activity, ledger and attachment reads already do (ADR-0139 D3); the gate does not catch that refusal into an empty list.
+  
+  Comment reactions are unchanged: their only parent is `sys_comment`, which this gate narrows by an object-scoped middleware, so the reaction gate keeps the bounded probe (ADR-0139 D5.2).
+  
+  `installCommentReadVisibility` takes an optional third argument, the security source whose `canReadObject` admits a leaf (`ParentObjectReadAdmissionSource`); without it every comment read is the bounded probe, as before. Its first parameter widens from `CommentAccessEngine` to `ParentRecordGateEngine` (`CommentAccessEngine` plus three optional members: a registry view, `hasObjectMiddleware` and `resolveEffectiveDatasource`); every existing caller's engine still satisfies it. Both types reach the published declaration through that signature. `CommentAccessEngine` gains an optional `getSchema`. `@objectstack/plugin-audit` exports the backfill, `backfillCommentParentPair` (with `COMMENT_PARENT_PAIR_BACKFILL_PAGE_SIZE` and its report and engine types), the planner `planCommentParentPair` (with `COMMENT_PARENT_OBJECT_COLUMN`, `COMMENT_PARENT_RECORD_COLUMN` and the `CommentParentPair` type).
+
+### Patch Changes
+
+- 94114c1: fix(plugin-audit): the audit ledger no longer records a user's own writes to their own UI-state row (`sys_user_preference`). A deployment that exports `sys_audit_log` to a SIEM or a compliance archive stops receiving those rows from this release on, and nothing else tells that consumer.
+  
+  Clause-②: no
+  
+  The console saves a user's list preferences, recent items, favourites and palette recents as that user's own `sys_user_preference` rows, one write per click. Each write landed an `update` row in `sys_audit_log`, so Setup's Audit Logs opened on a run of one user's clicks, and the System Overview's "Events by User" chart counted them.
+  
+  - **What changed.** When the acting user is the row's owner (`user_id`) on both sides of the write, the audit writer records neither the `sys_audit_log` row nor the `sys_activity` row. It already skipped the activity row for such a write; it now skips the ledger row by the same test. A create, an update and a delete are all covered.
+  - **What is still recorded.** Every other actor's write to the same rows: an administrator editing someone's preferences from Setup, a system write with no user, and a write that moves a row to another owner. `sys_user_preference` is not an excluded object, and every other object is unchanged.
+  - **Nothing to migrate.** Rows already in `sys_audit_log` stay.
+  
+  The list of per-user UI-state objects is closed and declared inside the plugin, and today holds one object, `sys_user_preference`. No metadata key adds an object to it.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [abb6df0]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [d050a8f]
+- Updated dependencies [b25d98a]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/objectql@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
+## 18.0.0-next.2
+
+### Minor Changes
+
+- 69351e9: feat(plugin-audit): the `sys_activity` and `sys_audit_log` read gates write one `ReadableIds` leaf per parent object and do no pre-scan, so a broad read is judged over every row, not a 2,000-row window (ADR-0139 D4, D5)
+  
+  Clause-②: no
+  
+  Both gates serve a row only when the caller may read the record it is about. Until now each read first scanned at most 2,000 candidate rows as the system, then asked which of those rows' parent records the caller could read. Past that window the gate failed closed: the unscanned rows were left out, the list's `total` agreed with the short answer, and a warning said so.
+  
+  Each gate now writes one branch per object the metadata registry holds (outside the audit writer's excluded objects and the gated object itself): `{ object_name: P, record_id: { $in: ReadableIds.of(P) } }`. The engine composes the leaf from the security service's `canReadObject` and `getReadFilter` for `P`, and the SQL drivers evaluate it as one subquery against `P`'s table, inside their own tenant wall. A list, its `total` and a grouped count are each one statement over every row the caller may read. A parent object the caller may not read is answered with no rows, without reading it as the caller, so no denial is logged for it.
+  
+  What a reader sees:
+  
+  - `sys_audit_log`: a broad read is served every row about a record the caller may read, and every row about no record, with a true `total`, whatever the table size. The rows about no record (`config_change`, `import`, `platform_admin_standing_change`, an auth event with no session) are now a filter on the ledger's own columns rather than a list of ids the scan saw. A holder of `view_all_audit_log` is still not narrowed. A row about a session is still served when that session is readable.
+  - `sys_activity`: the gate itself has no window any more, but the stream's withheld-update rule still pre-scans 2,000 rows as the system, so a broad read stays bounded by that rule until it becomes a predicate (ADR-0139 E6). A read about one record is unchanged.
+  - Three classes still read through the bounded probe, chosen before any leaf is written: a delegated (on-behalf-of) caller; a parent an object-scoped read middleware narrows (for example `sys_attachment`, `sys_comment_reaction`, `sys_approval_request` and the settings objects); and a parent bound to another datasource than the gated object, which covers every parent on a deployment that registers the `telemetry` datasource. The whole read also stays on the probe when the security service offers no `canReadObject`, or when none is registered, as before.
+  - On a driver that does not compile the leaf (`driver-mongodb`), a read of either object now fails with `INTERNAL_ERROR` / 500 naming the driver and the leaf, instead of serving a capped list. The gates do not turn that refusal into an empty answer. This is ADR-0139's ruled behaviour until a pipeline form is measured for that driver.
+
+### Patch Changes
+
+- 94924e0: fix(plugin-audit): the `sys_activity` and `sys_audit_log` read gates skip a parent object the caller cannot read without reading it, so the security plugin no longer logs a denial for each skipped object
+  
+  Clause-②: no
+  
+  Both gates serve a row only when the caller can read the record it is about. They decide that once per parent object the query's rows name, by reading that object as the caller. For every object the caller holds no object-level read on, plugin-security refused that read and logged `[Security] Access denied` at WARN: one line per object per read, and again for the list's `total`. The console header's activity feed reads `sys_activity` on every page view, so every non-admin page view logged a line for each platform object the stream names (`sys_migration`, `sys_platform_setting`, `sys_user_permission_set`, and others), and real denials were buried among them.
+  
+  Each gate now asks the security service's `canReadObject` first, with the caller's own context. That is the security middleware's own object-level read check, and it answers without logging. The gate then reads only the objects it admits. An object it refuses contributes no rows, exactly as its refused read did before, so every caller is served the same rows, with the same `total`, as before. A caller's own read of such an object is still refused and still logged, once.
+  
+  The check can only exclude objects. An admitted object is still read as the caller, and that read still decides row scope, sharing and RLS. If `canReadObject` throws, or answers anything other than `true`, that object's rows are excluded and the gate logs a warning naming the object. On a deployment without the security plugin, or with a security service that does not offer `canReadObject`, every parent object is read as the caller, as before.
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [989aa48]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c2bb302]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [30c33e3]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [cd86e41]
+- Updated dependencies [c03077e]
+- Updated dependencies [3bc407d]
+- Updated dependencies [76560a1]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/platform-objects@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/objectql@18.0.0-next.2
+  - @objectstack/metadata-core@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Patch Changes
@@ -109,8 +416,8 @@
   - **Reading reactions for a feed.** Read the reactions of the comments on screen in one request, `comment_id` `$in` those ids, and group the rows by comment and emoji. Nothing is stored or computed on the comment row.
   - **Granting it.** The object's create, read and delete bits come from a permission set, as `sys_comment`'s do. The `everyone`-bound baseline (`member_default`) grants nothing on it.
   - **`@objectstack/spec`: the platform object registry lists it.** `PLATFORM_OBJECTS_BY_PACKAGE['plugin-audit']` now includes `sys_comment_reaction`, and so do `PLATFORM_PROVIDED_OBJECT_NAMES` and `isPlatformProvidedObjectName`. A stack that references the object is no longer reported as naming an unknown platform object. This is the only change in the package.
-  - **`sys_comment.reactions` is unchanged in this release.** The column is still declared and still written by clients that write it. It is retired separately, and reactions stored in it are not converted into records.
-- 9963322: feat(plugin-audit)!: `sys_comment.reactions` retires; an emoji reaction lives only in `sys_comment_reaction`, and reactions stored in the old column are not migrated
+  - **`sys_comment.reactions` is unchanged in this release.** The column is still declared and still written by clients that write it. It is retired separately, and `os migrate comment-reactions` converts the reactions stored in it into records.
+- 9963322: feat(plugin-audit)!: `sys_comment.reactions` retires; an emoji reaction lives only in `sys_comment_reaction`, and reactions stored in the old column are converted into `sys_comment_reaction` records by `os migrate comment-reactions`
   
   Clause-②: no (narrowing)
   
@@ -118,7 +425,7 @@
   
   **BREAKING**, shipped as `minor` under the repo's convention for breaking changes on this line.
   
-  **Existing emoji reactions stored in `sys_comment.reactions` are gone after the upgrade.** They are not converted into `sys_comment_reaction` records, and no screen or API returns them again. Reactions now live in `sys_comment_reaction`, one row per comment, emoji and user, the reacting user's own record. Where the entry that introduces `sys_comment_reaction` says the column is unchanged, this entry supersedes it: the column retires.
+  **Existing emoji reactions stored in `sys_comment.reactions` survive the upgrade.** They stay in the column, which no screen or API returns, until `os migrate comment-reactions` converts them into `sys_comment_reaction` records, and `os migrate apply --allow-destructive` drops the column only after that conversion is verified (see *Existing databases* below). Reactions now live in `sys_comment_reaction`, one row per comment, emoji and user, the reacting user's own record. Where the entry that introduces `sys_comment_reaction` says the column is unchanged, this entry supersedes it: the column retires.
   
   - **`sys_comment`** (`@objectstack/plugin-audit`) no longer declares `reactions`. Nothing takes its place on the comment row: no stored aggregate, and no block computed on read. Its label leaves the four generated translation bundles.
   - **The data door refuses the field.** A create or an update of a comment that still carries `reactions`, and a list filter on it, answer `400 INVALID_FIELD` naming the field, and nothing is written. The rest of the payload is not applied either. A read of a comment no longer returns `reactions`.
@@ -134,7 +441,7 @@
   
   An application that shows reactions grants `sys_comment_reaction` read, create and delete beside its `sys_comment` grant; without it a member cannot react. The console's record chatter already reads and writes `sys_comment_reaction` rows wherever the deployment declares that object, as this framework does.
   
-  **Existing databases — nothing moves automatically.** Schema sync is additive: the physical `reactions` column stays with the values it holds, the boot drift report names it orphaned (`sys_comment.reactions: column exists in the database but not in metadata`), and the boot is otherwise clean. The data door neither returns nor accepts the column. To drop it, run `os migrate apply --allow-destructive` with the audit plugin composed (an auth secret resolves); the stored reactions go with it.
+  **Existing databases — nothing moves automatically.** Schema sync is additive: the physical `reactions` column stays with the values it holds, the boot drift report names it orphaned (`sys_comment.reactions: column exists in the database but not in metadata`), and the boot is otherwise clean. The data door neither returns nor accepts the column. Convert first, then drop. `os migrate comment-reactions` previews the conversion and writes nothing; `os migrate comment-reactions --apply` turns each stored (comment, emoji, user) into that user's own `sys_comment_reaction` record, in the comment's organization, lists every stored value it cannot read instead of guessing at it, and records the run verified once every stored value has read and converted. A re-run converts nothing twice. Only then does `os migrate apply --allow-destructive`, run with the audit plugin composed (an auth secret resolves), drop the column; before a verified run is recorded it refuses the drop and exits `1`, because the drop would delete the reactions.
 - 896a434: fix(plugin-approvals,plugin-audit)!: a lookup target's title is read only when the TARGET object's declared exposure serves `get` — the approvals inbox's `payload_display` and the activity summary (#22738)
   
   Clause-②: no (narrowing)

@@ -943,7 +943,7 @@ describe('uncountable effects (#4354 follow-up)', () => {
             name: 'f', label: 'f', type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'S' },
-                { id: 'push', type: 'connector_action', label: 'P', config: { connectorId: 'crm', actionId: 'push', input: {} } },
+                { id: 'push', type: 'connector_action', label: 'P', connectorConfig: { connectorId: 'crm', actionId: 'push', input: {} } },
                 { id: 'end', type: 'end', label: 'E' },
             ],
             edges: [{ id: 'e1', source: 'start', target: 'push' }, { id: 'e2', source: 'push', target: 'end' }],
@@ -977,7 +977,7 @@ describe('uncountable effects (#4354 follow-up)', () => {
                 name: 'f', label: 'f', type: 'autolaunched',
                 nodes: [
                     { id: 'start', type: 'start', label: 'S' },
-                    { id: 'push', type: 'connector_action', label: 'P', config: { connectorId: 'crm', actionId: 'push', input: {} } },
+                    { id: 'push', type: 'connector_action', label: 'P', connectorConfig: { connectorId: 'crm', actionId: 'push', input: {} } },
                     { id: 'end', type: 'end', label: 'E' },
                 ],
                 edges: [{ id: 'e1', source: 'start', target: 'push' }, { id: 'e2', source: 'push', target: 'end' }],
@@ -1003,7 +1003,7 @@ describe('uncountable effects (#4354 follow-up)', () => {
             name: 'child', label: 'child', type: 'autolaunched',
             nodes: [
                 { id: 'start', type: 'start', label: 'S' },
-                { id: 'push', type: 'connector_action', label: 'P', config: { connectorId: 'crm', actionId: 'push', input: {} } },
+                { id: 'push', type: 'connector_action', label: 'P', connectorConfig: { connectorId: 'crm', actionId: 'push', input: {} } },
                 { id: 'end', type: 'end', label: 'E' },
             ],
             edges: [{ id: 'e1', source: 'start', target: 'push' }, { id: 'e2', source: 'push', target: 'end' }],

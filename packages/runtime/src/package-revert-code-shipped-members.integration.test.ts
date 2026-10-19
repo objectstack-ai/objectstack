@@ -101,13 +101,13 @@ async function boot() {
   // A platform package that ships objects, as a platform plugin's manifest
   // installs it: `scope: 'system'`, and the four `sys_metadata*` objects
   // registered under it stand in for its objects.
-  engine.registry.installPackage({ id: OBJECTS_PKG, name: OBJECTS_PKG, version: '1.0.0', scope: 'system' } as any);
+  engine.registry.installPackage({ id: OBJECTS_PKG, name: OBJECTS_PKG, version: '1.0.0', scope: 'system' } as any, 'code');
   for (const o of sysObjects) engine.registry.registerObject(o, OBJECTS_PKG);
   // A platform package that ships no objects — nothing of it reaches the
   // metadata service.
-  engine.registry.installPackage({ id: REGISTRY_ONLY_PKG, name: REGISTRY_ONLY_PKG, version: '1.0.0', scope: 'system' } as any);
+  engine.registry.installPackage({ id: REGISTRY_ONLY_PKG, name: REGISTRY_ONLY_PKG, version: '1.0.0', scope: 'system' } as any, 'code');
   // A writable base: project-scoped, not booted.
-  engine.registry.installPackage({ id: STAMPED_BASE, name: STAMPED_BASE, version: '1.0.0', scope: 'project' } as any);
+  engine.registry.installPackage({ id: STAMPED_BASE, name: STAMPED_BASE, version: '1.0.0', scope: 'project' } as any, 'code');
 
   const protocol = new ObjectStackProtocolImplementation(
     engine as any, undefined, undefined, 'package-author',

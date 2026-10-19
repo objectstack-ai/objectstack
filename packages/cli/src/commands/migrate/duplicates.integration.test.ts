@@ -295,7 +295,9 @@ describe('#8928 os migrate duplicates — against a really booted stack', () => 
       status: 'blocked',
       groups: [
         {
-          key: { type: 'view', name: 'crm_case.board', organization_id: 'org_x', package_id_key: '' },
+          // [ADR-0131 C7b] The overlay key is (type, name, package, bundle member):
+          // the organization left it, so the legacy rows group without it.
+          key: { type: 'view', name: 'crm_case.board', package_id_key: '' },
           rowCount: 2,
         },
       ],

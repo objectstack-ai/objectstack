@@ -72,3 +72,42 @@ export function defaultRecordPageObject(page: unknown): string | undefined {
   if (type !== 'record') return undefined;
   return typeof p.object === 'string' && p.object !== '' ? p.object : undefined;
 }
+
+/**
+ * The refusal of `isDefault: true` on a page {@link defaultRecordPageObject}
+ * does not place, or `undefined` when the page may carry what it declares.
+ *
+ * `isDefault` has one meaning: the default record page of the object a record
+ * page binds. On any other page nothing reads it — an app opens on its first
+ * navigation item and the root landing follows the APP's `isDefault`, never a
+ * page's — so the flag was accepted, stored and served while it decided
+ * nothing (maintainer ruling A on objectstack#23610, record 6190536588). Every
+ * door that admits a page asks this one function, so `os validate`, package
+ * registration and the metadata save door refuse the same pages with the same
+ * sentence: `PageSchema`'s parse (and so `defineStack` and the save door), and
+ * `@objectstack/objectql`'s registry for the pages a package registers
+ * without a parse.
+ *
+ * Reads a parsed page and an unparsed one alike, by the same declared keys
+ * {@link defaultRecordPageObject} reads. The sentence names the release that
+ * first refused the flag (`@objectstack/spec 18`): the retired D2 entry
+ * `page-is-default-off-record-page-removed` converts data at rest, and the
+ * removal-version pin holds every such prescription to the release its
+ * `retiredAfter` derives.
+ */
+export function misplacedDefaultPageRefusal(page: unknown): string | undefined {
+  if (!page || typeof page !== 'object' || Array.isArray(page)) return undefined;
+  const p = page as Record<string, unknown>;
+  if (p.isDefault !== true || defaultRecordPageObject(page) !== undefined) return undefined;
+  const type = p.type === undefined ? PAGE_TYPE_DEFAULT : p.type;
+  if (type === 'record') {
+    return '`isDefault: true` is refused on a record page bound to no `object` since @objectstack/spec 18: it makes a record page the '
+      + 'default record page of the object it binds, the page that object\'s record view opens. Bind the '
+      + 'page (`object: \'<object name>\'`), or delete `isDefault`.';
+  }
+  return `\`isDefault: true\` is refused on a \`type: '${String(type)}'\` page since @objectstack/spec 18: it marks the default record page `
+    + 'of an object, and nothing reads it on any other page. A page does not choose where an app opens — an '
+    + 'app\'s landing page is its first navigation item (by `order`), so to land on this page put its entry '
+    + 'first in the app\'s `navigation`; the root landing follows the app\'s own `isDefault`. Delete '
+    + '`isDefault` from this page.';
+}

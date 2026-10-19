@@ -497,12 +497,20 @@ export const REWRAP_NOTES = {
     'A row is LEFT as it is when no holder references it, when its holders belong to different '
     + 'producers, or when a holder family could not be read. Its producer cannot be attributed, and '
     + 'it is never re-sealed under a guessed scope. It keeps the older binding over (namespace, key) alone.',
+  // [#23899] No sys_secret row, never "nothing": either mode's connect can
+  // switch a SQLite file's journal mode, which rewrites its header, and an
+  // `--apply` run's plain boot creates the tables a never-started database
+  // lacks. The note naming the switch follows this one in an `--apply` run's
+  // human face, on a SQLite file only; a dry run's closing line carries it.
   resumable:
     'Re-running is safe. A row already sealed under the current derivation is skipped as done, so a '
-    + 'run that stopped part-way finishes the rest, and a finished run writes nothing.',
+    + 'run that stopped part-way finishes the rest, and a finished run writes no sys_secret row.',
+  // [#23726] No row or table, never "nothing": the dry run's connect can switch
+  // a SQLite file's journal mode, which rewrites its header. The note naming
+  // that switch follows the human face's closing line, on a SQLite file only.
   dryRun:
-    'Dry run: every attributed row was opened, re-sealed and verified in memory, and nothing was '
-    + 'written. Re-run with --apply to write.',
+    'Dry run: every attributed row was opened, re-sealed and verified in memory, and no row or table '
+    + 'was written. Re-run with --apply to write.',
   unfinished:
     'Some rows were not re-wrapped (see the refused and not-written counts). Each was left exactly as '
     + 'it was. A row that changed during the run is picked up by a re-run.',

@@ -25,11 +25,11 @@
  *     control moved with it.
  *  2. The measured defect, named: an env-wide `_lock: 'full'` row, an
  *     org-scoped read, save, delete, publish and rollback.
- *  3. Precedence: with both rows present, [ADR-0131 D6] every request is
- *     served the env-wide row — a legacy organization row is served by no
- *     read — and the door binds that row's `_lock`.
- *  4. The organization gate: on a type with no per-org channel the reads
- *     never serve an org-scoped row, and neither does the door.
+ *  3, 4. RETIRED with the organization column (ADR-0131 D6/D7): they pinned
+ *     an env-wide row beside a legacy organization row of the same name, a
+ *     store the family can no longer hold (it declares no organization
+ *     column, and the runtime refuses to boot on a database still holding
+ *     one).
  *
  * It sits above PR #21693's and PR #21715's per-case pins and replaces neither.
  *
@@ -57,25 +57,29 @@ interface StoredRow {
     id: string;
     type: string;
     name: string;
-    organization_id: string | null;
     package_id: string | null;
     state: string;
     metadata: string;
 }
 
 /** A tenant-authored row (a `view` unless named), as an author's save of a body declaring `_lock` leaves it at rest. */
-function viewRow(name: string, organizationId: string | null, lock: Lock, type = 'view'): StoredRow {
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
+function viewRow(name: string, lock: Lock, type = 'view'): StoredRow {
     return {
-        id: `r_${name}_${organizationId ?? 'env'}`,
+        id: `r_${name}_env`,
         type,
         name,
-        organization_id: organizationId,
         package_id: null,
         state: 'active',
         metadata: JSON.stringify({
             name,
             // Which row was served, readable off the document.
-            label: organizationId === null ? 'env-wide row' : 'org row',
+            label: 'env-wide row',
             object: 'account',
             _provenance: 'org',
             ...(lock === 'none' ? {} : { _lock: lock }),
@@ -105,7 +109,7 @@ function harness(environmentId: string | undefined, rows: StoredRow[]) {
             if (k.startsWith('$')) throw new Error(`[test double] unsupported WHERE combinator '${k}'`);
         }
         return rows.filter((r) =>
-            Object.entries(where).every(([k, v]) => v === undefined || (r as unknown as Record<string, unknown>)[k] === v),
+            Object.entries(where).every(([k, v]) => v === undefined || whereValueMatches((r as unknown as Record<string, unknown>)[k], v)),
         );
     };
     const inserted: Array<{ table: string; values: Record<string, unknown> }> = [];
@@ -134,38 +138,6 @@ function harness(environmentId: string | undefined, rows: StoredRow[]) {
 
 const settle = (run: Promise<unknown>) => run.then(() => null, (e: unknown) => e);
 
-type Verdict = { refused: { code: unknown; status: unknown } } | 'admitted';
-const ITEM_LOCKED: Verdict = { refused: { code: 'ITEM_LOCKED', status: 403 } };
-/** [ADR-0131 D6] Every organization-scoped write is refused first, before the `_lock` gate is reached. */
-const NOT_OVERRIDABLE: Verdict = { refused: { code: 'NOT_OVERRIDABLE', status: 403 } };
-
-/**
- * The door, end to end. Refused ⇔ the ADR-0112 `ITEM_LOCKED` / 403 envelope
- * came back (or, for an organization-scoped request, `NOT_OVERRIDABLE` / 403). Admitted ⇔ the ADR-0010 `_lock` gate was reached and answered no
- * refusal; whatever the write does after that (validation, a double that
- * persists nothing) is not a lock verdict and is not read as one.
- */
-async function door(
-    protocol: ObjectStackProtocolImplementation, name: string, operation: 'save' | 'delete', organizationId?: string,
-    type = 'view',
-): Promise<Verdict> {
-    const gate = vi.spyOn(protocol as any, operation === 'save' ? 'assertLockAllowsWrite' : 'assertLockAllowsDelete');
-    try {
-        const scope = organizationId ? { organizationId } : {};
-        const outcome: any = await settle(operation === 'save'
-            ? protocol.saveMetaItem({ type, name, item: { name, label: name, object: 'account' }, ...scope })
-            : protocol.deleteMetaItem({ type, name, ...scope }));
-        if (outcome instanceof Error && ['ITEM_LOCKED', 'NOT_OVERRIDABLE'].includes((outcome as any).code)) {
-            return { refused: { code: (outcome as any).code, status: (outcome as any).status } };
-        }
-        expect(gate, `${type}/${name} ${operation}: not refused, yet the _lock gate was never reached`).toHaveBeenCalledTimes(1);
-        expect(await gate.mock.results[0]?.value).toBeNull();
-        return 'admitted';
-    } finally {
-        gate.mockRestore();
-    }
-}
-
 /** Both reads' envelopes for the same request; they must agree with each other first. */
 async function envelope(protocol: ObjectStackProtocolImplementation, name: string, organizationId?: string, type = 'view') {
     const scope = organizationId ? { organizationId } : {};
@@ -182,16 +154,12 @@ const TOPOLOGIES = [
     { kernel: 'environment', environmentId: ENV_ID },
     { kernel: 'host-config', environmentId: undefined },
 ] as const;
-const REQUEST_SCOPES = [
-    { requestScope: 'no organization', organizationId: undefined },
-    { requestScope: `organization ${ORG}`, organizationId: ORG },
-] as const;
 const OPERATIONS = ['save', 'delete'] as const;
 
 describe('[#21716] pin 2 — an env-wide _lock: full row binds an organization with no row of its own', () => {
     for (const { kernel, environmentId } of TOPOLOGIES) {
         it(`${kernel} kernel: the org-scoped read says locked, and save / delete are refused NOT_OVERRIDABLE (403) before any read`, async () => {
-            const { protocol, inserted } = harness(environmentId, [viewRow('v_env_full', null, 'full')]);
+            const { protocol, inserted } = harness(environmentId, [viewRow('v_env_full', 'full')]);
             expect(await envelope(protocol, 'v_env_full', ORG)).toMatchObject({
                 lock: 'full', editable: false, deletable: false, served: 'env-wide row',
             });
@@ -208,67 +176,11 @@ describe('[#21716] pin 2 — an env-wide _lock: full row binds an organization w
         });
 
         it(`${kernel} kernel: an org-scoped publish and rollback are refused the same way (the shared write gate)`, async () => {
-            const { protocol } = harness(environmentId, [viewRow('v_env_full', null, 'full')]);
+            const { protocol } = harness(environmentId, [viewRow('v_env_full', 'full')]);
             const published: any = await settle(protocol.publishMetaItem({ type: 'view', name: 'v_env_full', organizationId: ORG } as any));
             expect({ code: published?.code, status: published?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
             const rolledBack: any = await settle(protocol.rollbackMetaItem({ type: 'view', name: 'v_env_full', toVersion: 1, organizationId: ORG } as any));
             expect({ code: rolledBack?.code, status: rolledBack?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
         });
-    }
-});
-
-describe('[#21716, ADR-0131 D6] pin 3 — both rows present: every request is served the env-wide row, and the door binds its lock', () => {
-    const cases: Array<{ env: Lock; org: Lock }> = [
-        { env: 'full', org: 'none' },
-        { env: 'none', org: 'full' },
-        { env: 'no-delete', org: 'no-overlay' },
-    ];
-    for (const { kernel, environmentId } of TOPOLOGIES) {
-        for (const c of cases) {
-            for (const q of REQUEST_SCOPES) {
-                it(`${kernel} kernel · env-wide _lock=${c.env}, org _lock=${c.org} · request: ${q.requestScope}`, async () => {
-                    const rows = [viewRow('v_both', null, c.env), viewRow('v_both', ORG, c.org)];
-                    const { protocol } = harness(environmentId, rows);
-                    const read = await envelope(protocol, 'v_both', q.organizationId);
-                    // [ADR-0131 D6] The read serves the env-wide row to every
-                    // request: a legacy organization row is served by no read…
-                    expect(read).toMatchObject({
-                        lock: c.env,
-                        served: 'env-wide row',
-                        overlayScope: 'env',
-                    });
-                    // …and that row's lock is the one the doors enforce. [ADR-0131 D6]
-                    // An org-scoped write is refused before the `_lock` gate.
-                    expect(await door(protocol, 'v_both', 'save', q.organizationId))
-                        .toEqual(q.organizationId ? NOT_OVERRIDABLE : read.editable ? 'admitted' : ITEM_LOCKED);
-                    expect(await door(protocol, 'v_both', 'delete', q.organizationId))
-                        .toEqual(q.organizationId ? NOT_OVERRIDABLE : read.deletable ? 'admitted' : ITEM_LOCKED);
-                });
-            }
-        }
-    }
-});
-
-describe('[#21716] pin 4 — a type with no per-org channel: neither the read nor the door serves an org-scoped row', () => {
-    // `page` was outside the five types the pre-D6 doors let an organization
-    // write, so an org-scoped row of it is pre-#6190 residue boot hydration
-    // walks past. The reads gate the
-    // organization away (ADR-0131 D6: no read takes one) and serve the env-wide
-    // row. [ADR-0131 D6] Every org-scoped write — the removal included — is
-    // refused by the org-scope door (`NOT_OVERRIDABLE`) before the `_lock` gate.
-    const cases: Array<{ env: Lock; org: Lock }> = [
-        { env: 'full', org: 'none' },
-        { env: 'none', org: 'full' },
-    ];
-    for (const { kernel, environmentId } of TOPOLOGIES) {
-        for (const c of cases) {
-            it(`${kernel} kernel · page: env-wide _lock=${c.env}, org-scoped residue _lock=${c.org} · delete for ${ORG}`, async () => {
-                const rows = [viewRow('p_both', null, c.env, 'page'), viewRow('p_both', ORG, c.org, 'page')];
-                const { protocol } = harness(environmentId, rows);
-                const read = await envelope(protocol, 'p_both', ORG, 'page');
-                expect(read).toMatchObject({ lock: c.env, served: 'env-wide row', overlayScope: 'env' });
-                expect(await door(protocol, 'p_both', 'delete', ORG, 'page')).toEqual(NOT_OVERRIDABLE);
-            });
-        }
     }
 });

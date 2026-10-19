@@ -709,7 +709,12 @@ export class HonoServerPlugin implements Plugin {
             await this.server.listen(port);
 
             const actualPort = this.server.getPort();
-            if (actualPort !== port) {
+            // Port 0 is a request for a kernel-assigned port, not a busy one:
+            // `listen(0)` can never bind the number it was given, so a mismatch
+            // there says nothing about a port in use. The started line below
+            // already names the bound port. Only a non-zero request that the
+            // adapter's EADDRINUSE walk moved is a drift worth a warning.
+            if (port !== 0 && actualPort !== port) {
                 ctx.logger.warn(`Port ${port} is in use, using port ${actualPort} instead`);
             }
             ctx.logger.info('HTTP server started successfully', {

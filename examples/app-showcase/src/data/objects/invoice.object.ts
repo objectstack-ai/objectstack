@@ -46,6 +46,10 @@ export const Invoice = ObjectSchema.create({
   icon: 'receipt',
   description: 'A customer invoice entered together with its line items.',
 
+  // Files on an invoice: its printed PDF is archived as an attachment of the
+  // record (`showcase_invoice_document` is its print page).
+  enable: { files: true },
+
   // Per-record row-action gating (objectui#2614) — a PAID invoice is frozen:
   // its fields already lock via `readonlyWhen: record.status == 'paid'` below,
   // and here the built-in row buttons follow the same truth instead of

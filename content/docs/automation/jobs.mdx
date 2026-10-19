@@ -385,13 +385,15 @@ Delay before retry *n* is `min(backoffMs * backoffMultiplier^(n-1), maxRetryDela
 optionally jittered. `maxRetries` counts retries **after** the initial attempt and
 is capped at 10.
 
-Two defaults worth knowing before you rely on the block:
+Two rules worth knowing before you rely on the block:
 
-- **`maxRetries` defaults to `0`** — declaring `retryPolicy` without stating a
-  count still means *no retry*. State a count to opt in.
+- **A block must state `maxRetries` ≥ 1.** A `retryPolicy` that omits it or
+  writes `0` would buy no retry, so it is refused at `objectstack validate` with
+  "a retry block with no attempts is no retry block". State a count, or delete
+  the block: a job with no `retryPolicy` runs once.
 - **`backoffMultiplier` defaults to `1`** — a flat delay, not exponential.
 
-Those defaults are why the block is closed: a key it does not declare — `maxRetry`
+The count rule and that default are why the block is closed: a key it does not declare — `maxRetry`
 for `maxRetries`, a `maxDelayMs` borrowed from another retry vocabulary — is
 refused at `objectstack validate` with the declared key it was near, rather than
 dropped and replaced by a default that never retries.

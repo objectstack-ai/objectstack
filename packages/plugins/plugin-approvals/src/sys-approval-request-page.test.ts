@@ -142,12 +142,45 @@ describe('sys_approval_request detail page — the slot map', () => {
     // The seat's choice on the ui seat's design input: the page's strip drops
     // `record_id` so the details grid keeps it (that grid is where the console
     // draws the target-record card of the `record_id` / `object_name` pointer
-    // pair), and the object's `highlightFields` is left as it is.
+    // pair), and the object's `highlightFields` keeps it.
     const declared = SysApprovalRequest.highlightFields ?? [];
     expect(declared).toContain('record_id');
     expect(SLOTS.highlights?.type).toBe('record:highlights');
     expect(SLOTS.highlights.properties.fields).toEqual(declared.filter((f: string) => f !== 'record_id'));
     expect((SysApprovalRequest.fields as AnyRec).record_id?.referenceVia).toBe('object_name');
+  });
+
+  it('names the flow by its label, process_label, in the strip and in the object\'s list alike', () => {
+    // `process_name` is the machine source (`flow:NAME`); `process_label` is the
+    // flow's label, served under that name by the approvals get. The object's
+    // list moves with the strip: the Details tab's bare `record:details` node
+    // draws the object's `highlightFields` minus the strip, so a strip-only
+    // change would put `process_name` in that tab.
+    const strip = SLOTS.highlights.properties.fields as string[];
+    const declared = SysApprovalRequest.highlightFields ?? [];
+    expect(strip[0]).toBe('process_label');
+    expect(declared[0]).toBe('process_label');
+    expect({ strip: strip.includes('process_name'), declared: declared.includes('process_name') })
+      .toEqual({ strip: false, declared: false });
+    expect(declared.filter((f: string) => !strip.includes(f))).toEqual(['record_id']);
+  });
+
+  it('names the step by its label, current_step_label, in the strip and in the object\'s list alike', () => {
+    // `current_step` is the Approval node's machine id (`approve_step`);
+    // `current_step_label` is the step's label, a declared field the approvals
+    // get serves under that name (`approval-service.test.ts` pins the get). The
+    // object's list moves with the strip for the reason the flow chip's does.
+    const strip = SLOTS.highlights.properties.fields as string[];
+    const declared = SysApprovalRequest.highlightFields ?? [];
+    const fields = SysApprovalRequest.fields as AnyRec;
+    expect({ strip: strip.includes('current_step_label'), declared: declared.includes('current_step_label') })
+      .toEqual({ strip: true, declared: true });
+    expect({ strip: strip.includes('current_step'), declared: declared.includes('current_step') })
+      .toEqual({ strip: false, declared: false });
+    expect(fields.current_step_label).toMatchObject({ type: 'text', label: 'Approval Step' });
+    // Control: the machine id stays a declared field. It is dropped from the
+    // two lists, not from the object.
+    expect(fields.current_step).toMatchObject({ type: 'text' });
   });
 
   it('tabs: Details is record:details, Timeline is sys_approval_action as a related list on request_id', () => {

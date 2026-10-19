@@ -402,11 +402,13 @@ export { hookRecordState } from './hook-wrappers.js';
 // exactly these; they are exported so it does not have to re-derive any of it.
 export {
   resolveRecordTitle,
+  resolveServedRecordTitle,
+  servedRecordTitle,
   resolveRelatedTitleTarget,
   titleFieldOf,
   RecordTitleFieldError,
 } from './record-title.js';
-export type { RelatedTitleTarget } from './record-title.js';
+export type { RelatedTitleTarget, FormulaServingChannel } from './record-title.js';
 export { evaluateFormulaField } from './engine.js';
 
 // Export Validation
@@ -573,7 +575,8 @@ export type {
 export { MetadataFacade } from './metadata-facade.js';
 
 // Export Plugin Shim
-export { ObjectQLPlugin } from './plugin.js';
+// [#23649] The pre-sync announcement the app plugin installs `datasourceMapping` on.
+export { ObjectQLPlugin, OBJECTQL_DRIVERS_READY_HOOK } from './plugin.js';
 
 // Export Kernel Factory
 export { createObjectQLKernel } from './kernel-factory.js';

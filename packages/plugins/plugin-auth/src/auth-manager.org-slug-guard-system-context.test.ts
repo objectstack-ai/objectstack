@@ -25,6 +25,13 @@
  *     `sys_environment` (the open-source composition) declares the guard
  *     inapplicable without reading anything. The real ObjectQL registry
  *     answers that question in the last section.
+ *
+ * [#24243] Both answers are pinned on their ADR-0112 codes, the refusal's
+ * registered `ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS` and the read
+ * fault's standard `SERVICE_UNAVAILABLE`, at this level rather than on the
+ * wire: `sys_environment` is a cloud-provided object that no composition in this
+ * repository registers, so on a stock dogfood boot the guard does not apply and
+ * neither answer has a door.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -108,15 +115,19 @@ async function slugGuard(dataEngine: unknown) {
   return (slug: string) => guard({ organization: { slug }, member: { organizationId: ORG.id } });
 }
 
-/** The guard's refusal, asserted on its envelope: better-auth's `FORBIDDEN` / 403, naming the active environments. */
+/**
+ * The guard's refusal, asserted on its envelope: better-auth's `FORBIDDEN` / 403
+ * with its registered ADR-0112 code (#24243), naming the active environments.
+ */
 async function expectSlugRefusal(attempt: Promise<unknown>) {
   const err = (await attempt.then(
     () => undefined,
     (e: unknown) => e,
-  )) as { status?: unknown; statusCode?: unknown; body?: { message?: unknown } } | undefined;
+  )) as { status?: unknown; statusCode?: unknown; body?: { code?: unknown; message?: unknown } } | undefined;
   expect(err, 'the slug change was not refused').toBeTruthy();
   expect(err?.statusCode).toBe(403);
   expect(err?.status).toBe('FORBIDDEN');
+  expect(err?.body?.code).toBe('ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS');
   expect(String(err?.body?.message)).toMatch(/active.*environment/i);
 }
 
@@ -180,18 +191,20 @@ describe('organization slug guard — on an engine that refuses a principal-less
 
 /**
  * A read that could not answer, asserted on its envelope: better-auth's
- * `SERVICE_UNAVAILABLE` / 503, naming the object whose read failed — and
- * explicitly NOT the guard's `FORBIDDEN` / 403, which is a verdict about the
- * slug change that the guard never reached.
+ * `SERVICE_UNAVAILABLE` / 503 with the standard code of the same name (#24243),
+ * naming the object whose read failed — and explicitly NOT the guard's
+ * `FORBIDDEN` / 403, which is a verdict about the slug change that the guard
+ * never reached.
  */
 async function expectReadFaultRefusal(attempt: Promise<unknown>, object: string) {
   const err = (await attempt.then(
     () => undefined,
     (e: unknown) => e,
-  )) as { status?: unknown; statusCode?: unknown; body?: { message?: unknown }; cause?: unknown } | undefined;
+  )) as { status?: unknown; statusCode?: unknown; body?: { code?: unknown; message?: unknown }; cause?: unknown } | undefined;
   expect(err, 'the slug change was let through on a read that could not answer').toBeTruthy();
   expect(err?.statusCode).toBe(503);
   expect(err?.status).toBe('SERVICE_UNAVAILABLE');
+  expect(err?.body?.code).toBe('SERVICE_UNAVAILABLE');
   expect(String(err?.body?.message)).toContain(`\`${object}\``);
   return err;
 }

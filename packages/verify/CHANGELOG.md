@@ -1,5 +1,452 @@
 # @objectstack/verify
 
+## 18.0.0-next.4
+
+### Patch Changes
+
+- 1eae21f: fix(verify): the dashboard date-window family also proves sums and derived measures, and says why an average stays out
+  
+  Clause-②: no (no export, option or type moves: the family reads the measures it already read, and a widget it used to exclude can now be proven or contradicted)
+  
+  `runDashboardWindowProofs` (and `os verify --dashboard-windows`) now judges every verdict in fixture rows, so it compares every measure whose difference can be read back as rows:
+  
+  - **A `sum`** is probed. Each fixture row holds the summed field to the value the CRUD derivation synthesizes for it, or to the value the widget's own selection already holds there. The sum's difference over that value is the rows the window took in. FROM: a sum-only widget was `excluded` (`no-count-measure`), and a sum beside a count was an `excluded` measure (`not-a-count`). TO: `proven` or `contradicted` like a count. A sum of a relationship path, a summed field with no synthesizable value, and a held value that is not a non-zero number are `excluded` as `count-field-unsynthesizable`, and the reason names which.
+  - **A `derived` measure** (`ratio`, `sum`, `difference`, `product`) is probed through its operands, which the widget's own answer carries beside it. Each operand must be a count or a sum of the same dataset, and the fixture rows meet every operand's filter. Under each preset every operand must take in exactly the rows the window selects. The value the widget shows must equal `evaluateDerivedMeasures` (the server's own evaluator, from `@objectstack/service-analytics`) over that row's operands, or the preset is `contradicted` and the detail names both values. A derived measure over a derived one, or over a measure that is not a count or a sum, stays `excluded` (`not-a-count`), and the reason names the operand.
+  - **An `avg`, `min`, `max` or `count_distinct`** stays `excluded` (`not-a-count`, or `no-count-measure` for a widget with nothing else), with a reason that says why. What a fixture row does to it depends on rows the app already holds in the window: their number for an average, their extreme for a minimum or maximum, their values for a distinct count. Nothing the widget answers reveals that, so deriving it would mean guessing the data. The reason text changes: FROM `"avg_effort" aggregates avg of effort, not a row count` TO `"avg_effort" averages effort: an average is not additive — …`.
+  - The widget-level `no-count-measure` reason reads `no measure the widget selects can be compared (…)`. The `excludedKind` values are unchanged.
+  - **A new `not-run` cause.** The family gives up on a preset when a sum's own total is so large that its floating-point difference cannot resolve one fixture row. That needs 2^34 times the held value, and the detail says so.
+  - **Upgrading:** on an app whose dashboards bind sums or derived measures, `os verify --dashboard-windows` now probes those widgets. A window that does not reach them now fails the run (`hardFailures`), where before they were only counted as `excluded`.
+- d65826f: fix: framework writes on tenant-column objects name the organization they can derive (ADR-0131 D9)
+  
+  Clause-②: yes (widening)
+  
+  A write on a tenant-column object with no organization is derived under `single` and refused under a wall (ADR-0131 D9). Before the engine stops letting such writes through, each of these producers now names the organization it can derive itself. Under `single` that is the Default Organization, which is the owner the engine would derive anyway, so no reader changes. Under a wall the row names an organization only where the producer has one. The rows it cannot attribute are written exactly as before.
+  
+  - **`@objectstack/plugin-auth`.** The self-registration grant (`sys_user_permission_set`) and the auth mails about a user (verification, password reset, account invitation, magic link, change-email notice → `sys_email`) read one derivable organization: the `tenancy` service's `defaultOrgId()`. Under `single` that is the Default Organization. Under a wall it is none, because the registrant belongs to no organization yet. The verification and reset mails used to persist with no organization even under `single`.
+  - **`@objectstack/plugin-audit`.** An activity row (`sys_activity`) about a record with no organization of its own (a `sys_user`, a platform setting), written with no session organization (a sign-up), takes the Default Organization under `single`. The record's own organization and then the session's still win. The ledger's `tenant_id` attribution is unchanged. New optional `AuditWriterOptions.getDefaultOrganizationId()`; `AuditPlugin` wires it to the `tenancy` service.
+  - **`@objectstack/service-settings`.** The `sys_secret` ciphertext and the `sys_setting_audit` history row of a `tenant` or `user` value carry that value's organization, which is the same owner as its `sys_setting` row. A `global` value's rows name none. New optional `organization_id` on `SettingsSecretStore.insert`'s row and `organizationId` on `SettingsAuditWriter.write`'s entry; the built-in writers persist them. A failed `sys_setting_audit` write is now reported at `error`, not `warn`: the settings write succeeds while its history row is lost. The first report names the consequence and the fix. `buildSettingAuditWriter`'s optional logger argument keeps every sink it accepted (none, `{}`, or one with an optional `warn`) and additionally takes a sink that carries `error`. It reports through `error` when the sink has it, else through `warn`.
+  - **`@objectstack/verify`.** The RLS probe and position personas' grants (`sys_user_permission_set`, `sys_user_position`) belong to the organization the persona is a member of (the Default Organization under `single`). They used to be written with an explicit `organization_id: null`. A persona that belongs to no organization, or to several, names none.
+- Updated dependencies [b2e7870]
+- Updated dependencies [6a49efb]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [78652c0]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [646303e]
+- Updated dependencies [e9bc60b]
+- Updated dependencies [52ff308]
+- Updated dependencies [d1f082d]
+- Updated dependencies [f5ef054]
+- Updated dependencies [0d34066]
+- Updated dependencies [0c3db0f]
+- Updated dependencies [8d3dd6f]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [03ac4ec]
+- Updated dependencies [5e97907]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [6e43b7b]
+- Updated dependencies [727091c]
+- Updated dependencies [62c4441]
+- Updated dependencies [f792290]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [d702b18]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [9975c26]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [5a9a80b]
+- Updated dependencies [1489952]
+- Updated dependencies [04fd88a]
+- Updated dependencies [aaaeeac]
+- Updated dependencies [8eccf51]
+- Updated dependencies [8a88901]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [8259ea0]
+- Updated dependencies [9040945]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [2bcd406]
+- Updated dependencies [58a2faa]
+- Updated dependencies [e74ec56]
+- Updated dependencies [58a2faa]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [cbfa5e4]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [77e9f79]
+- Updated dependencies [83dfbc0]
+- Updated dependencies [9822b05]
+- Updated dependencies [889bf12]
+- Updated dependencies [7a8733f]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [e15897c]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [d79dc48]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [5da2e88]
+- Updated dependencies [51ad8e4]
+- Updated dependencies [ec749fb]
+- Updated dependencies [c4526a7]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [6868514]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [538f923]
+- Updated dependencies [d65826f]
+- Updated dependencies [741aa85]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [d8e11b5]
+- Updated dependencies [44a5011]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+- Updated dependencies [2a1e48a]
+- Updated dependencies [71fa166]
+- Updated dependencies [e22defb]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/plugin-security@18.0.0-next.4
+  - @objectstack/plugin-auth@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/plugin-sharing@18.0.0-next.4
+  - @objectstack/rest@18.0.0-next.4
+  - @objectstack/service-settings@18.0.0-next.4
+  - @objectstack/service-storage@18.0.0-next.4
+  - @objectstack/plugin-audit@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/runtime@18.0.0-next.4
+  - @objectstack/plugin-hono-server@18.0.0-next.4
+  - @objectstack/plugin-email@18.0.0-next.4
+  - @objectstack/plugin-webhooks@18.0.0-next.4
+  - @objectstack/plugin-approvals@18.0.0-next.4
+  - @objectstack/mcp@18.0.0-next.4
+  - @objectstack/metadata@18.0.0-next.4
+  - @objectstack/plugin-pinyin-search@18.0.0-next.4
+  - @objectstack/service-analytics@18.0.0-next.4
+  - @objectstack/service-automation@18.0.0-next.4
+  - @objectstack/service-cache@18.0.0-next.4
+  - @objectstack/service-datasource@18.0.0-next.4
+  - @objectstack/service-job@18.0.0-next.4
+  - @objectstack/service-mailbox@18.0.0-next.4
+  - @objectstack/service-messaging@18.0.0-next.4
+  - @objectstack/service-package@18.0.0-next.4
+  - @objectstack/service-queue@18.0.0-next.4
+  - @objectstack/service-realtime@18.0.0-next.4
+  - @objectstack/service-sms@18.0.0-next.4
+  - @objectstack/trigger-api@18.0.0-next.4
+  - @objectstack/trigger-record-change@18.0.0-next.4
+  - @objectstack/trigger-schedule@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
+## 18.0.0-next.3
+
+### Patch Changes
+
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [b9dbc3d]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [1eac7ad]
+- Updated dependencies [9fcea20]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [7428da0]
+- Updated dependencies [b55be42]
+- Updated dependencies [abb6df0]
+- Updated dependencies [5b6c257]
+- Updated dependencies [0b1179f]
+- Updated dependencies [8776119]
+- Updated dependencies [74b4362]
+- Updated dependencies [f7a5ebe]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9d4fb3c]
+- Updated dependencies [c5cf546]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [cf07168]
+- Updated dependencies [f846cc2]
+- Updated dependencies [34b740f]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [94114c1]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [0cfd0c4]
+- Updated dependencies [ae4dfaf]
+- Updated dependencies [099cc9d]
+- Updated dependencies [77efc66]
+- Updated dependencies [747c8e9]
+- Updated dependencies [6422da5]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [67e8792]
+- Updated dependencies [2e15620]
+- Updated dependencies [0cb45e9]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [b74434c]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [605aa01]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [d050a8f]
+- Updated dependencies [9e797a8]
+- Updated dependencies [b25d98a]
+- Updated dependencies [75ced06]
+- Updated dependencies [5fb8d15]
+- Updated dependencies [2054a08]
+- Updated dependencies [5c2ac83]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [33228c5]
+- Updated dependencies [d731b89]
+- Updated dependencies [19955fb]
+- Updated dependencies [905f57b]
+- Updated dependencies [aefab7c]
+- Updated dependencies [66d2757]
+- Updated dependencies [c7168ac]
+- Updated dependencies [44fe210]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b75129f]
+- Updated dependencies [6dede7a]
+- Updated dependencies [62f959d]
+- Updated dependencies [c1c0a90]
+- Updated dependencies [ab3ba2c]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [544b8d7]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+- Updated dependencies [cdf3777]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/service-storage@18.0.0-next.3
+  - @objectstack/plugin-security@18.0.0-next.3
+  - @objectstack/rest@18.0.0-next.3
+  - @objectstack/runtime@18.0.0-next.3
+  - @objectstack/service-job@18.0.0-next.3
+  - @objectstack/service-automation@18.0.0-next.3
+  - @objectstack/metadata@18.0.0-next.3
+  - @objectstack/objectql@18.0.0-next.3
+  - @objectstack/plugin-hono-server@18.0.0-next.3
+  - @objectstack/plugin-audit@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/plugin-approvals@18.0.0-next.3
+  - @objectstack/plugin-auth@18.0.0-next.3
+  - @objectstack/service-messaging@18.0.0-next.3
+  - @objectstack/plugin-sharing@18.0.0-next.3
+  - @objectstack/service-settings@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/plugin-email@18.0.0-next.3
+  - @objectstack/service-package@18.0.0-next.3
+  - @objectstack/mcp@18.0.0-next.3
+  - @objectstack/service-mailbox@18.0.0-next.3
+  - @objectstack/plugin-webhooks@18.0.0-next.3
+  - @objectstack/service-analytics@18.0.0-next.3
+  - @objectstack/service-cache@18.0.0-next.3
+  - @objectstack/service-datasource@18.0.0-next.3
+  - @objectstack/service-queue@18.0.0-next.3
+  - @objectstack/service-realtime@18.0.0-next.3
+  - @objectstack/service-sms@18.0.0-next.3
+  - @objectstack/trigger-api@18.0.0-next.3
+  - @objectstack/trigger-record-change@18.0.0-next.3
+  - @objectstack/trigger-schedule@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+  - @objectstack/plugin-pinyin-search@18.0.0-next.3
+
+## 18.0.0-next.2
+
+### Minor Changes
+
+- be16feb: feat(verify): `flows.run` takes the system principal, `{ system: true }`, and starts the flow the way its own trigger does
+  
+  Clause-②: yes
+  
+  `flows.run(name, params, { system: true })` is a new overload beside `flows.run(name, params, { as })`. Nothing is removed, and the `{ as }` overload answers as before.
+  
+  - **What it does.** It calls the booted `automation` service's own `execute(name, { params, callerParamKeys: [] })`, in process. That is the call the schedule trigger's tick makes when it fires a flow. No HTTP route is involved, and no caller is resolved, admitted or refused. The engine applies the flow's own `runAs`, as it does for a run its trigger fired.
+  - **Why.** The trigger route, `POST /automation/:name/trigger`, refuses a self-triggered flow declared `runAs: 'system'` (`type` `autolaunched`, `record_change` or `schedule`) to every caller, the platform admin included, with `PERMISSION_DENIED` / `403`. That refusal is unchanged. So an app had no kit door to start its own scheduled flow in a test, and had to call the automation service by hand.
+  - **What it answers.** The same `FlowRun` the `{ as }` overload answers: the engine's result unchanged, plus `flowName`. A run that paused goes straight back to `flows.resume`. The engine answers a run that did not succeed with a result, not a throw, and this overload hands that result back unchanged: `success: false`, with `status: 'failed'` for a run that failed, a `code` for a refusal before dispatch (such as `FLOW_DISABLED`), and no `code` for an unknown flow name. Assert on `success` before asserting on the flow's side effects.
+  - **What the context leaves out.** `params` are the trigger's seeds: like the tick, the context names no caller-supplied keys, so a `screen` node takes none of them as its submission. The context carries no `event`, no user and no organization. A schedule binding that declares an acting organization runs as that organization on a real tick; this overload does not read the binding.
+  - **One caller.** A call that names both `as` and `system: true` is refused with `INVALID_REQUEST` / `400` before anything runs, as `hooks.run` refuses it.
+  
+  ```ts
+  const run = await stack.flows.run('case_sla_monitor', {}, { system: true });
+  expect(run.success).toBe(true);
+  
+  // The trigger door still refuses a person, the admin included.
+  await expect(stack.flows.run('case_sla_monitor', {}, { as: admin }))
+    .rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+  ```
+
+### Patch Changes
+
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [cb9841a]
+- Updated dependencies [b60eb78]
+- Updated dependencies [584e737]
+- Updated dependencies [3d231ba]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [94924e0]
+- Updated dependencies [0f05907]
+- Updated dependencies [05e3b8e]
+- Updated dependencies [086fa46]
+- Updated dependencies [c245986]
+- Updated dependencies [0be162c]
+- Updated dependencies [fc1a55a]
+- Updated dependencies [fc1a55a]
+- Updated dependencies [b1e9280]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [e1cefa5]
+- Updated dependencies [1d79556]
+- Updated dependencies [c980d11]
+- Updated dependencies [0ecac96]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [0d784da]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [650933e]
+- Updated dependencies [d1e2841]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [cac0be8]
+- Updated dependencies [1f3ac4f]
+- Updated dependencies [57994c3]
+- Updated dependencies [70d4c06]
+- Updated dependencies [989aa48]
+- Updated dependencies [b1cfa3d]
+- Updated dependencies [23e689d]
+- Updated dependencies [0fb55fc]
+- Updated dependencies [19c554d]
+- Updated dependencies [5bb9a83]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c263588]
+- Updated dependencies [a6d0715]
+- Updated dependencies [7c6b7f4]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [f7cd580]
+- Updated dependencies [c9810dd]
+- Updated dependencies [9f81260]
+- Updated dependencies [e611e2b]
+- Updated dependencies [b513343]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [30c33e3]
+- Updated dependencies [7e6e4e1]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [cd86e41]
+- Updated dependencies [c03077e]
+- Updated dependencies [3bc407d]
+- Updated dependencies [69351e9]
+- Updated dependencies [395ca21]
+- Updated dependencies [76560a1]
+- Updated dependencies [4c21e57]
+- Updated dependencies [9e0945c]
+- Updated dependencies [069fd40]
+- Updated dependencies [6ee483c]
+- Updated dependencies [941c78a]
+  - @objectstack/plugin-security@18.0.0-next.2
+  - @objectstack/platform-objects@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/rest@18.0.0-next.2
+  - @objectstack/runtime@18.0.0-next.2
+  - @objectstack/service-mailbox@18.0.0-next.2
+  - @objectstack/objectql@18.0.0-next.2
+  - @objectstack/plugin-audit@18.0.0-next.2
+  - @objectstack/plugin-auth@18.0.0-next.2
+  - @objectstack/plugin-sharing@18.0.0-next.2
+  - @objectstack/service-datasource@18.0.0-next.2
+  - @objectstack/service-settings@18.0.0-next.2
+  - @objectstack/service-storage@18.0.0-next.2
+  - @objectstack/plugin-email@18.0.0-next.2
+  - @objectstack/plugin-hono-server@18.0.0-next.2
+  - @objectstack/mcp@18.0.0-next.2
+  - @objectstack/metadata@18.0.0-next.2
+  - @objectstack/service-automation@18.0.0-next.2
+  - @objectstack/plugin-approvals@18.0.0-next.2
+  - @objectstack/plugin-webhooks@18.0.0-next.2
+  - @objectstack/service-job@18.0.0-next.2
+  - @objectstack/service-messaging@18.0.0-next.2
+  - @objectstack/service-queue@18.0.0-next.2
+  - @objectstack/service-realtime@18.0.0-next.2
+  - @objectstack/service-analytics@18.0.0-next.2
+  - @objectstack/service-cache@18.0.0-next.2
+  - @objectstack/service-package@18.0.0-next.2
+  - @objectstack/service-sms@18.0.0-next.2
+  - @objectstack/trigger-api@18.0.0-next.2
+  - @objectstack/trigger-record-change@18.0.0-next.2
+  - @objectstack/trigger-schedule@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+  - @objectstack/plugin-pinyin-search@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

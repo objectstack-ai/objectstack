@@ -16,7 +16,7 @@ import {
 } from './object-graph.js';
 import {
   indexUnprovisionedAnchors,
-  unprovisionedAnchorHint,
+  unprovisionedAnchorFix,
   unprovisionedAnchorVerdict,
 } from './system-fields.js';
 
@@ -588,6 +588,18 @@ function list(names: Iterable<string>): string {
   return arr.length > 0 ? arr.join(', ') : '(none)';
 }
 
+/**
+ * [#22161] The bounded form of {@link list} for a one-line `fix:`: at most the
+ * first three declared names, so a dataset with forty measures cannot stretch
+ * the remedy past one line. An empty selection has no "Did you mean" to point
+ * at, so the names stay, bounded, rather than dropped.
+ */
+function declaredFew(names: Iterable<string>, noun: string): string {
+  const arr = [...names];
+  if (arr.length === 0) return `it declares no ${noun} yet`;
+  return `declared: ${arr.length > 3 ? `${arr.slice(0, 3).join(', ')}, …` : arr.join(', ')}`;
+}
+
 // ── dashboard-filter field-existence (#3365) ─────────────────────────────────
 
 /** Reserved filter name for the dashboard's built-in date range (#2501). */
@@ -779,11 +791,9 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           w.data !== undefined || optionsData;
         const keyList = legacyUsed.map((k) => `\`${k}\``).join(', ');
         const plural = legacyUsed.length > 1;
-        const datasetHint =
-          `Bind a semantic dataset and select fields BY NAME: ` +
-          `\`dataset: '<name>', dimensions: [...], values: [...]\`. ` +
-          `Dataset-bound widgets render through DatasetWidget (pivot rows/cols come from ` +
-          `\`dimensions\`, cell values from \`values\`).`;
+        // [#22161] One remedy line per id. How DatasetWidget reads a widget
+        // (pivot rows from `dimensions`, cells from `values`), that the legacy
+        // keys are ignored, and the suppression are each id's `os explain`.
         if (!hasDataSource) {
           push({
             severity: 'error',
@@ -792,8 +802,8 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
               `sets legacy analytics key${plural ? 's' : ''} ${keyList}, removed by the ADR-0021 ` +
               `cutover, and binds no \`dataset\`, \`object\` or inline \`data\`, so it renders nothing`,
             hint:
-              `${datasetHint} The renderer ignores the legacy keys, so without a data ` +
-              `source this widget has no data at all.`,
+              `Bind a semantic dataset and select fields BY NAME: ` +
+              `\`dataset: '<name>', dimensions: [...], values: [...]\`.`,
           });
         } else {
           push({
@@ -803,8 +813,8 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
               `sets legacy analytics key${plural ? 's' : ''} ${keyList} that the ADR-0021 ` +
               `single-form cutover removed — the dashboard renderer ignores ${plural ? 'them' : 'it'}.`,
             hint:
-              `${datasetHint} These inline keys are a no-op. ` +
-              `Suppress with suppressWarnings: ['${WIDGET_LEGACY_ANALYTICS_SHAPE}'] if intentional.`,
+              `Delete the legacy key${plural ? 's' : ''} and select fields BY NAME through the ` +
+              `widget's dataset: \`dataset\`, \`dimensions\`, \`values\`.`,
           });
         }
       }
@@ -906,11 +916,13 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
                     (eff.explicit
                       ? `binds dashboard filter \`${def.name}\` (via filterBindings), but `
                       : `inherits dashboard filter \`${def.name}\`, but `) + account.message,
+                  // [#22161] One remedy line: the verdict's "Did you mean" names
+                  // the nearest field, so the hop's field list (`account.detail`)
+                  // is not echoed; which fields traverse and the `include` rule
+                  // for a dotted target are the `os explain` entry's.
                   hint:
-                    `Point filterBindings: { ${def.name}: '<field>' } at a field that resolves on ` +
-                    `\`${datasetObject}\` — or at a \`relationship[.relationship].field\` path whose ` +
-                    `prefix is declared in dataset "${dsName}"'s \`include\` — or opt out with ` +
-                    `filterBindings: { ${def.name}: false }. ${account.detail}`,
+                    `Point filterBindings: { ${def.name}: '<field>' } at a path that resolves on ` +
+                    `\`${datasetObject}\`, or opt out with filterBindings: { ${def.name}: false }.`,
                 });
                 continue;
               }
@@ -923,13 +935,15 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
                     `has no field \`${field}\`.`
                   : `inherits dashboard filter \`${def.name}(${field})\`, but object ` +
                     `\`${datasetObject}\` (dataset "${dsName}") has no field \`${field}\`.`,
+                // [#22161] One remedy line plus the nearest field; the object's
+                // field list is not echoed.
                 hint: eff.explicit
                   ? `Point filterBindings: { ${def.name}: '<field>' } at a field that exists on ` +
                     `\`${datasetObject}\`, or opt out with filterBindings: { ${def.name}: false }.` +
-                    `${suggestName(field, base.names)} Object fields: ${list(base.names)}.`
+                    suggestName(field, base.names)
                   : `Set filterBindings: { ${def.name}: false } on this widget to opt out, or ` +
                     `re-target to an existing field with filterBindings: { ${def.name}: '<field>' }.` +
-                    `${suggestName(field, base.names)} Object fields: ${list(base.names)}.`,
+                    suggestName(field, base.names),
               });
               continue;
             }
@@ -950,11 +964,12 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
                   message:
                     `${provenance}its relationship prefix "${prefix}" is not in dataset ` +
                     `"${dsName}"'s \`include\`, so no join reaches it and the whole board renders empty`,
+                  // [#22161] One remedy line; that "a.b" implicitly includes "a"
+                  // is the `os explain` entry's, and the declared include paths
+                  // are not echoed (the remedy adds the one that is missing).
                   hint:
-                    `Add "${prefix}" to dataset "${dsName}"'s include (declaring "a.b" implicitly ` +
-                    `includes "a"), filter on a field of "${datasetObject}" itself, or opt out with ` +
-                    `filterBindings: { ${def.name}: false }. Declared include paths: ` +
-                    `${included.size > 0 ? [...included].sort().join(', ') : '(none)'}.`,
+                    `Add "${prefix}" to dataset "${dsName}"'s include, filter on a field of ` +
+                    `"${datasetObject}" itself, or opt out with filterBindings: { ${def.name}: false }.`,
                 });
                 continue;
               }
@@ -976,11 +991,10 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
               severity: 'warning',
               rule: DASHBOARD_FILTER_FIELD_UNPROVISIONED,
               message: `${provenance}${unprovisionedAnchorVerdict(leafObject, leafField)}, so the widget renders empty`,
-              hint:
-                `${unprovisionedAnchorHint(leafObject, leafField)} A widget can also opt out ` +
-                `with filterBindings: { ${def.name}: false }. Suppress with ` +
-                `suppressWarnings: ['${DASHBOARD_FILTER_FIELD_UNPROVISIONED}'] if the remote schema ` +
-                `resolves it some other way.`,
+              // [#22161] The shared one-line anchor fix; how to vouch for or
+              // opt out of the anchor, the widget's `filterBindings` opt-out
+              // and the suppression are `os explain`.
+              hint: unprovisionedAnchorFix(leafObject, leafField),
             });
           }
         }
@@ -1011,10 +1025,12 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
                 rule: WIDGET_FILTER_FIELD_UNKNOWN,
                 path: at,
                 message: account.message,
+                // [#22161] One remedy line: the verdict's "Did you mean" names
+                // the nearest field, so the field list (`account.detail`) is
+                // not echoed; which fields traverse is the `os explain` entry's.
                 hint:
-                  `Filter on a field that exists on "${filterObject}" (dataset "${dsName}"), ` +
-                  `or on a \`relationship[.relationship].field\` path whose prefix is declared ` +
-                  `in that dataset's \`include\`. ${account.detail}`,
+                  `Filter on a field of "${filterObject}" (dataset "${dsName}"), or on a relationship ` +
+                  `path whose prefix that dataset's \`include\` declares.`,
               });
               return;
             }
@@ -1151,8 +1167,10 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
         // refused binding keys" in the module docblock), so the authored key
         // is ignored rather than mis-queried — `widget-legacy-analytics-shape`'s
         // class, and it carries that class's tier and suppressibility.
-        const suppressHint =
-          `Suppress with suppressWarnings: ['${CHART_FIELD_UNKNOWN}'] if the inert key is intentional.`;
+        // [#22161] Each position's hint is one remedy line — delete the
+        // refused key — plus the nearest selectable name. How the renderer
+        // derives each binding, the `os migrate meta` route for existing
+        // sources and the suppression are `os explain chart-field-unknown`.
 
         const xAxis = (chartConfig.xAxis && typeof chartConfig.xAxis === 'object')
           ? (chartConfig.xAxis as AnyRec)
@@ -1168,11 +1186,8 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
               `chartConfig.xAxis.field "${xAxis.field}" is not a dimension of dataset "${dsName}" ` +
               `and is ignored anyway: the x-axis stays bound to this widget's first dimension (${list(dims)})`,
             hint:
-              `Delete the key: \`chartConfig.xAxis\` is refused on a dataset-bound widget ` +
-              `(ADR-0021) and the x-axis binding comes from this widget's \`dimensions\`. ` +
-              `Run \`os migrate meta --from 17\` to list the mechanical edits for existing ` +
-              `sources; \`--write\` applies the ones it can prove, and you apply the rest by hand.` +
-              `${suggestName(xAxis.field, dimensionNames)} ${suppressHint}`,
+              `Delete the key: \`chartConfig.xAxis\` is refused on a dataset-bound widget, and the ` +
+              `x-axis comes from this widget's \`dimensions\`.${suggestName(xAxis.field, dimensionNames)}`,
           });
         }
 
@@ -1193,23 +1208,20 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           const consequence = kind === 'series'
             ? `so it pairs with no series and its presentation lands on nothing`
             : `and an authored axis \`field\` re-points nothing`;
-          const fixHint = declaredButUnselected
-            ? `Add "${field}" to the widget's values, or bind the chart to a selected measure.`
-            : `Post-cutover data is keyed by the dataset's measure NAME, not the ` +
-              `base column.${suggestName(field, selectedValues.size > 0 ? selectedValues : measures.keys())}`;
           // Both positions are now REFUSED outright on a dataset-bound widget
-          // (ADR-0021; ruling 2026-09-12), so the shape sentence says delete
-          // rather than describing what the key used to carry.
-          const shapeHint = kind === 'series'
-            ? `\`chartConfig.series\` is refused on a dataset-bound widget: series membership ` +
-              `follows \`values\` (and a second \`dimensions\` entry to split). Delete the key.`
-            : `\`chartConfig.yAxis\` is refused on a dataset-bound widget: the bindings come ` +
-              `from \`values\`, one entry per mark. Delete the key.`;
+          // (ADR-0021; ruling 2026-09-12), so the remedy says delete rather
+          // than describing what the key used to carry. [#22161] One line:
+          // what to do instead, by whether the dataset declares the name.
+          const key = kind === 'series' ? 'chartConfig.series' : 'chartConfig.yAxis';
+          const instead = declaredButUnselected
+            ? `; to plot "${field}", add it to the widget's values.`
+            : `; select the measure BY NAME in the widget's values.` +
+              suggestName(field, selectedValues.size > 0 ? selectedValues : measures.keys());
           push({
             severity: 'warning',
             rule: CHART_FIELD_UNKNOWN,
             message: `${nameClause}, ${consequence}`,
-            hint: `${fixHint} ${shapeHint} ${suppressHint}`,
+            hint: `Delete the key: \`${key}\` is refused on a dataset-bound widget${instead}`,
           });
         };
 
@@ -1275,15 +1287,12 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             message:
               `'${w.type}' widget selects no measures (\`values\` is empty), so the renderer ` +
               `shows the "Pick measures (values) for this dataset widget." placeholder and no chart is drawn at all`,
+            // [#22161] One remedy line naming at most three declared measures;
+            // the placeholder short-circuit and the suppression are `os explain`.
             hint:
-              `Select at least one measure of dataset "${dsName}" BY NAME — ` +
-              `values: ['<measure>'] (declared measures: ${list(measures.keys())}).` +
-              (dims.length === 0
-                ? ` This widget selects no \`dimensions\` either; a chart family needs one ` +
-                  `to plot against (see ${CHART_DIMENSIONS_MISSING}).`
-                : '') +
-              ` If the widget is deliberately still being authored, suppress with: ` +
-              `suppressWarnings: ['${CHART_MEASURES_MISSING}']`,
+              `Select a measure of dataset "${dsName}" BY NAME in \`values\` ` +
+              `(${declaredFew(measures.keys(), 'measures')})` +
+              (dims.length === 0 ? `, and a dimension to plot it against.` : '.'),
           });
         } else if (isNonChartDatasetWidgetType(w.type)) {
           // The consequence is stated per family, because it differs: the
@@ -1299,12 +1308,11 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             message:
               `'${w.type}' widget selects no measures (\`values\` is empty), so the renderer ` +
               `shows the "Pick measures (values) for this dataset widget." placeholder and ${drawn}`,
+            // [#22161] One remedy line naming at most three declared measures;
+            // which families need no dimensions and the suppression are `os explain`.
             hint:
-              `Select at least one measure of dataset "${dsName}" BY NAME — ` +
-              `values: ['<measure>'] (declared measures: ${list(measures.keys())}). ` +
-              `A '${w.type}' widget needs no \`dimensions\`, so measures are the whole ` +
-              `fix. If the widget is deliberately still being authored, suppress with: ` +
-              `suppressWarnings: ['${WIDGET_MEASURES_MISSING}']`,
+              `Select a measure of dataset "${dsName}" BY NAME in \`values\` ` +
+              `(${declaredFew(measures.keys(), 'measures')}); a '${w.type}' widget needs no \`dimensions\`.`,
           });
         }
       } else if (dims.length === 0) {
@@ -1315,12 +1323,13 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             message:
               `'${w.type}' widget selects no dimensions, so the renderer draws a single KPI ` +
               `number instead of a '${w.type}' chart`,
+            // [#22161] One remedy line naming at most three declared
+            // dimensions; the renderer's `isMetric` test and the suppression
+            // are `os explain chart-dimensions-missing`.
             hint:
-              `Plot the chart against a dataset dimension — dimensions: ['<name>'] ` +
-              `(declared dimensions: ${list(dimensionNames)}) — or, if a single value ` +
-              `IS what this tile should show, declare it as a 'metric' or 'kpi' widget ` +
-              `so the type matches what renders. Suppress with: ` +
-              `suppressWarnings: ['${CHART_DIMENSIONS_MISSING}']`,
+              `Plot it against a dimension of dataset "${dsName}" ` +
+              `(${declaredFew(dimensionNames, 'dimensions')}), or declare it a 'metric' or 'kpi' ` +
+              `widget if one value is what it should show.`,
           });
         }
       }
@@ -1346,12 +1355,11 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           `a '${w.type}' widget bound to dataset "${dsName}" selects only count ` +
           `measure(s) (${values.join(', ')}) and no dimensions, so it renders a ` +
           `single summary row — not a per-record list.`,
+        // [#22161] One remedy line; why a record listing is not an analytics
+        // dataset and the suppression are `os explain table-count-only`.
         hint:
-          `A flat record listing is not an analytics dataset. Model it as an ` +
-          `object-bound ListView (ADR-0017) surfaced through app navigation, and ` +
-          `use a 'metric' widget here if you only need the count. If a single-row ` +
-          `table is intentional, add an explicit dimension or suppress with: ` +
-          `suppressWarnings: ['${TABLE_COUNT_ONLY}']`,
+          `List records with an object-bound ListView in app navigation, use a 'metric' widget ` +
+          `for the count, or add a dimension to group the rows.`,
       });
     }
   }

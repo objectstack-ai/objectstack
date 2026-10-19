@@ -5,18 +5,20 @@ import type { SemanticMigration } from '../../types.js';
 // #21464 — two members of the `object-metric` page block were `z.unknown()`
 // although the tile reads each with a fixed shape, so an off-shape value passed
 // the component-props gate and the tile asked the server for a measure it could
-// not answer or drew an empty badge, in silence. `aggregate` now takes the query
-// AST's aggregation functions and the chart aggregate's `groupBy` union by
-// reference (`groupBy` optional: a metric is one number), and `trend` the
-// badge's measured shape. `drillDown` and `compareTo` are held at `z.unknown()`: each
-// by-reference candidate disagrees with the tile's read (the chart's drill-down
-// declares `filter`, which the tile never reads, and refuses `report`, which it
-// draws; the dashboard widget's comparison declares `dimension`, never read on
-// this path), so each waits on a ruling. D3 only: page-component `properties`
-// is not parsed on the metadata save or load path, so a stored page is never
-// refused; an off-shape value has no rewrite that says what the author meant;
-// and the authored census found no authored value to respell — every refused
-// value is a fixture probing that the tile does not draw it.
+// not answer or drew an empty badge, in silence. `aggregate` now takes the
+// query AST's aggregation functions and the chart aggregate's `groupBy` union
+// by reference (`groupBy` optional: a metric is one number), and `trend` the
+// badge's measured shape. `drillDown` and `compareTo` are held at
+// `z.unknown()`: each by-reference candidate disagrees with the tile's read
+// (the chart's drill-down declares `filter`, which the tile never reads, and
+// refuses `report`, which it draws; the dashboard widget's comparison declares
+// `dimension`, never read on this path), so each waits on a ruling. D3 only:
+// page-component `properties` is not parsed on the metadata load path, so a
+// stored page is never refused at load (its next save meets the component-props
+// gate at the metadata save door); an off-shape value has no rewrite that says
+// what the author meant; and the authored census found no authored value to
+// respell — every refused value is a fixture probing that the tile does not
+// draw it.
 export const entry: SemanticMigration = {
   id: 'ui-object-metric-aggregate-trend-typed',
   surface: 'page `object-metric` components — `properties.aggregate` and `.trend` (which used to accept any '
@@ -43,8 +45,7 @@ export const entry: SemanticMigration = {
     + 'comparison declares a `dimension` this path never reads, so each waits on a ruling between the '
     + 'reference and the read. It is read where every page component\'s props are: the component-props gate '
     + 'reports a refused value as a `component-props-invalid` / `component-props-unknown-key` error '
-    + 'on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still saves and '
-    + 'loads, because a page component\'s `properties` is not parsed on the metadata save or load path. No '
+    + 'on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still loads, because a page component\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. No '
     + 'conversion is registered: nothing on the load path refuses the shape, and an off-shape value has no '
     + 'rewrite that both keeps what the tile shows today and honours what the author wrote — which is the '
     + 'judgment this entry leaves to the upgrader. Deployed metadata NOT MEASURED.',

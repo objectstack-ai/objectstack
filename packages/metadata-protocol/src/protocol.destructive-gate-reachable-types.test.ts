@@ -168,7 +168,7 @@ function makeKernel(seed: Row[] = [], artifacts: Record<string, unknown> = {}) {
             if (k === '$or') return (v as Array<Record<string, unknown>>).some((c) => match(r, c));
             return v === null || v === undefined
                 ? (r as any)[k] === null || (r as any)[k] === undefined
-                : (r as any)[k] === v;
+                : whereValueMatches((r as any)[k], v);
         });
 
     const engine: any = {
@@ -260,6 +260,12 @@ afterEach(() => {
 // ═══════════════════════════════════════════════════════════════════════════
 // 0. CONTROL — the harness really does reach the gate
 // ═══════════════════════════════════════════════════════════════════════════
+
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
 
 describe('[#11014 §0 CONTROL] the gate fires for `object` through this harness', () => {
     it('refuses a field-dropping `object` save with the ADR-0112 envelope', async () => {

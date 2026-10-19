@@ -29,6 +29,7 @@ import {
   lintLivenessPropertiesFromLedgerDir,
   resolveLivenessDir,
 } from './lint-liveness-properties.js';
+import { explainRule } from './rule-explanations.js';
 
 /**
  * These run against the REAL ledgers shipped by `@objectstack/spec` (the same
@@ -1970,13 +1971,13 @@ describe('the hint a warned row shows an author (#16094, #21096)', () => {
       (r) => (r.entry.authorWarn === true || r.entry.status === 'experimental') && r.entry.status !== 'live',
     );
     // Anti-vacuity: an experimental row without an authorHint and with a note
-    // exists, so the leak this pin forbids is a real one. An opted-in row exists
-    // too, but since #23268 retired `object.externalSharingModel` every shipped
-    // opt-in carries an authorHint (the CONTROL branch below); the no-hint
-    // opt-in class is held by the SYNTHETIC case after this one.
+    // exists, so the leak this pin forbids is a real one. No shipped row opts in
+    // with `authorWarn` any more: #23268 retired `object.externalSharingModel`,
+    // and #23710 flipped the last one, `page.print`, `live`. So the CONTROL
+    // branch below may find no shipped row, and both opt-in classes (with an
+    // authorHint and without) are held by the SYNTHETIC case after this one.
     const leakers = (pred: (r: ShippedRow) => boolean) =>
       warned.filter((r) => pred(r) && r.entry.authorHint === undefined && typeof r.entry.note === 'string');
-    expect(warned.filter((r) => r.entry.authorWarn === true).length).toBeGreaterThan(0);
     expect(leakers((r) => r.entry.status === 'experimental').length).toBeGreaterThan(0);
     expect(leakers((r) => typeof r.entry.note === 'string' && TRACKER_ID.test(r.entry.note as string)).length).toBeGreaterThan(0);
     for (const row of warned) {
@@ -2070,17 +2071,63 @@ describe('#21127 — a stack authoring `mapping.connectorSource` lints clean, an
     expect(findings.filter((f) => f.rule === LIVENESS_LEDGER_UNREADABLE)).toEqual([]);
   });
 
-  it('REAL LEDGER (the control): a `planned` row with `authorWarn` still warns, in the same call', () => {
-    // `page.print` is `planned` + `authorWarn` in tree — the legal shape: a
-    // consumer is being built, keep the key, it does nothing yet. (The control
-    // was `object.externalSharingModel` until #23268 retired it.)
-    const findings = lintLivenessProperties({
+  it('PLANTED (the control): a `planned` row with `authorWarn` still warns, in the same call', () => {
+    // No shipped row carries `planned` + `authorWarn` any more: the last one,
+    // `page.print`, went `live` with the console's print rendering (#23710;
+    // `object.externalSharingModel` held this control before #23268 retired
+    // it). So the legal shape is planted, through the same ledger seam.
+    const findings = lintWithPlantedGroup({
       objects: [FX_ACCOUNT],
-      pages: [{ name: 'invoice_print', print: {} }],
       mappings: [FX_PULL],
+      translations: [{ 'zh-CN': { [SYNTH_WARNED_GROUP]: synthWarnedGroup } }],
     });
     const planned = findings.filter((f) => f.rule === 'liveness-planned-property');
-    expect(planned.map((f) => f.message).join(' | ')).toContain('`print`');
+    expect(planned.map((f) => f.message).join(' | ')).toContain(`\`${SYNTH_WARNED_GROUP}\``);
     expect(findings.filter((f) => f.message.includes('connectorSource'))).toEqual([]);
+  });
+});
+
+// #23710: `page.print` was `planned` + `authorWarn`, so every compile of a page
+// declaring `print` told its author that printing the page prints the screen
+// layout. The console's `PageRenderer` applies the declaration through
+// objectui's `buildPagePrintStylesheet` at the `.objectui-sha` pin, so the row
+// is `live` and the warning is gone.
+describe('#23710 — a page declaring `print` lints without a planned-property warning', () => {
+  it('REAL LEDGER: no finding names `print`, in a call that still warns', () => {
+    expect(authorWarnedProperties('page').has('print')).toBe(false);
+    const findings = lintLivenessProperties({
+      objects: [{ name: 'widget', externalSharingModel: 'read' }],
+      pages: [{
+        name: 'invoice_print',
+        print: { paperSize: 'A4', margins: { top: 15 }, pageNumbers: true, repeatTableHeaders: true },
+      }],
+    });
+    expect(findings.filter((f) => f.rule === 'liveness-planned-property')).toEqual([]);
+    expect(findings.filter((f) => f.message.includes('`print'))).toEqual([]);
+    // Anti-vacuity: the same call, the same ledger load, still raises the
+    // object's `dead` tombstone row, so the silence is a reading.
+    expect(findings.filter((f) => f.message.includes('externalSharingModel'))).toHaveLength(1);
+    expect(findings.filter((f) => f.rule === LIVENESS_LEDGER_UNREADABLE)).toEqual([]);
+  });
+});
+
+// [#22161] Slice 19: the ledger-fault `fix:` line is one remedy line; that it
+// is a packaging fault and what the rule's silence means is the explanation's.
+describe('[#22161] one-line fix — liveness-ledger-unreadable', () => {
+  it('a missing and an unreadable ledger both print the one remedy line, and `os explain` carries the rest', () => {
+    const missing = lintLivenessPropertiesFromLedgerDir(ledgerDirWith((dir) => rmSync(join(dir, 'object.json'))), {});
+    const unreadable = lintLivenessPropertiesFromLedgerDir(
+      ledgerDirWith((dir) => writeFileSync(join(dir, 'object.json'), '{ not json')),
+      {},
+    );
+    const hints = [...missing, ...unreadable].filter((f) => f.rule === LIVENESS_LEDGER_UNREADABLE).map((f) => f.hint);
+    expect(hints).toEqual([
+      'Reinstall or repair `@objectstack/spec` so its `liveness/` directory ships intact.',
+      'Reinstall or repair `@objectstack/spec` so its `liveness/` directory ships intact.',
+    ]);
+    const text = explainRule(LIVENESS_LEDGER_UNREADABLE)!.paragraphs.join('\n');
+    for (const fact of ['packaging fault in the platform, not an authoring error', 'silence about that type means nothing', 'once per run']) {
+      expect(text, fact).toContain(fact);
+    }
   });
 });

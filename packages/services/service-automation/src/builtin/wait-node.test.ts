@@ -840,7 +840,9 @@ describe('wait timer one-shot vs. a shot that never consumed the pause (#5529)',
  *
  * These go through `registerFlow`, which is the seam that applies the conversion
  * — so they prove the graduation end-to-end on a legacy source, not merely that
- * the executor stopped looking. Both spellings under test (`duration`, `signal`)
+ * the executor stopped looking. Since 18 (#23543 F3) that seam is the STORED
+ * flow's: the conversion left the authoring load path, and an authored loose key
+ * is refused by the flow parse, so these read as "a stored row still runs". Both spellings under test (`duration`, `signal`)
  * are ones the spec never declared; they existed only as the tail of the `??`
  * chains this change deleted.
  */
@@ -896,10 +898,10 @@ describe('wait config graduation — legacy loose `config` still works via the c
     expect(ran).toEqual(['after']);
   });
 
-  // Unlike the two above, this one passes with the conversion unregistered too —
-  // it pins the EXECUTOR's side of the precedence (a declared value is what gets
-  // read), not the conversion's. Kept because that is the half a future
-  // "simplification" of the lift could silently invert.
+  // It pins the EXECUTOR's side of the precedence (a declared value is what gets
+  // read) — the half a future "simplification" of the lift could silently
+  // invert — and, since #23543 F3, the lift's: the shadowed loose key is
+  // deleted at this seam, or the stored row would not parse at all.
   it('reads the declared value, not its loose counterpart, when both are present', async () => {
     const { ctx, scheduled } = fakeJobCtx();
     registerWaitNode(engine, ctx);
@@ -919,6 +921,8 @@ describe('wait config graduation — legacy loose `config` still works via the c
       ],
     });
 
+    const pause = (await engine.getFlow('wait_flow'))!.nodes.find((n) => n.id === 'pause')!;
+    expect(pause.config).toEqual({});
     const before = Date.now();
     await engine.execute('wait_flow');
     // 1h (declared) — not 9h (loose). Same precedence the deleted `??` had.

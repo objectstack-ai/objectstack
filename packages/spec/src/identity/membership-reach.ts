@@ -147,6 +147,16 @@ export const MEMBERSHIP_REACH = {
     statement: { resource: 'member', action: 'delete' },
     grades: OWNER_ADMIN,
   },
+  update_organization: {
+    endpoint: '/organization/update',
+    statement: { resource: 'organization', action: 'update' },
+    grades: OWNER_ADMIN,
+  },
+  delete_organization: {
+    endpoint: '/organization/delete',
+    statement: { resource: 'organization', action: 'delete' },
+    grades: [MEMBERSHIP_ROLE_OWNER],
+  },
 } as const satisfies Record<string, MembershipReachEntry>;
 
 export type MembershipReachName = keyof typeof MEMBERSHIP_REACH;

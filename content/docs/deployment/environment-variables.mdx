@@ -59,6 +59,18 @@ read at startup unless noted otherwise. Boolean variables accept `true` / `false
 
 ---
 
+## Printing
+
+Read by `@objectstack/service-print` when `PrintServicePlugin` is composed; see [Print Pages](/docs/ui/print-pages). Configure **one** placement plus the console URL; a plugin option of the same purpose wins over its variable.
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_PRINT_CHROMIUM_PATH` | path | — | **Local placement**: a Chromium executable on this host, launched per print (plugin option `chromiumPath`). |
+| `OS_PRINT_BROWSER_ENDPOINT` | url | — | **Remote placement**: a browser's DevTools WebSocket endpoint, connected per print (option `browserEndpoint`). The minted session cookie travels in its frames, so use `wss://` off this host and `ws://` only on loopback. Never logged beyond its scheme and host. Setting it together with `OS_PRINT_CHROMIUM_PATH` is refused. |
+| `OS_PRINT_CONSOLE_URL` | url | — | The console URL that browser loads, `/_console` included (option `consoleUrl`). A URL carrying credentials (`user:password@`) is refused: the browser signs in with the requesting user's own session. |
+
+---
+
 ## Secrets & Clustering
 
 | Variable | Type | Default | Description |
@@ -256,7 +268,7 @@ OS_MCP_STDIO_ENABLED=true OS_MCP_STDIO_API_KEY=osk_... os start   # start the lo
 
 | Variable | Type | Default | Description |
 |:---|:---|:---|:---|
-| `OS_MCP_SERVER_ENABLED` | boolean | `true` | The MCP **HTTP** surface (`/api/v1/mcp`) is a core capability and defaults **on**. Set `false` to disable it (endpoint 404s, the Connect-an-Agent page disappears). |
+| `OS_MCP_SERVER_ENABLED` | boolean | `true` | The MCP **HTTP** surface (`/api/v1/mcp`) is a core capability and defaults **on**. Set `false` to disable it (the endpoint answers 404 to a caller with an API key or token and 401 to an anonymous one, and the Connect-an-Agent page disappears). |
 | `OS_MCP_STDIO_ENABLED` | boolean | `false` | Auto-start the long-lived **stdio** transport at boot. Opt-in and **stricter** than the HTTP surface. **Requires `OS_MCP_STDIO_API_KEY`** — stdio runs as that key's identity with RLS/FLS/tenant applied; if the key is missing or invalid, boot **fails closed** (stdio refuses to start). See ADR-0101. |
 | `OS_MCP_STDIO_API_KEY` | string | — | The `osk_...` API key the **stdio** transport runs as. Resolved through the same verify chain as the HTTP/REST surfaces, so reads are scoped to that identity's permissions. Mint one from the **Connect an Agent** page — **Account → Developer** for any signed-in user, **Setup → Connect an Agent** for platform admins — or `POST /api/v1/keys`. For full authority, mint a key on a platform-admin or dedicated **service** identity — there is deliberately no `system`/unscoped bypass. |
 | `OS_MCP_SERVER_NAME` | string | `objectstack` | Server name advertised to MCP clients. |

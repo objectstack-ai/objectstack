@@ -336,9 +336,11 @@ export const EastSubsidiaryAdmin = definePermissionSet({
 The runtime gate enforces: assignments anchored inside the subtree only,
 allowlisted sets only (**to others and to themselves** — no self-escalation),
 single-row writes, `granted_by` audit stamping, and **strict containment**
-when granting or authoring a set that itself carries an `adminScope` (handing
-out your own exact scope is refused). Anchors and security publishes stay
-tenant-level.
+when granting a set that itself carries an `adminScope` (handing out your own
+exact scope is refused). A delegate's scope is placement, assignment and the
+allowlist: writing a set's body or a position's sets is a metadata write, judged
+by `manage_metadata`, never by an `adminScope`. Anchors and security publishes
+stay tenant-level.
 
 ## Provenance — package vs environment sets (ADR-0086)
 
@@ -396,7 +398,10 @@ posture, the platform operator. This has three author-visible consequences:
 An older database keeps the `sys_permission_set` table and its rows, and
 nothing serves or reads them. `os migrate organization-ownership --apply`
 (ADR-0131 D10) converts the sets an organization authored in Setup into
-environment metadata under `single` and deletes the seeded copies.
+environment metadata under `single` and deletes the seeded copies. The shipped
+sets that an install created before 2026-08-15 stored as `managed_by: 'admin'`
+count as seeded copies too. The ceremony warns about each one before it writes
+anything, and then the shipped definition applies.
 
 A cross-package job function needs no hand-authored cross-package set: bind
 each package's own sets to one **position** (the union model adds). Where a
@@ -424,7 +429,7 @@ it was copied from, so changes to the source never reach the copy.
 - **Every permission facet is copied** — `objects`, `fields`,
   `systemPermissions`, `tabPermissions`, `rowLevelSecurity`, `description`.
 - **The server drops a declared set of keys**: the package provenance
-  (`packageId`, `managedBy`, `protection` and the internal protection envelope),
+  (`packageId`, `protection` and the internal protection envelope),
   and two privilege decisions — `adminScope` (delegated administration) and
   `isDefault` (the `everyone` suggestion). Grant either deliberately on the copy
   if it needs one. The response, `{ permissionSet, notice }`, says what was not

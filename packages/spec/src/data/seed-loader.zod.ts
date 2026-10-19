@@ -402,6 +402,27 @@ export const SeedLoadResultSchema = lazySchema(() => z.object({
   summariesStale: z.number().int().min(0).default(0)
     .describe('Roll-up summary values left stale by writes for this dataset'),
 
+  /**
+   * The ids of the stored rows this dataset's records landed on: a row a
+   * record inserted, a row it updated, and a row its key matched on a replay
+   * and left as it was. Each id appears once, in record order. Empty on a
+   * dry run, which writes nothing and matches nothing.
+   *
+   * It is the loader's own answer to "which rows did this seed write?" — the
+   * reference and key resolution behind it (natural keys, references resolved
+   * to the target's id, per-organization re-identification) is the loader's,
+   * and a reader that wants the seed's rows reads them here rather than
+   * re-deriving them from the dataset. A replay reports the rows an earlier
+   * load wrote, because a matched row is recorded as well as a written one,
+   * so the answer holds across boots for every keyed dataset.
+   *
+   * The seed-ownership claim is the reader it exists for (ADR-0138 D1): it
+   * hands to the platform admin only the unowned rows the seed landed on, and
+   * leaves every other unowned row as its writer left it.
+   */
+  landedIds: z.array(z.string()).default([])
+    .describe('Ids of the stored rows this dataset landed on: inserted, updated, or matched on replay'),
+
   /** Reference resolution errors for this object */
   errors: z.array(ReferenceResolutionErrorSchema).default([])
     .describe('Reference resolution errors'),

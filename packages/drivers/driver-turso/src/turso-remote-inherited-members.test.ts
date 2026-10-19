@@ -32,7 +32,7 @@
  *    | `introspectSchema` | `Unable to acquire a connection` | 501 |
  *    | `getKnex` | a Knex whose every statement fails | 501 |
  *    | `rotateShards` | `Unable to acquire a connection` | 501 |
- *    | `applyMigrationEntries` | resolved, every entry `skipped` | 501 |
+ *    | `applyMigrationEntries` | resolved, every entry `skipped` | 501; since #23816 answered (`turso-remote-migration-entries.test.ts`) |
  *    | `reclaimSpace` | `Unable to acquire a connection` | resolves; pages returned |
  *    | `supportsRotation` | `true` | `false` |
  *    | `setFileColumnsMovedResolver` | `true` (never asked) | `false` |
@@ -212,9 +212,6 @@ describe('members refused on the remote face, beside the local control that answ
   const WINDOW = {
     windowFunctions: [{ function: 'row_number', alias: 'rn', over: { orderBy: [{ field: 'id', order: 'asc' }] } }],
   } as unknown as Parameters<TursoDriver['findWithWindowFunctions']>[1];
-  const DROP_N = [
-    { table: 'probe_t', column: 'n', kind: 'unmapped_column', category: 'destructive', op: { type: 'drop_column' }, message: 'probe' },
-  ] as unknown as Parameters<TursoDriver['applyMigrationEntries']>[0];
   const ROTATED = {
     name: 'probe_rot',
     fields: { name: { type: 'text' } },
@@ -228,17 +225,10 @@ describe('members refused on the remote face, beside the local control that answ
     ['introspectSchema', 'Schema introspection (`introspectSchema()`)', (d) => d.introspectSchema()],
     ['getKnex', 'Handing out the Knex instance (`getKnex()`)', (d) => d.getKnex()],
     ['rotateShards', 'Data-lifecycle shard rotation (`rotateShards()`)', (d) => d.rotateShards(ROTATED)],
-    ['applyMigrationEntries', 'Applying schema migration entries (`applyMigrationEntries()`)', (d) => d.applyMigrationEntries(DROP_N, { allowDestructive: true })],
   ])('%s', async (_member, operation, call) => {
     await expect(Promise.resolve(call(await seeded('local')))).resolves.toBeDefined();
     const remote = await seeded('remote');
     expectRefused(await refusalOf(() => call(remote)), operation);
-  });
-
-  it('applyMigrationEntries left the remote table as it was: the column is still read back', async () => {
-    const remote = await seeded('remote');
-    await refusalOf(() => remote.applyMigrationEntries(DROP_N, { allowDestructive: true }));
-    expect((await remote.find('probe_t', { where: { id: 'a' } }))[0]).toEqual(expect.objectContaining({ n: 1 }));
   });
 
   it('the deprecated commitTransaction / rollbackTransaction answer with the commit / rollback refusal', async () => {

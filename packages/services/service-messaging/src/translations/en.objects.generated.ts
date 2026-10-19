@@ -116,7 +116,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_delivery: {
     label: "Notification Delivery",
     pluralLabel: "Notification Deliveries",
-    description: "Durable per-recipient × channel delivery outbox (ADR-0030 Layer 4).",
+    description: "Durable per-recipient × channel delivery outbox.",
     fields: {
       id: {
         label: "Delivery ID"
@@ -190,7 +190,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_preference: {
     label: "Notification Preference",
     pluralLabel: "Notification Preferences",
-    description: "Per-user × topic × channel notification toggle (mute/allow), with admin-global defaults.",
+    description: "Which topics and channels each user receives; admins set the defaults.",
     fields: {
       id: {
         label: "Preference ID"
@@ -234,6 +234,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       updated_at: {
         label: "Updated At"
       }
+    },
+    _views: {
+      all: {
+        label: "All",
+        emptyState: {
+          title: "No preferences yet",
+          message: "Nothing is muted until a preference is added; add one to mute or allow a topic on a channel, for one user or as the default for everyone."
+        }
+      }
     }
   },
   sys_notification_subscription: {
@@ -263,12 +272,21 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       created_at: {
         label: "Created At"
       }
+    },
+    _views: {
+      all: {
+        label: "All",
+        emptyState: {
+          title: "No subscriptions yet",
+          message: "A subscription records that a role, a team or a user follows a notification topic."
+        }
+      }
     }
   },
   sys_notification_template: {
     label: "Notification Template",
     pluralLabel: "Notification Templates",
-    description: "Per (topic × channel × locale) render template for notifications.",
+    description: "The subject and body each notification topic sends, per channel and language.",
     fields: {
       id: {
         label: "Template ID"
@@ -314,12 +332,21 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       updated_at: {
         label: "Updated At"
       }
+    },
+    _views: {
+      all: {
+        label: "All",
+        emptyState: {
+          title: "No templates yet",
+          message: "Add a template per topic, channel and locale; until then, a notification is sent with the title and body its sender provides."
+        }
+      }
     }
   },
   sys_http_delivery: {
     label: "HTTP Delivery",
     pluralLabel: "HTTP Deliveries",
-    description: "Durable outbox row for one outbound-HTTP attempt (ADR-0018). Managed by @objectstack/service-messaging; do not write directly.",
+    description: "Outgoing HTTP calls made by webhooks and flows, one row per call, with its delivery status.",
     fields: {
       id: {
         label: "Delivery ID",

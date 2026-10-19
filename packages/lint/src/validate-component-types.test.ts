@@ -111,10 +111,11 @@ describe('leaves the declared vocabulary and the open arm alone', () => {
     // ⛔ The RETIRED types are deliberately NOT here — their kept
     // `ComponentPropsMap` row makes them `isKnownComponentType`, and this rule
     // used to read that as "accepted". They now have their own describe below.
-    // Plugin namespaces — the open arm's declared story.
+    // Plugin namespaces — the open arm's declared story. (`marketplace:installed-list`
+    // left this list when it was retired by name: an open-arm type, so the
+    // EXACT-name describe below is what reports it.)
     'mcp:connect-agent',
     'cloud-connection:panel',
-    'marketplace:installed-list',
     // Colon-free custom/SDUI shapes — ditto.
     'flex',
     'grid',

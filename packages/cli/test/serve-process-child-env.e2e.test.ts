@@ -85,6 +85,8 @@
  * directory where being wrong matters most. So `readyVerdict()` below settles
  * only once the child has SAID which port it took, and `portDriftError()`
  * (`helpers/serve-process.ts`, #12525) REFUSES a mismatch rather than probing.
+ * The origin legs ask for a kernel-assigned port (#24342), so no number is
+ * drawn for them at all; only the forced-drift arm hands over one, held.
  *
  * ⛔ The gate keys on the banner's TAIL, never on `Server is ready`. That line
  * is the banner's HEAD, printed one `console.error` before the `API:` row that
@@ -118,9 +120,9 @@ import {
   boundPortFromBanner,
   childEnv,
   holdPort,
+  KERNEL_ASSIGNED_PORT,
   portDriftError,
   probeThroughChild,
-  randomPort,
   VITEST_WORKER_ENV_KEYS,
 } from './helpers/serve-process.js';
 
@@ -201,7 +203,7 @@ const WHAT = 'os serve (bin/run-dev.js \u21d2 NODE_ENV=development, spawned dire
 type ReadyVerdict =
   /** The child has not announced a bound port yet — keep waiting. */
   | { settled: false }
-  /** It announced the port it was asked for, and this is that number. */
+  /** It announced the port it bound: the one it was asked for, or a kernel-assigned one. */
   | { settled: true; port: number }
   /** It announced a DIFFERENT port, or a banner that cannot say which. */
   | { settled: true; refusal: Error };
@@ -258,11 +260,11 @@ function readyVerdict(output: string, requestedPort: string): ReadyVerdict {
  *
  * `requestedPort` is a parameter rather than a local so the forced-drift arm
  * below can hand it a port that is genuinely HELD. ⛔ Nothing else should pass
- * one: the default draw is bind-probed, and a hand-picked number is not.
+ * one: the default is a kernel-assigned port (#24342), and any number is a draw.
  */
 async function probeOrigin(
   env: Record<string, string | undefined>,
-  requestedPort: string = randomPort(),
+  requestedPort: string = KERNEL_ASSIGNED_PORT,
 ): Promise<{ status: number; code: unknown }> {
   const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '--port', requestedPort], {
     cwd: dir,
@@ -311,10 +313,10 @@ async function probeOrigin(
     // `probeThroughChild()` is where that is now read; its own section in
     // `helpers/serve-process.ts` carries the measurement and the fences.
     //
-    // ⭐ `bound`, not `requestedPort`. They are provably the same number on this
-    // line — a mismatch was REFUSED above rather than reaching it — and
-    // addressing the child's own announced port is what keeps that true if the
-    // gate is ever loosened.
+    // ⭐ `bound`, not `requestedPort`. For a kernel-assigned request they differ
+    // by design; for an explicit port a mismatch was REFUSED above rather than
+    // reaching this line, and addressing the child's own announced port is what
+    // keeps that true if the gate is ever loosened.
     return await probeThroughChild(
       {
         child,

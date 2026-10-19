@@ -57,6 +57,14 @@
  *  3. **Driver-internal tables.** `_objectstack_sequences` and the SQLite
  *     rebuild scratch table `__os_mig_<table>` carry no platform prefix, so the
  *     prefix test excludes them without an allowlist to maintain.
+ *  4. **A table a composed service declares outside the object set (#24059).**
+ *     `sys_packages` is the package registry's, created by its own raw DDL and
+ *     by `os migrate apply` from the registry's `package.storage` declaration
+ *     (#23022) — never an object, so neither set above names it, and every plan
+ *     after an apply reported the table that apply had just created. The name
+ *     comes from that same declaration ({@link SchemaStack.nonObjectTables}),
+ *     never from a list here; a boot that composed no package registry declares
+ *     none, and a `sys_packages` left in its database IS reported.
  *
  * The prefix itself is read from `PLATFORM_OBJECT_PREFIXES` rather than
  * spelled `'sys_'` here. That constant is the repo's own registry of namespaces
@@ -113,6 +121,7 @@
  * byte-identical to a reader.
  */
 
+import { dialectOfDriver } from '@objectstack/metadata-core';
 import { PLATFORM_OBJECT_PREFIXES, StorageNameMapping, hasPlatformObjectPrefix } from '@objectstack/spec/system';
 // The result-set/no-answer predicate `os migrate duplicates` already publishes
 // (#10677). Imported rather than re-spelled: a second copy would drift, and the
@@ -121,6 +130,7 @@ import { PLATFORM_OBJECT_PREFIXES, StorageNameMapping, hasPlatformObjectPrefix }
 // imports are deliberately lazy, for the reason its header gives.
 import { isResultSet } from '../commands/migrate/duplicates.js';
 import { describeDriverConnection } from './connection-display.js';
+import type { SchemaStack } from './schema-migrate.js';
 import type { SchemaMigrationComposition } from './schema-migration-plugins.js';
 
 /** How a raw SELECT is issued against the driver the plan diffed. */
@@ -235,7 +245,8 @@ export function readManagedTableNames(driver: unknown): ReadonlySet<string> | nu
 
 /**
  * Every table name a declaration accounts for: the planned driver's managed set
- * UNION the table names of every object the booted stack registered.
+ * UNION the table names of every object the booted stack registered UNION the
+ * tables the boot's composition declares outside the object set.
  *
  * The managed set is the plan's own (premise: one source, so the section cannot
  * disagree with the plan beside it). The declared set is the wider one, and it
@@ -245,12 +256,17 @@ export function readManagedTableNames(driver: unknown): ReadonlySet<string> | nu
  * Both an object's `name` and its resolved table name are added: legacy
  * double-underscore names resolve to a different table, and over-excluding is
  * the safe direction for a section whose failure mode is crying wolf.
+ *
+ * `nonObjectTables` is {@link SchemaStack.nonObjectTables} (#24059): physical
+ * names, added verbatim — they are not objects, so no object mapping applies.
  */
 export function buildKnownTableNames(
   managed: ReadonlySet<string>,
   declaredObjects: readonly unknown[],
+  nonObjectTables: readonly string[],
 ): ReadonlySet<string> {
   const known = new Set<string>(managed);
+  for (const table of nonObjectTables) known.add(table);
   for (const object of declaredObjects) {
     const name = (object as { name?: unknown } | null | undefined)?.name;
     if (typeof name !== 'string' || !name) continue;
@@ -370,12 +386,19 @@ async function readPhysicalTableNames(
     return { detail: 'the planned driver exposes no raw SQL seam, so its table catalog could not be read' };
   }
 
-  const client = (driver as { config?: { client?: unknown } } | null | undefined)?.config?.client;
-  const clientName = typeof client === 'string' ? client : '';
-  const sql = physicalTableListSql(clientName);
+  // [#23648] The dialect through the one shared resolver, `dialectName` first:
+  // `SqliteWasmDriver`'s `config.client` is a knex client CLASS, which names no
+  // spelling, while its `dialectName` says `sqlite`. Read as a client string
+  // alone, every `wasm-sqlite://` plan reported this section unreadable.
+  const d = driver as { dialectName?: unknown; config?: { client?: unknown } } | null | undefined;
+  const dialect = dialectOfDriver(d);
+  const sql = dialect === 'none' || dialect === 'unresolved' ? null : physicalTableListSql(dialect);
   if (sql === null) {
+    const named = typeof d?.dialectName === 'string'
+      ? d.dialectName
+      : typeof d?.config?.client === 'string' ? d.config.client : '';
     return {
-      detail: `the connected dialect (${clientName || 'unnamed client'}) is not one this sweep enumerates tables on `
+      detail: `the connected dialect (${named || 'unnamed client'}) is not one this sweep enumerates tables on `
         + '(sqlite / postgres / mysql)',
     };
   }
@@ -422,6 +445,8 @@ async function readPhysicalTableNames(
  * @param drivers every driver the plan diffed (`SchemaStack.drivers`): the
  *   primary, then the `telemetry` sibling when the serving boot keeps one.
  * @param declaredObjects everything the booted stack registered (`stack.allObjects()`).
+ * @param nonObjectTables the tables the boot's composition declares outside the
+ *   object set (`stack.nonObjectTables`, #24059).
  * @param composition what the boot composed — read for `servedBoot`, the
  *   premise above, and for the host config the reason may name.
  * @param normalize `normalizeRows` — flattens the three dialect result shapes.
@@ -429,6 +454,7 @@ async function readPhysicalTableNames(
 export async function collectUnmanagedTables(opts: {
   drivers: readonly unknown[];
   declaredObjects: readonly unknown[];
+  nonObjectTables: SchemaStack['nonObjectTables'];
   composition: Pick<SchemaMigrationComposition, 'servedBoot' | 'hostConfigPath'>;
   normalize: (result: unknown) => Record<string, unknown>[];
 }): Promise<UnmanagedTablesReport> {
@@ -469,7 +495,7 @@ export async function collectUnmanagedTables(opts: {
     status: 'read',
     prefixes: PLATFORM_OBJECT_PREFIXES,
     physicalTables: names.length,
-    tables: selectUnmanagedTables(names, buildKnownTableNames(managed, opts.declaredObjects)),
+    tables: selectUnmanagedTables(names, buildKnownTableNames(managed, opts.declaredObjects, opts.nonObjectTables)),
   };
 }
 
@@ -497,6 +523,6 @@ export function renderUnmanagedTables(report: UnmanagedTablesReport): string[] {
     `${report.tables.length} table(s) in the database(s) this plan covers carry a reserved platform prefix `
     + `(${report.prefixes.join(', ')}) and are declared by no object in this plan:`,
     ...report.tables.map((finding) => `  • ${describeUnmanagedTable(finding)}`),
-    'They are reported for information only — nothing here drops them, and a plan writes nothing.',
+    'They are reported for information only — nothing here drops them, and a plan writes no row or table.',
   ];
 }

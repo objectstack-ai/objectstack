@@ -729,7 +729,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **state** | `Enum<'active' \| 'draft'>` | optional | Which lifecycle row to discard: `draft` discards the pending draft overlay only (the still-active overlay, if any, keeps serving); `active` or absent resets the live row. Absent defaults to `active`. |
 | **dropStorage** | `boolean` | optional | Destructive opt-in, default false: also drop the object's physical table after the metadata row is removed (`object` type + `active` state only; never `sys_` tables). Used by the "discard a previewed object" flow so a publish-to-preview leaves no orphan table. |
 | **member** | `string` | optional | Bundle member selector, for a metadata type whose identity is a pair (today only `email_template`, identified by `(name, locale)`): the member this request addresses, spelled as its discriminator value (`zh-CN`). Absent, the canonical member (`en-US` for `email_template`), which is what a bare-name read answers; naming the canonical value is the same request. It is not the response translation locale, which `?locale=` and `Accept-Language` choose. Refused with 400 `VALIDATION_ERROR` on a type that has no members, and for a blank value or one longer than a stored member can be (100 characters). A well-formed member with nothing stored or shipped answers as that door answers an absent item. |
-| **packageId** | `string \| null` | optional | ADR-0048 — the software package whose row this delete removes (`sys_metadata.package_id`; `?package=<id>` on the REST door, where `all` and an empty value name no package), as a save names the row it writes. Named, the delete removes that package's row and no other; a package that holds no row removes nothing. Absent or `null` names no package: the delete then removes the row of the one package the item's rows at the deleted `state` are bound to, is refused `409 RESOURCE_CONFLICT` when they are bound to two or more, and with none removes the env-local row (no package stamp). That row is the one `parentVersion` is judged against. When another row of the item is still stored afterwards, the receipt `message` names it. |
+| **packageId** | `string \| null` | optional | ADR-0048 — the software package whose row this delete removes (`sys_metadata.package_id`; `?package=<id>` on the REST door, where `all` and an empty value name no package), as a save names the row it writes. Named, the delete removes that package's row and no other; a package that holds no row removes nothing. Absent or `null` names no package: the delete of the `active` row then removes the row of the one package the item's active rows are bound to, is refused `409 RESOURCE_CONFLICT` when they are bound to two or more, and with none removes the env-local row (no package stamp); the discard of the `draft` removes the draft a draft save naming no package writes, the one the per-item publish naming none promotes, and is refused where that publish is (see `PublishMetaItemRequestSchema.packageId`). That row is the one `parentVersion` is judged against. When another row of the item is still stored afterwards, the receipt `message` names it. |
 
 
 ---
@@ -816,7 +816,7 @@ Disable package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Disabled package details |
+| **package** | `{ manifest: object; source: Enum<'code' \| 'marketplace' \| 'authored'>; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; … }` | ✅ | Disabled package details |
 | **message** | `string` | optional | Disable status message |
 
 ### Nested Shape: `DisablePackageResponse.package`
@@ -824,6 +824,7 @@ Disable package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest at the AUTHORING stage; a row installed by a `defineStack()` host carries the assembled body instead — see `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema` |
+| **source** | `Enum<'code' \| 'marketplace' \| 'authored'>` | ✅ | Where the installed package came from: code (registered by the deployment's own code), marketplace (installed from the marketplace), or authored (a database-authored package) |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -860,7 +861,7 @@ Enable package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Enabled package details |
+| **package** | `{ manifest: object; source: Enum<'code' \| 'marketplace' \| 'authored'>; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; … }` | ✅ | Enabled package details |
 | **message** | `string` | optional | Enable status message |
 
 ### Nested Shape: `EnablePackageResponse.package`
@@ -868,6 +869,7 @@ Enable package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest at the AUTHORING stage; a row installed by a `defineStack()` host carries the assembled body instead — see `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema` |
+| **source** | `Enum<'code' \| 'marketplace' \| 'authored'>` | ✅ | Where the installed package came from: code (registered by the deployment's own code), marketplace (installed from the marketplace), or authored (a database-authored package) |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -1453,8 +1455,9 @@ This schema accepts one of the following structures:
 | **editable** | `boolean` | optional | Whether an overlay write is permitted — false iff `lock` is `no-overlay` or `full`. A derived verdict: do not recompute it from `lock` client-side. |
 | **deletable** | `boolean` | optional | Whether deleting the overlay is permitted — false iff `lock` is `no-delete` or `full`. |
 | **resettable** | `boolean` | optional | Whether the item can be reset to its packaged default — true iff it is artifact-backed, i.e. there is a baseline to reset TO. |
-| **version** | `string \| null` | optional | ADR-0008 version token of the STORED row a save to this item compares against, at this read's scope (the environment's partition and `?package=`) and lifecycle (`?state=draft` reads the draft row, the plain read the active row). The same keyed token a save receipt's `version` serves for that row: send it back as the `If-Match` request header on `PUT /meta/:type/:name` (with `?mode=draft` for the draft) and a concurrent edit is refused 409 `METADATA_CONFLICT` instead of overwritten. `null` when no stored row is there — an item served from code or a package artifact, or from a row in another scope (a package-less row a package read falls back to) — so the next save creates one: pin it with `If-None-Match: *`. ABSENT on the cached published-value branch and on a `?preview=draft` read, which publish no version: absence means "not published here", never "no row". Opaque — echo it verbatim, never parse it. |
+| **version** | `string \| null` | optional | ADR-0008 version token of the STORED row a save to this item compares against, at this read's scope (the environment's partition and `?package=`) and lifecycle (`?state=draft` reads the draft row, the plain read the active row). The same keyed token a save receipt's `version` serves for that row: send it back as the `If-Match` request header on `PUT /meta/:type/:name` (with `?mode=draft` for the draft) and a concurrent edit is refused 409 `METADATA_CONFLICT` instead of overwritten. `null` when no stored row is there — an item served from code or a package artifact, or from a row in another scope (a package-less row a package read falls back to) — so the next save creates one: pin it with `If-None-Match: *`. A `null` beside `editable: false` is no such invitation: that item takes no save at this address, so no pin is prescribed for it. ABSENT on the cached published-value branch and on a `?preview=draft` read, which publish no version: absence means "not published here", never "no row". Opaque — echo it verbatim, never parse it. |
 | **registration** | `{ state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }` | optional | The automation engine's verdict on this flow (see `FlowRegistrationSchema`): `registered`, or `refused` with the engine's `reason` verbatim, or `unregistered`. Present only on a `flow` read answered by a process that runs an automation service; absent otherwise, and absence means no engine judged it, never `registered`. Unlike the protection keys it is published by the cached branch too, read live and never part of the ETag, so a cached read that carries it is never answered 304; it is absent on a draft read, whose pending body no engine holds. The verdict is the answering process's engine. Beside `item`, never inside it: the item's `status` stays what its author declared. |
+| **draftChanges** | `{ path: string[]; by: Enum<'copilot' \| 'studio' \| 'api'>; actor: string \| null; at: string }[]` | optional | Per-key provenance of the pending draft: which authoring surface last changed each key path of `item`, under which actor, and when. No server writes the key yet: until the engine's draft save records it, every draft read is one whose saves recorded none, and the key is absent. The contract a writer must meet: it compares each draft save with the body that save replaced (the previous draft, or the published body for the draft's first save); it keeps the entries from the first recorded save until the draft is published or discarded, which remove the draft row and the entries with it; and it keeps no two entries on one path, replacing every entry at or under a path a save changes, so the last write to change a key is the entry whose `path` is the longest prefix of that key's path, and entries under a key's path are changes inside it. The entries name which writes changed what; they are not a list of every difference from the published body (compare the two bodies for that). Served only on a `?state=draft` read that answers a stored draft row. ABSENT on the active read, the cached branch and a `?preview=draft` read, and for a draft row whose saves recorded none: absence means "not recorded", never "no changes". |
 
 ### Nested Shape: `GetMetaItemResponse.sortability`
 
@@ -1480,6 +1483,17 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **state** | `'unregistered'` | ✅ | The engine holds nothing under the flow's name and recorded no refusal for it. |
+
+### Nested Shape: `GetMetaItemResponse.draftChanges[number]`
+
+One changed key path of the pending draft, and the last write that changed it.
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string[]` | ✅ | The changed key path inside `item`: one object key per segment, from the body root down to the deepest key whose value the write changed, added or removed. `["fields", "renewal_count"]` is a field the write added; `["fields", "renewal_count", "label"]` is one property of it. A segment is the key exactly as stored, dots included (a permission set's `fields` map is keyed `object.field`), so a path is never one dotted string. An array is one value: its path ends at its key (`["columns"]`) and never carries an index, which an insert or a reorder would shift. Which elements of an array the draft added or dropped is read by comparing it with the published body's array; the entry answers only who last changed the array as a whole. `[]` is the whole body: the write that created the draft of an item with no published body. |
+| **by** | `Enum<'copilot' \| 'studio' \| 'api'>` | ✅ | The authoring surface of the write that last changed this path. Closed: `copilot` is an AI assistant's tool writing on a person's behalf (Studio's AI copilot); `studio` is a person editing in Studio; `api` is any other caller of the save door. It names the surface, not the person: a copilot write and a Studio write of the same user carry the same `actor`. |
+| **actor** | `string \| null` | ✅ | The identity that write was recorded under: the save's `actor`, the value its history event carries. `null` when the write recorded none, never a sentinel string. |
+| **at** | `string` | ✅ | When that write happened: an ISO-8601 instant in UTC, written with `Z` (the form `toISOString()` produces). An offset or a local time is refused. |
 
 
 ---
@@ -1669,13 +1683,14 @@ Get package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Package details |
+| **package** | `{ manifest: object; source: Enum<'code' \| 'marketplace' \| 'authored'>; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; … }` | ✅ | Package details |
 
 ### Nested Shape: `GetPackageResponse.package`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest at the AUTHORING stage; a row installed by a `defineStack()` host carries the assembled body instead — see `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema` |
+| **source** | `Enum<'code' \| 'marketplace' \| 'authored'>` | ✅ | Where the installed package came from: code (registered by the deployment's own code), marketplace (installed from the marketplace), or authored (a database-authored package) |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -2024,7 +2039,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **actor** | `string \| null` | ✅ | Who wrote this. `null` = system-initiated (boot sync, migration, scheduled job) — never a sentinel string: consumers that resolve this against `sys_user` must be able to tell "nobody" from "a user id". |
 | **message** | `string` | optional | Optional commit message recorded with the write. |
 | **ts** | `string` | ✅ | When the write happened (ISO-8601 string). |
-| **source** | `string` | ✅ | Origin label of the write: "fs", "studio", "rest", "ai", "git-import", … |
+| **source** | `string` | ✅ | Which code path wrote the event: an open label the server stamps, not an enum an author or client picks from (e.g. `protocol.saveMetaItem`, `protocol.publishMetaItem`, `migrate-stored`). The history row's stored value is passed through; `sys-metadata-repo` is the repository's own default and the answer for a row that stored none. |
 
 
 ---
@@ -2105,7 +2120,7 @@ Install package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Installed package details |
+| **package** | `{ manifest: object; source: Enum<'code' \| 'marketplace' \| 'authored'>; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; … }` | ✅ | Installed package details |
 | **message** | `string` | optional | Installation status message |
 | **dependencyResolution** | `{ dependencies: object[]; canProceed: boolean; requiredActions: object[]; installOrder: string[]; … }` | optional | Dependency resolution result from install analysis |
 
@@ -2114,6 +2129,7 @@ Install package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest at the AUTHORING stage; a row installed by a `defineStack()` host carries the assembled body instead — see `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema` |
+| **source** | `Enum<'code' \| 'marketplace' \| 'authored'>` | ✅ | Where the installed package came from: code (registered by the deployment's own code), marketplace (installed from the marketplace), or authored (a database-authored package) |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -2308,7 +2324,7 @@ List packages response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **packages** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }[]` | ✅ | List of installed packages |
+| **packages** | `{ manifest: object; source: Enum<'code' \| 'marketplace' \| 'authored'>; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; … }[]` | ✅ | List of installed packages |
 | **total** | `number` | ✅ | Total package count |
 
 ### Nested Shape: `ListPackagesResponse.packages[number]`
@@ -2318,6 +2334,7 @@ Installed package with runtime lifecycle state
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest at the AUTHORING stage; a row installed by a `defineStack()` host carries the assembled body instead — see `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema` |
+| **source** | `Enum<'code' \| 'marketplace' \| 'authored'>` | ✅ | Where the installed package came from: code (registered by the deployment's own code), marketplace (installed from the marketplace), or authored (a database-authored package) |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -2386,7 +2403,7 @@ Installed package with runtime lifecycle state
 | :--- | :--- | :--- | :--- |
 | **error** | `string` | ✅ | Human-readable refusal sentence, unchanged by `currentVersion`: it names the item and the version the door judged current. For display and logs; branch on `code` and read `currentVersion`, never parse this. |
 | **code** | `'METADATA_CONFLICT'` | ✅ | ADR-0112 registered code of the optimistic-lock refusal. |
-| **currentVersion** | `string \| null` | ✅ | The version token of the head the door judged current — the value the sentence names — or `null` when no row of the target lifecycle exists. Send it as `If-Match` to overwrite deliberately (or `If-None-Match: *` when it is `null`), or re-read the item to merge first. Opaque — echo it verbatim, never parse it. |
+| **currentVersion** | `string \| null` | ✅ | The version token of the head the door judged current — the value the sentence names — or `null` when no row of the target lifecycle exists. Send it as `If-Match` to overwrite deliberately (or `If-None-Match: *` when it is `null`), or re-read the item to merge first. A `null` for an item whose read serves `editable: false` prescribes no pin: that item takes no save. Opaque — echo it verbatim, never parse it. |
 
 
 ---
@@ -2442,7 +2459,7 @@ Installed package with runtime lifecycle state
 | **name** | `string` | ✅ | Item name — lowercase snake_case segments, optionally dot-qualified (`crm_lead`, `crm_lead.pipeline`). The promotion door enforces the same grammar as `saveMetaItem`. |
 | **actor** | `string` | optional | Identity recorded on the `op='publish'` history event. On the REST door this is the request's authenticated identity (one producer) — never a caller-supplied header. |
 | **message** | `string` | optional | Optional human-readable note recorded with the publish history event. |
-| **packageId** | `string \| null` | optional | ADR-0048 — the software package the draft being promoted was listed under, when the caller has one to state (`?package=<id>` on the REST door). ⚠️ `null` is NOT the same as absent, and the difference is load-bearing: the implementation branches on the KEY BEING PRESENT, so an ABSENT key keeps the historical "match any package" resolution while `null` pins the lookup to the package-UNBOUND row. Spread it in conditionally; a present-and-`undefined` key coerces to `null` downstream and makes a package-bound draft unfindable — a silent `no_draft` on the untouched path. |
+| **packageId** | `string \| null` | optional | ADR-0048 — the software package the draft being promoted was listed under, when the caller has one to state (`?package=<id>` on the REST door). Named, the publish promotes that package's draft and no other. ABSENT names no package: the publish promotes the draft a draft save that names no package writes — the draft of the one package the item's active rows are bound to, else its package-unbound draft, promoted into that package — and answers `404 NO_DRAFT` when neither exists, as the strict draft read does. For an item never published into a package it is the package-unbound draft, else the one package's draft. It is refused `409 RESOURCE_CONFLICT` when the active rows (or, with none and no package-unbound draft, the drafts) are bound to two or more packages. ⚠️ `null` is NOT the same as absent: the implementation branches on the KEY BEING PRESENT, and `null` pins the lookup to the package-UNBOUND row. Spread it in conditionally; a present-and-`undefined` key coerces to `null` downstream and makes a package-bound draft unfindable — a silent `no_draft`. |
 | **member** | `string` | optional | Bundle member selector, for a metadata type whose identity is a pair (today only `email_template`, identified by `(name, locale)`): the member this request addresses, spelled as its discriminator value (`zh-CN`). Absent, the canonical member (`en-US` for `email_template`), which is what a bare-name read answers; naming the canonical value is the same request. It is not the response translation locale, which `?locale=` and `Accept-Language` choose. Refused with 400 `VALIDATION_ERROR` on a type that has no members, and for a blank value or one longer than a stored member can be (100 characters). A well-formed member with nothing stored or shipped answers as that door answers an absent item. |
 
 
@@ -2519,6 +2536,7 @@ Installed package with runtime lifecycle state
 | **materializeApplied** | `{ success: boolean; inserted: integer; updated: integer; failures: object[] }` | optional | ADR-0086 P2 — aggregate result of publish-time materializers across the batch (e.g. `flow`, whose draft credentials become the live ones), including side-effect failures surfaced by the per-item effects loop. Present ONLY when at least one published item had a registered materializer or a side-effect failure. Best-effort, same contract as `seedApplied`. |
 | **probes** | `any` | optional | ADR-0038 L3 post-publish runtime probe report — one real read per published artifact (seeded objects have rows, views are readable, widget dataset selections execute). DELIBERATELY OPAQUE in this contract: the key is declared and carried through verbatim, but its inner shape is intentionally not modeled until a consumer needs a field of it. Present only when something was publishable; probes never fail the publish. |
 | **commitId** | `string` | optional | ADR-0067 — id of the commit this publish recorded. Absent when nothing published. |
+| **backfillApplied** | `{ success: boolean; fields: object[] }` | optional | The opt-in `backfill` request key's receipt: the literal `defaultValue` of each named field this publish added, written into the object's existing rows whose value is absent, page by page, as the caller (permissions, RLS/FLS and record hooks apply as on their own edit). Present ONLY when the request named at least one field and the batch published; absent means nothing was asked. A request that names a field this publish does not add, or one without a literal default, is refused with a 400 before anything is published, so this key never reports a refusal. |
 | **unhiddenApps** | `string[]` | optional | ADR-0045 §3 — names of the apps whose `_unpublished` gate this publish cleared (publish = live AND visible; a materialized additive build has no drafts, only this flip). Attached by the REST door, not the protocol helper. Present ONLY when at least one app flipped — on a mid-loop failure it names the apps that DID persist, beside `unhideError` ('s split report). Spelling is a permanent wire contract (see the door's note). |
 | **unhideError** | `string` | optional | Present when the ADR-0045 visibility flip failed (wholly or partway): the drafts ARE published, but apps still stored `_unpublished: true` stay externally unobservable. Client-facing text only — undeclared driver text is withheld per ADR-0112; the full cause is in the server log. The route is idempotent: re-run it once the cause is resolved. |
 | **rebindError** | `string` | optional | Present when the post-publish `metadata:reloaded` announce failed: everything is published and stored, but boot-cached consumers keep the pre-publish view until re-run or restart (a newly published record-triggered flow does not bind its trigger). Client-facing text only, same ADR-0112 withhold as `unhideError`. |
@@ -2561,6 +2579,13 @@ Installed package with runtime lifecycle state
 | **inserted** | `integer` | ✅ | Data-plane rows created across the batch. |
 | **updated** | `integer` | ✅ | Data-plane rows updated across the batch. |
 | **failures** | `{ type: string; name: string; error: string }[]` | ✅ | Each item whose data-plane projection did NOT land — named per-item, unlike the single-item door's scalar `error`, because one aggregate boolean over N items would hide WHICH ones never went live. |
+
+### Nested Shape: `PublishPackageDraftsResponse.backfillApplied`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | False when any field stopped short (its entry carries `error`). The publish itself still succeeded and is not undone. |
+| **fields** | `{ object: string; field: string; updated: integer; error?: string; … }[]` | ✅ | One element per requested field, in request order. |
 
 
 ---
@@ -2742,7 +2767,7 @@ Installed package with runtime lifecycle state
 | **actor** | `string` | optional | Identity recorded on the write's history event (`recorded_by`, a lookup into `sys_user`) and audit row. On the REST door this is the request's authenticated identity (one producer) — never a caller-supplied header. Absent, the event is recorded actor-less (null), deliberately not attributed to "system". |
 | **force** | `boolean` | optional | Destructive-change acknowledgement (`?force=true` on the REST door): skips the safety diff that refuses an `object` save whose body drops fields or narrows types the stored item still carries (409 with the findings otherwise). Only `object` saves reach that diff, so the flag is inert for every other type. Absent = the guard runs. |
 | **mode** | `Enum<'draft' \| 'publish'>` | optional | Per-item lifecycle (ADR-0005 drafts): `draft` stages the body as a pending draft overlay (`?mode=draft` on the REST door; the publish door promotes it later); `publish` or ABSENT writes straight to the live `active` row — the legacy default, kept so callers that predate the draft/publish split keep working. Any value other than `draft` is read as `publish`. |
-| **packageId** | `string \| null` | optional | ADR-0048 — the software package to bind the saved row to (`sys_metadata.package_id`; `?package=<id>` on the REST door, where `all` and an empty value name no package). Set when authoring inside a Studio package workspace; a named read-only base package is refused. On create the row is stamped with this id; on update an existing binding is preserved, never silently re-bound. Absent or `null` names no package. An `active` save then writes the row of the one package the item's active rows are bound to, as a save naming that package does, is refused `409 RESOURCE_CONFLICT` when they are bound to two or more, and with none writes the env-local overlay (no package stamp); a `draft` save writes the draft of the package the item's active row is bound to when it is package-bound (a pending change stays in the package it edits), else the env-local draft. The row written is also the one the parent-version resolution reads: an unpinned save takes its version as the parent (last-write-wins), a pinned one is judged against it, and the item read at the same scope serves it as `version`. |
+| **packageId** | `string \| null` | optional | ADR-0048 — the software package to bind the saved row to (`sys_metadata.package_id`; `?package=<id>` on the REST door, where `all` and an empty value name no package). Set when authoring inside a Studio package workspace; a named read-only base package is refused. On create the row is stamped with this id; on update an existing binding is preserved, never silently re-bound. Absent or `null` names no package. An `active` save then writes the row of the one package the item's active rows are bound to, as a save naming that package does, is refused `409 RESOURCE_CONFLICT` when they are bound to two or more, and with none writes the env-local overlay (no package stamp); a `draft` save writes the draft of the one package the item's active rows are bound to (a pending change stays in the package it edits), else its package-unbound draft, adopted into that package — the draft the per-item publish naming no package promotes. For an item never published into a package it is the package-unbound draft, else the one package's draft, and with no draft at all the save creates the package-unbound draft. It is refused `409 RESOURCE_CONFLICT` when the active rows (or, with none and no package-unbound draft, the drafts) are bound to two or more packages, as that publish is (see `PublishMetaItemRequestSchema.packageId`). The row written is also the one the parent-version resolution reads: an unpinned save takes its version as the parent (last-write-wins), a pinned one is judged against it, and the item read at the same scope serves it as `version`. |
 | **writeFace** | `Enum<'package-duplicate' \| 'meta-envelope' \| 'meta-dispatch' \| 'external-import'>` | optional | Which write door a refusal is being rendered FOR — stated by the SERVER, never by a remote caller: every door builds this request field by field and never spreads a request body into it, so there is no path for a client to smuggle a face in, and a face arriving in a wire body is simply never read. Two refusals branch on it, for different questions: the 409 destructive-change remedy names the acknowledgement mechanism that actually exists on the refusing door (`?force=true` on the REST doors; the dispatcher, the duplicate-package door and the external-table import have none), and the 422 invalid-metadata message adapts to whether a structured `issues[]` channel reaches the consumer beside it. Absent = the conservative default wording. |
 
 
@@ -2791,7 +2816,7 @@ Installed package with runtime lifecycle state
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Name of the object the hit belongs to. |
 | **id** | `string` | ✅ | ID of the matched record. |
-| **title** | `string` | ✅ | Display title for the hit, resolved in order: the object's `titleFormat` template → the declared primary-title pointer (`nameField`, ADR-0079; deprecated alias `displayNameField` still honored) → conventional name fields → first/last name → the record ID as a string. |
+| **title** | `string` | ✅ | Display title for the hit, resolved in order: the declared primary-title pointer (`nameField`, ADR-0079; deprecated alias `displayNameField` still honored) → the object's deprecated `titleFormat` template → conventional name fields → first/last name → the record ID as a string. |
 | **snippet** | `string` | optional | Excerpt cut around the first matched term in a searchable text column, ellipsized at both ends when truncated. ABSENT when no source column literally contains a term (e.g. a pinyin companion match) — absence is a correct answer, not a miss. |
 | **record** | `Record<string, any>` | ✅ | The matched record as the engine's find path returns it (row-level security applied, internal fields already stripped). Object-specific — no cross-object field shape is promised beyond "a record of the named object". |
 
@@ -2832,7 +2857,7 @@ Installed package with runtime lifecycle state
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Name of the object the hit belongs to. |
 | **id** | `string` | ✅ | ID of the matched record. |
-| **title** | `string` | ✅ | Display title for the hit, resolved in order: the object's `titleFormat` template → the declared primary-title pointer (`nameField`, ADR-0079; deprecated alias `displayNameField` still honored) → conventional name fields → first/last name → the record ID as a string. |
+| **title** | `string` | ✅ | Display title for the hit, resolved in order: the declared primary-title pointer (`nameField`, ADR-0079; deprecated alias `displayNameField` still honored) → the object's deprecated `titleFormat` template → conventional name fields → first/last name → the record ID as a string. |
 | **snippet** | `string` | optional | Excerpt cut around the first matched term in a searchable text column, ellipsized at both ends when truncated. ABSENT when no source column literally contains a term (e.g. a pinyin companion match) — absence is a correct answer, not a miss. |
 | **record** | `Record<string, any>` | ✅ | The matched record as the engine's find path returns it (row-level security applied, internal fields already stripped). Object-specific — no cross-object field shape is promised beyond "a record of the named object". |
 

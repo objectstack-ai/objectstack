@@ -363,20 +363,23 @@ export interface ScriptContext {
    *
    *  - `field === undefined` → this record's title. Resolved from the record
    *    state the hook is already firing on (`hookRecordState`, the same state
-   *    the declarative `condition` gate evaluates), so it performs **no I/O**
-   *    at all — including when the title is a formula, which is the majority
-   *    case.
+   *    the declarative `condition` gate evaluates), so a title over the
+   *    record's own columns performs **no I/O** — including when it is a
+   *    formula, which is the majority case. [#24197] A title formula that reads
+   *    one hop through a reference costs one read per reference it reads
+   *    through, on `api`.
    *  - `field` names a reference column → that related record's title. This
    *    one costs a single `findOne`, which is why the VM-facing wire gates it
    *    behind `api.read` while the no-argument form needs no capability: the
-   *    token gates the read, and the no-argument form has no read to gate.
+   *    token gates the body's reach for another record, and the no-argument
+   *    form names this record by its own declaration.
    *
    * `api` is the read channel the installer resolves AT CALL TIME — the
    * transaction-scoped context while a body-opened `ctx.api.transaction` is in
    * flight, the base `ctx.api` otherwise. It is a parameter rather than a
    * closure because the seam is built once per invocation, in `body-runner.ts`,
-   * before any transaction can exist; threading it is what keeps a related-title
-   * read on the transaction's own connection instead of asking the pool for a
+   * before any transaction can exist; threading it is what keeps a title's
+   * reads on the transaction's own connection instead of asking the pool for a
    * second one, which on a `pool max=1` datasource (SQLite, the default for
    * `objectstack dev`) is a deadlock rather than a slow path.
    *

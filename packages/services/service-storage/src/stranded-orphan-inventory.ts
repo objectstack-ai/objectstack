@@ -359,7 +359,15 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
 }
 
-/** Render an inventory as human-readable lines (CLI output). */
+/**
+ * Render an inventory as human-readable lines (CLI output).
+ *
+ * The READ-ONLY line is the last one and claims no row or table, never that
+ * nothing was written: the command that prints this boots through the SQL
+ * driver's connect, which can switch a SQLite file's journal mode and so
+ * rewrite its header (no row). The command, which knows its target, appends
+ * the journal-mode note to that line on a SQLite file.
+ */
 export function formatStrandedOrphanInventory(report: StrandedOrphanInventory): string {
   const lines: string[] = [];
   lines.push(
@@ -410,7 +418,7 @@ export function formatStrandedOrphanInventory(report: StrandedOrphanInventory): 
     `Scope note: this pass covers ${report.scope}-scope files only — the files whose referrers are`,
     '  sys_attachment join rows. Files in the other scopes are governed by the field-reference',
     '  seam; run "os migrate files-to-references --include-unreferenced" to reconcile those.',
-    'This pass is READ-ONLY: nothing was written, tombstoned or deleted.',
+    'This pass is READ-ONLY: no row or table was written, tombstoned or deleted.',
   );
   return lines.join('\n');
 }

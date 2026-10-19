@@ -429,14 +429,14 @@ describe('#16225 a `sys_metadata` read is not answered from the journal tables',
 
         // ── The pin ──────────────────────────────────────────────────────
         // Asserted on STORE-ONLY columns rather than on the row count. A
-        // journal row is addressed to the same `(type, name, organization_id)`
+        // journal row is addressed to the same `(type, name)`
         // as the store row, which is this file's whole `keyOf`, so under a
         // merged map the audit row simply OVERWRITES the store row and a
         // count- or name-based assertion still reads one row called
         // `case_grid`. `checksum` and `state` are written by the store leg
         // alone; a journal row carries neither.
         const stored = await engine.find('sys_metadata', {
-            where: { type: 'view', organization_id: null },
+            where: { type: 'view' },
         });
         expect(
             stored.map((r: Row) => r.name),
@@ -445,7 +445,7 @@ describe('#16225 a `sys_metadata` read is not answered from the journal tables',
         expect(
             stored.map((r: Row) => [typeof r.checksum, r.state]),
             'and the row it answers with must be a STORE row, not a journal row wearing '
-            + 'the same `(type, name, organization_id)`',
+            + 'the same `(type, name)`',
         ).toEqual([['string', 'active']]);
     });
 });

@@ -48,7 +48,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { SysUser, SysAccount } from '@objectstack/platform-objects/identity';
+import { SysUser, SysAccount, SysOrganization } from '@objectstack/platform-objects/identity';
 import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
@@ -92,7 +92,7 @@ async function boot(): Promise<ObjectQL> {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysPermissionSet, SysUserPermissionSet, SysUser, SysAccount],
+    objects: [SysPermissionSet, SysUserPermissionSet, SysUser, SysAccount, SysOrganization],
   } as any);
   engine.registerApp({
     id: 'com.example.seeded-app',
@@ -110,6 +110,9 @@ async function boot(): Promise<ObjectQL> {
     ],
   } as any);
   await engine.syncSchemas();
+  // [ADR-0131 D3/D5] The Default Organization a `single` boot creates before any
+  // `kernel:ready` hook runs; it owns the promotion's grant.
+  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' }, { context: { isSystem: true } });
   engines.push(engine);
   return engine;
 }
@@ -216,12 +219,19 @@ describe('#14348 — the promotion target is the oldest human that can AUTHENTIC
     // Seeded business rows carry no owner — the state `claimSeedOwnership`
     // re-owns. This is the second half of the harm: a wrong promotion target
     // also mis-assigns every seeded record.
+    const seededIds: string[] = [];
     for (const name of ['Seeded Task A', 'Seeded Task B']) {
-      await (engine as any).insert('demo_task', { name }, { context: SYSTEM_CTX });
+      const row = await (engine as any).insert('demo_task', { name }, { context: SYSTEM_CTX });
+      seededIds.push(String(row.id));
     }
 
     const { logger } = collectingLogger();
-    const report = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, { logger });
+    // [#23354] The seed reports the rows it landed on; the promotion hands
+    // over those (ADR-0138 D1), read through the `seed-settlement` contract.
+    const report = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, {
+      logger,
+      seededRecordIds: (object: string) => (object === 'demo_task' ? seededIds : []),
+    });
 
     expect(report.adminPromoted).toBe(true);
     expect(report.ownershipClaimed).toBe(2);

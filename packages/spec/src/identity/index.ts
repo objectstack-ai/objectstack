@@ -15,3 +15,7 @@ export * from './membership-role';
 // reaches which better-auth organization endpoint, and the action sugar lowered
 // from it. Reach, not authority; never merged into the name list.
 export * from './membership-reach';
+// ADR-0105 D8 — which issuer grade may invite as which membership role: the
+// table the invitation role cap enforces and the invite dialog's role picker
+// offers from. One table, two readers; the cap stays the authority.
+export * from './invitation-role-grant';

@@ -131,7 +131,8 @@ function makeStubEngine() {
         },
         async find(table: string, opts: { where: Record<string, unknown> }) {
             return Array.from(tableOf(table).values()).filter((r) => {
-                if (opts.where.type && r.type !== opts.where.type) return false;
+                if (opts.where.type && !whereValueMatches(r.type, opts.where.type)) return false;
+                if (opts.where.name !== undefined && r.name !== opts.where.name) return false;
                 if (opts.where.organization_id !== undefined
                     && r.organization_id !== opts.where.organization_id) return false;
                 if (opts.where.state && r.state !== opts.where.state) return false;
@@ -205,6 +206,12 @@ const flowRows = (rows: Map<string, Row>) =>
 
 const save = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
     protocol.saveMetaItem({ type: 'flow', name: 'leave_approval', item, ...extra });
+
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
 
 describe('runtime authoring gate on saveMetaItem (#4463)', () => {
     let warn: ReturnType<typeof vi.spyOn>;
@@ -3059,5 +3066,274 @@ describe('runtime authoring gate on OBJECT writes — the object action predicat
                 expect(atDoor[0][k], `door and build disagree on '${k}' for ${refused.key}: ${refused.body}`).toBe(atBuild[0]![k]);
             }
         }
+    });
+});
+
+// #23388 — the two page component rules at the runtime save door, ruling of
+// record 6161173492 (letter B): `validateComponentProps` and
+// `validateComponentTypes` run on a `page` write (`runtimeTypes: ['page']`),
+// so a page saved through Studio, REST `/meta` or MCP meets the refusal
+// `os validate` / `os build` / `os lint` give, with the same fix. The
+// maintainer's principle: a page with a finding is fixed, then saved. Stored
+// pages keep loading and serving — the gate judges writes, never the read
+// path — and only the next save of a page with a finding is refused.
+describe('runtime authoring gate on PAGE writes — the component props and type rules (#23388)', () => {
+    const page = (components: unknown[]) => ({
+        name: 'deals_home',
+        label: 'Deals',
+        type: 'app',
+        regions: [{ name: 'main', components }],
+    });
+    /** Clean: every prop is one `page:header` declares. */
+    const cleanPage = () => page([{ type: 'page:header', properties: { title: 'Deals', subtitle: 'Open pipeline' } }]);
+    /** An undeclared prop: the near-miss `titel` of the declared `title`. */
+    const undeclaredPropPage = () => page([{ type: 'page:header', properties: { titel: 'Deals' } }]);
+    /** A type inside the reserved `page:` namespace the platform does not declare. */
+    const reservedTypePage = () => page([{ type: 'page:headr', properties: { title: 'Deals' } }]);
+
+    const savePage = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'page', name: 'deals_home', item, ...extra });
+    const activePageRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'page' && r.state === 'active');
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('(a) refuses a page carrying an undeclared component prop, and the refusal carries the fix', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const err = await savePage(protocol, undeclaredPropPage()).catch((e: any) => e);
+
+        expect(err).toBeInstanceOf(Error);
+        expect(err.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.message).toMatch(/^page\/deals_home failed author-time validation: 1 issue — /);
+        const issue = err.issues.find((i: any) => i.rule === 'component-props-unknown-key');
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe('pages[0].regions[0].components[0].properties.titel');
+        // The fix: the declared spelling, named in the verdict, and the remedy line.
+        expect(issue.message).toContain('`titel` → `title`');
+        expect(issue.hint).toContain('Remove `titel`');
+        expect(err.rulesRun).toEqual(expect.arrayContaining(['validateComponentProps', 'validateComponentTypes']));
+        // Nothing landed.
+        expect(activePageRows(rows)).toEqual([]);
+    });
+
+    it('(a) gates the draft → active promotion of the same page, so the draft door is no bypass', async () => {
+        const { protocol } = makeProtocol();
+        await expect(savePage(protocol, undeclaredPropPage(), { mode: 'draft' }))
+            .resolves.toMatchObject({ success: true });
+
+        const err = await protocol.publishMetaItem({ type: 'page', name: 'deals_home' }).catch((e: any) => e);
+
+        expect(err?.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.issues.map((i: any) => i.rule)).toContain('component-props-unknown-key');
+    });
+
+    it('(c) refuses a page carrying an undeclared type inside a reserved namespace, naming the declared type', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const err = await savePage(protocol, reservedTypePage()).catch((e: any) => e);
+
+        expect(err).toBeInstanceOf(Error);
+        expect(err.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        const issue = err.issues.find((i: any) => i.rule === 'component-type-unknown');
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe('pages[0].regions[0].components[0].type');
+        expect(issue.hint).toBe('Rename `page:headr` → `page:header`.');
+        expect(activePageRows(rows)).toEqual([]);
+    });
+
+    it('the control: the same page with its declared prop and type saves', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        await expect(savePage(protocol, cleanPage())).resolves.toMatchObject({ success: true });
+
+        expect(activePageRows(rows)).toHaveLength(1);
+        // A type outside the spec's reserved namespaces is the open arm's story
+        // and stays untouched (custom/registered component types).
+        await expect(savePage(protocol, page([{ type: 'acme:pipeline_board' }])))
+            .resolves.toMatchObject({ success: true });
+    });
+
+    it('(b) a stored page with a finding keeps loading and serving; its next save is refused until fixed', async () => {
+        const { engine, rows } = makeStubEngine();
+        const registered: Array<{ type: string; name: unknown }> = [];
+        engine.registry.registerItem = (type: string, item: { name?: unknown }) => {
+            registered.push({ type, name: item?.name });
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        // Stored before the crossing: both findings at once, seeded straight
+        // into the store because the save door now refuses this body.
+        const stored = page([
+            { type: 'page:header', properties: { titel: 'Deals' } },
+            { type: 'page:headr' },
+        ]);
+        rows.set(keyOf({ type: 'page', name: 'deals_home', organization_id: null, state: 'active' }), {
+            id: 'r_seed', type: 'page', name: 'deals_home', organization_id: null, state: 'active',
+            metadata: JSON.stringify(stored),
+        });
+
+        // Loads: the boot path runs no authoring rule.
+        const result = await protocol.loadMetaFromDb();
+        expect(result).toMatchObject({ loaded: 1, errors: 0, invalid: 0 });
+        expect(registered).toContainEqual({ type: 'page', name: 'deals_home' });
+        // Serves: the read door hands the stored body back as stored.
+        const served: any = (await protocol.getMetaItem({ type: 'page', name: 'deals_home' })).item;
+        expect(served?.regions?.[0]?.components?.map((c: any) => c.type)).toEqual(['page:header', 'page:headr']);
+
+        // The next save of the same body is a write, and is judged.
+        const err = await savePage(protocol, stored).catch((e: any) => e);
+        expect(err?.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.issues.map((i: any) => i.rule).sort()).toEqual(['component-props-unknown-key', 'component-type-unknown']);
+        // The stored row is untouched by the refusal.
+        expect(JSON.parse(activePageRows(rows)[0]!.metadata)).toEqual(stored);
+
+        // Fixed, then saved.
+        await expect(savePage(protocol, cleanPage())).resolves.toMatchObject({ success: true });
+        expect(JSON.parse(activePageRows(rows)[0]!.metadata)).toEqual(cleanPage());
+    });
+});
+
+// A page component's `data` prop naming the retired view-level `api` provider,
+// at the runtime save door. `object-grid`, `object-map`, `object-gantt` and
+// `object-tree` take a view data source (`ViewDataSchema`) as `data`, so the
+// step-18 retirement of that provider reaches them through their
+// `ComponentPropsMap` rows. The page parse leaves `properties` an open record;
+// the rule that judges the bag is `validateComponentProps`, which runs on a
+// `page` write by the ruling of record above (6161173492, letter B). One
+// operation, one implementation: the refusal is that rule's
+// `component-props-invalid`, carrying the retirement's own prescription.
+//
+// Stored pages: the boot and read paths run no authoring rule, so a stored
+// page with the binding loads, is registered and is served with no read
+// diagnostic for it; its next save is refused until the binding is fixed.
+describe('runtime authoring gate on PAGE writes — a component `data` naming the retired view-level api source', () => {
+    // Spelled through a constant: the spec's tree-scoped absence pin reads
+    // authored literals, and these bodies are refusals, not authorings.
+    const RETIRED_PROVIDER = 'api' as const;
+    const RETIRED_BINDING = {
+        provider: RETIRED_PROVIDER,
+        read: { url: 'https://partner.example.com/cases', headers: { Authorization: 'Bearer s3cr3t' } },
+    };
+    const PRESCRIPTION = "`view.data.provider: 'api'` was removed in @objectstack/spec 18 (ADR-0049";
+    const block = (type: string, data: unknown, id = 'cases') => ({ id, type, properties: { objectName: 'crm_case', data } });
+    const page = (components: unknown[], extra: Record<string, unknown> = {}) => ({
+        name: 'partner_page',
+        label: 'Partner',
+        type: 'app',
+        regions: [{ name: 'main', components }],
+        ...extra,
+    });
+    const savePage = (protocol: any, item: unknown) =>
+        protocol.saveMetaItem({ type: 'page', name: 'partner_page', item });
+    const activePageRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'page' && r.state === 'active');
+    const retirementIssues = (err: any) =>
+        (err?.issues ?? []).filter((i: any) => i.rule === 'component-props-invalid' && String(i.message).includes(PRESCRIPTION));
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it.each(['object-grid', 'object-map', 'object-gantt', 'object-tree'])(
+        '%s: 422 INVALID_METADATA from the props rule at the component\'s `data.provider`, with the prescription; nothing stored',
+        async (type) => {
+            const { protocol, rows } = makeProtocol();
+
+            const err = await savePage(protocol, page([block(type, RETIRED_BINDING)])).catch((e: any) => e);
+
+            expect(err).toBeInstanceOf(Error);
+            expect(err.status).toBe(422);
+            expect(err.code).toBe('INVALID_METADATA');
+            expect(err.rulesRun).toContain('validateComponentProps');
+            expect(retirementIssues(err).map((i: any) => i.path)).toEqual([
+                'pages[0].regions[0].components[0].properties.data.provider',
+            ]);
+            expect(activePageRows(rows)).toEqual([]);
+        },
+    );
+
+    it('reaches a component in a `page:tabs` item, one nested in containers, and one in a slot', async () => {
+        const { protocol, rows } = makeProtocol();
+        const body = page([
+            { id: 'tabs', type: 'page:tabs', properties: { items: [{ label: 'Cases', children: [block('object-grid', RETIRED_BINDING, 'in_tab')] }] } },
+            { id: 'row', type: 'flex', properties: { children: [{ id: 'card', type: 'page:card', properties: { children: [block('object-tree', RETIRED_BINDING, 'deep')] } }] } },
+        ], { kind: 'slotted', type: 'record', object: 'crm_case', slots: { details: block('object-map', RETIRED_BINDING, 'slotted') } });
+
+        const err = await savePage(protocol, body).catch((e: any) => e);
+
+        expect(err?.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(retirementIssues(err).map((i: any) => i.path).sort()).toEqual([
+            'pages[0].regions[0].components[0].properties.items[0].children[0].properties.data.provider',
+            'pages[0].regions[0].components[1].properties.children[0].properties.children[0].properties.data.provider',
+            'pages[0].slots.details.properties.data.provider',
+        ]);
+        expect(activePageRows(rows)).toEqual([]);
+    });
+
+    it('the control: the same page with the `object` or `value` provider saves, one row', async () => {
+        for (const data of [{ provider: 'object', object: 'crm_case' }, { provider: 'value', items: [{ name: 'a' }] }]) {
+            const { protocol, rows } = makeProtocol();
+            await expect(savePage(protocol, page([block('object-grid', data)]))).resolves.toMatchObject({ success: true });
+            expect(activePageRows(rows), JSON.stringify(data)).toHaveLength(1);
+        }
+    });
+
+    it('a stored page with the binding loads, registers and is served with no read diagnostic; its next save is refused until fixed', async () => {
+        const { engine, rows } = makeStubEngine();
+        const registered: Array<{ type: string; name: unknown }> = [];
+        engine.registry.registerItem = (type: string, item: { name?: unknown }) => {
+            registered.push({ type, name: item?.name });
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        const stored = page([block('object-grid', RETIRED_BINDING)]);
+        rows.set(keyOf({ type: 'page', name: 'partner_page', organization_id: null, state: 'active' }), {
+            id: 'r_seed', type: 'page', name: 'partner_page', organization_id: null, state: 'active',
+            metadata: JSON.stringify(stored),
+        });
+
+        // Boot: no authoring rule runs, and the page parse no longer judges the bag.
+        const result = await protocol.loadMetaFromDb();
+        expect(result).toMatchObject({ loaded: 1, errors: 0, invalid: 0 });
+        expect(registered).toContainEqual({ type: 'page', name: 'partner_page' });
+        // Read: served as stored, with no diagnostic for the binding.
+        const served: any = (await protocol.getMetaItem({ type: 'page', name: 'partner_page' })).item;
+        expect(served?.regions?.[0]?.components?.[0]?.properties?.data?.provider).toBe(RETIRED_PROVIDER);
+        expect(served?._diagnostics?.valid).toBe(true);
+        expect(served?._diagnostics?.errors ?? []).toEqual([]);
+        // No `[metadata_spec_invalid]` registration either: that came from the page parse.
+        expect((warn.mock.calls as unknown[][]).map((c) => String(c[0])).filter((m) => m.includes('metadata_spec_invalid'))).toEqual([]);
+
+        // The next save of the same body is a write, and is judged.
+        const err = await savePage(protocol, stored).catch((e: any) => e);
+        expect(err?.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(retirementIssues(err).map((i: any) => i.path)).toEqual([
+            'pages[0].regions[0].components[0].properties.data.provider',
+        ]);
+        expect(JSON.parse(activePageRows(rows)[0]!.metadata)).toEqual(stored);
+
+        // Fixed, then saved.
+        const fixed = page([block('object-grid', { provider: 'object', object: 'crm_case' })]);
+        await expect(savePage(protocol, fixed)).resolves.toMatchObject({ success: true });
+        expect(JSON.parse(activePageRows(rows)[0]!.metadata)).toEqual(fixed);
     });
 });

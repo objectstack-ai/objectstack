@@ -18,6 +18,7 @@ import * as actionExec from '../action-execution.js';
 import { isSystemObjectName } from '../action-execution.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 // [#15705] The resume door's one refusal table, shared with
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
 // engine result identically.
@@ -45,14 +46,17 @@ export function createMcpDomains(deps: DomainHandlerDeps): DomainRoute[] {
 /**
  * Handle an MCP request over the Streamable HTTP transport (`/mcp`).
  *
- * Gating + auth (fail-closed):
+ * Gating + auth (fail-closed), in this order:
+ *  - **auth first**: requires a principal already resolved by
+ *    `resolveExecutionContext` (the `sys_api_key` Bearer/header path, an
+ *    OAuth access token or a session). Anonymous → 401, whatever the two
+ *    checks below would answer: ADR-0138 D2 takes the anonymous decision as
+ *    the domain's first statement ({@link refuseAnonymousMcpCaller}).
  *  - **default-on**: served unless `OS_MCP_SERVER_ENABLED=false` (single-env
  *    runtime; MCP is a core platform capability). Multi-tenant cloud
  *    overrides this gate per env. When opted out we return 404 so the
  *    surface isn't advertised.
- *  - **auth**: requires a principal already resolved by
- *    `resolveExecutionContext` (the `sys_api_key` Bearer/header path or a
- *    session). Anonymous → 401.
+ *  - **serveable**: 501 when no `mcp` service can take the request.
  *
  * Execution: the MCP runtime builds a stateless per-request server whose
  * object-CRUD tools run through {@link callData} bound to THIS request's
@@ -60,36 +64,26 @@ export function createMcpDomains(deps: DomainHandlerDeps): DomainRoute[] {
  * uses. An external agent can never exceed the key's authority.
  */
 export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
+    // [#24251] ADR-0138 D2: the anonymous decision is this domain's first
+    // statement. The switch's 404 and the service's 501 below used to come
+    // first, so an anonymous caller learned whether this deployment runs MCP
+    // before it was refused.
+    const ec = context.executionContext;
+    if (!ec || (!ec.userId && !ec.isSystem)) {
+        return { handled: true, response: await refuseAnonymousMcpCaller(deps, context) };
+    }
+
     if (!isMcpServerEnabled()) {
-        return { handled: true, response: deps.error('MCP server is not enabled for this environment', 404) };
+        return { handled: true, response: deps.error('MCP server is not enabled', 404) };
     }
     const mcp: any = await deps.resolveService(context, 'mcp', context.environmentId);
     if (!mcp || typeof mcp.handleHttpRequest !== 'function') {
         return { handled: true, response: deps.error('MCP server is not available', 501) };
     }
 
-    const ec = context.executionContext;
-    if (!ec || (!ec.userId && !ec.isSystem)) {
-        // Per the MCP authorization spec (RFC 9728 §5.1), a 401 from the
-        // protected resource advertises where its metadata lives so an
-        // OAuth-capable client can bootstrap discovery → DCR → PKCE.
-        // Only advertised when the OAuth track is actually live (AS on +
-        // TLS rule satisfied); API-key-only deployments return a plain 401.
-        const resourceMetadataUrl = await getMcpResourceMetadataUrl(deps, context);
-        const response = deps.error(
-            resourceMetadataUrl
-                ? 'Unauthorized: a valid OAuth access token or API key is required'
-                : 'Unauthorized: a valid API key is required',
-            401,
-        ) as { status: number; body: any; headers?: Record<string, string> };
-        if (resourceMetadataUrl) {
-            response.headers = {
-                'WWW-Authenticate':
-                    `Bearer realm="ObjectStack MCP", resource_metadata="${resourceMetadataUrl}"`,
-            };
-        }
-        return { handled: true, response };
-    }
+    // [#24151] The body is read once the anonymous decision above has admitted
+    // the caller, never ahead of it (`../deferred-request-body.ts`).
+    body = readDispatchedBody(body);
 
     // ── OAuth scope → tool-family enforcement (fail-closed, #2698) ──
     // `oauthScopes` is set ONLY for OAuth-token provenance. A token that
@@ -167,16 +161,16 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
  */
 export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: string, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     if (!isMcpServerEnabled()) {
-        return { handled: true, response: deps.error('MCP server is not enabled for this environment', 404) };
+        return { handled: true, response: deps.error('MCP server is not enabled', 404) };
     }
     if (method !== 'GET') {
         // Hand-rolled rather than `deps.error(...)` only because it carries an
         // `Allow` header; the BODY still goes through the one builder (#3842),
         // so this branch cannot drift back to a numeric `code`. The code is
-        // DERIVED (`method_not_allowed`), not spelled here — the other two 405
-        // sites (`domains/actions.ts`, `domains/keys.ts`) go through
-        // `deps.error` and derive theirs, and one dispatcher answering the same
-        // status two ways is the drift this issue is closing.
+        // DERIVED (`METHOD_NOT_ALLOWED`), not spelled here. Every 405 this
+        // dispatcher's domains answer (`actions.ts`, `ai.ts`, `keys.ts`,
+        // `meta.ts`, this one) is built this way: an `Allow` header, and the
+        // body through the one builder.
         return {
             handled: true,
             response: {
@@ -248,6 +242,51 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
             })(),
         },
     } as any;
+}
+
+/**
+ * [#24251] The anonymous `401` of `/mcp` (ADR-0138 D2): the same status and
+ * code whatever `OS_MCP_SERVER_ENABLED` or the `mcp` service says.
+ *
+ * Per the MCP authorization spec (RFC 9728 §5.1), a 401 from the protected
+ * resource advertises where its metadata lives so an OAuth-capable client can
+ * bootstrap discovery → DCR → PKCE. It is advertised only when both halves
+ * hold, and API-key-only deployments get a plain 401:
+ *
+ *  - **the resource is served**: the switch is on and an `mcp` service can take
+ *    the request. That is the predicate `handleMcpRequest` applies to an
+ *    admitted caller (its 404 and 501) and `/discovery` applies to
+ *    `routes.mcp`. Without it there is nothing behind the metadata to
+ *    authorize. The auth service's answer alone does not settle it: with
+ *    `OS_OIDC_PROVIDER_ENABLED=true` (or the `oidcProvider` config key)
+ *    plugin-auth answers a metadata URL while the switch is off, and its
+ *    `/.well-known/oauth-protected-resource` mount follows the switch, so
+ *    that URL is not served.
+ *  - **the OAuth track is live**: the auth service answers a metadata URL
+ *    (AS on + TLS rule satisfied).
+ *
+ * The header tells an anonymous caller nothing the public `/discovery` route
+ * and the metadata document itself do not already answer anonymously.
+ */
+async function refuseAnonymousMcpCaller(deps: DomainHandlerDeps, context: HttpProtocolContext) {
+    const mcp: any = isMcpServerEnabled()
+        ? await deps.resolveService(context, 'mcp', context.environmentId)
+        : undefined;
+    const served = !!mcp && typeof mcp.handleHttpRequest === 'function';
+    const resourceMetadataUrl = served ? await getMcpResourceMetadataUrl(deps, context) : null;
+    const response = deps.error(
+        resourceMetadataUrl
+            ? 'Unauthorized: a valid OAuth access token or API key is required'
+            : 'Unauthorized: a valid API key is required',
+        401,
+    ) as { status: number; body: any; headers?: Record<string, string> };
+    if (resourceMetadataUrl) {
+        response.headers = {
+            'WWW-Authenticate':
+                `Bearer realm="ObjectStack MCP", resource_metadata="${resourceMetadataUrl}"`,
+        };
+    }
+    return response;
 }
 
 /**

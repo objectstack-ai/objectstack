@@ -2,7 +2,16 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import {
-  resolveAuthzContext,
+  // [ruling record 6227928430, letter A] The ONE request-to-ExecutionContext
+  // composition: the session read under the in-process rule, the tenancy
+  // posture's classification, `resolveAuthzContext` with the auth service's
+  // per-user posture source (ADR-0069 · #23287) and its API-key lifecycle
+  // policy (#23367), and the assembly. The download door states its
+  // differences as the function's named parameters and keeps only its own
+  // facts (see `buildFileReadAuthorizer`).
+  resolveRequestExecutionContext,
+  type RequestAuthService,
+  type TenancyServiceResolver,
   isAuthzStoreUnavailableError,
   // ADR-0069 — a gate the deployment declared active whose session read fails
   // is the authorization-store outage REST answers it with (#13906).
@@ -29,9 +38,10 @@ import type {
   IDataEngine,
   II18nService,
   ISecurityService,
+  ISharingService,
   IStorageService,
   IFileAccessDelegate,
-  ApiKeyLifecyclePolicy,
+  AuthSessionApi,
 } from '@objectstack/spec/contracts';
 import {
   OBSERVABILITY_METRICS_SERVICE,
@@ -363,6 +373,22 @@ export class StorageServicePlugin implements Plugin {
         getStorage: () => storage,
         getLimitsSnapshot: () => storage.getLimitsSnapshot(),
         logger: ctx.logger,
+        // The attach rule's verdict for the caller-scoped verbs, resolved per
+        // call, the same two services the `sys_attachment` insert gate asks.
+        getSharing: () => {
+          try {
+            return ctx.getService<ISharingService>('sharing');
+          } catch {
+            return null;
+          }
+        },
+        getSecurity: () => {
+          try {
+            return ctx.getService<ISecurityService>('security');
+          } catch {
+            return null;
+          }
+        },
       }),
     );
     ctx.logger.info(
@@ -475,8 +501,18 @@ export class StorageServicePlugin implements Plugin {
         // Parent-derived READ visibility (#2970 item 1) — list/find/count of
         // sys_attachment only returns rows whose parent record the caller can
         // read. Middleware (not a hook) so list `total` is filtered too.
+        // [ADR-0139 D4, D5] The gate writes a `ReadableIds` leaf per parent
+        // object only when the security service answers `canReadObject`;
+        // resolved on every read (the security plugin may start after this
+        // one), and without it every read takes the bounded probe.
         if (typeof (engine as any).registerMiddleware === 'function') {
-          installAttachmentReadVisibility(engine as any, ctx.logger);
+          installAttachmentReadVisibility(engine as any, ctx.logger, () => {
+            try {
+              return ctx.getService<ISecurityService>('security');
+            } catch {
+              return undefined;
+            }
+          });
         }
         // Field-reference ownership (ADR-0104 D3 wave 2) — keeps
         // sys_file.ref_object/ref_id/ref_field in step with what records hold,
@@ -911,8 +947,18 @@ function toWebHeaders(req: { headers?: unknown }): any | null {
   return null;
 }
 
-/** A `getSession(headers)` bound to the kernel's `auth` service, or null. */
-function buildGetSession(registry: StorageGateRegistry): ((headers: any) => Promise<any>) | null {
+/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
+
+/**
+ * A `getSession(headers)` bound to the kernel's `auth` service, or null.
+ *
+ * [#24222] It answers as `AuthSessionApi` declares the read, not `any`, so each
+ * of its two readers (the upload session resolver and the family's gate
+ * reader) reads only fields the contract declares. The download door reads the
+ * session through the one composition instead (`buildFileReadAuthorizer`).
+ */
+function buildGetSession(registry: StorageGateRegistry): ((headers: any) => Promise<SessionRead | null>) | null {
   let authService: any;
   try {
     authService = registry.getService<any>('auth');
@@ -1124,9 +1170,10 @@ export function composeStorageRoutes(
  * upload routes thread into `createFile` so the new `sys_file` row is stamped.
  * The read is the platform's existing spelling for that fact —
  * `session.session.activeOrganizationId`, the same one `HttpDispatcher`,
- * `dispatcher-plugin` and `ExecutionContext.tenantId` resolve from — with the
- * flattened shape as a fallback for hosts that hand back the session record
- * directly.
+ * `dispatcher-plugin` and `ExecutionContext.tenantId` resolve from. [#24222]
+ * The flattened shape (a top-level `activeOrganizationId`) is no longer read:
+ * `AuthSessionApi` declares no such field and no in-process producer answers
+ * one (better-auth's read is `{ user, session }`).
  *
  * ⛔ No membership fallback. A session with no active organization is a
  * declared state (ADR-0123 D1), never a gap to fill from the user's `sys_member`
@@ -1146,11 +1193,12 @@ function buildAuthSessionResolver(
     try {
       const headers = toWebHeaders(req);
       if (!headers) return null;
-      const session: any = await getSession(headers);
+      const session = await getSession(headers);
       const userId = session?.user?.id;
       if (!userId) return null;
-      const activeOrganizationId =
-        session?.session?.activeOrganizationId ?? session?.activeOrganizationId;
+      // [#24222] Where the contract declares it. No top-level
+      // `activeOrganizationId` operand: no in-process producer answers one.
+      const activeOrganizationId = session?.session?.activeOrganizationId;
       const organizationId =
         typeof activeOrganizationId === 'string' && activeOrganizationId.length > 0
           ? activeOrganizationId
@@ -1162,22 +1210,18 @@ function buildAuthSessionResolver(
   };
 }
 
-/** The slice of the kernel's `auth` service the storage family's two posture readers use. */
-type GateAuthService = {
-  isAuthGateActive?(): boolean;
-  resolveUserAuthGates?(userId: string, options?: { organizationId?: string }): Promise<readonly unknown[]>;
-  /** [#23367] The API-key lifecycle policy (`IAuthService.resolveApiKeyLifecyclePolicy`). */
-  resolveApiKeyLifecyclePolicy?(): ApiKeyLifecyclePolicy;
-};
-
 /**
  * The kernel's `auth` service, or `undefined` when none is registered (a
- * kernel composed without `plugin-auth`). One lookup for both posture readers:
- * the family door's gate reader and the download authorizer's resolver.
+ * kernel composed without `plugin-auth`), as the slice the one composition
+ * reads (`RequestAuthService`: the session API, the gate probe, the per-user
+ * posture computation and the API-key lifecycle policy). Looked up once per
+ * binding by each of its two readers, both bound by `composeStorageRoutes`
+ * from the same registry: the family door's gate reader and the download
+ * authorizer.
  */
-function resolveGateAuthService(registry: StorageGateRegistry): GateAuthService | undefined {
+function resolveGateAuthService(registry: StorageGateRegistry): RequestAuthService | undefined {
   try {
-    return registry.getService<GateAuthService>('auth') ?? undefined;
+    return registry.getService<RequestAuthService>('auth') ?? undefined;
   } catch {
     return undefined;
   }
@@ -1204,12 +1248,15 @@ function resolveGateAuthService(registry: StorageGateRegistry): GateAuthService 
  * KEY's answer, from the shared key-admission seam (`resolveApiKeyAdmission`)
  * with the auth service's per-user posture computation: a key whose owner
  * holds an `account`-scope posture answers that posture, and the door refuses
- * it with the session's `403`; an admitted key answers no posture, and the
- * session is NOT read for it — a cookie beside a key never answers for the
- * key. A key the seam does not recognise (`none`) leaves the session's own
- * gate to answer, exactly as the identity resolution falls through to the
- * session for it. Asked with the door's tenancy posture, so a key the posture
- * refuses is refused before its owner is asked, as on every other face.
+ * it with the session's `403`. Asked with the door's tenancy posture, so a key
+ * the posture refuses is refused before its owner is asked, as on every other
+ * face.
+ *
+ * [#24366] The family gate and the route judge the same credential: the gate
+ * judges every credential a route of this family can serve, so a session the
+ * policy holds is refused on every route whatever else the request carries.
+ * One door fronts every route, so the seam's answer about a key never stands
+ * in for the session's own posture.
  */
 function buildAuthGateSessionReader(
   registry: StorageGateRegistry,
@@ -1240,14 +1287,17 @@ function buildAuthGateSessionReader(
         await resolveAdmissionTenancyPosture(registry),
         userAuthGateSourceOf(auth),
         // [#23367] The API-key lifecycle policy, from the same service. A key
-        // its own lifecycle refuses (`lifecycle`) carries no posture and is
-        // left to the identity resolution below, which fails it closed.
+        // its own lifecycle refuses (`lifecycle`) carries no posture. The
+        // parent-governed download, whose composition reads keys, refuses it
+        // with its own code; the session-serving routes (uploads, the
+        // unclaimed-file download) never read a key and answer by the session
+        // alone; the raw-transfer routes answer by their capability token.
         apiKeyLifecyclePolicySourceOf(auth),
       );
       if (admission.outcome === 'held') return { authGate: admission.gate };
-      if (admission.outcome !== 'none') return undefined;
+      // [#24366] Every other answer falls through to the session's own gate.
     }
-    let session: any;
+    let session: SessionRead | null;
     try {
       session = await getSession(headers);
     } catch (err) {
@@ -1258,8 +1308,12 @@ function buildAuthGateSessionReader(
 }
 
 /**
- * [#15352] The EFFECTIVE tenancy posture for THIS door's admission decision —
- * the parent-governed download gate's, resolved fresh on every download.
+ * [#15352] How THIS door reaches the `tenancy` service for its admission
+ * decision — the parent-governed download gate's, read fresh on every
+ * download. [ruling record 6227928430] The download door hands this resolver
+ * to the one composition (`resolveRequestExecutionContext`), which classifies
+ * the read; the family's gate reader classifies it through
+ * {@link resolveAdmissionTenancyPosture} below.
  *
  * ## What was open
  *
@@ -1351,28 +1405,42 @@ function buildAuthGateSessionReader(
  * so there is nothing to buy by caching it.
  *
  * ⛔ And this door's degrade-to-ungated reason is precisely why the RESOLUTION
- * stayed here when the classification was folded (#16013): a shared owner of
- * the resolution would have had to erase that reason or carry a flag for it.
- * The helper receives the already-decided way to reach the service and nothing
+ * stayed here when the classification was folded (#16013), and again when the
+ * composition was (ruling record 6227928430): a shared owner of the resolution
+ * would have had to erase that reason or carry a flag for it. The shared
+ * helpers receive the already-decided way to reach the service and nothing
  * else.
+ *
+ * @returns `undefined` for a host shape with no async registry (no posture is
+ *   read), else the read.
+ */
+function tenancyServiceResolver(registry: StorageGateRegistry): TenancyServiceResolver | undefined {
+  if (typeof registry.getServiceAsync !== 'function') return undefined;
+  return () => registry.getServiceAsync!<TenancyPostureSource>('tenancy');
+}
+
+/**
+ * The family gate reader's posture read (its API-key arm, in
+ * {@link buildAuthGateSessionReader}): the shared classification over
+ * {@link tenancyServiceResolver}'s way to the service, or no posture on a host
+ * shape that has none.
  */
 async function resolveAdmissionTenancyPosture(
   registry: StorageGateRegistry,
 ): Promise<TenancyPosture | undefined> {
-  if (typeof registry.getServiceAsync !== 'function') return undefined;
-  return classifyAdmissionTenancyPosture(() =>
-    registry.getServiceAsync!<TenancyPostureSource>('tenancy'),
-  );
+  const tenancy = tenancyServiceResolver(registry);
+  return tenancy ? classifyAdmissionTenancyPosture(tenancy) : undefined;
 }
 
 /**
  * Authorize a parent-governed download (#2970 item 2; extended for field-owned
- * files by ADR-0104 D3 wave 2). Builds the FULL caller ExecutionContext via
- * `resolveAuthzContext` (the same shared resolver rest-server uses — a bare
- * `{ userId }` would lack the resolved permissions the parent RLS needs), then
- * allows when the caller is the file's owner or can READ the file's parent
- * record. Returns `undefined` (routes stay open) when the auth service or
- * engine is absent.
+ * files by ADR-0104 D3 wave 2). Builds the FULL caller ExecutionContext through
+ * the one request-to-ExecutionContext composition,
+ * `resolveRequestExecutionContext` (ruling record 6227928430, letter A: the
+ * same one the runtime dispatcher, REST and settings call — a bare `{ userId }`
+ * would lack the resolved permissions the parent RLS needs), then allows when
+ * the caller is the file's owner or can READ the file's parent record. Returns
+ * `undefined` (routes stay open) when the auth service or engine is absent.
  *
  * "Parent" resolves differently for the two surfaces, and that asymmetry is the
  * point of the ownership model: an attachment may hang off MANY records, so its
@@ -1385,44 +1453,75 @@ function buildFileReadAuthorizer(
   registry: StorageGateRegistry,
   engine: IDataEngine | null,
 ): ((file: FileRecord, req: { headers?: unknown }) => Promise<FileReadVerdict>) | undefined {
-  const getSession = buildGetSession(registry);
-  if (!getSession || !engine || typeof (engine as any).find !== 'function') return undefined;
+  // The door's wiring fact: no `auth` service or no data engine binds no gate
+  // at all, and parent-governed downloads stay open (the declared bare-kernel
+  // behaviour). The service is looked up once, here, as the family's gate
+  // reader looks it up, and every request is resolved against it.
+  const authService = resolveGateAuthService(registry);
+  if (!authService || !engine || typeof (engine as any).find !== 'function') return undefined;
 
   return async (file, req) => {
     try {
       const headers = toWebHeaders(req);
       if (!headers) return 'unauthenticated';
-      // [#15352] The posture is an authorization INPUT, resolved for THIS door
-      // before the resolver runs. Omitting it is what left both
-      // posture-conditional API-key refusals unreachable here — see
-      // `resolveAdmissionTenancyPosture` above for the classification, and for
-      // why a quiet `catch` at this seam would be the defect rather than the
-      // fix. Raised INSIDE this `try`, so an outage takes the relay (commit 6a180e42d) in
-      // the `catch` below rather than a new net.
-      const tenancyPosture = await resolveAdmissionTenancyPosture(registry);
-      // [#23455] The auth service's per-user posture computation, named here
-      // as every key-admitting seam names it. This authorizer is not a second
-      // ADR-0069 gate: every route that reaches it is mounted behind the
-      // family's door (`mountFamilyRoute` in `storage-routes.ts`), whose gate
-      // reader (`buildAuthGateSessionReader`) has already refused a held
-      // owner's key on this request with the posture's `403`, and both are
-      // bound by `composeStorageRoutes` from the same `auth` service. Passing
-      // the source keeps the resolved context truthful (a held key resolves
-      // as a held principal carrying `authGate`) instead of reading a held
-      // key as a plain admission here.
-      const authz = await resolveAuthzContext({
-        ql: engine,
+      // [ruling record 6227928430, letter A item 3] This door's differences,
+      // each a named parameter of the one composition:
+      //
+      //  - `anonymous: 'fail-closed'`: a request that resolves no principal
+      //    yields no context, and the door answers `'unauthenticated'` (401).
+      //  - `authGate: 'resolved'` (ADR-0069 · #23287 · #23455): this door is
+      //    not a second ADR-0069 gate. Every route that reaches it is mounted
+      //    behind the family's door (`mountFamilyRoute` in
+      //    `storage-routes.ts`), whose gate reader
+      //    (`buildAuthGateSessionReader`) has already refused a held session
+      //    or a held owner's key on this request with the posture's `403`,
+      //    whatever else the request carries (#24366), and both are bound by
+      //    `composeStorageRoutes` from the same `auth` service. The context
+      //    the door hands on stays truthful (a held principal carries the
+      //    `authGate` decided off the read that admitted it) without a second
+      //    read: `'reread-when-active'` would read the
+      //    session a third time on this request and add an outage arm no
+      //    caller of this door ever had.
+      //  - `credentials: 'api-key-and-session'`: the headers are the real
+      //    request's, so an `x-api-key` is honoured.
+      //  - `sessionApi: 'optional'`: an auth service exposing no session read
+      //    still admits an API key.
+      //  - `session: 'request'`: the auth service's read of this request.
+      //  - [#15352] `tenancy`: the posture is an authorization INPUT; without
+      //    it both posture-conditional API-key refusals were unreachable here.
+      //    This door's own way to the service ({@link tenancyServiceResolver}),
+      //    read per download; an outage it raises is propagated INSIDE this
+      //    `try`, so it takes the relay (commit 6a180e42d) in the `catch` below
+      //    rather than a new net.
+      //  - `localization: 'withhold'`, `requestLocale: undefined`: the verdict
+      //    is a read of a record, and this door has never resolved a locale or
+      //    a time zone for it.
+      //  - `accessToken: 'carry'`: the context reaches the owner-record read
+      //    and a file-access delegate as the caller's, and it has always
+      //    carried the session bearer there (a hook reads it as
+      //    `session.accessToken`).
+      //  - `oauth`, `onAdmission`: none; this door accepts no OAuth access
+      //    token and its gate needs no word about the credential.
+      const context = await resolveRequestExecutionContext({
         headers,
-        getSession,
-        tenancyPosture,
-        userAuthGates: userAuthGateSourceOf(resolveGateAuthService(registry)),
-        // [#23367] The API-key lifecycle policy, from the same service.
-        apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(resolveGateAuthService(registry)),
+        ql: engine,
+        authService,
+        tenancy: tenancyServiceResolver(registry),
+        anonymous: 'fail-closed',
+        authGate: 'resolved',
+        credentials: 'api-key-and-session',
+        sessionApi: 'optional',
+        session: 'request',
+        localization: 'withhold',
+        requestLocale: undefined,
+        accessToken: 'carry',
+        oauth: undefined,
+        onAdmission: undefined,
       });
-      if (!authz.userId) return 'unauthenticated';
+      if (!context?.userId) return 'unauthenticated';
 
       // Uploader / owner may always download.
-      if (file.owner_id && String(file.owner_id) === String(authz.userId)) return 'allow';
+      if (file.owner_id && String(file.owner_id) === String(context.userId)) return 'allow';
 
       // Field-owned (ADR-0104 D3 wave 2): exactly ONE record's field holds
       // this file, so access is that record's READ access — never a union.
@@ -1431,7 +1530,7 @@ function buildFileReadAuthorizer(
       // and the metadata of a field-owned file have one authority.
       if (file.ref_object && file.ref_id != null && file.ref_id !== '') {
         const ownerId = String(file.ref_id);
-        const readable = await readableFieldOwners(registry, engine, String(file.ref_object), [ownerId], authz);
+        const readable = await readableFieldOwners(registry, engine, String(file.ref_object), [ownerId], context);
         return readable.has(ownerId) ? 'allow' : 'deny';
       }
 
@@ -1460,7 +1559,7 @@ function buildFileReadAuthorizer(
             where: { id: { $in: ids } },
             fields: ['id'],
             limit: ids.length,
-            context: authz,
+            context,
           })) as Array<Record<string, unknown>>;
           if (visible.length) return 'allow';
         } catch {

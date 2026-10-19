@@ -191,6 +191,61 @@ describe('HttpDispatcher.handleMcp', () => {
       expect(recorded[0]?.isSystem).toBe(false);
     });
   });
+
+  // [#24251] ADR-0138 D2: the anonymous decision is the domain's first
+  // statement, so an anonymous caller is answered 401 whatever the switch or
+  // the service says. A caller the decision admits — a user or a system
+  // principal — keeps the switch's 404 and the service's 501, in that order.
+  // Over sockets, on both hosts: mcp-anonymous-first.hono.integration.test.ts
+  // and http-conformance's hono-mcp-anonymous-first.conformance.test.ts.
+  describe('[#24251] the anonymous decision comes first (ADR-0138 D2)', () => {
+    const SYSTEM = { userId: undefined, isSystem: true, positions: [], permissions: [] };
+
+    it('anonymous → 401 UNAUTHENTICATED with the switch off, not 404', async () => {
+      process.env.OS_MCP_SERVER_ENABLED = 'false';
+      const { kernel } = makeKernel({ withMcp: true });
+      const d = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
+      const res = await d.handleMcp({}, makeContext({ executionContext: undefined }));
+      expect(res.response!.status).toBe(401);
+      expect(res.response!.body.error.code).toBe('UNAUTHENTICATED');
+    });
+
+    it('anonymous → 401 UNAUTHENTICATED with no mcp service, not 501', async () => {
+      process.env.OS_MCP_SERVER_ENABLED = 'true';
+      const { kernel } = makeKernel({ withMcp: false });
+      const d = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
+      const res = await d.handleMcp({}, makeContext({ executionContext: undefined }));
+      expect(res.response!.status).toBe(401);
+      expect(res.response!.body.error.code).toBe('UNAUTHENTICATED');
+    });
+
+    it('a system principal is still admitted: the switch-off 404 answers it', async () => {
+      process.env.OS_MCP_SERVER_ENABLED = 'false';
+      const { kernel } = makeKernel({ withMcp: true });
+      const d = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
+      const res = await d.handleMcp({}, makeContext({ executionContext: SYSTEM }));
+      expect(res.response!.status).toBe(404);
+      expect(res.response!.body.error.code).toBe('RESOURCE_NOT_FOUND');
+    });
+
+    it('a system principal is still admitted: the no-service 501 answers it', async () => {
+      process.env.OS_MCP_SERVER_ENABLED = 'true';
+      const { kernel } = makeKernel({ withMcp: false });
+      const d = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
+      const res = await d.handleMcp({}, makeContext({ executionContext: SYSTEM }));
+      expect(res.response!.status).toBe(501);
+      expect(res.response!.body.error.code).toBe('NOT_IMPLEMENTED');
+    });
+
+    it('a system principal is still admitted: MCP on and installed reaches the transport', async () => {
+      process.env.OS_MCP_SERVER_ENABLED = 'true';
+      const { kernel, mcpService } = makeKernel({ withMcp: true });
+      const d = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
+      const res = await d.handleMcp({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, makeContext({ executionContext: SYSTEM }));
+      expect(res.response!.status).toBe(200);
+      expect(mcpService.lastOpts).toBeDefined();
+    });
+  });
 });
 
 describe('HttpDispatcher.handleMcpSkill (GET /mcp/skill)', () => {

@@ -70,7 +70,7 @@ const manifest = {
         { value: 'invite-only', label: 'Invitation only — never join automatically' },
       ],
       description:
-        'Automatic binds every new user to this deployment\'s default organization. Invitation only grants membership solely through an explicit act — creating a workspace, accepting an invitation, being added by an admin, or SSO just-in-time provisioning. Applies to the backfill of pre-existing member-less users too.',
+        'Automatic binds every new user to this deployment\'s default organization. Invitation only grants membership solely through an explicit act — creating an organization, accepting an invitation, being added by an admin, or SSO just-in-time provisioning. Applies to the backfill of pre-existing member-less users too.',
     },
 
     // [#11768] Audience posture (#11739, epic #11723) — who may BECOME a user
@@ -89,7 +89,7 @@ const manifest = {
       label: 'Audience',
       required: false,
       description:
-        'Who may become a user of this environment\'s apps. Allowlisted email domains always force email verification on. Open forces it on unless the deployment turns it off; a value saved in this console cannot. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
+        'Who may become a user of this system\'s apps. Allowlisted email domains always force email verification on. Open forces it on unless the deployment turns it off; a value saved in this console cannot. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
     },
     {
       type: 'select',

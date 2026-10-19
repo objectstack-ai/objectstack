@@ -85,6 +85,9 @@ export {
   applyIndexKeyParts,
   classifyIndexKeyPart,
   diffManagedTable,
+  // [#23925] The finding without its `--allow-destructive` remedy, for `os
+  // migrate plan` on a database whose driver declares it cannot apply the entry.
+  driftFindingWithoutRemedy,
   driftKey,
   fieldHasColumn,
   BUILTIN_COLUMNS,

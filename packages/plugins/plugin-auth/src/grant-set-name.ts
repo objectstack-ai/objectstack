@@ -3,21 +3,21 @@
 /**
  * [ADR-0131 D4] How this package's grant readers read which permission set a
  * `sys_user_permission_set` grant holds: BY NAME, from its `permission_set`
- * column — the reference the grant keeps once ADR-0131 C8 drops
+ * column — the grant's one reference since ADR-0131 C7b retired
  * `permission_set_id`.
  *
  * Every grant writer stores the name and nothing else (this package's
  * self-registration grant among them); `plugin-security` refuses a non-system
- * grant naming a set the security catalog does not hold, and a one-time
- * backfill names the grants written before the column existed. Internal: not
- * re-exported from the package entry.
+ * grant naming a set the security catalog does not hold. No boot names a
+ * grant. Internal: not re-exported from the package entry.
  *
  * A grant whose name is `NULL` or blank names no set. That is a grant written
- * before the column existed on an upgraded deployment's first boot, before the
- * backfill (`kernel:bootstrapped`) names it, or one the backfill could not name
- * (an id with no set row, or a set row of another organization). Such a grant
- * confers nothing through a by-name reader here; each reader states what it
- * does with one in the direction that fails closed.
+ * before the column existed, on a database upgraded from such a release, until
+ * the v18 ceremony's verified rewrite (`os migrate organization-ownership
+ * --apply`, ADR-0131 D10) names it from the retired id, or one the rewrite does
+ * not name (it lists each, with the reason). Such a grant confers nothing
+ * through a by-name reader here; each reader states what it does with one in
+ * the direction that fails closed.
  */
 
 /** The grant's NAME reference to its permission set (ADR-0131 D4). */

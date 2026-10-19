@@ -86,7 +86,7 @@ function makeFakeEngine(opts?: { listItemsThrows?: boolean }) {
   const rows = new Map<string, Row>();
   const historyRows: Row[] = [];
   const keyOf = (w: Record<string, unknown>, table = 'sys_metadata') =>
-    `${table}|${String(w.type)}|${String(w.name)}|${String(w.organization_id ?? 'null')}|${String(w.state ?? 'active')}`;
+    `${table}|${String(w.type)}|${String(w.name)}|${String(w.state ?? 'active')}`;
   const findRow = (where: Record<string, unknown>) => {
     if (where.id !== undefined) {
       for (const [k, r] of rows) if (r.id === where.id) return { key: k, row: r };
@@ -255,7 +255,10 @@ describe('#11843 — the lock answers at the metadata door', () => {
     expect(err).toBeNull();
     const rows = metaRowsOf(engine);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ package_id: null, organization_id: null });
+    expect(rows[0]).toMatchObject({ package_id: null });
+    // [ADR-0131 D7] The family declares no organization column: the save
+    // writes no organization key at all — every row is the environment's.
+    expect(rows[0]).not.toHaveProperty('organization_id');
   }, 30_000);
 
   it('hatch OPEN: a runtime-shadow set (definition living only in sys_metadata) is NOT locked — ADR-0094 D5-R', async () => {

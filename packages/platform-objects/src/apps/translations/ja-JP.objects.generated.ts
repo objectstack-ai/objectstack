@@ -35,7 +35,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "プラットフォームロール",
-        help: "レガシーな better-auth ロールスカラー値（admin、user など）。ObjectStack はもはやこの値を書き込みません（ADR-0068 D2）。プラットフォーム管理者権限を付与するには、そのユーザーの確認済みメールアドレスを `OS_PLATFORM_OWNER_EMAIL` に列挙してください。`single` テナンシー態勢では、`sys_user_permission_set` 内のスコープ指定なしの `admin_full_access` 割り当てでも同様にこの権限が付与されます。"
+        help: "レガシーな better-auth ロールスカラー値（admin、user など）。ObjectStack はもはやこの値を書き込みません。プラットフォーム管理者権限を付与するには、そのユーザーの確認済みメールアドレスを `OS_PLATFORM_OWNER_EMAIL` に列挙してください。`single` テナンシー態勢では、`sys_user_permission_set` 内のスコープ指定なしの `admin_full_access` 割り当てでも同様にこの権限が付与されます。"
       },
       banned: {
         label: "利用停止",
@@ -97,11 +97,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       manager_id: {
         label: "マネージャー",
-        help: "このユーザーの直属のマネージャー。`own_and_reports` 階層スコープがたどるレポートラインを形成します（ADR-0057 / @objectstack/security-enterprise）。"
+        help: "このユーザーの直属のマネージャー。`own_and_reports` 階層スコープがたどるレポートラインを形成します。"
       },
       primary_business_unit_id: {
         label: "主所属ビジネスユニット",
-        help: "ユーザーの主所属ビジネスユニット — sys_business_unit_member.is_primary を非正規化した投影で、plugin-sharing が管理します（ADR-0057 補遺 D12）。ユーザー参照の候補を、メンバーシップの中間テーブルをたどらずにビジネスユニットで絞り込めるようにします。直接編集せず、ビジネスユニットのメンバーシップで設定してください。"
+        help: "ユーザーの主所属ビジネスユニット — sys_business_unit_member.is_primary を非正規化した投影で、plugin-sharing が管理します。ユーザー参照の候補を、メンバーシップの中間テーブルをたどらずにビジネスユニットで絞り込めるようにします。直接編集せず、ビジネスユニットのメンバーシップで設定してください。"
       },
       source: {
         label: "ID ソース",
@@ -142,7 +142,17 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
-        successMessage: "${result.email} に招待を送信しました"
+        successMessage: "${result.email} に招待を送信しました",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理者",
+              delegated_admin: "委任管理者",
+              member: "メンバー"
+            }
+          }
+        }
       },
       ban_user: {
         label: "利用停止",
@@ -537,7 +547,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "親組織",
-        help: "レポート／グループ化のための親。何の権限も付与しません — 組織をまたぐ可視性はメンバーシップから生じ、この参照からは決して生じません（ADR-0105 D6）。"
+        help: "レポート／グループ化のための親。何の権限も付与しません — 組織をまたぐ可視性はメンバーシップから生じ、この参照からは決して生じません。"
       },
       sort_order: {
         label: "並び順",
@@ -559,6 +569,21 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "ユーザーを招待",
+        description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
+        successMessage: "${result.email} に招待を送信しました",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理者",
+              delegated_admin: "委任管理者",
+              member: "メンバー"
+            }
+          }
+        }
+      },
       create_organization: {
         label: "組織を作成",
         successMessage: "組織を作成しました"
@@ -576,15 +601,19 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "アクティブに設定",
         successMessage: "アクティブ組織を切り替えました"
       },
-      leave_organization: {
-        label: "組織から退出",
-        confirmText: "この組織から退出しますか？すべてのリソースへのアクセスを失います。",
-        successMessage: "組織から退出しました"
+      rename_organization: {
+        label: "組織名を変更",
+        successMessage: "組織名を変更しました"
       },
       change_slug: {
         label: "スラッグを変更",
         description: "スラッグを変更すると、この組織のすべてのプラットフォームサブドメインが書き換えられ、旧スラッグは 90 日間確保されます。続行しますか？",
         successMessage: "組織のスラッグを変更しました"
+      },
+      leave_organization: {
+        label: "組織から退出",
+        confirmText: "この組織から退出しますか？この組織の環境とメンバーへのアクセスを失います。",
+        successMessage: "組織から退出しました"
       }
     }
   },
@@ -633,7 +662,17 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
-        successMessage: "${result.email} に招待を送信しました"
+        successMessage: "${result.email} に招待を送信しました",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理者",
+              delegated_admin: "委任管理者",
+              member: "メンバー"
+            }
+          }
+        }
       },
       add_member: {
         label: "メンバーを追加",
@@ -649,9 +688,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "メンバーを削除しました"
       },
       transfer_ownership: {
-        label: "所有権の移譲",
-        confirmText: "この組織の所有権を選択したメンバーに移譲しますか？あなたは管理者に降格され、所有者のみの権限を失います。",
-        successMessage: "所有権を移譲しました"
+        label: "所有者にする",
+        confirmText: "選択したメンバーをこの組織の所有者にしますか？このメンバーには、組織の削除を含む所有者のすべての権限が付与されます。あなたも引き続き所有者です。退く場合は、自分のメンバーシップで「ロールを変更」を使用してください。",
+        successMessage: "メンバーが所有者になりました"
       }
     }
   },
@@ -710,32 +749,58 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       business_unit_id: {
         label: "配属先ビジネスユニット",
-        help: "承認時に招待されたユーザーが配属されるビジネスユニット（ADR-0105 D8）。発行者の委任されたサブツリー内にある必要があります。"
+        help: "承認時に招待されたユーザーが配属されるビジネスユニット。発行者の委任されたサブツリー内にある必要があります。"
       },
       positions: {
         label: "配属先ポジション",
-        help: "承認時に割り当てられるポジション名（ADR-0105 D8）。各ポジションの権限セットは、発行者の adminScope で許可されている必要があります。"
+        help: "承認時に割り当てられるポジション名。各ポジションの権限セットは、発行者の adminScope で許可されている必要があります。"
       }
     },
     _views: {
       pending: {
-        label: "保留中"
+        label: "保留中",
+        emptyState: {
+          title: "保留中の招待はありません",
+          message: "招待は、承認・辞退・キャンセルされるか、期限切れになるまでここに表示されます。"
+        }
       },
       accepted: {
-        label: "承認済み"
+        label: "承認済み",
+        emptyState: {
+          title: "承認済みの招待はありません",
+          message: "相手が招待を承認して組織に参加すると、招待はここに移動します。"
+        }
       },
       expired: {
-        label: "期限切れ / キャンセル済み"
+        label: "期限切れ / キャンセル済み",
+        emptyState: {
+          title: "期限切れまたはキャンセル済みの招待はありません",
+          message: "期限切れ、辞退、またはキャンセルされた招待はここに保持されます。"
+        }
       },
       all_invitations: {
-        label: "すべて"
+        label: "すべて",
+        emptyState: {
+          title: "まだ招待がありません",
+          message: "組織への招待は、状態にかかわらずすべてここに一覧表示されます。"
+        }
       }
     },
     _actions: {
       invite_user: {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
-        successMessage: "${result.email} に招待を送信しました"
+        successMessage: "${result.email} に招待を送信しました",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理者",
+              delegated_admin: "委任管理者",
+              member: "メンバー"
+            }
+          }
+        }
       },
       cancel_invitation: {
         label: "招待をキャンセル",
@@ -848,7 +913,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "ビジネスユニット",
     pluralLabel: "ビジネスユニット",
-    description: "階層的な組織ツリーノード（部門 / 事業部 / ビジネスユニット / オフィス）。",
+    description: "会社の組織構造（事業部、部門、地域、オフィス）。データとレポートの範囲指定に使われます。",
     fields: {
       name: {
         label: "名前"
@@ -1008,6 +1073,13 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       revoked: {
         label: "失効済み"
       },
+      revoked_reason: {
+        label: "失効理由",
+        help: "管理者によるパスワードの強制リセットでこのキーが失効したときに記録されます。このようなキーを復元できるのはプラットフォーム管理者のみで、所有者は新しいキーを作成します。キーを復元するとクリアされます。API キー一覧から失効させたキーでは空です。",
+        options: {
+          admin_password_reset: "管理者によるパスワードの強制リセット"
+        }
+      },
       key: {
         label: "ハッシュ済みキー",
         help: "ハッシュ済み API キー値 — クライアントには公開されません"
@@ -1024,19 +1096,47 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_keys: {
-        label: "すべて"
+        label: "すべて",
+        emptyState: {
+          title: "まだ API キーがありません",
+          message: "「キーを作成」でスクリプトや連携用のキーを作成できます。キーは作成時に一度だけ表示されます。"
+        }
       },
       mine: {
-        label: "自分のキー"
+        label: "自分のキー",
+        emptyState: {
+          title: "自分の API キーはまだありません",
+          message: "「キーを作成」で自分のスクリプトや連携用のキーを作成できます。キーは作成時に一度だけ表示されます。"
+        }
       },
       active: {
-        label: "有効"
+        label: "有効",
+        emptyState: {
+          title: "有効な API キーはありません",
+          message: "失効していないキーはすべてここに一覧表示されます。"
+        }
       },
       revoked: {
-        label: "失効済み"
+        label: "失効済み",
+        emptyState: {
+          title: "失効済みのキーはありません",
+          message: "失効したキーはここに移動し、そのキーを使うクライアントは復元されるまでアクセスを失います。"
+        }
       }
     },
     _actions: {
+      create_api_key: {
+        label: "キーを作成",
+        description: "スクリプトや連携用のキーを作成します。キーはあなたとして、あなたのアクセス権で、現在作業中の組織で動作します。",
+        resultDialog: {
+          title: "API キーを作成しました",
+          description: "今すぐキーをコピーしてください。キーは一度しか表示されず、後から取得することはできません。漏えいした場合は失効させて新しいキーを作成してください。",
+          acknowledge: "キーを保存しました",
+          fields: {
+            key: "API キー"
+          }
+        }
+      },
       revoke_api_key: {
         label: "API キーを失効",
         confirmText: "この API キーを失効しますか？使用中のクライアントはすぐにアクセスを失います。",
@@ -1388,16 +1488,32 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_apps: {
-        label: "すべて"
+        label: "すべて",
+        emptyState: {
+          title: "まだ OAuth アプリケーションがありません",
+          message: "アプリケーションを登録すると、そのクライアントがこのシステムでユーザーをサインインさせられるようになります。"
+        }
       },
       mine: {
-        label: "自分のアプリケーション"
+        label: "自分のアプリケーション",
+        emptyState: {
+          title: "自分の OAuth アプリケーションはまだありません",
+          message: "登録したアプリケーションはここに一覧表示されます。"
+        }
       },
       active: {
-        label: "有効"
+        label: "有効",
+        emptyState: {
+          title: "有効な OAuth アプリケーションはありません",
+          message: "アプリケーションは無効化されるまで有効です。無効化されたアプリケーションは「無効」に表示されます。"
+        }
       },
       disabled_apps: {
-        label: "無効"
+        label: "無効",
+        emptyState: {
+          title: "無効な OAuth アプリケーションはありません",
+          message: "無効化されたアプリケーションはここに移動し、再び有効化されるまでそのクライアントはサインインできません。"
+        }
       }
     },
     _actions: {
@@ -1490,7 +1606,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "参照 ID",
-        help: "呼び出し元が指定した相関識別子"
+        help: "このトークンの発行根拠となった同意が紐づけた組織。紐づけがない場合は空"
       },
       authorization_code_id: {
         label: "認可コード ID",
@@ -1550,7 +1666,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "参照 ID",
-        help: "呼び出し元が指定した相関識別子"
+        help: "このリフレッシュトークン系列を開始した同意が紐づけた組織。紐づけがない場合は空"
       },
       authorization_code_id: {
         label: "認可コード ID",
@@ -1618,7 +1734,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "参照 ID",
-        help: "呼び出し元が指定した相関識別子"
+        help: "この同意が紐づける組織。同意時のユーザーのアクティブな組織で、アクティブな組織がなかった場合は空"
       },
       resources: {
         label: "リソース",
@@ -1778,7 +1894,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_sso_provider: {
     label: "SSO プロバイダー",
     pluralLabel: "SSO プロバイダー",
-    description: "この環境がログインをフェデレーションする外部 SSO ID プロバイダー（OIDC / SAML）",
+    description: "このシステムがログインをフェデレーションする外部 SSO ID プロバイダー（OIDC / SAML）",
     fields: {
       id: {
         label: "ID"
@@ -1797,7 +1913,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       domain_verified: {
         label: "ドメイン検証済み",
-        help: "メールドメインの DNS 所有権が証明済みかどうか（ADR-0135 D6）。DNS TXT レコードが解決した後、「ドメインを検証」により設定されます。better-auth が管理し、直接編集はできません。環境でドメイン検証が有効な場合にのみ適用されます。"
+        help: "メールドメインの DNS 所有権が証明済みかどうか。DNS TXT レコードが解決した後、「ドメインを検証」により設定されます。better-auth が管理し、直接編集はできません。環境でドメイン検証が有効な場合にのみ適用されます。"
       },
       oidc_config: {
         label: "OIDC 設定",
@@ -1849,7 +1965,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           },
           clientId: {
             label: "クライアント ID",
-            helpText: "この環境向けに IdP が発行した OAuth クライアント ID。"
+            helpText: "このシステム向けに IdP が発行した OAuth クライアント ID。"
           },
           clientSecret: {
             label: "クライアントシークレット",
@@ -2356,7 +2472,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",
-    description: "通知イベント — emit() 1 回につき 1 行（ADR-0030 レイヤー 2 の入口）",
+    description: "プラットフォームが送信したすべての通知。イベントごとに 1 行です。",
     fields: {
       id: {
         label: "通知 ID"
@@ -2982,13 +3098,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           deprecated: "非推奨"
         }
       },
-      organization_id: {
-        label: "組織",
-        help: "マルチテナント分離のための組織。"
-      },
       environment_id: {
         label: "環境（非推奨）",
-        help: "非推奨。テナント分離には organization_id を使用してください。"
+        help: "非推奨。オーバーレイは環境の行です。テナント列はありません。"
       },
       version: {
         label: "バージョン"
@@ -3082,10 +3194,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       source: {
         label: "ソース"
       },
-      organization_id: {
-        label: "組織",
-        help: "マルチテナント分離のための組織。"
-      },
       recorded_by: {
         label: "記録者",
         help: "この変更を行ったユーザー。NULL = システムによる変更（起動時の同期、マイグレーション、スケジュールジョブ）— センチネル文字列は使いません。"
@@ -3098,7 +3206,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_metadata_audit: {
     label: "メタデータ監査",
     pluralLabel: "メタデータ監査",
-    description: "メタデータ書き込み決定の追記専用監査証跡（ADR-0010）。",
+    description: "メタデータ書き込み決定の追記専用監査証跡。",
     fields: {
       id: {
         label: "ID"
@@ -3118,9 +3226,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "名前"
-      },
-      organization_id: {
-        label: "組織"
       },
       operation: {
         label: "操作",

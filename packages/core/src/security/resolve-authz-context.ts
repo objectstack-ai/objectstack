@@ -46,8 +46,8 @@ import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
 // second copy of a security-relevant classifier exist. See `tryFind`'s catch.
 //
 // [#13667 / #11663 L5] `resolveTenancyPosture` is the REQUESTED tenancy posture. It
-// is read at exactly one place below (§6b) to key the LEGACY unscoped-grant anchor
-// to the same walled postures the BOOT-side detector already keys on — the same
+// is read at exactly one place below (§6) to key the grant anchor of platform standing
+// ({@link grantAnchorsPlatformStanding}) to the same walled postures the BOOT-side detector already keys on — the same
 // module, the same function, the same fail-stricter direction that detector reads.
 // It asks the ENVIRONMENT, never the engine, so the gate adds no query.
 import { isMissingTableError, resolveTenancyPosture } from '@objectstack/types';
@@ -63,6 +63,7 @@ import { SystemObjectName } from '@objectstack/spec/system';
 import type { AuthzPosture, TenancyPosture } from '@objectstack/spec/security';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { isValueDomainMember } from '@objectstack/spec/shared';
+import type { AuthSessionApi } from '@objectstack/spec/contracts';
 
 import { ApiKeyLifecycleRefusalError, resolveApiKeyAdmission } from './api-key.js';
 import type { ApiKeyLifecyclePolicySource, ApiKeyRefusalReason } from './api-key.js';
@@ -108,7 +109,7 @@ export interface ResolvedAuthzContext {
   /**
    * [ADR-0095 D2/D3] The monotonic posture rung this principal resolves to,
    * DERIVED once here from held capability grants (never a better-auth role):
-   * `PLATFORM_ADMIN` (an unscoped `admin_full_access` grant, or — since #11663
+   * `PLATFORM_ADMIN` (the anchoring `admin_full_access` grant, or — since #11663
    * L2 — a VERIFIED `sys_user.email` on the deployment's declared
    * administrator list) > `TENANT_ADMIN`
    * (`organization_admin`) > `MEMBER` (the authenticated floor). `EXTERNAL` is
@@ -145,6 +146,9 @@ export interface ResolvedAuthzContext {
    */
   authGate?: AuthGate;
 }
+
+/** What an in-process better-auth session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 export interface ResolveAuthzInput {
   /** Data engine (ObjectQL) exposing `find(object, { where, limit, context })`. */
@@ -539,7 +543,9 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   // 2. Session / Bearer path — fall back when no API key resolved a user.
   if (!userId && typeof input.getSession === 'function') {
     try {
-      const sessionData = await input.getSession(headers);
+      // [#24196] Read as `AuthSessionApi.getSession` declares its answer, so
+      // every field this arm reads is one the contract names for it.
+      const sessionData: SessionRead | null = await input.getSession(headers);
       userId = sessionData?.user?.id ?? sessionData?.session?.userId;
       tenantId = tenantId ?? sessionData?.session?.activeOrganizationId;
       if (userId) {
@@ -887,6 +893,52 @@ function grantOrganizationOf(row: unknown): string | null {
   const value = r.organization_id ?? r.organizationId;
   if (value === null || value === undefined || value === '') return null;
   return String(value);
+}
+
+/**
+ * [ADR-0131 D5] Does a stored grant ANCHOR platform-admin standing — the one
+ * predicate, with the posture as its parameter, that §6b asks of every
+ * `admin_full_access` grant:
+ *
+ *  - a walled posture (`group` / `isolated`): no grant anchors standing; it is
+ *    config-derived (`OS_PLATFORM_OWNER_EMAIL`, §6b-config) and nothing else
+ *    (#11663 L5);
+ *  - `single`: the grant the first-user promotion writes, which is owned by the
+ *    Default Organization ({@link readDefaultOrganizationId}), and the
+ *    organization-less row that promotion wrote before it was.
+ *
+ * Any other organization's grant of the set confers the set, never standing.
+ */
+function grantAnchorsPlatformStanding(
+  grant: unknown,
+  anchor: { walled: boolean; defaultOrganizationId: string | undefined },
+): boolean {
+  if (anchor.walled) return false;
+  const organizationId = grantOrganizationOf(grant);
+  return organizationId === null
+    || (anchor.defaultOrganizationId !== undefined && organizationId === anchor.defaultOrganizationId);
+}
+
+/**
+ * [ADR-0131 D3/D5] The deployment's Default Organization: the one with
+ * `slug = 'default'`, else the only organization there is; `undefined` when
+ * neither exists (several organizations, none of them `default`, name none).
+ * The definition plugin-auth's boot invariant (`default-organization-invariant.ts`)
+ * creates the organization by, read-only here — and the one plugin-security's
+ * promotion resolves the owner of the grant it writes by, so the row it writes
+ * is the row this resolver reads as the anchor.
+ *
+ * A composition that registers no organization object holds none, and is not
+ * read: the engine refuses an unregistered name as "object not found".
+ */
+async function readDefaultOrganizationId(ql: any): Promise<string | undefined> {
+  if (!registryHoldsObject(ql, SystemObjectName.ORGANIZATION)) return undefined;
+  const idOf = (row: any): string | undefined =>
+    row?.id === undefined || row?.id === null || String(row.id) === '' ? undefined : String(row.id);
+  const bySlug = await tryFind(ql, SystemObjectName.ORGANIZATION, { slug: 'default' }, 1);
+  if (idOf(bySlug[0])) return idOf(bySlug[0]);
+  const all = await tryFind(ql, SystemObjectName.ORGANIZATION, {}, 2);
+  return all.length === 1 ? idOf(all[0]) : undefined;
 }
 
 /** The activation ledger's catalog types the resolver honours (ADR-0126 §3 regime C, as ADR-0131 D6 amends it). */
@@ -1420,7 +1472,42 @@ export async function resolveUserAuthzGrants(
   //    positions' — never a catalog row's `active` column.
   // (read in Leg 1 above)
   const upsRows = upsRowsAll.filter((r) => isGrantActive(r, nowMs));
-  const applyingGrants = upsRows.filter((r) => grantAppliesInTenant(grantOrganizationOf(r), tenantId));
+  // [ADR-0131 D5 / #11663 L5] The platform-standing ANCHOR of a stored grant — one
+  // derivation site, with the posture as its parameter ({@link grantAnchorsPlatformStanding}):
+  //
+  //  - WALLED: no grant anchors standing. The walled half of the legacy anchor is
+  //    retired, so on a walled rig platform standing is config-derived
+  //    (`OS_PLATFORM_OWNER_EMAIL`, §6b-config) and nothing else.
+  //  - `single` — the DEFAULT, what a deployment that configured no tenancy at all
+  //    resolves to: the `admin_full_access` grant `bootstrapPlatformAdmin` mints for
+  //    the first human user, which D5 has OWNED BY THE DEFAULT ORGANIZATION (#11979;
+  //    maintainer ruling A on #18707 keeps the zero-config promotion and moves only the
+  //    row's owner), and the organization-less row that promotion wrote before it was —
+  //    the row D10's ceremony attributes to that same organization. ⛔ Reading only the
+  //    organization-less row would leave every promoted `single` rig with NO platform
+  //    administrator once its grant is the Default Organization's.
+  //
+  // The REQUESTED posture is the input, not the effective one — the same source and the
+  // same fail-stricter direction the boot side reads: a deployment that ASKED for a wall
+  // stays walled here even while running degraded (`OS_ALLOW_DEGRADED_TENANCY=1`).
+  // `resolveTenancyPosture()` asks the ENVIRONMENT, so the posture costs no query; the
+  // Default Organization is read only for a principal that holds an organization-owned
+  // `admin_full_access` grant under `single`, so a principal holding none issues exactly
+  // the reads it issued before (the batch-equivalence goldens are unchanged).
+  const walled = postureEnforcesWall(resolveTenancyPosture());
+  const defaultOrganizationId =
+    !walled && upsRows.some((r) => grantSetNameOf(r) === ADMIN_FULL_ACCESS && grantOrganizationOf(r) !== null)
+      ? await readDefaultOrganizationId(ql)
+      : undefined;
+  const platformAnchor = { walled, defaultOrganizationId };
+  const anchorsPlatformStanding = (grant: unknown): boolean =>
+    grantSetNameOf(grant) === ADMIN_FULL_ACCESS && grantAnchorsPlatformStanding(grant, platformAnchor);
+  // An anchoring grant applies in whichever organization the principal acts in, as the
+  // organization-less row it replaces always did: platform standing is the deployment's,
+  // never one tenant's.
+  const applyingGrants = upsRows.filter(
+    (r) => grantAppliesInTenant(grantOrganizationOf(r), tenantId) || anchorsPlatformStanding(r),
+  );
   const catalog = securityCatalogReaderOf(ql);
   const grantSetNames: string[] = [];
   for (const grant of applyingGrants) {
@@ -1430,30 +1517,6 @@ export async function resolveUserAuthzGrants(
   // Position-bound sets (§6a), by name, in the order the held positions name them.
   const boundSetNames: string[] = [];
   let disabled = { positions: new Set<string>(), permissions: new Set<string>() };
-  // [#11663 L5] …and under a WALLED posture it no longer is. This is the EXIT of
-  // the migration window L4 opened: the walled half of the legacy unscoped anchor
-  // is RETIRED, so on a walled rig platform standing is config-derived
-  // (`OS_PLATFORM_OWNER_EMAIL`, §6b-config) and nothing else. Read ADR-0131 D5 as
-  // amended 2026-09-17 (#18413) before widening this: the anchor retires here for
-  // the WALLED half only.
-  //
-  // ⛔ The `single` posture is deliberately NOT gated, and this is the whole of why
-  // the flag exists rather than a plain deletion. Under `single` — the DEFAULT, what
-  // a deployment that configured no tenancy at all resolves to — `bootstrapPlatformAdmin`
-  // MINTS this very row for the first human user, and that promotion is ruled correct
-  // and unchanged (Choice 4A, #11974; maintainer 2026-09-08, recorded in ADR-0131's 2026-09-17 amendment, verbatim: "The
-  // rest of Choice 4A (#11974, 2026-08-25) stands: retiring the walled write must not
-  // retire the `single` one"). A development environment started for a moment cannot be
-  // asked to declare an administrator first, so deleting the row route for every posture
-  // would leave every zero-config rig with NO platform administrator at all. The
-  // `single` half's own disposition is Choice 4B (#11979) — ⛔ a different card.
-  //
-  // The REQUESTED posture is the input, not the effective one — the same source and the
-  // same fail-stricter direction the boot side reads: a deployment that ASKED for a wall
-  // stays walled here even while running degraded (`OS_ALLOW_DEGRADED_TENANCY=1`).
-  // `resolveTenancyPosture()` asks the ENVIRONMENT, so this gate issues no query and the
-  // pinned batch-equivalence query multiset cannot move whichever way it answers.
-  const legacyGrantAnchorRetired = postureEnforcesWall(resolveTenancyPosture());
   let hasPlatformAdminGrant = false;
 
   // 5b. [ADR-0090 D5] Audience anchor: every AUTHENTICATED member implicitly
@@ -1520,28 +1583,23 @@ export async function resolveUserAuthzGrants(
     if (!name) continue;
     const body = await catalogSetBody(catalog, name);
     if (!body) continue;
-    const ownGrant = grantOrganizationOf(grant) !== null;
     const active = !disabled.permissions.has(name);
     take(body, active);
-    // platform_admin (ADR-0068 D2) is DERIVED from an UNSCOPED admin_full_access
+    // platform_admin (ADR-0068 D2) is DERIVED from the anchoring admin_full_access
     // USER grant — the single source of truth (no trusted stored boolean). The
-    // set is the catalog's one `admin_full_access` (ADR-0131 D4); an
-    // organization's grant of it confers the set, never platform standing.
+    // set is the catalog's one `admin_full_access` (ADR-0131 D4); a grant the
+    // anchor does not read (any other organization's, and every grant under a
+    // wall) confers the set, never platform standing.
     //
     // [ADR-0049] A DEACTIVATED set confers no standing either: a deactivated
     // `admin_full_access` must not keep conferring PLATFORM_ADMIN.
     //
-    // [#11663 L5] `legacyGrantAnchorRetired` gates the ANCHOR, not the grant: the
-    // set's own name and capabilities are pushed below exactly as for any other
-    // held set, on every posture. What a walled rig stops deriving from the
-    // grant is PLATFORM_ADMIN STANDING — the rung, the built-in
-    // `platform_admin` position and everything downstream of them.
-    if (
-      !ownGrant
-      && body.name === ADMIN_FULL_ACCESS
-      && active
-      && !legacyGrantAnchorRetired
-    ) {
+    // [#11663 L5] The posture gates the ANCHOR, not the grant: the set's own name
+    // and capabilities are pushed below exactly as for any other held set, on
+    // every posture. What a walled rig stops deriving from the grant is
+    // PLATFORM_ADMIN STANDING — the rung, the built-in `platform_admin` position
+    // and everything downstream of them.
+    if (anchorsPlatformStanding(grant) && active) {
       hasPlatformAdminGrant = true;
     }
   }
@@ -1576,8 +1634,8 @@ export async function resolveUserAuthzGrants(
   //     ADDITIVE, never subtractive: nothing above is revoked here (design §5
   //     step 3). A deployment that has declared no administrators resolves
   //     exactly as it did — `platformAdminConfig.emails` is empty and the branch
-  //     short-circuits before it looks at any row. Under `single` the legacy grant
-  //     read above then remains the only anchor; under a WALLED posture [#11663 L5]
+  //     short-circuits before it looks at any row. Under `single` the grant anchor
+  //     read above (§6) then remains the only anchor; under a WALLED posture [#11663 L5]
   //     that read is retired, so an undeclared walled rig has NO platform
   //     administrator — which is the fail-closed answer the boot-side backstop in
   //     `plugin-security` announces at startup.
@@ -1616,7 +1674,7 @@ export async function resolveUserAuthzGrants(
 
   // 6d. [ADR-0095 D2/D3] Resolve the posture rung ONCE, from held CAPABILITY
   //     grants — never from a better-auth role. `PLATFORM_ADMIN` from the
-  //     unscoped `admin_full_access` grant (the same `viewAllRecords`/
+  //     anchoring `admin_full_access` grant (the same `viewAllRecords`/
   //     `modifyAllRecords` evidence the superuser bypass trusts); `TENANT_ADMIN`
   //     from the `organization_admin` grant (auto-provisioned from the better-
   //     auth owner/admin role at §3 above — a provisioning source, not an
@@ -1662,7 +1720,9 @@ export async function resolveUserAuthzGrants(
  *
  * ADR-0068 D2 defined PLATFORM standing as one thing: an UNSCOPED
  * (`organization_id = null`) `sys_user_permission_set` grant on the
- * `admin_full_access` set, held **now**. Since #11663 L2 there is a SECOND
+ * `admin_full_access` set, held **now** — under `single` since ADR-0131 D5 the
+ * grant owned by the Default Organization, beside that legacy row (§6,
+ * {@link grantAnchorsPlatformStanding}). Since #11663 L2 there is a SECOND
  * anchor beside it — a `sys_user` row whose VERIFIED email is on the
  * deployment's declared administrator list (`OS_PLATFORM_OWNER_EMAIL`) — and
  * this predicate answers for both, for free, because it is a projection rather
@@ -1673,7 +1733,7 @@ export async function resolveUserAuthzGrants(
  *
  * It is a PROJECTION of {@link resolveUserAuthzGrants}, never a second
  * derivation: the answer is the `PLATFORM_ADMIN` rung of the posture ladder,
- * and that rung is derived from the unscoped-grant evidence and nothing else.
+ * and that rung is derived from the anchoring-grant evidence and nothing else.
  * Everything that governs those grants therefore applies here by construction
  * and cannot drift from it — the ADR-0091 validity window (§6), the ADR-0049
  * `active` flag on the catalogue row (§6b), the system-identity read, and the

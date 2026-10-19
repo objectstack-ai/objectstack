@@ -18,7 +18,9 @@
  *    with `strategy: 'rotation'`, 14 daily shards, and only the BASE name is
  *    ever a `managedObjectFields` key);
  *  - driver-internal tables (`_objectstack_sequences`, `__os_mig_*`);
- *  - an application table with no reserved prefix.
+ *  - an application table with no reserved prefix;
+ *  - [#24059] a table the composition declares OUTSIDE the object set
+ *    (`sys_packages`, the package registry's), which `os migrate apply` creates.
  *
  * And the third direction, which is neither: every way the sweep can fail to
  * OBTAIN an answer must report `unreadable`, never an empty `tables` list.
@@ -86,6 +88,8 @@ const MIRRORED: Premise = { servedBoot: { mirrored: true }, hostConfigPath: '/ap
 async function sweep(opts: {
   managed?: string[] | null;
   declared?: Array<{ name: string }>;
+  /** `SchemaStack.nonObjectTables` — none unless a case declares one. */
+  nonObjectTables?: string[];
   client?: string | null;
   answer?: unknown | (() => unknown);
   composition?: Premise;
@@ -93,6 +97,7 @@ async function sweep(opts: {
   return collectUnmanagedTables({
     drivers: [fakeDriver(opts)],
     declaredObjects: opts.declared ?? [],
+    nonObjectTables: opts.nonObjectTables ?? [],
     composition: opts.composition ?? MIRRORED,
     normalize,
   });
@@ -166,20 +171,63 @@ describe('readManagedTableNames — an unreadable map is null, never an empty se
 
 describe('buildKnownTableNames — the managed set UNION every declared object', () => {
   it('carries both, so a declared-but-unexamined object is accounted for', () => {
-    const known = buildKnownTableNames(new Set(['sys_user']), [{ name: 'sys_secret' }]);
+    const known = buildKnownTableNames(new Set(['sys_user']), [{ name: 'sys_secret' }], []);
     expect(known.has('sys_user')).toBe(true);
     expect(known.has('sys_secret')).toBe(true);
   });
 
   it('adds a legacy double-underscore name under both spellings', () => {
-    const known = buildKnownTableNames(new Set(), [{ name: 'crm__account' }]);
+    const known = buildKnownTableNames(new Set(), [{ name: 'crm__account' }], []);
     expect(known.has('crm__account')).toBe(true);
     expect(known.has('account')).toBe(true);
   });
 
   it('ignores objects with no usable name', () => {
-    const known = buildKnownTableNames(new Set(), [{}, { name: '' }, null, undefined] as never[]);
+    const known = buildKnownTableNames(new Set(), [{}, { name: '' }, null, undefined] as never[], []);
     expect(known.size).toBe(0);
+  });
+});
+
+/**
+ * [#24059] The table a composition declares OUTSIDE the object set:
+ * `sys_packages`, which `os migrate apply` creates from the package registry's
+ * `package.storage` declaration (#23022) and which no object declares. Neither
+ * the managed set nor the declared objects name it, so every plan after an
+ * apply reported the table that apply had just created. Its name reaches the
+ * sweep from that same declaration (`SchemaStack.nonObjectTables`); these hold
+ * the sweep to it in both directions.
+ */
+describe('[#24059] a table the composition declares outside the object set', () => {
+  it('is in the known set, verbatim — and only when declared', () => {
+    expect(buildKnownTableNames(new Set(['sys_user']), [{ name: 'sys_secret' }], ['sys_packages']).has('sys_packages'))
+      .toBe(true);
+    // The managed set and the declared objects alone never name it.
+    expect(buildKnownTableNames(new Set(['sys_user']), [{ name: 'sys_secret' }], []).has('sys_packages'))
+      .toBe(false);
+  });
+
+  it('after an apply: the registry table is not reported, a genuinely stranded table still is', async () => {
+    const report = await sweep({
+      managed: ['sys_user'],
+      declared: [{ name: 'sys_secret' }],
+      nonObjectTables: ['sys_packages'],
+      answer: rows('sys_user', 'sys_secret', 'sys_packages', 'sys_legacy_widget'),
+    });
+    expect(report).toMatchObject({ status: 'read', physicalTables: 4, tables: [{ table: 'sys_legacy_widget' }] });
+  });
+
+  it('DECISION: a boot that composed no package registry declares no such table, so a sys_packages left in its database IS reported', async () => {
+    // No declaration accounts for it there: nothing on that deployment creates
+    // or reads the table, which is what this section reports.
+    const report = await sweep({
+      managed: ['sys_user'],
+      nonObjectTables: [],
+      answer: rows('sys_user', 'sys_packages', 'sys_legacy_widget'),
+    });
+    expect(report).toMatchObject({
+      status: 'read',
+      tables: [{ table: 'sys_legacy_widget' }, { table: 'sys_packages' }],
+    });
   });
 });
 
@@ -200,7 +248,7 @@ describe('selectUnmanagedTables — the predicate', () => {
     // one real orphan.
     const declared = Array.from({ length: 72 }, (_, i) => ({ name: `sys_declared_${i}` }));
     const physical = [...declared.map((o) => o.name), 'sys_scim_provider'];
-    const known = buildKnownTableNames(new Set(['sys_user']), declared);
+    const known = buildKnownTableNames(new Set(['sys_user']), declared, []);
     expect(selectUnmanagedTables(physical, known)).toEqual([{ table: 'sys_scim_provider' }]);
   });
 
@@ -361,7 +409,9 @@ describe('collectUnmanagedTables — every no-answer path is unreadable, not emp
   });
 
   it('is unreadable when the plan holds no driver at all', async () => {
-    const report = await collectUnmanagedTables({ drivers: [], declaredObjects: [], composition: MIRRORED, normalize });
+    const report = await collectUnmanagedTables({
+      drivers: [], declaredObjects: [], nonObjectTables: [], composition: MIRRORED, normalize,
+    });
     expect(report.status).toBe('unreadable');
   });
 });
@@ -383,6 +433,7 @@ describe('collectUnmanagedTables — every planned database, or an answer about 
     const report = await collectUnmanagedTables({
       drivers: [primary(rows('sys_user', 'contacts')), sibling(rows('sys_audit_log', 'sys_retired_event'))],
       declaredObjects: [],
+      nonObjectTables: [],
       composition: MIRRORED,
       normalize,
     });
@@ -395,6 +446,7 @@ describe('collectUnmanagedTables — every planned database, or an answer about 
     const report = await collectUnmanagedTables({
       drivers: [primary(rows('sys_user', 'sys_audit_log')), sibling(rows('sys_audit_log', 'sys_user'))],
       declaredObjects: [],
+      nonObjectTables: [],
       composition: MIRRORED,
       normalize,
     });
@@ -405,6 +457,7 @@ describe('collectUnmanagedTables — every planned database, or an answer about 
     const report = await collectUnmanagedTables({
       drivers: [primary(rows('sys_user', 'sys_scim_provider')), sibling(null)],
       declaredObjects: [],
+      nonObjectTables: [],
       composition: MIRRORED,
       normalize,
     });
@@ -467,6 +520,23 @@ describe('rendering — informational, and silent when there is nothing to say',
     expect(text.toLowerCase()).not.toContain('drop ');
     expect(text.toLowerCase()).not.toContain('--allow-destructive');
     expect(text.toLowerCase()).not.toContain('delete');
+  });
+
+  it('closes with a claim of no row or table, never that a plan writes nothing', () => {
+    // A plan's read-only boot can still switch a SQLite file's journal mode,
+    // which rewrites its header: "writes nothing" is false there, "no row or
+    // table" is true on every target. `os migrate plan` appends the note
+    // naming the switch to this line on a SQLite file (its own pin).
+    const lines = renderUnmanagedTables({
+      status: 'read',
+      prefixes: ['sys_'],
+      physicalTables: 3,
+      tables: [{ table: 'sys_legacy_widget' }],
+    });
+    expect(lines[lines.length - 1]).toBe(
+      'They are reported for information only — nothing here drops them, and a plan writes no row or table.',
+    );
+    expect(lines.join('\n')).not.toContain('writes nothing');
   });
 
   it('describes a collapsed rotation family by its shard count', () => {

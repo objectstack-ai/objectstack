@@ -187,6 +187,56 @@ export type GetInstalledPackageRequest = z.input<typeof GetInstalledPackageReque
 // ==========================================
 
 /**
+ * The one sentence an authored install that declares a platform scope is
+ * refused with. Exported so a door that re-locates the refusal surfaces this
+ * text rather than wording a second one.
+ */
+export function packageInstallScopeRefusal(input: unknown): string {
+  return `manifest.scope ${JSON.stringify(input)} is not a scope a package installed through `
+    + 'POST /api/v1/packages may declare: an install there AUTHORS a project package. '
+    + '`cloud` and `system` are the scopes of packages the platform ships, which are read-only, '
+    + 'so an authored package declaring one could never again be deleted, disabled or '
+    + 'overwritten through the API. Remove `scope` (it defaults to `project`), or write `scope: \'project\'`.';
+}
+
+/**
+ * The manifest an install through `POST /api/v1/packages` carries — on BOTH
+ * body forms: the wrapped request's `manifest`, and the bare manifest that is
+ * the whole body.
+ *
+ * It is `ManifestSchema` with ONE key narrowed: `scope` admits only
+ * `project` (or absence, which defaults to it). Every other key, the strict
+ * close and its unknown-key prescription ride the `.extend()` unchanged.
+ *
+ * ## Why `scope` narrows here, and only here
+ *
+ * The package writability rule (`isWritablePackage`,
+ * `packages/metadata-protocol/src/package-writability.ts`) judges a registered
+ * package read-only by its stored `manifest.scope`: `cloud` and `system` mark
+ * a package the platform ships. An install through this door AUTHORS the row,
+ * so a manifest that declared one of those scopes produced an authored
+ * package that the read-only gate then refused on every API exit — `DELETE`,
+ * `PATCH …/disable` and `?overwrite=true` all answered `422`
+ * `WRITABLE_PACKAGE_REQUIRED` — and the row survived a restart. The door
+ * parses its body through this declaration and answers what it declares
+ * (see {@link PackageInstallBodySchema}), so the refusal lands HERE, loud, at
+ * parse time.
+ *
+ * ⛔ Not `ManifestSchema.scope` for every producer: platform packages
+ * legitimately carry `cloud` / `system`, and they reach the registry by code
+ * boot (`registerApp`), never over this wire. ⛔ Nor a silent rewrite of the
+ * declared scope at the door: the author is told, and writes `project`.
+ */
+export const PackageInstallManifestSchema = lazySchema(() => ManifestSchema.extend({
+  scope: z.enum(['project'], { error: (iss) => packageInstallScopeRefusal(iss.input) })
+    .default('project')
+    .describe('Deployment scope — an authored install is always `project`; `cloud` / `system` are refused (platform-shipped, read-only scopes)'),
+}).describe('Package manifest installed through POST /api/v1/packages (AUTHORING stage; scope is project)'));
+export type PackageInstallManifest = z.input<typeof PackageInstallManifestSchema>;
+/** Post-parse shape of {@link PackageInstallManifest} — defaults applied, transforms run (ADR-0122). */
+export type PackageInstallManifestParsed = z.infer<typeof PackageInstallManifestSchema>;
+
+/**
  * Request body for installing a package, in its WRAPPED form.
  *
  * ## The door this is bound to, and the one it used to name
@@ -205,7 +255,8 @@ export type GetInstalledPackageRequest = z.input<typeof GetInstalledPackageReque
  *
  * ## The manifest STAGE this names
  *
- * `manifest` is `ManifestSchema`, the **AUTHORING** stage — `objects` is
+ * `manifest` is {@link PackageInstallManifestSchema} — `ManifestSchema` with
+ * `scope` narrowed to `project` — the **AUTHORING** stage: `objects` is
  * `z.array(z.string())`, GLOB PATTERNS naming files a file-based loader should
  * read. That is the only stage this HTTP door is reached at: the ASSEMBLED
  * stage reaches the same table through `ObjectQL.registerApp`, never over this
@@ -234,8 +285,8 @@ export const PackageInstallRequestSchema = lazySchema(() => strictObject({
     + 'key, or spell it as the declared install option it meant; the declared keys are '
     + 'enumerated by `PackageInstallRequestSchema` (@objectstack/spec, api/package-api.zod.ts).',
 }, {
-  /** Package manifest to install — the AUTHORING stage */
-  manifest: ManifestSchema.describe('Package manifest to install (AUTHORING stage: `objects` are glob patterns)'),
+  /** Package manifest to install — the AUTHORING stage, `scope` narrowed to `project` ({@link PackageInstallManifestSchema}) */
+  manifest: PackageInstallManifestSchema.describe('Package manifest to install (AUTHORING stage: `objects` are glob patterns; `scope` is `project`)'),
 
   /** User-provided settings at install time */
   settings: z.record(z.string(), z.unknown()).optional()
@@ -334,7 +385,7 @@ export const PackageInstallRequestSchema = lazySchema(() => strictObject({
    * ⛔ Never remove this declaration while the handler still reads the key.
    */
   overwrite: z.boolean().optional()
-    .describe('Overwrite an already-installed package id instead of answering 409 Conflict'),
+    .describe('Overwrite an already-installed package id instead of answering 409 Conflict; an id the deployment ships read-only (code-booted, or scope cloud / system) is refused 422 WRITABLE_PACKAGE_REQUIRED'),
 
   /** Current platform version for compatibility verification */
   platformVersion: z.string().optional()
@@ -382,13 +433,14 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  * Every parse is a FULL parse of ONE coherent form, the discipline
  * `InstalledPackageAtEitherStageSchema` (`./package-api-assembled.zod.ts`)
  * records on the read side. The
- * two are disjoint by construction — `ManifestSchema` is a `strictObject`
- * with no `manifest` key, so a wrapped body can never fall through to the bare
+ * two are disjoint by construction — the install manifest
+ * ({@link PackageInstallManifestSchema}, an `.extend()` of `ManifestSchema`)
+ * is a `strictObject` with no `manifest` key, so a wrapped body can never fall through to the bare
  * branch, and a bare manifest has no `manifest` key, so it can never satisfy
  * the wrapped branch.
  *
  * Both branches refuse an unknown key by name. The bare branch is
- * `ManifestSchema`, a `strictObject`; the wrapped branch,
+ * {@link PackageInstallManifestSchema}, a `strictObject`; the wrapped branch,
  * {@link PackageInstallRequestSchema}, is a `strictObject` too. So
  * `{ manifest, enabledOnInstall: false }` — a misspelled `enableOnInstall` —
  * is refused naming `enabledOnInstall` and offering the declared key, where the
@@ -464,7 +516,7 @@ export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSc
  */
 export const PackageInstallBodySchema = lazySchema(() => z.union([
   PackageInstallRequestSchema,
-  ManifestSchema,
+  PackageInstallManifestSchema,
 ]).describe('Install package request body, wrapped or as a bare manifest'));
 export type PackageInstallBody = z.input<typeof PackageInstallBodySchema>;
 /** Post-parse shape of {@link PackageInstallBody} — defaults applied, transforms run (ADR-0122). */

@@ -16,6 +16,11 @@
  *  - creates and deletes keep their rows;
  *  - the count and every listing face agree with the rows served.
  *
+ * [ADR-0139 E6] The rule is a predicate over the writer-stamped
+ * `changed_fields` column (`activity-changed-fields.ts`), with no SYSTEM
+ * pre-scan: the same scene, read through it, plus the unstamped row it
+ * withholds from every non-system reader.
+ *
  * ## Why a real engine, a real driver and the real plugin
  *
  * The rule is a WHERE the redaction's middleware ANDs into the read, so whether
@@ -41,14 +46,17 @@ import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 import { AuditPlugin } from './audit-plugin.js';
-import { computeWithheldUpdateFilter, isWithheldOnlyUpdate } from './activity-field-redaction.js';
-import { PARENT_GATE_SCAN_LIMIT } from './parent-record-read-gate.js';
+import { computeWithheldUpdateFilter, keptRowsOfParent } from './activity-field-redaction.js';
+import { planActivityStamp } from './activity-changed-fields.js';
+import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 
 const ACTIVITY = 'sys_activity';
 /** A record the member reads with two fields withheld. */
 const ITEM = 'awu_item';
 /** A record the member reads with NO field served: every change is withheld. */
 const SEALED = 'awu_sealed';
+/** [ADR-0139 E6] A served field whose name is a prefix of a withheld one: membership, not substring. */
+const PREFIX = 'awu_prefix';
 const HARNESS_PACKAGE = 'com.objectstack.audit.test.activity-withheld-update';
 
 const SYS = { isSystem: true } as const;
@@ -79,6 +87,16 @@ const sealedObject = {
   },
 };
 
+const prefixObject = {
+  name: PREFIX,
+  label: 'Withheld Update Prefix',
+  fields: {
+    name: { name: 'name', label: 'Name', type: 'text' as const },
+    f: { name: 'f', label: 'F', type: 'text' as const },
+    f_secret: { name: 'f_secret', label: 'F Secret', type: 'text' as const },
+  },
+};
+
 type Row = Record<string, any>;
 const meta = (r: Row | undefined) => (typeof r?.metadata === 'string' ? JSON.parse(r.metadata) : null);
 const changeKeys = (r: Row | undefined) => {
@@ -97,18 +115,34 @@ describe('[#21388] an update whose every recorded change is withheld from the re
   const allFields = (object: string): string[] =>
     Object.keys(((engine as any).getSchema(object)?.fields ?? {}) as Record<string, unknown>);
 
-  /** The double: the two contract members, answered per reader. */
+  /** The double: the two field members, answered per reader, and the two read halves (below). */
   const security = {
     async getReadableFields(object: string, context?: any): Promise<string[] | undefined> {
       const all = allFields(object);
       if (context?.userId === MEMBER.userId) {
         if (object === ITEM) return all.filter((f) => !WITHHELD.has(f));
         if (object === SEALED) return [];
+        if (object === PREFIX) return all.filter((f) => f !== 'f_secret');
       }
       return all;
     },
     async getQueryableFields(object: string, context?: any): Promise<string[] | undefined> {
       return security.getReadableFields(object, context);
+    },
+    // [ADR-0139 E5] Every reader reads every parent record here: the two halves
+    // of a read the engine composes the parent-record gate's ReadableIds
+    // leaves from — the object-level admission and the read scope (none).
+    async canReadObject(): Promise<boolean> {
+      return true;
+    },
+    async getReadFilter(): Promise<Record<string, unknown> | undefined> {
+      return undefined;
+    },
+    // The engine's fallback admission when `canReadObject` is absent. Like
+    // plugin-security's (measured), it explains a principal's access and
+    // answers a SYSTEM context "not allowed".
+    async explain(_request: { object: string }, context?: any): Promise<{ allowed: boolean }> {
+      return { allowed: !context?.isSystem };
     },
   };
 
@@ -125,6 +159,7 @@ describe('[#21388] an update whose every recorded change is withheld from the re
       init: async (ctx: any) => ctx.registerService('security', security),
       start: async () => {},
     } as any);
+    await kernel.use(singlePostureTenancy());
     await kernel.use(new AuditPlugin());
     await kernel.bootstrap();
 
@@ -134,6 +169,7 @@ describe('[#21388] an update whose every recorded change is withheld from the re
     engine.registerDriver(driver, true);
     engine.registry.registerObject(itemObject as any, HARNESS_PACKAGE);
     engine.registry.registerObject(sealedObject as any, HARNESS_PACKAGE);
+    engine.registry.registerObject(prefixObject as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
 
     // Every row below is written by the real audit writer's CRUD mirror.
@@ -162,6 +198,33 @@ describe('[#21388] an update whose every recorded change is withheld from the re
     const sealedRows = (await engine.find(ACTIVITY, { where: { object_name: SEALED }, context: SYS })) as Row[];
     rowIds.sealedCreated = String(sealedRows.find((r) => r.type === 'created')?.id ?? '');
     rowIds.sealedUpdated = String(sealedRows.find((r) => r.type === 'updated')?.id ?? '');
+
+    // [ADR-0139 E6] `f` is served, `f_secret` is withheld, and `f` is a prefix of it.
+    ids.prefix = (await engine.insert(PREFIX, { name: 'prefix', f: 'p1', f_secret: 's1' }, { context: SYS })).id;
+    await update(PREFIX, ids.prefix, { f_secret: 's2' }); // withheld whole
+    await update(PREFIX, ids.prefix, { f: 'p2' }); // served whole
+    const prefixRows = (await engine.find(ACTIVITY, { where: { object_name: PREFIX }, context: SYS })) as Row[];
+    rowIds.prefixWithheld = String(prefixRows.find((r) => changeKeys(r).join() === 'f_secret')?.id ?? '');
+    rowIds.prefixServed = String(prefixRows.find((r) => changeKeys(r).join() === 'f')?.id ?? '');
+
+    // [ADR-0139 E6] An app's own row, inserted with no stamp of its own: the
+    // before-insert hook stamps it `[]` (not a recorded change), so it is kept.
+    rowIds.note = String(
+      (await engine.insert(
+        ACTIVITY,
+        {
+          type: 'note',
+          summary: 'a note',
+          timestamp: new Date().toISOString(),
+          object_name: ITEM,
+          record_id: ids.item,
+          metadata: JSON.stringify({ channel: 'call' }),
+          // A writer's own value is not the stamp: the planner's is.
+          changed_fields: ['f_open'],
+        },
+        { context: SYS },
+      )).id,
+    );
   }, 120_000);
 
   afterAll(async () => {
@@ -180,7 +243,22 @@ describe('[#21388] an update whose every recorded change is withheld from the re
     // `internal` field from both sides, so this is not a redaction artefact.
     expect(meta(byId(rowIds.empty))).toMatchObject({ old: {}, new: {} });
     expect(changeKeys(byId(rowIds.withheld))).toEqual(['f_admin', 'f_admin2']);
-    expect(atRest).toHaveLength(5);
+    expect(atRest).toHaveLength(6);
+  });
+
+  it('[ADR-0139 E6] at rest, every row carries the planner\'s stamp of its recorded change', async () => {
+    const atRest = await read(SYS);
+    const stampOf = (id: string) => {
+      const row = atRest.find((r) => r.id === id);
+      return { changed_fields: row?.changed_fields, milestone_key: row?.milestone_key ?? null };
+    };
+    expect(stampOf(rowIds.withheld)).toEqual({ changed_fields: ['f_admin', 'f_admin2'], milestone_key: null });
+    expect(stampOf(rowIds.mixed)).toEqual({ changed_fields: ['f_admin', 'f_open'], milestone_key: null });
+    expect(stampOf(rowIds.empty)).toEqual({ changed_fields: [], milestone_key: null });
+    expect(stampOf(rowIds.created)).toEqual({ changed_fields: [], milestone_key: null });
+    // The hook's answer, over the writer's own value.
+    expect(stampOf(rowIds.note)).toEqual({ changed_fields: [], milestone_key: null });
+    for (const row of atRest) expect(row.changed_fields, String(row.id)).toEqual(planActivityStamp(row.metadata)?.changed_fields);
   });
 
   // ── the card's three pins ───────────────────────────────────────────────
@@ -220,8 +298,26 @@ describe('[#21388] an update whose every recorded change is withheld from the re
 
   it('the member is served exactly the other rows', async () => {
     expect((await read(MEMBER)).map((r) => r.id)).toEqual(
-      [rowIds.created, rowIds.mixed, rowIds.empty, rowIds.served],
+      [rowIds.created, rowIds.mixed, rowIds.empty, rowIds.served, rowIds.note],
     );
+  });
+
+  it('[ADR-0139 D4] a read naming its parents by $in is served exactly the rows the same read spelled as an $or is', async () => {
+    const NAMED = [ITEM, SEALED, PREFIX];
+    const named = { object_name: { $in: NAMED } };
+    // A spelling neither rule reads as naming its parents: both keep their full enumeration.
+    const spelledOut = { $or: NAMED.map((object_name) => ({ object_name })) };
+    const idsOf = async (where: Record<string, unknown>, context: any) =>
+      ((await engine.find(ACTIVITY, { where, orderBy: ORDER, context })) as Row[]).map((r) => String(r.id));
+    for (const context of [MEMBER, ADMIN]) {
+      const full = await idsOf(spelledOut, context);
+      expect(await idsOf(named, context)).toEqual(full);
+      expect(await engine.count(ACTIVITY, { where: named }, { context })).toBe(full.length);
+    }
+    const member = await idsOf(named, MEMBER);
+    expect(member).not.toContain(rowIds.withheld);
+    expect(member).toContain(rowIds.mixed);
+    expect(await idsOf(named, ADMIN)).toContain(rowIds.withheld);
   });
 
   // ── every listing face agrees with the rows served ──────────────────────
@@ -240,7 +336,7 @@ describe('[#21388] an update whose every recorded change is withheld from the re
       context: MEMBER,
     });
     const byType = Object.fromEntries(groups.map((g: Row) => [g.type, Number(g.n)]));
-    expect(byType).toEqual({ created: 1, updated: 3 });
+    expect(byType).toEqual({ created: 1, updated: 3, note: 1 });
   });
 
   it('pages: walking the list one row at a time serves the same rows, and the withheld one on no page', async () => {
@@ -255,10 +351,93 @@ describe('[#21388] an update whose every recorded change is withheld from the re
     expect(walked).toEqual((await read(MEMBER)).map((r) => String(r.id)));
   });
 
+  it('[ADR-0139 E5, E6] with no canReadObject on the service, the row is still withheld', async () => {
+    // The read gate then answers by its bounded probe; the withheld-row rule
+    // reads no row at all, so it judges the same rows either way.
+    const own = Object.getOwnPropertyDescriptor(security, 'canReadObject');
+    expect(own, 'the double carries canReadObject as its own member').toBeTruthy();
+    delete (security as { canReadObject?: unknown }).canReadObject;
+    try {
+      const rows = await read(MEMBER);
+      expect(rows.map((r) => r.id)).not.toContain(rowIds.withheld);
+      // Armed: the member is still served the rows it is served with the admission.
+      expect(rows.map((r) => r.id).sort()).toEqual(
+        [rowIds.created, rowIds.mixed, rowIds.empty, rowIds.served, rowIds.note].sort(),
+      );
+    } finally {
+      Object.defineProperty(security, 'canReadObject', own!);
+    }
+  });
+
   it('findOne: the withheld row is absent by id for the member and present for the admin', async () => {
     expect(await engine.findOne(ACTIVITY, { where: { id: rowIds.withheld }, context: MEMBER })).toBeNull();
     expect((await engine.findOne(ACTIVITY, { where: { id: rowIds.mixed }, context: MEMBER }))?.id).toBe(rowIds.mixed);
     expect((await engine.findOne(ACTIVITY, { where: { id: rowIds.withheld }, context: ADMIN }))?.id).toBe(rowIds.withheld);
+  });
+
+  // A row at rest from before the column existed: the stamp cleared, as the
+  // platform (the migration door's own context).
+  it('[ADR-0139 E6] an unstamped row is withheld from the member and the admin, served to a system read, and served again once stamped', async () => {
+    const id = rowIds.served;
+    const restamp = (changed: unknown) =>
+      engine.update(ACTIVITY, { id, changed_fields: changed }, { context: SYS });
+    await restamp(null);
+    try {
+      expect((await read(MEMBER)).map((r) => r.id)).not.toContain(id);
+      expect((await read(ADMIN)).map((r) => r.id)).not.toContain(id);
+      expect(await engine.count(ACTIVITY, { where: scoped(ITEM, ids.item) }, { context: ADMIN })).toBe(5);
+      expect((await read(SYS)).map((r) => r.id)).toContain(id);
+    } finally {
+      await restamp(['f_open']);
+    }
+    expect((await read(MEMBER)).map((r) => r.id)).toContain(id);
+  });
+
+  // ── [ADR-0139 E6] the stamped columns: served narrowed, never probed ─────
+
+  it('[ADR-0139 E6] the recorded change\'s key set is served narrowed to the fields the reader is served', async () => {
+    const memberRow = (await read(MEMBER)).find((r) => r.id === rowIds.mixed);
+    const adminRow = (await read(ADMIN)).find((r) => r.id === rowIds.mixed);
+    expect(memberRow?.changed_fields).toEqual(['f_open']);
+    expect(adminRow?.changed_fields).toEqual(['f_admin', 'f_open']);
+  });
+
+  it('[ADR-0139 E6] a membership probe on either stamped column is refused to a reader withheld a parent field, matching or not', async () => {
+    for (const where of [
+      { changed_fields: { $contains: 'f_admin' } },
+      { changed_fields: { $contains: 'f_none' } },
+      { milestone_key: { $null: false } },
+    ]) {
+      const pinned = { ...scoped(ITEM, ids.item), ...where };
+      for (const run of [
+        () => engine.find(ACTIVITY, { where: pinned, context: MEMBER }),
+        () => engine.count(ACTIVITY, { where: pinned }, { context: MEMBER }),
+      ]) {
+        await expect(run(), JSON.stringify(where)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      }
+    }
+  });
+
+  it('[ADR-0139 E6] control: a reader served every field filters by the key set, as by any column', async () => {
+    const rows = (await engine.find(ACTIVITY, {
+      where: { ...scoped(ITEM, ids.item), changed_fields: { $contains: 'f_admin2' } },
+      context: ADMIN,
+    })) as Row[];
+    expect(rows.map((r) => r.id)).toEqual([rowIds.withheld]);
+  });
+
+  it('[ADR-0139 E6] membership, not substring: an update of only a withheld field stays withheld though a served field\'s name is its prefix', async () => {
+    const atRest = (await engine.find(ACTIVITY, { where: { object_name: PREFIX }, context: SYS })) as Row[];
+    expect(atRest.find((r) => r.id === rowIds.prefixWithheld)?.changed_fields).toEqual(['f_secret']);
+    const served = ((await engine.find(ACTIVITY, {
+      where: scoped(PREFIX, ids.prefix), orderBy: ORDER, context: MEMBER,
+    })) as Row[]).map((r) => r.id);
+    expect(served).not.toContain(rowIds.prefixWithheld);
+    expect(served).toContain(rowIds.prefixServed);
+    expect(await engine.count(ACTIVITY, { where: scoped(PREFIX, ids.prefix) }, { context: MEMBER })).toBe(served.length);
+    // Control: the administrator is served both.
+    const admin = ((await engine.find(ACTIVITY, { where: scoped(PREFIX, ids.prefix), context: ADMIN })) as Row[]).map((r) => r.id);
+    expect(admin).toEqual(expect.arrayContaining([rowIds.prefixWithheld, rowIds.prefixServed]));
   });
 
   it('a system read is not narrowed', async () => {
@@ -266,64 +445,121 @@ describe('[#21388] an update whose every recorded change is withheld from the re
   });
 });
 
-describe('[#21388] isWithheldOnlyUpdate reads the stored change', () => {
-  const served = new Set(['open']);
-
-  it('an update every key of which is withheld', () => {
-    expect(isWithheldOnlyUpdate({ old: { a: 1 }, new: { a: 2, b: 3 } }, served)).toBe(true);
+describe('[ADR-0139 E6] planActivityStamp — the one derivation of the stamp', () => {
+  it('an update: the key union of both recorded sides, sorted', () => {
+    expect(planActivityStamp({ old: { b: 1, a: 1 }, new: { a: 2, c: 3 } })).toEqual({
+      changed_fields: ['a', 'b', 'c'],
+      milestone_key: null,
+    });
   });
 
-  it('a key on either side that is served keeps the row', () => {
-    expect(isWithheldOnlyUpdate({ old: { a: 1, open: 1 }, new: { a: 2 } }, served)).toBe(false);
-    expect(isWithheldOnlyUpdate({ old: {}, new: { open: 1 } }, served)).toBe(false);
+  it('a change empty on both sides, a create, a delete and a non-change stamp an empty set', () => {
+    for (const metadata of [
+      { old: {}, new: {} },
+      { old: null, new: { a: 1 } },
+      { old: { a: 1 }, new: null },
+      { channel: 'email' },
+      null,
+      '',
+      'not json',
+      JSON.stringify({ old: { a: 1 }, new: null }),
+    ]) {
+      expect(planActivityStamp(metadata), JSON.stringify(metadata)).toEqual({ changed_fields: [], milestone_key: null });
+    }
   });
 
-  it('a change empty on both sides, a create, a delete and a non-change are not withheld', () => {
-    expect(isWithheldOnlyUpdate({ old: {}, new: {} }, served)).toBe(false);
-    expect(isWithheldOnlyUpdate({ old: null, new: { a: 1 } }, served)).toBe(false);
-    expect(isWithheldOnlyUpdate({ old: { a: 1 }, new: null }, served)).toBe(false);
-    expect(isWithheldOnlyUpdate({ channel: 'email' }, served)).toBe(false);
-    expect(isWithheldOnlyUpdate(null, served)).toBe(false);
+  it('reads the stored string exactly as the object a writer is about to serialize', () => {
+    const metadata = { old: { a: 1 }, new: { a: 2 } };
+    expect(planActivityStamp(JSON.stringify(metadata))).toEqual(planActivityStamp(metadata));
   });
 });
 
-describe('[#21388] computeWithheldUpdateFilter — the pre-scan bound fails closed', () => {
-  const update = (i: number, key: string) => ({
-    id: `r${i}`,
-    object_name: 'obj',
-    metadata: JSON.stringify({ old: { [key]: 1 }, new: { [key]: 2 } }),
-  });
-  const engineOf = (rows: Row[]) => ({ find: vi.fn(async () => rows) });
-  const servedFor = async () => ['open'];
-
-  it('under the bound: the withheld ids are ANDed out, and nothing else', async () => {
-    const logger = { warn: vi.fn() };
-    const rows = [update(1, 'secret'), update(2, 'open')];
-    expect(await computeWithheldUpdateFilter(engineOf(rows), { where: { a: 1 } }, servedFor, logger))
-      .toEqual({ id: { $nin: ['r1'] } });
-    expect(logger.warn).not.toHaveBeenCalled();
+describe('[ADR-0139 E6] keptRowsOfParent / computeWithheldUpdateFilter — a predicate, no row read', () => {
+  const engineWith = (objects: Array<{ name: string; activityMilestones?: unknown }>) => ({
+    registry: { getAllObjects: () => objects },
+    getSchema: (name: string) => objects.find((o) => o.name === name),
+    find: vi.fn(),
   });
 
-  it('nothing withheld: no filter at all', async () => {
-    const logger = { warn: vi.fn() };
-    expect(await computeWithheldUpdateFilter(engineOf([update(1, 'open')]), {}, servedFor, logger)).toBeNull();
+  it('one $contains per served field, and the empty set kept', () => {
+    expect(keptRowsOfParent('obj', ['open', 'b_open'], [])).toEqual({
+      $and: [
+        { object_name: 'obj' },
+        { changed_fields: { $null: false } },
+        {
+          $or: [
+            { changed_fields: { $empty: true } },
+            { changed_fields: { $contains: 'b_open' } },
+            { changed_fields: { $contains: 'open' } },
+          ],
+        },
+        { milestone_key: { $null: true } },
+      ],
+    });
   });
 
-  it('at the bound: only the judged, kept rows are served, and that is said', async () => {
+  it('a parent the service gives no answer for is kept whole; with no answer for any, no filter at all', async () => {
+    const engine = engineWith([{ name: 'a' }, { name: 'b' }]);
+    const servedFor = async (o: string) => (o === 'a' ? ['x'] : undefined);
+    expect(await computeWithheldUpdateFilter(engine, {}, servedFor, { warn: vi.fn() })).toEqual({
+      $or: [keptRowsOfParent('a', ['x'], []), { object_name: 'b' }],
+    });
+    expect(await computeWithheldUpdateFilter(engine, {}, async () => undefined, { warn: vi.fn() })).toBeNull();
+    expect(engine.find).not.toHaveBeenCalled();
+  });
+
+  it('a read pinned to one parent object is judged against that parent alone', async () => {
+    const engine = engineWith([{ name: 'a' }, { name: 'b' }]);
+    const servedFor = vi.fn(async () => ['x']);
+    const where = { $and: [{ object_name: 'b' }, { record_id: '1' }] };
+    expect(await computeWithheldUpdateFilter(engine, { where }, servedFor, { warn: vi.fn() })).toEqual(
+      keptRowsOfParent('b', ['x'], []),
+    );
+    expect(servedFor).toHaveBeenCalledTimes(1);
+  });
+
+  it('[ADR-0139 D4] a read naming its parents by $in is judged against those parents alone, as the read gate narrows its own', async () => {
+    const engine = engineWith([{ name: 'a' }, { name: 'b' }, { name: 'c' }, { name: 'd' }]);
+    const servedFor = vi.fn(async () => ['x']);
+    const where = { $and: [{ object_name: { $in: ['b', 'c'] } }, { type: 'updated' }] };
+    expect(await computeWithheldUpdateFilter(engine, { where }, servedFor, { warn: vi.fn() })).toEqual({
+      $or: [keptRowsOfParent('b', ['x'], []), keptRowsOfParent('c', ['x'], [])],
+    });
+    expect(servedFor).toHaveBeenCalledTimes(2);
+  });
+
+  it('[ADR-0139 D4] named parents that get no answer: the full enumeration still decides whether the read is narrowed', async () => {
+    const engine = engineWith([{ name: 'a' }, { name: 'b' }, { name: 'c' }]);
+    const onlyA = async (o: string) => (o === 'a' ? ['x'] : undefined);
+    const named = (names: string[]) => ({ where: { object_name: { $in: names } } });
+    // Another parent is narrowed: the named ones are kept whole, as the full enumeration keeps them.
+    expect(await computeWithheldUpdateFilter(engine, named(['b', 'c']), onlyA, { warn: vi.fn() })).toEqual({
+      $or: [{ object_name: 'b' }, { object_name: 'c' }],
+    });
+    // ...and a read naming no enumerated parent is withheld every row, as every full-enumeration branch withholds it.
+    expect(await computeWithheldUpdateFilter(engine, named(['zz']), onlyA, { warn: vi.fn() })).toEqual({
+      id: '__activity_withheld_row_denied__',
+    });
+    // No parent narrowed anywhere: no filter at all, as before.
+    expect(await computeWithheldUpdateFilter(engine, named(['b', 'zz']), async () => undefined, { warn: vi.fn() })).toBeNull();
+  });
+
+  it('the audit and activity objects themselves are not enumerated (the read gate excludes their rows)', async () => {
+    const engine = engineWith([{ name: 'sys_activity' }, { name: 'sys_audit_log' }, { name: 'a' }]);
+    expect(await computeWithheldUpdateFilter(engine, {}, async () => ['x'], { warn: vi.fn() })).toEqual(
+      keptRowsOfParent('a', ['x'], []),
+    );
+  });
+
+  it('an engine with no registry view: denied, and said once', async () => {
     const logger = { warn: vi.fn() };
-    const rows = Array.from({ length: PARENT_GATE_SCAN_LIMIT }, (_, i) => update(i, i === 0 ? 'secret' : 'open'));
-    const filter = (await computeWithheldUpdateFilter(engineOf(rows), {}, servedFor, logger)) as Row;
-    expect(filter.id.$in).toHaveLength(PARENT_GATE_SCAN_LIMIT - 1);
-    expect(filter.id.$in).not.toContain('r0');
+    const find = vi.fn();
+    // No registry view: only a row reader, which the rule must not call.
+    const engine = { find } as unknown as Parameters<typeof computeWithheldUpdateFilter>[0];
+    const filter = await computeWithheldUpdateFilter(engine, {}, async () => ['x'], logger);
+    expect(filter).toEqual({ id: '__activity_withheld_row_denied__' });
+    await computeWithheldUpdateFilter(engine, {}, async () => ['x'], logger);
     expect(logger.warn).toHaveBeenCalledTimes(1);
-  });
-
-  it('the pre-scan reads as the system, in the caller order, within the bound', async () => {
-    const engine = engineOf([]);
-    const orderBy = [{ field: 'timestamp', order: 'desc' }];
-    await computeWithheldUpdateFilter(engine, { where: { a: 1 }, orderBy }, servedFor, { warn: vi.fn() });
-    expect(engine.find).toHaveBeenCalledWith(ACTIVITY, expect.objectContaining({
-      where: { a: 1 }, orderBy, limit: PARENT_GATE_SCAN_LIMIT, context: { isSystem: true },
-    }));
+    expect(find).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/runtime",
-  "version": "18.0.0-next.1",
+  "version": "18.0.0-next.4",
   "license": "Apache-2.0",
   "description": "ObjectStack Core Runtime & Query Engine",
   "type": "module",
@@ -69,6 +69,8 @@
     "@objectstack/service-job": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
     "@objectstack/service-package": "workspace:*",
+    "@objectstack/service-settings": "workspace:*",
+    "@objectstack/service-storage": "workspace:*",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

@@ -373,24 +373,49 @@ describe('publishMetaItem — the per-item door names a package too (#10350)', (
         expect(labelOf(drafts[0])).toBe('FROM_OTHER');
     });
 
-    it('keeps the historical match-any resolution when the caller states NO package', async () => {
+    // [#23495] Replaced, not respelled: this case pinned the absent key's
+    // "match any package" resolution, which promoted this fixture's
+    // first-scanned draft (`app.other`) — the storage-order coin toss #8907
+    // removed from the batch door, on the per-item door. Naming no package,
+    // the publish now promotes the draft a draft save naming no package
+    // writes, and this item (no active row, two packages' drafts, no
+    // package-less draft) has no single one. What the case also guarded stays
+    // pinned: the absent key is not a present `null`, which would pin the
+    // lookup to the unbound row and answer `no_draft` (the next case).
+    it('refuses 409 RESOURCE_CONFLICT when the caller states NO package and two packages hold drafts, promoting nothing', async () => {
         const { engine, rows } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
 
         await seedTwoPackageDrafts(protocol);
 
+        const refusal = await protocol.publishMetaItem({ type: 'object', name: 'shared_ticket' })
+            .then(() => undefined, (e: any) => e);
+
+        expect(refusal).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+        expect(refusal.message).toContain("'app.demo'");
+        expect(refusal.message).toContain("'app.other'");
+        expect(activeRowsOf(rows)).toEqual([]);
+        expect(draftRowsOf(rows).map((r) => r.package_id)).toEqual(['app.other', 'app.demo']);
+    });
+
+    it('promotes the one package\'s draft when the caller states NO package — the absent key is not a present `null`', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await protocol.saveMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            item: objectBody('shared_ticket', 'FROM_OTHER'),
+            packageId: 'app.other',
+            mode: 'draft',
+        });
+
         await protocol.publishMetaItem({ type: 'object', name: 'shared_ticket' });
 
-        // The contract `promoteDraftForPublish` spells as
-        // `...('packageId' in request ? ... : {})`: an ABSENT key means "match
-        // any package" (this fixture's first-scanned row), while a
-        // present-and-`undefined` key would coerce to `null` downstream and pin
-        // the lookup to UNBOUND rows — finding neither draft and answering
-        // `no_draft`. Declaring `packageId` optional must not turn the first
-        // spelling into the second, so the untouched path is pinned here.
         const active = activeRowsOf(rows);
         expect(active).toHaveLength(1);
         expect(active[0].package_id).toBe('app.other');
         expect(labelOf(active[0])).toBe('FROM_OTHER');
+        expect(draftRowsOf(rows)).toEqual([]);
     });
 });

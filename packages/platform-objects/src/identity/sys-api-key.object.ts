@@ -86,6 +86,44 @@ export const SysApiKey = ObjectSchema.create({
   // `bodyExtra` to set the `revoked` flag explicitly. The `target` below is
   // the authority on that path; this comment used to omit `/data/`.
   actions: [
+    // "Create Key" mints through the one mint path, `POST /api/v1/keys`
+    // (`@objectstack/runtime` `domains/keys.ts`) — the same route the console's
+    // own key-minting surfaces call. Not the data API: `create` stays off in
+    // `apiMethods` below, and the route pins the row to the CALLER (`user_id`
+    // and the active organization are never read from the body), so an admin
+    // on Setup's "All" view mints their own key exactly as a user on the
+    // Account app's "My Keys" view does. The route answers the raw key ONCE
+    // (only its hash is stored), so the response is revealed in a
+    // `resultDialog` the user must close — a toast would lose it.
+    // `two-factor-one-shot-reveal.test.ts` holds every action on this route to
+    // that reveal.
+    {
+      name: 'create_api_key',
+      label: 'Create Key',
+      icon: 'plus-circle',
+      variant: 'primary',
+      mode: 'create',
+      locations: ['list_toolbar'],
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/keys',
+      description: 'Create a key for a script or integration. The key acts as you, with your access, in the organization you are working in now.',
+      refreshAfter: true,
+      // The route reads `name` (and an optional `expires_at`) and nothing else;
+      // a key named nothing is stored as "API Key", so the name is required
+      // here to keep the list readable.
+      params: [
+        { field: 'name', required: true },
+      ],
+      resultDialog: {
+        title: 'API key created',
+        description: 'Copy the key now — it is shown only once and cannot be recovered. If it leaks, revoke it and create a new one.',
+        acknowledge: 'I have saved the key',
+        fields: [
+          { path: 'key', label: 'API Key', format: 'secret' },
+        ],
+      },
+    },
     {
       name: 'revoke_api_key',
       label: 'Revoke API Key',
@@ -131,6 +169,14 @@ export const SysApiKey = ObjectSchema.create({
       columns: ['name', 'prefix', 'user_id', 'active_organization_id', 'expires_at', 'last_used_at', 'revoked'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
+      // This object is `managedBy: 'better-auth'`, so with no declaration the
+      // console draws the shared identity-object fallback ("created by the
+      // authentication provider … not added by hand here") — wrong for keys,
+      // which are created by hand on this very page.
+      emptyState: {
+        title: 'No API keys yet',
+        message: 'Create a key for scripts and integrations with Create Key; the key is shown once, when it is created.',
+      },
     },
     mine: {
       type: 'grid',
@@ -146,6 +192,10 @@ export const SysApiKey = ObjectSchema.create({
       ],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
+      emptyState: {
+        title: 'You have no API keys yet',
+        message: 'Create a key for your scripts and integrations with Create Key; the key is shown once, when it is created.',
+      },
     },
     active: {
       type: 'grid',
@@ -156,6 +206,10 @@ export const SysApiKey = ObjectSchema.create({
       filter: [{ field: 'revoked', operator: 'equals', value: false }],
       sort: [{ field: 'last_used_at', order: 'desc' }],
       pagination: { pageSize: 50 },
+      emptyState: {
+        title: 'No active API keys',
+        message: 'Every key that has not been revoked is listed here.',
+      },
     },
     revoked: {
       type: 'grid',
@@ -166,6 +220,10 @@ export const SysApiKey = ObjectSchema.create({
       filter: [{ field: 'revoked', operator: 'equals', value: true }],
       sort: [{ field: 'updated_at', order: 'desc' }],
       pagination: { pageSize: 50 },
+      emptyState: {
+        title: 'No revoked keys',
+        message: 'A key moves here when it is revoked; clients using it lose access until it is restored.',
+      },
     },
   },
 
@@ -281,6 +339,31 @@ export const SysApiKey = ObjectSchema.create({
     revoked: Field.boolean({
       label: 'Revoked',
       defaultValue: false,
+      group: 'Lifecycle',
+    }),
+
+    // Why the key was revoked, recorded only where the reason changes WHO may
+    // restore it. An administrator's forced password reset revokes the user's
+    // keys by default because the reset may answer a compromise, so the owner
+    // must not be the one to reopen such a key: only a platform administrator
+    // restores it, and the owner creates a new key instead.
+    //
+    // One writer stamps it (plugin-auth `forced-reset-revocation.ts`, beside
+    // `revoked: true`), and one hook keeps it in step with `revoked`
+    // (plugin-auth `api-key-restore-guard.ts`): it refuses the owner's restore
+    // of a key carrying this reason, clears the reason on every restore it
+    // admits, and leaves it alone when a revoked key is revoked again.
+    // `readonly` for ADR-0092 D4's form-rendering reason: it is not on the D2
+    // whitelist, so no data-API write may set or clear it.
+    revoked_reason: Field.select({
+      label: 'Revoke Reason',
+      required: false,
+      readonly: true,
+      options: [
+        { label: 'Administrator password reset', value: 'admin_password_reset' },
+      ],
+      description:
+        'Set when an administrator\'s forced password reset revoked this key. Only a platform administrator can restore such a key; its owner creates a new one. Cleared when the key is restored. Empty for a key revoked from the API Keys list.',
       group: 'Lifecycle',
     }),
 

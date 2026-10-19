@@ -311,3 +311,61 @@ describe('#8195 — a zh-CN send renders NO en-US text', () => {
     }
   });
 });
+
+// ── #24154 — the invitation's role clause, in both faces ───────────────────
+
+/** The invitation's two bodies, apart: the card is about what EACH one says. */
+async function renderInvitationFaces(locale: Locale, data: Record<string, unknown>) {
+  const transport = new CaptureTransport();
+  const svc = new EmailService({
+    transport,
+    defaultFrom: { address: 'no-reply@acme.test' },
+    templateLoader: seededLoader,
+  });
+  await svc.sendTemplate({ template: 'auth.invitation', to: 'recipient@acme.test', locale, data });
+  const sent = transport.sent[0];
+  expect(sent, `auth.invitation @ ${locale} was never handed to the transport`).toBeDefined();
+  return { html: sent!.html ?? '', text: sent!.text ?? '' };
+}
+
+/**
+ * One distinct value per declared variable of `auth.invitation`, none a
+ * substring of another, so "this face names that fact" is a plain `includes`.
+ */
+const INVITATION_FACT_BY_VARIABLE: Record<string, string> = {
+  'inviter.name': 'INVITER_NAME_X',
+  'inviter.email': 'inviter-email-x@acme.test',
+  'organization.name': 'ORG_NAME_X',
+  role: 'ROLE_LABEL_X',
+  acceptUrl: 'https://acme.test/accept/ACCEPT_X',
+  appName: 'APP_NAME_X',
+};
+const INVITATION_FACTS = {
+  inviter: { name: 'INVITER_NAME_X', email: 'inviter-email-x@acme.test' },
+  organization: { name: 'ORG_NAME_X' },
+  role: 'ROLE_LABEL_X',
+  acceptUrl: 'https://acme.test/accept/ACCEPT_X',
+  appName: 'APP_NAME_X',
+};
+
+describe('#24154 — the invitation names the role label, and both faces say the same thing', () => {
+  it('a zh-CN invitation carries the label in its HTML and its text body, and no raw role value', async () => {
+    // The sender passes the label (`plugin-auth`'s `invitation-role-label.test.ts`).
+    const { html, text } = await renderInvitationFaces('zh-CN', { ...DATA['auth.invitation'], role: '成员' });
+    expect(html).toContain('邀请您以 <em>成员</em> 的身份加入');
+    expect(text).toContain('邀请您以 成员 的身份加入');
+    for (const face of [html, text]) expect(face).not.toMatch(/member|admin|owner/i);
+  });
+
+  it.each(SUPPORTED_LOCALES)('%s: the HTML and the text body name every declared fact', async (locale) => {
+    const row = BUILTIN_AUTH_TEMPLATES.find((t) => t.name === 'auth.invitation' && t.locale === locale);
+    const declared = (row?.variables ?? []).map((v) => v.name).sort();
+    // The fact table covers exactly the declared variables, so a variable
+    // added later cannot slip past this pin unnamed.
+    expect(declared).toEqual(Object.keys(INVITATION_FACT_BY_VARIABLE).sort());
+    const { html, text } = await renderInvitationFaces(locale, INVITATION_FACTS);
+    const named = (face: string) => declared.filter((v) => face.includes(INVITATION_FACT_BY_VARIABLE[v]!));
+    expect(named(html), `${locale} HTML body`).toEqual(declared);
+    expect(named(text), `${locale} text body`).toEqual(declared);
+  });
+});

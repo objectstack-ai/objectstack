@@ -14,9 +14,9 @@
  *
  * ## The defect this file closes
  *
- * Each member is read with one shape (measured at the `.objectui-sha` pin
- * `ab1879721595`, unchanged at objectui `main` `94985a92ba`; the read points
- * are in the schemas' docblocks), and the rows declared them `z.unknown()`. So
+ * Each member is read with one shape (read points recorded in
+ * `liveness/page.json`, row `regions`), and the rows declared them
+ * `z.unknown()`. So
  * a marker with no `date`, a numeric `date`, a misspelled marker member, a
  * `mapping` written as a bare field name or keyed `titleField`, and a form
  * `fields` entry written `{ name }` or `{ field }` all passed the
@@ -149,7 +149,7 @@ describe('§2 an off-shape value is refused with the code and the path', () => {
     // objectui `plugin-form/src/__tests__/objectFormFieldsMembers-8071.test.tsx:140` — the warn probe.
     ['a `{ field }` field entry', 'object-form', { fields: [{ field: 'note' }] }, 'invalid_type', 'fields.0'],
     ['a numeric field entry', 'object-form', { fields: [5] }, 'invalid_type', 'fields.0'],
-    // objectui's page-builder guide at `.objectui-sha` (respelled on objectui `main`).
+    // objectui's page-builder guide (recorded in `liveness/page.json`, row `regions`).
     ['the guide\'s retired inline field', 'object-form', {
       fields: [{ name: 'name', label: 'Name', type: 'text', required: true }, 'email'],
     }, 'invalid_type', 'fields.0'],

@@ -143,6 +143,39 @@ describe('KNOWN_COMPONENT_TYPES covers every declared face', () => {
     // Lit control: the kept member of the same namespace is a candidate.
     expect(KNOWN_COMPONENT_TYPE_CANDIDATES).toContain('ai:suggestion');
   });
+
+  /**
+   * #24162 — `record:json` is retired BY NAME the `ai:chat_window` way: out of
+   * the enum, KNOWN through its kept `ComponentPropsMap` row, and out of the
+   * typo candidates, so the suggester no longer offers it for `record:jsn`.
+   * `record:` stays reserved — a dozen live members populate it.
+   */
+  it('record:json is known through its kept row, not a candidate, and `record:` stays reserved', () => {
+    expect(PageComponentType.options).not.toContain('record:json');
+    expect(isKnownComponentType('record:json')).toBe(true);
+    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).not.toContain('record:json');
+    expect(hasReservedComponentNamespace('record:json')).toBe(true);
+    // Lit control: a kept member of the same namespace is a candidate.
+    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).toContain('record:details');
+  });
+
+  /**
+   * #24230 — `marketplace:installed-list` is retired BY NAME, and it is the
+   * first retired type that was never an enum member: a plugin console widget
+   * on the open string arm, in a namespace the enum does not reserve. So its
+   * kept `ComponentPropsMap` row is the ONLY thing that keeps it known, and it
+   * leaves the typo candidates like every retired name. `marketplace:` stays
+   * unreserved — the namespace predicate below still holds for it.
+   */
+  it('marketplace:installed-list is known only through its kept row, and not a candidate', () => {
+    expect(PageComponentType.options).not.toContain('marketplace:installed-list');
+    expect(Object.keys(ComponentPropsMap)).toContain('marketplace:installed-list');
+    expect(isKnownComponentType('marketplace:installed-list')).toBe(true);
+    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).not.toContain('marketplace:installed-list');
+    expect(hasReservedComponentNamespace('marketplace:installed-list')).toBe(false);
+    // Lit control: the live sibling console widget is a candidate.
+    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).toContain('cloud-connection:panel');
+  });
 });
 
 describe('STRING_ARM_REGISTERED_TYPES ledger discipline', () => {

@@ -66,8 +66,8 @@
  *
  * ⭐ A pin asserting `'conversions' in payload` passes against a `conversions:
  * []` hard-coded at every exit — the defect with a lid on it. So every fixture
- * here drives a LIVE conversion (`page-kind-jsx-to-html`, ADR-0087 D2, protocol
- * 11, on `pages[0].kind: 'jsx'`) and each exit is asserted to carry exactly the
+ * here drives a LIVE conversion (a test-only probe loaded with `--import`, ADR-0087 D2
+ * shape, on `flows[0].nodes[1].type: 'probe_old_callout'`) and each exit is asserted to carry exactly the
  * notice the run had computed by then — no fewer, and NO MORE:
  *
  *   exit                  | conversions
@@ -85,7 +85,7 @@
  *
  * ## Both directions of the instrument are proven
  *
- * `converts nothing` runs the SAME failure exit with `kind: 'html'` — already
+ * `converts nothing` runs the SAME failure exit with `type: 'http'` — already
  * canonical, nothing to convert — and requires `[]`. Without it, a payload with
  * the notice hard-coded in would satisfy every assertion above; with it, the
  * field is shown to track what the run actually computed. That is the negative
@@ -111,14 +111,21 @@ import { fileURLToPath } from 'node:url';
 import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
+import { LIVE_PROBE, liveProbeNodeOptions } from './helpers/live-conversion-probe.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const VALIDATE_TS = resolve(HERE, '../src/commands/validate.ts');
 
-/** The live ADR-0087 D2 conversion these fixtures drive (protocol 11). */
-const CONVERSION_ID = 'page-kind-jsx-to-html';
+/**
+ * The live ADR-0087 D2 conversion these fixtures drive: a TEST-ONLY probe the
+ * child loads with `--import` (`helpers/live-conversion-probe.ts`). It was a
+ * real entry before — `page-kind-jsx-to-html` until `jsx` retired as a page
+ * kind at 18, then `flow-node-http-callout-rename` until #23543 F5-http
+ * reserved its old names, the last real entry left live.
+ */
+const CONVERSION_ID = LIVE_PROBE.conversionId;
 /** The FATAL capability token — `{package: null, edition: 'cloud'}` in the spec
  *  registry, so it classifies `unavailable` whatever is installed. */
 const FATAL_TOKEN = 'governance';
@@ -134,7 +141,7 @@ function runCli(args: string[], cwd: string): Promise<Run> {
     execFile(
       TSX,
       [CLI, ...args],
-      { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
+      { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1', NODE_OPTIONS: liveProbeNodeOptions() }) },
       (err, stdout, stderr) => {
         resolvePromise({
           code: err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as unknown as { code: number }).code : 1) : 0,
@@ -155,23 +162,31 @@ function payloadOf(run: Run, label: string): Record<string, unknown> {
 }
 
 /**
- * A stack whose `pages[0].kind` drives the live conversion. `pageKind` is a
- * parameter so the negative control can run the identical shape with the
- * CANONICAL spelling, where there is nothing to convert.
- *
- * The page is `<box>`, not `<div>`: where the CLI reaches the manifest
- * `@objectstack/console` ships, the html tier refuses `div` (#19922), and that
- * would add an author-time error no exit here is about.
+ * A stack whose `flows[0].nodes[1].type` drives the live conversion.
+ * `nodeType` is a parameter so the negative control can run the identical
+ * shape with the CANONICAL spelling, where there is nothing to convert.
  */
-function stack(ns: string, opts: { pageKind?: string; requires?: string[]; extraFields?: string } = {}): string {
-  const { pageKind = 'jsx', requires = [], extraFields = '' } = opts;
+function stack(ns: string, opts: { nodeType?: string; requires?: string[]; extraFields?: string } = {}): string {
+  const { nodeType = LIVE_PROBE.from as string, requires = [], extraFields = '' } = opts;
   return `
 import { defineStack } from '@objectstack/spec';
 
 export default defineStack({
   manifest: { id: 'com.example.${ns}', name: '${ns}', version: '1.0.0', type: 'app', namespace: '${ns}' },
   requires: [${requires.map((r) => `'${r}'`).join(', ')}],
-  pages: [{ name: 'landing', label: 'Landing', kind: '${pageKind}', source: '<box>hi</box>' }],
+  flows: [
+    {
+      name: '${ns}_notify',
+      label: 'Notify',
+      type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'call', type: '${nodeType}', label: 'Call', config: { url: 'https://example.com/hook' } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],
+    },
+  ],
   objects: [
     {
       name: '${ns}_ticket',
@@ -205,10 +220,10 @@ function conversionsOf(payload: Record<string, unknown>): unknown[] {
  */
 const THE_NOTICE = {
   conversionId: CONVERSION_ID,
-  surface: 'page.kind',
-  from: 'jsx',
-  to: 'html',
-  path: 'pages[0].kind',
+  surface: LIVE_PROBE.surface,
+  from: LIVE_PROBE.from,
+  to: LIVE_PROBE.to,
+  path: 'flows[0].nodes[1].type',
 };
 
 /**
@@ -261,9 +276,9 @@ beforeAll(() => {
   make('parsefail', stack('pfail', { extraFields: `
         broken: { type: 'this_is_not_a_field_type', label: 'Broken' },` }));
 
-  // ⭐ the negative control — the SAME exit, the CANONICAL page kind. Nothing
+  // ⭐ the negative control — the SAME exit, the CANONICAL node type. Nothing
   // to convert, so `conversions` must be empty.
-  make('parsefail_nc', stack('pnc', { pageKind: 'html', extraFields: `
+  make('parsefail_nc', stack('pnc', { nodeType: 'http', extraFields: `
         broken: { type: 'this_is_not_a_field_type', label: 'Broken' },` }));
 
   // rule errors — an expression naming a field that does not resolve.
@@ -310,7 +325,7 @@ describe('#12125 — every `os validate --json` failure exit carries the convers
     expectTheOneNotice(payload, 'control', run);
     // The expiry is the reason this field cannot just be dropped into prose:
     // it rides the payload entry (`expectTheOneNotice`) and the producer's line.
-    expect(run.stderr).toMatch(/conversion 'page-kind-jsx-to-html', retires in protocol \d+\)/);
+    expect(run.stderr).toMatch(new RegExp(`conversion '${CONVERSION_ID}', retires in protocol \\d+\\)`));
   }, 120_000);
 
   it('parse failure — THE HEADLINE: the notice computed at step 2 survives the schema error', async () => {
@@ -331,9 +346,9 @@ describe('#12125 — every `os validate --json` failure exit carries the convers
     const payload = payloadOf(run, 'parsefail_nc');
     expect(payload.valid).toBe(false);
     expect('conversions' in payload, 'the field must be PRESENT even when empty').toBe(true);
-    expect(payload.conversions, 'a canonical page kind converts nothing').toEqual([]);
+    expect(payload.conversions, 'a canonical node type converts nothing').toEqual([]);
     // …and, since the producer is what converts now, raised no notice at load either.
-    expect(run.stderr).not.toContain("conversion 'page-kind-jsx-to-html'");
+    expect(run.stderr).not.toContain(`conversion '${CONVERSION_ID}'`);
   }, 120_000);
 
   it('rule errors — the notice rides the author-time gate', async () => {
