@@ -41,6 +41,7 @@ import {
 } from '@objectstack/platform-objects/identity';
 import { SysEmail } from '@objectstack/platform-objects/audit';
 import { installAuditWriters } from './audit-writers.js';
+import { singlePostureDefaultOrganization } from './__tests__/single-posture-tenancy.js';
 
 type Row = Record<string, unknown>;
 type ObjectDef = { name: string; fields: Record<string, { type?: string; required?: boolean; internal?: unknown; options?: unknown[] }> };
@@ -168,7 +169,7 @@ async function boot(def: ObjectDef) {
   for (const o of [sysAuditLog, sysActivity, def]) {
     engine.registry.registerObject(o as any, 'com.objectstack.test.audit-internal-field-omission');
   }
-  installAuditWriters(engine as any);
+  installAuditWriters(engine as any, undefined, { getDefaultOrganizationId: singlePostureDefaultOrganization });
   return { engine: engine as any, storeFor };
 }
 

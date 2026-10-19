@@ -48,6 +48,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuditPlugin } from './audit-plugin.js';
 import { computeWithheldUpdateFilter, keptRowsOfParent } from './activity-field-redaction.js';
 import { planActivityStamp } from './activity-changed-fields.js';
+import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 
 const ACTIVITY = 'sys_activity';
 /** A record the member reads with two fields withheld. */
@@ -158,6 +159,7 @@ describe('[#21388] an update whose every recorded change is withheld from the re
       init: async (ctx: any) => ctx.registerService('security', security),
       start: async () => {},
     } as any);
+    await kernel.use(singlePostureTenancy());
     await kernel.use(new AuditPlugin());
     await kernel.bootstrap();
 

@@ -1010,10 +1010,16 @@ async function planPresentTable(ctx: PlanContext, entry: InventoryEntry, source:
     organizationColumn: hasOrg ? 'present' : 'absent',
     rows: { total: 0, organizationNull: 0, stamped: 0 },
     fateCounts: {},
-    departures: (entry.departures ?? []).map((d) => {
-      const advisory = advisoryDepartureReason(entry.object, d.id);
-      return { id: d.id, label: d.label, citation: d.citation, as: d.as, rows: 0, ...(advisory ? { advisory } : {}) };
-    }),
+    departures: [
+      ...(entry.departures ?? []).map((d) => {
+        const advisory = advisoryDepartureReason(entry.object, d.id);
+        return { id: d.id, label: d.label, citation: d.citation, as: d.as, rows: 0, ...(advisory ? { advisory } : {}) };
+      }),
+      // Last, so the declared departures keep their index (`walkNullRows`).
+      ...(underivableDepartureOf(entry, ctx.posture)
+        ? [{ ...underivableDepartureOf(entry, ctx.posture)!, as: 'mirror-deletion' as const, rows: 0 }]
+        : []),
+    ],
     categories: [],
     unattributable: [],
     notNull: { willReceive: false, reason: '' },
@@ -1141,6 +1147,20 @@ function heldNullReason(plan: TablePlan): string | null {
   );
 }
 
+/**
+ * The inventory's `underivableDeparture` of a fate-3 table, when it applies:
+ * on every posture but `single`, where the Default Organization takes every
+ * row no anchor names (or, with none to take them, they are reported) and so
+ * nothing leaves (ruling record 6257510973 item 3: under `single` nothing
+ * changes).
+ */
+export function underivableDepartureOf(
+  entry: InventoryEntry,
+  posture: string,
+): NonNullable<InventoryEntry['underivableDeparture']> | undefined {
+  return entry.fate === 'attribution' && posture !== 'single' ? entry.underivableDeparture : undefined;
+}
+
 /** Keyset-walk the NULL-organization rows of one physical table and classify each. */
 async function walkNullRows(
   ctx: PlanContext,
@@ -1209,6 +1229,13 @@ async function walkNullRows(
             via: 'default-organization',
           });
         }
+        pending = [];
+      }
+      // What no anchor names, on a table that declares it a departure, leaves
+      // instead of being reported ({@link underivableDepartureOf}).
+      const underivable = underivableDepartureOf(entry, ctx.posture);
+      if (underivable && pending.length > 0) {
+        plan.departures.find((d) => d.id === underivable.id)!.rows += pending.length;
         pending = [];
       }
     }
@@ -1444,7 +1471,17 @@ export async function buildOrganizationOwnershipPlan(opts: {
   }
   // Certifying with NULL rows standing is decided on the operator's behalf, so
   // it is said before the first write, once per departure that holds rows.
+  // So is a deletion no fate-2 selector names: the rows no anchor attributes.
   for (const table of tables) {
+    const entry = inventory.find((e) => e.object === table.object);
+    const underivable = entry ? underivableDepartureOf(entry, opts.posture) : undefined;
+    const leaving = underivable ? table.departures.find((d) => d.id === underivable.id) : undefined;
+    if (leaving && leaving.rows > 0) {
+      warnings.push(
+        `${table.object} holds ${leaving.rows} organization-less row(s) no anchor attributes: ${leaving.label}. ` +
+          '--apply deletes them, and keeps every row an anchor attributes.',
+      );
+    }
     for (const departure of table.departures) {
       if (!departure.advisory || departure.rows === 0) continue;
       warnings.push(
