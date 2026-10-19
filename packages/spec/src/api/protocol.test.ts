@@ -372,7 +372,7 @@ describe('ObjectStack Protocol', () => {
     expect(AiCompleteRequestSchema.safeParse({ prompt: 'Summarise:', options: { maxTokens: 64 } }).success).toBe(true);
     expect(AiCompleteRequestSchema.safeParse({}).success).toBe(false);
 
-    // models — both live shapes: the ADR-0028 allowlist and the bare-id fallback
+    // models — both live shapes: the cloud ADR-0028 allowlist and the bare-id fallback
     expect(AiModelsResponseSchema.safeParse({
       models: [{ id: 'gpt-4o-mini', label: 'GPT-4o mini', default: true }], defaultModel: 'gpt-4o-mini',
     }).success).toBe(true);
