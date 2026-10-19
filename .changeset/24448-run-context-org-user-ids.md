@@ -1,5 +1,5 @@
 ---
-'@objectstack/service-automation': patch
+'@objectstack/service-automation': minor
 ---
 
 fix(service-automation): a `runAs: 'user'` flow now sees the acting user's organization members in `sys_user`, as the same user's own request does
@@ -16,4 +16,4 @@ Run setup now seeds the peer list through the resolver the request path uses (`r
 
 A `runAs: 'system'` flow is unchanged. The exported `RunIdentityContext` type gains an optional `org_user_ids` member.
 
-Clause-②: no
+Clause-②: yes (widening: the exported RunIdentityContext / RunDataContext type gains the optional org_user_ids member, the key ExecutionContext already declares; no accepted input moves)
