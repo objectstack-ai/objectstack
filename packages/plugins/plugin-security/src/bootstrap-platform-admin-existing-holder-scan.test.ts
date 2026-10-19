@@ -148,11 +148,14 @@ type NaturalOrder = (typeof NATURAL_ORDERS)[number];
  * query is forwarded verbatim and the RESULT is returned untouched. The facade
  * never sorts, so everything the fix relies on is done by the real SQL engine.
  */
+/** [C8 stage 8b] The real engine behind a {@link withNaturalOrder} facade, for landing residue. */
+const ENGINE_OF = new WeakMap<object, ObjectQL>();
+
 function withNaturalOrder(engine: ObjectQL, order: NaturalOrder): any {
   const insertionRank = new Map<string, number>();
   let nextRank = 0;
   const rankKey = (object: string, id: unknown) => `${object}:${String(id)}`;
-  return {
+  const facade = {
     async find(object: string, query: any, options: any) {
       const rows = await (engine as any).find(object, query, options);
       if (!Array.isArray(rows)) return rows;
@@ -178,6 +181,8 @@ function withNaturalOrder(engine: ObjectQL, order: NaturalOrder): any {
       return (engine as any).update(object, data, options);
     },
   };
+  ENGINE_OF.set(facade, engine);
+  return facade;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -236,16 +241,18 @@ async function seedTenant(
   // The founder — this deployment's platform admin, and the row the guard has
   // to find. Inserted FIRST so the insertion-order family puts it in row 1.
   await seedUser(ql, 'usr_founder', 'founder@tenant.example', '2026-01-01T00:00:00.000Z', true);
-  await ql.insert(
-    'sys_user_permission_set',
-    {
-      id: 'ups_zzz_founder',
-      user_id: 'usr_founder',
-      permission_set: 'admin_full_access',
-      organization_id: unscopedOrganizationId,
-    },
-    { context: SYSTEM_CTX },
-  );
+  // [C8 stage 8b] The unscoped grant is legacy residue, landed straight through
+  // the driver: under `single` the engine stamps an organization-less platform
+  // insert with the Default Organization (ADR-0131 D9), which is where 8b-0a
+  // already puts a new promotion's grant. An unranked row sorts first in the
+  // insertion-order family, as it did when it was inserted first.
+  const real: any = ENGINE_OF.get(ql) ?? ql;
+  await real.getDriver('sys_user_permission_set').create('sys_user_permission_set', {
+    id: 'ups_zzz_founder',
+    user_id: 'usr_founder',
+    permission_set: 'admin_full_access',
+    organization_id: unscopedOrganizationId,
+  });
 
   for (let i = 1; i <= orgGrants; i++) {
     const n = String(i).padStart(3, '0');

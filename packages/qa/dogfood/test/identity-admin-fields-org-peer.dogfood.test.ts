@@ -152,8 +152,11 @@ describe('[#21237] the identity object Admin group at the HTTP door: org peers a
 
     const activitySet = await catalogPermissionSet(ql, activityReadSet.name);
     expect(activitySet, 'fixture permission set served by the security catalog').toBeTruthy();
+    // [C8 stage 8b] The grant carries the fixture organization the sessions are
+    // active in: this `single` install now holds two organizations, so an
+    // organization-less system insert is refused as ambiguous (ADR-0131 D9).
     for (const who of ['member', 'owner', 'admin']) {
-      await ql.insert('sys_user_permission_set', { user_id: uid[who], permission_set: activitySet.name }, { context: SYS });
+      await ql.insert('sys_user_permission_set', { user_id: uid[who], permission_set: activitySet.name, organization_id: orgId }, { context: SYS });
     }
 
     // The colleague's group values, written as the system in two steps so the

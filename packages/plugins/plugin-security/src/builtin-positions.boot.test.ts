@@ -344,7 +344,13 @@ async function boot(scenario: Scenario): Promise<Booted> {
     const organizationId = scenario.posture === 'isolated' ? ORG : undefined;
     const context = organizationId ? { isSystem: true, tenantId: organizationId } : SYS;
     for (const row of LEGACY_ROWS) {
-      await insert('sys_position', { id: `pos_${row.name}`, ...row, active: true, is_default: false }, { context } as any);
+      const stored = { id: `pos_${row.name}`, ...row, active: true, is_default: false };
+      // [C8 stage 8b] The organization-less rows go in beneath the engine: under
+      // `single` the engine stamps such a platform insert with the Default
+      // Organization (ADR-0131 D9), and these rows ARE the organization-less
+      // residue an earlier release's seeder left.
+      if (organizationId) await insert('sys_position', stored, { context } as any);
+      else await (engine as any).getDriver('sys_position').create('sys_position', { ...stored, organization_id: null });
     }
   }
 
@@ -523,8 +529,12 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
         expect(held.some((h) => h.startsWith('usr_orgadmin -> organization_admin'))).toBe(true);
       }
       // Positive control: the census sees a row — one insert reads back as one.
+      // [C8 stage 8b] Under `single` the organization-less system insert takes
+      // the sole organization (ADR-0131 D9); under the wall it stays unstamped,
+      // the exemption 18.0 keeps there.
       await engine.insert('sys_permission_set', { id: 'ps_census_control', name: 'zz_census_control', label: 'Control' }, { context: SYS } as any);
-      expect(await permissionSetCensus(engine)).toEqual(['zz_census_control | -']);
+      const stamped = scenario.posture === 'single' ? (scenario.organizationAtBoot ? ORG : 'org_default') : '-';
+      expect(await permissionSetCensus(engine)).toEqual([`zz_census_control | ${stamped}`]);
       await engine.delete('sys_permission_set', { where: { id: 'ps_census_control' }, context: SYS } as any);
       expect(await permissionSetCensus(engine)).toEqual([]);
     });

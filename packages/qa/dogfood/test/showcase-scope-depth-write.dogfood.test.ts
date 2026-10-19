@@ -99,8 +99,13 @@ async function bootWriteWorld(tag: string, opts: { writeScope?: 'unit'; withReso
     expect(id[who], `${who} resolved`).toBeTruthy();
   }
 
-  let orgId = (await ql.findOne('sys_organization', { where: {}, context: SYS }).catch(() => null))?.id;
-  if (!orgId) { orgId = `org_w_${tag}`; await sys('sys_organization', { id: orgId, name: 'WScope Org', slug: `wscope_${tag}` }).catch(() => {}); }
+  // [ADR-0131 D3/D9, C8 stage 8b] The showcase boots `single`, so the Default
+  // Organization exists before the first sign-up and owns every row this fixture
+  // seeds — asked of the `tenancy` service. (An empty-`where` `findOne` is refused
+  // as an arbitrary pick; the refusal was swallowed and a second organization
+  // minted, which under `single` makes every organization-less insert ambiguous.)
+  const orgId = (await (await stack.kernel.getServiceAsync<{ defaultOrgId(): Promise<string | null> }>('tenancy')).defaultOrgId());
+  if (!orgId) throw new Error('fixture: the showcase boot has no Default Organization to own the business units');
 
   await sys('sys_business_unit', { id: `bu_wparent_${tag}`, name: 'Parent', kind: 'division', organization_id: orgId, active: true });
   await sys('sys_business_unit', { id: `bu_wchild_${tag}`, name: 'Child', kind: 'department', parent_business_unit_id: `bu_wparent_${tag}`, organization_id: orgId, active: true });

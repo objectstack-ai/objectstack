@@ -53,7 +53,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `triage` | 以分诊座位身份运行(只扫/分类/路由,永不认领) | — |
 | `<domain>`(如 `spec`、`skills`) | 以该 `domain:*` 车道的执行座位身份运行 | — |
 | `epic:#<n>` | 以父单 #n 的 epic PM 身份运行(见 `references/seat-lifecycle.md` 〈Epic 子树车道〉) | — |
-| `director` | 以项目总监席身份运行(人工召唤;三职见 升级与决策 节与 `references/lanes/director.md`) | — |
+| `director` | 以项目总监席身份运行(人工召唤;三职与章程见 `references/lanes/director.md`) | — |
 | `label:<name>` | backlog 过滤标签;`label:all` = 全部 open 未认领 | `pm:queue` |
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
 | `batch:<n>` | 席位同时在飞的子代理总上限,按 `Agent` 调用与 `create_session` 计:dev、复核、普查皆计,⛔ 只读不豁免 | 默认 `3`;`n` 的维护者天花板 `5` |
@@ -269,9 +269,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 决策卡带选项、推荐、证据、四棱块与工作量列;受阻执行卡同笔挂 `pm:blocked`+`Blocked-by:`。
 - `AskUserQuestion` 只是在场加速器:仅当维护者在本会话 ~30 分钟内有过人类输入才可发。
 - 每问必带推荐项,被 Skip 或长挂即转卡通道,⛔ 不重弹。
+- 推送维护者:受管 PR 待批合、决策卡待字、发版、仅其可解之阻 ⇒ 另发 `PushNotification`。
+- 一行 ≤200 字,先写动作与编号;每项恰一次,例行进展、刚问刚答与在场即见的不推。
 - 项目总监席:维护者在所在仓召唤 `/pm-dispatch director`;⛔ 无 Routine/cron;未回字 = 不在 = 停。
-- 三职 = 契约复核记录事后审计、决裁勤务、维护者动作台账。
-- 每场召唤把带席内 ACCEPT 的受管草稿呈为一批 ≤5 行决裁;批准与合并仍是维护者的点击。
 - 总监席档位由维护者按项目人工定,每场记入摘要台账;⛔ 无档位硬门、无免档整理态。
 - 总监席是唯一裁决者:决策箱、代裁与一类自裁只出自本席,⛔ 无子代理无自述。
 

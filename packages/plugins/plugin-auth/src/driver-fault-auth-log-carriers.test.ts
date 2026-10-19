@@ -257,10 +257,12 @@ for (const cell of CELLS) {
         // below will meet in the DATABASE — not in any check of ours.
         await engine.insert('sys_user', { id: 'usr_holder', email: 'holder@corp.example', name: S }, SYSTEM);
         await driver.getKnex().raw(`create unique index sys_user_name_forced_unique on sys_user (${cell.nameKey})`);
-        await engine.insert(
+        // [C8 stage 8b] A legacy organization-less catalogue row, landed beneath the
+        // engine: under `single` the engine refuses an organization-less platform
+        // insert while the install holds no organization (ADR-0131 D9).
+        await (engine as any).getDriver('sys_permission_set').create(
           'sys_permission_set',
           { id: 'ps_member_default', name: 'member_default', label: 'member_default', active: true },
-          SYSTEM,
         );
         for (const email of ['first@corp.example', 'second@corp.example']) {
           await engine.insert(

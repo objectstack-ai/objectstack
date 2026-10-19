@@ -236,7 +236,11 @@ describe('Setup identity objects declare enable.feeds: false — a comment creat
     const { engine, storeFor } = await boot();
 
     await expect(
-      engine.insert('sys_comment', { thread_id: 'crm_account:acc-1', body: 'hello' } as any),
+      // [C8 stage 8b] The comment carries its organization: under `single` an
+      // organization-less system insert into a platform object is refused when
+      // no organization exists, and this harness registers the organization
+      // object with none of its rows.
+      engine.insert('sys_comment', { thread_id: 'crm_account:acc-1', body: 'hello', organization_id: 'org_fixture' } as any),
     ).resolves.toBeTruthy();
 
     expect(Array.from(storeFor('sys_comment').values()).map((r) => r.thread_id)).toEqual(['crm_account:acc-1']);

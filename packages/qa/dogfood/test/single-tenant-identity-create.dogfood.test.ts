@@ -66,9 +66,14 @@ describe('ADR-0057: org-scoped identity creatable single-tenant', () => {
     expect(denied.code).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
 
     // ADR-0057's actual regression target — `organization_id` is OPTIONAL at
-    // the schema level, so a single-tenant (no org row) write does not die
-    // with VALIDATION_FAILED. System-context writes (org-structure sync,
+    // the schema level, so a system write that names no organization does not
+    // die with VALIDATION_FAILED. System-context writes (org-structure sync,
     // seeding) are the writers that remain legitimate post-ADR-0092.
+    //
+    // [ADR-0131 D9 / D11, C8 stage 8b] Under `single` that write is no longer
+    // left organization-less: it takes the Default Organization, the one owner
+    // a `single` install has. It used to land NULL, through the platform-object
+    // exemption 8b lifted under `single`.
     const ql = await stack.kernel.getServiceAsync<any>('objectql');
     const row = await ql.insert(
       'sys_team',
@@ -76,6 +81,9 @@ describe('ADR-0057: org-scoped identity creatable single-tenant', () => {
       { context: { isSystem: true } },
     );
     expect(row?.id).toBeTruthy();
-    expect(row?.organization_id ?? null).toBeNull();
+    const tenancy = await stack.kernel.getServiceAsync<{ defaultOrgId(): Promise<string | null> }>('tenancy');
+    const defaultOrgId = await tenancy.defaultOrgId();
+    expect(defaultOrgId).toBeTruthy();
+    expect(row?.organization_id).toBe(defaultOrgId);
   });
 });

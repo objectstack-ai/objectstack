@@ -129,8 +129,15 @@ async function boot(): Promise<Harness> {
     plugins: { scim: true, organization: true },
   } as never);
 
+  // [C8 stage 8b] It carries an organization: under `single` an organization-less
+
+  // system insert is refused while the install holds none, and this rig holds none.
+
+  // The verifier reads the digest alone, so the organization changes nothing it answers.
+
   const { token } = await mintScimConnectionCredential(engine as never, SECRET, {
     connectionId: 'okta-14522',
+    organizationId: 'org_scim_8b',
   });
 
   return { engine, driver, manager, token, send: (request) => manager.handleRequest(request) };

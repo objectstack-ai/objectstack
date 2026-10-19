@@ -126,10 +126,13 @@ async function bootScopeWorld(scope: 'unit' | 'unit_and_below' | 'own_and_report
   const id = {} as Record<Who, string>;
   for (const who of WHO) id[who] = await uid(who);
 
-  // org (BU.organization_id is required) — reuse any existing, else create one.
-  let org = await ql.findOne('sys_organization', { where: {}, context: { isSystem: true } }).catch(() => null);
-  let orgId = org?.id;
-  if (!orgId) { orgId = 'org_scope'; await sys('sys_organization', { id: orgId, name: 'Scope Org', slug: `scope_${scope}` }).catch(() => {}); }
+  // [ADR-0131 D3/D9, C8 stage 8b] The showcase boots `single`, so the Default
+  // Organization exists before the first sign-up and owns every row this fixture
+  // seeds — asked of the `tenancy` service. (An empty-`where` `findOne` is refused
+  // as an arbitrary pick; the refusal was swallowed and a second organization
+  // minted, which under `single` makes every organization-less insert ambiguous.)
+  const orgId = (await (await stack.kernel.getServiceAsync<{ defaultOrgId(): Promise<string | null> }>('tenancy')).defaultOrgId());
+  if (!orgId) throw new Error('fixture: the showcase boot has no Default Organization to own the business units');
 
   const p = `${scope}`;
   await sys('sys_business_unit', { id: `bu_parent_${p}`, name: 'Parent', kind: 'division', organization_id: orgId, active: true });

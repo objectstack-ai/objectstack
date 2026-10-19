@@ -437,11 +437,19 @@ async function bootPrincipal(source: PostureSource) {
   await e.insert('sys_member', { id: `mem_admin_${n}`, user_id: USER_ADMIN, organization_id: ALPHA, role: 'member' }, SYS);
   await e.insert('sys_member', { id: `mem_member_${n}`, user_id: USER_MEMBER, organization_id: ALPHA, role: 'member' }, SYS);
   await e.insert('sys_member', { id: `mem_removed_${n}`, user_id: USER_REMOVED, organization_id: BETA, role: 'member' }, SYS);
-  const catalogue = (id: string, name: string, organization: string | null, objects: Record<string, unknown>) =>
-    e.insert('sys_permission_set', {
+  // [C8 stage 8b] A catalogue row with no organization is landed straight through
+  // the driver, as the residue an older release left: under `single` the engine
+  // stamps or refuses an organization-less platform insert (ADR-0131 D9), and this
+  // rig's engine holds two organizations.
+  const catalogue = (id: string, name: string, organization: string | null, objects: Record<string, unknown>) => {
+    const row = {
       id, name, label: name, organization_id: organization, managed_by: 'admin', active: true,
       object_permissions: JSON.stringify(objects), system_permissions: JSON.stringify([]),
-    }, SYS);
+    };
+    return organization === null
+      ? (engine as any).getDriver('sys_permission_set').create('sys_permission_set', row)
+      : e.insert('sys_permission_set', row, SYS);
+  };
   await catalogue(`ps_user_admin_${n}`, 'qa_user_admin', null, {});
   await catalogue(`ps_reader_${n}`, READER_SET, null, {});
   await catalogue(`ps_alpha_notes_${n}`, ALPHA_ONLY_SET, ALPHA, { [NOTES]: { allowRead: true } });

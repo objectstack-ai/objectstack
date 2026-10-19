@@ -232,10 +232,17 @@ beforeAll(async () => {
   ], SYS);
   await engine.insert('sys_organization', [{ id: ORG, name: 'CBC', slug: 'cbc' }], SYS);
   await engine.insert('sys_member', [{ id: 'mem_delegator', user_id: DELEGATOR_MEMBER, organization_id: ORG, role: 'member' }], SYS);
-  await engine.insert('sys_user_position', [
+  // [C8 stage 8b] Organization-less position rows are landed straight through the
+  // driver, as the residue an older release left: under `single` the engine now
+  // stamps such a system insert with the one organization (ADR-0131 D9), which
+  // would tie DELEGATOR_UNBOUND's position to an organization it is not a member of.
+  const positions = (engine as any).getDriver('sys_user_position');
+  for (const row of [
     { id: 'up_unbound', user_id: DELEGATOR_UNBOUND, position: MANAGER_SET.name },
     { id: 'up_member', user_id: DELEGATOR_MEMBER, position: MANAGER_SET.name },
-  ], SYS);
+  ]) {
+    await positions.create('sys_user_position', row);
+  }
 
   let security: unknown;
   let sharing: SharingService | undefined;

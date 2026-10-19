@@ -95,8 +95,21 @@ afterEach(async () => {
   }
 });
 
+/**
+ * [C8 stage 8b] An organization-less GLOBAL row is legacy residue: under
+ * `single` the engine stamps or refuses an organization-less platform insert
+ * (ADR-0131 D9), so a row with `organization_id` NULL is landed straight
+ * through the driver, as an older release left it. The readers this file pins
+ * still read it until C8's NULL-reader stages (18.x).
+ */
+function write(e: any, object: string, row: Record<string, unknown>) {
+  return row.organization_id === null
+    ? e.getDriver(object).create(object, row)
+    : e.insert(object, row, SYS);
+}
+
 async function insertSet(e: any, id: string, name: string, organizationId: string | null, caps: string[]) {
-  await e.insert('sys_permission_set', {
+  await write(e, 'sys_permission_set', {
     id,
     name,
     label: `${organizationId ?? 'global'} ${name}`,
@@ -105,7 +118,7 @@ async function insertSet(e: any, id: string, name: string, organizationId: strin
     active: true,
     object_permissions: JSON.stringify({ probe_ledger: FULL }),
     system_permissions: JSON.stringify(caps),
-  }, SYS);
+  });
 }
 
 async function boot(): Promise<ObjectQL> {
@@ -145,9 +158,9 @@ async function boot(): Promise<ObjectQL> {
 
   // USER_GLOBAL's GLOBAL grants — what an organization-less principal really holds:
   //  (1) a global position assignment, folded onto a global same-named set;
-  await e.insert('sys_user_position', {
+  await write(e, 'sys_user_position', {
     id: 'up_global_ops_lead', user_id: USER_GLOBAL, position: 'ops_lead', organization_id: null,
-  }, SYS);
+  });
   await insertSet(e, 'ps_global_ops_lead', 'ops_lead', null, ['probe.global_ops_lead']);
   //  (2) a global user grant to a global set, beside ORG_OTHER's same-named
   //      copy. The copy's id SORTS FIRST (`ps_0_…` before `ps_1_…`) and the
@@ -157,10 +170,10 @@ async function boot(): Promise<ObjectQL> {
   //      load-bearing.
   await insertSet(e, 'ps_0_other_platform_ops', 'platform_ops', ORG_OTHER, ['probe.other_platform_ops']);
   await insertSet(e, 'ps_1_global_platform_ops', 'platform_ops', null, ['probe.global_platform_ops']);
-  await e.insert('sys_user_permission_set', {
+  await write(e, 'sys_user_permission_set', {
     id: 'ups_global_platform_ops', user_id: USER_GLOBAL,
     permission_set: 'platform_ops', organization_id: null,
-  }, SYS);
+  });
   // [ADR-0131 D3/D4] The two GLOBAL sets are declared in the catalog, which is
   // what makes a grant of them confer anything; the sets ORG_OTHER authored are
   // rows only, with no definition (#15196 Q3 A).

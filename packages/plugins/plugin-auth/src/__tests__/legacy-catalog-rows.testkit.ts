@@ -41,7 +41,15 @@ export async function seedLegacyPlatformBucket(
       continue;
     }
     const id = legacyBucketRowId(ps.name);
-    await engine.insert('sys_permission_set', {
+    // [C8 stage 8b] Written beneath the engine when it has a driver to reach: under
+    // `single` the engine stamps an organization-less platform insert with the
+    // Default Organization (ADR-0131 D9), and these rows ARE the organization-less
+    // residue an earlier release left. An engine double without a driver keeps
+    // the engine write, where nothing stamps it.
+    const driver = (engine as { getDriver?: (object: string) => any }).getDriver?.('sys_permission_set');
+    const write = (row: Record<string, unknown>) =>
+      driver ? driver.create('sys_permission_set', row) : engine.insert('sys_permission_set', row, { context: SYS });
+    await write({
       id,
       name: ps.name,
       label: ps.label ?? ps.name,
@@ -54,7 +62,7 @@ export async function seedLegacyPlatformBucket(
       admin_scope: (ps as any).adminScope ? JSON.stringify((ps as any).adminScope) : null,
       active: true,
       managed_by: 'platform',
-    }, { context: SYS });
+    });
     ids[ps.name] = id;
   }
   return ids;
