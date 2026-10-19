@@ -64,7 +64,7 @@ export const SysSsoProvider = ObjectSchema.create({
     reason: 'Identity table managed by better-auth (@better-auth/sso) — see ADR-0135 D6.',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
-  description: 'External SSO identity providers (OIDC / SAML) this environment federates login to',
+  description: 'External SSO identity providers (OIDC / SAML) this system federates login to',
   displayNameField: 'provider_id',
   nameField: 'provider_id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{provider_id}',
@@ -109,7 +109,7 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'providerId', label: 'Provider ID', type: 'text', required: true, helpText: 'Stable identifier, e.g. "okta" or "acme-entra".' },
         { name: 'issuer', label: 'Issuer URL', type: 'text', required: true, helpText: 'IdP issuer, e.g. https://acme.okta.com. Discovery is fetched from here unless an explicit URL is given below.' },
         { name: 'domain', label: 'Email Domain', type: 'text', required: true, helpText: 'Users with this email domain are routed to this IdP, e.g. acme.com.' },
-        { name: 'clientId', label: 'Client ID', type: 'text', required: true, helpText: 'OAuth client ID issued by the IdP for this environment.' },
+        { name: 'clientId', label: 'Client ID', type: 'text', required: true, helpText: 'OAuth client ID issued by the IdP for this system.' },
         { name: 'clientSecret', label: 'Client Secret', type: 'text', required: true, helpText: 'OAuth client secret (stored encrypted by better-auth).' },
         { name: 'discoveryEndpoint', label: 'Discovery URL', type: 'text', required: false, helpText: 'Optional. OIDC discovery document URL. Leave blank to derive `<issuer>/.well-known/openid-configuration`.' },
         { name: 'scopes', label: 'Scopes', type: 'text', required: false, placeholder: 'openid email profile', helpText: 'Optional. Space- or comma-separated OAuth scopes. Defaults to "openid email profile".' },

@@ -176,7 +176,7 @@ export const zhCNSourceHashes: Readonly<Record<string, string>> = {
   'pages.cloud_connection_settings.label': '3a7caad0cb98e71d',
   'pages.cloud_connection_settings.subtitle': 'f5cdd253e8ffef9f',
   'pages.connect_agent.label': 'eeb174613510e87d',
-  'pages.connect_agent.subtitle': '2d0f9a000824e78a',
+  'pages.connect_agent.subtitle': 'b0d7c6d174511bcb',
   'pages.sys_user_detail.label': '6c0d22a931e235bd',
   'pages.sys_organization_detail.label': '3e55836156e1c1de',
 };

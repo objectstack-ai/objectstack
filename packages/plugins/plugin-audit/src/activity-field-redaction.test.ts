@@ -40,6 +40,7 @@ import type { EngineQueryOptions } from '@objectstack/spec/data';
 
 import { AuditPlugin } from './audit-plugin.js';
 import { resolveServedFields } from './activity-field-redaction.js';
+import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 
 const ACTIVITY = 'sys_activity';
 const ITEM = 'afr_item';
@@ -147,6 +148,7 @@ describe('[#21081] sys_activity value-bearing columns are served through the sec
       init: async (ctx: any) => ctx.registerService('security', security),
       start: async () => {},
     } as any);
+    await kernel.use(singlePostureTenancy());
     await kernel.use(new AuditPlugin());
     await kernel.bootstrap();
 
