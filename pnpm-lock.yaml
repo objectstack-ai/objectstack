@@ -1958,6 +1958,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/plugin-audit':
+        specifier: workspace:*
+        version: link:../plugin-audit
       '@objectstack/plugin-sharing':
         specifier: workspace:*
         version: link:../plugin-sharing

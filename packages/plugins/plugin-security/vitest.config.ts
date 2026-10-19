@@ -84,6 +84,14 @@ export default defineConfig({
       // a BUILD ARTIFACT, and a dist merely BEHIND runs GREEN against the
       // driver's old behaviour while saying nothing (`check:test-source-alias`
       // refuses exactly that).
+      // `default-row-scope-declarations.test.ts` reads `sys_audit_log`'s declared
+      // default row scope off the object `AuditPlugin` registers (the ledger is
+      // plugin-audit's, ADR-0029 K2), so that declaration must be the source in
+      // this checkout, not a `dist/` that may predate it.
+      {
+        find: /^@objectstack\/plugin-audit$/,
+        replacement: path.resolve(__dirname, '../plugin-audit/src/index.ts'),
+      },
       {
         find: /^@objectstack\/driver-sqlite-wasm$/,
         replacement: path.resolve(__dirname, '../../drivers/driver-sqlite-wasm/src/index.ts'),
