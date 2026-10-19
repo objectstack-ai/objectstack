@@ -951,8 +951,9 @@ const DEFAULT_ORGANIZATION_WATCHED_OBJECTS: ReadonlySet<string> = new Set([Syste
  * [#24523] The residual bound on a memoised Default Organization answer —
  * ⛔ never the in-process rule, which is the write seam. It covers only what no
  * seam can see: a peer replica's `sys_organization` write on a deployment with
- * no `authz.invalidated` bridge attached (a peer's delete-and-recreate is
- * #21868's exact failure), a write that started before this engine's observer
+ * no `authz.invalidated` bridge attached — the shipped default, where this
+ * bound is the only cover for a peer's write (a peer's delete-and-recreate is
+ * #21868's exact failure) — a write that started before this engine's observer
  * registered, and a watched write inside an engine transaction that has not
  * committed when its statement completes. The same residual bound the
  * localization success cache defaults to; the price is two reads per engine
@@ -992,9 +993,13 @@ const defaultOrganizationMemo = new WeakMap<object, DefaultOrganizationMemoEntry
  * included), delete — observed after it settles by the leg-5 write seam
  * ({@link watchedWriteState}), so a Default Organization deleted and
  * recreated is read anew on the next request (#21868 is the failure designed
- * against). Across replicas: the bridges' non-`write` epoch bumps (`remote`
- * from `authz.invalidated`, `metadata`), wholesale. Then the residual
- * {@link DEFAULT_ORGANIZATION_MEMO_TTL_MS}.
+ * against). Across replicas: only with the `authz.invalidated` bridge
+ * attached — the grants cache on (`OS_AUTHZ_GRANTS_CACHE_TTL_MS` above 0) and
+ * a cross-process cluster driver — does a peer's write arrive, as a `remote`
+ * epoch bump; that and every other non-`write` bump (`metadata`, plugin-security's
+ * local declaration bump, and `manual`) retire the answer wholesale. Then the
+ * residual {@link DEFAULT_ORGANIZATION_MEMO_TTL_MS}, on the shipped default the
+ * only cover for a peer's write.
  *
  * A stale answer can fail either way, and no design at this cost avoids the
  * granting one: a stale id withholds standing from the new Default
