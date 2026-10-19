@@ -44,7 +44,7 @@ export function metadataPartialListingSentence(plural: string, served: number): 
   return (
     `The metadata service could not be fully read, so this listing of ${plural} is known to be INCOMPLETE. `
     + `${served} ${served === 1 ? 'is' : 'are'} being served and the total is withheld — `
-    + `this environment declares at least that many ${plural}, possibly more. `
+    + `this system declares at least that many ${plural}, possibly more. `
     + 'Retry once the metadata service is reachable.'
   );
 }
