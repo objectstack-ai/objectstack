@@ -3159,23 +3159,50 @@ export class ApprovalService implements IApprovalService {
    * most natural approvals automation there is, had to declare `runAs:'system'`
    * and take blanket elevation for a case where a perfectly good scoped identity
    * existed. Re-attaching the actor lets those cascades run as the deciding user
-   * with RLS enforced. Same shape the approval node already uses when it calls
-   * into this service (`approval-node.ts`).
+   * with RLS enforced.
    *
    * `actorId` is `null` for the genuinely machine-driven transitions (the SLA
    * escalation's auto-decision, the dead-run sweep). There is no human to name
    * there, and naming a sentinel would put a non-user in `updated_by` and in
-   * every downstream flow's identity. Those cascades stay user-less — a flow
-   * that wants to react to them still has to declare `runAs:'system'`, which is
-   * the honest answer rather than an oversight.
+   * every downstream flow's identity. Those cascades stay user-less, under
+   * {@link SYSTEM_CTX} — a flow that wants to react to them still has to
+   * declare `runAs:'system'`, which is the honest answer rather than an
+   * oversight.
    *
-   * Deliberately carries `userId` ONLY, not the request's org. On an
-   * ExecutionContext `tenantId` is a driver-scoping knob, not attribution
-   * (`buildDriverOptions` turns it into a tenant predicate on the update), so
-   * passing it would newly org-scope this write and silently no-op the mirror on
-   * a record whose org differs from the request's — while buying nothing: the
-   * automation engine back-fills the run's `tenantId` from the resolved user's
-   * own grants.
+   * **A named actor's write acts in the record's organisation, and carries no
+   * grants of its own (#24519, ruling 6271152775).** Its context is
+   * {@link attributedMirrorContext}: `isSystem`, the actor's `userId`, and
+   * `tenantId` = the organisation of the record being written. Every consumer
+   * that runs as the actor then resolves the actor's own request envelope in
+   * that organisation, through the one resolver the request path uses
+   * (`resolveUserAuthzGrants`):
+   *  - a `runAs:'user'` hook's pinned api is seeded with the actor's positions,
+   *    permission sets and organisation peers. Positions and permission sets a
+   *    context CARRIES are kept verbatim, so the empty arrays this write used to
+   *    carry left such a hook on the member baseline instead of the actor's own
+   *    grants;
+   *  - a record-change flow receives the actor and the organisation as its
+   *    `tenantId`, and a `runAs:'user'` run resolves the same envelope under it.
+   *    Nothing downstream supplies a missing organisation: the automation
+   *    engine's grants bridge answers a `tenantId` only when it was handed one,
+   *    and an organisation-less resolution is not the actor's request in the
+   *    record's organisation — its peers are the actor alone, and its positions
+   *    come from every organisation the actor belongs to.
+   * The write itself is authorized by `isSystem` alone — the security
+   * middleware short-circuits before it reads any grant — so leaving the arrays
+   * off changes nothing about what this write may do.
+   *
+   * The organisation is the record's, for every actor: an approver drawn from
+   * another organisation's directory (ADR-0105 D9) included, which is the
+   * reading #24321 applies to a `runAs:'user'` flow's decider. On an
+   * ExecutionContext `tenantId` is also the driver's scoping knob
+   * (`buildDriverOptions`): under a walled posture it narrows this update to that
+   * organisation's rows (and organisation-less ones), under `single` it scopes
+   * nothing (ADR-0131 D11). That is why the organisation is the record's LIVE
+   * one, read at write time, and not the request's stamp: the two agree by
+   * construction (#10101 stamps the request with the subject record's
+   * organisation), except for a record re-parented while its approval was
+   * pending, which the stamp would scope this write away from.
    */
   private async mirrorStatusField(
     object: string,
@@ -3183,13 +3210,44 @@ export class ApprovalService implements IApprovalService {
     field: string,
     status: string,
     actorId: string | null,
+    requestOrg: string | null | undefined,
   ): Promise<void> {
     try {
-      const context = actorId ? { ...SYSTEM_CTX, userId: actorId } : SYSTEM_CTX;
+      const context = actorId
+        ? await this.attributedMirrorContext(object, recordId, actorId, requestOrg)
+        : SYSTEM_CTX;
       await this.engine.update(object, { id: recordId, [field]: status }, { context });
     } catch (err: any) {
       this.logger?.warn?.(`[approvals] mirrorStatusField failed: ${err?.message ?? err}`);
     }
+  }
+
+  /**
+   * The context a named actor's status mirror writes under (see
+   * {@link mirrorStatusField}): `{ isSystem: true, userId, tenantId }` and
+   * nothing else. The organisation is the subject record's live one, read
+   * through {@link recordOrgResolver} — the resolver the request row was
+   * stamped by — and the request's own organisation for an object that has
+   * none (or a record that carries none), as at the stamp. ⛔ No `positions` /
+   * `permissions`: a carried array is kept verbatim by every `runAs:'user'`
+   * consumer, so an empty one would stand in for the actor's own grants.
+   */
+  private async attributedMirrorContext(
+    object: string,
+    recordId: string,
+    actorId: string,
+    requestOrg: string | null | undefined,
+  ): Promise<ExecutionContext> {
+    const column = this.recordOrgResolver.organizationFieldFor(object);
+    let organization: string | null = null;
+    if (column) {
+      const rows = await this.engine.find(object, {
+        where: { id: recordId }, fields: ['id', column], limit: 1, context: SYSTEM_CTX,
+      } as any);
+      organization = this.recordOrgResolver.organizationOf(object, Array.isArray(rows) ? rows[0] : rows);
+    }
+    if (!organization && requestOrg != null && String(requestOrg) !== '') organization = String(requestOrg);
+    return { isSystem: true, userId: actorId, ...(organization ? { tenantId: organization } : {}) };
   }
 
   /**
@@ -3673,7 +3731,7 @@ export class ApprovalService implements IApprovalService {
       // first-party path.
       await this.mirrorStatusField(
         input.object, input.recordId, input.config.approvalStatusField, 'pending',
-        row.submitter_id ?? null,
+        row.submitter_id ?? null, requestOrg,
       );
     }
 
@@ -3984,7 +4042,7 @@ export class ApprovalService implements IApprovalService {
     if (config.approvalStatusField) {
       await this.mirrorStatusField(
         raw.object_name, raw.record_id, config.approvalStatusField, finalStatus,
-        actingUserId(context),
+        actingUserId(context), org,
       );
     }
     const fresh = await this.readBackRequest(requestId, context);
@@ -4466,7 +4524,7 @@ export class ApprovalService implements IApprovalService {
     if (config.approvalStatusField) {
       await this.mirrorStatusField(
         raw.object_name, raw.record_id, config.approvalStatusField, 'recalled',
-        actingUserId(context),
+        actingUserId(context), org,
       );
     }
 
@@ -4805,7 +4863,7 @@ export class ApprovalService implements IApprovalService {
       if (config.approvalStatusField) {
         await this.mirrorStatusField(
           raw.object_name, raw.record_id, config.approvalStatusField, 'rejected',
-          actingUserId(context),
+          actingUserId(context), org,
         );
       }
       let resumed = false;
@@ -4847,7 +4905,7 @@ export class ApprovalService implements IApprovalService {
     if (config.approvalStatusField) {
       await this.mirrorStatusField(
         raw.object_name, raw.record_id, config.approvalStatusField, 'returned',
-        actingUserId(context),
+        actingUserId(context), org,
       );
     }
 
@@ -6510,7 +6568,7 @@ export class ApprovalService implements IApprovalService {
       // No human did this — a sweep did. Left user-less on purpose (#3783): a
       // flow that wants to react to a dead-run release declares runAs:'system'.
       await this.mirrorStatusField(
-        raw.object_name, raw.record_id, config.approvalStatusField, 'recalled', null,
+        raw.object_name, raw.record_id, config.approvalStatusField, 'recalled', null, org,
       );
     }
 
