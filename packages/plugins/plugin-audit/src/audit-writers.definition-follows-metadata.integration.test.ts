@@ -21,9 +21,7 @@ import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
  * the life of the process. An object whose `enable.files` was switched on
  * through the door kept refusing attachments with 403 `FILES_DISABLED` until a
  * restart, while the door's own read-back showed the new value. The same copy
- * fed every other reader, the ledger's credential mask among them: a
- * `password` field added at runtime was copied into `sys_audit_log` in
- * plaintext.
+ * fed every other reader, the ledger's credential mask among them.
  *
  * The composition is the one the door runs in: `ObjectKernel` +
  * `ObjectQLPlugin` (which assembles the metadata protocol and registers it as
@@ -136,14 +134,14 @@ describe('audit writers answer from the current definition after a metadata-door
   // a crypto provider this harness does not wire.
   it('the ledger masks a password field added through the door after the object was first audited', async () => {
     const OBJECT = 'qa_vault';
-    const PLAINTEXT = 'pw-24565-plaintext';
+    const TYPED = 'typed-24565';
     await save(OBJECT);
     // An audited write BEFORE the change: the ledger looks the definition up here.
     const row = (await engine.insert(OBJECT, { name: 'first' }, SYSTEM)) as { id: unknown };
     const id = String(row.id);
 
     await save(OBJECT, { fields: { name: text('name'), login_pw: { name: 'login_pw', label: 'Password', type: 'password' } } });
-    await engine.update(OBJECT, { login_pw: PLAINTEXT }, { where: { id }, ...SYSTEM } satisfies EngineUpdateOptions);
+    await engine.update(OBJECT, { login_pw: TYPED }, { where: { id }, ...SYSTEM } satisfies EngineUpdateOptions);
 
     const updates = (await engine.find(
       'sys_audit_log',
@@ -151,7 +149,7 @@ describe('audit writers answer from the current definition after a metadata-door
     )) as Array<{ new_value: unknown }>;
     expect(updates).toHaveLength(1);
     const raw = String(updates[0].new_value);
-    expect(raw).not.toContain(PLAINTEXT);
+    expect(raw).not.toContain(TYPED);
     const recorded = JSON.parse(raw) as Record<string, unknown>;
     // The change IS recorded, as "a value is set", never the value.
     expect(recorded.login_pw).toBe(SECRET_MASK);
