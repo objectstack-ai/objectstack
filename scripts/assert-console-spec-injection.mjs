@@ -16,7 +16,9 @@
 //
 //   injected = this framework tree's packages/spec  (what must be bundled)
 //   vendored = the @objectstack/spec objectui's own lockfile installed
-//              (what gets bundled when the injection is missing or broken)
+//              (what gets bundled when the injection is missing or broken);
+//              on a pin carrying `.objectstack-sha`, objectui's own build of
+//              that commit — see readPinnedReference for why only that one
 //
 // ## The test is two-sided, because one side is not enough
 //
@@ -73,8 +75,9 @@
 //     --assets   <built console dist/assets>
 //
 // Exit: 0 = injection proven (or no skew to prove) · 1 = injection failed
-//       2 = inconclusive / cannot run
+//       2 = inconclusive / cannot run (including a reference that is this tree)
 
+import fs from 'node:fs';
 import path from 'node:path';
 
 import {
@@ -106,6 +109,50 @@ function parseArgs(argv) {
 }
 
 const args = parseArgs(process.argv);
+
+/**
+ * The objectstack commit --vendored was built at, when objectui pins one; null otherwise.
+ *
+ * A pin carrying `.objectstack-sha` installs @objectstack/* by commit, and
+ * build-console.sh stands THIS tree in for that commit, so the spec objectui's
+ * install holds is this tree's own, packed. As --vendored it equals --injected:
+ * both pools are empty, the no-skew branch below passes, and the stamp records no
+ * witness for ANY bundle. What a broken pack-or-inject ships there is objectui's
+ * own build of the pinned commit, so that build is the only reference taken on
+ * such a pin. It is known by the stamp objectui's scripts/objectstack-pin.mjs
+ * writes at the root of the cache it packed into (`<cache>/.stamp.json` beside
+ * `<cache>/spec`): `source: 'pin'`, `sha` equal to the pin. A stand-in, a copy
+ * with no such stamp (the install's node_modules/@objectstack/spec) or a build of
+ * another commit is refused as cannot-judge, never read as "no skew".
+ */
+function readPinnedReference(objectuiDir, vendoredDir) {
+  const pinFile = path.join(objectuiDir, '.objectstack-sha');
+  if (!fs.existsSync(pinFile)) return null;
+  const pin = fs.readFileSync(pinFile, 'utf8').trim();
+  const stampFile = path.join(path.dirname(vendoredDir), '.stamp.json');
+  let stamp = null;
+  try {
+    stamp = JSON.parse(fs.readFileSync(stampFile, 'utf8'));
+  } catch {
+    // No readable stamp is refused below, with the rest.
+  }
+  if (stamp?.source !== 'pin' || stamp?.sha !== pin) {
+    const found = stamp ? `source ${JSON.stringify(stamp.source)} at ${String(stamp.sha).slice(0, 12)}` : 'no readable stamp';
+    fail(
+      `objectui pins objectstack ${pin.slice(0, 12)} (.objectstack-sha), so --vendored must be objectui's own\n` +
+        `  build of that commit, and \`${stampFile}\` says ${found}. On this pin objectui's install is\n` +
+        "  this tree (the OBJECTSTACK_ROOT stand-in), and judged against itself this check would pass any\n" +
+        "  bundle. build-console.sh keeps that build before standing this tree in; pass its spec.",
+    );
+  }
+  return pin;
+}
+
+const vendoredPin = readPinnedReference(path.resolve(args.objectui), path.resolve(args.vendored));
+const vendoredName = vendoredPin
+  ? `@objectstack/spec of objectui's own build of objectstack ${vendoredPin.slice(0, 12)}`
+  : 'PUBLISHED @objectstack/spec';
+const vendoredOnly = vendoredPin ? 'pin-only' : 'published-only';
 
 const assetsDir = path.resolve(args.assets);
 // The dist root is the assets dir's parent: build-console.sh passes
@@ -162,6 +209,8 @@ function stamp(skew) {
       {
         name: '@objectstack/spec',
         injectedFrom: path.resolve(args.injected),
+        vendoredFrom: path.resolve(args.vendored),
+        vendoredPin,
         skew,
         freshWitness,
         staleDetector,
@@ -175,8 +224,11 @@ function stamp(skew) {
   }
 }
 
+// With a pinned reference this is the honest case, never the vacuous one: an
+// independently built spec of the pinned commit declares the same descriptions as
+// this tree's, so a bundle carrying either carries the same text.
 if (freshCounts.pool === 0 && staleCounts.pool === 0) {
-  console.log('✓ Injected and vendored @objectstack/spec declare the same descriptions');
+  console.log(`✓ Injected and vendored @objectstack/spec declare the same descriptions${vendoredPin ? ` (vendored: ${vendoredName})` : ''}`);
   console.log('  — no observable skew, so nothing for this check to assert.');
   stamp(false);
   process.exit(0);
@@ -193,7 +245,7 @@ if (staleCounts.pool > 0 && staleDetector === null) {
   console.error("  it could look for is in the bundle, and objectui's own source at the pin carries");
   console.error('  each one too, so none can tell the published spec from objectui\'s own text.');
   console.error('  The injection is UNVERIFIED by this check.');
-  console.error(`    published-only descriptions: ${staleCounts.pool}, all of them carried by objectui's source`);
+  console.error(`    ${vendoredOnly} descriptions: ${staleCounts.pool}, all of them carried by objectui's source`);
   console.error(`    first of them: "${staleHostCarried[0]}"`);
   process.exit(2);
 }
@@ -204,19 +256,19 @@ if (freshPresent !== true && stalePresent !== true) {
   console.error('✗ Neither spec appears in the built console — no @objectstack/spec');
   console.error('  content matched. The injection is UNVERIFIED by this check.');
   console.error(`    injected-only descriptions in the bundle: ${freshCounts.inBundle} of ${freshCounts.pool}`);
-  console.error(`    published-only descriptions in the bundle: ${staleCounts.inBundle} of ${staleCounts.pool}`);
+  console.error(`    ${vendoredOnly} descriptions in the bundle: ${staleCounts.inBundle} of ${staleCounts.pool}`);
   for (const line of [...freshNote('    '), ...staleNote('    ')]) console.error(line);
   process.exit(2);
 }
 
 if (stalePresent === true) {
-  console.error("✗ Built console still carries the PUBLISHED @objectstack/spec.");
-  console.error('  The console resolved spec from objectui\'s lockfile, so any authorable');
-  console.error('  key this framework declared after the last spec publish is unreachable');
+  console.error(`✗ Built console still carries the ${vendoredName}.`);
+  console.error(`  The console resolved spec from objectui's ${vendoredPin ? 'own pin' : 'lockfile'}, so any authorable`);
+  console.error(`  key this framework declared after ${vendoredPin ? 'that commit' : 'the last spec publish'} is unreachable`);
   console.error('  in the Studio designer — the defect objectstack#8134 exists to end.');
   console.error('');
   console.error(`  Text found in the bundle that ONLY the vendored spec has (${staleCounts.inBundle} of`);
-  console.error(`  ${staleCounts.pool} published-only descriptions), the first of them:`);
+  console.error(`  ${staleCounts.pool} ${vendoredOnly} descriptions), the first of them:`);
   console.error(`    "${staleDetector}"`);
   if (staleCounts.hostCarried > 0) {
     console.error('');
@@ -241,16 +293,16 @@ if (freshPresent !== true) {
   process.exit(2);
 }
 
-console.log("✓ Console bundle carries THIS tree's @objectstack/spec, and only it.");
+console.log(`✓ Console bundle carries THIS tree's @objectstack/spec, and only it${vendoredPin ? ` (vendored: ${vendoredName})` : ''}.`);
 console.log(`    present (injected only): "${freshWitness}"`);
 console.log(`      — ${freshCounts.inBundle} of ${freshCounts.pool} injected-only descriptions are in the bundle`);
 for (const line of freshNote('        ')) console.log(line);
 if (staleDetector) {
   console.log(`    absent  (vendored only): "${staleDetector}"`);
   if (staleCounts.hostCarried === 0) {
-    console.log(`      — and all ${staleCounts.pool} published-only descriptions are absent`);
+    console.log(`      — and all ${staleCounts.pool} ${vendoredOnly} descriptions are absent`);
   } else {
-    console.log(`      — and ${staleCounts.pool - staleCounts.hostCarried} of ${staleCounts.pool} published-only descriptions are absent;`);
+    console.log(`      — and ${staleCounts.pool - staleCounts.hostCarried} of ${staleCounts.pool} ${vendoredOnly} descriptions are absent;`);
     for (const line of staleNote('        ')) console.log(line);
   }
 }
