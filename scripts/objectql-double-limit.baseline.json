@@ -618,9 +618,6 @@
     "packages/plugins/plugin-webhooks/src/auto-enqueuer.test.ts": {
       "unjudged": 1
     },
-    "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.test.ts": {
-      "unjudged": 1
-    },
     "packages/plugins/plugin-webhooks/src/webhook-headers-gate.test.ts": {
       "blind": 1
     },

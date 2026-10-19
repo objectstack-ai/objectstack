@@ -653,3 +653,76 @@ describe('the catalog activation door — a declared sharing rule', () => {
         expect(h.tables[LEDGER][0].package_id ?? null).toBeNull();
     });
 });
+
+// [ADR-0131 D2/D6 regime C] A DECLARED webhook is switched through the same door
+// and the same ledger: `:type` `webhook`, the name resolved by plugin-webhooks'
+// declared-webhook reader (`declaredWebhooks`, `declaredWebhookNamed`), which the
+// dispatcher reads its switch through. The effect on dispatch is pinned beside
+// that reader (`declared-webhooks.test.ts`).
+describe('the catalog activation door — a declared webhook', () => {
+    const HOOK = 'crm_contact_changed';
+    const declaredWebhooks = (declared: Record<string, { packageId?: string }> = { [HOOK]: { packageId: 'crm' } }) => ({
+        declaredWebhooks: {
+            async declaredWebhookNamed(name: string) {
+                return declared[name]
+                    ? { webhook: { name }, active: true, ...declared[name] }
+                    : null;
+            },
+        },
+    });
+
+    it('`single`: a tenant admin holding `manage_metadata` switches it — one ledger row of type webhook, its package recorded', async () => {
+        const h = boot('single', {}, declaredWebhooks());
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`, { enabled: true });
+        expect(statusOf(res)).toBe(200);
+        expect(res.response?.body?.data).toEqual({ type: 'webhook', name: HOOK, enabled: true });
+        expect(h.tables[LEDGER]).toEqual([
+            expect.objectContaining({ metadata_type: 'webhook', name: HOOK, package_id: 'crm', active: true }),
+        ]);
+    });
+
+    for (const posture of ['group', 'isolated'] as const) {
+        it(`\`${posture}\`: the switch is the platform operator's — a tenant admin is refused 403 and nothing is written`, async () => {
+            const h = boot(posture, {}, declaredWebhooks());
+            const refused = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`);
+            expect(statusOf(refused)).toBe(403);
+            expect(codeOf(refused)).toBe('PERMISSION_DENIED');
+            expect(messageOf(refused)).toContain('a declared webhook');
+            expect(h.writes).toEqual([]);
+
+            expect(statusOf(await flip(h, PLATFORM_OPERATOR(), `/_activation/webhook/${HOOK}`))).toBe(200);
+            expect(h.writes).toHaveLength(1);
+        });
+    }
+
+    it('a name no declaration holds is 404 and writes nothing — an organization\'s own webhook has its own switch', async () => {
+        const h = boot('single', {}, declaredWebhooks());
+        const res = await flip(h, TENANT_ADMIN(), '/_activation/webhook/our_own_hook');
+        expect(statusOf(res)).toBe(404);
+        expect(h.writes).toEqual([]);
+    });
+
+    it('no declared-webhook reader is 503 SERVICE_UNAVAILABLE, never a write for an unconfirmed name', async () => {
+        const h = boot('single');
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`);
+        expect(statusOf(res)).toBe(503);
+        expect(codeOf(res)).toBe('SERVICE_UNAVAILABLE');
+        expect(h.writes).toEqual([]);
+    });
+
+    it('a declared-webhook read that fails is 503, never a write', async () => {
+        const h = boot('single', {}, {
+            declaredWebhooks: { async declaredWebhookNamed() { throw new Error('registry down'); } },
+        });
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`);
+        expect(statusOf(res)).toBe(503);
+        expect(codeOf(res)).toBe('SERVICE_UNAVAILABLE');
+        expect(h.writes).toEqual([]);
+    });
+
+    it('a declaration no package names is switched too, its row carrying no package', async () => {
+        const h = boot('single', {}, declaredWebhooks({ [HOOK]: {} }));
+        expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`))).toBe(200);
+        expect(h.tables[LEDGER][0].package_id ?? null).toBeNull();
+    });
+});

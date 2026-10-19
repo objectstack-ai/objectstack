@@ -32,7 +32,7 @@
  *
  * ## Why a hook, and why THIS hook
  * Maintainer ruling 2026-08-13 (option 2). Validating at the plugin's own write
- * paths (`bootstrapDeclaredWebhooks` / `headersPatch` / the migration sweep)
+ * paths (the since-retired declared-webhook seeder / the migration sweep)
  * was rejected as insufficient: a direct `PATCH /api/v1/data/sys_webhook` never
  * goes through any of them, and that is the measured trigger. An engine hook
  * covers every door at once — the generic data API, the Setup UI, scripts, the
@@ -291,8 +291,8 @@ const GATE_PRIORITY = 50;
  * ADMIN edit; this is a validity verdict on a payload, and a malformed header
  * map is exactly as unusable when a seeder writes it. Ruling item 2 says the
  * plugin's own write paths inherit this validation through the hook, which is
- * only true if system writes are covered. They pass by construction —
- * `bootstrapDeclaredWebhooks` and the migration sweep both write
+ * only true if system writes are covered. They pass by construction — the
+ * migration sweep (and the since-retired declared-webhook seeder) writes
  * `serializeHeaders(...)` of an already `isHeaderMap`-filtered map — so
  * covering them costs nothing and closes the door for a future write path that
  * is less careful.

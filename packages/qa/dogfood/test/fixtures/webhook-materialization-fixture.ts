@@ -3,17 +3,18 @@
 // Webhook materialization fixture — the deterministic ADR-0054 proof for the
 // `webhook-materialization` high-risk class.
 //
-// A webhook prop is `live` in the ledger because a stack-authored `webhooks:`
-// entry is materialized into a dispatchable `sys_webhook` row on boot
-// (#3461/#3489) — but "materialized" is not "reads the schema". The authored
-// value crosses manifest-decomposition → the ObjectQL registry (type `webhook`)
-// → `bootstrapDeclaredWebhooks` → `engine.insert('sys_webhook')`, and the break
-// can live in any seam: the bridge was first gated BEHIND the realtime/messaging
-// dispatch guard, so a boot without realtime silently materialized nothing (the
-// exact silent no-op #3461 set out to kill). This fixture authors ONE webhook
-// against ONE object, with ZERO dependence on an example app, so the proof can
-// assert the runtime outcome: the sys_webhook row exists with the spec→runtime
-// remap applied (`object`→`object_name`, `isActive`→`active`).
+// A webhook prop is `live` in the ledger because the dispatcher reads it — but
+// "read" is not "reads the schema". Since ADR-0131 D2 retired the boot seeder,
+// the authored value crosses manifest-decomposition → the ObjectQL registry
+// (type `webhook`) → plugin-webhooks' declared-webhook reader (bound as the
+// `declaredWebhooks` service on the data engine alone) → the dispatcher's
+// subscription, with NO `sys_webhook` row in between, and the break can live in
+// any seam: the old bridge was first gated BEHIND the realtime/messaging
+// dispatch guard, so a boot without realtime silently did nothing. This fixture
+// authors ONE webhook against ONE object, with ZERO dependence on an example
+// app, so the proof can assert the runtime outcome: no row, and a delivery with
+// the spec→runtime remap applied (`object`→`object_name`, `isActive`→the
+// switch).
 
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -33,8 +34,8 @@ export const WmTask = ObjectSchema.create({
 });
 
 /**
- * The stack-authored webhook. `object` (spec) must land as `object_name`
- * (runtime col) and `isActive` as `active` — the remap the proof asserts.
+ * The stack-authored webhook. `object` (spec) must land as the dispatcher's
+ * `object_name` and `isActive` as its switch — the remap the proof asserts.
  */
 export const wmTaskChanged = defineWebhook({
   name: 'wm_task_changed',
@@ -52,7 +53,7 @@ export const webhookFixtureStack = defineStack({
     version: '0.0.0',
     type: 'app',
     name: 'Webhook Materialization Fixture',
-    description: 'Single-object app that authors one webhook to prove stack `webhooks:` entries materialize into dispatchable sys_webhook rows (ADR-0054).',
+    description: 'Single-object app that authors one webhook to prove stack `webhooks:` entries reach the dispatcher from the registry, with no sys_webhook row (ADR-0054, ADR-0131 D2).',
   },
   objects: [WmTask],
   webhooks: [wmTaskChanged],

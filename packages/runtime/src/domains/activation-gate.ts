@@ -193,6 +193,19 @@ export const SHARING_RULE_ACTIVATION_SUBJECT: ActivationSubject = {
 };
 
 /**
+ * [ADR-0131 D6 regime C] The declared-webhook door's wording. A declared webhook
+ * is customised by a copy under another name plus the declared one switched
+ * off; an organization still authors its own webhooks, so the remedy names that
+ * half and the operator for the switch.
+ */
+export const WEBHOOK_ACTIVATION_SUBJECT: ActivationSubject = {
+    subject: 'a declared webhook',
+    remedy:
+        'To switch a declared webhook on or off for this installation, ask your platform operator; webhooks your ' +
+        'organization authors under names of its own stay yours to create and switch.',
+};
+
+/**
  * The activation body every `_activation` door reads: `{ enabled?: boolean }`,
  * unknown keys refused, `enabled` defaulting to `true`.
  *

@@ -122,7 +122,7 @@ are reported as `undecidable` rather than assumed either way.
 
 The same holds twice over for the context. An options argument spelled as a
 literal can be read; one spelled `options`, `{ ...opts }`, or handed through a
-forwarding shim cannot, and **52 of the 232 sites are spelled that way**. A
+forwarding shim cannot, and **50 of the 230 sites are spelled that way**. A
 context resolved from an inline literal or a local `const` can be tested for
 `isSystem`; one arriving from a helper call cannot.
 
@@ -150,8 +150,8 @@ now **0**: nothing on this surface threads a context that provably lacks the fla
 
 **"No tenant context" counted sites it had not read.** An options argument the
 walker could not parse was folded into the same bucket as one it had read and
-found empty. That published **60 sites "carrying no tenant context at all"**
-when 8 said so and 52 were simply unread — an over-claim in the *alarming*
+found empty. That published **58 sites "carrying no tenant context at all"**
+when 8 said so and 50 were simply unread — an over-claim in the *alarming*
 direction, on the very figure this page tells other cards to cite. `carries` is
 now three-valued, and an unreadable argument can never contribute to the
 provable count.
@@ -187,10 +187,10 @@ reproduce them. Where it disagrees, it disagrees on the page:
 
 | carried figure | where it survives | this census |
 | :--- | :--- | ---: |
-| 175 write call sites | quoted in the merged changeset | **232** |
-| 24 carrying no tenant context | quoted in the merged changeset | **2** provable and tenancy-enabled; **31** more whose options argument is unreadable |
-| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **158 of 232** decidable, **74** undecidable |
-| 135 (77%) silenced by the `isSystem` guard before the posture gate | the lost issue body — **no surviving corroboration** | **not reproduced**: 129 decidably elevated, 0 decidably not, 95 undecidable |
+| 175 write call sites | quoted in the merged changeset | **230** |
+| 24 carrying no tenant context | quoted in the merged changeset | **2** provable and tenancy-enabled; **29** more whose options argument is unreadable |
+| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **156 of 230** decidable, **74** undecidable |
+| 135 (77%) silenced by the `isSystem` guard before the posture gate | the lost issue body — **no surviving corroboration** | **not reproduced**: 129 decidably elevated, 0 decidably not, 93 undecidable |
 | 141 and 132, two independent re-derivations | the card that filed this work | — |
 
 **The differences are not reconciled, and deliberately so.** The old census's
@@ -201,20 +201,20 @@ at any commit.
 
 Two structural facts do plausibly widen this reading against any hand or regex
 one, and both are counted in the generated tables below: the 41 sites reached
-through an erased (`any`) receiver, and the 51 that name their object through a
+through an erased (`any`) receiver, and the 49 that name their object through a
 `const` rather than inline. An instrument that read either the way a person does
 would report a smaller number and would not say so.
 
 The fourth row is the one worth flagging to anyone citing it. **The 135 / 77%
 figure has no surviving corroboration anywhere in the tree.** This census reads
-129 of 232 (56%) as decidably elevated, with 95 more whose elevation is a
+129 of 230 (56%) as decidably elevated, with 93 more whose elevation is a
 run-time fact — so the claim is neither confirmed nor refuted, and the honest
 answer is that a static reading cannot settle it.
 
-⇒ **Cite `2 / 232`, and say what it is**: the sites whose options argument was
+⇒ **Cite `2 / 230`, and say what it is**: the sites whose options argument was
 READ and holds no tenant context, against a decidably tenancy-enabled object.
 That is the control's provable yield surface. ⛔ Do not cite it as "the sites
-without tenant context" — **31 further sites** have an options argument this
+without tenant context" — **29 further sites** have an options argument this
 cannot read, and they are neither in nor out.
 
 {/* BEGIN GENERATED: tenant-audit-census (scripts/tenant-audit-census.mjs) — DO NOT EDIT */}
@@ -223,29 +223,29 @@ cannot read, and they are neither in nor out.
 
 | what | count |
 | :--- | ---: |
-| write call sites on the application surface | **232** |
-| …whose object name is statically decidable | 158 |
+| write call sites on the application surface | **230** |
+| …whose object name is statically decidable | 156 |
 | …whose object name is chosen at run time | 74 |
-| …against an object with tenancy ENABLED | 157 |
+| …against an object with tenancy ENABLED | 155 |
 | …against an object that declares tenancy off | 1 |
 | threading a tenant context | 172 |
 | PROVABLY carrying none (options read, no context key) | **8** |
 | …of those, against a decidably tenancy-enabled object | **2** |
-| options argument UNREADABLE — may or may not carry one | 52 |
-| …of those, against a decidably tenancy-enabled object | 31 |
+| options argument UNREADABLE — may or may not carry one | 50 |
+| …of those, against a decidably tenancy-enabled object | 29 |
 | threading a decidably ELEVATED (`isSystem`) context | 129 |
 | threading a context that is decidably NOT elevated | 0 |
-| threading a context whose elevation is a run-time fact | 95 |
+| threading a context whose elevation is a run-time fact | 93 |
 
 | how the instrument reached the site | count |
 | :--- | ---: |
-| receiver carried a readable engine type | 191 |
+| receiver carried a readable engine type | 189 |
 | receiver erased, placed by the object NAME | 31 |
 | receiver erased, placed by an `object: string` PARAMETER | 5 |
 | receiver erased, placed by an `UNTYPED_RECEIVERS` row | 5 |
 
 | object name spelled inline | 107 |
-| object name spelled through a `const` | 51 |
+| object name spelled through a `const` | 49 |
 | object name is an `object: string` parameter | 7 |
 | object name is some other run-time expression | 67 |
 
@@ -297,7 +297,7 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-19 at `030483e7f`.
+Measured on 2026-10-19 at `fa6a837e7`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
