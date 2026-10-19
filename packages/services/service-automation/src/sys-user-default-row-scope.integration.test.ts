@@ -214,7 +214,7 @@ describe("sys_user's one `||` default keeps the reader's own row on every user-c
     for (const literal of SHIPPED_LITERALS) {
       const where = compiler.compileFilter([literal as any], context as any);
       if (where === null) throw new Error(`literal ${literal.name} compiled to no filter`);
-      for (const id of ids(await ql.find('sys_user', { where, fields: ['id'], context: SYS } as any))) out.add(id);
+      for (const id of ids(await ql.find('sys_user', { where, fields: ['id'], context: SYS }))) out.add(id);
     }
     return [...out].sort();
   }
@@ -248,9 +248,10 @@ describe("sys_user's one `||` default keeps the reader's own row on every user-c
   it('CONTROL: the rows are the object default\'s — explain names it, and a system read sees all four users', async () => {
     await boot();
     expect(ids(await ql.find('sys_user', { context: SYS }))).toEqual(['usr_loner', 'usr_me', 'usr_other', 'usr_peer']);
-    const security = kernel.getService<any>('security');
+    type Explained = { layers: Array<{ layer: string; verdict: string; detail: string }> };
+    const security = kernel.getService<{ explain(input: { object: string; operation: string }, context: object): Promise<Explained> }>('security');
     const decision = await security.explain({ object: 'sys_user', operation: 'read' }, await requestContext('usr_me', orgA));
-    const rls = (decision.layers as Array<{ layer: string; verdict: string; detail: string }>).find((l) => l.layer === 'rls');
+    const rls = decision.layers.find((l) => l.layer === 'rls');
     expect(rls?.verdict).toBe('narrows');
     expect(rls?.detail).toContain("'sys_user_self_or_org_members'");
     expect(rls?.detail).toContain('object default row scope');
