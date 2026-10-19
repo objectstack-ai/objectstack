@@ -8837,8 +8837,8 @@ export class ObjectStackProtocolImplementation implements
      *    the one that actually carries the plugin-registered family: manifests
      *    register through the `manifest` service during kernel Phase 1
      *    (`ql.registerApp`), so by Phase 2 it holds `theme`, `connector`,
-     *    `webhook`, `sharing_rule`, `analytics_cube`, … — none of which have a
-     *    registry entry.
+     *    `webhook`, `analytics_cube`, … — none of which have a registry entry
+     *    (and `sharing_rule`, which has had one since ADR-0131 D6).
      *  - the `metadata` service's `getRegisteredTypes()` — types the
      *    MetadataManager knows. Its `typeRegistry` is seeded with
      *    `DEFAULT_METADATA_TYPE_REGISTRY` in the manager's constructor, so
@@ -8956,11 +8956,14 @@ export class ObjectStackProtocolImplementation implements
             // ({@link unrecognisedMetaTypeRefusal}) instead of two
             // independently-maintained rules that drifted apart.
             //
-            // What this keeps, and it is the whole point: the six legitimate
-            // plugin kinds with no static registry entry — `theme`, `webhook`,
-            // `connector`, `sharing_rule`, `analytics_cube`, `rag_pipeline` —
-            // are IN the static spelling contract (limb 1 of the URL map), so
-            // the predicate accepts them and they stay advertised as creatable.
+            // What this keeps, and it is the whole point: the legitimate
+            // plugin kinds with no static registry entry — `webhook`,
+            // `connector`, `analytics_cube`, `rag_pipeline` — are IN the static
+            // spelling contract (limb 1 of the URL map), so the predicate
+            // accepts them and they stay advertised as creatable. (`theme` and
+            // `sharing_rule` were two more: `theme` left the contract with its
+            // carrier, and ADR-0131 D6 gave `sharing_rule` a code-only registry
+            // entry, so it takes the registry arm above.)
             // `PUT /meta/theme/dark` is the operation the plugin path exists to
             // serve and this change must not touch it.
             //

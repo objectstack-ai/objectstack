@@ -92,6 +92,7 @@ export const en: TranslationData = {
         nav_capabilities: { label: 'Capabilities' },
         nav_permission_sets: { label: 'Permission Sets' },
         nav_sharing_rules: { label: 'Sharing Rules' },
+        nav_declared_sharing_rules: { label: 'Declared Sharing Rules' },
         nav_record_shares: { label: 'Record Shares' },
         // `nav_sso_providers` is contributed by `@objectstack/plugin-auth` only
         // when the external-IdP RP is wired (`OS_SSO_ENABLED`, or the cloud

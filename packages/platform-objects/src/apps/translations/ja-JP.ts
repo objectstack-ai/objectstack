@@ -64,6 +64,7 @@ export const jaJP: TranslationData = {
         nav_capabilities: { label: 'ケイパビリティ' },
         nav_permission_sets: { label: '権限セット' },
         nav_sharing_rules: { label: '共有ルール' },
+        nav_declared_sharing_rules: { label: '宣言済みの共有ルール' },
         nav_record_shares: { label: 'レコード共有' },
         // Conditionally contributed by `@objectstack/plugin-auth` (only when an
         // external IdP is wired), so `check:app-nav-i18n` cannot see it — see
