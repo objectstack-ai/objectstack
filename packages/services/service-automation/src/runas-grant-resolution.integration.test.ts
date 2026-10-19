@@ -111,6 +111,9 @@ describe("AutomationServicePlugin bridges the runAs:'user' grant resolver (#3356
       update!.ctx.permissions,
       "the triggering user's permission set was not propagated — runAs:'user' ran with the bare member fallback (#3356)",
     ).toContain('ehr_all');
+    // The peer list rides the same bridge. No organization here, so it is the
+    // user alone — what an organization-less request resolves to as well.
+    expect(update!.ctx.org_user_ids, 'the bridge dropped the resolver\'s peer list').toEqual(['u1']);
 
     await kernel.shutdown();
   });

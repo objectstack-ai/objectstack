@@ -212,7 +212,7 @@ const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
             '`required` field meant to stay hidden then blocks the screen from ever being submitted.',
     },
 };
-import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
+import { runIsUnscopedUserMode, flowTouchesData, runOrgUserIds, type SeededRunContext } from './runtime-identity.js';
 import { isGuardRefusal, refuseNode } from './guard-refusal.js';
 import { readPartialSteps } from './partial-steps.js';
 import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
@@ -723,12 +723,22 @@ export type FlowObjectSchemaResolver = (
  * The authorization envelope a `runAs:'user'` run needs to enforce its data
  * ops as the triggering user (#3356): the user's resolved position names and
  * permission-set names (the two lists the data security middleware keys on),
- * plus their tenant. Built by {@link FlowUserGrantsResolver}.
+ * plus their tenant and their fellow-organization peers. Built by
+ * {@link FlowUserGrantsResolver}.
  */
 export interface FlowUserGrants {
   positions: string[];
   permissions: string[];
   tenantId?: string;
+  /**
+   * The user's peers in the organization the resolver was asked about, the
+   * user included: the value RLS reads as `current_user.org_user_ids`
+   * (`resolveUserAuthzGrants`' own field, under its own name). Run setup seeds
+   * it on the run context ({@link SeededRunContext}). A resolver that omits it
+   * leaves the run without one, so every policy that reads it drops out: the
+   * run sees less, never more.
+   */
+  org_user_ids?: string[];
 }
 
 /**
@@ -6412,18 +6422,40 @@ export class AutomationEngine implements IAutomationService {
         // left untouched: that includes an ADR-0090 agent principal acting
         // on-behalf-of a user (its scope-derived ceiling is always non-empty), so
         // this never re-broadens a deliberately narrowed identity.
+        //
+        // The run's peer list (`org_user_ids`) is seeded here too, through the
+        // same resolver, whenever the context does not carry one yet — so also
+        // for a context whose positions/permissions the door already resolved.
+        // No trigger surface forwards it (the REST, action and record-change
+        // doors all hand over positions/permissions/tenant at most), so without
+        // it every `runAs:'user'` run's `sys_user_org_members` policy compiled
+        // `unresolved-variable` and dropped out: the run saw only the acting
+        // user's own `sys_user` row while the same user's request saw their
+        // organization's members too. Taking ONLY the peer list from a
+        // re-resolution leaves the carried positions/permissions verbatim, so an
+        // agent ceiling stays narrowed; the list itself is the delegating
+        // human's peers in the run's organization, which is what the request
+        // path's agent envelope carries as well. A context that already carries
+        // one — a `subflow` / `map` child, a resumed leg — keeps it.
+        const needsGrants = !Array.isArray(runContext.permissions);
+        const needsPeers = runOrgUserIds(runContext) === undefined;
         if (
             runContext.runAs !== 'system' &&
             runContext.userId &&
-            !Array.isArray(runContext.permissions) &&
+            (needsGrants || needsPeers) &&
             this.userGrantsResolver
         ) {
             try {
                 const grants = await this.userGrantsResolver(runContext.userId, runContext.tenantId);
                 if (grants) {
-                    runContext.positions = Array.isArray(grants.positions) ? grants.positions : [];
-                    runContext.permissions = Array.isArray(grants.permissions) ? grants.permissions : [];
-                    if (grants.tenantId && !runContext.tenantId) runContext.tenantId = grants.tenantId;
+                    if (needsGrants) {
+                        runContext.positions = Array.isArray(grants.positions) ? grants.positions : [];
+                        runContext.permissions = Array.isArray(grants.permissions) ? grants.permissions : [];
+                        if (grants.tenantId && !runContext.tenantId) runContext.tenantId = grants.tenantId;
+                    }
+                    if (needsPeers && Array.isArray(grants.org_user_ids)) {
+                        (runContext as SeededRunContext).org_user_ids = grants.org_user_ids;
+                    }
                 }
             } catch (err) {
                 // Fail-safe, never fail-open: on a resolution error the run keeps
@@ -6438,10 +6470,19 @@ export class AutomationEngine implements IAutomationService {
                 // degradation is fail-safe as argued above, its symptom is the
                 // run's own data-op refusals/strips, and nothing
                 // claimed-persisted failed to land.
+                //
+                // Unresolved peers degrade the same way, narrower and never
+                // wider: a policy that reads `current_user.org_user_ids` drops
+                // out, so the run sees its own `sys_user` row and not its
+                // organization's members. The sentence names which half applies.
+                const consequence = needsGrants
+                    ? `its data ops fall back to baseline member permissions (not elevated), and every ` +
+                      `row policy reading current_user.org_user_ids drops out`
+                    : `its data ops keep the trigger's positions and permission sets, but every row ` +
+                      `policy reading current_user.org_user_ids drops out (narrower, not elevated)`;
                 this.logger.warn(
                     `[runAs] flow '${flow.name}' could not resolve grants for triggering user ` +
-                    `'${runContext.userId}' — its data ops fall back to baseline member permissions ` +
-                    `(not elevated). The resolver's failure is in this record's meta.`,
+                    `'${runContext.userId}' — ${consequence}. The resolver's failure is in this record's meta.`,
                     describeThrownForLog(err),
                 );
             }
