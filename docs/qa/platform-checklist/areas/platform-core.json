@@ -510,7 +510,7 @@
       "title": "The built-in apps a stock boot REGISTERS (Setup / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored — and Studio's deliberate absence is asserted, never hunted",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -532,10 +532,10 @@
       "steps": [
         "as admin, GET /api/v1/meta/app?id=setup and extract every merged nav destination — Setup is a SHELL of empty group anchors (packages/platform-objects/src/apps/setup.app.ts: group_overview/apps/people_org/access_control/approvals/configuration/diagnostics/integrations/advanced) filled by SETUP_NAV_CONTRIBUTIONS (setup-nav.contributions.ts) plus capability-plugin contributions (plugin-security Positions/Permission Sets, plugin-sharing Sharing Rules/Record Shares, plugin-approvals, plugin-webhooks)",
         "GET /api/v1/meta/app with NO query first and record the names actually served — a stock boot answers exactly showcase_app, setup, account. Then GET /api/v1/meta/app?id=account (account.app.ts — Profile + Inbox/Security/Developer groups). ⚠️ GET /api/v1/meta/app?id=studio answers 200 {\"items\":[]} on every stock boot and that is the expected result (knownGap): record the absence as an assertion and move on — do NOT install @objectstack/studio to make the step runnable",
-        "as admin, hand-walk each destination in each app: navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
+        "as admin, hand-walk each destination in each app. EXPAND every nav group first: some render collapsed by default — Setup's Advanced group and Account's Developer group declare `expanded: false` (packages/platform-objects/src/apps/setup.app.ts, account.app.ts), and QA run #24557 found Setup's Configuration group collapsed as well — so a walk that never expands them never reaches their entries. Then navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
         "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form (localization/company/branding/auth/mail/storage/ai/knowledge/feature_flags), and Users / Organization / Business Units / Teams / Sessions / OAuth Applications render. User preferences and identity links are not Setup destinations: open a user from Users and confirm the user page's Preferences and Linked Accounts tabs render that user's rows",
         "Studio detail is NOT walked from here — the app is not registered on a stock boot (knownGap), so there is no merged nav to render. Its metadata:resource lists and component surfaces (App Builder, All Metadata Types, Packages, API Console, Flow Runs, Public Forms) are reached through the console surface at /_console/studio/<pkg>/<pillar> and are covered by area studio-authoring. What THIS item asserts about Studio is the absence itself, per clause 6",
-        "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (sys_approval_request/my_pending), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) and Connect an Agent (nav_connect_agent) each render — 8 Account destinations and 45 Setup destinations for the admin, re-measured 2026-10-01 (GET /api/v1/meta/app leaves; #9453 recorded 43 and 7). Recount from the payload each run",
+        "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (sys_approval_request/my_pending), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) and Connect an Agent (nav_connect_agent) each render — 8 Account destinations and 42 Setup destinations for the admin on a stock single-org showcase boot, re-measured by QA run #24557 at 5b14b7f3 (GET /api/v1/meta/app leaves, which match the nav source minus its gates; 45 on 2026-10-01, and #9453 recorded 43 and 7). Recount from the payload each run",
         "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys is ABSENT for EVERY persona, admin included — the entry was removed in #7544 because sys_jwks declares apiEnabled:false, so its list answers OBJECT_API_DISABLED (404) for all callers and no permission gate could prune it; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
         "sign in as the plain member: attempt to open Setup (app name setup) — capture the app-level refusal (App.requiredPermissions setup.access); open Account (declares no requiredPermissions) — capture it opening. Studio is not part of this comparison: it is absent for EVERY persona including the admin, so a member failing to reach it proves nothing about the gate (the same reasoning #7544 applied to nav_jwks)",
         "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide. JWKS is deliberately NOT in this list any more: it is absent for admins too, so finding it absent for a member proves nothing about the gate (#7544)",
@@ -625,6 +625,12 @@
           "date": "2026-10-16",
           "change": "the Setup detail step listed Identity Links and User Preferences among Setup's rendered destinations; #23803 removed both entries from Setup (nav_accounts, nav_user_preferences), and an administrator reaches those rows from the User record page's Linked Accounts and Preferences tabs. The step now drives those two tabs from a user's page instead. The destination count in the Account-detail step is left as it is: it is #23803 item 4's, re-measured by whichever of that card's changes lands last. No acceptance clause changed",
           "ref": "#23803"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-19",
+          "change": "steps[2] and steps[5] corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.builtin-apps-nav-render; wave anchor #24579 §3). steps[5] said 45 Setup destinations; the run's GET /api/v1/meta/app payload at 5b14b7f3 served 42, which matches the nav source minus its gates, and no nav source changed between 5b14b7f3 and this edit's base (the count was #23803 item 4's to re-measure, and #23803 is closed). steps[2] now has the walk expand the groups that render collapsed (Advanced and Developer declare expanded: false in setup.app.ts / account.app.ts; the run also found Configuration collapsed) before it navigates. No acceptance clause changed",
+          "ref": "#PENDING-24579R2"
         }
       ]
     },
@@ -792,7 +798,7 @@
       "title": "Package lifecycle: disable stops serving, enable restores, uninstall de-registers, commits grow per publish and revert restores the prior published shape",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -806,7 +812,7 @@
         ]
       },
       "steps": [
-        "create or reuse the writable probe package (POST /api/v1/packages); author a probe object + view + nav entry into it and publish (POST /api/v1/packages/:id/publish or /publish-drafts). Record its id",
+        "create or reuse the writable probe package (POST /api/v1/packages); author a probe object + view + nav entry into it and publish (POST /api/v1/packages/:id/publish or /publish-drafts). The draft PUT accepts what publish then refuses, so author both up front: the object must declare `sharingModel` (else publish answers 422 `security-owd-unset`, an error-tier rule — packages/lint/src/validate-security-posture.ts) and the view its `object` and `viewKind` (the authored view overlay requires both — packages/spec/src/ui/view.zod.ts). Record its id",
         "confirm it serves: GET /api/v1/meta lists the probe object; GET /api/v1/data/<probe_object> answers 200; the probe nav appears in the relevant /api/v1/meta/app",
         "disable: PATCH /api/v1/packages/:id/disable → capture; then GET /api/v1/data/<probe_object> and the probe routes → now 404/403 (stopped serving); /meta/app no longer lists its nav",
         "enable: PATCH /api/v1/packages/:id/enable → capture; the object/nav/routes serve again (restore)",
@@ -878,7 +884,13 @@
         "ADR-0070 (writable vs read-only packages), ADR-0033 (drafts/publish/commits)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "initial — package enable/disable/uninstall + commits/revert lifecycle, driven against the writable probe package the authoring round-trip already creates", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "initial — package enable/disable/uninstall + commits/revert lifecycle, driven against the writable probe package the authoring round-trip already creates", "ref": "claude/platform-test-checklist-ocwugl" },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "steps[0] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.package-lifecycle-enable-disable; wave anchor #24579 §3, and QA run #24571 measured the same gate on a runtime object): the probe object needs `sharingModel` and the probe view its `viewKind` before publish accepts them — the draft PUT answers 200 and publish then refuses (security-owd-unset is error-tier in packages/lint/src/validate-security-posture.ts; the view overlay requires object + viewKind in packages/spec/src/ui/view.zod.ts). No acceptance clause changed; acceptance[5]'s FAIL is the objectui defect objectstack-ai/objectui#13052 and is untouched",
+          "ref": "#PENDING-24579R2"
+        }
       ]
     },
     {
@@ -886,7 +898,7 @@
       "title": "Notification center (bell / InboxPopover): badge counts distinct unread topics + pending approvals, repeats coalesce, per-group and global mark-read drop the badge",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -901,21 +913,21 @@
         ]
       },
       "steps": [
-        "open the console as admin; the header (AppHeader.tsx) polls GET /api/v1/notifications?view=mine — capture the initial inbox rows",
+        "open the console as admin; the header bell's feed polls `sys_inbox_message` joined with `sys_notification_receipt` through the data API (objectui packages/app-shell/src/hooks/sharedUserFeeds.ts at the console pin), not GET /api/v1/notifications?view=mine — capture the initial inbox rows from those two reads",
         "read the bell badge: it must equal distinct unread (topic,title) TOPICS + pending approvals, NOT raw row count (#2765) — the recurring digest producing many identical rows must not inflate it to 9+ off one topic",
         "cross-check: count distinct unread (topic,title) groups from the payload (groupNotifications in inboxGrouping.ts) + pendingApprovalsCount and confirm it equals the rendered totalBadge",
         "open the popover; confirm THREE tabs render: Notifications / Approvals / Activity",
         "confirm coalescing: repeats of the same (topic,title) collapse into ONE expandable group with a ×N count pill; click the chevron to expand and reveal the members",
         "per-group mark-read: click a group's 'Mark read' → capture POST /api/v1/notifications/read {ids:[...]} on the wire (ONE request for the whole group, not N); the group's unread dot clears and the badge drops by one topic",
         "global mark-all-read: click 'Mark all read' → capture POST /api/v1/notifications/read/all; the notifications portion of the badge drops to 0; the approvals portion is unaffected",
-        "Approvals tab: confirm it lists/points at the pending approval request(s) and pendingApprovalsCount equals the sys_approval_request my_pending count",
+        "Approvals tab: confirm it shows the pending count with a 'View approvals' link to the app's system/approvals page — the tab is a count and a link, not a list of requests (objectui packages/app-shell/src/layout/InboxPopover.tsx) — and pendingApprovalsCount equals the sys_approval_request my_pending count",
         "persistence: reload; read-state persists — the marked rows read read: true in the post-reload GET /notifications (sys_notification_receipt upsert, ADR-0030); a row that flips back is either synthetic (its sys_inbox_message row has no notification_id — knownGap) or the receipt bug"
       ],
       "acceptance": [
         {
           "clause": "the badge counts distinct unread TOPICS + pending approvals, not raw rows — a recurring digest producing N identical rows contributes 1 to the badge (#2765)",
           "oracle": "network",
-          "verify": "distinct-(topic,title) unread group count from the GET /notifications payload + pendingApprovalsCount == the rendered totalBadge",
+          "verify": "distinct-(topic,title) unread group count from the inbox rows the bell polls (steps[0]: sys_inbox_message joined with sys_notification_receipt through the data API) + pendingApprovalsCount == the rendered totalBadge",
           "evidence": "the payload + the badge value"
         },
         {
@@ -943,9 +955,9 @@
           "evidence": "the captured POST + badge"
         },
         {
-          "clause": "the Approvals tab lists the pending request(s) and pendingApprovalsCount equals the sys_approval_request my_pending count",
+          "clause": "the Approvals tab shows the pending count with a 'View approvals' link (a count and a link, not a list) and pendingApprovalsCount equals the sys_approval_request my_pending count",
           "oracle": "dom",
-          "verify": "the tab content + the count vs a direct sys_approval_request my_pending query",
+          "verify": "the tab's count and its 'View approvals' link target + the count vs a direct sys_approval_request my_pending query",
           "evidence": "the tab + the count comparison"
         },
         {
@@ -972,7 +984,13 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — bell/InboxPopover: topic-based badge (#2765), (topic,title) coalescing, per-group + global mark-read on the wire, approvals tab, receipt persistence; cross-referenced with i18n + approvals notification items", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-10-16", "change": "fixtures.requires[0], knownGaps[0], steps[8] and acceptance[6].verify re-pointed (checklist-accuracy findings and fixture gap of QA run #23939, wave #23878, and #23879). The showcase_scheduled_digest fixture never fires on a default boot — OS_AUTOMATION_SCHEDULED_WORK_ENABLED leaves packaged schedules unbound — so the requirement names the switch and the fallback #23939 used (the seeded approval.requested rows). The payload's rows carry no notification_id field — the row id IS the event id when one exists — so 'verify persistence on a keyed row' could not be followed; persistence is proven on read: true after reload, and a reverting row is classified through its backing sys_inbox_message row. Not loosened: a keyed row that reverts is still the receipt bug and FAILS", "ref": "#24036" }
+        { "revision": 2, "date": "2026-10-16", "change": "fixtures.requires[0], knownGaps[0], steps[8] and acceptance[6].verify re-pointed (checklist-accuracy findings and fixture gap of QA run #23939, wave #23878, and #23879). The showcase_scheduled_digest fixture never fires on a default boot — OS_AUTOMATION_SCHEDULED_WORK_ENABLED leaves packaged schedules unbound — so the requirement names the switch and the fallback #23939 used (the seeded approval.requested rows). The payload's rows carry no notification_id field — the row id IS the event id when one exists — so 'verify persistence on a keyed row' could not be followed; persistence is proven on read: true after reload, and a reverting row is classified through its backing sys_inbox_message row. Not loosened: a keyed row that reverts is still the receipt bug and FAILS", "ref": "#24036" },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "steps[0], steps[7], acceptance[0].verify and acceptance[5] (clause, verify) corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.notification-center; wave anchor #24579 §3). At the console pin 4016370a the bell does not poll GET /api/v1/notifications?view=mine: its feed reads sys_inbox_message joined with sys_notification_receipt through the data API (objectui sharedUserFeeds.ts), which is the payload the run counted the badge from. The Approvals tab shows a pending count and a 'View approvals' link, not a list of requests (InboxPopover.tsx); the run scored acceptance[5] on the count match. Mark-read still POSTs /api/v1/notifications/read[/all] (useInboxBell.ts), and acceptance[6]'s post-reload GET /api/v1/notifications is a direct read of the same rows, so those clauses are unchanged",
+          "ref": "#PENDING-24579R2"
+        }
       ]
     },
     {
@@ -1176,7 +1194,7 @@
       "title": "Documentation audience gating (book + doc): the tree endpoint and the doc read layer gate on ONE semantics — public/org/permissionSet, fail-closed — and an unclaimed doc never leaks through a public book",
       "since": "v14.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1192,7 +1210,7 @@
           "a session for each of the four personas above"
         ],
         "knownGaps": [
-          "Stock showcase seeds are not known to author a book with `audience: { permissionSet: '<name>' }` NOR one with `audience: 'public'`. Verify against the installed corpus FIRST (GET /api/v1/meta/book and read each item's `audience`). If neither gated nor public books exist, the permissionSet and public clauses are blocked(fixture) and MUST be recorded as such — do NOT score them from the `org` default alone, which is the one audience every authenticated caller passes and therefore proves nothing about the gate.",
+          "Stock showcase authors ONE book with `audience: 'public'` — `showcase_manual` (examples/app-showcase/src/system/books/index.ts) — and none with `audience: { permissionSet: '<name>' }`. Verify against the installed corpus FIRST (GET /api/v1/meta/book and read each item's `audience`): the public clauses run on `showcase_manual`; if no permissionSet-gated book exists, the permissionSet clauses are blocked(fixture) and MUST be recorded as such (or staged per knownGaps[1]) — do NOT score them from the `org` default alone, which is the one audience every authenticated caller passes and therefore proves nothing about the gate.",
           "Authoring a book/doc at runtime to create the fixture is acceptable only if the run records that it did so and tears it down; the audience is read off the stored row, so a runtime-authored book exercises the same resolver."
         ]
       },
@@ -1226,9 +1244,9 @@
           "evidence": "test output naming the fail-closed case"
         },
         {
-          "clause": "gating is TWO-LAYERED: passing the book gate does not reveal every entry — the tree's entries are additionally filtered by each doc's effective audience, so a lesser persona's tree is a subset of admin's and contains no entry that would refuse on fetch",
+          "clause": "gating is TWO-LAYERED: passing the book gate does not reveal every entry — the tree's entries are additionally filtered by each doc's effective audience, so a caller's tree holds only the entries whose audience that caller passes and no entry that would refuse on fetch. For a permissionSet-gated doc the axis is HOLDING the set, not rank: audienceAllows grants no admin bypass (packages/spec/src/system/book.zod.ts#audienceAllows), so an admin who does not hold the set sees LESS than a member who does — a non-holder's tree is a subset of a holder's, never 'a lesser persona's of admin's'",
           "oracle": "api",
-          "verify": "diff the entry sets; then fetch EVERY entry the lesser persona's tree offers as that persona — each must resolve, none may 401/403 (a nav entry that refuses on click is the exact defect this filter exists to prevent)",
+          "verify": "diff the entry sets of a holder and a non-holder of each gating set (and, for org/unset docs, an authenticated caller against anonymous); then fetch EVERY entry the narrower tree offers as its own persona — each must resolve, none may 401/403 (a nav entry that refuses on click is the exact defect this filter exists to prevent)",
           "evidence": "entry-set diff + the per-entry fetch statuses"
         },
         {
@@ -1273,6 +1291,12 @@
           "date": "2026-08-17",
           "change": "new — authored to RETIRE the `book` and `doc` coverage waivers, which claimed these kinds are 'display-only, no independent runtime behavior to gate beyond serving'. Grounding disproved that: the read layer runs a three-member audience vocabulary with an ADR-0049 fail-closed branch, a two-layer gate (book, then per-entry doc audience union), a deliberate orphan-group non-leak rule, an implicit-package-book fallback, and locale resolution. That is an access-control surface, tested here like every other one. Capability predates the ledger baseline (landed at spec 14.1.0, #2774) — never authored until now, which is itself the finding",
           "ref": "#9299"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "fixtures.knownGaps[0] and acceptance[3] (clause, verify) corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.docs-audience-gate; wave anchor #24579 §3). knownGaps[0] said stock showcase authors neither a public nor a permissionSet book; it ships the public `showcase_manual` (examples/app-showcase/src/system/books/index.ts), so only the permissionSet half is a fixture gap. acceptance[3] said a lesser persona's tree is a subset of admin's; audienceAllows (packages/spec/src/system/book.zod.ts) admits a permissionSet doc for holders only and has no admin bypass, so for those books the run's admin non-holder saw less than a holder — the subset relation is holder vs non-holder. acceptance[2]'s unknown-shape half (unreachable live, no pin) is a fixture/pin gap left on #24579 §4",
+          "ref": "#PENDING-24579R2"
         }
       ]
     },
@@ -1369,7 +1393,7 @@
       "title": "The package manifest is enforced at the install boundary: an incompatible `engines` range is refused before the registry write, the namespace gate holds ownership, and a namespace-less runtime package has one derived",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1386,7 +1410,7 @@
           "the DURABLE half of the handshake is NOT scored here: ADR-0087 also refuses an incompatible `sys_packages` row during boot-time rehydration, with boot CONTINUING (v15 release notes). Staging it needs an already-stored incompatible row — DB-level access, or a runtime whose major moved under a previously-installed package. Record blocked(fixture) if attempted. The install-path refusal this item does score is the same assertProtocolCompat call one boundary earlier, so a green here says nothing about the rehydration arm",
           "OS_METADATA_COLLISION=warn downgrades the namespace refusal to a console warning (registry.ts installPackage) — the policy is read by the registry, not per request, so that leg needs a SECOND server booted with the env set, never a mid-run toggle. Score it only if that boot is cheap, and record which arm the run exercised",
           "the install's durable leg is best-effort BY DESIGN (protocol.installPackage warns and continues when the `package` service cannot persist to sys_packages), so a probe that installs and does not survive a restart is that documented non-fatal path, not a failure of any clause here",
-          "NamespaceConflictError is a plain Error subclass with no `code` field (registry.ts) — unlike the protocol refusal, its HTTP status/code mapping is decided by whatever handler catches it, not pinned by the class. The run RECORDS the status and code it observes rather than asserting a pre-agreed one; see `negative` for the direction that is a finding"
+          "CLOSED (commit df657d9df): NamespaceConflictError carries the ADR-0112 envelope — `code` NAMESPACE_CONFLICT, `status` 422 (packages/objectql/src/registry.ts#NamespaceConflictError) — so the wire answer of POST /api/v1/packages for a conflict is pinned by the class, no longer decided by whichever handler catches it (before that commit the door fell through to 500 INTERNAL_ERROR). The 18.0 sweep observed 422 NAMESPACE_CONFLICT (QA run #24557). Assert that status and code; see `negative` for the 5xx direction"
         ]
       },
       "steps": [
@@ -1442,7 +1466,7 @@
       "negative": [
         "an incompatible package that installs — any 2xx, or a row present after the refusal — is the FAIL this item exists for: it means the mismatch will surface later as a deep schema/renderer crash instead of at the boundary that could name it",
         "a compatible package REFUSED is the mirror fail and the more expensive one: no-range and unparsed-range must admit, so a false rejection here blocks every package that predates the range convention or is workspace-linked",
-        "a namespace conflict surfacing as a 5xx is the platform reporting its own fault for a manifest the caller authored — record it as a finding rather than scoring the clause on status alone; NamespaceConflictError carries no `code` (registry.ts), so nothing pins its mapping today",
+        "a namespace conflict surfacing as a 5xx is the platform reporting its own fault for a manifest the caller authored — a FAIL: NamespaceConflictError carries `code` NAMESPACE_CONFLICT and `status` 422 (packages/objectql/src/registry.ts#NamespaceConflictError), so anything other than 422 NAMESPACE_CONFLICT on the wire means a handler dropped the envelope",
         "a refusal whose message says only that something conflicted, without the namespace / current owner / incoming id, fails the ownership clause even when the refusal itself is correct — the ADR-0048 text exists so the author knows which of the two packages to rename",
         "a derived namespace present in the POST echo but absent from the read-back (or vice versa) is a disagreement between the in-memory registry and sys_packages, not a pass"
       ],
@@ -1477,6 +1501,12 @@
           "date": "2026-10-16",
           "change": "steps[1], [4] and [7](b) re-pointed (checklist-accuracy findings of QA run #23939, wave #23878). The probe manifests used scope 'custom', which POST /packages refuses (the enum is cloud | system | project), so the baseline never installed; the legacy engine.objectstack range must be full semver ('^17.0.0') because a bare major is a 400 VALIDATION_ERROR at parse; and #23939 drove the own-namespace reinstall leg as POST ?overwrite=true. Not loosened: every refusal and admission the clauses score is unchanged",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-19",
+          "change": "fixtures.knownGaps[3] and negative[2] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.manifest-install-contract; wave anchor #24579 §3): both said NamespaceConflictError has no `code`, so its wire mapping was unpinned. Since commit df657d9df the class carries code NAMESPACE_CONFLICT and status 422 (packages/objectql/src/registry.ts), and the run observed 422 NAMESPACE_CONFLICT on POST /api/v1/packages. knownGaps[3] is now marked CLOSED with that reading, and negative[2] scores a 5xx as a FAIL instead of a finding to record. No acceptance clause changed",
+          "ref": "#PENDING-24579R2"
         }
       ]
     },
@@ -1594,10 +1624,10 @@
     },
     {
       "id": "platform-core.activation-ledger-row-contract",
-      "title": "sys_metadata_activation row contract: reads open / generic-data-API writes 405, one row per (metadata_type, name) with NO tenant column on the table at all, re-enable updates never deletes, and rows exist ONLY for the metadata types a shipped door writes — flow, action, position, permission (the ADR-0126 scope wall, as ADR-0131 D3 widens it)",
+      "title": "sys_metadata_activation row contract: reads open / generic-data-API writes 405, one row per (metadata_type, name) with NO tenant column on the table at all, re-enable updates never deletes, and rows exist ONLY for the metadata types a shipped door writes — flow, action, position, permission, sharing_rule (the ADR-0126 scope wall, as ADR-0131 D3 and D6 widen it)",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -1605,17 +1635,17 @@
         "app": "showcase",
         "requires": [
           "an isolated boot on a file DB (-d file:/tmp/<run>/data.db) WITH direct sqlite access to that file between boots: the object declares apiMethods ['get','list'], so REST can never stage the org-row and duplicate-row probes — same scratch-DB class of fixture platform-core.interrupted-migration-boot-report uses. On a stock boot no 'cloud' datasource is registered, so the table rides the global default driver and lives in the run's own file DB",
-          "the shipped switches as row producers: the flow toggle (POST /api/v1/automation/showcase_task_completed/toggle), the action activation door (POST /api/v1/actions/_activation/showcase_task/showcase_mark_done), and the security catalog activation door POST /api/v1/security/_activation/:type/:name for :type position and permission (packages/runtime/src/domains/catalog-activation.ts — e.g. position legal and permission set showcase_auditor; ⛔ never admin_full_access, which the last-admin guard refuses to switch off). Their own door contracts belong to automation.packaged-flow-disable-durable, api-backend.packaged-action-disabled-dispatch and access-security.security-catalog-activation-and-clone-doors — this item owns the ROWS they leave behind"
+          "the shipped switches as row producers: the flow toggle (POST /api/v1/automation/showcase_task_completed/toggle), the action activation door (POST /api/v1/actions/_activation/showcase_task/showcase_mark_done), and the security catalog activation door POST /api/v1/security/_activation/:type/:name for :type position, permission and sharing_rule (packages/runtime/src/domains/catalog-activation.ts — e.g. position legal, permission set showcase_auditor and the declared sharing rule share_new_inquiries_with_field_ops; ⛔ never admin_full_access, which the last-admin guard refuses to switch off). Their own door contracts belong to automation.packaged-flow-disable-durable, api-backend.packaged-action-disabled-dispatch and access-security.security-catalog-activation-and-clone-doors — this item owns the ROWS they leave behind"
         ],
         "knownGaps": [
-          "metadata_type is an untyped Field.text (maxLength 100) with three writer sites and four values in the tree — 'flow' (packages/services/service-automation/src/flow-activation-store.ts), 'action' (packages/objectql/src/action-activation.ts), and 'position' / 'permission' (packages/runtime/src/domains/catalog-activation.ts, which constructs the shared store with the path's :type and closes that :type to exactly those two). There is NO spec enum to pin: the variants below are enumerated BY HAND and deliberately carry no enumSource, so a further writer (ADR-0126 §8 pre-charts tool/skill) lands without failing any ratchet. Re-derive the writer list (grep the METADATA_TYPE literals and every `new ObjectStoreMetadataActivationStore(` call site) before scoring the scope wall, and bump this item's variants when a new writer ships — revision 3 is that bump for the catalog door",
+          "metadata_type is an untyped Field.text (maxLength 100) with three writer sites and five values in the tree — 'flow' (packages/services/service-automation/src/flow-activation-store.ts), 'action' (packages/objectql/src/action-activation.ts), and 'position' / 'permission' / 'sharing_rule' (packages/runtime/src/domains/catalog-activation.ts, which constructs the shared store with the path's :type and closes that :type to exactly those three — sharing_rule since ADR-0131 D6). There is NO spec enum to pin: the variants below are enumerated BY HAND and deliberately carry no enumSource, so a further writer (ADR-0126 §8 pre-charts tool/skill) lands without failing any ratchet. Re-derive the writer list (grep the METADATA_TYPE literals and every `new ObjectStoreMetadataActivationStore(` call site) before scoring the scope wall, and bump this item's variants when a new writer ships — revision 3 is that bump for the catalog door, revision 5 the one for its sharing_rule :type",
           "the tenant-column leg is a SCHEMA probe, not a row probe: there is no organization_id column left to hand-seed (systemFields { tenant: false } — ADR-0131 D7 withdrew ADR-0126 D3's reserved-and-never-written column before it ever shipped), so it is staged by reading the physical column list and by an INSERT that NAMES the column and is refused. Its anti-vacuity control INSERT does land a row — that row is the run's own artifact and must be deleted before the restart (or the DB discarded)"
         ]
       },
       "steps": [
-        "boot isolated on the file DB; as admin flip EVERY shipped switch off — the flow toggle (showcase_task_completed), the action flip (showcase_mark_done), and the catalog door for one position and one permission set (POST /api/v1/security/_activation/position/legal and /permission/showcase_auditor, body {\"enabled\": false}); capture the four 200s",
+        "boot isolated on the file DB; as admin flip EVERY shipped switch off — the flow toggle (showcase_task_completed), the action flip (showcase_mark_done), and the catalog door for one position, one permission set and one declared sharing rule (POST /api/v1/security/_activation/position/legal, /permission/showcase_auditor and /sharing_rule/share_new_inquiries_with_field_ops, body {\"enabled\": false}); capture the five 200s",
         "read the ledger through the open read path: GET /api/v1/data/sys_metadata_activation — capture every row; each carries the four declared ledger columns (metadata_type, name, package_id, active) beside the driver's id and the injected audit family, and NO tenant column: organization_id is ABSENT from the row's key set, never present-and-NULL on it. ⛔ Assert the KEY SET, never a value read — a value assertion of the shape `row.organization_id ?? null` is `null` for a column that does not exist, so it passes while measuring nothing (the dogfood pin was inverted into a key-set assertion for exactly this reason)",
-        "scope wall sweep: the distinct metadata_type set over ALL rows is exactly {'flow','action','position','permission'} — the four values the shipped doors write. Any other value (hook/capability/tool/skill/…) is a FAIL of the model, not a coverage discovery: hooks are code-only by ADR-0126 §3 amendment ruling 1 (no ledger row, no disable switch), and a capability is code-only on the regime with no switch (catalog-activation.ts CATALOG_ACTIVATION_SUBJECTS). Then probe the door's own wall: POST /api/v1/security/_activation/capability/showcase.export_data {\"enabled\": false} answers 400 naming the two types it switches, and POST /api/v1/security/_activation/position/everyone {\"enabled\": false} answers 400 (an audience anchor) — re-read the ledger: neither left a row. Position and permission rows are no longer foreign here: ADR-0131 D3 moved the on/off switch of a position and of a permission set off the catalog row into this ledger (regime C as ADR-0131 D6 amends ADR-0126 §3; readDisabledCatalogNames in packages/core/src/security/resolve-authz-context.ts reads these two types and never the row's active column), which supersedes the 2026-08-26 #12159 ruling that a packaged permission set rides its kind's own active field",
+        "scope wall sweep: the distinct metadata_type set over ALL rows is exactly {'flow','action','position','permission','sharing_rule'} — the five values the shipped doors write. Any other value (hook/capability/tool/skill/…) is a FAIL of the model, not a coverage discovery: hooks are code-only by ADR-0126 §3 amendment ruling 1 (no ledger row, no disable switch), and a capability is code-only on the regime with no switch (catalog-activation.ts CATALOG_ACTIVATION_SUBJECTS). Then probe the door's own wall: POST /api/v1/security/_activation/capability/showcase.export_data {\"enabled\": false} answers 400 naming the three types it switches, and POST /api/v1/security/_activation/position/everyone {\"enabled\": false} answers 400 (an audience anchor) — re-read the ledger: neither left a row. Position and permission rows are no longer foreign here: ADR-0131 D3 moved the on/off switch of a position and of a permission set off the catalog row into this ledger (regime C as ADR-0131 D6 amends ADR-0126 §3; readDisabledCatalogNames in packages/core/src/security/resolve-authz-context.ts reads these two types and never the row's active column), which supersedes the 2026-08-26 #12159 ruling that a packaged permission set rides its kind's own active field. sharing_rule rows are not foreign either: ADR-0131 D6 charts a package-declared sharing rule under regime C, and the same door writes its row (packages/runtime/src/domains/catalog-activation.ts, CATALOG_ACTIVATION_SUBJECTS) — an organization-authored sys_sharing_rule row keeps its own switch and writes none",
         "write-refusal probes, all three verbs: POST /api/v1/data/sys_metadata_activation {metadata_type:'action',name:'qa_probe',package_id:'qa',active:false}, PATCH /api/v1/data/sys_metadata_activation/<existing id> {active:true}, DELETE /api/v1/data/sys_metadata_activation/<existing id> — each answers 405 naming the refused operation and the allowed set; re-read confirms every row unchanged",
         "re-enable every switch flipped in step 1 — the SAME rows update to active true (same ids, row count unchanged, nothing vanished)",
         "uniqueness probe (direct DB): stop the server; in the sqlite file INSERT a second row for an existing (metadata_type, name) pair — the declared unique:'global' index over exactly those two columns refuses with a UNIQUE constraint error; capture it. Both key parts are required text, so no NULL arm is left to collapse: the earlier unique:'organization' spelling asked the driver to prepend the tenant column in its COALESCE'd form (ADR-0120 D3) against the #5030 NULL-distinct hole, and with the column gone normalizeDeclaredIndex resolves tenantField to null — so the materialized DDL is byte-identical either way and the current spelling is a re-SPELLING, not a change of shape (sys-metadata-activation.object.ts records it)",
@@ -1648,9 +1678,9 @@
           "evidence": "the before/after row listings keyed by id"
         },
         {
-          "clause": "the scope wall: after exercising every shipped switch, rows exist ONLY for metadata_type ∈ {'flow','action','position','permission'} — hand-enumerated, because no pinnable enum exists (the column is untyped Field.text; the values are string literals at the flow and action stores and the catalog door's closed :type set). Position and permission rows belong here since ADR-0131 D3 moved those two kinds' on/off switch off the catalog row into this ledger (written by POST /api/v1/security/_activation/:type/:name, read by readDisabledCatalogNames), superseding the #12159 'permission rides its own active field' ruling. A hook/capability (or any other) row is a FAIL of the model (ADR-0126 §3: hook reclassified code-only by amendment ruling 1; a capability is code-only with no switch), and the catalog door refuses every other :type, and the audience anchors, with a 400 that writes nothing",
+          "clause": "the scope wall: after exercising every shipped switch, rows exist ONLY for metadata_type ∈ {'flow','action','position','permission','sharing_rule'} — hand-enumerated, because no pinnable enum exists (the column is untyped Field.text; the values are string literals at the flow and action stores and the catalog door's closed :type set). Position and permission rows belong here since ADR-0131 D3 moved those two kinds' on/off switch off the catalog row into this ledger (written by POST /api/v1/security/_activation/:type/:name, read by readDisabledCatalogNames), superseding the #12159 'permission rides its own active field' ruling; sharing_rule rows belong here since ADR-0131 D6 charts a package-declared sharing rule under regime C and the same door writes them. A hook/capability (or any other) row is a FAIL of the model (ADR-0126 §3: hook reclassified code-only by amendment ruling 1; a capability is code-only with no switch), and the catalog door refuses every other :type, and the audience anchors, with a 400 that writes nothing",
           "oracle": "api",
-          "verify": "distinct metadata_type over the full table equals exactly the four-value set; the capability-type and audience-anchor door probes each answer 400 and the ledger's row count is unchanged after them; re-derive the writer list (the METADATA_TYPE literals and the `new ObjectStoreMetadataActivationStore(` call sites) first, per knownGaps — a new LEGITIMATE writer means this item needs a revision, a value outside the four from stock switches without one means the wall fell",
+          "verify": "distinct metadata_type over the full table equals exactly the five-value set; the capability-type and audience-anchor door probes each answer 400 and the ledger's row count is unchanged after them; re-derive the writer list (the METADATA_TYPE literals and the `new ObjectStoreMetadataActivationStore(` call sites) first, per knownGaps — a new LEGITIMATE writer means this item needs a revision, a value outside the five from stock switches without one means the wall fell",
           "evidence": "the distinct-set query result + the two door refusals with the unchanged row count + the writer-grep excerpt"
         },
         {
@@ -1666,13 +1696,14 @@
         "a row deleted by re-enable is a FAIL of §6 wall 3 even though every door answered 200 — the wire looks identical either way, only the row read tells them apart",
         "two contradictory active rows accepted for one artifact is a FAIL of the declared unique:'global' index — and ⛔ do not diagnose it as the #5030 NULL-distinct hole: that hole needed a nullable tenant column inside the key, and this table has none. Both key parts are required text, so a duplicate accepted here means the index is missing or was never materialized, not that a NULL slipped through",
         "treating this item's variants as a pinned enum is a mis-read: they are hand-enumerated and un-pinned by construction — a stale value list over a tree that grew a new writer is a checklist defect, not a platform one; revise the item",
-        "a catalog-door write for a :type other than position or permission (capability, hook, …), or for an audience anchor (everyone, guest), that answers 2xx or leaves a ledger row is a FAIL of the door's closed :type set — it would switch off something the regime gives no switch"
+        "a catalog-door write for a :type other than position, permission or sharing_rule (capability, hook, …), or for an audience anchor (everyone, guest), that answers 2xx or leaves a ledger row is a FAIL of the door's closed :type set — it would switch off something the regime gives no switch"
       ],
       "variants": [
         "metadata_type 'flow' — written by ObjectStoreFlowActivationStore (packages/services/service-automation/src/flow-activation-store.ts)",
         "metadata_type 'action' — written by ObjectStoreActionActivationStore (packages/objectql/src/action-activation.ts)",
         "metadata_type 'position' — written by the security catalog activation door (packages/runtime/src/domains/catalog-activation.ts, the shared ObjectStoreMetadataActivationStore constructed with the path's :type), read by readDisabledCatalogNames",
-        "metadata_type 'permission' — the same door, for a permission set (ADR-0131 D3)"
+        "metadata_type 'permission' — the same door, for a permission set (ADR-0131 D3)",
+        "metadata_type 'sharing_rule' — the same door, for a package-declared sharing rule (ADR-0131 D6 regime C; catalog-activation.ts SHARING_RULE_ACTIVATION_SUBJECT, read from the sharing-rule service rather than the security catalog)"
       ],
       "traps": ["destructive-in-place", "absence-inference"],
       "automated": {
@@ -1717,6 +1748,12 @@
           "date": "2026-10-16",
           "change": "acceptance[0].verify, steps[6] and acceptance[2].clause corrected (residual checklist-accuracy finding of QA run #23939, wave #23878; PR #24000 re-pointed clause 4). The 405's allowed set is [get, list, aggregate, search, export] — the declared apiMethods ['get','list'] plus the verbs list derives (API_METHOD_DERIVATION) — not the bare apiMethods pair, and PRAGMA table_info also lists the __search companion column the searchable object carries. The verify text now names the allowed set exactly (a write verb in it FAILS) and the column list names __search. Not loosened: organization_id must still be absent and every generic write still 405",
           "ref": "#24036"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-19",
+          "change": "the scope wall widened from four metadata_type values to five — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.activation-ledger-row-contract; wave anchor #24579 §3, which lists it under access-security). The security catalog activation door now also accepts :type sharing_rule (packages/runtime/src/domains/catalog-activation.ts CATALOG_ACTIVATION_SUBJECTS, ADR-0131 D6 regime C) and writes its row to this ledger through the same ObjectStoreMetadataActivationStore — a fifth writer the item's hand-enumerated variants did not carry, the case negative[4] says is a checklist defect. Title, steps[0] and [2], fixtures.requires[1], knownGaps[0], acceptance[4] (clause, verify) and negative[5] now name sharing_rule, variants gains it, and steps[0] flips the showcase's declared rule share_new_inquiries_with_field_ops. QA run #24601 drove that switch and read the row {metadata_type: sharing_rule, active: false}. No other clause changed",
+          "ref": "#PENDING-24579R2"
         }
       ]
     },
@@ -1804,19 +1841,19 @@
       "title": "Marketplace install-local: the wiring matrix mounts the right arms per OS_CLOUD_URL, the air-gapped inline install works with NO control plane, reseed/purge touch exactly the sample rows, every mutating door is manage_metadata-gated both sides, and the listing projects installedBy/storageDir per principal",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123 — admin_full_access carries manage_metadata)",
-        "a plain member (fresh runtime sign-up — member_default holds NO manage_metadata)",
+        "a plain member, created by the admin (POST /api/v1/auth/admin/create-user) — the stock audience posture is invite_only (packages/plugins/plugin-auth/src/audience-posture.ts), so a fresh self sign-up is refused; member_default holds NO manage_metadata",
         "anonymous",
         "operator (local shell — the `os package install` door)"
       ],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "TWO isolated boots of the same app: boot A = plain `objectstack dev` with NO OS_CLOUD_URL (resolveCloudUrl() falls back to DEFAULT_CLOUD_URL — truthy — so the CLOUD arm mounts: proxy + install-local + cloud-connection + runtime-config); boot B = the same line with OS_CLOUD_URL=off exported (the offline arm: install-local pinned to the 'off' control plane + runtime-config ONLY — nothing that dials out mounts). The matrix is decided by Serve.planMarketplaceWiring, pure and testable (packages/cli/src/commands/serve.ts)",
+          "TWO isolated boots of the same app: boot A = plain `objectstack dev` with NO OS_CLOUD_URL (resolveCloudUrl() falls back to DEFAULT_CLOUD_URL — truthy — so the CLOUD arm mounts: proxy + install-local + cloud-connection + runtime-config); boot B = the same line with OS_CLOUD_URL=off exported (the offline arm: install-local pinned to the 'off' control plane + runtime-config ONLY — nothing that dials out mounts). The matrix is decided by Serve.planMarketplaceWiring, pure and testable (packages/cli/src/commands/serve.ts). ⚠️ On showcase the boot-A cloud arm is the HOST's, not the CLI's: examples/app-showcase/objectstack.config.ts mounts MarketplaceProxyPlugin, MarketplaceInstallLocalPlugin and CloudConnectionPlugin itself whenever resolveCloudUrl() is truthy, and RuntimeConfigPlugin always, and planMarketplaceWiring checks presence — so on boot A the CLI wires none of the four, and on boot B its offline arm adds install-local alone (pinned to the 'off' control plane) beside the host's runtime-config. The observable route matrix is the same either way",
           "a compiled package artifact for the inline install: pnpm -C examples/app-crm build → dist/objectstack.json (the air-gapped path the #8343 fix exists for — `handleInstall`'s inline branch never reads the cloud URL). Both boots that install run from a SCRATCH COPY of the app, never the shared tree: install-local caches the manifest under the working directory's .objectstack/installed-packages (packages/cloud-connection/src/local-manifest-source.ts#DEFAULT_INSTALLED_PACKAGES_DIR, resolved against process.cwd()), which a per-boot OS_HOME / OS_STORAGE_LOCAL_ROOT does not redirect (RUNNER.md environment facts)",
           "admin credentials passed to the CLI door (--email/--password or OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD) — the runtime refuses an unauthenticated install with a 401 that names exactly that remedy (packages/cli/src/commands/package/install.ts)"
         ],
@@ -1829,7 +1866,7 @@
         "boot A (no OS_CLOUD_URL), as admin: GET /api/v1/runtime/config and record features.marketplace + features.installLocal; probe the mounts — GET /api/v1/marketplace/install-local (authed) → 200, and the browse namespace answers as a mounted passthrough (a non-404 that reflects the upstream's reachability, not this kernel's routing). Capture the boot banner's Marketplace plugin line",
         "boot B (OS_CLOUD_URL=off), as admin: GET /api/v1/runtime/config → still served, now reporting installLocal:true AND marketplace:false (#8389 discovery + #8356 route-table derivation); GET /api/v1/marketplace/install-local → 200 []; a browse-namespace probe (e.g. GET /api/v1/marketplace/packages) → 404 (the proxy did NOT mount); GET /api/v1/cloud-connection/status → 404 (cloud-connection did NOT mount)",
         "build the artifact: pnpm -C examples/app-crm build; confirm dist/objectstack.json exists",
-        "air-gapped install against boot B: `os package install./examples/app-crm/dist/objectstack.json` with admin credentials — the CLI signs in, then POSTs the manifest inline to /api/v1/marketplace/install-local (install.ts); capture the success output and the installed entry",
+        "air-gapped install against boot B: `os package install ./examples/app-crm/dist/objectstack.json` with admin credentials — the CLI signs in, then POSTs the manifest inline to /api/v1/marketplace/install-local (install.ts); capture the success output and the installed entry",
         "confirm the install registered: GET /api/v1/meta/app lists the CRM app; a CRM object answers on /api/v1/data; GET /api/v1/marketplace/install-local as admin shows the entry WITH installedBy, and storageDir on the listing envelope (data.storageDir — one value for the whole ledger, not a per-entry field)",
         "per-principal projection (#9011): repeat the GET as the plain member — 200, the entry listed, but installedBy ABSENT from the entry and storageDir ABSENT from the envelope; repeat anonymous — 401",
         "reseed/purge on the installed entry: create ONE user-authored row in an installed CRM object and record its id; POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data as admin — capture {deleted, skipped, errors}; re-read: every manifest-declared seed id is gone, the user-authored row SURVIVES (the purge deletes only ids declared in the cached manifest's seed datasets — marketplace-install-local-plugin.ts); restart boot B against the same DB and confirm the purged rows do NOT come back (sampleDataPurged persisted on the ledger entry)",
@@ -1921,6 +1958,12 @@
           "date": "2026-10-16",
           "change": "steps[4] and [5] and acceptance[3].clause corrected (checklist-accuracy finding of QA run #23939, wave #23878). storageDir is served once, on the listing envelope (data.storageDir), not on each entry — the admin entry carries installedBy only — so 'installedBy + storageDir on each entry' named a field the entries never carry. The clause now reads each field where it lives and still requires both to be omitted for the member. Not loosened: a member who sees either field, or is refused or served an empty list, still FAILS",
           "ref": "#24036"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-19",
+          "change": "personas[1], steps[3] and fixtures.requires[0] corrected — three checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.marketplace-install-local-lifecycle; wave anchor #24579 §3). The plain member cannot be a fresh sign-up: the stock audience posture is invite_only (plugin-auth audience-posture.ts), so the run created the member through the admin create-user door. steps[3] read `install./examples` (a missing space). On showcase the cloud arm of boot A, and runtime-config on both boots, are mounted by the host config (examples/app-showcase/objectstack.config.ts), and Serve.planMarketplaceWiring wires only what the host did not — the matrix the clauses score is unchanged. No acceptance clause changed",
+          "ref": "#PENDING-24579R2"
         }
       ]
     },
@@ -2039,7 +2082,7 @@
       "title": "Runtime config boot read: GET /api/v1/runtime/config answers 200 ANONYMOUSLY with cloud URL, capability flags, branding and telemetry posture; the legacy /api/v1/studio/runtime-config alias is byte-identical (same handler); nothing credential-shaped is in the body",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["anonymous", "seeded admin (control only)"],
@@ -2051,7 +2094,7 @@
       },
       "steps": [
         "on a stock isolated boot, with NO session: GET /api/v1/runtime/config — capture status, headers and full body",
-        "confirm the payload shape: features (installLocal, marketplace, …), branding (productName, productShortName, logoUrl, faviconUrl, brandColor, pwaDescription, pwaThemeColor), telemetry (errorReporting when configured), and the cloud/control-plane URL field",
+        "confirm the payload shape: features (installLocal, marketplace, …), branding (productName, productShortName, pwaDescription and pwaThemeColor always; logoUrl, faviconUrl and brandColor ONLY when configured — by the plugin config or their env vars — since an unset one serialises as absent, which is not a missing key; `stage` likewise only when set — packages/cloud-connection/src/runtime-config-plugin.ts), telemetry (errorReporting when configured), and the cloud/control-plane URL field",
         "GET /api/v1/studio/runtime-config with the same (absent) auth — diff the two bodies byte for byte (the alias is mounted with the SAME handler instance; ledgered as its own row because it is its own wire path)",
         "scan the serialised body for credential-shaped content: no session token, no secret handle plaintext, no Authorization material, no sys_secret ciphertext; telemetry.errorReporting.dsn, when present, is a PUBLIC client key by design — record its presence, it is not a finding",
         "control: repeat the read WITH an admin session and confirm the payload is not silently enriched with anything the anonymous read withheld (the route is unauthenticated by construction — there is no per-principal projection to leak through)",
@@ -2103,6 +2146,12 @@
           "date": "2026-08-30",
           "change": "new — authored in the 2026-08-30 sweep (routes angle): the anonymous boot-read the whole console SPA depends on had no item. Kept as its own item rather than clauses on the marketplace lifecycle item, split along the register's suggested seam: this item owns the route + alias + payload hygiene; the marketplace item owns the features-vs-live-routes agreement",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "steps[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.runtime-config-boot-read steps[1]; wave anchor #24579 §3): the branding block carries logoUrl, faviconUrl and brandColor only when they are configured — runtime-config-plugin.ts reads each from the plugin config or its env var and serialises an unset one as undefined, which JSON drops — so their absence on a stock boot is the contract, not a missing key. No acceptance clause changed",
+          "ref": "#PENDING-24579R2"
         }
       ]
     },
@@ -2209,7 +2258,7 @@
       "title": "Reserved URL params (ADR-0054 C3): recordId drawer and form overlay push so Back closes them, tab/palette/shortcuts replace so Back never pages through chrome, formObject/formLink pre-link a child create, ?tab cold-loads, the from trail keeps a clickable path back, and a recordId+recordObject mismatch fails closed",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -2228,7 +2277,7 @@
         "child pre-link: from a parent record, create a subtable child via the overlay — capture ?form=new&formObject=<childObject>&formLink=<fkField>:<parentId>; the FK field arrives pre-linked to the parent; RELOAD the URL cold — the pre-link survives (refresh-safe by construction: the state is the URL)",
         "tab cold-load: copy a record URL, append ?tab=related (or a related:<child> value), open in a fresh tab — the detail lands on that tab; now switch tabs in-page several times and press Back ONCE — you leave the record (or close the prior overlay), you do NOT step back through tab selections (tab REPLACEs)",
         "palette/shortcuts chrome: open ?palette=1 and ?shortcuts=1 overlays, close them, and confirm Back never replays them (replace semantics — useUrlOverlay defaults to replace)",
-        "drill trail: from a record, drill into a related record — the URL carries from=…; the breadcrumb renders the ancestor trail and clicking a crumb navigates back to that level",
+        "drill trail: from a record, drill into a related record — the URL carries from=…; the drilled record shows an inline '← PARENT' back link above its body (the top bar draws no record crumb since objectui#12461 — objectui packages/app-shell/src/views/RecordDetailView.tsx), and clicking it navigates to the parent, whose own back link carries the rest of the trail",
         "cross-object refusal (#4292): take a real record id of object A; navigate to /forms/<formName>?recordId=<idOfA>&recordObject=<objectB> — the route renders an ERROR state; capture the network: NO /data/ read was issued for the mismatched pair (the refusal precedes the read, so nothing is read and nothing can be written); control: the same URL with the AGREEING recordObject loads and prefills normally",
         "case probe: repeat the mismatch with only a case difference in recordObject — still refused (object names are not case-folded)"
       ],
@@ -2258,10 +2307,10 @@
           "evidence": "both screenshots + the URL"
         },
         {
-          "clause": "the from drill trail renders a clickable ancestor path and each crumb navigates to its level",
+          "clause": "the from drill trail keeps a clickable path back: the drilled record's inline back link names its immediate parent and navigates there, and that parent's own back link continues up the trail — one level per link, built from ?from= so it survives a refresh and a shared link",
           "oracle": "screenshot",
-          "verify": "the drilled record shows the trail; a crumb click lands on the ancestor",
-          "evidence": "trail screenshot + the crumb navigation"
+          "verify": "the drilled record shows the back link naming its parent; clicking it lands on the parent, and the parent's back link leads to the next ancestor",
+          "evidence": "back-link screenshot per level + the navigation per click"
         },
         {
           "clause": "a recordId whose recordObject names ANOTHER object fails CLOSED (#4292): error state, NO /data read issued for the mismatch, no form to submit — and the refusal is exact (case differences refuse too); the agreeing control loads normally",
@@ -2279,7 +2328,7 @@
       "traps": ["hydration-race", "automation-input", "shared-browser-tab"],
       "automated": {
         "kind": "unit",
-        "ref": "objectui: apps/console/src/components/FormPage.recordObject.test.tsx (the #4292 fail-closed matrix: mismatch → error state, no /data request, no write path, case-sensitive; agreeing control unchanged); objectui: packages/app-shell/src/hooks/__tests__/useUrlOverlay.test.tsx (replace semantics)"
+        "ref": "objectui: apps/console/src/components/FormPage.recordObject.test.tsx (the #4292 fail-closed matrix: mismatch → error state, no /data request, no write path, case-sensitive; agreeing control unchanged); objectui: packages/app-shell/src/hooks/__tests__/useUrlOverlay.test.tsx (open / close / toggle / alias param state only — it asserts no history push or replace, so the push-vs-replace semantics of acceptance[0] and [1] are evidenced by hand)"
       },
       "source": [
         "objectui packages/app-shell/src/urlParams.ts (the single registry of reserved params with the per-param push/replace column and the rule of thumb: user-opened overlays push so Back closes; passive selection and transient chrome replace so Back never pages through them; objectui#2269 P3, ADR-0054 C3)",
@@ -2293,6 +2342,12 @@
           "date": "2026-08-30",
           "change": "new — authored in the 2026-08-30 sweep (console-UI angle): the console's reserved-URL-param contract (ADR-0054 C3) had no item though it is the cross-route state contract every overlay and deep link rides. Grounded against urlParams.ts's own push/replace table and the FormPage #4292 fail-closed pin (objectui-repo-only, so the clause is drivable by hand per the RUNNER standing fact). since v16 by judgment from the issue numbers (#2269/#2604/#4278/#4292 pre-date the v17 window)",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "steps[5], acceptance[4] (clause, verify, evidence) and automated.ref corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.url-overlay-contract; wave anchor #24579 §3). The from trail no longer renders as a breadcrumb: since objectui#12461 the top bar draws no record crumb and RecordDetailView.tsx shows an inline back link to the immediate parent, each parent's link carrying the trail above it, so the clause now scores that chain. automated.ref described useUrlOverlay.test.tsx as pinning replace semantics; at the console pin it asserts param state only and nothing about history, which is why the run evidenced replace by hand. The push/replace clauses themselves are unchanged",
+          "ref": "#PENDING-24579R2"
         }
       ]
     },
@@ -2404,7 +2459,7 @@
       "title": "Shell-hard-coded Administration targets + the retired System hub: every Administration target URL resolves to a real page (no RouteNotFound, no RecordDetailView for an object named 'system'), /apps/:app/system lands on the settings hub in one hop and every hub entry resolves, the five legacy system/* URLs redirect (users and organizations to their object routes, roles, positions and permissions to the Setup metadata catalog), and a member's shell offers no Administration entry",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2448,9 +2503,9 @@
           "evidence": "the five redirect traces + landings"
         },
         {
-          "clause": "a member's shell offers no Administration entry anywhere (no /home sidebar — HomeLayout omits it; Help menu offers Documentation); the server refusal is proven by the builtin-apps item.",
+          "clause": "a member's shell offers no Administration entry anywhere (no /home sidebar — HomeLayout omits it; the Help menu offers documentation entries, Keyboard shortcuts and About — nothing that administers); the server refusal is proven by the builtin-apps item.",
           "oracle": "dom",
-          "verify": "the member's /home and one app shell, in the member's own session (wrong-persona): screenshot, then DOM — no Administration entry in any chrome region, and the Help menu lists documentation entries only",
+          "verify": "the member's /home and one app shell, in the member's own session (wrong-persona): screenshot, then DOM — no Administration entry in any chrome region, and the Help menu lists documentation entries, Keyboard shortcuts and About and no administration entry (objectui packages/app-shell/src/layout/AppHeader.tsx at the console pin)",
           "evidence": "the member screenshots + DOM excerpt"
         }
       ],
@@ -2485,6 +2540,12 @@
           "date": "2026-10-13",
           "change": "clause 3, acceptance[2] (the legacy-redirect clause) re-pointed, with step 4, the title and the AppContent source note (stale spec, #23104 A2). Since objectui#7611, roles, positions and permissions no longer land on the sys_position / sys_permission_set object routes: SystemCatalogRedirect forwards them to the Setup metadata catalog in its environment scope (roles and positions to /apps/setup/metadata/position?scope=environment, permissions to /apps/setup/metadata/permission?scope=environment), because ADR-0131 D3 makes positions and permission sets registry items. users and organizations still use SystemObjectRedirect and are unchanged. Read at objectui 1fb1ced36243 (this repo's .objectui-sha): AppContent.tsx's systemRoutes, and the 'the catalog entries reach the Setup catalog (objectui#7611)' block of AppContent.systemHubRoutes.test.tsx. Both files are byte-identical at 7578323a544e",
           "ref": "#23121"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-19",
+          "change": "acceptance[3] (clause, verify) corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.home-admin-cluster-links acceptance[3]; wave anchor #24579 §3): the member's Help menu does not list documentation entries only — at the console pin 4016370a it also lists Keyboard shortcuts and About (objectui packages/app-shell/src/layout/AppHeader.tsx). The clause's point is unchanged: no Administration entry anywhere in the member's chrome",
+          "ref": "#PENDING-24579R2"
         }
       ]
     },
@@ -2977,7 +3038,7 @@
       "title": "A v18 server refuses to boot rather than serve wrongly: against a 17.x-shaped database (a physical organization_id on a non-tenant table, no verified ADR-0131 ceremony marker) it stops before listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED naming the tables and the command, and with security on but no identity objects it stops with AuthzIdentityObjectsMissingError",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -2992,7 +3053,7 @@
       },
       "steps": [
         "snapshot the v17 copy through SQLite — its schema (`sqlite_master`, `pragma_table_info` per table) and every table's rows, read with the sqlite3 CLI or node:sqlite so a `-wal` file is included (copy the v17 DB together with its `-wal`, or checkpoint the original before copying); run `os serve` (v18) against the copy with `OS_DATABASE_URL=file:COPY.db` (`os serve` has no `-d` flag); read the output and exit code; snapshot again and diff the two",
-        "run `os dev` on a scratch config with services:{auth:false} and security on"
+        "boot the auth-less security composition from a scratch config whose own `plugins` mounts `new SecurityPlugin()` (@objectstack/plugin-security) with the `auth` tier off (`tiers` without 'auth', or `--preset minimal`), so the platform composes no AuthPlugin and nothing registers sys_user / sys_member. ⚠️ `services: {auth: false}` is not a stack key (packages/spec/src/stack.zod.ts declares no `services`), and a stock boot composes the security plugin only beside AuthPlugin (packages/core/src/stack-auth.ts#resolvePlatformAuthComposition), so no stock `os dev` reaches this refusal. This rig is derived from the composition source and not yet replayed live: if it fails for any other reason, score acceptance[3] on its pin and record the rig as not proven"
       ],
       "acceptance": [
         {
@@ -3002,9 +3063,9 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "the v18 serve against the v17 DB exits before kernel:listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED, naming the tables and `os migrate organization-ownership`",
+          "clause": "the v18 serve against the v17 DB exits 1 before kernel:listening with the organization-ownership refusal, which names the tables and `os migrate organization-ownership`. ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED is that refusal's `code` (packages/runtime/src/organization-ownership-boot-guard.ts#OrganizationOwnershipBootRefusal) and the boot never prints it — `os serve` prints the refusal's message only — so the code is the pins' evidence (acceptance[0]), not this log's",
           "oracle": "log",
-          "verify": "boot output + exit code + no listening line",
+          "verify": "boot output + exit code + no listening line: the printed refusal names each table still carrying organization_id and the `os migrate organization-ownership` command. ⛔ Do not grep the log for the code literal — it is not printed (packages/cli/src/commands/serve.ts prints the refusal's message)",
           "evidence": "the refusal excerpt"
         },
         {
@@ -3016,7 +3077,7 @@
         {
           "clause": "the auth-less security boot is refused naming createIdentityObjectsPlugin(), not served with 503s",
           "oracle": "log",
-          "verify": "boot output",
+          "verify": "boot output of the steps[1] boot: the refusal names createIdentityObjectsPlugin() and the boot does not reach listening. With no such boot run, this clause rests on packages/plugins/plugin-security/src/authz-identity-objects-boot-refusal.test.ts (automated.ref) — record which",
           "evidence": "the excerpt"
         }
       ],
@@ -3049,6 +3110,12 @@
           "date": "2026-10-19",
           "change": "acceptance[2] (clause, verify, evidence) and steps[0] re-worded — an assertion defect found by the 18.0 QA sweep (QA run #24556, platform-core.v18-boot-refusals acceptance[2]: FAIL, confirmed by an independent RUNNER rule 7 re-derivation; card #24567 row 1). The product is right and the clause was wrong: the guard judges in its own start(), after the engine (whose start() runs the additive schema sync the ceremony waits for) and ahead of every plugin that writes a row (packages/runtime/src/organization-ownership-boot-guard.ts), and ADR-0131 D10 item 5 says the refusing runtime never auto-migrates (the ceremony's fates); nothing in it forbids additive schema sync. So a refused boot legitimately adds tables, columns and indexes, and 'did not alter the database' (checksum before == after) failed on a correct product. The clause now asserts what the guard promises — no row written, no D10 step run — through a row-level SQLite diff that includes the `-wal` (the run's second boot left the main file's hash unchanged with its DDL in the `-wal`). steps[0] also stops passing `-d` to `os serve`, which declares no such flag (the same run's checklist-accuracy finding); `OS_DATABASE_URL` is what the run booted with. The other three clauses are unchanged",
           "ref": "#24592"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "steps[1], acceptance[1] (clause, verify) and acceptance[3].verify corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.v18-boot-refusals; wave anchor #24579 §3). steps[1] booted `os dev` with `services: {auth: false}`, which is not a stack key (packages/spec/src/stack.zod.ts), so the run recorded acceptance[3] blocked(fixture); a stock boot composes the security plugin only beside AuthPlugin (packages/core/src/stack-auth.ts resolvePlatformAuthComposition), so the step now names a scratch config that mounts SecurityPlugin itself with the auth tier off, marked as not yet replayed live, and acceptance[3] names its pin as the fallback. acceptance[1] said the boot exits with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED on a log oracle; that literal is only the refusal error's code (OrganizationOwnershipBootRefusal) and serve.ts prints the message alone, so the log oracle now reads the named tables and command and the code is left to the pins. acceptance[2] and steps[0] (#24592) are unchanged",
+          "ref": "#PENDING-24579R2"
         }
       ]
     },
@@ -3205,7 +3272,7 @@
       "title": "`os serve` composition on v18: unclaimed top-level items of a packages[] config are served under manifest.id with a warn line, an app shipping its own default sys_organization record page boots, a host datasourceMapping is installed before the first schema sync, a production host with no storage refuses to boot naming three remedies, and /_console/ answers 503 with the remedy when the console is not built",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "cli",
       "personas": [
@@ -3215,7 +3282,7 @@
         "app": "showcase",
         "requires": [
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
-          "per leg a scratch config: packages[] plus one top-level view; an isDefault:true sys_organization record page; a datasourceMapping (examples/app-crm declares one); NODE_ENV=production with no storage service"
+          "per leg a scratch config: packages[] plus one top-level view; an isDefault:true sys_organization record page; a datasourceMapping — no example declares one any more (examples/app-crm removed its rule; its objectstack.config.ts says why), so author one on the scratch config: `datasourceMapping: [{ default: true, datasource: NAME }]` over a declared, file-backed sqlite datasource, the shape packages/cli/test/serve-datasource-mapping-before-sync.integration.test.ts boots; NODE_ENV=production with no storage service"
         ],
         "knownGaps": [
           "test/serve-organization-record-page.e2e.test.ts is a `*.e2e.test.ts` file, which packages/cli collects ONLY under OS_TEST_TIERS=nightly (vitest.config.ts nightly tiers): run it as `OS_TEST_TIERS=nightly npx vitest run test/serve-organization-record-page.e2e.test.ts` in packages/cli — a plain run of the automated.ref list silently collects 25 of its 26 cli files"
@@ -3281,6 +3348,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "fixtures.requires[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.serve-composition-v18; wave anchor #24579 §3): examples/app-crm no longer declares a datasourceMapping (its config records why the rule was deleted, #4462), and no other example declares one, so the leg's scratch config authors the mapping itself, in the shape the item's own pin serve-datasource-mapping-before-sync.integration.test.ts boots. No acceptance clause changed",
+          "ref": "#PENDING-24579R2"
         }
       ]
     }
