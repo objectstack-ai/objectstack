@@ -213,7 +213,7 @@
  *    ONE exception, and it is this rule's own: a binding judged under a
  *    package closure (the next section).
  *
- * ## [#24563] A binding outside the written package's closure is REPORTED
+ * ## [#24563] A binding outside the written package's closure is REFUSED
  *
  * At the runtime save door, a write into a package is judged against that
  * package's closure (ruling #9612, `RuntimePackageScope` in
@@ -233,13 +233,16 @@
  * reported here, once per list view, as
  * {@link LIST_VIEW_OBJECT_OUTSIDE_CLOSURE} — never skipped:
  *
- *  - **`warning`**, the verdict a flow's out-of-closure object reference
- *    gets at the same door (`flow-trigger-unknown-object`, pinned in
- *    `runtime-gate.package-closure.test.ts`): the package's declared
- *    `dependencies` bound what it may reference, so the binding is not
- *    resolvable BY DECLARATION, and the door reports it rather than refuses
- *    it. An object that exists nowhere lands on the same verdict, because the
- *    closure is all this snapshot can see.
+ *  - **`error`**, so the save door refuses the publish-mode write (`422`):
+ *    the package's declared `dependencies` bound what it MAY reference, so the
+ *    binding is not resolvable BY DECLARATION. It is the verdict the dataset
+ *    door already gives the same reference under the same closure
+ *    (`object-reference-unknown` on `datasets[].object`). The flow door's
+ *    `flow-trigger-unknown-object` stays advisory; that is its own question
+ *    and this rule does not settle it. An object that exists nowhere lands on
+ *    the same verdict, because the closure is all this snapshot can see. The
+ *    door judges writes only: a stored row is judged at its next save, and a
+ *    draft is never gated.
  *  - **The field positions stay unjudged** for that list view. Judging them
  *    against the whole collection would judge the package against objects
  *    ruling #9612 says it may not reference; the remedy the hint names —
@@ -679,7 +682,7 @@ export function validateListViewFieldRefs(
   const graph: ObjectGraph = indexObjectGraph(stack);
   const scope = options?.packageScope;
   // [#24563] Under a stated closure an empty graph is still a verdict: every
-  // object binding is then outside it, and is reported below.
+  // object binding is then outside it, and is refused below.
   if (graph.size === 0 && !scope) return findings;
 
   /**
@@ -695,7 +698,9 @@ export function validateListViewFieldRefs(
   ): void => {
     const pkg = closure.packageId;
     findings.push({
-      severity: 'warning',
+      // `error`: the save door refuses it — see the section of that name on
+      // this module for why, and for the flow door's advisory.
+      severity: 'error',
       rule: LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
       where,
       path,
@@ -813,7 +818,7 @@ export function validateListViewFieldRefs(
     // resolving anything against it here would turn one typo into a finding
     // per position.
     // [#24563] Except under a stated package closure, where the base object
-    // was dropped by the closure or exists nowhere: reported once, and the
+    // was dropped by the closure or exists nowhere: refused once, and the
     // positions stay unjudged (see the section of that name on this module).
     if (!graph.has(object)) {
       if (scope) reportOutsideClosure(scope, object, where, bindingPath);

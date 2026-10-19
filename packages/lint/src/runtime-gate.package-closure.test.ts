@@ -314,32 +314,33 @@ describe('the view door under a package closure (#24563)', () => {
   const whole = (item: AnyRec) => runRuntimeAuthoringRules({ type: 'view', item, context: { objects } });
   const rules = (fs: AnyRec[]) => fs.map((f) => f.rule);
 
-  it('REPORTS a binding into a package the written one never declared — advisory, the flow verdict', () => {
+  it('REFUSES a binding into a package the written one never declared — at the binding, with the remedy', () => {
     const result = scoped(listViewOn('other_0_0'));
 
-    // The verdict a flow's out-of-closure trigger object gets at this door
-    // (`flow-trigger-unknown-object`, pinned above): reported, not refused.
-    expect(result.errors).toEqual([]);
-    expect(result.advisories).toHaveLength(1);
-    expect(result.advisories[0]).toMatchObject({ severity: 'warning', rule: OUTSIDE });
-    expect(result.advisories[0].path).toMatch(/^views(\[0\]|\.other_0_0\.probe_list)\.data\.object$/);
+    // An `error`, so the door refuses the write: the dataset door's verdict
+    // for an out-of-closure base object under the same closure. The flow
+    // door's `flow-trigger-unknown-object` (pinned above) stays advisory.
+    expect(result.advisories).toEqual([]);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatchObject({ severity: 'error', rule: OUTSIDE });
+    expect(result.errors[0].path).toMatch(/^views(\[0\]|\.other_0_0\.probe_list)\.data\.object$/);
     // The fix names the remedy and the package it applies to.
-    expect(result.advisories[0].hint).toContain(OWN);
-    expect(result.advisories[0].hint).toContain('dependencies');
+    expect(result.errors[0].hint).toContain(OWN);
+    expect(result.errors[0].hint).toContain('dependencies');
     // ⛔ The field positions stay unjudged: judging them against the whole
     // collection would judge the package against what ruling #9612 says it may
     // not reference.
-    expect(rules(result.advisories)).not.toContain(FIELD_UNKNOWN);
+    expect(rules(result.errors)).not.toContain(FIELD_UNKNOWN);
   });
 
-  it('REPORTS a binding to an object that exists nowhere the same way', () => {
+  it('REFUSES a binding to an object that exists nowhere the same way', () => {
     const result = scoped(listViewOn('nosuch_obj'));
 
-    expect(result.errors).toEqual([]);
-    expect(rules(result.advisories)).toEqual([OUTSIDE]);
+    expect(result.advisories).toEqual([]);
+    expect(rules(result.errors)).toEqual([OUTSIDE]);
   });
 
-  it('REPORTS it under a closure that carries no object at all — an empty graph is still a verdict', () => {
+  it('REFUSES it under a closure that carries no object at all — an empty graph is still a verdict', () => {
     const result = runRuntimeAuthoringRules({
       type: 'view',
       item: listViewOn('nosuch_obj'),
@@ -347,7 +348,7 @@ describe('the view door under a package closure (#24563)', () => {
       packageScope: SCOPE,
     });
 
-    expect(rules(result.advisories)).toEqual([OUTSIDE]);
+    expect(rules(result.errors)).toEqual([OUTSIDE]);
   });
 
   it('REFUSES an unknown column on an object of the written package — the field verdict is unchanged', () => {
@@ -355,7 +356,7 @@ describe('the view door under a package closure (#24563)', () => {
 
     expect(rules(result.errors)).toEqual([FIELD_UNKNOWN]);
     expect(result.errors[0].path).toMatch(/columns\[1\]\.field$/);
-    expect(rules(result.advisories)).not.toContain(OUTSIDE);
+    expect(result.advisories).toEqual([]);
   });
 
   it('admits a known column on an object of the written package', () => {
@@ -366,8 +367,8 @@ describe('the view door under a package closure (#24563)', () => {
   });
 
   it('keeps a DECLARED DEPENDENCY inside the closure — known column admitted, unknown refused', () => {
-    // The discriminating case: a report here would mean the dependency limb
-    // never reached the rule.
+    // The discriminating case: a refusal of the binding here would mean the
+    // dependency limb never reached the rule.
     expect(scoped(listViewOn('core_user', ['name']))).toMatchObject({ errors: [], advisories: [] });
     expect(rules(scoped(listViewOn('core_user')).errors)).toEqual([FIELD_UNKNOWN]);
   });
@@ -381,7 +382,7 @@ describe('the view door under a package closure (#24563)', () => {
 
   it('keeps a provenance-less overlay object inside the closure — its field verdict is unchanged', () => {
     expect(rules(scoped(listViewOn('tenant_overlay')).errors)).toEqual([FIELD_UNKNOWN]);
-    expect(rules(scoped(listViewOn('tenant_overlay')).advisories)).not.toContain(OUTSIDE);
+    expect(scoped(listViewOn('tenant_overlay')).advisories).toEqual([]);
   });
 
   it('a write that names no package is unchanged — the whole collection, field verdict and silence alike', () => {
@@ -398,9 +399,9 @@ describe('the view door under a package closure (#24563)', () => {
 
   it('the flow verdict is unchanged, and a stored object\'s out-of-closure list view is not charged to it', () => {
     // A context object of the written package whose built-in list view
-    // retargets an object outside the closure: the rule now reports that list
+    // retargets an object outside the closure: the rule now refuses that list
     // view, in the baseline and the candidate alike, so it cancels — a flow
-    // publish is not charged with a stored sibling's binding (#4463 D4).
+    // publish is not refused for a stored sibling's binding (#4463 D4).
     const retargeting = obj('crm_board', OWN, {
       listViews: { foreign: { label: 'Foreign', data: { provider: 'object', object: 'other_0_0' }, columns: ['name'] } },
     });
@@ -408,11 +409,11 @@ describe('the view door under a package closure (#24563)', () => {
     const flow = (item: AnyRec) =>
       verdict(runRuntimeAuthoringRules({ type: 'flow', item, context: { objects: withSibling }, packageScope: SCOPE }));
 
-    // Non-vacuous: written itself, that object IS reported — the list view
-    // rides the object door too, at the same advisory.
+    // Non-vacuous: written itself, that object IS refused — the list view
+    // rides the object door too, at the same verdict.
     const asWritten = runRuntimeAuthoringRules({ type: 'object', item: retargeting, context: { objects }, packageScope: SCOPE });
-    expect(asWritten.errors).toEqual([]);
-    expect(rules(asWritten.advisories)).toContain(OUTSIDE);
+    expect(rules(asWritten.errors)).toContain(OUTSIDE);
+    expect(rules(asWritten.advisories)).not.toContain(OUTSIDE);
 
     expect(flow(FLOW_INTO_OWN_PACKAGE)).toEqual([]);
     const undeclared = flow(FLOW_INTO_UNDECLARED);

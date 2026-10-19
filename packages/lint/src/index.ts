@@ -491,7 +491,7 @@ export type {
 // compiled filter), where that door refuses it by name — the loud-failing half
 // #14107 recorded and left open.
 // [#24563] Its THIRD: a list view judged under a package closure whose bound
-// object is outside that closure — reported (advisory) where skip 1 judged
+// object is outside that closure — refused (`error`) where skip 1 judged
 // nothing; `ListViewFieldRefOptions` is how the runtime gate states the closure.
 export {
   validateListViewFieldRefs,

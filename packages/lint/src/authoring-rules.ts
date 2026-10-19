@@ -385,7 +385,7 @@ export interface AuthoringRuleContext {
    * "not in this stack": an object missing from a narrowed snapshot is the
    * first, one missing from a whole one may come from another package. Read
    * by `validateListViewFieldRefs` only (through the reference-integrity
-   * suite), which reports a list view bound outside the closure instead of
+   * suite), which refuses a list view bound outside the closure instead of
    * skipping it.
    */
   packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };

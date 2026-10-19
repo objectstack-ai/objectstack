@@ -3492,12 +3492,15 @@ describe('runtime authoring gate on PAGE writes — a component `data` naming th
 // provenance-less rows. Through the real `saveMetaItem`, `publishMetaItem` and
 // `publishPackageDrafts`: a binding outside the closure — an object of a
 // package this one never declared, or an object that exists nowhere — is
-// REPORTED, at the advisory severity a flow's out-of-closure trigger object
-// gets at the same door (`protocol.package-closure-gate.test.ts`), never
-// skipped; a binding inside the closure keeps its field verdict, so an unknown
+// REFUSED `422 INVALID_METADATA` at the binding, with the remedy (declare the
+// dependency), never skipped; it is the verdict the dataset door gives an
+// out-of-closure base object under the same closure (the flow door's trigger
+// advisory, `protocol.package-closure-gate.test.ts`, is a separate question).
+// A binding inside the closure keeps its field verdict, so an unknown
 // `columns` field is refused `422 list-view-field-unknown` as the overlay door
 // refuses it. A write that names no package is judged against the whole
-// collection, exactly as before.
+// collection, exactly as before. Drafts are not gated; a stored row is judged
+// at its next save.
 describe('runtime authoring gate on VIEW writes into a package — the closure verdict (#24563)', () => {
     const OWN = 'com.acme.crm';
     const DEP = 'com.acme.core';
@@ -3550,13 +3553,19 @@ describe('runtime authoring gate on VIEW writes into a package — the closure v
     const activeViewRows = (rows: Map<string, Row>) =>
         Array.from(rows.values()).filter((r) => r.type === 'view' && r.state === 'active');
     const rulesOf = (findings: any[] | undefined) => (findings ?? []).map((f: any) => f.rule);
-    /** The one outside-closure advisory, with the shape the door returns. */
-    const expectOutsideClosure = (advisories: any[] | undefined) => {
-        expect(rulesOf(advisories), JSON.stringify(advisories)).toEqual([OUTSIDE]);
-        expect(advisories![0]).toMatchObject({ severity: 'warning', path: 'views[0].data.object' });
+    /** The one outside-closure refusal issue, with the shape the door returns. */
+    const expectOutsideClosure = (issues: any[] | undefined) => {
+        expect(rulesOf(issues), JSON.stringify(issues)).toEqual([OUTSIDE]);
+        expect(issues![0]).toMatchObject({ severity: 'error', path: 'views[0].data.object' });
         // The fix names the remedy and the package it applies to.
-        expect(advisories![0].hint).toContain(OWN);
-        expect(advisories![0].hint).toContain('dependencies');
+        expect(issues![0].hint).toContain(OWN);
+        expect(issues![0].hint).toContain('dependencies');
+    };
+    /** A refused publish-mode write: the 422 envelope, carrying the closure issue. */
+    const expectRefusedOutsideClosure = (err: any, what: string) => {
+        expect(err, `${what}: the write resolved — the door still accepts the out-of-closure binding`).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expectOutsideClosure(err.issues);
     };
 
     let warn: ReturnType<typeof vi.spyOn>;
@@ -3569,24 +3578,30 @@ describe('runtime authoring gate on VIEW writes into a package — the closure v
         delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
     });
 
-    it('(a) REPORTS an active save bound to a package the written one never declared — the advisory rides the 2xx, never skipped', async () => {
+    it('(a) REFUSES an active save bound to a package the written one never declared — 422 at the binding, nothing stored', async () => {
         const { protocol, rows } = makePackagedProtocol();
 
-        const result = await saveView(protocol, listView('showcase_task'), { packageId: OWN });
+        const err = await saveView(protocol, listView('showcase_task'), { packageId: OWN }).catch((e: any) => e);
 
-        expect(result).toMatchObject({ success: true });
-        expectOutsideClosure(result.advisories);
-        // Reported, not refused: the flow verdict at this door.
-        expect(activeViewRows(rows)).toHaveLength(1);
+        expectRefusedOutsideClosure(err, 'stranger object');
+        // A gate that refuses after persisting is a log line.
+        expect(activeViewRows(rows)).toEqual([]);
     });
 
-    it('(a) REPORTS an active save bound to an object that exists nowhere the same way', async () => {
+    it('(a) REFUSES an active save bound to an object that exists nowhere the same way', async () => {
+        const { protocol, rows } = makePackagedProtocol();
+
+        const err = await saveView(protocol, listView('nosuch_obj'), { packageId: OWN }).catch((e: any) => e);
+
+        expectRefusedOutsideClosure(err, 'nosuch_obj');
+        expect(activeViewRows(rows)).toEqual([]);
+    });
+
+    it('(a) a DRAFT save of the same body is not gated — the draft door stays open, its promotion is judged', async () => {
         const { protocol } = makePackagedProtocol();
 
-        const result = await saveView(protocol, listView('nosuch_obj'), { packageId: OWN });
-
-        expect(result).toMatchObject({ success: true });
-        expectOutsideClosure(result.advisories);
+        await expect(saveView(protocol, listView('showcase_task'), { packageId: OWN, mode: 'draft' }))
+            .resolves.toMatchObject({ success: true });
     });
 
     it('(b) REFUSES an unknown `columns` field on an object inside the closure — own, declared dependency, platform', async () => {
@@ -3627,12 +3642,15 @@ describe('runtime authoring gate on VIEW writes into a package — the closure v
         expect(rulesOf(result.advisories)).toEqual([]);
     });
 
-    it('(d) the draft → active promotion reports the out-of-closure binding, and refuses the in-closure unknown field', async () => {
+    it('(d) the draft → active promotion refuses the out-of-closure binding, and the in-closure unknown field', async () => {
         const outside = makePackagedProtocol();
         await expect(saveView(outside.protocol, listView('showcase_task'), { packageId: OWN, mode: 'draft' }))
             .resolves.toMatchObject({ success: true });
-        const promoted = await outside.protocol.publishMetaItem({ type: 'view', name: 'showcase_task.qavfy_r1', packageId: OWN });
-        expectOutsideClosure(promoted.advisories);
+        const promoted = await outside.protocol
+            .publishMetaItem({ type: 'view', name: 'showcase_task.qavfy_r1', packageId: OWN })
+            .catch((e: any) => e);
+        expectRefusedOutsideClosure(promoted, 'promotion');
+        expect(activeViewRows(outside.rows)).toEqual([]);
 
         const inside = makePackagedProtocol();
         await saveView(inside.protocol, listView('crm_account'), { packageId: OWN, mode: 'draft' });
@@ -3643,12 +3661,14 @@ describe('runtime authoring gate on VIEW writes into a package — the closure v
         expect(rulesOf(err.issues)).toEqual([FIELD_UNKNOWN]);
     });
 
-    it('(e) a package draft publish reports the out-of-closure binding on the published item, and refuses the in-closure unknown field', async () => {
+    it('(e) a package draft publish refuses the out-of-closure binding, and the in-closure unknown field', async () => {
         const outside = makePackagedProtocol();
         await saveView(outside.protocol, listView('showcase_task'), { packageId: OWN, mode: 'draft' });
         const published = await outside.protocol.publishPackageDrafts({ packageId: OWN });
-        expect(published).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
-        expectOutsideClosure(published.published.find((p: any) => p.name === 'showcase_task.qavfy_r1')?.advisories);
+        expect(published).toMatchObject({ success: false, publishedCount: 0 });
+        expect(published.failed[0]).toMatchObject({ name: 'showcase_task.qavfy_r1', code: 'INVALID_METADATA' });
+        expectOutsideClosure(published.failed[0].issues);
+        expect(activeViewRows(outside.rows)).toEqual([]);
 
         const inside = makePackagedProtocol();
         await saveView(inside.protocol, listView('crm_account'), { packageId: OWN, mode: 'draft' });
@@ -3658,7 +3678,26 @@ describe('runtime authoring gate on VIEW writes into a package — the closure v
         expect(rulesOf(refused.failed[0].issues)).toEqual([FIELD_UNKNOWN]);
     });
 
-    it('(f) a view bound to an object drafted in the SAME batch is inside the closure — no phantom report, its fields judged', async () => {
+    it('(g) a stored view with the binding keeps loading; its next save into the package is refused, the row untouched', async () => {
+        const { protocol, rows } = makePackagedProtocol();
+        // Stored before the crossing, seeded straight into the store because the
+        // save door now refuses this body.
+        const stored = listView('showcase_task', ['title']);
+        rows.set(keyOf({ type: 'view', name: stored.name, organization_id: null, state: 'active' }), {
+            id: 'r_seed', type: 'view', name: stored.name, organization_id: null, state: 'active',
+            metadata: JSON.stringify(stored),
+        });
+
+        // The boot path runs no authoring rule.
+        await expect(protocol.loadMetaFromDb()).resolves.toMatchObject({ loaded: 1, errors: 0, invalid: 0 });
+
+        // The next save is a write, and is judged.
+        const err = await saveView(protocol, stored, { packageId: OWN }).catch((e: any) => e);
+        expectRefusedOutsideClosure(err, 'next save of a stored row');
+        expect(JSON.parse(activeViewRows(rows)[0]!.metadata)).toEqual(stored);
+    });
+
+    it('(f) a view bound to an object drafted in the SAME batch is inside the closure — no phantom refusal, its fields judged', async () => {
         const batchObject = {
             name: 'crm_ticket',
             label: 'Ticket',
