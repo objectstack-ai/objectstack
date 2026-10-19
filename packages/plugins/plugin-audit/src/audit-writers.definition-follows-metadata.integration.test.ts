@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
+import type { DataEngineInsertOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
 import { SECRET_MASK } from '@objectstack/objectql/core';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuditPlugin } from './audit-plugin.js';
@@ -38,7 +39,7 @@ import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
  */
 describe('audit writers answer from the current definition after a metadata-door change (#24565)', () => {
   const HARNESS_PACKAGE = 'com.objectstack.audit.test.definition-follows-metadata';
-  const SYSTEM = { context: { isSystem: true } };
+  const SYSTEM = { context: { isSystem: true } } satisfies DataEngineInsertOptions;
 
   let kernel: ObjectKernel;
   let engine: ObjectQL;
@@ -66,8 +67,8 @@ describe('audit writers answer from the current definition after a metadata-door
     try {
       await engine.insert(
         'sys_attachment',
-        { parent_object: parent, parent_id: 'rec-1', file_id: 'file-1' } as any,
-        SYSTEM as any,
+        { parent_object: parent, parent_id: 'rec-1', file_id: 'file-1' },
+        SYSTEM,
       );
       return { admitted: true };
     } catch (e: any) {
@@ -113,7 +114,7 @@ describe('audit writers answer from the current definition after a metadata-door
 
     await save('qa_kid', { enable: { files: true } });
     // The registry already serves the new value, so the door's read-back shows it.
-    expect((engine.getSchema('qa_kid') as any)?.enable?.files).toBe(true);
+    expect(engine.getSchema('qa_kid')?.enable?.files).toBe(true);
     expect(await attach('qa_kid')).toEqual({ admitted: true });
   });
 
@@ -138,15 +139,15 @@ describe('audit writers answer from the current definition after a metadata-door
     const PLAINTEXT = 'pw-24565-plaintext';
     await save(OBJECT);
     // An audited write BEFORE the change: the ledger looks the definition up here.
-    const row = (await engine.insert(OBJECT, { name: 'first' } as any, SYSTEM as any)) as { id: unknown };
+    const row = (await engine.insert(OBJECT, { name: 'first' }, SYSTEM)) as { id: unknown };
     const id = String(row.id);
 
     await save(OBJECT, { fields: { name: text('name'), login_pw: { name: 'login_pw', label: 'Password', type: 'password' } } });
-    await engine.update(OBJECT, { login_pw: PLAINTEXT } as any, { where: { id }, ...SYSTEM } as any);
+    await engine.update(OBJECT, { login_pw: PLAINTEXT }, { where: { id }, ...SYSTEM } satisfies EngineUpdateOptions);
 
     const updates = (await engine.find(
       'sys_audit_log',
-      { where: { object_name: OBJECT, record_id: id, action: 'update' }, ...SYSTEM } as any,
+      { where: { object_name: OBJECT, record_id: id, action: 'update' }, ...SYSTEM } satisfies EngineQueryOptions,
     )) as Array<{ new_value: unknown }>;
     expect(updates).toHaveLength(1);
     const raw = String(updates[0].new_value);
