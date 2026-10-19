@@ -3,10 +3,14 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import {
   isDataMigrationFlagVerified,
+  organizationOwnershipShapeGenerationOf,
   DATA_MIGRATION_FLAG_OBJECT,
   ORGANIZATION_OWNERSHIP_MIGRATION_ID,
+  ORGANIZATION_OWNERSHIP_SHAPE_GENERATION,
   type DataMigrationFlag,
+  type OrganizationOwnershipBirthMarker,
 } from '@objectstack/spec/system';
+import { resolveRuntimeVersion } from './runtime-version.js';
 
 /**
  * OrganizationOwnershipBootGuardPlugin — the v18 boot refusal (ADR-0131 D10
@@ -22,33 +26,42 @@ import {
  *
  * ## What is refused
  *
- * Two questions, in order:
+ * The guard reads the ceremony's `sys_migration` row
+ * ({@link ORGANIZATION_OWNERSHIP_MIGRATION_ID}) and decides on ONE field of
+ * it: the ownership shape generation it attests
+ * (`organizationOwnershipShapeGenerationOf`), against the one this release
+ * requires ({@link ORGANIZATION_OWNERSHIP_SHAPE_GENERATION}; ruling record
+ * 6269955919 on the v18 epic, ① A and item 2). It never compares versions.
  *
- * 1. Does a table whose object declares NO organization column
- *    (`systemFields.tenant: false` and no declared `organization_id`) still
- *    carry a PHYSICAL `organization_id`? Schema sync only adds, so on a
- *    database a v17 runtime created the answer is yes until the ceremony's
- *    column-drops step has run. If it is, the guard reads the ceremony's
- *    `sys_migration` marker ({@link ORGANIZATION_OWNERSHIP_MIGRATION_ID});
- *    unless that marker is verified, it throws
- *    {@link OrganizationOwnershipBootRefusal}.
- * 2. With no such table left: does the marker exist and say the ceremony has
- *    not finished? A ceremony whose every step ran (the columns are gone) but
- *    whose post-check found discrepancies records `applied_at` and leaves
- *    `verified_at` NULL — rows of an organization-owned object still without
- *    their organization. D10 item 5 refuses a database the ceremony has not
- *    COMPLETED, and `verified_at` is the ceremony's completion marker, so this
- *    database is refused too, naming the re-run. Without a marker there is
- *    nothing to judge: a fresh database is never refused.
+ * 1. A VERIFIED row at the current generation — the ceremony's completion
+ *    marker, or the birth marker below — boots, whatever the columns hold.
+ * 2. No row, on a datastore this boot observed being CREATED FROM EMPTY: the
+ *    guard writes the BIRTH MARKER (verified, `details.birth` =
+ *    {@link OrganizationOwnershipBirthMarker}) exactly once and boots. The
+ *    observation is the store that holds the ledger — its driver's own schema
+ *    sync stats — never the sum over every driver: a `telemetry` sibling left
+ *    over from an earlier boot does not make a fresh primary look old, and a
+ *    fresh sibling does not make an old primary look new.
+ * 3. No row on any other store: a database an earlier release created (every
+ *    18.0 database and every v17 one) — refused until the ceremony has run on
+ *    it. The tables still carrying a retired `organization_id` (an object that
+ *    declares no organization column — `systemFields.tenant: false`,
+ *    `systemFields: false` or `tenancy: { enabled: false }` — whose physical
+ *    table still has one) are named when there are any.
+ * 4. A verified row BELOW the current generation — a database a shorter
+ *    ceremony certified, or a marker written before generations existed — is
+ *    refused, naming the ceremony again: its new steps have not run there.
+ * 5. A row the ceremony wrote and did not verify (its post-check found rows it
+ *    has not carried) is refused, naming the re-run; so is a row that could
+ *    not be read.
  *
- * - A FRESH database is never refused: no table it creates carries a retired
- *   column, and no ceremony wrote a marker on it.
- * - A database whose ceremony verified boots, whatever its columns.
  * - A read that fails is refused, never passed: "I could not check" is not
  *   "there is nothing to find" (the `readDataMigrationFlag` asymmetry).
+ * - A birth marker that cannot be written refuses the boot: a store left
+ *   without one would be taken, at its next boot, for a database an earlier
+ *   release created.
  * - ⛔ No escape hatch: no `OS_ALLOW_*` / `OS_SKIP_*` variable and no flag
- *   skips the check (D10 verbatim). A 17.x runtime is the way to keep 17.x
- *   semantics on an unmigrated database.
+ *   skips the check (D10 verbatim).
  *
  * ## When it judges: in `start()`, before any plugin writes a row
  *
@@ -79,9 +92,10 @@ import {
  * every CLI data and schema boot shares that builder, the ceremony's own boot
  * among them, and a guard there would refuse the one command that clears it.
  *
- * A driver with no physical columns to read (memory, MongoDB) has no v17
- * shape to find: the guard is inert there, as the recovery plugin is on a
- * kernel with no journal.
+ * A store with no physical columns to read (memory, MongoDB), or a
+ * composition with no ledger or no store serving it, has nothing to judge:
+ * the guard is inert there, as the recovery plugin is on a kernel with no
+ * journal.
  */
 
 /** The machine code a host discriminates this refusal by, across module instances. */
@@ -181,32 +195,57 @@ function columnNameOf(row: Record<string, unknown>): string | null {
   return typeof v === 'string' ? v : null;
 }
 
+interface GuardDriver {
+  dialectName?: unknown;
+  config?: { client?: unknown };
+  execute?: (sql: string, params?: unknown[]) => Promise<unknown>;
+  getSchemaSyncStats?: () => { created: number; existing: number } | undefined;
+}
+
 interface GuardEngine {
   registry?: { getAllObjects?: () => unknown[] };
   getDriverForObject?: (object: string) => unknown;
   findOne?: (object: string, query: Record<string, unknown>) => Promise<unknown>;
+  insert?: (object: string, data: Record<string, unknown>, options?: Record<string, unknown>) => Promise<unknown>;
   getObject?: (name: string) => unknown;
+  wasDatastoreCreatedFromEmpty?: () => boolean;
+  invalidateDataMigrationFlags?: () => void;
+}
+
+/**
+ * Whether an object declares that it carries no organization column: every
+ * spelling the injected-column resolver honours for an object of its own —
+ * `systemFields: false`, `systemFields.tenant: false`, and
+ * `tenancy: { enabled: false }` (`injected-system-columns.ts`).
+ */
+function declaresNoOrganizationColumn(object: {
+  systemFields?: unknown;
+  tenancy?: { enabled?: unknown };
+}): boolean {
+  if (object.systemFields === false) return true;
+  if ((object.systemFields as { tenant?: unknown } | undefined)?.tenant === false) return true;
+  return object.tenancy?.enabled === false;
 }
 
 /**
  * The tables in the v17 shape: an object that declares no organization column
- * whose physical table still carries one. Only SQL drivers are read; any other
- * driver is skipped. Throws when a column read fails.
+ * ({@link declaresNoOrganizationColumn}) whose physical table still carries
+ * one. Only SQL drivers are read; any other driver is skipped. Throws when a
+ * column read fails.
  */
 export async function findV17ShapeTables(engine: GuardEngine): Promise<string[]> {
   const objects = (engine.registry?.getAllObjects?.() ?? []) as Array<{
     name?: string;
-    systemFields?: { tenant?: unknown };
+    systemFields?: unknown;
+    tenancy?: { enabled?: unknown };
     fields?: Record<string, unknown>;
   }>;
   const found: string[] = [];
   for (const object of objects) {
     const name = object?.name;
-    if (typeof name !== 'string' || object.systemFields?.tenant !== false) continue;
+    if (typeof name !== 'string' || !declaresNoOrganizationColumn(object)) continue;
     if (object.fields && Object.prototype.hasOwnProperty.call(object.fields, ORG)) continue;
-    const driver = engine.getDriverForObject?.(name) as
-      | { dialectName?: unknown; config?: { client?: unknown }; execute?: (sql: string, params?: unknown[]) => Promise<unknown> }
-      | undefined;
+    const driver = engine.getDriverForObject?.(name) as GuardDriver | undefined;
     const dialect = dialectOfDriver(driver);
     if (!dialect || typeof driver?.execute !== 'function') continue;
     const columns = rowsOf(await driver.execute(columnListSql(dialect), [name]))
@@ -217,45 +256,56 @@ export async function findV17ShapeTables(engine: GuardEngine): Promise<string[]>
   return found.sort();
 }
 
+/** The guard's reading of the ceremony's `sys_migration` row (see {@link readMarker}). */
+export type OrganizationOwnershipMarkerState = 'absent' | 'unverified' | 'unreadable' | 'outdated';
+
 /**
- * The refusal text: what was found, that the server refuses to start, the
- * command, and the 17.x way out. On a v17-shaped database it says first that
- * 18.0 does not upgrade it, because in 18.0 the command it names refuses too,
- * so the operator does not reach that answer in two hops. With no table left in the v17 shape (`tables`
- * empty), the ceremony ran every step and its marker is not verified: the
- * text says so and names the re-run instead.
+ * The refusal text: what was found, that the server refuses to start, and the
+ * command. It names no release line to stay on: a database an 18.0 install
+ * created is refused here exactly as a v17 one is, and both take the same
+ * ceremony.
  */
 export function organizationOwnershipRefusalMessage(
   tables: readonly string[],
-  marker: 'absent' | 'unverified' | 'unreadable',
-  opts: OrganizationOwnershipBootGuardOptions = {},
+  marker: OrganizationOwnershipMarkerState,
+  opts: OrganizationOwnershipBootGuardOptions & { generation?: number } = {},
 ): string {
   const ceremony = ceremonyCommand(opts.dev);
-  if (tables.length === 0) {
-    const state = marker === 'unreadable'
-      ? `its marker (sys_migration '${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') could not be read`
-      : `its marker (sys_migration '${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') is not verified: the post-check ` +
-        'still found rows the ceremony has not carried';
+  const run =
+    `Run '${ceremony} --out PLAN' to write and review its plan, take a backup, then run ` +
+    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.`;
+  const columns = tables.length > 0
+    ? ` ${tables.join(', ')} still carr${tables.length === 1 ? 'ies' : 'y'} a physical organization_id column its ` +
+      'object no longer declares.'
+    : '';
+  if (marker === 'outdated') {
     return (
-      `The organization-ownership ceremony has not finished on this database: ${state}. The server refuses to start ` +
-      'rather than serve rows of an organization-owned object with no organization. Resolve what the apply report ' +
-      `names, then run '${ceremony} --out PLAN' again, review it, run '${ceremony} --apply --plan-file PLAN ` +
-      "--backup-taken', and start again."
+      `This database was certified by an organization-ownership ceremony of shape generation ${opts.generation ?? 0}, ` +
+      `and this release requires generation ${ORGANIZATION_OWNERSHIP_SHAPE_GENERATION}: the ceremony steps added since ` +
+      `have not run on it.${columns} The server refuses to start rather than serve it in a shape it was never ` +
+      `migrated to. ${run}`
     );
   }
-  const state = marker === 'absent'
-    ? 'the ceremony has not run on it'
-    : marker === 'unverified'
-      ? 'the ceremony has not finished on it (its marker is not verified)'
-      : 'its marker could not be read';
+  if (marker === 'absent') {
+    return (
+      'This database carries no organization-ownership marker: an earlier release created it (a v17 install, or an ' +
+      '18.0 one), and this release serves only a database it created itself or one its ownership ceremony upgraded.' +
+      `${columns} The server refuses to start rather than serve it in a shape it was never migrated to. ${run}`
+    );
+  }
+  if (marker === 'unreadable') {
+    return (
+      `The organization-ownership marker (sys_migration '${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') of this database ` +
+      `could not be read, and an unread answer is never taken for a migrated database.${columns} The server refuses ` +
+      `to start. Fix the read, or run the ceremony: ${run}`
+    );
+  }
   return (
-    `This database is still in the v17 organization-ownership shape: ${tables.join(', ')} still carr` +
-    `${tables.length === 1 ? 'ies' : 'y'} a physical organization_id column, and ${state}. The server refuses to ` +
-    'start rather than serve v17 data with v18 semantics. 18.0 does not upgrade a v17 database: keep this one on a ' +
-    '17.x release until the 18.x release that carries the upgrade path, and run these steps there. ' +
-    `Run '${ceremony} --out PLAN' to write and review its ` +
-    `plan, take a backup, then run '${ceremony} --apply --plan-file PLAN --backup-taken', and start again. ` +
-    'To keep 17.x semantics, run a 17.x runtime.'
+    `The organization-ownership ceremony has not finished on this database: its marker (sys_migration ` +
+    `'${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') is not verified, so the post-check still found rows the ceremony has ` +
+    `not carried.${columns} The server refuses to start rather than serve rows of an organization-owned object with ` +
+    `no organization. Resolve what the apply report names, then run '${ceremony} --out PLAN' again, review it, run ` +
+    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.`
   );
 }
 
@@ -293,43 +343,109 @@ export class OrganizationOwnershipBootGuardPlugin implements Plugin {
   }
 }
 
+/** What the guard read of the ceremony's `sys_migration` row. */
+type MarkerReading =
+  /** No ledger on this composition, or no SQL store serving it: nothing to judge. */
+  | { state: 'inert' }
+  | { state: 'absent' }
+  | { state: 'unreadable' }
+  | { state: 'unverified'; generation: number }
+  | { state: 'verified'; generation: number };
+
 /**
- * The ceremony's marker: `absent` (no ledger on this composition, no store
- * serving it, or no row), `verified`, `unverified`, or `unreadable` (a store
- * serves the ledger and its read threw).
+ * The ceremony's marker. `inert` when this composition registers no ledger
+ * object, no store serves it (`os serve` with no OS_DATABASE_URL and no driver
+ * plugin), or the store that does has no physical columns to read (memory,
+ * MongoDB) — nothing was ever migrated there. `unreadable` only when a store
+ * serves the ledger and its read threw.
  */
-async function readMarker(engine: GuardEngine): Promise<'absent' | 'verified' | 'unverified' | 'unreadable'> {
-  if (typeof engine.findOne !== 'function') return 'absent';
-  // A composition that registers no ledger object has no marker to hold.
-  if (typeof engine.getObject === 'function' && !engine.getObject(DATA_MIGRATION_FLAG_OBJECT)) return 'absent';
-  // A boot with no storage (no driver serves the ledger — `os serve` with no
-  // OS_DATABASE_URL and no driver plugin) has no database to judge, exactly as
-  // the column probe skips an object no driver serves: nothing was ever
-  // migrated there. Only a store that serves the ledger and fails its read is
-  // `unreadable`.
-  if (typeof engine.getDriverForObject === 'function' && !engine.getDriverForObject(DATA_MIGRATION_FLAG_OBJECT)) return 'absent';
+async function readMarker(engine: GuardEngine): Promise<MarkerReading> {
+  if (typeof engine.findOne !== 'function') return { state: 'inert' };
+  if (typeof engine.getObject === 'function' && !engine.getObject(DATA_MIGRATION_FLAG_OBJECT)) return { state: 'inert' };
+  const store = ledgerStore(engine);
+  if (!store || !dialectOfDriver(store)) return { state: 'inert' };
   try {
     const row = (await engine.findOne(DATA_MIGRATION_FLAG_OBJECT, {
       where: { id: ORGANIZATION_OWNERSHIP_MIGRATION_ID },
       context: { isSystem: true },
     })) as DataMigrationFlag | null;
-    if (!row) return 'absent';
+    if (!row) return { state: 'absent' };
     const flag = { ...row, blocking: Number((row as { blocking?: unknown }).blocking) } as DataMigrationFlag;
-    return isDataMigrationFlagVerified(flag) ? 'verified' : 'unverified';
+    const generation = organizationOwnershipShapeGenerationOf(flag.details);
+    return isDataMigrationFlagVerified(flag) ? { state: 'verified', generation } : { state: 'unverified', generation };
   } catch {
-    return 'unreadable';
+    return { state: 'unreadable' };
+  }
+}
+
+/** The driver that serves the ledger, or `undefined`. */
+function ledgerStore(engine: GuardEngine): GuardDriver | undefined {
+  if (typeof engine.getDriverForObject !== 'function') return undefined;
+  try {
+    return (engine.getDriverForObject(DATA_MIGRATION_FLAG_OBJECT) as GuardDriver | undefined) ?? undefined;
+  } catch {
+    return undefined;
   }
 }
 
 /**
+ * Did THIS boot observe the store that holds the ledger being created from
+ * empty? Its own driver's schema-sync stats (`getSchemaSyncStats`): every
+ * table it synced it created, none it found. A driver that cannot report
+ * answers through the engine's all-driver reading, and "cannot say" is no.
+ */
+function ledgerStoreCreatedFromEmpty(engine: GuardEngine): boolean {
+  const stats = ledgerStore(engine)?.getSchemaSyncStats?.();
+  if (stats) return (Number(stats.existing) || 0) === 0 && (Number(stats.created) || 0) > 0;
+  try {
+    return engine.wasDatastoreCreatedFromEmpty?.() === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Write the birth marker: the ceremony's row, verified, with `details.birth`
+ * naming the generation the store was created in. Only where no row exists.
+ */
+async function writeBirthMarker(engine: GuardEngine, now: Date): Promise<OrganizationOwnershipBirthMarker> {
+  if (typeof engine.insert !== 'function') throw new Error('the engine offers no insert');
+  const at = now.toISOString();
+  // `commit` stays absent: no build of this runtime records its source commit.
+  const birth: OrganizationOwnershipBirthMarker = {
+    shapeGeneration: ORGANIZATION_OWNERSHIP_SHAPE_GENERATION,
+    platformVersion: resolveRuntimeVersion(),
+    createdAt: at,
+  };
+  await engine.insert(
+    DATA_MIGRATION_FLAG_OBJECT,
+    {
+      id: ORGANIZATION_OWNERSHIP_MIGRATION_ID,
+      last_run_at: at,
+      verified_at: at,
+      applied_at: null,
+      blocking: 0,
+      advisory: 0,
+      details: JSON.stringify({ birth }),
+      created_at: at,
+      updated_at: at,
+    },
+    { context: { isSystem: true } },
+  );
+  engine.invalidateDataMigrationFlags?.();
+  return birth;
+}
+
+/**
  * The check itself, for the plugin and for a host that composes its own boot:
- * resolves when the database may be served, throws
- * {@link OrganizationOwnershipBootRefusal} when it may not.
+ * resolves when the database may be served (writing the birth marker on a
+ * store created from empty), throws {@link OrganizationOwnershipBootRefusal}
+ * when it may not.
  */
 export async function assertOrganizationOwnershipMigrated(
   engine: GuardEngine,
   logger?: { info?: (msg: string) => void },
-  opts: OrganizationOwnershipBootGuardOptions = {},
+  opts: OrganizationOwnershipBootGuardOptions & { now?: () => Date } = {},
 ): Promise<void> {
   const ceremony = ceremonyCommand(opts.dev);
   let tables: string[];
@@ -337,26 +453,50 @@ export async function assertOrganizationOwnershipMigrated(
     tables = await findV17ShapeTables(engine);
   } catch (error) {
     throw new OrganizationOwnershipBootRefusal(
-      `The server refuses to start: it could not read whether this database is still in the v17 organization-ownership ` +
-        `shape (${error instanceof Error ? error.message : String(error)}), and an unread answer is never taken for a ` +
-        `migrated database. Fix the read, or run the ceremony ('${ceremony} --out PLAN', then ` +
+      `The server refuses to start: it could not read whether this database is still in an earlier organization-` +
+        `ownership shape (${error instanceof Error ? error.message : String(error)}), and an unread answer is never ` +
+        `taken for a migrated database. Fix the read, or run the ceremony ('${ceremony} --out PLAN', then ` +
         `'${ceremony} --apply --plan-file PLAN --backup-taken'), then start again.`,
       [],
     );
   }
   const marker = await readMarker(engine);
-  if (marker === 'verified') {
+  if (marker.state === 'inert') return;
+  if (marker.state === 'verified' && marker.generation >= ORGANIZATION_OWNERSHIP_SHAPE_GENERATION) {
     if (tables.length > 0) {
       logger?.info?.(
         `[organization-ownership] ${tables.join(', ')} still carry a physical organization_id column, and the ` +
-          `ceremony's marker is verified: the server starts.`,
+          `marker is verified at shape generation ${marker.generation}: the server starts.`,
       );
     }
     return;
   }
-  // No table left in the v17 shape: only a marker the ceremony wrote and did
-  // not verify refuses (its post-check found rows it has not carried). No
-  // marker is a database no ceremony ran on — a fresh one — and it boots.
-  if (tables.length === 0 && marker === 'absent') return;
-  throw new OrganizationOwnershipBootRefusal(organizationOwnershipRefusalMessage(tables, marker, opts), tables);
+  if (marker.state === 'absent' && tables.length === 0 && ledgerStoreCreatedFromEmpty(engine)) {
+    let birth: OrganizationOwnershipBirthMarker;
+    try {
+      birth = await writeBirthMarker(engine, (opts.now ?? (() => new Date()))());
+    } catch (error) {
+      throw new OrganizationOwnershipBootRefusal(
+        `The server refuses to start: this datastore was created from empty, and its organization-ownership birth ` +
+          `marker (sys_migration '${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') could not be written ` +
+          `(${error instanceof Error ? error.message : String(error)}). Without it the next boot would take this ` +
+          `store for a database an earlier release created. Fix the write and start again, or run the ceremony ` +
+          `('${ceremony} --out PLAN', then '${ceremony} --apply --plan-file PLAN --backup-taken').`,
+        [],
+      );
+    }
+    logger?.info?.(
+      `[organization-ownership] a datastore created from empty: birth marker written (shape generation ` +
+        `${birth.shapeGeneration}, platform ${birth.platformVersion}).`,
+    );
+    return;
+  }
+  const state: OrganizationOwnershipMarkerState = marker.state === 'verified' ? 'outdated' : marker.state;
+  throw new OrganizationOwnershipBootRefusal(
+    organizationOwnershipRefusalMessage(tables, state, {
+      ...opts,
+      ...('generation' in marker ? { generation: marker.generation } : {}),
+    }),
+    tables,
+  );
 }

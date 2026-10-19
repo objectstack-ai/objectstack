@@ -178,12 +178,80 @@ export const VALUE_SHAPES_MIGRATION_ID = 'adr-0104-value-shapes';
  * to start against a database still in the v17 shape while this marker is not
  * verified (D10 item 5).
  *
- * ⛔ Not a member of {@link CREATION_ATTESTED_MIGRATION_IDS}: a fresh store is
- * not in the v17 shape (no table it creates carries a retired organization
- * column), so the boot needs no attestation to start it, and a row claiming a
- * ceremony that never ran would read as one that did.
+ * ⛔ Not a member of {@link CREATION_ATTESTED_MIGRATION_IDS}: those are
+ * attested by `attestFreshDatastore` as a claim that a backfill's fact holds,
+ * and a row claiming a ceremony that never ran would read as one that did.
+ *
+ * The one exception, and the only one (ruling record 6269955919 on the v18
+ * epic, ① A): the organization-ownership boot guard itself writes this row
+ * ONCE, on a datastore it observed being created from empty, as the store's
+ * BIRTH MARKER ({@link OrganizationOwnershipBirthMarker}) — verified, with
+ * `details.birth` naming the {@link ORGANIZATION_OWNERSHIP_SHAPE_GENERATION}
+ * the store was born in. It claims no ceremony ran: it records that none was
+ * owed. A database with no row — every database an earlier release created —
+ * takes the ceremony before an 18.x server serves it.
  */
 export const ORGANIZATION_OWNERSHIP_MIGRATION_ID = 'adr-0131-organization-ownership';
+
+/**
+ * The organization-ownership shape generation this release requires (ruling
+ * record 6269955919 on the v18 epic, item 2). Every ceremony step that changes
+ * the required shape bumps it, in the change that adds the step.
+ *
+ * Both markers carry it — the ceremony's verified checkpoint
+ * (`details.checkpoint.shapeGeneration`) and the birth marker
+ * (`details.birth.shapeGeneration`) — and the boot guard decides on it ALONE,
+ * by one rule: a marker whose generation is below this one refuses the boot
+ * and names the ceremony. It never compares version strings. A marker written
+ * before generations existed reads as generation 0, so a database a shorter
+ * ceremony certified is never taken for one this release's ceremony did.
+ *
+ * Generations:
+ *  - `1` — the ceremony that upgrades v17 and 18.0 databases: the declared
+ *    webhook settlement, the two sibling moves, the declared sharing-rule
+ *    copies, the `sys_secret` / `sys_flow_credential` column drops and the
+ *    `organization_id` NOT NULL step.
+ */
+export const ORGANIZATION_OWNERSHIP_SHAPE_GENERATION = 1;
+
+/**
+ * The birth marker the organization-ownership boot guard writes into
+ * `details.birth` of the {@link ORGANIZATION_OWNERSHIP_MIGRATION_ID} row on a
+ * datastore created from empty (ruling record 6269955919, ① A). Only
+ * `shapeGeneration` is ever decided on; the rest is provenance.
+ */
+export const OrganizationOwnershipBirthMarkerSchema = lazySchema(() => z.object({
+  shapeGeneration: z.number().int().min(0)
+    .describe('The organization-ownership shape generation the store was created in; the only field the boot guard decides on'),
+  platformVersion: z.string()
+    .describe('The exact platform version that created the store (provenance only, never compared)'),
+  commit: z.string().optional()
+    .describe('The source commit of that build, when known (provenance only)'),
+  createdAt: z.string().datetime()
+    .describe('When the guard observed the store created from empty'),
+}).describe('Birth marker of a datastore created from empty: the ownership shape generation it was born in'));
+export type OrganizationOwnershipBirthMarker = z.infer<typeof OrganizationOwnershipBirthMarkerSchema>;
+
+/**
+ * The shape generation an {@link ORGANIZATION_OWNERSHIP_MIGRATION_ID} row's
+ * `details` attests — its birth marker's, else its ceremony checkpoint's — or
+ * `0` when it names none (a marker written before generations existed, or
+ * details that do not parse). Pure derivation; the guard compares the answer
+ * with {@link ORGANIZATION_OWNERSHIP_SHAPE_GENERATION}.
+ */
+export function organizationOwnershipShapeGenerationOf(details: unknown): number {
+  let parsed: unknown = details;
+  if (typeof details === 'string') {
+    try {
+      parsed = JSON.parse(details);
+    } catch {
+      return 0;
+    }
+  }
+  const d = parsed as { birth?: { shapeGeneration?: unknown }; checkpoint?: { shapeGeneration?: unknown } } | null;
+  const g = d?.birth?.shapeGeneration ?? d?.checkpoint?.shapeGeneration;
+  return typeof g === 'number' && Number.isInteger(g) && g >= 0 ? g : 0;
+}
 
 /**
  * ⚰️ RETIRED migration id: ADR-0030 notification convergence.
