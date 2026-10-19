@@ -389,7 +389,7 @@ const DISPOSITIONS: Record<string, Disposition> = {
   [`POST ${D}/:object/import`]: { kind: 'no-record-echo', why: 'Import summary: counts + per-row receipts, never the written row.' },
   [`POST ${D}/:object/import/jobs`]: { kind: 'no-record-echo', why: 'Job handle (id/status).' },
   [`POST ${D}/import/jobs/:jobId/cancel`]: { kind: 'no-record-echo', why: 'Job state receipt.' },
-  [`POST ${D}/import/jobs/:jobId/undo`]: { kind: 'no-record-echo', why: 'Undo summary (counts).' },
+  [`POST ${D}/import/jobs/:jobId/undo`]: { kind: 'no-record-echo', why: 'Undo summary: counts + per-row `failures` (record id, action, code, refusal sentence), never a record body.' },
 };
 
 const keyOf = (r: { method: string; path: string }) => `${r.method} ${r.path}`;
