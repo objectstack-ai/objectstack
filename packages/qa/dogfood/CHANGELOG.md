@@ -1,5 +1,60 @@
 # @objectstack/dogfood
 
+## 0.0.48-next.5
+
+### Patch Changes
+
+- Updated dependencies [9847f87]
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [9112bcd]
+- Updated dependencies [94e60c0]
+- Updated dependencies [94e60c0]
+- Updated dependencies [9524666]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [45bec43]
+- Updated dependencies [964a237]
+- Updated dependencies [b7a688e]
+  - @objectstack/plugin-sharing@18.0.0-next.5
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/objectql@18.0.0-next.5
+  - @objectstack/runtime@18.0.0-next.5
+  - @objectstack/plugin-security@18.0.0-next.5
+  - @objectstack/plugin-auth@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+  - @objectstack/platform-objects@18.0.0-next.5
+  - @objectstack/mcp@18.0.0-next.5
+  - @objectstack/example-crm@4.0.100-next.5
+  - @objectstack/example-multi-package@0.0.7-next.5
+  - @objectstack/example-showcase@0.3.22-next.5
+  - @objectstack/verify@18.0.0-next.5
+  - @objectstack/service-datasource@18.0.0-next.5
+  - @objectstack/plugin-approvals@18.0.0-next.5
+  - @objectstack/connector-mcp@18.0.0-next.5
+  - @objectstack/connector-openapi@18.0.0-next.5
+  - @objectstack/connector-rest@18.0.0-next.5
+  - @objectstack/formula@18.0.0-next.5
+  - @objectstack/metadata@18.0.0-next.5
+  - @objectstack/plugin-audit@18.0.0-next.5
+  - @objectstack/plugin-email@18.0.0-next.5
+  - @objectstack/plugin-webhooks@18.0.0-next.5
+  - @objectstack/service-analytics@18.0.0-next.5
+  - @objectstack/service-messaging@18.0.0-next.5
+  - @objectstack/service-storage@18.0.0-next.5
+  - @objectstack/trigger-record-change@18.0.0-next.5
+  - @objectstack/trigger-schedule@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+  - @objectstack/plugin-pinyin-search@18.0.0-next.5
+
 ## 0.0.48-next.4
 
 ### Patch Changes

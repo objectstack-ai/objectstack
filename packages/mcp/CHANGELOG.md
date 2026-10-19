@@ -1,5 +1,29 @@
 # @objectstack/plugin-mcp-server
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- 4d12b23: Clause-②: no (copy only: no accept set or public surface moves; owes the seat's review of record at `TIER_DEFAULT` before the queue)
+  
+  fix(mcp): the Connect-an-Agent page subtitle says "this system"
+  
+  - **What changed.** The Connect-an-Agent page header now reads "Give any MCP-capable AI client governed access to this system — every call runs under the caller's own permissions and row-level security." Inside the running system, user-facing copy names the system the caller is in as "this system".
+  - **Unchanged.** The page's name, layout, components and navigation entries, and every MCP route and payload.
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/formula@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
 ## 18.0.0-next.4
 
 ### Patch Changes

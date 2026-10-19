@@ -1,5 +1,42 @@
 # @objectstack/plugin-dev
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [8ed3786]
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [9112bcd]
+- Updated dependencies [94e60c0]
+- Updated dependencies [94e60c0]
+- Updated dependencies [9524666]
+- Updated dependencies [adb7910]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [45bec43]
+- Updated dependencies [964a237]
+  - @objectstack/plugin-hono-server@18.0.0-next.5
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/objectql@18.0.0-next.5
+  - @objectstack/runtime@18.0.0-next.5
+  - @objectstack/plugin-security@18.0.0-next.5
+  - @objectstack/plugin-auth@18.0.0-next.5
+  - @objectstack/rest@18.0.0-next.5
+  - @objectstack/account@18.0.0-next.5
+  - @objectstack/setup@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/driver-memory@18.0.0-next.5
+  - @objectstack/service-i18n@18.0.0-next.5
+  - @objectstack/service-realtime@18.0.0-next.5
+  - @objectstack/service-storage@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
 ## 18.0.0-next.4
 
 ### Patch Changes

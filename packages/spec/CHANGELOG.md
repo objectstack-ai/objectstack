@@ -1,5 +1,125 @@
 # @objectstack/spec
 
+## 18.0.0-next.5
+
+### Minor Changes
+
+- fa26308: fix(objectql,runtime): a hook whose `handler` names a function gets `ctx.title(field?)` in-process, as an inline handler and a `body` do
+  
+  Clause-②: yes (widening)
+  
+  - **What was wrong.** A hook whose `handler` is a string naming a function ran in-process without `ctx.title`: `defineStack({ functions })` plus a hook naming an entry on a source boot (`@objectstack/verify`'s `bootStack(config)`, `os serve` over a config), and a string `handler` resolved from the artifact's `runtimeModule` (what `objectstack build` ships for a callable it could not lower to a `body`). The engine's binder resolved the name after the runtime had wrapped the inline handlers, so the function was called with the bare engine context and `await ctx.title()` threw `TypeError: ctx.title is not a function`.
+  - **What changed.** `bindHooksToEngine` (`@objectstack/objectql`) takes a `wrapHandler(handler, hook)` option, applied at bind to every handler a hook runs in-process, after a string `handler` resolves: an inline function, a name from the bind's `functions`, or a name the same package registered on the engine. A `body`'s handler (built by `bodyRunner`) never takes it. `ObjectQL.bindHooks` and the `IObjectQLEngine.bindHooks` contract (`@objectstack/spec`) carry the option. `bindAppArtifactHandlers` (`@objectstack/runtime`) passes the existing `withInProcessHookTitle` through it, in place of wrapping inline handlers before the bind, so the inline and the named handler take one wrap.
+  - **Unchanged.** A bind that passes no `wrapHandler` binds every handler exactly as resolved, so a host or harness that calls `bindHooks` itself, and a hook registered with `ql.registerHook(...)`, are not handed `ctx.title`. `HookContext` still declares no `title`.
+- 26501ae: feat(spec): a navigation entry may declare one API data source, which its `visible` reads as `data` (planned, not yet rendered)
+  
+  Clause-②: yes (widening)
+  
+  - **What changed.** Every navigation entry that spreads the shared nav base (`object`, `dashboard`, `page`, `url`, `report`, `action`, `component`, `doc`, `group`) accepts an optional `dataSource`. It is the page element's API binding, `ElementApiDataSourceSchema`, by reference: `{ provider: 'api', read: { url, method? }, path? }` reads one same-origin endpoint with the console's signed-in fetch, and the entry's `visible` reads the value `path` selects as `data`, for example `visible: 'data.total == 1'`.
+  - **The refusals are the binding's own.** A `read.url` that is not a same-origin API path, a `method` other than `GET`, a credential key (`headers`, `token`, …), the object binding `{ object, … }` and an unknown key are all refused at parse, at the entry's `dataSource` path. A `separator` refuses `dataSource` with its own prescription.
+  - **What does not read it.** Only `visible` reads `data`. `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and a group's binding is not published to its `children`: each entry declares its own.
+  - **Planned, not yet rendered.** No console reads the key yet, so a `visible` that reads `data` has no value to read until the navigation renderer ships. The describe opens with `[PLANNED — not yet rendered]`, and the liveness row `app` → `navigation.dataSource` is `planned` with an author warning (`os lint` / `os validate` report it on a top-level entry).
+  - **Who notices.** Nobody, by construction: every app that parsed before parses unchanged. Nothing narrows.
+- adb7910: fix(spec)!: `UndoImportJobResponseSchema` requires `failures`, one entry per row an import undo did not revert, and the `skipAutomations` describe names no import-undo exception
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authored key and no stored shape moves: `failures` is a key on the import undo's HTTP answer, which the server builds and no author writes or stores; the job row keeps its columns, its undo log stays the engine-owned json column it was, and the other edits are describes and TSDoc. No spec key, export or error code is removed or renamed, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** (`UndoImportJobResponseSchema` accepts fewer answers: `failures` is required, so a response parsed with the schema is refused without it, and code that constructs an `UndoImportJobResponse` must set it, `[]` on a full revert; readers of `client.data.undoImportJob` are unchanged and gain the key), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `UndoImportJobResponseSchema` gains a required `failures`: one `{ id, action, code, error }` entry per row an import undo did not revert, `action` being `delete` or `restore`, and an empty array when every row was reverted. It is required rather than optional so a server that does not report its unreverted rows is off-contract instead of silently spec-valid. The `success` describe now says it is `false` when any row is listed there, and `failed` counts those entries. `revertedAt` on `ImportJobProgressSchema` and `ImportJobSummarySchema` now says it is set only once every row of the job is reverted; an undo that left rows unreverted sets nothing, and the job stays undoable for them.
+  
+  The `skipAutomations` describe on the hook context's `session` no longer names the import undo as a case that skips an app's controls for any caller. It names the system principal's import and undo, and says the import undo door is not an exception: only the system principal may take an app's declared controls off a write, and any other caller's undo runs under the object's hooks, record-change triggers and state machine. The `ExecutionContext` TSDoc for `skipAutomations` says the import runner sets it from its caller's `runAutomations: false`, which the import doors admit over HTTP from the system principal alone while an in-process caller of the runner passes its own setting, and that the import undo sets it only when the system principal undoes a job; the `skipStateMachine` TSDoc says the same of the undo.
+- 69f342b: feat(spec)!: retire a page action row's own `patch` — a row's `operation: 'update'` runs the declared action its `name` names, and the platform action route writes that action's `patch` (#24394)
+  
+  **BREAKING** — `patch` on a page action row (`action:button`, `action:icon`, and each `action:group` / `action:menu` member of `properties.actions`) is now refused. A row's `operation: 'update'` posts to the platform action route under the row's `name`. The route resolves that declared action by name and writes the action's own `patch`, merged under the request's params. The row's `patch` was never sent: the reference console read it only for its Undo snapshot. Beside `operation: 'update'` a row now needs a `name`, since without one it has no declared action to run and the console refused it before any request. A row's static `params` are written only where that action declares them, and the route refuses any other with a 400 (ADR-0104 D2). `ActionSchema.patch`, the action's own declaration, is unchanged.
+  
+  Clause-②: yes (narrowing)
+  
+  Both directions, measured on the built rows. Narrowing: every row `patch` is refused, and a row with `operation: 'update'` and no `name` (an input list or static `params` included) is refused at `name`. Widening: a row with `operation: 'update'` and a `name` but no `patch` and no `params` now parses; before, the rows refused it at `patch` as having nothing to write, though its write is the named action's `patch`.
+  
+  Measured before removal, at `71fa166e96`: no producer. No page action row in this repository's examples or apps authors `patch` (or any `operation`), and neither does any objectui page row at the pinned `0707b4ae37` or at objectui `main` `4b7ce47`.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `operation: 'update'` with a `patch` on a page action row | the values in the `patch` of the declared action the row's `name` names (`defineAction({ name, operation: 'update', patch })`), the row keeping only `operation: 'update'` and that `name` |
+  | `patch` on a page action row with no `operation` | nothing — delete the key; it was already refused |
+  | `operation: 'update'` on a page action row with no `name` | a `name` naming the declared `operation: 'update'` action |
+  
+  **The one-line fix:** move each row's `patch` values onto the declared action its `name` names, then delete the row's `patch`.
+  
+  **What an author who still writes it sees.** `tsc` fails at a typed authoring site (the rows type the key as retired), and `os validate`, `os build` and `os lint` refuse it as an `error` (`component-props-invalid`) at its own path (`properties.patch`, `properties.actions.N.patch`) with the prescription:
+  
+  > An `action:button`'s `patch` was removed in @objectstack/spec 18 (ADR-0110 D2) — a page action row's `operation: 'update'` runs the declared action its `name` names, and the platform action route resolves that action by name and writes ITS `patch`, so the row's own `patch` was never sent and never written. Move the values into the `patch` of the action the row's `name` names, then delete the key. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+  
+  A page's own parse keeps its component `properties` as an open bag, so an existing page carrying the key is never refused at load.
+  
+  ## The retirement kit
+  
+  - **A `retiredKey()` tombstone** at `patch` on `ActionButtonProps`, `ActionIconProps` and the `action:group` / `action:menu` member. `RETIRED_KEYS_BY_MAJOR[18]`: `ui/ActionButtonProps:patch`, `ui/ActionIconProps:patch` (the member's keys have no surface row of their own). The authorable-surface rows read `[RETIRED]`.
+  - **The rows' half of the declarative-update judge** reads the row's own surface: a row has no "`patch` without `operation`" rule of its own (its tombstone refuses every `patch`), and its "nothing to write" rule asks for the `name`. `ActionSchema`'s half of every rule, and every text it prints, is unchanged.
+  - **The D2 conversion `page-action-row-patch-removed`** (protocol 18, retired from the load path) deletes the key from every node and member — region-level, nested in a container's `children`, and in a slotted page's named slot — one notice per row. It is scoped by component `type`: the same key name on another component is left alone.
+  - **The D3 entry `ui-page-action-row-patch-retired`** records the judgement the strip cannot make: when the named action's own `patch` lacks a value the row carried, that value was never written, and adding it to the action changes what the action writes.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  **Not part of it:** objectui's renderers still forward the row's `patch`, its runner still reads it for the Undo snapshot, and its component registry still lists a `patch` input on `action:button` / `action:icon` (so the tracked `sdui.manifest.json` advertises it to the html-tier page gate until the pin moves). Those reads leave on the objectui side.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered page-action-row-patch-removed, ui-page-action-row-patch-retired -->
+- 2ec6827: feat(spec): a metadata save declares its authoring surface — `SaveMetaItemRequestSchema.surface`, in one exported closed set shared with `draftChanges[].by`
+  
+  Clause-②: yes (widening)
+  
+  - **One closed set, one name.** `MetadataAuthoringSurfaceSchema` (`copilot | studio | api`) is exported from `@objectstack/spec/api`, with its type `MetadataAuthoringSurface`. `GetMetaItemResponseSchema.draftChanges[].by` now reads it instead of an inline enum: the accepted values are unchanged.
+  - **The save states its surface.** `SaveMetaItemRequestSchema` gains an optional `surface` from that set. A draft save stamps it as `by` on each key path it changes; an absent `surface` stamps `api`. On the REST door and the runtime dispatcher it is the `?surface=` query parameter, which takes `studio` or `api` only: `copilot` is stated by an in-process AI tool, never over HTTP.
+  - **The writer exists.** The `draftChanges` describe no longer says no server writes it: it states the writer's rules (the first draft save is compared with the stored published row, an item with no stored published row is recorded as `[]`, and a `migrate-stored` rewrite records nothing). `18.0.0-next.4`'s note said no server writes `draftChanges` yet; from this release the draft save writes it.
+- fb0d85b: feat(spec,objectql)!: a top-level action bound by `objectName` to an object another package owns is listed on that object wherever it is served, and a bound action whose object no loaded package registers fails the boot
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, option, error code or stored shape is added, removed or renamed: `defineStack` accepts two more target kinds for an action's existing `objectName`, the served object gains entries in its existing `actions` array, and the boot refusal answers the existing `INVALID_METADATA` code. Nothing stored changes shape, so `objectstack migrate meta` has nothing to rewrite. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no Zod schema shape in packages/spec changes (not runtime-interface-only or type-surface-only); and nothing exported is retired (not runtime-export-retired). -->
+  
+  **BREAKING** (one narrowing beside a widening), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **Widening** (`@objectstack/spec`, `@objectstack/objectql`): an action declared in a stack's top-level `actions` with `objectName` naming an object that another package owns now reaches that object. `defineStack()` accepts the action when the stack extends the object through `objectExtensions`, or when the object is a known platform object (`sys_organization` and the rest of the platform's named list). It keeps the action in the top-level `actions`. The engine's schema registry then attaches it to the object at the one step every object read ends in. That covers `GET /api/v1/meta/object/<name>` (stored-row, MetadataService and registry layers alike), `engine.getSchema()` and the action router's object lookup, in whichever order the two packages register. The attached entry is the action's own declaration, so its `requiredPermissions`, `requiresMembershipReach` and execution identity are unchanged. An action the object already declares under the same name keeps the object's declaration. A disabled package's bound actions are not attached. Before this, such an action was refused by `defineStack()` whenever the stack declared an object of its own. Where it got through (an object-less stack, or `strict: false`), it registered but was listed on no object, so no client rendered it.
+  - **FROM** (`@objectstack/objectql`): a top-level action bound by `objectName` to an object no loaded package registers was registered and listed nowhere, and the boot succeeded. **TO:** the boot fails at `kernel:ready` with `INVALID_METADATA` (422), naming each such action, its package and the object. An artifact registered through the `manifest` service after the boot is refused before any of it registers. **Fix:** register the object (in the package or in one it depends on), or correct the action's `objectName`.
+  - **Unchanged:** a name `defineStack()` cannot attribute (an object this stack neither defines nor extends, and not a known platform object) is still refused at build with `STACK_CROSS_REFERENCE_INVALID`. A same-stack bound action is still merged into its object by `defineStack()` and is attached once.
+  
+  The `ObjectExtensionSchema` refusal for `actions` now says exactly this: declare a top-level action with `objectName: '<target>'` in the same stack; the schema registry attaches it to the object wherever the object is served; a target no loaded package registers fails the boot.
+
+### Patch Changes
+
+- 01fafde: A page element's `api` data source is described as rendered, and `visibleWhen` says where `data` is mounted
+  
+  Clause-②: no (describe and TSDoc text only: `ElementApiDataSourceSchema` and `PageComponentSchema` accept exactly what they accepted before, and every refusal keeps its issue `code` and `path`)
+  
+  - `ElementApiDataSourceSchema`'s describe dropped its `[PLANNED — not yet rendered]` marker. It now says what the console renders: the console reads the binding on every page element and binds the value `path` selects as `data`, on that element and on every element nested inside it. The element's `visibleWhen` is decided once the read answers. While the read is in flight, or when the binding is refused or the read fails, the element draws a loading or error panel instead.
+  - `PageComponentSchema.visibleWhen` (its describe and its TSDoc) no longer says that no renderer reads the binding. The renderer mounts no `data` root on an element that no `api` data source binds, where a `data.*` read still faults and the gate never gates. On an element that one binds, `data` is the bound value.
+  - The `page:tabs` item `visibleWhen` describe's parenthetical now reads that the component-node evaluator mounts no `data` root "save on an element an `api` data source binds", where `data` is that binding's value. That surface's own evaluator still binds `data` to the record row.
+  - The binding's refusal and unknown-key messages no longer name a page element. For example, "`read.url` of a page element's `api` data source must be …" now reads "`read.url` of an `api` data source must be …", and the unknown-key surface is "this `api` data source". The `object` guidance names the object binding only where the `dataSource` takes one. Each message keeps its issue `code` and `path`.
+- 94e60c0: `defaultRowScope`'s describe, TSDoc and liveness row now say what the security plugin's reader does with the key
+  
+  Clause-②: no — only describe, TSDoc and liveness-ledger text move; `ObjectSchema` and `DefaultRowScopeSchema` accept and refuse exactly what they did.
+  
+  - `ObjectSchema.defaultRowScope`'s describe no longer says the key is not applied. It states what the row-policy collection does: the default applies when no permission set the caller holds carries a row policy for the object and the operation (a `'*'` policy counts; one switched off, outside the caller's positions, or for another operation does not), it is judged like a held policy, a `using` the compiler cannot lower makes the reads it governs return no rows with one server warning, and authoring checks do not judge that predicate. The TSDoc on the key and on `DefaultRowScopeSchema` say the same.
+  - `liveness/object.json`: the `defaultRowScope` row and its eight members are `live`, citing the security plugin's collection, compiler and explain as their readers. Authoring the key no longer raises the `liveness-planned-property` warning.
+- ff48407: Clause-②: no
+  
+  fix(spec): published copy that names the running system says "this system", or drops the noun, not "this environment"
+  
+  - **What changed.** Inside the running system, user-facing copy names the system the reader is in as "this system", or drops the noun. A permission set made here, not shipped by a package, is "authored in this system".
+    - The permission-set `packageId` refusal on the save, restore and publish doors now reads "a set written into no package is authored in this system, which an absent `packageId` states".
+    - The permission set's `packageId` help text in Setup ends "Leave empty for a set authored in this system." The English Setup forms bundle of `@objectstack/platform-objects` is regenerated from it.
+    - The `permission.managedBy` tombstone prescription, and the `permission-set-managed-by-retired` protocol-18 upgrade-guide entry, say "a set authored in this system carries neither".
+    - The `AudienceConfig.posture` and `AuthConfig.audience` describes say "who may self-register", with no noun. Their TSDoc says "who may become a user of this system's apps", the sentence the Setup Authentication group already reads.
+    - `AiModelsResponse.models` describes "Models this system offers". The `IMetadataService.listDiagnosed` TSDoc example reads "this system contains N items".
+  - **Kept "environment", where the word names a deployment or configuration scope.** `SeedLoaderConfig.env` ("Only load datasets matching this environment", the `prod | dev | test` tier), the `package-uninstall-environment-wide` upgrade-guide entry (the ADR-0131 environment-wide scope, as against an organization), and the environment artifact's consent-record TSDoc.
+  - **Unchanged.** Every error code, status, issue path, accepted value and export. Only the human-readable text moves.
+
 ## 18.0.0-next.4
 
 ### Minor Changes

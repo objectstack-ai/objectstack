@@ -1,5 +1,17 @@
 # @objectstack/hono
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [8ed3786]
+- Updated dependencies [fa26308]
+- Updated dependencies [2ec6827]
+- Updated dependencies [964a237]
+  - @objectstack/plugin-hono-server@18.0.0-next.5
+  - @objectstack/runtime@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
 ## 18.0.0-next.4
 
 ### Patch Changes
