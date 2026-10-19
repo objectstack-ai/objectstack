@@ -17,7 +17,7 @@ import { bindHooksToEngine } from './hook-binder.js';
 import type { Hook, HookContext } from '@objectstack/spec/data';
 
 const ctx = (): HookContext =>
-  ({ object: 'account', event: 'beforeInsert', input: { data: {} } }) as HookContext;
+  ({ object: 'account', event: 'beforeInsert', input: { data: {} }, ql: undefined }) as HookContext;
 
 /** Marks each context the wrapped handler is called with, and records which hook it wrapped. */
 function marking(wrappedFor: string[]) {
