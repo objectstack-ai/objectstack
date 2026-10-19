@@ -8,7 +8,7 @@
 
 - 整车道一次读全,本地求交:`list_issues` 带 `labels: [domain:X]` + 最小字段拿回全车道 open 集。
 - 候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`;⛔ 排除三门皆无的 `tooling` 卡。
-- 自贴 `domain:*` 卡:车道合域表且正文齐 `filing-gate.md` 三件 ⇒ 候选;缺一 ⇒ 挂 `pm:retriage`。
+- 自贴 `domain:*` 卡:合域表且齐立卡门三件 ⇒ 候选;缺一 ⇒ 挂 `pm:retriage`,⛔ 只评论不算。
 - 已排队父单的 open sub-issue 自动是候选,`pm:epic` 父单的子树除外。
 - 每张候选读全文 + 全部评论,写派发词前做决策复读:评论读到最后一页。
 - 维护者裁决逐字引入派发词裁决分区作约束,无则写明无裁决。
