@@ -874,6 +874,7 @@ export default class OrganizationOwnershipCeremony extends Command {
             return applyNotNullThroughDrift(
               {
                 isDeclared: (table) => declared.has(rotationBaseOf(table) ?? table),
+                shardBaseOf: (table) => rotationBaseOf(table) ?? null,
                 driverFor: (database) =>
                   (database === undefined
                     ? liveStack.driver

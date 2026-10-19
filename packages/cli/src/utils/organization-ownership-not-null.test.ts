@@ -97,6 +97,22 @@ describe('organization_id NOT NULL through the drift apply door', () => {
     expect(attempted).toBe(0);
   });
 
+  it('a rotation shard is unsupported, never rebuilt: it has no declaration of its own', async () => {
+    let attempted = 0;
+    const outcomes = await applyNotNullThroughDrift(
+      {
+        isDeclared: () => true,
+        shardBaseOf: (t) => (t.startsWith('sys_activity__') ? 'sys_activity' : null),
+        driverFor: () => ({ applyMigrationEntries: async () => { attempted++; return { applied: [], skipped: [] }; } }) as never,
+      },
+      [{ table: 'sys_activity__r20261019', column: 'organization_id' }],
+    );
+    expect(outcomes).toEqual([
+      { table: 'sys_activity__r20261019', column: 'organization_id', outcome: 'unsupported', detail: expect.stringMatching(/rotation shard of sys_activity/) },
+    ]);
+    expect(attempted).toBe(0);
+  });
+
   it('no driver for the table\'s database fails, naming the database', async () => {
     const [outcome] = await applyNotNullThroughDrift(
       { isDeclared: () => true, driverFor: () => undefined },

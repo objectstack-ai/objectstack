@@ -10,6 +10,8 @@ export interface NotNullTarget {
   driverFor(database: string | undefined): Pick<SqlDriverLike, 'applyMigrationEntries' | 'driftApplyLimit'> | undefined;
   /** Whether the booted composition declares an object for this table (a rotation shard judged by its base). */
   isDeclared(table: string): boolean;
+  /** The declared table a rotation shard belongs to (`sys_activity__r20261019` → `sys_activity`), or `null`. */
+  shardBaseOf?(table: string): string | null;
 }
 
 /**
@@ -23,13 +25,26 @@ export interface NotNullTarget {
  * `tighten_not_null`, handed to the one driver that holds the table. A table
  * the composition does not declare is not rebuilt (`not-declared`); a
  * transport whose apply door cannot perform the op (the Turso remote face,
- * `driftApplyLimit`) is `unsupported`, never attempted.
+ * `driftApplyLimit`) is `unsupported`, never attempted; so is a rotation
+ * shard: the apply door rebuilds a table against its own declaration, which a
+ * shard does not have, and every shard rotated in later is created from the
+ * base's declaration, nullable — the shard family holds NOT NULL nowhere.
  */
 export async function applyNotNullThroughDrift(target: NotNullTarget, columns: readonly NotNullColumn[]): Promise<NotNullOutcome[]> {
   const outcomes: NotNullOutcome[] = [];
   for (const { table, column, database } of columns) {
     if (!target.isDeclared(table)) {
       outcomes.push({ table, column, outcome: 'not-declared' });
+      continue;
+    }
+    const base = target.shardBaseOf?.(table) ?? null;
+    if (base !== null && base !== table) {
+      outcomes.push({
+        table,
+        column,
+        outcome: 'unsupported',
+        detail: `${table} is a rotation shard of ${base}: the drift apply door rebuilds only a declared table, and each new shard is created with ${base}'s nullable column`,
+      });
       continue;
     }
     const driver = target.driverFor(database);
