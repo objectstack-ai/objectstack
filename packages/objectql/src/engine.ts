@@ -290,7 +290,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 // [#20331] The divergent view-container `name` refusal — the ONE judge this
 // registrar and `os validate` both call.
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
-import { bindHooksToEngine } from './hook-binder.js';
+import { bindHooksToEngine, type BindHooksOptions } from './hook-binder.js';
 import { declaredHookCondition } from './hook-wrappers.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
@@ -4908,6 +4908,8 @@ export class ObjectQL implements IObjectQLEngine {
     strict?: boolean;
     warnLegacyHandler?: boolean;
     metrics?: any;
+    /** Wraps each in-process handler after its name resolves — see {@link BindHooksOptions.wrapHandler}. */
+    wrapHandler?: BindHooksOptions['wrapHandler'];
   }): void {
     const merged = { ...(opts ?? {}), logger: this.logger } as any;
     if (!merged.bodyRunner && this._defaultBodyRunner) {
