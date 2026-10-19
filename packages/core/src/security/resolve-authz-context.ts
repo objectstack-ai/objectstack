@@ -1495,35 +1495,40 @@ export async function resolveUserAuthzGrants(
   // `admin_full_access` grant under `single`, so a principal holding none issues exactly
   // the reads it issued before (the batch-equivalence goldens are unchanged).
   const walled = postureEnforcesWall(resolveTenancyPosture());
-  const defaultOrganizationId =
-    !walled && upsRows.some((r) => grantSetNameOf(r) === ADMIN_FULL_ACCESS && grantOrganizationOf(r) !== null)
-      ? await readDefaultOrganizationId(ql)
-      : undefined;
-  const platformAnchor = { walled, defaultOrganizationId };
-  const anchorsPlatformStanding = (grant: unknown): boolean =>
-    grantSetNameOf(grant) === ADMIN_FULL_ACCESS && grantAnchorsPlatformStanding(grant, platformAnchor);
-  // An anchoring grant applies in whichever organization the principal acts in, as the
-  // organization-less row it replaces always did: platform standing is the deployment's,
-  // never one tenant's.
-  const applyingGrants = upsRows.filter(
-    (r) => grantAppliesInTenant(grantOrganizationOf(r), tenantId) || anchorsPlatformStanding(r),
-  );
+  const anchorReadsDefaultOrganization =
+    !walled && upsRows.some((r) => grantSetNameOf(r) === ADMIN_FULL_ACCESS && grantOrganizationOf(r) !== null);
   const catalog = securityCatalogReaderOf(ql);
-  const grantSetNames: string[] = [];
-  for (const grant of applyingGrants) {
-    const name = grantSetNameOf(grant);
-    if (name && !grantSetNames.includes(name)) grantSetNames.push(name);
-  }
-  // Position-bound sets (§6a), by name, in the order the held positions name them.
-  const boundSetNames: string[] = [];
-  let disabled = { positions: new Set<string>(), permissions: new Set<string>() };
-  let hasPlatformAdminGrant = false;
 
   // 5b. [ADR-0090 D5] Audience anchor: every AUTHENTICATED member implicitly
   //     holds the built-in `everyone` position, so sets bound to it resolve
   //     below exactly like any other position-bound grant — ADDITIVE, with no
   //     "only when the user has nothing else" cliff.
   if (!grants.positions.includes('everyone')) grants.positions.push('everyone');
+
+  // [#10757 leg 4] The Default Organization read (§6) and the activation-ledger
+  // read (§6a) are ONE wave. They used to be two serial round trips, because the
+  // ledger was asked about the names of the grants that APPLY, and whether an
+  // organization-owned `admin_full_access` grant applies is the Default
+  // Organization's answer. The ledger is now asked about every name that MAY
+  // apply: the grants that apply in this tenant (exactly as before), plus such an
+  // `admin_full_access` grant while its anchoring is still open. That adds at
+  // most the one name `admin_full_access`, and only when the anchor then answers
+  // "not the Default Organization". Asking the ledger about a name changes no
+  // verdict: every reader of `disabled` below asks it only about a name it
+  // grants, and a held name of either type was already in the question. So
+  // every envelope is unchanged, and so is every read's predicate: the ledger's
+  // and the organization's filters, `grantAppliesInTenant` and
+  // `grantAnchorsPlatformStanding` (the organization-less readings) are called
+  // as they were, never edited. Pinned in
+  // `resolve-authz-context.request-rounds.test.ts`.
+  const mayApply = (r: unknown): boolean =>
+    grantAppliesInTenant(grantOrganizationOf(r), tenantId)
+    || (anchorReadsDefaultOrganization && grantSetNameOf(r) === ADMIN_FULL_ACCESS && grantOrganizationOf(r) !== null);
+  const ledgerSetNames: string[] = [];
+  for (const grant of upsRows) {
+    const name = grantSetNameOf(grant);
+    if (name && mayApply(grant) && !ledgerSetNames.includes(name)) ledgerSetNames.push(name);
+  }
 
   // 6a. Position-bound permission sets: a position carries its permission sets
   //     in its definition (`PositionSchema.permissionSets`, ADR-0131 D3/D4),
@@ -1545,22 +1550,45 @@ export async function resolveUserAuthzGrants(
   //     Only a name the activation ledger switched off is dropped
   //     ({@link readDisabledCatalogNames}); a name with no ledger row is in
   //     effect, a membership-derived role (`org_owner`) included.
-  if (grants.positions.length > 0) {
+  const readPositionLedger = async (): Promise<{
+    namedByPosition: Map<string, string[]>;
+    disabled: { positions: Set<string>; permissions: Set<string> };
+  }> => {
+    if (grants.positions.length === 0) {
+      return { namedByPosition: new Map(), disabled: { positions: new Set(), permissions: new Set() } };
+    }
     // The definitions first (in-process), so the ONE ledger read can ask about
     // every position and every set this resolution may grant.
     const namedByPosition = await positionBoundSetNames(catalog, grants.positions);
-    disabled = await readDisabledCatalogNames(
+    const disabled = await readDisabledCatalogNames(
       ql,
       grants.positions,
-      [...grantSetNames, ...[...namedByPosition.values()].flat()],
+      [...ledgerSetNames, ...[...namedByPosition.values()].flat()],
     );
-    if (disabled.positions.size > 0) {
-      grants.positions = grants.positions.filter((n) => !disabled.positions.has(n));
-    }
-    for (const positionName of grants.positions) {
-      for (const setName of namedByPosition.get(positionName) ?? []) {
-        if (!boundSetNames.includes(setName)) boundSetNames.push(setName);
-      }
+    return { namedByPosition, disabled };
+  };
+  const [defaultOrganizationId, { namedByPosition, disabled }] = await Promise.all([
+    anchorReadsDefaultOrganization ? readDefaultOrganizationId(ql) : Promise.resolve(undefined),
+    readPositionLedger(),
+  ]);
+  const platformAnchor = { walled, defaultOrganizationId };
+  const anchorsPlatformStanding = (grant: unknown): boolean =>
+    grantSetNameOf(grant) === ADMIN_FULL_ACCESS && grantAnchorsPlatformStanding(grant, platformAnchor);
+  // An anchoring grant applies in whichever organization the principal acts in, as the
+  // organization-less row it replaces always did: platform standing is the deployment's,
+  // never one tenant's.
+  const applyingGrants = upsRows.filter(
+    (r) => grantAppliesInTenant(grantOrganizationOf(r), tenantId) || anchorsPlatformStanding(r),
+  );
+  // Position-bound sets (§6a), by name, in the order the held positions name them.
+  const boundSetNames: string[] = [];
+  let hasPlatformAdminGrant = false;
+  if (disabled.positions.size > 0) {
+    grants.positions = grants.positions.filter((n) => !disabled.positions.has(n));
+  }
+  for (const positionName of grants.positions) {
+    for (const setName of namedByPosition.get(positionName) ?? []) {
+      if (!boundSetNames.includes(setName)) boundSetNames.push(setName);
     }
   }
 
