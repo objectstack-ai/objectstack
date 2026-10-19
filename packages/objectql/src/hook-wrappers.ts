@@ -23,7 +23,7 @@ import { noopHookMetricsRecorder, type HookMetricsRecorder, type HookMetricOutco
 import { materializeDeclaredFields } from './declared-fields.js';
 import { describeCelFault, type CelFault } from './cel-fault.js';
 import { nullPreviousReadDetail, ruleScope, type PreviousBinding } from './validation/rule-validator.js';
-import { hookRunAs, deriveHookApi, type HookRunAs } from './hook-run-as.js';
+import { hookRunAs, deriveHookApi, seedHookUserGrants, type HookRunAs } from './hook-run-as.js';
 
 /**
  * The logger the hook layer writes its diagnostics to — the `Logger` CONTRACT
@@ -469,8 +469,8 @@ export function wrapDeclarativeHook(
     // engine's own context object is never touched (the condition gate above
     // already ran against it; the readonly strip and the session keep reading
     // it). Under `'inherit'` this is a no-op that leaves the engine-built api
-    // in place by reference.
-    const restoreApi = installRunAsApi(ctx, runAs, meta.name);
+    // in place by reference — and, deliberately, without an extra `await`.
+    const restoreApi = runAs === 'inherit' ? noRestore : await installRunAsApi(ctx, runAs, meta.name, logger);
     const startedAt = Date.now();
 
     const recordOutcome = (err?: any) => {
@@ -537,18 +537,50 @@ export function wrapDeclarativeHook(
  * only the api holds the full triggering `ExecutionContext` — `ctx.session` is
  * a projection of it and drops the transaction handle, among other things.
  */
-function installRunAsApi(ctx: HookContext, runAs: HookRunAs, hookName: string): () => void {
-  if (runAs === 'inherit') return () => {};
+function installRunAsApi(
+  ctx: HookContext,
+  runAs: HookRunAs,
+  hookName: string,
+  logger: HookDiagnosticsLogger,
+): Promise<() => void> {
+  if (runAs === 'inherit') return Promise.resolve(noRestore);
   const original = ctx.api;
-  ctx.api = deriveHookApi(original, runAs, {
+  const derived = deriveHookApi(original, runAs, {
     hook: hookName,
     object: ctx.object,
     event: ctx.event,
-  }) as HookContext['api'];
-  return () => {
-    ctx.api = original;
+  });
+  const install = (api: unknown) => {
+    ctx.api = api as HookContext['api'];
+    return () => {
+      ctx.api = original;
+    };
   };
+  if (runAs !== 'user') return Promise.resolve(install(derived));
+  // [#24497] A `'user'` pin carries the user's grants and peer list, seeded
+  // through the resolver the request path uses (`ScopedContext[SEED_USER_GRANTS]`, `hook-run-as.ts`).
+  // Cost: one `resolveUserAuthzGrants` per dispatch whose triggering context
+  // carries no `permissions` or no `org_user_ids` — the hand-built system
+  // contexts; a request-resolved context carries both and resolves nothing.
+  return seedHookUserGrants(derived).then(install, (err: unknown) => {
+    // Fail-safe, never fail-open — the flow run setup's posture: the hook keeps
+    // the unseeded pin, so its data ops run on the context's own grants (the
+    // security plugin's member baseline when it carries none, never elevation),
+    // and every row policy reading `current_user.org_user_ids` drops out. It
+    // sees less, never more. FUNCTIONAL, so `warn`: nothing claimed-persisted
+    // failed to land, and the symptom is the hook's own narrower reads.
+    logger.warn(
+      `[hook] runAs 'user': the triggering user's grants could not be resolved, so this hook's data ops run ` +
+        `on the triggering context's own grants (not elevated), and every row policy reading ` +
+        `current_user.org_user_ids drops out`,
+      { hook: hookName, object: ctx.object, event: ctx.event, error: (err as any)?.message },
+    );
+    return install(derived);
+  });
 }
+
+/** The restore of a hook whose `runAs` installed nothing (`'inherit'`). */
+const noRestore = (): void => {};
 
 /**
  * Swap `ctx.input` in place for a Proxy that exposes a flat record view
