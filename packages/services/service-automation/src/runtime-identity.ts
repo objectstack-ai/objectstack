@@ -27,8 +27,9 @@ export interface RunIdentityContext {
   actor?: string;
   /**
    * Acting user id. On a `runAs:'user'` run it drives owner/role RLS. On a
-   * `runAs:'system'` run it is carried through UNCHANGED from the trigger when
-   * one resolved a user (#5494): elevation and anonymity are separate choices
+   * `runAs:'system'` run it is carried through from the trigger when one
+   * resolved a user (#5494), and after an approval decision it is the decider
+   * (ruling 6267719791 Q1 A): elevation and anonymity are separate choices
    * (ADR-0073's authorization-vs-attribution axes; the #3783 approvals-mirror
    * `{ isSystem: true, userId }` shape), and the security middleware's
    * `isSystem` short-circuit precedes every gate that reads `userId`, so under
@@ -52,6 +53,16 @@ export interface RunIdentityContext {
    * `runAs:'system'` run, whose `isSystem` short-circuit precedes every policy.
    */
   org_user_ids?: string[];
+  /**
+   * The acting user's unique email: the value RLS reads as
+   * `current_user.email` (an owner policy such as
+   * `assignee == current_user.email`). Present on a `runAs:'user'` run whose
+   * context carries it ({@link AutomationContext.email}, seeded at run setup);
+   * a policy that reads it drops out without it, so the run would be refused
+   * on every row only such a policy admits. Never set on a `runAs:'system'`
+   * run, whose `isSystem` short-circuit precedes every policy.
+   */
+  email?: string;
   /** Acting user's tenant/org id. */
   tenantId?: string;
   /**
@@ -136,6 +147,32 @@ export interface RunDataContext extends RunIdentityContext {}
  */
 export interface SeededRunContext extends AutomationContext {
   org_user_ids?: string[];
+  /**
+   * Who TRIGGERED the run, recorded when a human decision moved the run's
+   * acting identity (`userId`) to the decider (ruling A on `FlowSchema.runAs`;
+   * `AutomationEngine.resolveDecisionSegmentContext` is the only writer).
+   * `null` when the trigger resolved no user. Set on the first switch and kept
+   * by every later one, and persisted with the rest of the context through a
+   * later pause, so the run's history names its trigger however many
+   * decisions it has passed. Absent until a switch: `userId` is then still the
+   * trigger user ({@link runTriggerUserId}).
+   */
+  triggerUserId?: string | null;
+}
+
+/**
+ * The run's trigger user: {@link SeededRunContext.triggerUserId} once a
+ * decision switch recorded it (`undefined` for a trigger that resolved no
+ * user), and `userId` before any switch — when the two are the same person by
+ * construction. Attribution of the run, not of its writes: the writes of the
+ * current segment are `userId`'s.
+ */
+export function runTriggerUserId(context: AutomationContext | undefined): string | undefined {
+  const seeded = context as SeededRunContext | undefined;
+  if (seeded && Object.prototype.hasOwnProperty.call(seeded, 'triggerUserId')) {
+    return typeof seeded.triggerUserId === 'string' && seeded.triggerUserId !== '' ? seeded.triggerUserId : undefined;
+  }
+  return context?.userId;
 }
 
 /**
@@ -154,7 +191,8 @@ export function runOrgUserIds(context: AutomationContext | undefined): string[] 
  *
  *  - `runAs:'system'` → `{ isSystem: true, actor: 'svc:flow:<flowName>' }`,
  *    PLUS the trigger's `userId` / `tenantId` when the trigger resolved them
- *    (#5494) — the security middleware short-circuits on `isSystem`, so the
+ *    (#5494; after an approval decision `userId` is the decider, the run's
+ *    elevation unchanged) — the security middleware short-circuits on `isSystem`, so the
  *    run reads/writes with full access, bypassing RLS; the `actor` label and
  *    the carried-through acting user keep those writes attributable in the
  *    audit log and in the rows' own `created_by`/`updated_by` stamps
@@ -172,14 +210,17 @@ export function runOrgUserIds(context: AutomationContext | undefined): string[] 
  *    `flowRunId` are its provenance, and ADR-0118 D1 forbids inventing a
  *    sentinel or pseudo-user in its place.
  *  - `runAs:'user'` (default) → the triggering user's identity
- *    (`{ userId, positions, permissions, org_user_ids?, tenantId? }`), so the
+ *    (`{ userId, positions, permissions, org_user_ids?, email?, tenantId? }`), so the
  *    security middleware enforces that user's row-level security. The run can
  *    never exceed the triggering user's grants. Empty `positions` falls back to
  *    the platform's baseline permission set, exactly like a fresh member's own
  *    REST request. `org_user_ids` is the peer list run setup seeded
  *    ({@link SeededRunContext}): with it, `sys_user` answers the acting user and
  *    their organization's members, as the same user's request does; without
- *    it, every policy that reads it drops out.
+ *    it, every policy that reads it drops out. `email` is the user's, run setup
+ *    seeded or the trigger carried ({@link AutomationContext.email}): with it,
+ *    an owner policy on `current_user.email` admits the rows it admits for the
+ *    same user's request; without it, that policy drops out.
  *  - neither (an effective `runAs:'user'` run with no trigger user) → **throws**
  *    {@link UnscopedRunDataAccessError} (#3760). This used to return a
  *    provenance-only envelope and let the run proceed UNSCOPED — the #1888
@@ -271,6 +312,7 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
   };
   const orgUserIds = runOrgUserIds(context);
   if (orgUserIds) out.org_user_ids = orgUserIds;
+  if (context.email) out.email = context.email;
   if (context.tenantId) out.tenantId = context.tenantId;
   if (flowRunId) out.flowRunId = flowRunId;
   return out;

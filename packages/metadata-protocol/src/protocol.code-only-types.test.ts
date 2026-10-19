@@ -169,6 +169,23 @@ const PROBES: Record<string, { name: string; item: Record<string, unknown> }> = 
             options: [{ label: 'One', value: 'one' }],
         },
     },
+    // [ADR-0131 D6] `sharing_rule`, regime C: a sharing rule is a package's
+    // declaration or an organization's `sys_sharing_rule` row, and a runtime
+    // `sys_metadata` item was a third source past the same-name guard and the
+    // organization wall. Schema-valid for the same reason as the rest.
+    sharing_rule: {
+        name: 'rc3_sharing_rule_probe',
+        item: {
+            type: 'criteria',
+            name: 'rc3_sharing_rule_probe',
+            label: 'Probe',
+            object: 'task',
+            condition: "record.status == 'open'",
+            accessLevel: 'read',
+            sharedWith: { type: 'position', value: 'probe_position' },
+            active: true,
+        },
+    },
 };
 
 function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
@@ -285,7 +302,7 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
         // auto-enrolment is the point of deriving the set instead of listing it
         // (Prime Directive #8).
         expect(CODE_ONLY_TYPES.length).toBeGreaterThan(0);
-        expect([...CODE_ONLY_TYPES].sort()).toEqual(['agent', 'api', 'capability', 'field', 'job', 'picklist']);
+        expect([...CODE_ONLY_TYPES].sort()).toEqual(['agent', 'api', 'capability', 'field', 'job', 'picklist', 'sharing_rule']);
         for (const type of CODE_ONLY_TYPES) {
             expect(PROBES[type], `no probe payload for code-only type '${type}'`).toBeDefined();
         }

@@ -2526,12 +2526,18 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/plugin-audit':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-audit
       '@objectstack/plugin-auth':
         specifier: workspace:*
         version: link:../../plugins/plugin-auth
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../../plugins/plugin-security
+      '@objectstack/plugin-sharing':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-sharing
       '@objectstack/refd-timer-testkit':
         specifier: workspace:*
         version: link:../../qa/refd-timer-testkit

@@ -544,6 +544,12 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_comment', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; a reply's parent comment carries the organization`, anchors: [parent('parent_id', 'sys_comment')] },
   { object: 'sys_comment_reaction', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the reaction's comment carries the organization`, anchors: [parent('comment_id', 'sys_comment')] },
   { object: 'sys_email', census: P1, fate: 'attribution', citation: `${D7}: sys_email is stamped at its producers; the related record carries the organization`, anchors: [subject('related_object', 'related_id')] },
+  {
+    object: 'sys_identity_email',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation: `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: sys_email's sibling for mail about a person (ruling record 6257510973, Q2 A)`,
+  },
   { object: 'sys_http_delivery', census: P1, fate: 'attribution', citation: `${D7}: a delivery is stamped from its webhook's organization`, anchors: [parent('ref_id', 'sys_webhook')] },
   {
     object: 'sys_webhook',
@@ -619,6 +625,12 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     ],
   },
   { object: 'sys_setting_audit', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
+  {
+    object: 'sys_platform_setting_audit',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation: `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the settings audit trail's global rung (ruling record 6257510973, Q4 A)`,
+  },
   { object: 'sys_secret', census: P1, fate: 'attribution', citation: `re-verification 6018712820: sys_secret is tenant-attributed by one producer (moved here from C6); ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_scim_connection_credential', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_flow_credential', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },

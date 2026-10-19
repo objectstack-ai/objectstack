@@ -38,7 +38,7 @@
  *  1. **statically declared** (`view`, `hook`, `agent`) — the flag comes off
  *     the registry entry, as it always did, in both the `true` and the `false`
  *     direction;
- *  2. **URL-map-only plugin kinds** (`webhook`, and its four siblings) — no
+ *  2. **URL-map-only plugin kinds** (`webhook`, and its three siblings) — no
  *     registry entry, IN the static spelling contract, still advertised and
  *     still mintable. This is the discriminating control: without it the change
  *     cannot show its narrowing is narrow;
@@ -157,6 +157,20 @@ const SAMPLE: Array<{
         item: { name: 'probe_agent', label: 'Probe' },
     },
     {
+        // [ADR-0131 D6] `sharing_rule` left class 2 for class 1 when regime C gave
+        // it a code-only registry entry: an organization authors its rules through
+        // the sharing door, so the `/meta` door neither advertises nor honours a
+        // create. Spec-valid body, so the refusal read is the declaration's.
+        type: 'sharing_rule',
+        klass: 'declared',
+        creatable: false,
+        item: {
+            type: 'criteria', name: 'probe_meta_rule', label: 'Probe', object: 'task',
+            condition: "record.status == 'new'", accessLevel: 'read',
+            sharedWith: { type: 'position', value: 'probe_position' }, active: true,
+        },
+    },
+    {
         type: 'webhook',
         klass: 'url-map-only',
         creatable: true,
@@ -247,7 +261,7 @@ describe('#8421 — the read door and the mint door agree, across all three clas
         }
     });
 
-    it('the five URL-map-only plugin kinds are ALL still advertised as creatable', async () => {
+    it('the four URL-map-only plugin kinds are ALL still advertised as creatable', async () => {
         // The blanket-flip guard, quantified rather than sampled. `webhook`
         // above is the one driven end-to-end through a write; the others have
         // no hand-written spec-valid body here, so they are pinned on the door
@@ -257,7 +271,7 @@ describe('#8421 — the read door and the mint door agree, across all three clas
         const { protocol } = makeProtocol();
         const listing = await protocol.getMetaTypes();
         for (const kind of [
-            'analytics_cube', 'connector', 'rag_pipeline', 'sharing_rule', 'webhook',
+            'analytics_cube', 'connector', 'rag_pipeline', 'webhook',
         ]) {
             const entry = listing.entries.find((e: any) => e.type === kind);
             expect(entry, `${kind} must be listed`).toBeDefined();

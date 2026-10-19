@@ -16,6 +16,8 @@ export { SysPlatformSetting } from './sys-platform-setting.object.js';
 export { SysSecret } from './sys-secret.object.js';
 export { SysMetadataActivation } from './sys-metadata-activation.object.js';
 export { SysSettingAudit } from './sys-setting-audit.object.js';
+// [ADR-0131 D7] The settings audit trail's global rung, tenant-less.
+export { SysPlatformSettingAudit } from './sys-platform-setting-audit.object.js';
 export { SysMigration } from './sys-migration.object.js';
 export { SysMigrationJournal } from './sys-migration-journal.object.js';
 export {

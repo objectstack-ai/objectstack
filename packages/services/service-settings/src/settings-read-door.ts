@@ -9,14 +9,15 @@
  * The settings door (`GET /api/settings/:namespace`) refuses a caller who lacks
  * the manifest's `readPermission` (`SettingsService.assertPermitted`). The same
  * values, and their audit trail, are rows of `sys_setting`,
- * `sys_setting_audit` and `sys_platform_setting`, and each of those objects
- * exposes `get` / `list` on the generic data API as a diagnostic grid. That
+ * `sys_setting_audit`, `sys_platform_setting` and `sys_platform_setting_audit`,
+ * and each of those objects exposes `get` / `list` on the generic data API as a
+ * diagnostic grid. That
  * door applied the OBJECT's grants only — never the namespace's — so a
  * principal the settings door refused read the namespace's rows there instead.
  *
  * ## The seam
  *
- * An engine middleware the settings plugin registers for exactly those three
+ * An engine middleware the settings plugin registers for exactly those four
  * objects. It ANDs a `namespace` predicate into the operation's `where` for
  * every READ (`find`, `findOne`, `count`, `aggregate`) — a filter, never a
  * pass over the result, so a count, an aggregate and a page see exactly the
@@ -29,7 +30,7 @@
  *
  *  - a SYSTEM context — the settings service's own plumbing and every other
  *    platform reader that elevates on purpose;
- *  - writes — the three objects expose no write on the data API, and the
+ *  - writes — the four objects expose no write on the data API, and the
  *    settings door owns every write.
  *
  * A context that is not system and carries no capability holds none, so it
@@ -44,6 +45,7 @@ export const SETTINGS_READ_DOOR_OBJECTS: readonly string[] = Object.freeze([
   'sys_setting',
   'sys_setting_audit',
   'sys_platform_setting',
+  'sys_platform_setting_audit',
 ]);
 
 /** The engine verbs that read rows — the four that carry a `where` to scope. */

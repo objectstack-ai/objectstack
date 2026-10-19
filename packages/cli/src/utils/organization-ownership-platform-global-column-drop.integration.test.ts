@@ -436,7 +436,9 @@ describe('os migrate apply --allow-destructive: the organization_id drop on a ho
       created: [],
       marker: null,
     });
-    expect(payload.detail).toMatch(/os migrate organization-ownership --apply/);
+    expect(payload.detail).toMatch(/organization-ownership ceremony/);
+    // 18.0 refuses `os migrate organization-ownership` on every database: the refusal names no step of it.
+    expect(payload.detail).not.toMatch(/os migrate organization-ownership|--plan-file|organization-ownership --out/);
     // The drops the refusal held back are the ones the drift offered.
     expect(organizationDropsIn(payload.skipped)).toEqual([...DECLARED].sort());
     for (const table of HOST_OBJECTS) expect(hasOrganizationColumn(dbFile, table), table).toBe(true);

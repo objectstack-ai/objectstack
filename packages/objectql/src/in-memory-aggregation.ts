@@ -84,7 +84,7 @@
 // every entry: labels fell back to raw ids, and cross-object rebucketing filed
 // every row under `'(restricted)'` while the grand total still reconciled.
 
-import { bucketDateKey, compensatedSum } from '@objectstack/core';
+import { bucketDateKey, compensatedSum, temporalStorageForm } from '@objectstack/core';
 import type { QueryAST, GroupByNode, AggregationNode, DateGranularityValue } from '@objectstack/spec/data';
 import {
   aggregationFilterClause,
@@ -103,6 +103,14 @@ import {
  * so a row near a tz day-boundary lands in the right day/week/month/quarter.
  * It is only consulted by `groupBy` items carrying a `dateGranularity`; an
  * unset or `'UTC'` value keeps the historical UTC bucketing.
+ *
+ * [#24618] …and only for a field holding an INSTANT. A `groupBy` field that
+ * `fields` declares a `date` (`Field.date`, a timezone-naive calendar day under
+ * ADR-0053, "never converted to an instant and never timezone-shifted") is
+ * bucketed by its own calendar day under every `timezone`
+ * (`bucketCalendarDay` below) — the label the pushed-down SQL gives the same
+ * column. A `datetime`, and a field the declaration cannot type (absent
+ * `fields`, an undeclared field, a `formula`), keep the reference zone.
  *
  * [#20176] `fields` is the object's declared field map. A per-aggregation
  * `filter` reads a temporal comparand by the column's storage rule when it is
@@ -173,13 +181,16 @@ export function applyInMemoryAggregation(
     return [aggregateBucket(rows, aggregations, filterClasses, filterJsonStored)];
   }
 
+  // [#24618] Read once per call, off the declaration, never off a row.
+  const calendarDayFields = calendarDayGroupFields(groupBy, fields);
+
   const buckets = new Map<string, { key: Record<string, any>; rows: any[] }>();
   for (const row of rows) {
     const key: Record<string, any> = {};
     const parts: string[] = [];
     for (const g of groupBy) {
       const fieldName = typeof g === 'string' ? g : (g.alias ?? g.field);
-      const value = projectGroupValue(row, g, timezone);
+      const value = projectGroupValue(row, g, timezone, calendarDayFields);
       key[fieldName] = value;
       // Type-preserving, because the key no longer is: `1` and `'1'`, `true` and
       // `'true'`, `null` and `'null'` are all distinct groups and must not merge
@@ -216,11 +227,65 @@ function bucketIdPart(v: unknown): string {
   return JSON.stringify(v) ?? `${typeof v}:${String(v)}`; // undefined / symbol / function
 }
 
-function projectGroupValue(row: any, g: GroupByNode, timezone?: string): unknown {
+/**
+ * [#24618] The date-bucketed `groupBy` fields the object DECLARES a calendar
+ * day — a `CALENDAR_DATE_TYPES` type, read through the same classification the
+ * per-aggregation `filter` reads a comparand by ({@link declaredFieldClasses}).
+ * No usable field map (a registry-less host) ⇒ none, and every date bucket
+ * keeps the reference zone, as before.
+ */
+function calendarDayGroupFields(
+  groupBy: GroupByNode[],
+  fields: Record<string, unknown> | undefined,
+): ReadonlySet<string> {
+  const out = new Set<string>();
+  if (!fields) return out;
+  let classes: ReturnType<typeof declaredFieldClasses> | undefined;
+  for (const g of groupBy) {
+    if (typeof g === 'string' || !g?.dateGranularity) continue;
+    classes ??= declaredFieldClasses(fields);
+    if (classes.get(g.field) === 'date') out.add(g.field);
+  }
+  return out;
+}
+
+/**
+ * [#24618] The bucket key of a `Field.date` value: its own calendar day's, with
+ * NO reference timezone.
+ *
+ * ADR-0053 makes a `date` a timezone-naive calendar day, "never converted to an
+ * instant and never timezone-shifted"; a reference zone decides which calendar
+ * day an INSTANT falls on, and a calendar day has no instant to place. The
+ * value is first put into the `date` storage form by `temporalStorageForm` —
+ * THE storage rule, the one the drivers write the column with — so a bare
+ * `YYYY-MM-DD` stays itself and a `Date` (a driver that hands one back) becomes
+ * its UTC calendar day. `bucketDateKey` then labels that day with no zone: it
+ * reads a bare `YYYY-MM-DD` as that day's UTC midnight (the ECMA-262 date-only
+ * form is UTC on every host) and takes the UTC parts, which are the day itself.
+ *
+ * That is the label the pushed-down SQL gives the same column, where no zone is
+ * applied to a `date` at all. Before, the value went to `bucketDateKey` WITH
+ * the zone, which read `'2026-10-01'` as the instant `2026-10-01T00:00Z` and
+ * placed it on that zone's calendar — `2026-09-30` in every zone west of UTC —
+ * so the two paths disagreed on every row of a `date` dimension, and month /
+ * quarter / year totals moved across their edges.
+ */
+function bucketCalendarDay(value: unknown, granularity: DateGranularityValue): string | null {
+  return bucketDateKey(temporalStorageForm(value, 'date'), granularity);
+}
+
+function projectGroupValue(
+  row: any,
+  g: GroupByNode,
+  timezone: string | undefined,
+  calendarDayFields: ReadonlySet<string>,
+): unknown {
   const field = typeof g === 'string' ? g : g.field;
   const v = row?.[field];
   if (typeof g !== 'string' && g.dateGranularity) {
-    return bucketDateValue(v, g.dateGranularity, timezone);
+    return calendarDayFields.has(field)
+      ? bucketCalendarDay(v, g.dateGranularity)
+      : bucketDateValue(v, g.dateGranularity, timezone);
   }
   // The value as `driver.find()` presented it — these rows ARE find() output, so
   // passing it through is what makes the bucket key equal the column's own read

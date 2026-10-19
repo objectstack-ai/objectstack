@@ -2395,6 +2395,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "能力",
     description: "软件包定义的一项权限；通过权限集授予"
   },
+  sharing_rule: {
+    label: "共享规则",
+    description: "软件包声明的记录共享规则；组织在设置中编写自己的规则"
+  },
   agent: {
     label: "AI 代理",
     sections: {

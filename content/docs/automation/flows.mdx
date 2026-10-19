@@ -73,7 +73,7 @@ const approvalFlow = {
 | `version` | `number` | optional | Version number (defaults to `1`) |
 | `status` | `enum` | optional | `'draft'`, `'active'`, `'obsolete'`, `'invalid'` (defaults to `'draft'`) |
 | `type` | `FlowType` | ✅ | Flow trigger type (see below) |
-| `runAs` | `enum` | optional | `'system'` (elevated, bypasses RLS) or `'user'` (the triggering user, RLS-respecting; the default). A `'user'` run that resolved **no** trigger user has nothing to scope to, so its data operations are refused — declare `'system'` for schedule / time-relative / API triggers and for record-change flows fired by a write that carried no user |
+| `runAs` | `enum` | optional | `'system'` (elevated, bypasses RLS; after an approval decision its attribution user is the decider) or `'user'` (the default, RLS-respecting: the trigger user until a human decision, the decider after it, with the decider's permissions). A `'user'` run that resolved **no** trigger user has nothing to scope to, so its data operations are refused — declare `'system'` for schedule / time-relative / API triggers and for record-change flows fired by a write that carried no user |
 | `variables` | `FlowVariable[]` | optional | Input/output variables |
 | `nodes` | `FlowNode[]` | ✅ | Flow nodes |
 | `edges` | `FlowEdge[]` | ✅ | Connections between nodes |
@@ -1088,8 +1088,8 @@ referent there. The shape is `ResumeFailureDetailsSchema` in
 The route asks two questions, in this order. Both must pass.
 
 **1. Who is resuming.** A resumed run continues under the identity stored on
-the run, so its data nodes run as the user who **started** it, whoever sent the
-values. The route therefore admits only:
+the run — the user who **started** it or, after an approval decision, the
+decider — whoever sent the values. The route therefore admits only:
 
 - the user who started the run (the run's `trigger.userId`) — no extra
   permission needed;

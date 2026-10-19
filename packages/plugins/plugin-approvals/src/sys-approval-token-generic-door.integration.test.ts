@@ -39,9 +39,11 @@
  *    read on the object and for an administrator;
  *  - the cross-object search, on a real engine with token rows present: no
  *    token row for any caller, while the search itself still answers;
- *  - positive control: a link minted by `remind()` still peeks, redeems once and
- *    is refused as consumed on replay — the engine's mint, lookup-by-digest and
- *    consume path runs as the system and is untouched by the door.
+ *  - positive control: a token minted by `issueActionTokens` still peeks,
+ *    redeems once and is refused as consumed on replay — the engine's mint,
+ *    lookup-by-digest and consume path runs as the system and is untouched by
+ *    the door. [#24564] The raw tokens are held in memory only, as a message
+ *    that is sent and not kept holds them: no reminder carries one any more.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -108,7 +110,7 @@ interface Rig {
   engine: ObjectQL;
   svc: ApprovalService;
   protocol: any;
-  links: Array<{ label: string; url: string }>;
+  tokens: { approve: string; reject: string };
   requestId: string;
 }
 
@@ -119,7 +121,7 @@ afterEach(async () => {
   current = undefined;
 });
 
-/** A real engine, the real plugin, one pending request and the links one reminder minted. */
+/** A real engine, the real plugin, one pending request and one approve + reject token minted for its approver. */
 async function boot(): Promise<Rig> {
   const engine = new ObjectQL();
   current = engine;
@@ -143,18 +145,7 @@ async function boot(): Promise<Rig> {
   await engine.syncSchemas();
   await engine.insert(OBJECT, { id: 'sheet_1', title: 'tokdoor ledger sheet' }, { context: SYSTEM } as any);
 
-  // The delivered message is where a raw link exists at all: storage holds its digest only.
-  const links: Rig['links'] = [];
-  const services: Record<string, unknown> = {
-    objectql: engine,
-    messaging: {
-      emit: async (event: any) => {
-        for (const action of event?.payload?.actions ?? []) {
-          if (typeof action?.url === 'string') links.push({ label: String(action.label), url: action.url });
-        }
-      },
-    },
-  };
+  const services: Record<string, unknown> = { objectql: engine };
   const ctx: any = {
     getService: (name: string) => {
       if (!(name in services)) throw new Error(`[Kernel] Service '${name}' not found`);
@@ -173,13 +164,11 @@ async function boot(): Promise<Rig> {
     submitterId: SUBMITTER, record: { id: 'sheet_1', title: 'tokdoor ledger sheet' },
   }, asUser(SUBMITTER));
   const requestId = String(opened.id);
-  await svc.remind(requestId, { actorId: SUBMITTER }, asUser(SUBMITTER));
+  // The raw tokens exist here, in memory, and nowhere else: storage holds their digests only.
+  const tokens = await svc.issueActionTokens(requestId, APPROVER);
 
-  return { engine, svc, protocol: new ObjectStackProtocolImplementation(engine as any), links, requestId };
+  return { engine, svc, protocol: new ObjectStackProtocolImplementation(engine as any), tokens, requestId };
 }
-
-/** The raw token a delivered action link carries (relative when no public base URL is configured). */
-const tokenOf = (url: string) => String(new URL(url, 'http://localhost').searchParams.get('token') ?? '');
 
 /** The engine's own read of the token rows, as the system. */
 async function tokenRows(rig: Rig): Promise<any[]> {
@@ -187,12 +176,12 @@ async function tokenRows(rig: Rig): Promise<any[]> {
 }
 
 describe('the cross-object search, on a real engine with token rows present', () => {
-  it('the scene: one reminder minted one approve and one reject link for the concrete approver', async () => {
+  it('the scene: one approve and one reject token minted for the concrete approver', async () => {
     const rig = await boot();
     const rows = await tokenRows(rig);
     expect(rows.map((r) => r.action).sort()).toEqual(['approve', 'reject']);
     expect(rows.every((r) => r.approver_id === APPROVER && r.request_id === rig.requestId)).toBe(true);
-    expect(rig.links).toHaveLength(2);
+    expect(rig.tokens.approve).not.toBe(rig.tokens.reject);
   });
 
   it('serves no token row to any caller — by the bound slot, by the request, alone or swept with other objects', async () => {
@@ -217,11 +206,9 @@ describe('the cross-object search, on a real engine with token rows present', ()
 });
 
 describe('positive control: the engine\'s own token path is unchanged', () => {
-  it('a link minted by remind() peeks, redeems exactly once, and is refused as consumed on replay', async () => {
+  it('a minted token peeks, redeems exactly once, and is refused as consumed on replay', async () => {
     const rig = await boot();
-    const approve = rig.links.find((l) => l.label === 'Approve');
-    expect(approve, 'the reminder carried an Approve link').toBeTruthy();
-    const raw = tokenOf(approve!.url);
+    const raw = rig.tokens.approve;
     expect(raw.length).toBeGreaterThan(0);
 
     expect(await rig.svc.peekActionToken(raw)).toMatchObject({ ok: true, action: 'approve', approverId: APPROVER });

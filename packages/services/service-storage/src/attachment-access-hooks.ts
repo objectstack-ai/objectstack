@@ -91,6 +91,22 @@ import {
  *    abstention admits, as it always did.
  *  - No sharing service at all: caller-scoped parent READ visibility (degraded
  *    mode) — still strictly tighter than no gate.
+ *  - [#24549] Whatever the steps above admit, the parent's own by-id UPDATE
+ *    must admit too, and it decides last: the security service's judgement of
+ *    that update, `ISecurityService.explain`'s record-grained verdict for
+ *    `update` on the parent — `allowed` and `record.visible` both. That verdict
+ *    is the write path's own composition (the parent object's grant, its
+ *    row-level security, its record sharing and its master), so each limb
+ *    gives the answer a by-id update of the parent gets, and the gate keeps no
+ *    copy of that judgement. Asked only for a caller the steps above admit, it
+ *    adds refusals and never admits one: record sharing's `deny`, the master
+ *    check's refusals and a rejection keep their answers, and so does the
+ *    owner-only edit DEPTH the sharing step is asked at (the #7144 ruling). A
+ *    rejection of it propagates unchanged. A kernel with no security service
+ *    meets no such judgement on the parent's update either, and a security
+ *    service that serves no `explain` is not asked it — the same
+ *    feature-detection `FileAttachmentService.assertMayAttach` applies to its
+ *    own `explain` question.
  *
  * ⛔ This is why the gate reads `checkEdit`, never `canEdit`: `canEdit` is its
  * two-state projection, folding `abstain` into `true`, and an attach gate that
@@ -116,11 +132,15 @@ import {
 export type AttachmentSharingLike = Pick<ISharingService, 'checkEdit'>;
 
 /**
- * The one member of the security service's contract this gate consults: the
- * ADR-0055 master-detail write check, for a `controlled_by_parent` parent.
- * OPTIONAL on the contract, so the gate handles its absence by construction.
+ * The two members of the security service's contract this gate consults: the
+ * ADR-0055 master-detail write check, for a `controlled_by_parent` parent
+ * (OPTIONAL on the contract, so the gate handles its absence by construction),
+ * and `explain`, whose record-grained `update` verdict is the parent's own
+ * by-id update judgement (see "Parent EDIT" above). `explain` is feature-detected
+ * like every member here, so it is optional on this view of the contract.
  */
-export type AttachmentSecurityLike = Pick<ISecurityService, 'checkControlledByParentWrite'>;
+export type AttachmentSecurityLike = Pick<ISecurityService, 'checkControlledByParentWrite'> &
+  Partial<Pick<ISecurityService, 'explain'>>;
 
 const PACKAGE_ID = 'com.objectstack.service.storage';
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -331,8 +351,60 @@ export interface AttachmentParentVerdictDeps {
  * shape each limb always queried with); the sharing and security services
  * are handed its string form, as `canEdit` always was. `readParent` is the
  * degraded mode's caller-scoped read of the parent.
+ *
+ * Two steps, in order: record sharing (or the degraded read) and the master
+ * check, then the parent's own by-id update judgement
+ * ({@link parentUpdateAdmits}), asked only when the first step admits.
  */
 export async function mayEditAttachmentParent(
+  deps: AttachmentParentVerdictDeps,
+  object: string,
+  recordId: unknown,
+  callerCtx: ExecutionContext,
+  limb: string,
+  readParent: () => Promise<unknown>,
+): Promise<boolean> {
+  if (!(await sharingAndMasterAdmit(deps, object, recordId, callerCtx, limb, readParent))) return false;
+  return parentUpdateAdmits(deps, object, recordId, callerCtx, limb);
+}
+
+/**
+ * [#24549] The parent's own by-id update judgement: the security service's
+ * record-grained `explain` verdict for `update` on `(object, recordId)`, which
+ * admits only when `allowed` and `record.visible` are both `true` — a decision
+ * that carries no record verdict did not judge the record, and refuses. See
+ * "Parent EDIT" in the module header. A rejection propagates unchanged.
+ */
+async function parentUpdateAdmits(
+  deps: AttachmentParentVerdictDeps,
+  object: string,
+  recordId: unknown,
+  callerCtx: ExecutionContext,
+  limb: string,
+): Promise<boolean> {
+  let security: AttachmentSecurityLike | null | undefined;
+  try {
+    security = deps.getSecurity?.();
+  } catch {
+    security = undefined;
+  }
+  if (!security || typeof security.explain !== 'function') {
+    deps.logger.debug?.(
+      `[storage] attachment access: the security service judges no by-id update of ${object} here — ${limb} decided ` +
+        'by record sharing and the master-detail check alone',
+    );
+    return true;
+  }
+  const decision = await security.explain({ object, operation: 'update', recordId: String(recordId) }, callerCtx);
+  if (decision?.allowed === true && decision.record?.visible === true) return true;
+  deps.logger.debug?.(
+    `[storage] attachment access: ${limb} refused — a by-id update of ${object}/${String(recordId)} is refused to this caller`,
+  );
+  return false;
+}
+
+/** The first step of {@link mayEditAttachmentParent}: record sharing (or the degraded read), then the master check. */
+async function sharingAndMasterAdmit(
   deps: AttachmentParentVerdictDeps,
   object: string,
   recordId: unknown,

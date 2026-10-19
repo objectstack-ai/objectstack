@@ -9,7 +9,7 @@
       "title": "Per-group sign-off (会签) needs one approval from EACH group",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": ["approver holding exactly one group (e.g. manager)", "second approver holding the other group (e.g. finance/auditor)"],
@@ -56,7 +56,7 @@
         {
           "clause": "after the finance-group approval: the request finalizes approved and the flow run resumes down its approve edge to the Approved end",
           "oracle": "api",
-          "verify": "request status=approved; the showcase_expense_signoff run transitions paused→completed with the approve branch taken",
+          "verify": "request status=approved; the showcase_expense_signoff run transitions paused→completed. The approve EDGE itself is not observable — end nodes log no step, and this flow's approve edge ends at the Approved end — so the request's approved status plus the run's status transition is the evidence, the wording approvals.quorum-m-of-n uses for its veto edge",
           "evidence": "final request read + run read"
         },
         {
@@ -90,7 +90,13 @@
         { "revision": 4, "date": "2026-08-11", "change": "knownGaps records the better-auth issuer=local:credential provisioning detail — the one field that decides whether Ada can be driven as a real second session or the run falls back to the admin override; it used to be rediscovered every sweep, behind a 'User not found' warn that points at the wrong cause", "ref": "#7530" },
         { "revision": 5, "date": "2026-08-18", "change": "the fixture blocker is CLOSED, not merely documented: the showcase now provisions Ada's better-auth credential account at boot (issuer derived from the dev admin's own row), so she signs in on stock seeds. knownGaps rewritten as closed-by-fixture rather than deleted — the issuer detail is the reason the gap existed and the next sweep still needs it. The admin-override fallback is withdrawn as an acceptable path for this item", "ref": "#9308" },
         { "revision": 6, "date": "2026-09-19", "change": "the issuer knownGap is re-anchored rather than re-pointed: better-auth 1.7.3 rolled the issuer-scoped account identity back and sys_account.issuer retired with it, so the cited plugin-auth backfill module no longer exists and has no successor. The reason the gap carries is kept verbatim in substance — a password hash alone was not enough, and the failure was a silent lockout whose 'User not found' warn pointed at the wrong row — and the durable anchor is now the retirement's own migration entry in packages/spec. The clause describing the seed as reading the issuer off the dev admin's credential row is withdrawn as false: there is no issuer to read", "ref": "#17453" },
-        { "revision": 7, "date": "2026-10-16", "change": "the actorId clause described a silent override ('a hint … regardless of any actorId in the body'), but the server REFUSES a mismatched actorId (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 on EXP-2001: the admin's approve carrying Ada's id answers 403 FORBIDDEN \"cannot act as 'usr_showcase_auditor_demo' — an approval action is recorded against the authenticated caller\" and adds no action row; the same call carrying the admin's own id answers 200 and the approve row's actor is the admin. The clause now states the stricter, measured behavior; it still fails if a foreign actorId is recorded", "ref": "#24036" }
+        { "revision": 7, "date": "2026-10-16", "change": "the actorId clause described a silent override ('a hint … regardless of any actorId in the body'), but the server REFUSES a mismatched actorId (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 on EXP-2001: the admin's approve carrying Ada's id answers 403 FORBIDDEN \"cannot act as 'usr_showcase_auditor_demo' — an approval action is recorded against the authenticated caller\" and adds no action row; the same call carrying the admin's own id answers 200 and the approve row's actor is the admin. The clause now states the stricter, measured behavior; it still fails if a foreign actorId is recorded", "ref": "#24036" },
+        {
+          "revision": 8,
+          "date": "2026-10-19",
+          "change": "acceptance[3].verify corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24542, approvals.per-group-signoff acceptance[3]; wave anchor #24579 §3): it asked for 'the approve branch taken' in the run read, but end nodes log no step and showcase_expense_signoff's approve edge ends at an end node, so no run read can show the branch. The verify now scores the run status transition and the request status, as approvals.quorum-m-of-n already words the same evidence. Clause text unchanged",
+          "ref": "#24632"
+        }
       ]
     },
     {
@@ -98,7 +104,7 @@
       "title": "M-of-N quorum approves at the threshold; one rejection vetoes",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": ["three DISTINCT users each holding one of the approver positions"],
@@ -106,7 +112,7 @@
         "app": "showcase",
         "requires": [
           "a quorum (minApprovals: 2) request whose three position approvers resolve to three distinct users",
-          "RUNTIME FIXTURE (admin API only, stock boot, nothing seeded or committed; proved by run #21845) — apply it before the quorum steps, in this order: (1) bind a second committee position holder: as the admin, POST /api/v1/data/sys_user_position {user_id: <Ada Auditor's user id>, position: 'finance', organization_id: <the showcase organization id>} — admin + Ada is a real 2-of-2 slate; (2) for the full 2-of-3, invite + sign up a third user and bind them to position 'legal' the same way; prove each persona with GET /api/v1/auth/get-session before it acts; (3) DISABLE the competing per-group sign-off flow for the run: POST /api/v1/automation/showcase_expense_signoff/toggle {\"enabled\": false} — it has no amount ceiling and opens its request first on any >= 5000 report, so without this the quorum flow's open fails DUPLICATE_REQUEST; re-enable it with {\"enabled\": true} afterwards; (4) open a FRESH request after the bindings, because a slate is fixed when its request opens: create a draft showcase_expense_report, add one showcase_expense_line of 6000 (total_amount >= 5000, the committee threshold), then PATCH the report's status to 'submitted'. Use a second fresh request the same way for the veto case"
+          "RUNTIME FIXTURE (admin API only, stock boot, nothing seeded or committed; proved by run #21845) — apply it before the quorum steps, in this order: (1) bind a second committee position holder: as the admin, POST /api/v1/data/sys_user_position {user_id: <Ada Auditor's user id>, position: 'finance', organization_id: <the showcase organization id>} — admin + Ada is a real 2-of-2 slate; (2) for the full 2-of-3, invite + sign up a third user and bind them to position 'legal' the same way. On a boot an earlier item already used, first list sys_user_position for positions finance and legal and unbind any other member a previous item bound there (e.g. approvals.account-app-entry's runtime persona, which holds finance) — a slate is every holder, so a leftover binding makes it four distinct people and the 2-of-3 never forms; prove each persona with GET /api/v1/auth/get-session before it acts; (3) DISABLE the competing per-group sign-off flow for the run: POST /api/v1/automation/showcase_expense_signoff/toggle {\"enabled\": false} — it has no amount ceiling and opens its request first on any >= 5000 report, so without this the quorum flow's open fails DUPLICATE_REQUEST; re-enable it with {\"enabled\": true} afterwards; (4) open a FRESH request after the bindings, because a slate is fixed when its request opens: create a draft showcase_expense_report, add one showcase_expense_line of 6000 (total_amount >= 5000, the committee threshold), then PATCH the report's status to 'submitted'. Use a second fresh request the same way for the veto case"
         ],
         "knownGaps": [
           "the FLOW half of the fixture is real and seeded — showcase_committee_quorum (2-of-3 quorum over positions manager/finance/legal, examples/app-showcase/src/automation/flows/index.ts) is launched on EXP-DEMO by seed-approval-demo.ts. What still collapses the slate is POSITION ASSIGNMENT, not a missing flow or a pending design call: the admin holds all three committee positions (ADMIN_APPROVAL_POSITIONS = manager/finance/legal/exec, seed-approval-demo.ts) and Ada Auditor deliberately holds ONLY auditor, so all three slots resolve to one person and the runtime clamps 2-of-3 to 1-of-1",
@@ -176,7 +182,13 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; carried the fixture blocker forward explicitly", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-30", "change": "blocked ref re-worded to price the gap honestly: the old 'showcase design call pending' read as an open-ended product decision, but the quorum flow fixture ships (showcase_committee_quorum, 2-of-3 over manager/finance/legal) and Ada Auditor has been a real login since #9308 — the slate collapse survives only because seed-approval-demo.ts gives the admin all three committee positions and Ada only auditor. knownGaps now states the exact remaining cost (one seed line assigning Ada a committee position → 2-of-2 demonstrable; a third distinct holder for the full 2-of-3), verified against source including the per-group demo's non-collision (its finance group keys on position 'auditor')", "ref": "#sweep-2026-08-30" },
-        { "revision": 4, "date": "2026-10-05", "change": "blocked lifted: run #21845 passed 2-of-2 and 2-of-3 on fresh requests under a runtime fixture (admin-API position bindings, a third signed-up holder, and the per-group sign-off flow disabled because it opens first on any >= 5000 report and the quorum open then fails DUPLICATE_REQUEST); the recipe is written into fixtures.requires and the seed-gap knownGap is marked CLOSED-for-runs, not deleted. Three clauses re-pointed from the same run: negative[0] now requires a NON-PRIVILEGED repeat actor, because an admin decision is the documented override (#3424, via_override:true) and finalizes by design; acceptance[2] asserts the run's paused → completed transition with the request rejected, since the reject edge is not observable (end nodes log no step); acceptance[3] names the English inbox tab 'My Pending', and acceptance[4] plus the screenshot step read the drawer's 'Approvals — x of y' line as the tally, not the static '(2 of 3)' subtitle (card #21851 entries 1, 5, 6, 7)", "ref": "#21845" }
+        { "revision": 4, "date": "2026-10-05", "change": "blocked lifted: run #21845 passed 2-of-2 and 2-of-3 on fresh requests under a runtime fixture (admin-API position bindings, a third signed-up holder, and the per-group sign-off flow disabled because it opens first on any >= 5000 report and the quorum open then fails DUPLICATE_REQUEST); the recipe is written into fixtures.requires and the seed-gap knownGap is marked CLOSED-for-runs, not deleted. Three clauses re-pointed from the same run: negative[0] now requires a NON-PRIVILEGED repeat actor, because an admin decision is the documented override (#3424, via_override:true) and finalizes by design; acceptance[2] asserts the run's paused → completed transition with the request rejected, since the reject edge is not observable (end nodes log no step); acceptance[3] names the English inbox tab 'My Pending', and acceptance[4] plus the screenshot step read the drawer's 'Approvals — x of y' line as the tally, not the static '(2 of 3)' subtitle (card #21851 entries 1, 5, 6, 7)", "ref": "#21845" },
+        {
+          "revision": 5,
+          "date": "2026-10-19",
+          "change": "fixtures.requires[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24542, approvals.quorum-m-of-n; wave anchor #24579 §3): in a shared boot an earlier item (approvals.account-app-entry's runtime persona) had bound another member to 'finance', so the committee slate resolved four distinct holders; the run deleted that binding before opening the quorum requests. The fixture now says to clear such bindings first. No clause changed",
+          "ref": "#24632"
+        }
       ]
     },
     {
@@ -405,7 +417,7 @@
       "title": "Every approval action executes its REST route and produces the expected state transition plus a timeline entry",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["dev admin (pending approver on the seeded requests; submitter of the invoice request)"],
@@ -428,7 +440,7 @@
         "resubmit: POST /:id/resubmit {comment} as the submitter — then re-read BOTH sides: GET /:id (the resubmitted request, which stays returned) and GET /api/v1/approvals/requests?status=pending filtered to the same object/record, which now carries a DIFFERENT id — the round-N+1 request the approval node minted on re-entry; then drive revise→resubmit→revise again and attempt a THIRD revise (maxRevisions: 2 — it must auto-reject)",
         "recall: raise one more pending request; POST /:id/recall as the submitter; re-read",
         "reassign: on a pending request POST /:id/reassign {to: <userId>, comment}; re-read pending_approvers",
-        "remind: POST /:id/remind on the admin-submitted invoice request; then POST it again immediately (throttle probe)",
+        "remind: POST /:id/remind on an admin-submitted PENDING request — the seeded invoice request while it is still pending, else any budget-approval request the admin raised (in a shared boot approvals.decision-only-via-service consumes the invoice one); then POST it again immediately (throttle probe)",
         "request-info + comment: POST /:id/request-info {comment} AS A PENDING APPROVER of the request (request-info is approver-only: once the admin has reassigned their own slot away in the reassign step, the admin's request-info answers 403 FORBIDDEN \"actor '…' is not a pending approver\" — drive it as the pending approver, e.g. the reassign target with their own token), and POST /:id/comment {comment}, which a non-approver admin may still post",
         "after EVERY action above: GET /:id and GET /:id/actions; record the status transition and the appended timeline row",
         "lock contrast: while a request from exec_review (lockRecord: true) is pending, PATCH the project record — refused; while parked at manager_review (lockRecord: false) the same PATCH succeeds",
@@ -444,7 +456,7 @@
         {
           "clause": "decisions finalize per the APPROVAL_STATUSES lifecycle: approve → approved, reject → rejected, and the parked flow run resumes down the matching branch label",
           "oracle": "api",
-          "verify": "request status transitions pending→approved / pending→rejected; the owning run transitions paused→completed with the approve/reject edge taken",
+          "verify": "request status transitions pending→approved / pending→rejected; the owning run transitions paused→completed. The approve/reject EDGE itself is not logged — end nodes log no step — so on showcase_budget_approval the branch is evidenced by the approve edge's non-end successor: manager_review's approve edge leads to the needs_exec decision node, whose step row is present after an approve and absent after a reject (manager_review's reject edge ends at the Rejected end) — examples/app-showcase/src/automation/flows/index.ts",
           "evidence": "before/after request + run reads"
         },
         {
@@ -521,7 +533,13 @@
         { "revision": 2, "date": "2026-08-11", "change": "corrected the resubmit transition the item asserted: it does NOT move the original returned→pending — the approval node's re-entry mints a round-N+1 request while the original stays terminally returned (source-confirmed as by design). Split the old combined revise/resubmit clause into three (revise parks · resubmit mints · original stays returned) and sharpened the maxRevisions verify to name which request the auto-reject lands on. Fixes the sole reason #7517 scored this item PARTIAL", "ref": "#7530" },
         { "revision": 3, "date": "2026-08-30", "change": "added the READ_BACK_FAILED clause (#12769, landed #13181 2026-08-29): all ten fresh! non-null assertions on the post-write echo are gone — deciding an org-less request (the schedule/api-trigger shape, #10131) as an org-scoped caller now answers a loud named refusal with the write recorded, never a malformed 200 with request:null. Fixture reality recorded in knownGaps: no seeded flow opens an org-less request on demand, so the live-HTTP leg is blocked(fixture) while the unit pin covers the mechanism", "ref": "#13181" },
         { "revision": 4, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 19). A10 was blocked(fixture): no org-less request can be provisioned, and even an api-hook approval is org-stamped. Disposition: pin. approval-service.test.ts (the #12769 describe) proves the clause's verdict at the service. `automated` names it for that clause, and the knownGap records the refuted api-trigger candidate, the one untried schedule candidate, and the wire-envelope half that stays unobserved on stock", "ref": "#22017" },
-        { "revision": 5, "date": "2026-10-16", "change": "step 9 ran request-info + comment as the admin on a pending request, but request-info is approver-only (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6: request-info by the admin while a pending approver → 200; after the admin reassigns their slot to Ada → the admin's request-info answers 403 FORBIDDEN \"actor … is not a pending approver\", the admin's comment still answers 200, and Ada's request-info answers 200. The step now names the pending approver as the request-info caller; the clauses are unchanged", "ref": "#24036" }
+        { "revision": 5, "date": "2026-10-16", "change": "step 9 ran request-info + comment as the admin on a pending request, but request-info is approver-only (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6: request-info by the admin while a pending approver → 200; after the admin reassigns their slot to Ada → the admin's request-info answers 403 FORBIDDEN \"actor … is not a pending approver\", the admin's comment still answers 200, and Ada's request-info answers 200. The step now names the pending approver as the request-info caller; the clauses are unchanged", "ref": "#24036" },
+        {
+          "revision": 6,
+          "date": "2026-10-19",
+          "change": "steps[7] and acceptance[1].verify corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24542, approvals.decision-action-matrix; wave anchor #24579 §3). steps[7] reminded 'the admin-submitted invoice request', which a shared boot's approvals.decision-only-via-service has already decided; any admin-submitted pending request serves, and the run used a budget request. acceptance[1] asked for 'the approve/reject edge taken', but end nodes log no step, so the run evidenced the reject by the absence of the approve edge's successor, the needs_exec decision node (examples/app-showcase/src/automation/flows/index.ts). The verify now names that discriminator. Clause text unchanged",
+          "ref": "#24632"
+        }
       ]
     },
     {
@@ -917,7 +935,7 @@
       "title": "A non-admin reaches the full Approvals Inbox from the account app's Approvals entry",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "browser",
       "personas": ["a NON-ADMIN business user who is a pending approver and has no Setup access"],
@@ -926,7 +944,7 @@
         "requires": [
           "a bundled console: packages/console/dist is absent in a fresh checkout — build it with `pnpm objectui:build` and confirm dist/.objectui-sha equals .objectui-sha before trusting anything in the browser (`pnpm check:console-sha` exits 0 when there is NO dist at all, so a green check does not prove a console is present)",
           "a non-admin sign-in account holding only business positions (showcase: contributor + finance) — the seeded personas (Ada Auditor, Mei Phone) ARE loginable since #9308 (showcase123, examples/app-showcase/src/security/demo-personas.ts) but hold the wrong positions (Mei none, Ada auditor only), so provision one at runtime and invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address admits the sign-up (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)",
-          "at least one pending request routed to that user (showcase: PATCH a draft invoice to status=sent + issued_on to launch showcase_invoice_signoff, whose finance/legal positions the persona holds). ⚠️ Launch a NEW one after the persona holds its positions: the sign-off requests seed-approval-demo.ts launches at boot were routed before the runtime persona held finance, so they never list it as a pending approver. Make that invoice one the persona OWNS — acceptance[5] needs a row whose record the persona can read"
+          "at least one pending request routed to that user (showcase: PATCH a draft invoice to status=sent + issued_on to launch showcase_invoice_signoff, whose finance/legal positions the persona holds). ⚠️ Launch a NEW one after the persona holds its positions: the sign-off requests seed-approval-demo.ts launches at boot were routed before the runtime persona held finance, so they never list it as a pending approver. Make that invoice one the persona OWNS — acceptance[5] needs a row whose record the persona can read. ⚠️ Ownership here is the TEXT field `owner`, not owner_id: the contributor RLS invoice_own_rows reads `owner == current_user.email` (examples/app-showcase/src/security/permission-sets.ts), so an invoice the persona creates gets owner_id = the persona and `owner` null, and its own creator reads it 404 until an admin PATCHes `owner` to the persona's email"
         ]
       },
       "steps": [
@@ -979,7 +997,7 @@
         {
           "clause": "zh-CN wording is consistent: the nav entry reads 待我审批 and the inbox's tab / status vocabulary reads 待我审批 / 待审批",
           "oracle": "screenshot",
-          "verify": "set the console language to 中文（中国） — code zh-CN, the language the showcase ships; the picker offers no bare zh entry here — and screenshot the nav entry and the inbox; nav label 待我审批, tab 待我审批, status badge 待审批",
+          "verify": "set the console language to 中文（中国） through the avatar (user) menu's Preferences › Language row — not a top-bar globe (objectui packages/app-shell/src/layout/AppHeader.tsx at the console pin) — code zh-CN, the language the showcase ships; the picker offers no bare zh entry here — and screenshot the nav entry and the inbox; nav label 待我审批, tab 待我审批, status badge 待审批",
           "evidence": "zh screenshots of nav + inbox"
         }
       ],
@@ -996,7 +1014,13 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-10", "change": "initial — the account-app entry had no checklist coverage; authored from the #7331 browser run that first drove it end to end against a dist built at pin 8aad9fd50b16", "ref": "#7331" },
-        { "revision": 2, "date": "2026-10-01", "change": "checklist-accuracy findings of QA run #21056: acceptance[6] names the zh-CN option (中文（中国）) — no bare zh exists; acceptance[1] gives the tab labels in both locales; acceptance[5] needs a row the persona can read, since unreadable rows render no link; fixtures.requires asks for a request launched after the persona holds finance (the boot-seeded ones were routed before). Also corrected while grounding: the seeded personas are loginable since #9308 — they hold the wrong positions, which is the real reason to provision one, invite-first under invite_only", "ref": "#21060" }
+        { "revision": 2, "date": "2026-10-01", "change": "checklist-accuracy findings of QA run #21056: acceptance[6] names the zh-CN option (中文（中国）) — no bare zh exists; acceptance[1] gives the tab labels in both locales; acceptance[5] needs a row the persona can read, since unreadable rows render no link; fixtures.requires asks for a request launched after the persona holds finance (the boot-seeded ones were routed before). Also corrected while grounding: the seeded personas are loginable since #9308 — they hold the wrong positions, which is the real reason to provision one, invite-first under invite_only", "ref": "#21060" },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "fixtures.requires[2] and acceptance[6].verify corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24542, approvals.account-app-entry; wave anchor #24579 §3). 'Make that invoice one the persona OWNS' did not say which field owns it: showcase_invoice's contributor RLS reads the text field `owner` against current_user.email (invoice_own_rows), so a persona-created invoice is unreadable to its creator until an admin sets `owner`. acceptance[6] did not say where the language switch is: at the console pin 4016370a it is the avatar menu's Preferences › Language row (AppHeader.tsx). No clause text changed",
+          "ref": "#24632"
+        }
       ]
     },
     {
@@ -1121,69 +1145,65 @@
       "title": "The anonymous /approvals/act door: a minted one-tap token renders a confirm page and one POST decides as exactly the bound approver — every dead-token shape is a designed refusal page with no state change",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
-      "personas": ["dev admin (submitter of the seeded invoice request — remind is submitter-only, and the remind fan-out is what mints the tokens)", "the ANONYMOUS bearer of an action link: a clean HTTP client holding NO session cookie and NO bearer token"],
+      "personas": ["dev admin (submitter of the seeded invoice request — remind is submitter-only). Since PR #24620 the remind fan-out mints no token, so the admin drives only the live legs: the reminder at-rest read and the server reads beside the anonymous probes", "the ANONYMOUS bearer of an action link: a clean HTTP client holding NO session cookie and NO bearer token"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a pending request the admin SUBMITTED (the seeded invoice dual sign-off request — seed-approval-demo.ts submits it as the admin) so POST /:id/remind is permitted; the reminder fan-out mints per-approver approve/reject tokens (ADR-0043) for every CONCRETE pending approver",
-          "token capture WITHOUT a mail harness: messaging's emit() persists the notification payload verbatim on the sys_notification event row (writeEvent, packages/services/service-messaging/src/messaging-service.ts; NOTIFICATION_EVENT_OBJECT = 'sys_notification') — so after a remind, GET /api/v1/data/sys_notification filtered to topic approval.reminder + source_id=<request id> as the admin and read the two /api/v1/approvals/act?token=... URLs out of payload.actions. The raw tokens exist ONLY there and in the outbound mail: sys_approval_token stores SHA-256 hashes (a DB leak yields no usable links)"
+          "a pending request the admin SUBMITTED (the seeded invoice dual sign-off request — seed-approval-demo.ts submits it as the admin) so POST /:id/remind is permitted — for the at-rest leg only. Since PR #24620 (65a8eeb7d4, the fix of #24564) the reminder fan-out mints NO action token and attaches no link: each concrete pending approver gets an approval.reminder notification carrying its title, its body and the /system/approvals deep link, and nothing else",
+          "the pinned tests in automated.ref, run with the plugin's own vitest (`pnpm --filter @objectstack/plugin-approvals exec vitest run --maxWorkers=2 FILE`, never through a bare `--`). They mint with issueActionTokens in-process and hold the raw token in memory, which is the only place a live token exists now: sys_approval_token stores SHA-256 hashes, and since PR #24620 no persisted row (a notification payload, an audit row, a log line) holds a raw token or a URL built from one — issueActionTokens' caller contract (approval-service.ts)"
         ],
         "knownGaps": [
-          "the EMAIL-RENDERING leg (the Approve/Reject links arriving as buttons in an actual message) is not covered by the sys_notification capture — it needs the dev log mail transport the forgot-password item uses (EMAIL_TRANSPORT_PROVIDERS 'log' → LogTransport, see identity-auth.self-service-password-reset fixtures); without it that one leg is blocked(fixture) while every token/door clause still runs off the persisted payload",
+          "NO STOCK DOOR MINTS AN ACTION TOKEN since PR #24620 (65a8eeb7d4, 2026-10-19). remind() no longer calls issueActionTokens or attaches a link (no channel ever read payload.actions, so no recipient received one), issueActionTokens has no production caller, and no REST route reaches it. So every leg that needs a live raw token — the per-approver mint, the confirm page, the redemption, the replay, the not_pending / not_approver pages, the expiry and the bearer probe — is blocked(fixture) on a live boot and is scored from the pins in automated.ref. QA run #24542's capture (the raw links read out of sys_notification.payload.actions after a remind) no longer exists: the absence of a link there is now this item's at-rest leg, not a fixture failure. ⛔ Never plant a token row or patch remind() to get a live link",
+          "the EMAIL-RENDERING leg (the Approve/Reject links arriving as buttons in an actual message) has NO stock producer at all: a reminder names no channel, so messaging materializes it in the in-app inbox only, no approval.reminder email template exists, and since PR #24620 the payload carries no link — the dev log mail transport the forgot-password item uses (EMAIL_TRANSPORT_PROVIDERS 'log' → LogTransport, identity-auth.self-service-password-reset fixtures) would capture nothing to render. Record the leg blocked(fixture), never a defect",
           "the EXPIRED leg has no live door on this build: ACTION_TOKEN_TTL_MS is 72h (approval-service.ts), issueActionTokens' ttlMs override is not REST-reachable, the service clock is a constructor option the plugin never threads (approvals-plugin.ts constructs ApprovalService without one), and since PR #22633 (#22616) sys_approval_token declares apiEnabled: false + apiMethods: [], so every data-API verb answers 404 OBJECT_API_DISABLED to every caller, the administrator included — the old recipe (backdate expires_at over the data API) is gone, and update was never in the object's whitelist even before. Score the expired shape from the pinned unit test instead: approval-service.test.ts 'redeem: dead tokens — invalid, expired, decided request, reassigned slot' mints with ttlMs: 1 under the fake clock and pins reason 'expired' (RESULT_COPY.expired in action-link-pages.ts is the page that reason renders); a live run records this one leg as blocked(fixture), never as a defect"
         ]
       },
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
-        "mint: POST /api/v1/approvals/requests/:id/remind on the admin-submitted invoice request — the response's notified count equals the number of concrete pending approvers, and GET /:id/actions gains one remind row. ⛔ Do NOT read sys_approval_token through the data API: since PR #22633 the object is apiEnabled: false with apiMethods: [], so GET /api/v1/data/sys_approval_token answers 404 OBJECT_API_DISABLED for every caller (the administrator included) — that 404 is the designed answer, not a finding. The per-approver mint (one approve + one reject row per concrete pending approver, SHA-256 at rest, FORBIDDEN for a non-pending approver) is pinned by the two integration tests named in source; live, step 3's payload.actions is the per-approver oracle",
-        "capture the raw links: GET /api/v1/data/sys_notification (topic approval.reminder, source_id = the request id) and extract the two /api/v1/approvals/act?token=... URLs from payload.actions",
-        "switch to a CLEAN anonymous client (no cookies, no Authorization header — prove it: GET /api/v1/approvals/requests from the same client answers 401); GET the approve URL — 200 HTML confirm page naming the action, the acting approver id and the request summary, with a POST form; GET it again — the confirm page renders a second time, not the 'Already used' page (peek validates without consuming), then re-read the request and GET /:id/actions as admin: nothing changed (mail-gateway prefetch safety — the GET never mutates). The token row is served through no door, so the second confirm page IS the 'still live' oracle",
-        "POST the form body (token=<raw>) anonymously — 200 result page 'Approved · 已通过'; as admin re-read the request (status moved / group tally advanced) and GET /:id/actions — the approve row's actor is the BOUND approver_id, comment 'Via action link'",
-        "replay: POST the same token again — 'Already used · 链接已使用' page; no new action row, no state movement",
-        "dead-slot leg: on a second pending request mint tokens, decide it through the normal UI/API first, then GET the leftover token URL — 'Already decided · 请求已处理' page; and on a third, reassign the BOUND approver's own slot away first — POST /:id/reassign {\"from\": \"<the token's bound approver_id>\", \"to\": \"<someone else>\"} as the admin, or the bound approver's own reassign with their token — then GET — 'No longer your approval · 已不在你名下' (the link died with the slot, ADR-0043 invalidation). ⚠️ An admin reassign WITHOUT `from` moves the CALLER's own slot (from defaults to the caller's taken slot, approval-service.ts reassign), so when the admin also holds a slot the bound approver's token stays live and the leg scores nothing",
-        "garbage: GET and POST with token=garbage — 'Invalid link · 链接无效' page, 200, no summary rows",
-        "expiry: no live door on this build (see knownGaps) — cite the pinned unit test's 'expired' reason and the RESULT_COPY.expired page copy ('Link expired · 链接已过期'), and record the leg as blocked(fixture)",
-        "scope probe: replay the raw token as a credential everywhere else — Authorization: Bearer <token> on GET /api/v1/approvals/requests and on GET /api/v1/data/showcase_invoice — every such call is unauthenticated (401); the token opens nothing but the act door"
+        "at-rest leg: POST /api/v1/approvals/requests/:id/remind on the admin-submitted invoice request — the answer's notified is positive and GET /:id/actions gains one remind row (notified counts the pending SLOTS fanned out to: a slot listed twice counts twice while messaging dedups the second emit, so read it as a positive count, never as distinct people — QA run #24542, PR #24620's acceptance notes); then GET /api/v1/data/sys_notification (topic approval.reminder, source_id = the request id) as the admin and confirm each reminder payload carries NO actions list and no /api/v1/approvals/act URL — only its title, its body and the /system/approvals deep link. ⛔ Do NOT read sys_approval_token through the data API: since PR #22633 the object is apiEnabled: false with apiMethods: [], so GET /api/v1/data/sys_approval_token answers 404 OBJECT_API_DISABLED for every caller (the administrator included) — that 404 is the designed answer, not a finding",
+        "the live-token legs — the per-approver mint (one approve + one reject row per concrete pending approver, SHA-256 at rest, FORBIDDEN for a non-pending approver), the confirm page that never mutates, the redemption as the bound approver (comment 'Via action link'), the replay, the dead-slot and expired shapes and the bearer probe — need a raw token no stock door mints (knownGaps[0]): run the pins in automated.ref and cite each file's summary line, per clause as each verify names them",
+        "switch to a CLEAN anonymous client (no cookies, no Authorization header — prove it: GET /api/v1/approvals/requests from the same client answers 401); GET and then POST (form body token=garbage) /api/v1/approvals/act?token=garbage — both answer the 'Invalid link · 链接无效' page, 200 text/html, with no request summary rows, and the admin's before/after reads of the invoice request show no change. It is the one dead-token shape a live boot can still produce without a minted token",
+        "expiry: no live door on this build (see knownGaps) — cite the pinned unit test's 'expired' reason and the RESULT_COPY.expired page copy ('Link expired · 链接已过期'), and record the leg as blocked(fixture)"
       ],
       "acceptance": [
         {
-          "clause": "minting is approver-bound and hashed at rest: remind fans out one approve + one reject token per CONCRETE pending approver (literal type:value slots get a plain nudge, no token), stored as SHA-256 hashes with approver_id and expires_at — and issueActionTokens refuses a non-pending approver with FORBIDDEN",
+          "clause": "minting is approver-bound and hashed at rest, and NOTHING PERSISTED holds a usable link: issueActionTokens mints one approve + one reject token for a CONCRETE pending approver, stored as SHA-256 hashes with approver_id and expires_at, and refuses a non-pending approver with FORBIDDEN; remind() mints none and attaches no link to the payload messaging stores (PR #24620)",
           "oracle": "test",
-          "verify": "run the two pinned integration tests and cite their output: approval-token-internal-hash.integration.test.ts (the digest is internal — the generic read omits it, storage holds the SHA-256, peek and redeem resolve by it) and sys-approval-token-generic-door.integration.test.ts (apiEnabled: false, apiMethods: [], every operation refused for every caller with the api-disabled discriminant, the cross-object search returns no token row, and the Approve link remind() delivered still redeems once as the bound approver and is refused on replay). Live, the sys_notification payload carries one approve + one reject /api/v1/approvals/act?token= URL per concrete pending approver and none for a literal slot — the token rows themselves are served through no door since PR #22633",
-          "evidence": "pinned test output + notification-payload read"
+          "verify": "run the pins and cite their output: approval-service.test.ts 'issueActionTokens: stores hashes only and binds approver + action' (the FORBIDDEN arm included) and 'remind: each concrete approver gets their own reminder, and none carries an action link (#24564)'; approval-token-internal-hash.integration.test.ts (the digest is internal — the generic read omits it, storage holds the SHA-256, peek and redeem resolve by it); sys-approval-token-generic-door.integration.test.ts (apiEnabled: false, apiMethods: [], every operation refused for every caller with the api-disabled discriminant, the cross-object search returns no token row); reminder-action-link-at-rest.integration.test.ts (no emit input and no stored row holds an action-page URL or the preimage of a live token). Live, step 2's sys_notification read shows the reminder with no link — the token rows themselves are served through no door since PR #22633",
+          "evidence": "pinned test output + the at-rest notification read"
         },
         {
           "clause": "the GET confirm page renders session-less and MUTATES NOTHING — repeated GETs leave the request, its actions timeline and the token's consumed_at byte-identical (a mail gateway's link prefetch must never approve a request)",
-          "oracle": "api",
-          "verify": "before/after reads of GET /:id and GET /:id/actions around two anonymous GETs of the confirm URL — no delta; both GETs came back 200 text/html with the POST form (peekActionToken validates without consuming), and the second one rendering the confirm page rather than the 'Already used' page is the consumed_at oracle now that the token row is served through no door",
-          "evidence": "the two confirm-page responses + before/after reads"
+          "oracle": "test",
+          "verify": "pin-scored (no stock door mints a live token, knownGaps[0]): action-page-member.integration.test.ts 'GET renders the confirm page for a live token, and never decides however often it is fetched' (200 text/html with the POST form, five more GETs, the request still pending with no decision, then the first POST decides) and approval-service.test.ts 'peek: validates without consuming (GET never mutates)'",
+          "evidence": "the vitest summary lines of the two pins"
         },
         {
           "clause": "one anonymous POST decides as exactly the bound approver on exactly the bound request: the decision is attributed like a UI decision — the approve action row's actor is the token's approver_id (never null, never the submitter), comment 'Via action link', and the request/tally/flow-run all move exactly as a session decision would",
-          "oracle": "api",
-          "verify": "post-redemption reads: request status/tally moved; /:id/actions carries one approve row with actor = the bound approver_id ('the token IS the authentication' #3783 — the decision context carries that userId, so the status mirror and every cascade attribute to them)",
-          "evidence": "the redemption response + request/actions re-reads"
+          "oracle": "test",
+          "verify": "pin-scored (knownGaps[0]): approval-service.test.ts 'redeem: approves as the bound approver and burns the token (single-use)' (actor_id the bound approver, comment 'Via action link', the run resumed on the approve branch); action-page-member.integration.test.ts 'POST redeems as the bound approver — the audit row names that approver, not a system actor' (actor_id and acted_as the approver, for approve and reject); reminder-action-link-at-rest.integration.test.ts's positive control (actor_id and acted_as the bound approver, via_override false) — 'the token IS the authentication' (#3783)",
+          "evidence": "the vitest summary lines of the three pins"
         },
         {
           "clause": "redemption is single-use and consume-FIRST: the second POST answers the 'Already used' page with no second action row — and because the token is burned before the decide, a decide that fails still burns it (replay-safe by design; a burned-but-undecided token is the designed outcome, not a defect to file)",
-          "oracle": "api",
-          "verify": "second POST → the 'Already used' page (the act door's own reading of consumed_at — the row is served through no door); GET /:id/actions count unchanged",
-          "evidence": "the replayed response + actions count"
+          "oracle": "test",
+          "verify": "pin-scored (knownGaps[0]): the replay halves of approval-service.test.ts 'redeem: approves as the bound approver and burns the token (single-use)' (reason consumed), sys-approval-token-generic-door.integration.test.ts 'a minted token peeks, redeems exactly once, and is refused as consumed on replay' and reminder-action-link-at-rest.integration.test.ts's positive control (refuses a replay); action-page-member.integration.test.ts renders the consumed shape as the 'Already used' page",
+          "evidence": "the vitest summary lines of the pins"
         },
         {
           "clause": "every dead-token shape answers its DESIGNED 200 refusal page with zero state change: invalid / expired / consumed render WITHOUT request summary rows; not_pending / already-decided and not_approver / reassigned-away render theirs WITH the summary (the bearer legitimately held that link) — and none of the five moves any state",
           "oracle": "network",
-          "verify": "one capture per RESULT_COPY shape reachable live (invalid, consumed, not_pending, not_approver) — HTTP 200 text/html, the matching bilingual title, summary-row presence per the rule above; paired before/after request reads show no delta; the expired shape is scored from the pinned unit test (knownGaps). The 200-on-refusal is by design (a human-facing page reached from a mail client) — a run must not file the missing 4xx as a finding",
-          "evidence": "the four live refusal captures + paired reads + the pinned expired reason"
+          "verify": "live: the invalid shape only — step 4's token=garbage GET and POST, each HTTP 200 text/html with the 'Invalid link · 链接无效' title and no summary rows, with paired before/after request reads showing no delta. Pinned: action-page-member.integration.test.ts 'a dead link — unknown, expired, consumed — is told on the page with 200, through GET and POST alike' (the invalid, expired and consumed pages byte-equal to renderResultPage with no request) and approval-service.test.ts 'redeem: dead tokens — invalid, expired, decided request, reassigned slot' (the not_pending and not_approver reasons). The not_pending / not_approver PAGES and their summary rows have neither a live door (they need a live token, knownGaps[0]) nor a page-level pin: record that half blocked(fixture). The 200-on-refusal is by design (a human-facing page reached from a mail client) — a run must not file the missing 4xx as a finding",
+          "evidence": "the live invalid captures + paired reads + the pin summary lines"
         },
         {
           "clause": "the token grants nothing else: presented as a bearer credential on any authenticated route it is a stranger — the platform's auth stack never resolves it",
           "oracle": "api",
-          "verify": "Authorization: Bearer <raw token> on GET /api/v1/approvals/requests and one data route answers 401 exactly like an anonymous call; no session is minted anywhere",
-          "evidence": "the 401 responses"
+          "verify": "blocked(fixture) on this build: the probe needs a raw token, which no stock door mints (knownGaps[0]), and no pin presents one as a bearer on an authenticated route. A garbage string as Bearer proves nothing about an action token. The converse is pinned: action-page-member.integration.test.ts 'the token is the only credential: a cookie or Authorization header is never read, and changes nothing'",
+          "evidence": "the blocked(fixture) note + the converse pin's summary line"
         }
       ],
       "negative": [
@@ -1193,21 +1213,27 @@
         "a raw token readable out of sys_approval_token storage (the engine's system read in the internal-hash test: a raw-token column, or a hash that is really the token) is a FAIL of the hashed-at-rest claim — and a run that reads the data API's 404 OBJECT_API_DISABLED on sys_approval_token as a defect is a FAIL of the method: the door is closed by design (PR #22633)"
       ],
       "traps": ["dispatcher-vs-hono-route", "auth-state-leak"],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-approvals/src/approval-service.test.ts (acceptance[0] mint + FORBIDDEN and the remind-carries-no-link pin; acceptance[1] peek; acceptance[2]–[3] redeem + replay; acceptance[4] the dead-token reasons) + packages/plugins/plugin-approvals/src/action-page-member.integration.test.ts (acceptance[1] the confirm page; acceptance[2] the redemption; acceptance[4] the invalid / expired / consumed pages; acceptance[5]'s converse) + packages/plugins/plugin-approvals/src/sys-approval-token-generic-door.integration.test.ts (acceptance[0] the closed door; acceptance[3] the replay) + packages/plugins/plugin-approvals/src/reminder-action-link-at-rest.integration.test.ts (acceptance[0] nothing redeemable at rest; acceptance[2]–[3] the positive control) + packages/plugins/plugin-approvals/src/approval-token-internal-hash.integration.test.ts (acceptance[0] the internal digest). The at-rest read and the token=garbage page still need the live run; acceptance[5]'s probe has no pin"
+      },
       "source": [
         "packages/plugins/plugin-approvals/src/approvals-plugin.ts#http (the raw Hono mount at /api/v1/approvals/act — GET renders via peekActionToken, POST redeems; mounted on kernel:ready off the canonical http.server handle, #4251 B5)",
         "packages/plugins/plugin-approvals/src/approval-service.ts#actionLinkUrl (actionLinkUrl · issueActionTokens: hashed-at-rest + FORBIDDEN for non-pending approvers · resolveActionToken: invalid/consumed/expired/not_pending/not_approver chain · peekActionToken 'validate WITHOUT consuming' · redeemActionToken 'consume the token FIRST … then decide as the bound approver', #3783 the-token-IS-the-authentication attribution); ACTION_TOKEN_TTL_MS = 72h",
-        "packages/plugins/plugin-approvals/src/approval-service.ts#approver (the remind fan-out is the mint path: per-approver Approve/Reject action links on topic approval.reminder; literal slots fall back to a tokenless nudge)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts#remind (since PR #24620 the fan-out sends each concrete approver an approval.reminder notification with the /system/approvals deep link and NO action link, and mints no token — the ⛔ #24564 note at the fan-out; literal slots fall back to the shared nudge)",
         "packages/plugins/plugin-approvals/src/action-link-pages.ts#RESULT_COPY (ADR-0043 session-less bilingual pages; 'The GET page NEVER mutates'; RESULT_COPY — which refusal shapes carry summaryRows and which do not)",
-        "packages/services/service-messaging/src/messaging-service.ts#writeEvent + (writeEvent persists the payload on sys_notification — the stock-boot token-capture seam this item's fixtures rest on)",
+        "packages/services/service-messaging/src/messaging-service.ts#writeEvent + (writeEvent persists the payload verbatim on the sys_notification event row — why PR #24620 took the link off the reminder payload, and the row this item's at-rest leg reads)",
         "packages/plugins/plugin-approvals/src/sys-approval-token.object.ts (the token store — enable.apiEnabled: false + apiMethods: [] since PR #22633: every data-API verb 404 OBJECT_API_DISABLED for every caller, and the cross-object search skips it)",
         "packages/plugins/plugin-approvals/src/approval-token-internal-hash.integration.test.ts (#21197 — the digest is internal; storage holds it; peek + redeem resolve by it)",
         "packages/plugins/plugin-approvals/src/sys-approval-token-generic-door.integration.test.ts (#22616 — the declaration, every operation refused for every caller, the search pin, and the positive control: the link still redeems once)",
+        "packages/plugins/plugin-approvals/src/reminder-action-link-at-rest.integration.test.ts (#24564, PR #24620 — no emit input and no stored row holds an action-page URL or a live token's preimage; positive control: a token held outside storage still decides once, as its approver)",
         "packages/plugins/plugin-approvals/src/approval-service.test.ts ('redeem: dead tokens — invalid, expired, decided request, reassigned slot' — the expired reason under ttlMs: 1 and the fake clock)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "initial — the anonymous actionable-link door (ADR-0043) had no checklist coverage despite being an unauthenticated decision path. Authored from source with one register correction: the hunter proposed an emailed-link capture harness as the fixture, but messaging persists the reminder payload (raw action URLs included) on the sys_notification event row, so every token/door clause is stock-runnable; only the email-rendering leg still wants the LogTransport capture (recorded in knownGaps)", "ref": "#sweep-2026-08-30" },
         { "revision": 2, "date": "2026-10-10", "change": "re-pointed after PR #22633 (#22616) closed sys_approval_token to the automatic API (apiEnabled: false, apiMethods: [] — 404 OBJECT_API_DISABLED for every caller): the token-row oracles move to the act door's outcome pages, the request's action history (GET /:id/actions) and the two pinned integration tests (internal-hash, generic-door); the mint clause is scored by test; the expiry leg, whose only recipe was backdating expires_at over the data API, has no surviving door (ttlMs is not REST-reachable and the plugin threads no clock) and is recorded in knownGaps as blocked(fixture) with the pinned 'expired' reason as its oracle. Two steps had contradicted the door before that PR already: the digest has been withheld since #21197, and update was never in the whitelist", "ref": "#22631" },
-        { "revision": 3, "date": "2026-10-16", "change": "step 7's dead-slot leg said 'reassign the bound approver away first' without saying who can (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 on a two-slot request [admin, Ada] minted by remind: the admin's reassign without `from` moved the admin's own slot ([OTHER, Ada]) and Ada's approve token still peeked as the 'Approve · 通过' confirm page; the admin's reassign with from: Ada moved Ada's slot and the same token then rendered 'No longer your approval · 已不在你名下'. The step now passes `from` (or has the bound approver reassign their own slot); the clause is unchanged", "ref": "#24036" }
+        { "revision": 3, "date": "2026-10-16", "change": "step 7's dead-slot leg said 'reassign the bound approver away first' without saying who can (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 on a two-slot request [admin, Ada] minted by remind: the admin's reassign without `from` moved the admin's own slot ([OTHER, Ada]) and Ada's approve token still peeked as the 'Approve · 通过' confirm page; the admin's reassign with from: Ada moved Ada's slot and the same token then rendered 'No longer your approval · 已不在你名下'. The step now passes `from` (or has the bound approver reassign their own slot); the clause is unchanged", "ref": "#24036" },
+        { "revision": 4, "date": "2026-10-19", "change": "re-pointed to main after PR #24620 (65a8eeb7d4, the fix of #24564) took the one-tap link off the reminder payload — wave anchor #24579 §1, the row round 2 added (comment 6272314386), resting on QA runs #24542 and #24558. The live mint leg read raw tokens out of sys_notification.payload.actions after a remind; on main remind() mints no token and attaches no link, issueActionTokens has no production caller and no REST door reaches it, so no stock boot holds a live token. Every live-token leg moves to the pins, now named per clause in a new automated.ref, each measured at base 9a7838edf5 under os-verify-lock (plugin-approvals vitest: approval-service.test.ts 367, action-page-member.integration.test.ts 12, sys-approval-token-generic-door.integration.test.ts 6, reminder-action-link-at-rest.integration.test.ts 4, approval-token-internal-hash.integration.test.ts 1, all passed). The live run keeps the at-rest read (the reminder row carries no link), the token=garbage page and the anonymous-client proof. acceptance[1]–[3] move to oracle test; acceptance[4] keeps its live invalid capture and records the not_pending / not_approver pages as unpinned; acceptance[5]'s bearer probe has no live token and no pin and reads blocked(fixture). The ten steps become five: the mint, capture, confirm-page, redemption, replay, dead-slot and bearer-probe steps fold into one pin step (steps[2]) and the garbage step joins the anonymous-client step (steps[3]); #24542's finding that notified counts slots rides along in steps[1]; knownGaps[0] is new, the email-rendering gap now says no stock producer exists, and personas[0], fixtures.requires and source[2]/[4] follow, plus the at-rest pin in source", "ref": "#24649" }
       ]
     },
     {
@@ -1215,7 +1241,7 @@
       "title": "Every approver type resolves the slate it declares — department includes all descendants, deprecated role warns and resolves, and a slate with no concrete person takes the declared onEmptyApprovers fork, never a fake approval",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["dev admin (authors the scratch flows; org owner)", "Ada Auditor / Mei Phone (real logins since #9308 — directory rows the graph legs resolve to)"],
@@ -1241,8 +1267,8 @@
         "field leg: a multi-select user field naming two users — two slots, in order, never one 'u1,u2' literal",
         "manager leg: the submitter's manager_id resolves; user leg: the literal id resolves",
         "role leg: author {type:'role', value:'owner'} (it still parses for the deprecation window); read the boot/trigger log for the ADR-0090 D3 deprecation warn naming the canonical spelling, and assert the slate equals what {type:'org_membership_level', value:'owner'} resolves on the same org",
-        "queue leg: a stored flow carrying {type:'queue'} (author it directly through the metadata channel if the designer refuses — the designer withholding it IS the xEnumDeprecated contract) — trigger: the slot resolves to nobody and the log carries the #3508 'not implemented — the slot resolves to nobody' warn; the slate then names no one, so the default admin_rescue opens the request on the organization's administrators (#22824) — pending_approvers holds the administrators' ids and NOT the literal queue:<value> slot, which is kept as the abandoned slate in node_config_json.__resolvedFrom['admin_rescue:abandoned'] — and the request stays pending",
-        "empty-slate forks, one scratch flow per policy over an UNSTAFFED position: onEmptyApprovers absent/admin_rescue → the request opens on the request organization's ADMINISTRATORS as ordinary approvers (#22824): first read who they are — the organization's sys_member rows whose grants hold organization_admin or organization_admin_no_bypass (on stock showcase, the dev admin as the org owner) — then read the request: pending_approvers equals exactly those ids, the abandoned position:<p> literal and its reason sit in node_config_json.__resolvedFrom ('admin_rescue:abandoned', 'admin_rescue:reason'), GET /:id/actions carries one system comment (no actor) 'Routed to this organization's administrators because the approver slate named no one: position '<p>' has no holder.', the request stays pending, and the WARN '… resolved to no concrete approver (…) — opening on this organization's administrators per onEmptyApprovers: 'admin_rescue'' lands; 'fail' → the run fails with NO_APPROVERS and no request row; 'auto_approve' → NO request row, the run continues down the approve edge with output.autoApproved=true and the auto-approve warn lands; 'fallback' (fallbackApprovers naming a STAFFED target, e.g. org_membership_level 'owner') → the request opens on the fallback slate — pending_approvers holds the fallback's resolved ids, no literal slot — and the 'opening on the declared fallbackApprovers' warn lands; a fallback that itself resolves to nobody degrades to admin_rescue with its own 'resolved to nobody either' warn, and so opens on the organization's administrators too",
+        "queue leg: a stored flow carrying {type:'queue'} (author it directly through the metadata channel if the designer refuses — the designer withholding it IS the xEnumDeprecated contract) — trigger: the slot resolves to nobody and the log carries the #3508 'not implemented — the slot resolves to nobody' warn; the slate then names no one, so the default admin_rescue opens the request on the organization's administrators (#22824) — pending_approvers holds the administrators' ids and NOT the literal queue:<value> slot, which is kept as the abandoned slate in node_config_json.__resolvedFrom['admin_rescue:abandoned'] (read node_config_json through GET /api/v1/data/sys_approval_request/ID as the admin — GET /api/v1/approvals/requests/:id projects no node_config_json, packages/plugins/plugin-approvals/src/approval-service.ts rowFromRequest) — and the request stays pending",
+        "empty-slate forks, one scratch flow per policy over an UNSTAFFED position: onEmptyApprovers absent/admin_rescue → the request opens on the request organization's ADMINISTRATORS as ordinary approvers (#22824): first read who they are — the organization's sys_member rows whose grants hold organization_admin or organization_admin_no_bypass (on stock showcase, the dev admin as the org owner) — then read the request: pending_approvers equals exactly those ids, the abandoned position:<p> literal and its reason sit in node_config_json.__resolvedFrom ('admin_rescue:abandoned', 'admin_rescue:reason') — on the data door's row (GET /api/v1/data/sys_approval_request/ID as the admin), since the approvals request read omits node_config_json — GET /:id/actions carries one system comment (no actor) 'Routed to this organization's administrators because the approver slate named no one: position '<p>' has no holder.', the request stays pending, and the WARN '… resolved to no concrete approver (…) — opening on this organization's administrators per onEmptyApprovers: 'admin_rescue'' lands; 'fail' → the run fails with NO_APPROVERS and no request row; 'auto_approve' → NO request row, the run continues down the approve edge with output.autoApproved=true and the auto-approve warn lands; 'fallback' (fallbackApprovers naming a STAFFED target, e.g. org_membership_level 'owner') → the request opens on the fallback slate — pending_approvers holds the fallback's resolved ids, no literal slot — and the 'opening on the declared fallbackApprovers' warn lands; a fallback that itself resolves to nobody degrades to admin_rescue with its own 'resolved to nobody either' warn, and so opens on the organization's administrators too",
         "throughout: read the trigger-time log — every graph expansion to nobody must carry the #3807 'expanded to nobody' warn naming type and value"
       ],
       "acceptance": [
@@ -1267,19 +1293,19 @@
         {
           "clause": "deprecated 'role' still parses for the deprecation window, warns with the canonical prescription, and resolves IDENTICALLY to org_membership_level",
           "oracle": "log",
-          "verify": "the ADR-0090 D3 warn ('approver type role is deprecated — author org_membership_level instead') appears at resolution, and the two spellings' slates are equal on the same org (canonicalApproverType maps role → org_membership_level before any lookup)",
+          "verify": "the ADR-0090 D3 deprecation warn appears at resolution, naming the type `role` and prescribing `org_membership_level` (match those two names, not the sentence — the live line quotes both and carries the ADR tag), and the two spellings' slates are equal on the same org (canonicalApproverType maps role → org_membership_level before any lookup)",
           "evidence": "the warn line + the two equal slates"
         },
         {
           "clause": "the empty-slate fork honors the declared policy: admin_rescue (the default) opens the request on the request organization's ADMINISTRATORS as ordinary approvers, warns loudly and records why (#22824) — never on the slate that names no one while the organization has an administrator; 'fail' kills the node with NO_APPROVERS and opens nothing; 'auto_approve' opens nothing and resumes down the approve edge with output.autoApproved=true; 'fallback' opens the request on the declared fallbackApprovers (resolved by the same resolver as approvers) and warns that the fallback fired — a fallback that resolves to nobody too degrades to admin_rescue, and so to the administrators — 'empty' meaning no CONCRETE person, so a slate of only type:value literals takes the fork too",
           "oracle": "api",
-          "verify": "per policy: request-row presence/absence, run outcome, and the matching warn/error text ('resolved to no concrete approver…'); the admin_rescue request's pending_approvers holds exactly the organization's administrators (the TENANT_ADMIN rung of the request's organization, ADR-0095 D3 — read from its sys_member rows and their grants) and NOT the abandoned position:<p> literal, which is recorded under node_config_json.__resolvedFrom['admin_rescue:abandoned'] beside 'admin_rescue:reason'; its actions carry the one system comment 'Routed to this organization's administrators because the approver slate named no one: …'; its WARN reads '… opening on this organization's administrators per onEmptyApprovers: 'admin_rescue' …'; it stays pending, never finalized (approval-service.ts openNodeRequest's empty-slate fork and organizationAdministrators; pinned by admin-rescue-named-slate.integration.test.ts); the fallback request's pending_approvers holds the fallback slate, never the abandoned literal slot",
+          "verify": "per policy: request-row presence/absence, run outcome, and the matching warn/error text ('resolved to no concrete approver…'); the admin_rescue request's pending_approvers holds exactly the organization's administrators (the TENANT_ADMIN rung of the request's organization, ADR-0095 D3 — read from its sys_member rows and their grants) and NOT the abandoned position:<p> literal, which is recorded under node_config_json.__resolvedFrom['admin_rescue:abandoned'] beside 'admin_rescue:reason' (read on GET /api/v1/data/sys_approval_request/ID as the admin — the approvals request read projects no node_config_json); for auto_approve, output.autoApproved is not surfaced by GET /api/v1/automation/NAME/runs/RUNID (QA run #24542: its steps carry no output and the run's output is {}), so prove the approve edge with a marker node on it (e.g. an update_record) and read the marker; its actions carry the one system comment 'Routed to this organization's administrators because the approver slate named no one: …'; its WARN reads '… opening on this organization's administrators per onEmptyApprovers: 'admin_rescue' …'; it stays pending, never finalized (approval-service.ts openNodeRequest's empty-slate fork and organizationAdministrators; pinned by admin-rescue-named-slate.integration.test.ts); the fallback request's pending_approvers holds the fallback slate, never the abandoned literal slot",
           "evidence": "per-policy request/run reads (pending_approvers, node_config_json.__resolvedFrom, the request's actions) + log lines + the administrator read"
         },
         {
           "clause": "queue is a dead slot that stays LOUD, never a fake approval: it resolves to nobody and warns #3508; its slate naming no one, the default admin_rescue opens the request on the organization's administrators (#22824) — the literal queue:<value> slot is the abandoned slate, never a pending approver — and the request waits for an administrator's decision rather than passing",
           "oracle": "log",
-          "verify": "the 'approver type 'queue' is not implemented — the slot resolves to nobody' warn (#3508, approval-service.ts resolveApproverSpec) + the request read: status still pending, pending_approvers equals the organization's administrators with no queue:<value> entry, node_config_json.__resolvedFrom['admin_rescue:abandoned'] is ['queue:<value>'], and the routed-to-administrators comment is on its actions",
+          "verify": "the 'approver type 'queue' is not implemented — the slot resolves to nobody' warn (#3508, approval-service.ts resolveApproverSpec) + the request read: status still pending, pending_approvers equals the organization's administrators with no queue:<value> entry, node_config_json.__resolvedFrom['admin_rescue:abandoned'] is ['queue:<value>'] (on the data door's row, as acceptance[4] reads it), and the routed-to-administrators comment is on its actions",
           "evidence": "warn line + request read + its actions"
         }
       ],
@@ -1314,6 +1340,12 @@
           "date": "2026-10-16",
           "change": "residual of the #23878 finding, settled now that #23965 closed: approver-bindings.flow.ts ships status 'obsolete' (PR #24008), not 'draft', so knownGaps[0] and the fixture line stop calling it a draft (re-measured on main c91af8ed6: a showcase_field_zoo update opens no admin_rescue request; three pending requests before and after). The scratch-flow door is re-pointed too (the approvals.ooo-delegation-reroute finding covers this item): POST /api/v1/automation registers a runtime flow on the stock boot, record-triggered on showcase_field_zoo, so no writable package is needed. Re-run of the door with the user leg: a flow routing {type:'user', value:<admin>} opened its request with pending_approvers [admin]",
           "ref": "#24036"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-19",
+          "change": "steps[6]–[7] and acceptance[3]–[5] verify corrected — three checklist-accuracy findings of the 18.0 QA sweep (QA run #24542, approvals.approver-resolution-matrix; wave anchor #24579 §3). node_config_json, and so __resolvedFrom, is not on GET /api/v1/approvals/requests/:id — rowFromRequest in approval-service.ts projects no node_config_json — and the run read it through GET /api/v1/data/sys_approval_request/ID as the admin, so the steps and verifies now name that door. output.autoApproved is not surfaced by the automation runs read (no step output, run output {}), so the auto_approve leg proves the approve edge with a marker node, as the run did. acceptance[3]'s quoted warn was a paraphrase of the live line; the verify now matches the two names it carries instead of a sentence. No clause text changed",
+          "ref": "#24632"
         }
       ]
     },
@@ -1475,7 +1507,7 @@
       "title": "Approval requests on v18: the request record page serves record:approval_decision and a Reply action that lands in its timeline, `enable.approvalsVisibleToReaders` lets a plain record reader see the record's requests read-only (and only then), the generic /data door serves request rows by approvals visibility, and titles shown to a reader use only what that reader may read",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1495,7 +1527,7 @@
       },
       "steps": [
         "GET /api/v1/meta/page/sys_approval_request_detail and find record:approval_decision",
-        "as the pending approver POST /api/v1/approvals/requests/ID/comment {body}; read the timeline",
+        "as the pending approver POST /api/v1/approvals/requests/ID/comment {comment} (the key is `comment` — a {body} is refused 400 VALIDATION_FAILED, packages/plugins/plugin-approvals/src/approval-service.ts comment); read the timeline",
         "as the member (non-participant) GET /api/v1/data/sys_approval_request/ID and list with a total",
         "flip approvalsVisibleToReaders on the scratch object; as a plain reader list that record's requests; flip it off and repeat without restart"
       ],
@@ -1537,7 +1569,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-approvals/src/sys-approval-request-page.test.ts + packages/spec/src/ui/component-record-approval-decision-22472.test.ts + packages/plugins/plugin-approvals/src/record-reader-opt-in.integration.test.ts + packages/plugins/plugin-approvals/src/request-child-read-gate.integration.test.ts + packages/plugins/plugin-approvals/src/subject-title-reader-fls.integration.test.ts"
+        "ref": "packages/plugins/plugin-approvals/src/sys-approval-request-page.test.ts + packages/spec/src/ui/component-record-approval-decision-22472.test.ts + packages/plugins/plugin-approvals/src/record-reader-opt-in.integration.test.ts + packages/plugins/plugin-approvals/src/request-read-gate.integration.test.ts (acceptance[2]: the REQUEST object's own generic-door gate — a hidden request answers by id exactly as a missing one, 404, and list / count exclude it) + packages/plugins/plugin-approvals/src/request-child-read-gate.integration.test.ts (the sys_approval_action / approver-index CHILD tables only) + packages/plugins/plugin-approvals/src/subject-title-reader-fls.integration.test.ts"
       },
       "source": [
         "packages/plugins/plugin-approvals/src/sys-approval-request.page.ts",
@@ -1551,15 +1583,21 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "steps[1] and automated.ref corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24542, approvals.request-page-reply-and-reader-visibility; wave anchor #24579 §3). The comment route's body key is `comment`, not `body`: {body} answers 400 VALIDATION_FAILED 'comment is required' (approval-service.ts comment). automated.ref named request-child-read-gate.integration.test.ts, which covers only the child tables, and omitted request-read-gate.integration.test.ts, the pin of the request object's own generic-door gate that acceptance[2] asserts. That clause's live leg is unreachable on stock showcase (no member reads sys_approval_request), a fixture gap left on #24579 §4. No clause changed",
+          "ref": "#24632"
         }
       ]
     },
     {
       "id": "approvals.act-door-and-admin-rescue-slate",
-      "title": "Approvals on v18: the email action door /approvals/act works through the dispatcher exactly as the self-hosted mount (GET renders, POST redeems, PUT 405 Allow: GET, POST, a dead link a 200 page, a policy-held session not 403'd before the token), and an approval over an unstaffed position opens on the org administrators as ordinary approvers",
+      "title": "Approvals on v18: the email action door /approvals/act works through the dispatcher exactly as the self-hosted mount (GET renders, POST redeems, a PUT neither door claims an ordinary 404 miss with no Allow header, a dead link a 200 page, a policy-held session not 403'd before the token), and an approval over an unstaffed position opens on the org administrators as ordinary approvers",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1570,12 +1608,12 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
-          "an approval email action token (dev mail transport capture) for a pending request",
+          "a live action token for the GET-renders / POST-redeems legs — which no stock door mints since PR #24620 (65a8eeb7d4): a stock boot sends no approval email, and a reminder now carries no link (approvals.email-action-token-door knownGaps[0]), so those two legs are scored from the pins in automated.ref. The PUT and dead-link legs need no live token: any non-token string (token=garbage) drives them",
           "an approval process whose approver is a position nobody holds (scratch process, default onEmptyApprovers)"
         ]
       },
       "steps": [
-        "GET /api/v1/approvals/act?token=T; POST the same; PUT the same; GET with a consumed token",
+        "PUT /api/v1/approvals/act?token=garbage; GET and POST /api/v1/approvals/act?token=garbage (the dead-link page) — neither needs a live token. The live-token GET and POST legs are pin-scored: no stock door mints a token since PR #24620",
         "submit a record into the unstaffed process; as the org admin GET /api/v1/approvals/requests (My Pending); decide it"
       ],
       "acceptance": [
@@ -1586,10 +1624,10 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "GET renders the action page, POST redeems, PUT → 405 with Allow: GET, POST, a dead token → a 200 page (not an error envelope)",
+          "clause": "GET renders the action page, POST redeems, a dead token → a 200 page (not an error envelope), and PUT — a method neither wire door claims — is that door's ordinary miss: 404 with no Allow header, never reaching the member (ENDPOINT_NOT_FOUND on the self-hosted `os dev` boot, whose raw-app mount registers only GET and POST; ROUTE_NOT_FOUND on the hosted dispatcher door, whose `/approvals/act` domain claims only GET, HEAD and POST). 405 with Allow: GET, POST is the in-process ApprovalService.handleActionPage member's answer only, which no wire request reaches with a PUT",
           "oracle": "api",
-          "verify": "status + headers per verb",
-          "evidence": "four lines"
+          "verify": "status + headers per verb; for the PUT also error.code and the absence of an Allow header. The PUT and the dead-link legs run live with token=garbage; the GET-renders and POST-redeems halves need a live token no stock door mints since PR #24620, so they are scored from packages/runtime/src/domains/approvals-act.test.ts (the dispatcher forwards GET and POST to the member, the form body unread) and packages/plugins/plugin-approvals/src/action-page-member.integration.test.ts (the member renders and redeems). The member's 405 is not a wire leg: it is pinned in-process by action-page-member.integration.test.ts, and the dispatcher's 404 miss by approvals-act.test.ts (both in automated.ref)",
+          "evidence": "the live PUT line (its error.code and its headers) and the dead-link page, plus the two pins' summary lines for the live-token halves"
         },
         {
           "clause": "the unstaffed request appears in each org admin's pending list and the decision is recorded via_override:false",
@@ -1614,6 +1652,18 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; approvals.approver-resolution-matrix still says admin_rescue is decidable only via the privileged override — stale against 22824 (reported, not edited here)",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "acceptance[1] (clause, verify, evidence) and the title's PUT leg re-worded — an assertion defect found by the 18.0 QA sweep (QA run #24542, approvals.act-door-and-admin-rescue-slate clause 1: FAIL; card #24543). The product is right and the clause was wrong: on a stock `os dev` showcase boot `PUT /api/v1/approvals/act?token=…` answered 404 ENDPOINT_NOT_FOUND with no Allow header (twice; DELETE and PATCH the same), which is the design — the self-hosted mount registers only GET and POST (changeset 22578), the dispatcher domain claims only GET, HEAD and POST and lets every other method fall through (packages/runtime/src/domains/approvals.ts), and the item's own pin packages/runtime/src/domains/approvals-act.test.ts asserts that miss (404 ROUTE_NOT_FOUND) with the member never run. 405 with Allow: GET, POST belongs to the in-process member ApprovalService.handleActionPage alone (packages/plugins/plugin-approvals/src/action-page-member.integration.test.ts). The GET, POST and dead-token legs held and are unchanged, as are the other two clauses",
+          "ref": "#24592"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "fixtures.requires[1], steps[0] and acceptance[1] (verify, evidence) follow PR #24620 (65a8eeb7d4) — wave anchor #24579 §1, round 2's out-of-scope note (report 6274548573) that #24620 refutes QA run #24542's reading (\"no mail harness needed — the raw links sit in sys_notification.payload.actions after a remind\"); QA run #24558 recorded that a stock boot sends no approval email. No stock door mints an action token now, so the GET-renders / POST-redeems legs are scored from the pins already in automated.ref, and the PUT and dead-link legs run live with a non-token string. Re-derived at base 9a7838edf5: issueActionTokens has no production caller. No clause changed",
+          "ref": "#24649"
         }
       ]
     }

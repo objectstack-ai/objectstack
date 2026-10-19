@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 231 |
-| Object name statically decidable | 160 |
-| Object name chosen at run time | 71 |
-| Against a tenancy-enabled object | 159 |
+| Write call sites | 232 |
+| Object name statically decidable | 158 |
+| Object name chosen at run time | 74 |
+| Against a tenancy-enabled object | 157 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 171 |
+| Threading a tenant context | 172 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 52 |
 | …and decidably tenancy-enabled | 31 |
-| Threading a decidably elevated context | 128 |
+| Threading a decidably elevated context | 129 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 95 |
 
@@ -90,13 +90,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-19 at `2623d6d6c`.
+Measured on 2026-10-19 at `030483e7f`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 670 |
+| tracked non-test sources scanned | 672 |
 | engine-shaped types recognised | 79 |
-| declared objects in the registry | 116 |
+| declared objects in the registry | 118 |
 | same-named calls subtracted as non-engine | 166 |
 
 ## Every site
@@ -157,9 +157,9 @@ Measured on 2026-10-19 at `2623d6d6c`.
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `update` | `sys_sso_provider` | disabled | elevated | 1 |
-| `packages/plugins/plugin-email/src/attachment-reclaim.ts` | `update` | `sys_email` | enabled | elevated | 1 |
-| `packages/plugins/plugin-email/src/email-plugin.ts` | `insert` | `sys_email` | enabled | elevated | 1 |
-| `packages/plugins/plugin-email/src/email-plugin.ts` | `update` | `sys_email` | enabled | elevated | 1 |
+| `packages/plugins/plugin-email/src/attachment-reclaim.ts` | `update` | `object` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-email/src/email-plugin.ts` | `insert` | `object` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-email/src/email-plugin.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-pinyin-search/src/companion-projection.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/auto-org-admin-grant.ts` | `delete` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/auto-org-admin-grant.ts` | `insert` | `object` | undecidable | elevated | 1 |
@@ -229,6 +229,7 @@ Measured on 2026-10-19 at `2623d6d6c`.
 | `packages/services/service-settings/src/config-change-audit.ts` | `insert` | `sys_audit_log` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `update` | `objectName` | undecidable | options unreadable | 2 |
+| `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_platform_setting_audit` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `delete` | `sys_secret` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_secret` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `update` | `sys_secret` | enabled | elevated | 1 |

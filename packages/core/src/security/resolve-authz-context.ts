@@ -941,6 +941,102 @@ async function readDefaultOrganizationId(ql: any): Promise<string | undefined> {
   return all.length === 1 ? idOf(all[0]) : undefined;
 }
 
+/**
+ * [#24523] The objects the Default Organization's answer is read from: the
+ * two {@link readDefaultOrganizationId} reads ask `sys_organization` alone.
+ */
+const DEFAULT_ORGANIZATION_WATCHED_OBJECTS: ReadonlySet<string> = new Set([SystemObjectName.ORGANIZATION]);
+
+/**
+ * [#24523] The residual bound on a memoised Default Organization answer —
+ * ⛔ never the in-process rule, which is the write seam. It covers only what no
+ * seam can see: a peer replica's `sys_organization` write on a deployment with
+ * no `authz.invalidated` bridge attached — the shipped default, where this
+ * bound is the only cover for a peer's write (a peer's delete-and-recreate is
+ * #21868's exact failure) — a write that started before this engine's observer
+ * registered, and a watched write inside an engine transaction that has not
+ * committed when its statement completes. The same residual bound the
+ * localization success cache defaults to; the price is two reads per engine
+ * per interval.
+ */
+const DEFAULT_ORGANIZATION_MEMO_TTL_MS = 30_000;
+
+/** `null`: an engine whose wiring threw — never memoised behind. */
+const defaultOrganizationWriteStates = new WeakMap<object, WatchedWriteState | null>();
+
+interface DefaultOrganizationMemoEntry {
+  /** The answer — `undefined` included: no organization, or several and none `default`, is a real answer. */
+  value: string | undefined;
+  /** The engine-side state this answer was read under. */
+  writes: WatchedWriteState;
+  /** That state's generation, read BEFORE the reads were issued. */
+  gen: number;
+  expiresAt: number;
+}
+
+const defaultOrganizationMemo = new WeakMap<object, DefaultOrganizationMemoEntry>();
+
+/**
+ * [#24523] {@link readDefaultOrganizationId}, memoised per engine across
+ * requests. Before, every authenticated request of a principal holding an
+ * organization-owned `admin_full_access` grant under `single` paid one
+ * `sys_organization` read — two when the one organization is not slugged
+ * `default` — because the request memo de-duplicates only within a request and
+ * the grants cache is off by default (#11633 Fork 4).
+ *
+ * Only how often the answer is read moves; ⛔ the reads, their filters and
+ * limits, and the predicate fed by the answer
+ * ({@link grantAnchorsPlatformStanding}) are untouched.
+ *
+ * What retires the answer, in-process, synchronously: any write to
+ * `sys_organization` through the engine — insert, update (a slug moved
+ * included), delete — observed after it settles by the leg-5 write seam
+ * ({@link watchedWriteState}), so a Default Organization deleted and
+ * recreated is read anew on the next request (#21868 is the failure designed
+ * against). Across replicas: only with the `authz.invalidated` bridge
+ * attached — the grants cache on (`OS_AUTHZ_GRANTS_CACHE_TTL_MS` above 0) and
+ * a cross-process cluster driver — does a peer's write arrive, as a `remote`
+ * epoch bump; that and every other non-`write` bump (`metadata`, plugin-security's
+ * local declaration bump, and `manual`) retire the answer wholesale. Then the
+ * residual {@link DEFAULT_ORGANIZATION_MEMO_TTL_MS}, on the shipped default the
+ * only cover for a peer's write.
+ *
+ * A stale answer can fail either way, and no design at this cost avoids the
+ * granting one: a stale id withholds standing from the new Default
+ * Organization's grant, and keeps granting it to the old organization's grant
+ * while that row survives. So every window it can be stale in is one the
+ * residual bound caps.
+ *
+ * ⛔ An outage is not an answer: a read that throws (`AuthzStoreUnavailableError`
+ * from {@link tryFind}) memoises nothing and propagates, so the next request
+ * reads again — the reason `probeInstallOrganizations` gives for its own memo.
+ * A table never provisioned reads as zero organizations, the true answer
+ * there; the write that later creates an organization retires it.
+ *
+ * Declines to memoise — every call reads, exactly as before — when:
+ *  - the engine lacks the write epoch or `registerMiddleware` (a `ql` whose
+ *    writes this memo cannot see; every recording double), or its wiring threw;
+ *  - the registry does not hold `sys_organization`: "not registered" is a
+ *    verdict the boot can still contradict, and registering the object writes
+ *    no row the seam would see.
+ */
+async function memoisedDefaultOrganizationId(ql: any): Promise<string | undefined> {
+  if (!ql || typeof ql !== 'object' || !registryHoldsObject(ql, SystemObjectName.ORGANIZATION)) {
+    return readDefaultOrganizationId(ql);
+  }
+  const writes = watchedWriteState(ql, defaultOrganizationWriteStates, DEFAULT_ORGANIZATION_WATCHED_OBJECTS);
+  if (!writes) return readDefaultOrganizationId(ql);
+  // ⭐ Read BEFORE the reads, stored with the answer: a write that lands while
+  // they are in flight moves the generation past it, so that entry is dead on
+  // arrival — the safe direction.
+  const gen = writes.gen;
+  const hit = defaultOrganizationMemo.get(ql);
+  if (hit && hit.writes === writes && hit.gen === gen && hit.expiresAt > Date.now()) return hit.value;
+  const value = await readDefaultOrganizationId(ql);
+  defaultOrganizationMemo.set(ql, { value, writes, gen, expiresAt: Date.now() + DEFAULT_ORGANIZATION_MEMO_TTL_MS });
+  return value;
+}
+
 /** The activation ledger's catalog types the resolver honours (ADR-0126 §3 regime C, as ADR-0131 D6 amends it). */
 const LEDGER_CATALOG_TYPES = ['position', 'permission'] as const;
 
@@ -1568,7 +1664,7 @@ export async function resolveUserAuthzGrants(
     return { namedByPosition, disabled };
   };
   const [defaultOrganizationId, { namedByPosition, disabled }] = await Promise.all([
-    anchorReadsDefaultOrganization ? readDefaultOrganizationId(ql) : Promise.resolve(undefined),
+    anchorReadsDefaultOrganization ? memoisedDefaultOrganizationId(ql) : Promise.resolve(undefined),
     readPositionLedger(),
   ]);
   const platformAnchor = { walled, defaultOrganizationId };
@@ -2029,10 +2125,14 @@ function localizationSuccessCacheTtlMs(
 const LOCALIZATION_CACHE_WATCHED_OBJECTS: ReadonlySet<string> = new Set(['sys_setting', 'sys_platform_setting']);
 
 /** The engine operations that read; every other operation on a watched object retires the bucket. */
-const LOCALIZATION_READ_OPERATIONS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
+const ENGINE_READ_OPERATIONS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
 
-/** Per-engine invalidation state for the localization success cache. */
-interface LocalizationWriteState {
+/**
+ * Per-engine invalidation state for one cross-request answer read from a
+ * watched set of objects: the localization success cache, and the Default
+ * Organization memo ({@link memoisedDefaultOrganizationId}).
+ */
+interface WatchedWriteState {
   /** Advanced after each watched write settles, and on every non-`write` epoch bump. Compared, never interpreted. */
   gen: number;
 }
@@ -2041,12 +2141,17 @@ interface LocalizationWriteState {
  * `null` records an engine whose wiring THREW partway — poisoned, never cached
  * behind, so a half-attached seam can never stand behind an entry.
  */
-const localizationWriteStates = new WeakMap<object, LocalizationWriteState | null>();
+const localizationWriteStates = new WeakMap<object, WatchedWriteState | null>();
+
+/** The localization cache's engine-side state ({@link watchedWriteState}, {@link LOCALIZATION_CACHE_WATCHED_OBJECTS}). */
+function localizationWriteState(ql: object): WatchedWriteState | undefined {
+  return watchedWriteState(ql, localizationWriteStates, LOCALIZATION_CACHE_WATCHED_OBJECTS);
+}
 
 /**
- * Fetch — and on first sight of an engine, wire — the localization cache's
- * engine-side invalidation state: a middleware that bumps the generation after
- * every write to {@link LOCALIZATION_CACHE_WATCHED_OBJECTS} settles (on a throw
+ * Fetch — and on first sight of an engine, wire — the engine-side
+ * invalidation state one cross-request answer keeps in `states`: a middleware
+ * that bumps the generation after every write to `watched` settles (on a throw
  * too: a partial write is a write), and an epoch subscription that bumps it on
  * every non-`write` reason. Returns `undefined` for a `ql` without both seams,
  * and for one whose wiring threw.
@@ -2054,7 +2159,7 @@ const localizationWriteStates = new WeakMap<object, LocalizationWriteState | nul
  * Registered without an `object` filter on purpose: an object-keyed
  * registration is what `hasObjectMiddleware` counts, and the analytics
  * native-SQL strategy declines an object that has one — this observer must not
- * change which strategy serves `sys_setting`.
+ * change which strategy serves a watched object.
  *
  * ⚠️ What it cannot see, stated exactly: the engine snapshots its middleware
  * list when a write starts, so a write that STARTED before this registration
@@ -2064,11 +2169,15 @@ const localizationWriteStates = new WeakMap<object, LocalizationWriteState | nul
  * flight was invisible to the epoch reading this replaced as well (it had
  * already bumped). The TTL bounds it.
  *
- * Only ever called with a non-zero TTL in hand: with the cache OFF this leaves
- * no footprint on the engine, so `0` stays a real path.
+ * The localization cache calls this only with a non-zero TTL in hand: with
+ * that cache OFF it leaves no footprint on the engine, so `0` stays a real path.
  */
-function localizationWriteState(ql: object): LocalizationWriteState | undefined {
-  const existing = localizationWriteStates.get(ql);
+function watchedWriteState(
+  ql: object,
+  states: WeakMap<object, WatchedWriteState | null>,
+  watched: ReadonlySet<string>,
+): WatchedWriteState | undefined {
+  const existing = states.get(ql);
   if (existing !== undefined) return existing ?? undefined;
   const register = (ql as { registerMiddleware?: unknown }).registerMiddleware;
   const epoch = (ql as { writeEpoch?: { subscribe?: unknown } }).writeEpoch;
@@ -2076,7 +2185,7 @@ function localizationWriteState(ql: object): LocalizationWriteState | undefined 
     // Not memoized: probing is cheap and a double's shape is static anyway.
     return undefined;
   }
-  const state: LocalizationWriteState = { gen: 0 };
+  const state: WatchedWriteState = { gen: 0 };
   try {
     (register as (
       fn: (ctx: { object?: unknown; operation?: unknown }, next: () => Promise<void>) => Promise<void>,
@@ -2084,8 +2193,8 @@ function localizationWriteState(ql: object): LocalizationWriteState | undefined 
       const operation = ctx?.operation;
       if (
         typeof ctx?.object !== 'string'
-        || !LOCALIZATION_CACHE_WATCHED_OBJECTS.has(ctx.object)
-        || (typeof operation === 'string' && LOCALIZATION_READ_OPERATIONS.has(operation))
+        || !watched.has(ctx.object)
+        || (typeof operation === 'string' && ENGINE_READ_OPERATIONS.has(operation))
       ) {
         return next();
       }
@@ -2106,10 +2215,10 @@ function localizationWriteState(ql: object): LocalizationWriteState | undefined 
       },
     );
   } catch {
-    localizationWriteStates.set(ql, null);
+    states.set(ql, null);
     return undefined;
   }
-  localizationWriteStates.set(ql, state);
+  states.set(ql, state);
   return state;
 }
 
@@ -2208,7 +2317,7 @@ interface LocalizationCacheEntry {
   expiresAt: number;
   kind: 'failure' | 'success';
   /** `success` only: the engine-side invalidation state this value was read under. */
-  writes?: LocalizationWriteState;
+  writes?: WatchedWriteState;
   /** `success` only: that state's generation at read time. */
   writesGen?: number;
   /** `success` only: the settings occupant this value was read through. */
@@ -2226,7 +2335,7 @@ const localizationCache = new WeakMap<object, Map<string, LocalizationCacheEntry
  */
 function localizationEntryIsLive(
   entry: LocalizationCacheEntry,
-  writes: LocalizationWriteState | undefined,
+  writes: WatchedWriteState | undefined,
   settings: LocalizationSettingsState,
 ): boolean {
   if (entry.kind === 'failure') return true;

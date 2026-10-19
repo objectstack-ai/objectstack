@@ -257,7 +257,7 @@
       "title": "Record-grained access explain shows per-layer attribution and a verdict",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -274,7 +274,7 @@
       },
       "steps": [
         "boot showcase with the console; as admin create the probe: a member-owned showcase_private_note; grant a second member showcase_auditor",
-        "in the console's access explain panel pick user = the auditor, object = showcase_private_note, record = the probe; screenshot the layered result",
+        "in the console's access explain panel — Studio's Access pillar (/_console/studio/PKG/access, e.g. com.example.showcase) → the header's 'Explain access' action (objectui packages/app-shell/src/views/metadata-admin/AccessExplainPanel.tsx) — pick user = the auditor, object = showcase_private_note, record = the probe; screenshot the layered result",
         "call the API twin: POST /api/v1/security/explain (client security.explain; GET variant also mounted — rest-route-ledger security-explain family) with the same user/object/record; capture the JSON",
         "as the auditor (real session): GET /api/v1/data/showcase_private_note/<probe id> — the impersonated-read cross-check",
         "repeat panel + API explain for the PLAIN member (no auditor set) on the same record",
@@ -340,6 +340,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "steps[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.record-access-explain; wave anchor #24579 §3): the step named 'the console's access explain panel' without saying where it opens; at the console pin 4016370a it is the 'Explain access' action in Studio's Access pillar header (/_console/studio/PKG/access), the route the run drove. No clause changed",
+          "ref": "#24632"
         }
       ]
     },
@@ -709,7 +715,7 @@
       "title": "Field-level security: editable:false strips/denies writes API-side and renders read-only in the UI; masked-read half needs an authored readable:false grant",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -735,7 +741,7 @@
         "re-read the project system-side; compare budget before/after",
         "as admin: PATCH the same budget field to a new value and re-read (the entitled side)",
         "in the console as the contributor: open the project's detail/edit form; screenshot; inspect the state of the budget and spent controls — the two budget figures the edit form renders (project.view.ts form section 'Budget & Schedule': budget, spent, start_date, end_date). budget_remaining is a formula field and is not on the edit form at all",
-        "read-mask half (see knownGaps): grant a scratch readable:false set to a fresh member, then GET the project as that member and inspect whether the masked field is absent/nulled in the API body AND blank in the UI render",
+        "read-mask half (see knownGaps): grant the STOCK showcase_client_liaison set (fixtures.requires[2] — the readable:false grant on budget, spent and budget_remaining; no scratch set is needed) to a fresh member who holds no showcase_contributor, then GET the project as that member and inspect whether the masked field is absent/nulled in the API body AND blank in the UI render",
         "as admin GET the same row — the unmasked contrast"
       ],
       "acceptance": [
@@ -811,6 +817,12 @@
           "date": "2026-10-16",
           "change": "clause 4 and step 5 asked for the disabled state of THREE budget controls (#23878 checklist-accuracy finding). The edit form renders two: project.view.ts's 'Budget & Schedule' section lists budget, spent, start_date and end_date, and budget_remaining is a formula field that no edit form carries (re-measured on main c91af8ed6). The clause now scores budget and spent, and says why the formula cannot discriminate the lock. The API clauses are unchanged",
           "ref": "#24036"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-19",
+          "change": "steps[5] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.fls-mask-and-strip steps[5]; wave anchor #24579 §3): the step still told the run to author a scratch readable:false set, while fixtures.requires[2] and knownGaps[0] already record that the stock showcase_client_liaison set (examples/app-showcase/src/security/permission-sets.ts) is that grant. The step now grants the stock set to a fresh member who holds no showcase_contributor. No clause changed",
+          "ref": "#24632"
         }
       ]
     },
@@ -819,7 +831,7 @@
       "title": "Scope depth (readScope/writeScope): org-wide read with own-only write, per persona — depth widens along geometry, never bypasses",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -836,7 +848,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; create member M plus manager/executive/ops personas; as M: POST /api/v1/data/showcase_inquiry {\"subject\": \"M probe\", ...minimal valid payload}; as the manager: POST their OWN inquiry",
+        "boot showcase isolated; create member M plus manager/executive/ops personas; as M: POST /api/v1/data/showcase_inquiry {\"name\": \"M probe\", \"email\": \"m.probe@example.com\", \"message\": \"scope probe\"} (showcase_inquiry requires name, email and message and has no `subject` field — examples/app-showcase/src/data/objects/inquiry.object.ts); as the manager: POST their OWN inquiry",
         "as the manager: GET /api/v1/data/showcase_inquiry (list) — M's inquiry must appear (readScope org on a private object)",
         "as the manager: PATCH M's inquiry (foreign write, writeScope own) and PATCH their own inquiry",
         "as the executive: GET the inquiry list and M's inquiry by id; then attempt PATCH (no edit bit at all); also GET /api/v1/data/showcase_private_note list (readScope org over private notes)",
@@ -892,7 +904,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts + packages/qa/dogfood/test/showcase-scope-depth-write.dogfood.test.ts + packages/qa/dogfood/test/showcase-scope-depth-fallback.dogfood.test.ts"
+        "ref": "packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts + packages/qa/dogfood/test/showcase-scope-depth-write.dogfood.test.ts + packages/qa/dogfood/test/showcase-scope-depth-fallback.dogfood.test.ts — ⚠️ ADJACENT pins, not this item's: they drive the business-unit depth values (readScope unit / unit_and_below / own_and_reports, writeScope unit, the absent-writeScope default and the fallback profile), not the org-read / own-write asymmetry of the manager, executive and ops personas that acceptance[0]–[5] score, so no clause here is satisfied by running them — drive the clauses by hand"
       },
       "traps": [
         "wrong-persona"
@@ -909,7 +921,13 @@
           "change": "new — scope-depth read/write asymmetry matrix, per the deep-test contract",
           "ref": "claude/platform-test-checklist-ocwugl"
         },
-        { "revision": 2, "date": "2026-08-18", "change": "spelled the two companion refs as full paths instead of bare names. Both resolve, but a bare name costs the next runner a search before the pin can be consulted (#9401)", "ref": "#9386" }
+        { "revision": 2, "date": "2026-08-18", "change": "spelled the two companion refs as full paths instead of bare names. Both resolve, but a bare name costs the next runner a search before the pin can be consulted (#9401)", "ref": "#9386" },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "steps[0] and automated.ref corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24559, access-security.scope-depth-asymmetry; wave anchor #24579 §3; round 2's Tier 1 record #24598, which names this item among the refs that over-claim clause coverage). steps[0] POSTed a showcase_inquiry with `subject`; the object has no such field and requires name, email and message (examples/app-showcase/src/data/objects/inquiry.object.ts). The three dogfood pins exercise the business-unit depth axis (unit / unit_and_below / own_and_reports and the fallback profile), not the manager / executive / ops org-read and own-write asymmetry the clauses score, so automated.ref now says so and that no clause rests on them. No clause changed",
+          "ref": "#24632"
+        }
       ]
     },
     {
@@ -1037,7 +1055,7 @@
       "title": "Criteria sharing rules widen the OWD baseline: matching rows become visible to the rule's audience, non-matching stay hidden",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1068,7 +1086,7 @@
         "as a member OUTSIDE the audience: same reads",
         "read sys_record_share for the matching record; run /security/explain for the audience member + matching record",
         "manual-share the non-matching inquiry to a specific user via the record-shares route (POST /api/v1/data/showcase_inquiry/<id>/shares); that user re-reads, and a third member re-reads too. The recipient needs object-level read on the object: a share on showcase_contact to a baseline member lands 201 but the member's read answers 403 at the object gate, because the member baseline grants no showcase_contact read — so a manual share is only observable on an object the recipient can already read at object level",
-        "§A13: as admin edit the SEEDED sharing-rule row (PATCH /api/v1/data/sys_sharing_rule/<the share_new_inquiries_with_field_ops row id>, e.g. its description), restart the server on the same database, re-read the row (seed-not-clobber). The materialized share is not editable: PATCH /api/v1/data/sys_record_share/<id> answers 405 OBJECT_API_METHOD_NOT_ALLOWED (allowed get, list, aggregate, search, export)"
+        "§A13: as admin switch the DECLARED rule off at the activation door — POST /api/v1/security/_activation/sharing_rule/share_new_inquiries_with_field_ops {\"enabled\": false}; re-read the audience member's list and by-id read of the matching inquiry, the rule-sourced sys_record_share rows and the sys_metadata_activation row; restart the server on the same database and re-read; switch it back on ({\"enabled\": true}), re-read, restart once more and re-read. There is no seeded sys_sharing_rule row to edit any more: declared rules are read from the registry (ADR-0131 D2, packages/plugins/plugin-sharing/src/declared-sharing-rules.ts) and GET /api/v1/data/sys_sharing_rule answers total 0 on stock, so the activation switch is the administrator's durable artifact. The materialized share is not editable: PATCH /api/v1/data/sys_record_share/<id> answers 405 OBJECT_API_METHOD_NOT_ALLOWED (allowed get, list, aggregate, search, export)"
       ],
       "acceptance": [
         {
@@ -1096,10 +1114,10 @@
           "evidence": "the two reads"
         },
         {
-          "clause": "§A13 — an admin edit to a SEEDED sharing-rule row (sys_sharing_rule) survives a restart: the declared-rules bootstrap does not clobber it (#2909). sys_record_share refuses edits (405), so the rule row is the editable seeded artifact",
+          "clause": "§A13 — an administrator's switch on a DECLARED sharing rule survives a restart and is never undone by the boot: switched off at the activation door, share_new_inquiries_with_field_ops withdraws its grant (the audience member is denied, its rule-sourced sys_record_share row is gone, sys_metadata_activation reads active false); a cold restart on the same database leaves it off — the boot neither re-arms it nor re-materializes the grant; switched back on it restores exactly one rule-sourced share, which a second restart keeps. The declared rule is code with no stored row (ADR-0131 D2), so the ledger row IS the administrator's edit; sys_record_share refuses edits (405)",
           "oracle": "api",
-          "verify": "post-restart re-read of the sys_sharing_rule row shows the admin's edit intact",
-          "evidence": "before/after-restart reads"
+          "verify": "per stage — baseline, off, restart, on, restart — the audience member's list + by-id read of the matching inquiry, the outsider's read, the sys_record_share rows with source 'rule' for the rule (none while off, exactly one while on, the same id after the second restart), and the sys_metadata_activation row (active false/true, updated_at unchanged across each restart). ⛔ GET /api/v1/meta/sharing_rule/NAME keeps answering active: true while the ledger holds the rule off — that read is the DECLARATION, not the effective state, so it is never this clause's oracle",
+          "evidence": "the five-stage read table (member, outsider, share rows, ledger row)"
         }
       ],
       "negative": [
@@ -1127,6 +1145,12 @@
           "date": "2026-10-16",
           "change": "re-pointed on main c91af8ed6 (#23878 checklist-accuracy findings). (1) The position-audience variant is confounded on stock: the manager position binds showcase_manager, which reads showcase_contact at readScope 'org', so a manager reads all 32 contacts and explain answers decidedBy 'depth' on matching and non-matching rows alike. A knownGap records it, the variant is marked recorded-not-scored, and the widening clauses are scored on the unit_and_subordinates rule (measured: a member added to bu_west_coast reads exactly the one status='new' inquiry, rule-sourced share row). Steps 1-2 name the provisioning and the seeded probes instead of the retired red-project example. (2) Step 7 / clause 5 (§A13) said 'edit a materialized share', but sys_record_share answers 405 to PATCH; the editable seeded artifact is the sys_sharing_rule row. (3) Step 6 records that a manual-share recipient needs object-level read (a contact share to a baseline member reads 403)",
           "ref": "#24036"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "steps[6] and acceptance[4] (clause, verify, evidence) re-pointed — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.sharing-rules-widen acceptance[4]; wave anchor #24579 §3) with its oracle from round 2 (QA run #24601). §A13 asked that an admin edit to the SEEDED sys_sharing_rule row survive a restart; the seeder that copied declared rules into that table is retired (ADR-0131 D2, packages/plugins/plugin-sharing/src/declared-sharing-rules.ts) and GET /api/v1/data/sys_sharing_rule answers total 0, so there is no seeded row to edit. The administrator's durable act on a declared rule is now the activation switch (POST /api/v1/security/_activation/sharing_rule/NAME), and the clause asserts that switch across two restarts. QA run #24601 drove exactly this recipe at ba4afcc2 and passed. It measured that GET /api/v1/meta/sharing_rule/NAME keeps reading active: true while the ledger holds the rule off, so the oracle is the ledger row and the member's reads, never the metadata read. acceptance[0]–[3] are unchanged",
+          "ref": "#24632"
         }
       ]
     },
@@ -1135,7 +1159,7 @@
       "title": "Per-record manual shares grant, scope, and revoke access on a private-OWD record; rule evaluate reconciles the audience",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1204,10 +1228,10 @@
           "evidence": "the mis-scoped DELETE trace + survival read"
         },
         {
-          "clause": "rule evaluate reconciles the audience: POST /sharing/rules/share_key_account_qualified_contacts_with_managers/evaluate returns {ruleId, matchedRecords>=1, grantsCreated/grantsUpdated} and a sys_record_share row exists for the matched contact with source 'rule' and source_id = the rule's ROW ID (sys_sharing_rule.id, e.g. srule_…), NOT the rule name",
+          "clause": "rule evaluate reconciles the audience: POST /sharing/rules/share_key_account_qualified_contacts_with_managers/evaluate returns {ruleId, matchedRecords>=1, grantsCreated/grantsUpdated} and a sys_record_share row exists for the matched contact with source 'rule' and source_id = the rule's id. For this DECLARED rule that id IS its name — a declared rule is projected from the registry, not stored, and its id is its name (ADR-0131 D2) — while an organization-authored rule's id is its sys_sharing_rule row id (srule_…)",
           "oracle": "api",
-          "verify": "the SharingRuleEvaluationResult body (packages/plugins/plugin-sharing/src/sharing-rule-service.ts evaluateRule) + the materialized rule-sourced share row: assert share.source_id === the sys_sharing_rule row's id, not 'share_key_account_qualified_contacts_with_managers'. The row id is the stable FK the reconcile path relies on — purgeRuleGrants(ruleId) deletes on where {source:'rule', source_id: ruleId} with ruleId = rule.id (sharing-rule-service.ts), and sys-sharing-rule.object.ts documents 'source_id={rule.id}' — so a run asserting the NAME here would be asserting a value the implementation never writes",
-          "evidence": "evaluate response + the sys_record_share read (both the row's source_id and the sys_sharing_rule id it must equal)"
+          "verify": "the SharingRuleEvaluationResult body (packages/plugins/plugin-sharing/src/sharing-rule-service.ts evaluateRule) + the materialized rule-sourced share row: assert share.source_id === the body's ruleId, which for this rule is 'share_key_account_qualified_contacts_with_managers' (packages/plugins/plugin-sharing/src/sharing-rule-service.ts#projectDeclaredRule projects a declared rule with id = name, and that id is what its grants carry as sys_record_share.source_id). The rule id is the stable key the reconcile path relies on — revokeRuleGrants(ruleId) purges where {source:'rule', source_id: ruleId}. ⛔ Do not look for a sys_sharing_rule row for this rule: that table holds only organization-authored rules and answers total 0 on stock",
+          "evidence": "evaluate response + the sys_record_share read (the row's source_id beside the body's ruleId)"
         }
       ],
       "negative": [
@@ -1255,6 +1279,12 @@
           "date": "2026-10-16",
           "change": "source[1] re-pointed (carried reading of the #23878 wave, confirmed on main c91af8ed6): it said the record-shares family is 'registered inline, under no registrar of its own'. packages/rest/src/sharing-routes.ts exports registerSharingEndpoints, which registers GET and POST /data/:object/:id/shares and DELETE .../:shareId; the evaluate leg stays on registerSharingRuleEndpoints. Anchor and wording only: no step, fixture or oracle changed, so no re-run is owed",
           "ref": "#24036"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-19",
+          "change": "acceptance[6] (clause, verify, evidence) corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.record-share-grant-revoke acceptance[6]; wave anchor #24579 §3). The clause required source_id to be the rule's sys_sharing_rule ROW id and NOT its name; that holds only for an organization-authored rule. The rule it evaluates, share_key_account_qualified_contacts_with_managers, is DECLARED, and a declared rule is projected with id = name (sharing-rule-service.ts projectDeclaredRule, ADR-0131 D2), so its grants carry the name. The clause now asserts source_id equals the rule's id as evaluate reports it, and the verify names revokeRuleGrants, the current name of the purge it cited as purgeRuleGrants",
+          "ref": "#24632"
         }
       ]
     },
@@ -1263,7 +1293,7 @@
       "title": "The audit-log browser surfaces attributable events over sys_audit_log with correct actor/object, filters, and a before/after payload drawer",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1286,7 +1316,7 @@
         "narrow to writes and confirm the narrowing is server-side; capture the re-issued /api/v1/data/sys_audit_log request with its $filter. /system/audit-log (AuditLogPage) has an Action select in its filter bar that writes action into the request's $filter. The page's Presets row offers sys_audit_log's list views (Writes / Auth / Config / …), and its 'Open as list' link opens the sys_audit_log object list (no longer a Setup menu entry), which offers the same views and the generic Filter Records → Where → Add filter builder. Any of these is a valid server-side narrowing",
         "click an UPDATE row (e.g. PATCH a showcase_contact first) → the side drawer opens; screenshot the Before (old_value) / After (new_value) JSON panels — the update event is the shape that carries both",
         "cross-check the API twin directly: GET /api/v1/data/sys_audit_log?$filter=... for each of the three actions and compare actor/object/action to the page",
-        "attempt to forge the trail: POST and PATCH /api/v1/data/sys_audit_log — both must be refused (get+list only)"
+        "attempt to forge the trail: POST and PATCH /api/v1/data/sys_audit_log — both must be refused 405 — the declared apiMethods are get + list, and the refusal's allowed set reads [get, list, aggregate, search, export] because aggregate, search and export derive from list (packages/spec/src/data/api-derivation.ts#API_METHOD_DERIVATION) — none of them a write"
       ],
       "acceptance": [
         {
@@ -1322,7 +1352,7 @@
         {
           "clause": "the trail is append-only via the data API: POST and PATCH /api/v1/data/sys_audit_log are refused (enable.apiMethods = get + list) — an actor cannot forge or edit their own audit record",
           "oracle": "api",
-          "verify": "POST and PATCH both answer >=400 (method not permitted for the object); a follow-up list shows no forged row",
+          "verify": "POST and PATCH both answer >=400 (method not permitted for the object; a 405 lists the derived read verbs aggregate, search and export beside get and list, and an allowed set naming create or update is a FAIL); a follow-up list shows no forged row",
           "evidence": "the two write traces + the list"
         }
       ],
@@ -1351,7 +1381,13 @@
         { "revision": 3, "date": "2026-10-02", "change": "re-pointed clause 1 (and the clauses that counted its three rows) at 17.6.0's ledger read rule. 30c530e5 (#21194) serves a non-system reader, administrators included, only audit rows about records it can read, so the delete row is written but never served on the data API; the 17.6.0 release-verification run measured the admin's delete-filtered read at 0 rows while the stored row carried correct attribution. The clause now asserts the login and config_change rows served, the delete row stored and NOT served; step 6's drawer check moves to an update row, since no delete row reaches the page", "ref": "#21330" },
         { "revision": 4, "date": "2026-10-05", "change": "clauses 1, 3 and 5 and steps 5-6 re-pointed (stale after 17.6.0, #21784 VF4 + FE7). 7ebb543164 (#21296, fixes #21260, 2026-10-02) gives platform admins view_all_audit_log by default (ADMIN_FULL_ACCESS_CAPABILITIES). That exempts them from the ledger's parent-record read gate, so the admin's read serves the delete row. Revision 3 was measured on 17.6.0 and encodes only #21194. Clauses 1 and 5 use the verifier's wording: the delete row is served to a view_all_audit_log holder and withheld from a non-holder who cannot read the deleted record. FE7: revision 2's 'there is no Action dropdown' is false at the console pin, because AuditLogPage has an Action select that narrows through $filter. Clause 3 and step 5 now name it beside the object list's prebuilt views. Re-read at objectui 9dfaca6543: unchanged", "ref": "#21797" },
         { "revision": 5, "date": "2026-10-16", "change": "clause 1's non-holder arm re-pointed to the measured answer (#23878 checklist-accuracy finding, re-measured on main c91af8ed6): a fresh member is refused sys_audit_log at the object level (GET /api/v1/data/sys_audit_log and the action='delete' filter both answer 403 PERMISSION_DENIED), so the 'empty filtered list' the clause expected never appears. No stock non-admin permission set grants read on sys_audit_log, so the parent-record gate (#21194) has no live non-admin reader; the clause now names the plugin-audit visibility pins as its oracle for that gate. The clause still fails if the fresh member is served any row", "ref": "#24036" },
-        { "revision": 6, "date": "2026-10-17", "change": "step 5 and the nav source re-pointed at Setup's one audit entry (#23890): nav_audit_logs now opens this page (audit:log) and is labelled Audit Log, the sys_audit_log object list has no Setup menu entry and is reached from the page's Open as list link, and the page offers the list views as presets (objectui#12667, at the console pin 5e15928b4631). No acceptance clause changes", "ref": "#23890" }
+        { "revision": 6, "date": "2026-10-17", "change": "step 5 and the nav source re-pointed at Setup's one audit entry (#23890): nav_audit_logs now opens this page (audit:log) and is labelled Audit Log, the sys_audit_log object list has no Setup menu entry and is reached from the page's Open as list link, and the page offers the list views as presets (objectui#12667, at the console pin 5e15928b4631). No acceptance clause changes", "ref": "#23890" },
+        {
+          "revision": 7,
+          "date": "2026-10-19",
+          "change": "steps[7] and acceptance[5].verify clarified — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.audit-log-browser; wave anchor #24579 §3): the 405 body advertises allowed [get, list, aggregate, search, export], which a run reading 'get + list only' could take for a widened door. sys_audit_log still declares apiMethods ['get', 'list']; the other three are the read verbs list derives (packages/spec/src/data/api-derivation.ts). The append-only clause is unchanged",
+          "ref": "#24632"
+        }
       ]
     },
     {
@@ -2091,7 +2127,7 @@
       "title": "Editing the permission matrix and publishing flips an affected persona's live API access; revoke flips it back; assign/unassign moves access",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2107,10 +2143,10 @@
         ]
       },
       "steps": [
-        "boot showcase with the console; admin session; provision member M granted a writable set S that WITHHOLDS a verb on an object (e.g. delete:false on showcase_task)",
-        "baseline: as M, DELETE /api/v1/data/showcase_task/<id> — must be refused 403 (the withheld verb)",
+        "boot showcase with the console; admin session; provision member M granted a writable set S that WITHHOLDS a verb on an object (e.g. delete:false on showcase_task); as M create the showcase_task rows the DELETE probes below use — M's OWN rows, never seeded ids: a set silent on writeScope is owner-only (packages/plugins/plugin-security/src/permission-evaluator.ts getEffectiveScope), so a seeded task owned by someone else stays refused after the verb flips ON and confounds the verb with ownership",
+        "baseline: as M, DELETE /api/v1/data/showcase_task/<one of M's own ids> — must be refused 403 (the withheld verb)",
         "in the console Permission Matrix editor for S, flip delete ON for showcase_task; save (draft) then publish — capture PUT /api/v1/meta/permission/S and POST /api/v1/meta/permission/S/publish",
-        "as M: DELETE /api/v1/data/showcase_task/<another id> — must now be 2xx (access flipped)",
+        "as M: DELETE /api/v1/data/showcase_task/<another of M's own ids> — must now be 2xx (access flipped)",
         "flip delete back OFF in the matrix; publish; as M: DELETE again — must be refused 403",
         "field-level half: flip an FLS bit (a showcase_project field editable:false→true) in the lower matrix; publish; as M PATCH that field — the write flips accordingly",
         "assign/unassign: grant M a SECOND permission set (insert sys_user_permission_set) — M gains its verbs; remove the row — the access retracts",
@@ -2185,7 +2221,13 @@
           "ref": "claude/platform-test-checklist-ocwugl"
         },
         { "revision": 2, "date": "2026-08-18", "change": "corrected clause 1, which demanded a 2xx from POST /api/v1/meta/permission/S/publish. That route is mounted type-generically, but it answers 404 [no_draft] when no pending draft exists — and the console's permission save is a plain PUT that lands state:'active' directly, so there is nothing to promote. As written the clause was unsatisfiable on the path the item's own fixture block describes (#9453 CF-5). The clause now keys on the published set carrying the verb and records which save path was taken", "ref": "#9386" },
-        { "revision": 3, "date": "2026-09-23", "change": "re-keyed clause 2 and its verify on the refusal's code axis: the nothing-to-publish answer is now stated as HTTP 404 with code NO_DRAFT instead of quoting a bracketed lowercase opener inside the message. That opener was retired from every metadata-protocol refusal in 7a25a3ee9c (error is human language, code is the machine token), so a checker matching the old quoted spelling against a live answer recorded a false failure. Pass/fail semantics are unchanged; the producer is now cited in source", "ref": "#19705" }
+        { "revision": 3, "date": "2026-09-23", "change": "re-keyed clause 2 and its verify on the refusal's code axis: the nothing-to-publish answer is now stated as HTTP 404 with code NO_DRAFT instead of quoting a bracketed lowercase opener inside the message. That opener was retired from every metadata-protocol refusal in 7a25a3ee9c (error is human language, code is the machine token), so a checker matching the old quoted spelling against a live answer recorded a false failure. Pass/fail semantics are unchanged; the producer is now cited in source", "ref": "#19705" },
+        {
+          "revision": 4,
+          "date": "2026-10-19",
+          "change": "steps[0], [1] and [3] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.permission-matrix-edit-loop step 4; wave anchor #24579 §3): the DELETE probes named seeded task ids, but a permission set silent on writeScope is owner-only (plugin-security permission-evaluator.ts), so a seeded row owned by someone else stays refused after the delete bit flips ON. The probes now use rows M creates. No clause changed",
+          "ref": "#24632"
+        }
       ]
     },
     {
@@ -2193,7 +2235,7 @@
       "title": "A package-declared capability is served by the registry (no sys_capability row — the object is retired, ADR-0131 D3) and resolves across the grant/require three-way (ADR-0066) on the PLATFORM action path; platform names cannot be shadowed",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2227,7 +2269,7 @@
         "REGRANT leg: showcase_ops is sealed (PUT /api/v1/meta/permission/showcase_ops → 403 NOT_OVERRIDABLE), so clone it (fixtures.requires[1]) and grant the CLONE to a fresh member through a sys_user_permission_set row; invoke showcase_zoo_perm_held as that member → executes; withdraw showcase.export_data from the CLONE's systemPermissions (PUT /api/v1/meta/permission/<clone> with the read-back item minus that entry), re-invoke → refused; restore it, re-invoke → executes again",
         "invoke showcase_zoo_perm_missing (requires showcase.restricted_ops, granted to nobody) as EVERY persona incl. the OpsPermissionSet holder → refused for all; and showcase_zoo_perm_empty (requiredPermissions:[]) → executes for all, since 'declares nothing' is not 'denies everything'",
         "author a scratch package declaring a capability whose name is in PLATFORM_CAPABILITY_NAMES and BOOT it: os validate and os build both pass the declaration (the name is lexically valid), and the refusal is the registry's one-holder check at boot, which stops the process. The runtime door is closed to the same attempt: PUT /api/v1/meta/capability/<a platform name> answers 403 NOT_OVERRIDABLE (capability is a code-only type)",
-        "the capability write doors validate before anything reaches the authorization namespace (the #5961 concern): author a scratch capability with a malformed shape (e.g. scope 'galaxy') in source and run os validate — refused at parse; the runtime metadata door refuses the type outright, PUT /api/v1/meta/capability/<new name> → 403 NOT_CREATABLE (capability is allowRuntimeCreate:false and allowEnvironmentOverlay:false, packages/spec/src/kernel/metadata-plugin.zod.ts); and there is no sys_capability table to upsert into (step 1's 404)"
+        "the capability write doors validate before anything reaches the authorization namespace (the #5961 concern): author a scratch capability with a malformed shape (e.g. scope 'galaxy') in source as a RAW `capabilities: [{…}]` entry and run os validate — refused at parse with the located `capabilities.0.scope` error. ⚠️ Not through defineCapability: it parses its argument itself (packages/spec/src/security/capabilities.ts#defineCapability), so the malformed shape throws while the config loads and os validate never reaches its located message; the runtime metadata door refuses the type outright, PUT /api/v1/meta/capability/<new name> → 403 NOT_CREATABLE (capability is allowRuntimeCreate:false and allowEnvironmentOverlay:false, packages/spec/src/kernel/metadata-plugin.zod.ts); and there is no sys_capability table to upsert into (step 1's 404)"
       ],
       "acceptance": [
         {
@@ -2239,7 +2281,7 @@
         {
           "clause": "the three-way resolves by NAME on the surface that actually enforces it — the PLATFORM action path (ADR-0066 D4 actionPermissionError, reached via the dispatcher /actions domain — POST /api/v1/actions/:object/:action/:recordId on the stock dev server — or, on a host without it, the MCP run_action bridge or ql.executeAction): invoking an action that REQUIREs the capability is refused for a member whose granted sets do not carry it and executes for one that does, the refusal follows a grant WITHDRAWN from the (cloned) permission set, and execution returns when it is re-granted — grant / deny / regrant, all three legs",
           "oracle": "api",
-          "verify": "on the dispatcher /actions domain (or the recorded alternative): showcase_zoo_perm_held answers 200 for the OpsPermissionSet holder and 403 PERMISSION_DENIED for a non-granted member, the message being the actionPermissionError sentence naming the action and the missing capability; a member holding the CLONE of showcase_ops (showcase_ops itself is sealed, 403 NOT_OVERRIDABLE) gets 200, then 403 after showcase.export_data is withdrawn from the clone, then 200 again after it is restored. Cross-checks on the same surface: showcase_zoo_perm_missing (showcase.restricted_ops, granted to nobody) is refused for every persona, and showcase_zoo_perm_empty (requiredPermissions:[]) executes for every persona. This clause is NOT scored against /api/v1/data/:object/:id/actions/... — @objectstack/rest mounts no action-invoke route by design (#7680)",
+          "verify": "on the dispatcher /actions domain (or the recorded alternative): showcase_zoo_perm_held answers 200 for the OpsPermissionSet holder and 403 PERMISSION_DENIED for a non-granted member, the message being the actionPermissionError sentence naming the action and the missing capability; a member holding the CLONE of showcase_ops (showcase_ops itself is sealed, 403 NOT_OVERRIDABLE) gets 200, then 403 after showcase.export_data is withdrawn from the clone, then 200 again after it is restored. Cross-checks on the same surface: showcase_zoo_perm_missing (showcase.restricted_ops, granted to nobody) is refused for every persona, and showcase_zoo_perm_empty (requiredPermissions:[]) executes for every persona. The seeded admin is refused showcase_zoo_perm_held too (403 PERMISSION_DENIED, measured by QA run #24559) unless one of the admin's sets carries showcase.export_data: the gate reads the caller's held capabilities and only a system context skips it (packages/runtime/src/action-execution.ts#actionPermissionError) — an administrator is not exempt. This clause is NOT scored against /api/v1/data/:object/:id/actions/... — @objectstack/rest mounts no action-invoke route by design (#7680)",
           "evidence": "the invocation results for all three legs (grant → deny → regrant) plus the two cross-checks, each with the refusal text or the executed result, and a note of which platform surface was driven"
         },
         {
@@ -2291,7 +2333,13 @@
           "ref": "claude/issue-7680-package-capability-doctrine"
         },
         { "revision": 3, "date": "2026-08-18", "change": "named the specimens' object correctly: showcase_field_zoo, not `zoo`. The fixture block quoted the local TS const from predicate-matrix.action.ts (const zoo = 'showcase_field_zoo'), so an invoke keyed on `zoo` answers 'Action ... not found on object zoo' — which reads like a missing specimen rather than a wrong object name (#9453 CF-6)", "ref": "#9386" },
-        { "revision": 4, "date": "2026-10-16", "change": "re-pointed against main c91af8ed6 (#23878 checklist-accuracy findings, #23879 out_of_scope_findings). (1) sys_capability is retired (GET /api/v1/data/sys_capability → 404 OBJECT_NOT_FOUND), so the title, step 1, clause 1 and the old steps 7-8 no longer describe a sys_capability row or upsert; clause 4 now states the doors that exist: source parsed by os validate, the runtime metadata door refusing the code-only type (403 NOT_CREATABLE), and no table. (2) The dispatcher /actions domain IS mounted on the stock dev server and enforces actionPermissionError (measured: held 200 for the ops holder, 403 PERMISSION_DENIED naming the missing capability for a plain member; missing and and refused, empty executes), so step 3 and the knownGap name it as the surface; /api/v1/data/:object/:id/actions/... stays the routing 404. (3) showcase_ops is sealed (PUT → 403 NOT_OVERRIDABLE, ADR-0126), so the REGRANT leg withdraws and restores the capability on a clone made through POST /api/v1/security/permission-sets/showcase_ops/clone (label mandatory); measured 200 → 403 → 200. The clause still fails if a non-holder executes, a withdrawn grant keeps executing or a holder is refused. The build-oracle clauses re-run on a minimal scratch stack: a capability with scope 'galaxy' → os validate exit 1 \"capabilities.0.scope: Invalid value 'galaxy'. Expected one of: platform, org.\"; a capability named manage_platform_settings → os validate and os build exit 0, and os dev refused to boot with '✗ Security catalog name conflict: package \"com.qa.caps\" cannot register a name another holder already holds — capability \"manage_platform_settings\" is already held by the platform …' (step 6 now says the refusal is at boot); the runtime door answered both a platform name and the malformed body 403 (sealed / code-only type)", "ref": "#24036" }
+        { "revision": 4, "date": "2026-10-16", "change": "re-pointed against main c91af8ed6 (#23878 checklist-accuracy findings, #23879 out_of_scope_findings). (1) sys_capability is retired (GET /api/v1/data/sys_capability → 404 OBJECT_NOT_FOUND), so the title, step 1, clause 1 and the old steps 7-8 no longer describe a sys_capability row or upsert; clause 4 now states the doors that exist: source parsed by os validate, the runtime metadata door refusing the code-only type (403 NOT_CREATABLE), and no table. (2) The dispatcher /actions domain IS mounted on the stock dev server and enforces actionPermissionError (measured: held 200 for the ops holder, 403 PERMISSION_DENIED naming the missing capability for a plain member; missing and and refused, empty executes), so step 3 and the knownGap name it as the surface; /api/v1/data/:object/:id/actions/... stays the routing 404. (3) showcase_ops is sealed (PUT → 403 NOT_OVERRIDABLE, ADR-0126), so the REGRANT leg withdraws and restores the capability on a clone made through POST /api/v1/security/permission-sets/showcase_ops/clone (label mandatory); measured 200 → 403 → 200. The clause still fails if a non-holder executes, a withdrawn grant keeps executing or a holder is refused. The build-oracle clauses re-run on a minimal scratch stack: a capability with scope 'galaxy' → os validate exit 1 \"capabilities.0.scope: Invalid value 'galaxy'. Expected one of: platform, org.\"; a capability named manage_platform_settings → os validate and os build exit 0, and os dev refused to boot with '✗ Security catalog name conflict: package \"com.qa.caps\" cannot register a name another holder already holds — capability \"manage_platform_settings\" is already held by the platform …' (step 6 now says the refusal is at boot); the runtime door answered both a platform name and the malformed body 403 (sealed / code-only type)", "ref": "#24036" },
+        {
+          "revision": 5,
+          "date": "2026-10-19",
+          "change": "steps[7] and acceptance[1].verify corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24559, access-security.capability-declaration-lifecycle; wave anchor #24579 §3). The located `capabilities.0.scope` refusal appears only for a raw capabilities entry: defineCapability parses its argument (packages/spec/src/security/capabilities.ts), so a malformed shape written through it throws at config load. The item stated no expectation for the admin on showcase_zoo_perm_held. The run measured the admin refused, and actionPermissionError has no administrator exemption (only a system context skips it), so the verify now says so. The run also measured DELETE /api/v1/meta/capability/NAME answering 200 while removing nothing; no clause asserts that door, and it is left to the wave anchor as an observation, not encoded here",
+          "ref": "#24632"
+        }
       ]
     },
     {
@@ -3207,7 +3255,7 @@
       "title": "The anonymous floor answers 401 FIRST on the doors v18 added to it — /notifications (was 501), non-POST /keys (was 405), share-link management (was 501), /openapi.json and /docs, every /i18n face and the settings family — while the token faces and the public-form submit stay anonymous and the submit echoes only {id}",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3222,7 +3270,7 @@
         ],
         "knownGaps": [
           "the dispatcher `/ui` domain (also floored by 23225) is NOT mounted over HonoServer on a stock `os dev` / `os serve` — GET /api/v1/ui/... answers 404 ENDPOINT_NOT_FOUND to the admin too — so it is not driven here; it is reachable only on a dispatcher-only (hosted) kernel and is pinned by the dogfood sweep",
-          "the dispatcher mounts only POST /keys on HonoServer (packages/runtime/src/dispatcher-plugin.ts), so a non-POST /keys never reaches the domain's floor on a stock boot: the HonoServer fallback answers it 405 METHOD_NOT_ALLOWED (packages/plugins/plugin-hono-server/src/adapter.ts unmatchedResponse) — run 2026-10-16 measured exactly that; the clause stays as the 23225 contract states it, so a 405 there is a FAIL, not a re-point"
+          "CLOSED (#23909): the dispatcher now registers `/keys` for EVERY verb on HonoServer, POST alone served (packages/runtime/src/dispatcher-plugin.ts), so a non-POST /keys reaches the domain's floor and an anonymous caller is answered 401 UNAUTHENTICATED — the 18.0 sweep measured anonymous GET /api/v1/keys → 401 (QA run #24559). Before #23909 only POST /keys was registered and the HonoServer fallback answered other verbs 405 METHOD_NOT_ALLOWED (run 2026-10-16). A 405 to an anonymous non-POST /keys is now a regression of #23909 and a FAIL"
         ]
       },
       "steps": [
@@ -3280,6 +3328,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; extends access-security.anonymous-deny-surfaces (v15), which enumerates data/meta/actions/automation/batch/security/analytics only",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "fixtures.knownGaps[1] marked CLOSED — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.anonymous-floor-v18-doors; wave anchor #24579 §3): the gap said a non-POST /keys never reaches the floor on a stock boot and answers 405; since #23909 the dispatcher registers /keys for every verb (packages/runtime/src/dispatcher-plugin.ts) and the run measured anonymous GET /api/v1/keys → 401. No clause changed: acceptance[1] already demanded 401",
+          "ref": "#24632"
         }
       ]
     },
@@ -3360,7 +3414,7 @@
       "title": "/meta read gates added on v18: the authoring-trail doors (history / audit / diff / package commits) refuse a setup.access-only caller, and a list view or dashboard carrying requiredPermissions is withheld from a caller without them on EVERY alternate door",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3377,7 +3431,7 @@
       },
       "steps": [
         "as the setup.access-only member: GET /api/v1/meta/object/showcase_task/history, /audit, /diff; GET /api/v1/packages/com.example.showcase/commits",
-        "as a member without the capability: GET /api/v1/meta/view (list) and GET /api/v1/meta/view/showcase_task.qa_gated_view, plus /published, /layers, ?state=draft, /history",
+        "as a member without the capability: GET /api/v1/meta/view (list) and GET /api/v1/meta/view/showcase_task.qa_gated_view, plus /published, /layers, ?state=draft, and /history as a member who also holds studio.access (the authoring-trail gate refuses a member without it first — acceptance[2])",
         "as admin: the same reads (control); then delete the scratch view"
       ],
       "acceptance": [
@@ -3394,9 +3448,9 @@
           "evidence": "four status lines"
         },
         {
-          "clause": "the gated view is absent from the member's list and every by-name door answers 403 PERMISSION_DENIED; the admin reads it on all of them",
+          "clause": "the gated view is absent from the member's list and every by-name read door (by name, /published, /layers, ?state=draft) answers 403 PERMISSION_DENIED; on /history the audience refusal (403 PERMISSION_DENIED) is reached only by a caller the authoring-trail gate admits (studio.access or manage_metadata); a member holding neither is refused there FIRST with 403 FORBIDDEN — acceptance[1]'s gate (packages/rest/src/rest-server.ts#mayReadAuthoringTrail). The admin reads it on all of them",
           "oracle": "api",
-          "verify": "list membership + status per door, both personas",
+          "verify": "list membership + status per door, both personas. Score /history's PERMISSION_DENIED with a member who holds studio.access (or manage_metadata) but not the view's requiredPermissions; a 403 FORBIDDEN there from a member holding neither is the authoring gate answering first, not this clause's verdict",
           "evidence": "the list ids + per-door lines"
         }
       ],
@@ -3422,6 +3476,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "acceptance[2] (clause, verify) and steps[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.meta-authoring-trail-and-audience-gates; wave anchor #24579 §3). The clause said every by-name door of the gated view answers 403 PERMISSION_DENIED. /history is an authoring-trail door: it asks mayReadAuthoringTrail (studio.access or manage_metadata, packages/rest/src/rest-server.ts) before anything, so a member without either is refused 403 FORBIDDEN first — acceptance[1]'s gate — and PERMISSION_DENIED is reached only by a member the trail admits. The run saw exactly that split. The other doors and clauses are unchanged",
+          "ref": "#24632"
         }
       ]
     },
@@ -3501,10 +3561,10 @@
     },
     {
       "id": "access-security.security-catalog-one-holder-and-boot-report",
-      "title": "The security catalog has exactly one holder per name: two packages declaring one permission-set / position name refuse boot (422 NAMESPACE_CONFLICT on install-local), a body packageId that disagrees with its package is refused, `os migrate security-catalog-overlays` clears environment shadows, and boot reports grants naming undefined catalog entries",
+      "title": "The security catalog has exactly one holder per name: two packages declaring one permission-set / position name refuse boot (on install-local, 422 PLUGIN_REGISTER_FAILED naming each name and its holder), a body packageId that disagrees with its package is refused, `os migrate security-catalog-overlays` clears environment shadows, and boot reports grants naming undefined catalog entries",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3532,10 +3592,10 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "install-local of a package redeclaring a catalog name → 422 NAMESPACE_CONFLICT (or PLUGIN_REGISTER_FAILED) with conflicts[], and nothing is recorded as installed",
+          "clause": "install-local of an inline manifest (a `{ manifest }` body) whose package redeclares a catalog name → 422 PLUGIN_REGISTER_FAILED whose message names each conflicting name and its holder, and nothing is recorded as installed",
           "oracle": "api",
-          "verify": "status + code + conflicts; package list unchanged",
-          "evidence": "refusal body + the list"
+          "verify": "status + error.code + error.message: every redeclared catalog name (permission set, position or capability) appears in the message with the package, environment or built-in that already holds it; GET /api/v1/packages lists the same packages before and after. ⛔ No `conflicts[]` is expected on this door: it answers its own registered PLUGIN_REGISTER_FAILED and interpolates only the register error's message (that route's entry in packages/spec/src/api/error-code-ledger.zod.ts); the structured `conflicts` ride the thrown SecurityCatalogNameConflictError, which the boot-refusal pins in automated.ref assert",
+          "evidence": "the refusal body + the package list before and after"
         },
         {
           "clause": "a permission-set save whose body packageId disagrees with the target package → 400 VALIDATION_ERROR at packageId",
@@ -3576,6 +3636,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "acceptance[1] (clause, verify, evidence) and the title's install-local parenthetical re-pointed — an assertion defect found by the 18.0 QA sweep (QA run #24558, access-security.security-catalog-one-holder-and-boot-report acceptance[1]: FAIL, confirmed by an independent RUNNER rule 7 re-derivation; card #24567 row 2, folded from #24568). The product is right and the clause was wrong: on an inline manifest the install-local door (packages/cloud-connection/src/marketplace-install-local-plugin.ts) answers its OWN registered 422 PLUGIN_REGISTER_FAILED and interpolates only the register error's message — that route's documented contract in packages/spec/src/api/error-code-ledger.zod.ts — so it never carried NAMESPACE_CONFLICT or a `conflicts[]`, and no pin in automated.ref asserts either at this door. The run measured the refusal twice: the names and their holders inside the message, nothing installed (27 packages before and after). The clause now asserts that; a structured `conflicts[]` on this door would be a separate enhancement decision, not taken here. The other four clauses are unchanged",
+          "ref": "#24592"
         }
       ]
     },
@@ -3584,7 +3650,7 @@
       "title": "Grant-table write contract (sys_user_permission_set / sys_user_position): the retired permission_set_id column is refused, a duplicate grant is 409, an inverted validity window is 400, granted_by is stamped with the caller, and (walled) a grant to a non-member is refused",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3619,9 +3685,9 @@
           "evidence": "two refusal bodies"
         },
         {
-          "clause": "an INSERT with valid_until <= valid_from is refused as the rule's VIOLATION: 400 VALIDATION_FAILED at valid_until with constraint.rule validity_window_order, constraint.reason NOT `unevaluable`, and the rule's authored message (\"Valid Until must be later than Valid From …\") — an unevaluable-predicate refusal is a FAIL even though it also answers 400",
+          "clause": "an INSERT with valid_until <= valid_from is refused as the rule's VIOLATION: 400 VALIDATION_FAILED with fields[0] {field: valid_until, code: rule_violation} carrying the rule's authored message (\"Valid Until must be later than Valid From …\") and no `constraint.reason: 'unevaluable'` — a plain violation carries field, code and message only, so `constraint.rule` is not observable on this path; only an unevaluable predicate attaches a `constraint` (reason 'unevaluable'), and an unevaluable-predicate refusal is a FAIL even though it also answers 400",
           "oracle": "api",
-          "verify": "fields[0].constraint + message on the inverted-window insert; a valid window inserts 201 (control)",
+          "verify": "fields[0].field + fields[0].code + the message's opening on the inverted-window insert, and fields[0].constraint absent or without reason 'unevaluable' (packages/objectql/src/validation/rule-validator.ts: a true predicate returns {field, code: 'rule_violation', message}; only the unevaluable branches attach constraint {rule, reason: 'unevaluable', fault}); a valid window inserts 201 (control)",
           "evidence": "the refusal body + the control"
         },
         {
@@ -3652,6 +3718,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "acceptance[2] (clause, verify) corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.grant-table-write-contract acceptance[2]; wave anchor #24579 §3): the clause required constraint.rule validity_window_order on the refusal, which is unobservable — a plain rule violation carries field, code and message and no constraint object (packages/objectql/src/validation/rule-validator.ts); only an unevaluable predicate attaches one. The clause now asserts what the rule's verdict carries and what the item's own pin sys-user-permission-set-window-order.test.ts asserts (valid_until · rule_violation, the authored message, no unevaluable reason). The walled leg acceptance[4] is §2's and is unchanged",
+          "ref": "#24632"
         }
       ]
     },
@@ -3737,7 +3809,7 @@
       "title": "Seven deployment tables (sys_job, sys_job_run, sys_job_queue, sys_flow_dispatch, sys_migration, sys_migration_journal, sys_presence) carry no organization column on v18 and are readable only with manage_platform_settings — an org admin who is not platform admin is refused even on single",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3754,7 +3826,7 @@
       "steps": [
         "as the org admin GET /api/v1/data/sys_job and /api/v1/data/sys_migration",
         "as the platform admin repeat",
-        "as the platform admin GET /api/v1/data/sys_job?filter=[[\"organization_id\",\"=\",\"x\"]]"
+        "as the platform admin GET /api/v1/data/sys_job?filter=[[\"organization_id\",\"=\",\"x\"]] — URL-encode the filter value (e.g. curl -G --data-urlencode 'filter=[[\"organization_id\",\"=\",\"x\"]]'); sent raw, the value is mangled before it reaches the door (curl reads [ ] as a glob range)"
       ],
       "acceptance": [
         {
@@ -3781,7 +3853,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/platform-objects/src/deployment-level-no-tenant-column.test.ts + packages/plugins/plugin-security/src/authz-identity-objects-boot-refusal.test.ts"
+        "ref": "packages/platform-objects/src/deployment-level-no-tenant-column.test.ts (sys_job, sys_job_queue, sys_job_run, sys_migration, sys_migration_journal) + packages/services/service-automation/src/sys-flow-dispatch.object.test.ts (sys_flow_dispatch) + packages/services/service-realtime/src/objects/sys-presence.object.test.ts (sys_presence) + packages/plugins/plugin-security/src/authz-identity-objects-boot-refusal.test.ts"
       },
       "source": [
         "packages/platform-objects/src/audit/sys-job.object.ts",
@@ -3794,15 +3866,21 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "automated.ref and steps[2] corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24559, access-security.deployment-tables-platform-only; wave anchor #24579 §3). acceptance[0] says the SEVEN tables are pinned, but the named pin, deployment-level-no-tenant-column.test.ts, lists five — the platform-objects ones. sys_flow_dispatch and sys_presence live in service-automation and service-realtime, and each has its own object pin asserting no tenant column and requiredPermissions manage_platform_settings (sys-flow-dispatch.object.test.ts, sys-presence.object.test.ts). automated.ref now names both, so the seven are pinned, and says which tables each file holds. steps[2]'s filter must be URL-encoded. No clause changed",
+          "ref": "#24632"
         }
       ]
     },
     {
       "id": "access-security.share-link-combined-gates",
-      "title": "Share links with two gates combined: signed_in + password answers an anonymous caller 401 SIGN_IN_REQUIRED whatever password is sent, email + password answers a uniform 404 INVALID_OR_EXPIRED, and /messages answers exactly like /resolve",
+      "title": "Share links with two gates combined: signed_in + password answers an anonymous caller 401 SIGN_IN_REQUIRED whatever password is sent, email + password answers a uniform 404 INVALID_OR_EXPIRED, and /messages opens exactly where /resolve opens",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3841,9 +3919,9 @@
           "evidence": "the bodies"
         },
         {
-          "clause": "/messages answers identically to /resolve on every call",
+          "clause": "/messages is open iff /resolve is open on the same call — open meaning the call passes the link's token, audience and password gates: where /resolve refuses at a gate (401 / 404 / 410), /messages answers its one refusal, 404 NOT_FOUND; where /resolve passes, /messages answers 200 for an `ai_conversations` link and 400 UNSUPPORTED for any other object (the stock showcase has no ai_conversations object, so 400 UNSUPPORTED is the open answer there). The refusal codes differ by pinned design, so only the open/refused verdict is compared (a malformed password header is refused 400 VALIDATION_FAILED by both, before either reads the link)",
           "oracle": "api",
-          "verify": "status+code pairs",
+          "verify": "pair each /resolve answer with the /messages answer to the same call: refused → 404 NOT_FOUND, passed → 200 or 400 UNSUPPORTED; a /messages 200 or 400 UNSUPPORTED where /resolve refused is a fail",
           "evidence": "the paired lines"
         }
       ],
@@ -3852,7 +3930,7 @@
       ],
       "automated": {
         "kind": "conformance",
-        "ref": "packages/plugins/plugin-sharing/src/share-link-eligibility.test.ts + packages/plugins/plugin-sharing/src/share-link-envelope.conformance.test.ts"
+        "ref": "packages/plugins/plugin-sharing/src/share-link-eligibility.test.ts + packages/plugins/plugin-sharing/src/share-link-envelope.conformance.test.ts + packages/runtime/src/domains/share-links-messages-audience.test.ts (acceptance[3]: `/messages` opens for a caller exactly when `/resolve` opens the same link, on both mounts)"
       },
       "source": [
         "packages/plugins/plugin-sharing/src/share-link-routes.ts#registerShareLinkRoutes",
@@ -3865,6 +3943,18 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "acceptance[3] re-pointed to open/refused parity (QA run #24559 acceptance[3] fail, disposition assertion defect; parked on #24579 §1; QA run #24558 scored the same clause on that corrected intent). #24559 records the divergence as \"the pinned design (share-link-envelope.conformance.test.ts: messages for an unresolvable token → 404 NOT_FOUND; for a non-ai_conversations link → 400 UNSUPPORTED)\" and re-points the clause to \"/messages opens iff /resolve opens\". packages/plugins/plugin-sharing/src/share-link-routes.ts#registerShareLinkRoutes hands /messages the same audience inputs and answers every refusal 404 NOT_FOUND, and packages/runtime/src/domains/share-links-messages-audience.test.ts holds both mounts to one open/refused verdict per audience. The clause asked for identical status+code pairs, which the design contradicts on every refused call. The title follows; re-derived from main 5a871e4e41, where every source cited here is byte-identical to the run subject 5b14b7f3",
+          "ref": "#24622"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "automated.ref gains packages/runtime/src/domains/share-links-messages-audience.test.ts — the out-of-scope §3 note of #24622's round (wave anchor #24579 §3; QA run #24559). That file pins the parity acceptance[3] has asserted since revision 2: /messages hands resolveToken every audience input /resolve hands it, on the plugin mount and the dispatcher twin, so /messages serves exactly the callers /resolve serves. No clause changed",
+          "ref": "#24632"
         }
       ]
     }

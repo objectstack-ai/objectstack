@@ -67,6 +67,7 @@ export const zhCN: TranslationData = {
         nav_capabilities: { label: '能力' },
         nav_permission_sets: { label: '权限集' },
         nav_sharing_rules: { label: '共享规则' },
+        nav_declared_sharing_rules: { label: '已声明的共享规则' },
         nav_record_shares: { label: '记录共享' },
         // Conditionally contributed by `@objectstack/plugin-auth` (only when an
         // external IdP is wired), so `check:app-nav-i18n` cannot see it — see

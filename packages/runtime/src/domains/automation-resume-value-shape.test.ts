@@ -252,14 +252,14 @@ describe('#9416 — every currently-valid submission still succeeds, unchanged',
         });
     });
 
-    it('keeps the `variables` alias, and `inputs` still wins when both are sent', async () => {
+    it('keeps the `variables` alias', async () => {
+        // A body carrying BOTH `inputs` and `variables` used to be accepted
+        // here with `inputs` winning and `variables` silently dropped. It is
+        // refused since #24546 — pinned in
+        // `automation-resume-inputs-variables.test.ts`.
         const alias = await acceptedFor({ variables: { note: 'hi' } });
         expect(alias.status).toBe(200);
         expect(alias.spies.resume).toHaveBeenCalledWith('run_1', { variables: { note: 'hi' } });
-
-        const both = await acceptedFor({ inputs: { a: 1 }, variables: { b: 2 } });
-        expect(both.status).toBe(200);
-        expect(both.spies.resume).toHaveBeenCalledWith('run_1', { variables: { a: 1 } });
     });
 
     it.each([

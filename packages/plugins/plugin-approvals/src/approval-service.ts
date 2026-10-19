@@ -58,7 +58,9 @@ import type {
 // fields the caller had already supplied.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
-import { canServeApiOperation, isFileIdToken, referenceTargetOf } from '@objectstack/spec/data';
+import {
+  canServeApiOperation, isFileIdToken, referenceTargetOf, SINGLE_OPTION_TYPES, MULTI_OPTION_TYPES,
+} from '@objectstack/spec/data';
 import type { EnableLike, ObjectCapabilitiesParsed } from '@objectstack/spec/data';
 // [#11993] The SANCTIONED renderer for OPERATION-level refusal copy. The
 // Operation Message Catalog is the ONE seat for these sentences — its own
@@ -160,6 +162,16 @@ export interface ApprovalResumeSurface {
   resume?(runId: string, signal?: {
     output?: Record<string, unknown>;
     branchLabel?: string;
+    /**
+     * The person whose approve / reject decision this resume carries
+     * (`ResumeSignal.resumedBy`, ruling A on `FlowSchema.runAs`): the same
+     * person the verdict mirror writes as ({@link actingUserId}). The engine
+     * runs a `runAs: 'user'` flow's nodes after the decision as them,
+     * resolving their own grants, and a `runAs: 'system'` flow's with them as
+     * the attribution user of its unchanged elevation; absent when no human
+     * decided (the SLA sweep), and then the run keeps the identity it had.
+     */
+    resumedBy?: string;
     /**
      * #3801: the engine refuses a resume of an `approval` suspension unless
      * the signal carries this marker — the proof that the resume is the tail
@@ -321,14 +333,23 @@ export interface ApprovalMessagingSurface {
 
 /**
  * What an approval notification hands to the messaging service: the
- * `EmitInput` payload fields the delivered notification is built from, plus a
- * reminder's one-tap decision links.
+ * `EmitInput` payload fields the delivered notification is built from.
  *
  * `body` is the text the recipient reads under the title. Messaging builds the
  * inbox row's `body_md`, and each channel's fallback rendering, from
  * `payload.body` and no other field, so the text is declared here rather than
  * left to a free-form bag: a call site that spells it any other way does not
  * compile. Spelled `message`, it once reached every recipient as an empty body.
+ *
+ * ⛔ [#24564] No field carries a bearer credential: no ADR-0043 action link and
+ * no raw action token, in any spelling. Messaging KEEPS this payload — verbatim
+ * on the `sys_notification` event row, and snapshotted onto every
+ * `sys_notification_delivery` row it enqueues — so anything in it is in the
+ * database for as long as those rows live. ADR-0043's storage axis is that the
+ * database holds no usable link (`sys_approval_token` stores digests only),
+ * and a raw link here is a usable link at rest. The shape is closed so that a
+ * call site handing one over does not compile; {@link ApprovalService.issueActionTokens}
+ * says where a raw token may travel instead.
  */
 type ApprovalNotificationPayload = {
   /** The headline. */
@@ -337,8 +358,6 @@ type ApprovalNotificationPayload = {
   readonly body: string;
   /** Where opening it lands; `notify()` narrows the approvals inbox to the request. */
   readonly actionUrl: string;
-  /** Approve / Reject links on a reminder to a concrete approver (ADR-0043). */
-  readonly actions?: ReadonlyArray<{ readonly label: string; readonly url: string }>;
 };
 
 /** Minimum time between submitter reminders on one request. */
@@ -772,6 +791,13 @@ export interface StrandedContinuationSignal {
   decision: string;
   /** How the original door described the outcome in prose, e.g. `the reject decision`. */
   what: string;
+  /**
+   * The decider the original resume carried ({@link ApprovalResumeSurface}'s
+   * `resumedBy`), so a replay continues the nodes after the decision as the
+   * person who decided, never as the run's trigger user. Absent when the
+   * original carried none.
+   */
+  resumedBy?: string;
 }
 
 /**
@@ -1124,6 +1150,31 @@ function parseJson<T = any>(raw: unknown, fallback: T): T {
     try { return JSON.parse(raw) as T; } catch { return fallback; }
   }
   return raw as T;
+}
+
+/** [#24577] What {@link ApprovalService.mirroredStatusValue} answers when a transition writes nothing. */
+const STATUS_NOT_MIRRORED = Symbol('status-not-mirrored');
+
+/**
+ * [#24577] The values a status field declares, read as the engine's record
+ * validator reads a select's options (objectql `record-validator.ts`,
+ * `optionValues`): the option codes of an option-typed field. `undefined` when
+ * the field declares no value set — text, any type that is not an option type,
+ * an option type authored without options (free-form `tags`), a field the
+ * registry does not hold — and then every status is written as it is.
+ */
+function declaredOptionValues(def: unknown): string[] | undefined {
+  if (!def || typeof def !== 'object') return undefined;
+  const { type, options } = def as { type?: unknown; options?: unknown };
+  if (typeof type !== 'string' || (!SINGLE_OPTION_TYPES.has(type) && !MULTI_OPTION_TYPES.has(type))) return undefined;
+  if (!Array.isArray(options) || options.length === 0) return undefined;
+  return options.map((o) => (typeof o === 'object' && o !== null ? String((o as { value?: unknown }).value) : String(o)));
+}
+
+/** [#24577] A held value (one code, or a multi-value field's codes) every part of which the field declares. */
+function holdsDeclaredValues(value: unknown, declared: readonly string[]): boolean {
+  const values = Array.isArray(value) ? value : [value];
+  return values.length > 0 && values.every((v) => v != null && declared.includes(String(v)));
 }
 
 function csvSplit(raw: unknown): string[] {
@@ -3159,23 +3210,54 @@ export class ApprovalService implements IApprovalService {
    * most natural approvals automation there is, had to declare `runAs:'system'`
    * and take blanket elevation for a case where a perfectly good scoped identity
    * existed. Re-attaching the actor lets those cascades run as the deciding user
-   * with RLS enforced. Same shape the approval node already uses when it calls
-   * into this service (`approval-node.ts`).
+   * with RLS enforced.
    *
    * `actorId` is `null` for the genuinely machine-driven transitions (the SLA
    * escalation's auto-decision, the dead-run sweep). There is no human to name
    * there, and naming a sentinel would put a non-user in `updated_by` and in
-   * every downstream flow's identity. Those cascades stay user-less — a flow
-   * that wants to react to them still has to declare `runAs:'system'`, which is
-   * the honest answer rather than an oversight.
+   * every downstream flow's identity. Those cascades stay user-less, under
+   * {@link SYSTEM_CTX} — a flow that wants to react to them still has to
+   * declare `runAs:'system'`, which is the honest answer rather than an
+   * oversight.
    *
-   * Deliberately carries `userId` ONLY, not the request's org. On an
-   * ExecutionContext `tenantId` is a driver-scoping knob, not attribution
-   * (`buildDriverOptions` turns it into a tenant predicate on the update), so
-   * passing it would newly org-scope this write and silently no-op the mirror on
-   * a record whose org differs from the request's — while buying nothing: the
-   * automation engine back-fills the run's `tenantId` from the resolved user's
-   * own grants.
+   * **A named actor's write acts in the record's organisation, and carries no
+   * grants of its own (#24519, ruling 6271152775).** Its context is
+   * {@link attributedMirrorContext}: `isSystem`, the actor's `userId`, and
+   * `tenantId` = the organisation of the record being written. Every consumer
+   * that runs as the actor then resolves the actor's own request envelope in
+   * that organisation, through the one resolver the request path uses
+   * (`resolveUserAuthzGrants`):
+   *  - a `runAs:'user'` hook's pinned api is seeded with the actor's positions,
+   *    permission sets and organisation peers. Positions and permission sets a
+   *    context CARRIES are kept verbatim, so the empty arrays this write used to
+   *    carry left such a hook on the member baseline instead of the actor's own
+   *    grants;
+   *  - a record-change flow receives the actor and the organisation as its
+   *    `tenantId`, and a `runAs:'user'` run resolves the same envelope under it.
+   *    Nothing downstream supplies a missing organisation: the automation
+   *    engine's grants bridge answers a `tenantId` only when it was handed one,
+   *    and an organisation-less resolution is not the actor's request in the
+   *    record's organisation — its peers are the actor alone, and its grants
+   *    are not the ones that organisation gives them.
+   * The write itself is authorized by `isSystem` alone — the security
+   * middleware short-circuits before it reads any grant — so leaving the arrays
+   * off changes nothing about what this write may do.
+   *
+   * The organisation is the record's, for every actor: an approver drawn from
+   * another organisation's directory (ADR-0105 D9) included, which is the
+   * reading #24321 applies to a `runAs:'user'` flow's decider. On an
+   * ExecutionContext `tenantId` is also the driver's scoping knob
+   * (`buildDriverOptions`): under a walled posture it narrows this update to that
+   * organisation's rows (and organisation-less ones), under `single` it scopes
+   * nothing (ADR-0131 D11). That is why the organisation is the record's LIVE
+   * one, read at write time, and not the request's stamp: the two agree by
+   * construction (#10101 stamps the request with the subject record's
+   * organisation), except for a record re-parented while its approval was
+   * pending, which the stamp would scope this write away from.
+   *
+   * **The value written is one the field declares (#24577).** What is written
+   * is {@link mirroredStatusValue}'s answer, and `abandoned` (the request's
+   * row, on a transition that abandons it) is what that answer may restore.
    */
   private async mirrorStatusField(
     object: string,
@@ -3183,13 +3265,105 @@ export class ApprovalService implements IApprovalService {
     field: string,
     status: string,
     actorId: string | null,
+    requestOrg: string | null | undefined,
+    abandoned?: { payloadJson: unknown },
   ): Promise<void> {
     try {
-      const context = actorId ? { ...SYSTEM_CTX, userId: actorId } : SYSTEM_CTX;
-      await this.engine.update(object, { id: recordId, [field]: status }, { context });
+      const value = this.mirroredStatusValue(object, field, status, abandoned);
+      if (value === STATUS_NOT_MIRRORED) {
+        this.logger?.warn?.(
+          `[approvals] approval status '${status}' was not written to ${object}.${field}: the field's options do not `
+          + `declare it, so the field keeps its value. Declare '${status}' among the field's options to mirror this transition.`,
+          { object, record: recordId, field, value: status },
+        );
+        return;
+      }
+      const context = actorId
+        ? await this.attributedMirrorContext(object, recordId, actorId, requestOrg)
+        : SYSTEM_CTX;
+      await this.engine.update(object, { id: recordId, [field]: value }, { context });
     } catch (err: any) {
       this.logger?.warn?.(`[approvals] mirrorStatusField failed: ${err?.message ?? err}`);
     }
+  }
+
+  /**
+   * [#24577] The value a status mirror writes onto `object.field` for
+   * `status`, or {@link STATUS_NOT_MIRRORED} when it writes nothing.
+   *
+   * A field's declared options are its value set (the triage ruling on the
+   * card): the producer never writes outside them. The engine's validator does
+   * not hold that line for this write — it judges a `readonly` field's value
+   * for shape only, and the mirrored field is readonly by the spec's own advice
+   * — so a select that never declared `recalled` came to hold it, and an app
+   * whose submit gate admits only the select's own values never re-entered
+   * approval. The options are read from the registry the engine validates the
+   * same write against (`getSchema` answers `registry.getObject`).
+   *
+   *  - A field with no declared value set ({@link declaredOptionValues}) and a
+   *    status the field declares: the status, as before.
+   *  - A transition that ABANDONS the request (a recall, the dead-run sweep),
+   *    `abandoned` set: the record goes back to where it stood before it
+   *    entered approval. That is the value the field held in the request's
+   *    submit snapshot (`payload_json`, the trigger record the flow started
+   *    from) when that is a declared value or none; else what a never-submitted
+   *    record carries — the field's declared default, or empty. Whether the
+   *    record re-enters approval is then the app's own gate's decision.
+   *  - Every other transition (open, decide, send-back, the revision-limit
+   *    auto-reject): nothing. Send-back is here, not with recall, because its
+   *    run is still alive in the revise window (ADR-0044): a pre-approval value
+   *    restored there re-admits the start condition ADR-0044 tells authors to
+   *    gate on this field, and opens a parallel approval of the same record.
+   */
+  private mirroredStatusValue(
+    object: string,
+    field: string,
+    status: string,
+    abandoned: { payloadJson: unknown } | undefined,
+  ): unknown {
+    let def: { defaultValue?: unknown } | undefined;
+    try {
+      const schema = this.engine.getSchema?.(object) as { fields?: Record<string, unknown> } | undefined;
+      def = schema?.fields?.[field] as typeof def;
+    } catch { /* schema unavailable — no declared value set to hold the write to */ }
+    const declared = declaredOptionValues(def);
+    if (!declared || declared.includes(status)) return status;
+    if (!abandoned) return STATUS_NOT_MIRRORED;
+    const snapshot = parseJson<unknown>(abandoned.payloadJson, undefined);
+    if (snapshot && typeof snapshot === 'object' && Object.prototype.hasOwnProperty.call(snapshot, field)) {
+      const held = (snapshot as Record<string, unknown>)[field];
+      if (held == null) return null;
+      if (holdsDeclaredValues(held, declared)) return held;
+    }
+    return holdsDeclaredValues(def?.defaultValue, declared) ? def!.defaultValue : null;
+  }
+
+  /**
+   * The context a named actor's status mirror writes under (see
+   * {@link mirrorStatusField}): `{ isSystem: true, userId, tenantId }` and
+   * nothing else. The organisation is the subject record's live one, read
+   * through {@link recordOrgResolver} — the resolver the request row was
+   * stamped by — and the request's own organisation for an object that has
+   * none (or a record that carries none), as at the stamp. ⛔ No `positions` /
+   * `permissions`: a carried array is kept verbatim by every `runAs:'user'`
+   * consumer, so an empty one would stand in for the actor's own grants.
+   */
+  private async attributedMirrorContext(
+    object: string,
+    recordId: string,
+    actorId: string,
+    requestOrg: string | null | undefined,
+  ): Promise<ExecutionContext> {
+    const column = this.recordOrgResolver.organizationFieldFor(object);
+    let organization: string | null = null;
+    if (column) {
+      const rows = await this.engine.find(object, {
+        where: { id: recordId }, fields: ['id', column], limit: 1, context: SYSTEM_CTX,
+      });
+      organization = this.recordOrgResolver.organizationOf(object, Array.isArray(rows) ? rows[0] : undefined);
+    }
+    if (!organization && requestOrg != null && String(requestOrg) !== '') organization = String(requestOrg);
+    return { isSystem: true, userId: actorId, ...(organization ? { tenantId: organization } : {}) };
   }
 
   /**
@@ -3673,7 +3847,7 @@ export class ApprovalService implements IApprovalService {
       // first-party path.
       await this.mirrorStatusField(
         input.object, input.recordId, input.config.approvalStatusField, 'pending',
-        row.submitter_id ?? null,
+        row.submitter_id ?? null, requestOrg,
       );
     }
 
@@ -3702,8 +3876,8 @@ export class ApprovalService implements IApprovalService {
     //    `onEmptyApprovers` decides that case, not this fan-out;
     //  - not an out-of-office DELEGATE, who was already told above by
     //    `approval.ooo_substituted` — one message per approver, not two.
-    // No one-tap decision links: ADR-0043 mints those on `remind()` only, and
-    // minting bearer tokens on every opening is a decision this does not make.
+    // No one-tap decision links: a notification payload is stored, and a raw
+    // ADR-0043 token in it is a usable link at rest (`ApprovalNotificationPayload`).
     //
     // [#23556] The body names the record by its object's label and its id —
     // `Deal D_123`, never `crm_deal/D_123` — so a grouped bell entry tells its
@@ -3984,7 +4158,7 @@ export class ApprovalService implements IApprovalService {
     if (config.approvalStatusField) {
       await this.mirrorStatusField(
         raw.object_name, raw.record_id, config.approvalStatusField, finalStatus,
-        actingUserId(context),
+        actingUserId(context), org,
       );
     }
     const fresh = await this.readBackRequest(requestId, context);
@@ -4023,7 +4197,7 @@ export class ApprovalService implements IApprovalService {
    */
   private async serviceResume(
     runId: string,
-    signal: { output?: Record<string, unknown>; branchLabel?: string },
+    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string },
   ): Promise<{ runId: string; repairable: boolean; error: string } | undefined> {
     const result = await this.automation!.resume!(runId, { ...signal, [RESUME_AUTHORITY_SERVICE]: true });
     const reported = result as
@@ -4219,7 +4393,7 @@ export class ApprovalService implements IApprovalService {
     runId: string,
     requestId: string,
     what: string,
-    signal: { output?: Record<string, unknown>; branchLabel?: string },
+    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string },
     decision: string,
   ): Promise<{ resumed: boolean; resumeError?: string; resumeFailure?: ResumeFailureReport }> {
     const missing = this.missingRunCapability(runId, requestId, what, 'resume');
@@ -4279,6 +4453,7 @@ export class ApprovalService implements IApprovalService {
       if (repairable) {
         await this.journalStrandedContinuation(requestId, {
           branchLabel: signal.branchLabel, output: signal.output, decision, what,
+          ...(signal.resumedBy ? { resumedBy: signal.resumedBy } : {}),
         });
       }
       throw strandedDecisionFailure(
@@ -4321,6 +4496,12 @@ export class ApprovalService implements IApprovalService {
       const branchLabel = result.decision === 'approve'
         ? APPROVAL_BRANCH_LABELS.approve
         : APPROVAL_BRANCH_LABELS.reject;
+      // Ruling A on `FlowSchema.runAs`: the decider rides the hand-off, so the
+      // nodes after the decision run as the person who decided — the person
+      // the verdict mirror above already wrote as. The SLA sweep's context
+      // vouches for nobody, so its auto-decision names no decider and the run
+      // keeps the identity it had.
+      const decider = actingUserId(context);
       const outcome = await this.resumeRecordedOutcome(
         result.runId, requestId, `the ${result.decision} decision`,
         {
@@ -4331,6 +4512,7 @@ export class ApprovalService implements IApprovalService {
           // Reserved keys are spread LAST so no output can shadow them (the
           // whitelist already rejects them; this is defense in depth).
           output: { ...(result.outputs ?? {}), decision: result.decision, requestId },
+          ...(decider ? { resumedBy: decider } : {}),
         },
         result.decision,
       );
@@ -4464,9 +4646,11 @@ export class ApprovalService implements IApprovalService {
     }, { context: SYSTEM_CTX });
     await this.syncApproverIndex(requestId, [], org, now);
     if (config.approvalStatusField) {
+      // [#24577] A recall abandons the request: a field whose options do not
+      // declare `recalled` goes back to its value at submit.
       await this.mirrorStatusField(
         raw.object_name, raw.record_id, config.approvalStatusField, 'recalled',
-        actingUserId(context),
+        actingUserId(context), org, { payloadJson: raw.payload_json },
       );
     }
 
@@ -4805,7 +4989,7 @@ export class ApprovalService implements IApprovalService {
       if (config.approvalStatusField) {
         await this.mirrorStatusField(
           raw.object_name, raw.record_id, config.approvalStatusField, 'rejected',
-          actingUserId(context),
+          actingUserId(context), org,
         );
       }
       let resumed = false;
@@ -4847,7 +5031,7 @@ export class ApprovalService implements IApprovalService {
     if (config.approvalStatusField) {
       await this.mirrorStatusField(
         raw.object_name, raw.record_id, config.approvalStatusField, 'returned',
-        actingUserId(context),
+        actingUserId(context), org,
       );
     }
 
@@ -5179,39 +5363,37 @@ export class ApprovalService implements IApprovalService {
       actor_id: recordedActor(context), comment: input.comment ?? null, created_at: nowIso,
     }), { context: SYSTEM_CTX });
 
-    // Per-approver fan-out: concrete identities (user ids / emails) each get
-    // their OWN one-tap approve/reject links (ADR-0043); `position:*`-style
-    // literals can't carry a personal token and fall back to a plain nudge.
+    // Per-approver fan-out, the opening's shape (`approval.requested`): each
+    // concrete identity (a user id / an email) gets its own reminder;
+    // `position:*`-style literals go to the shared nudge below, which
+    // `notify()` drops — a slot address names no one.
     // [#23978] One name for every recipient, the form `approval.requested` uses.
+    //
+    // ⛔ [#24564] No one-tap decision link (ADR-0043) rides a reminder.
+    // Messaging stores the payload it is handed (`ApprovalNotificationPayload`),
+    // so a raw token there is a usable link in the database — the one thing
+    // ADR-0043's storage axis rules out. Nor would a link here reach the
+    // approver: a reminder names no channel, messaging's default materializes
+    // it in the in-app inbox, and the inbox row carries the title, the body and
+    // the deep link below, never links. The deep link is the approver's way in.
     const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
     let notified = 0;
     const concrete = pending.filter(a => a && !a.includes(':'));
     const literals = pending.filter(a => a && a.includes(':'));
     for (const approver of concrete) {
-      try {
-        const tokens = await this.issueActionTokens(requestId, approver);
-        notified += await this.notify({
-          topic: 'approval.reminder',
-          organizationId: raw.organization_id,
-          audience: [approver],
-          actorContext: context,
-          source: { object: 'sys_approval_request', id: requestId },
-          dedupKey: `approval-remind-${requestId}-${nowIso}-${approver}`,
-          payload: {
-            title: 'Approval reminder',
-            body: `A decision on ${subject} is still waiting on you.`,
-            actionUrl: '/system/approvals',
-            actions: [
-              { label: 'Approve', url: this.actionLinkUrl(tokens.approve) },
-              { label: 'Reject', url: this.actionLinkUrl(tokens.reject) },
-            ],
-          },
-        });
-      } catch (err: any) {
-        this.logger?.warn?.('[approvals] reminder with action links failed', {
-          request: requestId, approver, error: err?.message ?? String(err),
-        });
-      }
+      notified += await this.notify({
+        topic: 'approval.reminder',
+        organizationId: raw.organization_id,
+        audience: [approver],
+        actorContext: context,
+        source: { object: 'sys_approval_request', id: requestId },
+        dedupKey: `approval-remind-${requestId}-${nowIso}-${approver}`,
+        payload: {
+          title: 'Approval reminder',
+          body: `A decision on ${subject} is still waiting on you.`,
+          actionUrl: '/system/approvals',
+        },
+      });
     }
     if (literals.length) {
       notified += await this.notify({
@@ -5244,6 +5426,13 @@ export class ApprovalService implements IApprovalService {
    * Issue one-tap approve/reject tokens for one approver on one pending
    * request. Raw tokens are returned ONCE; only SHA-256 hashes are stored
    * (`sys_approval_token`), so a DB leak yields no usable links.
+   *
+   * ⛔ [#24564] That guarantee holds only as far as the CALLER keeps it: a raw
+   * token — or an {@link actionLinkUrl} built from one — is never written to a
+   * persisted row. Not a notification payload (messaging stores those, see
+   * `ApprovalNotificationPayload`), not an audit row, not a log line. It may
+   * travel only in a message that is sent and not kept. No notification this
+   * service sends carries one, so no first-party path calls this today.
    */
   async issueActionTokens(
     requestId: string,
@@ -5398,15 +5587,15 @@ export class ApprovalService implements IApprovalService {
    * vouch for on the decision's context — or `null` when no person can be
    * named without guessing.
    *
-   * Tokens are minted for concrete slots only (`remind`'s fan-out), so the
-   * slot is a user id or an email:
+   * A token binds the slot `issueActionTokens` minted it for, normally a
+   * concrete one — a user id or an email:
    *
    *   - a user id IS the person;
    *   - an email names the ONE account carrying exactly that email — the same
    *     proof `resolveActor` takes for a named email, and the recipient
    *     resolver's own rule for delivering to it. No account, or more than one,
    *     names nobody;
-   *   - a `type:value` literal names no person (no first-party path mints one).
+   *   - a `type:value` literal names no person.
    *
    * Before this the slot itself went on the context, so an email-bound link
    * recorded the email as the acting user — on the action row and in the
@@ -6410,7 +6599,12 @@ export class ApprovalService implements IApprovalService {
     // so a continuation that strands AGAIN is repairable exactly like the first.
     const outcome = await this.resumeRecordedOutcome(
       runId, requestId, signal.what,
-      { branchLabel: signal.branchLabel, output: signal.output },
+      {
+        branchLabel: signal.branchLabel, output: signal.output,
+        // The journalled decider (ruling A): the replayed nodes after the
+        // decision run as the person who decided, not as the run's trigger.
+        ...(typeof signal.resumedBy === 'string' && signal.resumedBy ? { resumedBy: signal.resumedBy } : {}),
+      },
       signal.decision,
     );
 
@@ -6509,8 +6703,11 @@ export class ApprovalService implements IApprovalService {
     if (config.approvalStatusField) {
       // No human did this — a sweep did. Left user-less on purpose (#3783): a
       // flow that wants to react to a dead-run release declares runAs:'system'.
+      // [#24577] It abandons the request, as a recall does: a field whose
+      // options do not declare `recalled` goes back to its value at submit.
       await this.mirrorStatusField(
-        raw.object_name, raw.record_id, config.approvalStatusField, 'recalled', null,
+        raw.object_name, raw.record_id, config.approvalStatusField, 'recalled', null, org,
+        { payloadJson: raw.payload_json },
       );
     }
 

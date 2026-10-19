@@ -63,7 +63,7 @@ describe('INVARIANT 1 — no spelling that worked before may stop working', () =
     }
   });
 
-  it('carries the five plugin-kind spellings that no registry derivation could produce', () => {
+  it('carries the four plugin-kind spellings that no registry derivation could produce', () => {
     // Named explicitly because losing them is the specific regression the
     // union-vs-pure-derivation choice was made to avoid, and a reader needs to
     // see the population rather than infer it.
@@ -71,9 +71,10 @@ describe('INVARIANT 1 — no spelling that worked before may stop working', () =
     const pluginOnly = Object.entries(PLURAL_TO_SINGULAR).filter(([, s]) => !registryTypes.has(s));
     // `themes` left this list at commit 35ad101bc (ADR-0049 — the carrier retired, so
     // `/meta/theme` now earns `unrecognisedMetaTypeRefusal`'s verdict; pinned
-    // in the #8421 block at the bottom of this file).
+    // in the #8421 block at the bottom of this file). `sharingRules` left it
+    // when ADR-0131 D6 gave `sharing_rule` a code-only registry entry.
     expect(pluginOnly.map(([p]) => p).sort()).toEqual(
-      ['analyticsCubes', 'connectors', 'ragPipelines', 'sharingRules', 'webhooks'],
+      ['analyticsCubes', 'connectors', 'ragPipelines', 'webhooks'],
     );
     for (const [plural, singular] of pluginOnly) {
       expect(canonicalMetaUrlType(plural)).toBe(singular);
@@ -224,8 +225,8 @@ describe('the second verdict: not a metadata type AT ALL', () => {
 
   it('accepts every manifest spelling AND the singular each one folds to', () => {
     // The direction that matters most, and the one a registry-quantified
-    // refusal would get wrong: five of these singulars — `webhook`,
-    // `connector`, `sharing_rule`, `analytics_cube`, `rag_pipeline` — are
+    // refusal would get wrong: four of these singulars — `webhook`,
+    // `connector`, `analytics_cube`, `rag_pipeline` — are
     // PLUGIN kinds with no static registry entry at all. Refusing them would
     // break `PUT /meta/webhook/stripe`, the exact operation the plugin path
     // exists to serve, which is the failure #8421's measurement disqualified
@@ -241,14 +242,25 @@ describe('the second verdict: not a metadata type AT ALL', () => {
     }
   });
 
-  it('carries the five plugin kinds by NAME, since quantification hides them', () => {
+  it('carries the four plugin kinds by NAME, since quantification hides them', () => {
     const declared = new Set<string>(DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type));
     for (const kind of [
-      'analytics_cube', 'connector', 'rag_pipeline', 'sharing_rule', 'webhook',
+      'analytics_cube', 'connector', 'rag_pipeline', 'webhook',
     ]) {
       expect(declared.has(kind), `${kind} must NOT be in the static registry`).toBe(false);
       expect(unrecognisedMetaTypeRefusal(kind), `${kind} must stay accepted anyway`).toBeNull();
     }
+  });
+
+  it('`sharing_rule` left the plugin kinds for the registry — still a spelling the contract accepts', () => {
+    // [ADR-0131 D6] Regime C gave it a code-only registry entry, so the WRITE
+    // is now refused by that declaration (`NOT_CREATABLE`), never by this
+    // verdict: the spelling stays part of the contract.
+    const entry = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'sharing_rule');
+    expect(entry, 'sharing_rule is a declared type').toBeDefined();
+    expect({ create: entry?.allowRuntimeCreate, overlay: entry?.allowEnvironmentOverlay })
+      .toEqual({ create: false, overlay: false });
+    expect(unrecognisedMetaTypeRefusal('sharing_rule')).toBeNull();
   });
 
   it('`theme` left the contract with its carrier — refused by name', () => {

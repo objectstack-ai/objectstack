@@ -1202,7 +1202,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 673 since #23891: the permission-set form's `managedBy` select left
       // with its key (retired — nothing read the authored provenance), taking
       // its label — authored in all three locales — out of the catalog.
-      expect(translated.length, `${locale} positive control`).toBe(673);
+      // 674 since ADR-0131 D6: `sharing_rule` joined the registry, so the catalog
+      // gains its type-level display pair — authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(674);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

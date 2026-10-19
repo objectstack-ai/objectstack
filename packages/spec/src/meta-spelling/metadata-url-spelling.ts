@@ -257,15 +257,16 @@ export function metaUrlSpellingRefusal(
  * {@link META_URL_TO_SINGULAR} rather than its keys.
  *
  * Strictly larger than `DECLARED_META_TYPES`, and that difference is the whole
- * reason this set exists: limb 1 carries five kinds that NO registry derivation
- * could produce — `webhook`, `connector`, `sharing_rule`, `analytics_cube`,
- * `rag_pipeline` — which are legal, addressable metadata kinds with no static
- * registry entry. A refusal quantified over the registry alone would refuse
- * all five, i.e. break `PUT /meta/webhook/stripe`, which is the exact
- * operation the plugin path exists to serve. (`theme` was the sixth until
- * commit 35ad101bc retired its carrier; dropping the `PLURAL_TO_SINGULAR` row is what
- * moved `/meta/theme` from this set to `unrecognisedMetaTypeRefusal`'s
- * verdict.)
+ * reason this set exists: limb 1 carries four kinds that NO registry derivation
+ * could produce — `webhook`, `connector`, `analytics_cube`, `rag_pipeline` —
+ * which are legal, addressable metadata kinds with no static registry entry. A
+ * refusal quantified over the registry alone would refuse all four, i.e. break
+ * `PUT /meta/webhook/stripe`, which is the exact operation the plugin path
+ * exists to serve. (`theme` was the sixth until commit 35ad101bc retired its
+ * carrier; dropping the `PLURAL_TO_SINGULAR` row is what moved `/meta/theme`
+ * from this set to `unrecognisedMetaTypeRefusal`'s verdict. `sharing_rule` was
+ * the fifth until ADR-0131 D6 gave it a code-only registry entry: it is a
+ * declared type now, and its write is refused by that declaration.)
  *
  * Module-internal (#8424), for the same reason `DECLARED_META_TYPES` is: it
  * LOOKS like a live registry of registered types and is not one.

@@ -130,6 +130,9 @@ describe('Storage REST Routes', () => {
       const presignRes = createMockRes();
       await presignHandler(presignReq, presignRes);
       const fileId = presignRes._json.data.fileId;
+      // The backend holds the declared 5 bytes, so the commit is accepted:
+      // one that does not is refused 409 and stays pending (#24548).
+      await adapter.upload(`user/${fileId}.txt`, Buffer.from('hello'));
 
       // Now complete it
       const completeHandler = httpServer._getHandler('POST', '/api/v1/storage/upload/complete')!;

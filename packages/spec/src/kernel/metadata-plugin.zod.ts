@@ -179,6 +179,15 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   // deliberately NOT admitted here: they have no `PLURAL_TO_SINGULAR` mapping,
   // no declaration schema and no read-back seam — see #5961's ruling.
   'capability',  // Package-declared authorization capabilities (CapabilityDeclarationSchema, ADR-0066 D1)
+  // `sharing_rule` was a URL-map-only kind with no registry entry, so the two
+  // `/meta` doors read its absence as "runtime-creatable": `/meta/types`
+  // advertised `allowRuntimeCreate: true` and `PUT /meta/sharing_rule/:name`
+  // stored an environment-wide item the sharing service then enforced — a third
+  // authoring door beside the organization's `sys_sharing_rule` rows and the
+  // package's declaration, past both the same-name guard and the organization
+  // wall. Regime C (ADR-0131 D6) has two sources and only two; the registry
+  // entry declares the type code-only so both doors read one sealed answer.
+  'sharing_rule', // Package-declared sharing rules (SharingRuleSchema, ADR-0131 D6 regime C)
 
   // AI Protocol
   'agent',       // AI agent definitions (AgentSchema)
@@ -1222,6 +1231,27 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // DEFINITION side of ADR-0066 D1: grants live on permission sets,
   // requirements on resources.
   { type: 'capability', label: 'Capability', description: 'A permission a package defines; you grant it through permission sets', filePatterns: ['**/*.capability.ts', '**/*.capability.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 12, domain: 'security' },
+  // [ADR-0131 D6, regime C] Declared sharing rules.
+  //
+  // ⛔ CODE-ONLY, the `capability` pair, for a regime-C reason: a sharing rule
+  // has exactly two sources — a package declares it (the stack's `sharingRules`,
+  // served from the registry, switched off through the activation ledger) and an
+  // organization authors its own (`sys_sharing_rule`, `POST /api/v1/sharing/rules`,
+  // where the same-name guard and the organization wall hold). A runtime
+  // `sys_metadata` item is neither, so `saveMetaItem` refuses
+  // `PUT /api/v1/meta/sharing_rule/:name` with 403 `NOT_CREATABLE` (a new name)
+  // or `NOT_OVERRIDABLE` (a declared one) on every kernel, and `/meta/types`
+  // advertises `allowRuntimeCreate: false`. The refusal names the two sanctioned
+  // paths rather than `filePatterns[0]` (`CODE_ONLY_TYPE_REMEDY` in
+  // metadata-protocol).
+  //
+  // The declaration channel is untouched: artifact ingest maps the stack's
+  // `sharingRules` onto items of this type through `registerApp`, never through
+  // `saveMetaItem`. `filePatterns` follows the `*.TYPE.ts` convention so the
+  // CLI's file-name derivation has a spelling; nothing this repo boots reaches
+  // the glob. `supportsOverlay: false` — a declared rule is customized by a
+  // clone, never by an overlay of it.
+  { type: 'sharing_rule', label: 'Sharing Rule', description: 'A rule a package declares to share records; organizations author their own in Setup', filePatterns: ['**/*.sharing-rule.ts', '**/*.sharing-rule.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 16, domain: 'security' },
 
   // AI Protocol
   // `agent`: executionPinned — long-running conversations must stick to the

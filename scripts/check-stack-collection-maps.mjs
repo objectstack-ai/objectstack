@@ -778,7 +778,8 @@ const SITES = [
     waivers: [
       {
         direction: 'missing',
-        keys: ['datasourceMapping', 'translations', 'data', 'sharingRules', 'webhooks'],
+        // `sharingRules` left with ADR-0131 D6: `sharing_rule` is a registry kind, covered by KIND_COVERAGE.
+        keys: ['datasourceMapping', 'translations', 'data', 'webhooks'],
         reason:
           'NOT DEMONSTRATED, and visible for the first time. This manifest tracked 3 of the non-kind '
           + 'collections and — unlike its ratcheted sibling `KIND_COVERAGE` — was answerable to nothing '
