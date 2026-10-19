@@ -2334,7 +2334,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       packageId: {
         label: "所属パッケージ ID",
-        helpText: "このセットを同梱しているパッケージです。別のパッケージを指す値は拒否されます。この環境で作成したセットでは空のままにします。"
+        helpText: "このセットを同梱しているパッケージです。別のパッケージを指す値は拒否されます。このシステムで作成したセットでは空のままにします。"
       },
       systemPermissions: {
         label: "システム権限",

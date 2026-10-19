@@ -249,7 +249,7 @@ console.log('Current user:', session.data.user);
 ### First-run bootstrap status
 
 `GET /api/v1/auth/bootstrap-status` answers one question — is the admission gate's
-bootstrap window open, i.e. does this environment have no **human** user yet? Service
+bootstrap window open, i.e. does this system have no **human** user yet? Service
 rows (such as the legacy `usr_system` row) do not count.
 
 ```typescript
@@ -310,7 +310,7 @@ const response = await fetch('http://localhost:3000/api/v1/auth/reset-password',
 signed-in user who has no credential account yet — the account was onboarded
 through SSO, through the cloud OAuth provider, or imported with
 `passwordPolicy: 'none'`. It gives that user an email/password way in to this
-environment without the SSO round-trip.
+system without the SSO round-trip.
 
 ```typescript
 const response = await fetch('http://localhost:3000/api/v1/auth/set-initial-password', {
@@ -1122,7 +1122,7 @@ All endpoints are available under `/api/v1/auth/*`:
 #### Session
 
 - `GET /api/v1/auth/get-session` - Get current user session
-- `GET /api/v1/auth/bootstrap-status` - Public, unauthenticated first-run probe: `{ "hasOwner": boolean }`, telling a client whether the admission gate's bootstrap window is still open — i.e. whether this environment has no human user yet ([details](#first-run-bootstrap-status))
+- `GET /api/v1/auth/bootstrap-status` - Public, unauthenticated first-run probe: `{ "hasOwner": boolean }`, telling a client whether the admission gate's bootstrap window is still open — i.e. whether this system has no human user yet ([details](#first-run-bootstrap-status))
 
 #### Password Management
 
