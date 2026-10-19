@@ -5119,13 +5119,20 @@ describe('status mirror identity (#3783)', () => {
     expect(mirrorContext()).toMatchObject({ isSystem: true });
   });
 
-  it('carries the actor WITHOUT org-scoping the write', async () => {
-    // `tenantId` on an ExecutionContext is a driver-scoping knob, not
-    // attribution: ObjectQL turns it into a tenant predicate on the update. The
-    // submitter's org (`t1` on CTX) must therefore not ride along, or the mirror
-    // would silently no-op on a record whose org differs from the request's.
-    await open();
-    expect(mirrorContext()).not.toHaveProperty('tenantId');
-    expect(mirrorContext()).not.toHaveProperty('organizationId');
+  it('names the organisation it acts in, and carries no grants of its own (#24519)', async () => {
+    // Ruling 6271152775 on #24519 reverses what this pin used to assert: a
+    // named actor's mirror names its organisation through `tenantId`, so a
+    // `runAs:'user'` consumer resolves the actor's own request envelope in
+    // it. The organisation is the subject record's, read live; this fake
+    // engine exposes no schema, so the object has none of its own and the
+    // request's organisation stands in (`t1`, from the opening context), as
+    // it does for the request row's stamp. No `positions` / `permissions`
+    // ride along — a consumer would keep them verbatim — and no
+    // `organizationId`, which is not an envelope field. The record-organisation
+    // read and the end-to-end envelope are pinned in
+    // `status-mirror-envelope.integration.test.ts`.
+    const req = await open();
+    expect(req.organization_id).toBe('t1');
+    expect(mirrorContext()).toEqual({ isSystem: true, userId: 'u1', tenantId: 't1' });
   });
 });
