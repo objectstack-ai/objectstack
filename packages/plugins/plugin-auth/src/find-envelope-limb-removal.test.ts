@@ -440,7 +440,8 @@ describe('#15597 — the blocks driven through their real production entry point
  * the grant's id from, and commit 9e9f03abe made it refuse a malformed row
  * rather than drop it (B4 was that row read). [ADR-0131 D4] The grant now
  * names its set and reads no `sys_permission_set` row at all, so there is no
- * candidate row to drop, malformed or otherwise — pinned below.
+ * candidate row to drop, malformed or otherwise — pinned below. The grant is
+ * owned by the membership it settles with (D3), so the case binds one first.
  */
 describe('[ADR-0131 D4] settleSelfRegistrationGrant names the set and reads no sys_permission_set row', () => {
   const USER = { id: 'usr_new', name: 'New Person', email: 'new@corp.example' };
@@ -459,6 +460,9 @@ describe('[ADR-0131 D4] settleSelfRegistrationGrant names the set and reads no s
       logger: { error: (m: string) => lines.push(String(m)), warn: (m: string) => lines.push(String(m)), info: () => {} },
     } as never);
     (manager as never as { stageSelfRegistrationGrant: Function }).stageSelfRegistrationGrant(USER.email, 'portal_user');
+    // The `user.create.after` order: the reconciler binds the Default
+    // Organization, then the grant settles with that membership (ADR-0131 D3).
+    await (manager as never as { settleMembership: Function }).settleMembership(USER.id);
     await (manager as never as { settleSelfRegistrationGrant: Function }).settleSelfRegistrationGrant(USER);
 
     const rows = (await engine.find('sys_user_permission_set', { limit: 100 }, SYSTEM)) as Array<Record<string, unknown>>;

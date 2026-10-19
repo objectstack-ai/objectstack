@@ -2,6 +2,8 @@
 '@objectstack/service-print': patch
 ---
 
+**Shipped in 18.0.0-next.3**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 Clause-②: no
 
 fix(service-print): the local placement binds its browser server's control socket to `127.0.0.1` itself, instead of relying on `playwright-core`'s default host

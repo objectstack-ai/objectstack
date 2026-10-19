@@ -34,12 +34,21 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'action'` | ✅ |  |
 | **actionDef** | `{ actionName: string; params?: Record<string, any> }` | ✅ | Action definition to execute when clicked |
+
+### Nested Shape: `ActionNavItem.dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 ### Nested Shape: `ActionNavItem.actionDef`
 
@@ -107,7 +116,8 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -130,7 +140,8 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -147,7 +158,8 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -165,7 +177,8 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -183,7 +196,8 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -200,7 +214,8 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -217,7 +232,8 @@ const result = ActionNavItemSchema.parse(data);
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -237,7 +253,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -263,7 +280,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -354,13 +372,22 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'component'` | ✅ |  |
 | **componentRef** | `string` | ✅ | Component registry key (e.g. "metadata:directory") |
 | **params** | `Record<string, any>` | optional | Props passed to the component |
+
+### Nested Shape: `ComponentNavItem.dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 
 ---
@@ -377,12 +404,21 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'dashboard'` | ✅ |  |
 | **dashboardName** | `string` | ✅ | Target dashboard name |
+
+### Nested Shape: `DashboardNavItem.dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 
 ---
@@ -401,13 +437,22 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'doc'` | ✅ |  |
 | **book** | `string` | optional | Book to open (a declared `book` name, or the package id for the package's implicit book). Alone: opens the book at its first readable page with the book sidebar; membership is derived by rule, so docs added later appear under this entry with no navigation edit. With `doc`: that page in this book's context. At least one of `book` / `doc` is required. |
 | **doc** | `string` | optional | Doc to open (the doc name = its source filename stem, lowercase snake_case). Alone: its book context is the doc's own book, else the package's implicit book. At least one of `book` / `doc` is required. |
+
+### Nested Shape: `DocNavItem.dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 
 ---
@@ -424,12 +469,21 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'group'` | ✅ |  |
 | **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
+
+### Nested Shape: `GroupNavItem.dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 
 ---
@@ -456,7 +510,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -479,7 +534,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -496,7 +552,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -514,7 +571,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -532,7 +590,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -549,7 +608,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -566,7 +626,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -586,7 +647,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -612,7 +674,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -646,7 +709,8 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -669,7 +733,8 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -686,7 +751,8 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -704,7 +770,8 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -722,7 +789,8 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -739,7 +807,8 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -756,7 +825,8 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -776,7 +846,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -802,7 +873,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -833,7 +905,8 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -845,6 +918,14 @@ This schema accepts one of the following structures:
 | **filters** | `Record<string, string>` | optional | URL filter conditions — targets the /:objectName/data bare surface via filter[`<field>`]=`<value>` params instead of a saved view. Values support template vars `{current_user_id}`, `{current_org_id}`. Mutually exclusive with recordId/viewName. |
 | **runAction** | `string` | optional | Auto-run this declared action once on arrival at the object's list surface (deep-link "navigate = run action"). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId. |
 | **children** | `[NavigationItem](#navigationitem)[]` | optional | Child navigation items (e.g. specific views) |
+
+### Nested Shape: `NavigationItem[type='object'].dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 ---
 
@@ -862,12 +943,21 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'dashboard'` | ✅ |  |
 | **dashboardName** | `string` | ✅ | Target dashboard name |
+
+### Nested Shape: `NavigationItem[type='dashboard'].dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 ---
 
@@ -885,13 +975,22 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'page'` | ✅ |  |
 | **pageName** | `string` | ✅ | Target custom page component name |
 | **params** | `Record<string, any>` | optional | Parameters passed to the page context |
+
+### Nested Shape: `NavigationItem[type='page'].dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 ---
 
@@ -909,13 +1008,22 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'url'` | ✅ |  |
 | **url** | `string` | ✅ | Target external URL |
 | **target** | `Enum<'_self' \| '_blank'>` | optional (default: `"_self"`) | Link target window |
+
+### Nested Shape: `NavigationItem[type='url'].dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 ---
 
@@ -933,12 +1041,21 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'report'` | ✅ |  |
 | **reportName** | `string` | ✅ | Target report name |
+
+### Nested Shape: `NavigationItem[type='report'].dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 ---
 
@@ -956,12 +1073,21 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'action'` | ✅ |  |
 | **actionDef** | `{ actionName: string; params?: Record<string, any> }` | ✅ | Action definition to execute when clicked |
+
+### Nested Shape: `NavigationItem[type='action'].dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 ### Nested Shape: `NavigationItem[type='action'].actionDef`
 
@@ -986,13 +1112,22 @@ This schema accepts one of the following structures:
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'component'` | ✅ |  |
 | **componentRef** | `string` | ✅ | Component registry key (e.g. "metadata:directory") |
 | **params** | `Record<string, any>` | optional | Props passed to the component |
+
+### Nested Shape: `NavigationItem[type='component'].dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 ---
 
@@ -1012,13 +1147,22 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'doc'` | ✅ |  |
 | **book** | `string` | optional | Book to open (a declared `book` name, or the package id for the package's implicit book). Alone: opens the book at its first readable page with the book sidebar; membership is derived by rule, so docs added later appear under this entry with no navigation edit. With `doc`: that page in this book's context. At least one of `book` / `doc` is required. |
 | **doc** | `string` | optional | Doc to open (the doc name = its source filename stem, lowercase snake_case). Alone: its book context is the doc's own book, else the package's implicit book. At least one of `book` / `doc` is required. |
+
+### Nested Shape: `NavigationItem[type='doc'].dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 ---
 
@@ -1050,13 +1194,22 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'group'` | ✅ |  |
 | **expanded** | `boolean` | optional (default: `false`) | Default expansion state in sidebar |
 | **children** | `[NavigationItem](#navigationitem)[]` | ✅ | Child navigation items |
+
+### Nested Shape: `NavigationItem[type='group'].dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 ---
 
@@ -1075,7 +1228,8 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
@@ -1086,6 +1240,14 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **recordMode** | `Enum<'view' \| 'edit'>` | optional | Open the record in view (default) or edit mode. Only meaningful when `recordId` is set. |
 | **filters** | `Record<string, string>` | optional | URL filter conditions — targets the /:objectName/data bare surface via filter[`<field>`]=`<value>` params instead of a saved view. Values support template vars `{current_user_id}`, `{current_org_id}`. Mutually exclusive with recordId/viewName. |
 | **runAction** | `string` | optional | Auto-run this declared action once on arrival at the object's list surface (deep-link "navigate = run action"). Must name an action defined in the stack; validated by defineStack and lint. Not combinable with recordId. |
+
+### Nested Shape: `ObjectNavItem.dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 
 ---
@@ -1102,13 +1264,22 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'page'` | ✅ |  |
 | **pageName** | `string` | ✅ | Target custom page component name |
 | **params** | `Record<string, any>` | optional | Parameters passed to the page context |
+
+### Nested Shape: `PageNavItem.dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 
 ---
@@ -1125,12 +1296,21 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'report'` | ✅ |  |
 | **reportName** | `string` | ✅ | Target report name |
+
+### Nested Shape: `ReportNavItem.dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 
 ---
@@ -1147,13 +1327,22 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
 | **badgeVariant** | `Enum<'default' \| 'secondary' \| 'destructive' \| 'outline'>` | optional | Visual variant of the nav badge. Declared to match the objectui NavigationRenderer read (inverse-drift fix, liveness audit /). |
-| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions` |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL). e.g. P`'org_admin' in current_user.positions`. An entry that declares `dataSource` reads that binding's selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read. |
+| **dataSource** | `{ provider: 'api'; read: object; path?: string }` | optional | [PLANNED — not yet rendered] One API data source for this navigation entry, the page element's API binding by reference: `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint with the console's signed-in fetch and binds the value `path` selects, which this entry's `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element's binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this item |
 | **requiresObject** | `string` | optional | Hide/disable this entry unless the named object is registered in the runtime |
 | **requiresService** | `string` | optional | Hide/disable this entry unless the named kernel service is registered |
 | **type** | `'url'` | ✅ |  |
 | **url** | `string` | ✅ | Target external URL |
 | **target** | `Enum<'_self' \| '_blank'>` | optional (default: `"_self"`) | Link target window |
+
+### Nested Shape: `UrlNavItem.dataSource`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
 
 
 ---

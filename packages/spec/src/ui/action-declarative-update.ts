@@ -23,7 +23,9 @@ import { onSuccessBesideUpdateOperationRefusal } from './action-on-success-execu
  * read. The rules, in the order the issues are raised:
  *
  *  1. `patch` without `operation: 'update'` is refused (it would be silently
- *     dropped — ADR-0078).
+ *     dropped — ADR-0078). An action's rule only: a page action row has no
+ *     `patch` of its own ({@link DeclarativeUpdateSurface.writesNamedAction}),
+ *     so its tombstone refuses the key whatever `operation` says.
  *  2. Beside `operation: 'update'`, an executor other than `'script'` — the
  *     route the write is posted to — is refused at the executor key
  *     ({@link updateOperationExecutorRefusal}). An explicit `'script'` names
@@ -33,7 +35,10 @@ import { onSuccessBesideUpdateOperationRefusal } from './action-on-success-execu
  *     asymmetry).
  *  3. Every key that names or shapes a dispatch the update does not make is
  *     refused at its own path ({@link DECLARATIVE_UPDATE_REFUSED_KEYS}).
- *  4. `operation: 'update'` with nothing to write is refused at `patch`.
+ *  4. `operation: 'update'` with nothing to write is refused. On an action that
+ *     is no `patch` and no non-empty `params`, refused at `patch`. On a page
+ *     action row it is no `name`, refused at `name`: the row runs the declared
+ *     action its `name` names, and the route writes THAT action's `patch`.
  *  5. A `list_toolbar` location is refused: no current record there.
  *
  * Deliberately NOT judged here: `objectName`. `ActionSchema` parses an action
@@ -46,9 +51,10 @@ import { onSuccessBesideUpdateOperationRefusal } from './action-on-success-execu
  * What differs between an action and a row is only what a
  * {@link DeclarativeUpdateSurface} says: the key that spells the executor,
  * whether that key has a default, the subject the `onSuccess` refusal opens
- * with, and whether `params` has an object form the write reads. Every rule and
- * every text is the same function of it. On `ActionSchema`'s surface each text
- * is byte-for-byte the action's own.
+ * with, and whether the write is the surface's own `patch` or the `patch` of
+ * the declared action the surface names. Every rule and every text is the same
+ * function of it. On `ActionSchema`'s surface each text is byte-for-byte the
+ * action's own.
  *
  * Why a module of its own: `action-on-success-executor.ts`'s reason. The two
  * schema files must apply the SAME judge; `component.zod.ts` already imports
@@ -72,15 +78,24 @@ export interface DeclarativeUpdateSurface {
   /** Opens the refusal of `onSuccess` beside the operation ({@link onSuccessBesideUpdateOperationRefusal}). */
   readonly onSuccessSubject: string;
   /**
-   * `true` where a non-empty OBJECT `params` holds static field values the
-   * write merges in, besides the array the dialog collects: an `action:button`
-   * / `action:icon` node, whose `params` IS `properties.params`, the static
-   * values the renderer forwards (`readStaticParamValues`) and the runner's
-   * update merges OVER `patch` (`executeUpdateOperation`). An action's
-   * `params` is the input list only, and so is a container member's, whose
-   * object `params` never reaches a non-`api` executor.
+   * `true` on a page action row (`action:button`, `action:icon`, an
+   * `action:group` / `action:menu` member): its `operation: 'update'` runs the
+   * declared action its `name` names. The console's runner posts the row's
+   * collected values to the platform action route under that name, and the
+   * route resolves the declaration by name (ADR-0110 D2) and writes that
+   * declaration's `patch`, merged under the values. So the row carries no
+   * `patch` of its own (its tombstone refuses one), and what the row has to
+   * write is that action, named: a row with no `name`, or an empty one, has
+   * nothing to write, and the runner's server dispatch refuses it before any
+   * request. A row's `params` are no write of its own either. An array is the
+   * input list the dialog collects. A node's static object `params` ride the
+   * request as params, which the route writes only where the named action
+   * declares them, and otherwise refuses with a 400 (ADR-0104 D2).
+   *
+   * `false` on `ActionSchema`: the action IS the declaration, so its write is
+   * its own `patch` and its collected `params`.
    */
-  readonly staticParams: boolean;
+  readonly writesNamedAction: boolean;
 }
 
 /** `` `type: 'api'` `` on an action or a member, `` `actionType: 'api'` `` on a page node. */
@@ -162,11 +177,13 @@ const DECLARATIVE_UPDATE_REFUSED_KEYS: ReadonlyArray<
     + 'has no such flow. Drop it.'],
 ];
 
-/** Whether `params` gives the write field values on `surface` (rule 4). */
-function paramsWrite(surface: DeclarativeUpdateSurface, params: unknown): boolean {
-  if (Array.isArray(params)) return params.length > 0;
-  return surface.staticParams && params !== null && typeof params === 'object' && Object.keys(params).length > 0;
+/** Whether an action's `params` gives its write field values (rule 4): a non-empty input list. */
+function paramsWrite(params: unknown): boolean {
+  return Array.isArray(params) && params.length > 0;
 }
+
+/** Whether a row names the declared action its write is (rule 4 on a row): a non-empty `name`. */
+const namesAction = (name: unknown): boolean => typeof name === 'string' && name !== '';
 
 /**
  * The declarative-update judge for `surface`: the five rules above, as one
@@ -176,7 +193,8 @@ function paramsWrite(surface: DeclarativeUpdateSurface, params: unknown): boolea
 export function refuseDeclarativeUpdateContradictions(surface: DeclarativeUpdateSurface) {
   return (data: Record<string, unknown>, ctx: z.core.$RefinementCtx): void => {
     if (data.operation !== 'update') {
-      if (data.patch !== undefined) {
+      // A row's `patch` is its tombstone's to refuse, whatever `operation` says.
+      if (!surface.writesNamedAction && data.patch !== undefined) {
         ctx.addIssue({
           code: 'custom',
           path: ['patch'],
@@ -206,7 +224,19 @@ export function refuseDeclarativeUpdateContradictions(surface: DeclarativeUpdate
       }
     }
 
-    if (data.patch === undefined && !paramsWrite(surface, data.params)) {
+    if (surface.writesNamedAction) {
+      if (!namesAction(data.name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['name'],
+          message:
+            "A page action row's `operation: 'update'` runs the declared action its `name` names — the platform "
+            + 'action route resolves that action by name and writes its `patch` — so a row with no `name` has nothing '
+            + 'to write, and the runner refuses it before any request. Set `name` to the declared '
+            + "`operation: 'update'` action whose `patch` this row should write.",
+        });
+      }
+    } else if (data.patch === undefined && !paramsWrite(data.params)) {
       ctx.addIssue({
         code: 'custom',
         path: ['patch'],

@@ -1,5 +1,234 @@
 # @objectstack/rest
 
+## 18.0.0-next.4
+
+### Minor Changes
+
+- a06f0d4: fix(rest)!: the `/data` API-exposure check treats an object of a disabled package as no object, so every operation on it answers `404 OBJECT_PACKAGE_DISABLED` again, with no fail-open warning
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the change is which refusal a runtime REST door answers for an object whose owning package is disabled: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the object -->
+  
+  **BREAKING** (a refusal moves), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The by-name `/meta` read now refuses an object of a disabled package with `404 OBJECT_PACKAGE_DISABLED`. The API-exposure check reads that object by name. It now reads that refusal as "no object here": there is no exposure policy to judge, and nothing failed, so it logs nothing. The request then reaches the data plane, which refuses it with the same code.
+  
+  - **Changed back:** for an object whose package is disabled, a denied operation goes from `405 OBJECT_API_METHOD_NOT_ALLOWED` (an operation outside `apiMethods`) or `404 OBJECT_API_DISABLED` (an object with `apiEnabled: false`) back to `404 OBJECT_PACKAGE_DISABLED`. That is what it answered before the check read one object by name. An allowed operation still answers `404 OBJECT_PACKAGE_DISABLED`.
+  - **No warning now:** such a request no longer logs `api-exposure gate: object metadata read failed — failing open`.
+  - **Unchanged:** any other failed read still fails open and still logs that warning. Objects of enabled packages get the same exposure answers as before.
+  
+  What changes for you: nothing to rewrite. No accepted request is now refused, and no refused request is now accepted.
+- aaaeeac: fix(rest)!: a schema-derived export skips the fields declared `hidden`, so the hidden `__search` search companion no longer adds an empty "Search Index" column
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a runtime column-selection narrowing at the REST export door, not a metadata change: no spec key, export, option, config field or stored shape is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite; an explicit `?fields=` request is answered exactly as before -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `GET /api/v1/data/:object/export` without `?fields=` builds its columns from the object schema. It took every field of the object, so the hidden `__search` companion, which the search-normalization seam declares on every object with an eligible name field whenever pinyin search is on, and whose value the data reads strip from every row, became a "Search Index" column that was empty on every row. The default columns are now the fields the object shows by default: a field declared `hidden` (`FieldSchema.hidden`, "Hidden from default UI") is not one.
+  
+  - **Served less now:** the CSV and XLSX default header, and its zero-row header, no longer carry a column for a field declared `hidden`. Measured on a dev boot of `examples/app-showcase`, over every object with a hidden field that the export serves: `Search Index` (`__search`, 64 objects, empty on every row), `Organization` (`organization_id`, 53 objects, the one that carries a value: the record's organization), `Owning Business Unit` (`owning_business_unit_id`, 24 objects, empty on every row because nothing stamps it yet), and `Session Token` (`sys_session`), `Previous Password Hashes` (`sys_account`) and `Hashed Key` (`sys_api_key`), all three empty because the read omits their values. No other column moved.
+  - **Unchanged:** an explicit `?fields=` list is answered as asked, a hidden field included: the header names it and its cells carry what the read returns (empty for `__search`, which the read strips). The field-level-security narrowing of the default columns is unchanged, and so are the zero-row header rules. `format=json` streams each row as the read returns it, has no column set, and is unchanged. `?template=true` keeps its own column rule.
+  
+  What changes for you: a consumer that wants a hidden field's column in an export names the field in `?fields=`.
+- 8259ea0: fix(rest)!: `format=json` honours an explicit `?fields=`, so each exported row carries exactly the named keys, in list order
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a runtime projection narrowing at the REST export door, not a metadata change: no spec key, export, option, config field or stored shape is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite; a caller that wants more keys names them in `?fields=` -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `GET /api/v1/data/:object/export` declares `fields=a,b,c` for every format. The CSV and XLSX arms wrote exactly the listed columns, but the JSON arm wrote each row as the read returned it, so `?format=json&fields=…` was ignored without any sign. objectui's list-view and grid export send `format=json` with the view's visible columns, so a JSON export of a list view carried every readable field instead of the view's columns.
+  
+  - **Served less now:** with `?fields=`, each JSON row carries exactly the named keys, in the order the list names them, with the same readable formatting as before. Measured on a dev boot of `examples/app-showcase`: `?format=json&fields=title` on `showcase_task` answered 25 keys per row (`id`, the audit and ownership columns, `organization_id`, `owning_business_unit_id` and every author field) and now answers `title` alone. A named key the read did not return (a field that field-level security removes from the row, or the `__search` companion the read strips) is absent from the JSON row. It is not written as `null`. The CSV and XLSX arms write an empty cell for it, as before.
+  - **Unchanged:** `format=json` without `?fields=` still writes each row as the read returns it. The CSV and XLSX arms, their default columns and their header rules are untouched.
+  
+  What changes for you: a caller that sends `format=json` with `fields` and reads a key it did not name, such as `id`, adds that key to `fields`.
+- 2bcd406: fix(rest)!: `/history`, `/audit` and `/diff` answer a disabled package's item with the plain read's absence, never past the per-caller gate
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of three runtime read doors for an item whose owning package is disabled: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the read -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The by-name read now answers a disabled package's item as absent. The event and diff doors judge the item the plain read would judge, and they read "no item" as "nothing behind the name": events served whole, and a view's or dashboard's diff served whole, to a caller the item's own gate refuses.
+  
+  - **Absent now, `404 RESOURCE_NOT_FOUND`:** `GET /meta/:type/:name/history`, `/audit` and `/diff` for an `app`, `view`, `dashboard`, `doc` or `book` the plain read withholds while its layers still resolve, which is a disabled package's item. No events and no diff are read.
+  - **Unchanged:** an item that is really gone (every layer null, such as a deleted item) keeps its answer: its events, and its diff as before. Items of enabled packages keep the per-caller gate as before.
+  
+  What changes for you: re-enable the package to read its items' history, audit trail and diff again.
+- 58a2faa: fix(rest)!: `/meta/:type/:name/layers` and the deprecated `?layers=true` answer a disabled package's non-object item as a missing name, on both transports
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of two runtime read doors for an item whose owning package is disabled: no stored metadata changes shape, no spec key, export or error code is removed, and nothing must be rewritten; re-enabling the package restores the reads -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **Absent now, byte for byte the missing name's answer (`404 RESOURCE_NOT_FOUND`):** the layered view of an item of every type but `object` and `package` whose owning package is disabled, on `GET /meta/:type/:name/layers` and on `GET /meta/:type/:name?layers=true`, to every caller, an author who may write the item included. One step in the shared layered chain (`createMetaLayeredAnswer`) answers it, so the runtime dispatcher's two spellings answer the same. The owner is the one the by-name read's protection envelope names (`packageId`), read under the request's `?package=` scope, asked of the engine registry's `isPackageDisabled`. Objects already answered `404 OBJECT_PACKAGE_DISABLED` here.
+  - **Unchanged:** items of enabled packages, a name with nothing behind it, and the protocol's `getMetaItemLayered`, which keeps serving every layer to the readers that resolve with it (the security catalog echo, the packaged-permission-set lock gate).
+  - **Added, optional:** `MetaItemReadGateSources.isItemOfDisabledPackage` and `MetaLayeredRequest.packageId`. A host that supplies neither answers as before.
+  
+  What changes for you: re-enable the package to read its items' layered views again.
+- e74ec56: fix(rest)!: `/published` and `/meta/object/:name/state/:field` answer a disabled package's item as the by-name read does, and the event and diff doors' absence is the plain read's body
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of two runtime read doors for an item whose owning package is disabled, plus the body of a 404 that already carried this status and code: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the reads -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **`GET /meta/:type/:name/published`, every type but `object` and `package`:** a disabled package's item is answered as a name with nothing behind it (`404 NOT_FOUND`, byte for byte), on both exits: the stored published row and the code/package snapshot. The owner is the one the by-name read's protection envelope names (`packageId`). Objects already answered `404 OBJECT_PACKAGE_DISABLED` here.
+  - **`GET /meta/object/:name/state/:field`:** a disabled package's object is refused `404 OBJECT_PACKAGE_DISABLED`, what `GET /meta/object/:name` answers, as the runtime dispatcher's twin already does. The schema is not read.
+  - **`/history`, `/audit` and `/diff`:** the `404 RESOURCE_NOT_FOUND` a disabled package's gated item gets is now the plain read's nested body, `{ "error": { "code": "RESOURCE_NOT_FOUND", "message": "Metadata item not found or access denied." } }`, instead of the flat `{ "error": "…", "code": "RESOURCE_NOT_FOUND" }`. Status and code are unchanged; read `body.error.code`.
+  - **Unchanged:** items of enabled packages, a deleted item, and a name with nothing behind it.
+  
+  What changes for you: re-enable the package to read its items' published versions and its objects' state machines again.
+- 741aa85: fix(rest)!: the import doors honour `runAutomations: false` and `treatAsHistorical: true` only for the system principal, and refuse them `403 PERMISSION_DENIED` to every other caller
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes, and no stored shape, is added, removed, renamed or converted: the change is who may send two request flags on the two import doors. Both keys stay declared on `ImportRequestSchema` with their shape and defaults unchanged, the refused values arrive in a request body and are never stored, and no spec key, export or error code is added or removed (`PERMISSION_DENIED` is a standard code), so there is nothing for `objectstack migrate meta` to rewrite. The remedy is a request-time one, stated below: send the import without the two opt-outs. -->
+  
+  **BREAKING** (the import doors accept fewer request values: `runAutomations: false` and `treatAsHistorical: true` are refused from every caller but the system principal, administrators included), shipped as `minor` under the launch-window convention for breaking changes. Two known consumers break visibly: objectui's Import Wizard, whose two options now answer `403` for every signed-in user (#24381), and hotcrm's dev-only demo script, which sent the opt-out as the dev administrator and now exits by its own submitter check.
+  
+  Both flags take an app's declared business controls off every row an import writes. `runAutomations: false` writes with `skipAutomations`, so no metadata-bound hook and no record-change trigger runs (an approval flow and a closed-record freeze hook among them). `treatAsHistorical: true` writes with `skipStateMachine` and `preserveAudit`, so the object's `state_machine` rule is skipped and supplied audit and read-only values are kept. Until now, any caller who may import could send either.
+  
+  **What changes.** `POST /api/v1/data/:object/import` and `POST /api/v1/data/:object/import/jobs` admit either opt-out only from the system principal (`ExecutionContext.isSystem`), the predicate the doors that start an elevated self-triggered flow already ask. Every other caller, every signed-in user and administrator included, gets `403 PERMISSION_DENIED` in the ADR-0112 envelope, with `error.details: { object, refused }` naming the opt-outs it sent. The doors ask before the body is parsed: a refused request writes no row and creates no import job, on a dry run too. A hidden object keeps its `404` ahead of the refusal.
+  
+  **What stays as it was.** A request that omits both keys, or sends `runAutomations: true` / `treatAsHistorical: false`, imports exactly as before, with every control in force. `runImport` (`@objectstack/core`) is unchanged: in-process callers that run as the system principal, and the identity import in `@objectstack/plugin-auth`, keep their own settings.
+  
+  **If an import now answers 403.** Send it without `runAutomations: false` and `treatAsHistorical: true`: the rows are written with the object's automations, hooks, `state_machine` rule and audit stamps in force. A bulk load that must skip them is a migration, and runs in-process as the system principal.
+
+### Patch Changes
+
+- bb7ccde: The CRUD doors' registrar body lives in its own module, with no route, handler or answer changed
+  
+  Clause-②: no (a move: the six CRUD routes, their order, every handler and every response are unchanged, and the published declarations are byte-identical)
+  
+  - `RestServer#registerCrudEndpoints` keeps its name, docblock and place. The body that registers `GET`, `POST` and `POST …/query` on `{basePath}{crud.dataPrefix}/:object`, and `GET`, `PATCH` and `DELETE` on `…/:object/:id`, moved unedited to `packages/rest/src/crud-routes.ts`. The five `crud.operations` switches and `crud.dataPrefix` gate and shape the same mounts.
+  - Nothing to do for a consumer: no export of the package entry, no route, no configuration key and no response moved.
+- df000d4: The `/meta` type list, whole-store maintenance and per-type list routes live in their own module, with no route, handler or answer changed
+  
+  Clause-②: no (a move: the seven routes per base, their place in the `/meta` registration order, every handler, every response and the anonymous-deny gate in front of them are unchanged, and the published declarations are byte-identical)
+  
+  - `RestServer#registerMetadataEndpointsInner` keeps its name, docblock, place and head. The statements that register `GET {metaPath}` and `GET {metaPath}/types`, `GET {metaPath}/diagnostics`, `GET {metaPath}/_drafts`, `POST {metaPath}/_migrate-stored` and `GET {metaPath}/:type` moved, re-indented, to `packages/rest/src/meta-collection-routes.ts`, and the method calls them at their old position, inside the umbrella's guarded registration. The `metadata.endpoints.types`, `.maintenance` and `.items` switches gate the same mounts.
+  - Nothing to do for a consumer: no export of the package entry, no route, no configuration key and no response moved.
+- 646303e: The `/meta` per-item read routes live in their own module, with no route, handler or answer changed
+  
+  Clause-②: no (a move: the four routes per base, their place in the `/meta` registration order, every handler, every response and the anonymous-deny gate in front of them are unchanged, and the published declarations are byte-identical)
+  
+  - `RestServer#registerMetadataEndpointsInner` keeps its name, docblock, place and head. The statement that registers `GET {metaPath}/:type/:name/references`, `GET {metaPath}/:type/:name/layers`, `GET {metaPath}/book/:name/tree` and `GET {metaPath}/:type/:name` moved, re-indented, to `packages/rest/src/meta-item-read-routes.ts`, and the method calls it at its old position, inside the umbrella's guarded registration. The `metadata.endpoints.item` switch gates the same mounts.
+  - Nothing to do for a consumer: no export of the package entry, no route, no configuration key and no response moved.
+- e9bc60b: The `/meta` per-item write routes live in their own module, with no route, handler or answer changed
+  
+  Clause-②: no (a move: the two routes per base, their place in the `/meta` registration order, every handler, every response and the anonymous-deny gate in front of them are unchanged, and the published declarations are byte-identical)
+  
+  - `RestServer#registerMetadataEndpointsInner` keeps its name, docblock, place and head, its per-item registrar included. The two statements that register `PUT {metaPath}/:type/:name` (the item save) and `DELETE {metaPath}/:type/:name` (the reset to the artifact default) moved, re-indented, to `packages/rest/src/meta-item-write-routes.ts`, and the method calls them at their old position, inside the umbrella's guarded registration. They still register through that per-item registrar, so the `metadata.endpoints.item` switch gates the same mounts.
+  - Nothing to do for a consumer: no export of the package entry, no route, no configuration key and no response moved.
+- 52ff308: The `/meta` history family routes live in their own module, with no route, handler or answer changed
+  
+  Clause-②: no (a move: the five routes per base, their place in the `/meta` registration order, every handler, every response and the anonymous-deny gate in front of them are unchanged, and the published declarations are byte-identical)
+  
+  - `RestServer#registerMetadataEndpointsInner` keeps its name, docblock, place and head, its per-item registrar included. The five statements that register `GET {metaPath}/:type/:name/history` (the change log), `GET …/audit` (the audit trail), `POST …/publish` (the promotion of a pending draft), `POST …/rollback` (the restore of an earlier version) and `GET …/diff` (the comparison of two stored versions) moved, re-indented, to `packages/rest/src/meta-item-history-routes.ts`, and the method calls them at their old position, inside the umbrella's guarded registration. They still register through that per-item registrar, so the `metadata.endpoints.item` switch gates the same mounts.
+  - Nothing to do for a consumer: no export of the package entry, no route, no configuration key and no response moved.
+- d1f082d: The `/meta` object state-machine read and the published read live in their own modules, with no route, handler or answer changed
+  
+  Clause-②: no (a move: the two routes per base, their place in the `/meta` registration order, every handler, every response and the anonymous-deny gate in front of them are unchanged, and the published declarations are byte-identical)
+  
+  - `RestServer#registerMetadataEndpointsInner` keeps its name, docblock, place and head, its per-item registrar included. The statement that registers `GET {metaPath}/object/:name/state/:field` (the legal next states of an object field's state machine) moved, re-indented, to `packages/rest/src/meta-object-state-routes.ts`, and the block that registers `GET {metaPath}/:type/:name/published` (an item's published version) moved to `packages/rest/src/meta-item-history-routes.ts`, beside the history family. The method calls each at its old position, inside the umbrella's guarded registration. The state read still answers to `api.enableMetadata` alone, and the published read still registers through the per-item registrar, so the `metadata.endpoints.item` switch gates the same mounts.
+  - Nothing to do for a consumer: no export of the package entry, no route, no configuration key and no response moved.
+- 0d34066: REST's request identity door resolves through `@objectstack/core`'s `resolveRequestExecutionContext`, the one request-to-`ExecutionContext` composition
+  
+  Clause-②: no
+  
+  - `RestServer` resolves the caller of every data, metadata and package route by calling `resolveRequestExecutionContext` with this door's differences as named parameters: `anonymous: 'fail-closed'`, `authGate: 'reread-when-active'`, `credentials: 'api-key-and-session'`, `sessionApi: 'required'`, `session: 'request'`, its settings lookup for the localization, its own request-locale parse, `accessToken: 'withhold'`, and no OAuth provenance or admission channel. The environment and auth-service resolution, the header normalisation, the data engine, the tenancy wiring, the per-request memo, the `Server-Timing` disclosure and the fail-closed `catch` stay at the door.
+  - The answers are the ones the door gave before: an anonymous caller gets `401` with the shared body; a session the authentication policy holds gets `403` with its code and message while a gate feature is active; an API key is judged by its own owner's posture; an unreadable permission store, tenancy service or active gate re-read gets `503 SERVICE_UNAVAILABLE`; and an API key its own lifecycle refuses gets its `403` and code.
+  - One ordering moved, and it shows only when two faults coincide on the single-kernel wiring. The data engine is now resolved before the auth service's session read is asked for. If the configured engine provider fails AND the auth service exposes no session read (or its `getApi()` rejects), the answer is now `503 SERVICE_UNAVAILABLE` (the engine outage) instead of `401`. With a working auth service, the engine outage was already `503`.
+  - Nothing to do for a consumer: no export, route, configuration key or response shape changed.
+- 9975c26: docs(rest): the public form routes' docstring says what authorizes an anonymous submit — the form's own declaration (`publicFormGrant`), not a `guest_portal` permission set — and that nothing falls open without one (#24130)
+  
+  Clause-②: no
+  
+  The docstring of `RestServer#registerFormEndpoints`, which ships in `@objectstack/rest`'s published declarations, said the submit route delegates security to a `guest_portal` permission set on its execution context, that a deployment without that set "falls open", and that secure-by-default deployments must pair the form routes with one. None of that is what runs. The submit hands the engine a `publicFormGrant` scoped to the form's target object, and the security plugin admits on that grant alone, before any permission set resolves: the create and the read-back on that object only, every other operation and object refused, the server-managed anchors stripped from the payload. The grant never falls open and admits the same operations whether or not a `guest_portal` set is registered. The docstring now says this, and says what the `guest_portal` name on the context does reach: where a deployment registers a set under it, that set is what the grant's result masker reads over the record the grant hands back, and the submit answers the created id only.
+  
+  Text only; nothing the form routes do changes.
+- 2ac0616: fix(rest)!: an anonymous public-form submit that leaves a form-required field empty answers `400 VALIDATION_FAILED` naming the field, and stores nothing
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is a runtime REST door's accept set, POST /forms/:slug/submit: no stored metadata changes shape and nothing must be rewritten, so `objectstack migrate meta` has nothing to do; a caller that omitted a form-required field sends it -->
+  
+  - **What changed.** `POST /forms/:slug/submit` now enforces the form's own `required`: a section entry `{ field: 'email', required: true }` is judged before the write, with the rule the engine's object-level check uses (`isEmptyForRequired` from `@objectstack/core`). A submission whose value for such a field is absent, `null`, `''`, only whitespace, or `[]` on a multi-value field is refused, and no row is created. Before, the engine judged only the fields the OBJECT requires, so a field only the form required answered `201` and was stored empty — while the rendered form refused the same submission.
+  - **The refusal** is the object-level one's envelope on this route, key for key: `400` with top-level `code: 'VALIDATION_FAILED'`, `error` (the messages), and `fields[]` of `{ field, code: 'required', message, label }`, worded by the same validation catalog (for example `Email is required`). Every empty form-required field is named in one refusal, in the form's order.
+  - **BREAKING — a narrowing, and who it affects.** A script or integration that posts to a public form and omits a field the form marks `required: true` now gets `400` instead of `201`. The fix is to send that field. Nothing that was refused before is accepted now.
+  - **Judged only where the form asks.** An entry the form hides (`hidden: true`), or shows only conditionally (`visibleWhen` on the entry or on its section), is not judged — nothing server-side evaluates a form-view `visibleWhen`. A server-managed anchor (`owner_id`, `organization_id`, …) is never written by this route, so it is never judged. An object `defaultValue` or a `beforeInsert` hook does not satisfy a field the visitor omitted: the route judges what the visitor sent.
+- af284b0: feat(spec): the remaining `getSession` readers read `AuthSessionApi`'s declared result, and none reads a top-level `activeOrganizationId`
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec/contracts` — `AuthSessionApi.getSession`'s result gains three optional `user` members**, each declared for a named reader: `isPlatformAdmin` (`boolean`, the ADR-0068 D2 rung plugin-auth's `customSession` derives) and `role` (`string | null`, better-auth's `admin` plugin scalar), both read by `judgePlatformAdmin` in `@objectstack/plugin-auth`; and `name` (`string`), read by the runtime dispatcher's AI-route `req.user` resolver as the display name. Every member is optional, so every implementer and caller typechecks unchanged.
+  - **The readers read through the declared type instead of `any` or a cast** (types only, runtime behaviour unchanged): `judgePlatformAdmin` and the four platform-admin mounts in `@objectstack/plugin-auth` (better-auth's own session type now has to fit the declaration at those reads), the REST server's two session reads (`@objectstack/rest`), the dispatcher's posture read, `resolveSessionData` and both `HttpDispatcher` reads (`@objectstack/runtime`), the cloud-connection and install-local session reads (`@objectstack/cloud-connection`), the webhook redeliver door (`@objectstack/plugin-webhooks`), and the storage session bridge (`@objectstack/service-storage`).
+  - **Fix — the top-level `activeOrganizationId` fallback is removed** from the storage upload stamp (`@objectstack/service-storage`) and from install-local's `resolveActiveOrgId` (`@objectstack/cloud-connection`). The active organization is read from `session.activeOrganizationId` alone, where the contract declares it. No in-process producer answers a top-level `activeOrganizationId` (better-auth's read is `{ user, session }`), so for the shipped auth plugin nothing changes. An auth service that answered only the flattened shape now gets no organization: the upload is not stamped, and install-local reports no active organization. To fix it, answer the active organization on `session.activeOrganizationId`, as `AuthSessionApi` declares it.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/metadata@18.0.0-next.4
+  - @objectstack/service-package@18.0.0-next.4
+  - @objectstack/observability@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes
