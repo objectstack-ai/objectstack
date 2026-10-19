@@ -277,18 +277,25 @@ describe('#24537 — the file watcher retires what it reports', () => {
     expect(await catalog.resolve('permission', 'watched_set')).toMatchObject({ name: 'watched_set' });
   });
 
-  it('an `unlink` event: the next resolution finds the remembered path gone and answers the miss — no stat failure logged', async () => {
-    const filePath = await writeSetFile('unlinked_set');
+  it('an `unlink` event: the next read finds the remembered path gone and answers the miss — no stat failure logged', async () => {
     const mgr = makeManager();
     const catalog = makeCatalog(mgr);
-    expect(await catalog.resolve('permission', 'unlinked_set')).toMatchObject({ name: 'unlinked_set' });
+    const paths: string[] = [];
+    for (const name of ['unlinked_set', 'unlinked_too']) {
+      paths.push(await writeSetFile(name));
+      expect(await catalog.resolve('permission', name)).toMatchObject({ name });
+    }
 
-    await fs.rm(filePath);
-    await fireFileEvent(mgr, 'deleted', filePath);
+    for (const filePath of paths) {
+      await fs.rm(filePath);
+      await fireFileEvent(mgr, 'deleted', filePath);
+    }
 
+    // Each door asked FIRST, while the memo still holds its path: `load()`
+    // (through the catalog read) for one name, `exists()` for the other.
     expect(await catalog.resolve('permission', 'unlinked_set')).toBeUndefined();
+    expect(await mgr.exists('permission', 'unlinked_too')).toBe(false);
     expect(await catalog.resolve('permission', 'unlinked_set')).toBeUndefined();
-    expect(await mgr.exists('permission', 'unlinked_set')).toBe(false);
     expect(statFailureLogs()).toEqual([]);
   });
 });
