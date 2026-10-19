@@ -205,10 +205,10 @@ async function boot() {
     },
     /** The job row as stored, read the way the engine-owned writer reads it. */
     async jobRow(jobId: string): Promise<any> {
-      return engine.findOne('sys_import_job', { where: { id: jobId }, context: { isSystem: true } } as any);
+      return engine.findOne('sys_import_job', { where: { id: jobId }, context: { isSystem: true } });
     },
     async record(object: string, id: string): Promise<any> {
-      return engine.findOne(object, { where: { id }, context: { isSystem: true } } as any);
+      return engine.findOne(object, { where: { id }, context: { isSystem: true } });
     },
     /** A later edit on the live app, by a signed-in user, between the import and its undo. */
     async edit(object: string, id: string, data: Record<string, unknown>) {
@@ -229,7 +229,7 @@ describe('[#24380] an import undo runs under the object\'s declared controls for
 
   /** One deal the import updates (its amount) and one it creates. */
   async function dealJob(): Promise<string> {
-    await ctx.engine.insert('ou_deal', { id: 'd_old', name: 'Acme renewal', amount: 100, approval_status: 'approved' }, { context: { isSystem: true } } as any);
+    await ctx.engine.insert('ou_deal', { id: 'd_old', name: 'Acme renewal', amount: 100, approval_status: 'approved' }, { context: { isSystem: true } });
     const jobId = await ctx.importJob('ou_deal', {
       writeMode: 'upsert', matchFields: ['id'],
       rows: [{ id: 'd_old', amount: 250 }, { id: 'd_new', name: 'Globex', amount: 10 }],
@@ -272,7 +272,7 @@ describe('[#24380] an import undo runs under the object\'s declared controls for
     await ctx.engine.insert('ou_ticket', [
       { id: 't_closed', title: 'printer', status: 'open' },
       { id: 't_renamed', title: 'old name', status: 'open' },
-    ], { context: { isSystem: true } } as any);
+    ], { context: { isSystem: true } });
     const jobId = await ctx.importJob('ou_ticket', {
       writeMode: 'update', matchFields: ['id'],
       rows: [{ id: 't_closed', status: 'closed' }, { id: 't_renamed', title: 'new name' }],
@@ -313,7 +313,7 @@ describe('[#24380] an import undo runs under the object\'s declared controls for
   });
 
   it('a delete and a restore a closed-record freeze refuses are each reported per row, and the job keeps both', async () => {
-    await ctx.engine.insert('ou_case', { id: 'c_old', title: 'before', status: 'open' }, { context: { isSystem: true } } as any);
+    await ctx.engine.insert('ou_case', { id: 'c_old', title: 'before', status: 'open' }, { context: { isSystem: true } });
     const jobId = await ctx.importJob('ou_case', {
       writeMode: 'upsert', matchFields: ['id'],
       rows: [{ id: 'c_old', title: 'after' }, { id: 'c_new', title: 'fresh', status: 'open' }],
@@ -354,7 +354,7 @@ describe('[#24380] an import undo runs under the object\'s declared controls for
 
     /** A historical job, created by the system principal (the only caller the import doors let send it). */
     async function historicalJob(): Promise<string> {
-      await ctx.engine.insert('ou_deal', { id: 'h_old', name: 'Initech', amount: 5, approval_status: 'approved' }, { context: { isSystem: true } } as any);
+      await ctx.engine.insert('ou_deal', { id: 'h_old', name: 'Initech', amount: 5, approval_status: 'approved' }, { context: { isSystem: true } });
       ctx.as(SYSTEM);
       const jobId = await ctx.importJob('ou_deal', {
         writeMode: 'upsert', matchFields: ['id'], treatAsHistorical: true,
