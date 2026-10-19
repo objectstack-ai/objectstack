@@ -339,7 +339,7 @@ export const TryCatchConfigSchema = lazySchema(() => strictObject(
      * any other `$` name is the engine's, and a text slot could not read it
      * (#22502).
      */
-    errorVariable: flowBoundVariableNameSchema('errorVariable').default(ENGINE_ERROR_VARIABLE).describe('Variable holding the caught error in the catch region — `$error` (the default), or a name without a leading `$` read as `{{ name.message }}`; any other `$` name is the flow engine\'s own and refused. The value is a `TryCatchErrorValue`: `nodeId`, `message`, `code` when the failing node carried a platform-classified error code (ADR-0112 — branch on `$error.code` to tell "the row is already there" from "the store is down"), and `iteration` / `item` when the failure happened inside a loop body'),
+    errorVariable: flowBoundVariableNameSchema('errorVariable').default(ENGINE_ERROR_VARIABLE).describe('Variable holding the caught error in the catch region — `$error` (the default), or a name without a leading `$` read as `{{ name.message }}`; any other `$` name is the flow engine\'s own and refused. It carries the id of this Try / Catch node (`nodeId`), the failure message, which normally names the step that failed (`message`), the platform-classified error code when that step reported one (`code`, ADR-0112 — branch on `$error.code` to tell "the row is already there" from "the store is down"), and, when the failure happened inside a loop body, the zero-based pass number (`iteration`) and the item being processed (`item`)'),
     retry: RetryPolicySchema.optional().describe('Optional retry policy for the try region'),
   },
 ));
@@ -383,7 +383,7 @@ export type TryCatchConfigParsed = z.infer<typeof TryCatchConfigSchema>;
  * the `nodeId` / `message` core; this schema declares the try/catch binding.
  */
 export const TryCatchErrorValueSchema = lazySchema(() => z.object({
-  nodeId: z.string().describe('Node the failure is attributed to'),
+  nodeId: z.string().describe('Id of this Try / Catch node, not of the step that failed inside its try region; that step is normally named inside `message`'),
   message: z.string().describe('Message of the error that ended the try region, after any retries'),
   code: z.string().optional()
     .describe('Platform-classified error code (ADR-0112) of the failure that ended the try region, e.g. `create_record`\'s `DUPLICATE_RECORD`; present only when the failing node\'s own result carried one, so a catch region branching on `$error.code` treats "unset" as "no classified code", never as "nothing failed". An open `string`, not a closed enum: the vocabulary is `StandardErrorCode` plus registered ledger codes plus tenant-authored codes, and third-party node executors bind their own'),
