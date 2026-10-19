@@ -118,9 +118,15 @@ function refusalLines(logFile: string): string[] {
  * Synchronous on purpose — nothing else may open the files while it runs.
  */
 export function upgradeDevelopmentDatabase(input: DevelopmentUpgradeInput): DevelopmentUpgradeResult {
+  // The way on, when os dev does not upgrade the database itself. 18.0 supports
+  // fresh installs only, and its `os migrate organization-ownership` refuses on
+  // every database (`ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE`), so this names
+  // no step of that command: it says what 18.0 supports for a v17 database, in
+  // the boot refusal's terms. The 18.x release that registers the ceremony names
+  // its steps here again.
   const manual =
-    'Run `os migrate organization-ownership --dev` (review its plan), then the same command with --apply ' +
-    '--plan-file FILE --backup-taken, and start os dev again.';
+    '18.0 supports fresh installs only and does not upgrade a v17 database: keep this development database on a ' +
+    '17.x release until the 18.x release that carries the upgrade path, and upgrade it there.';
   if (!input.sqliteFile) {
     return {
       ok: false,
