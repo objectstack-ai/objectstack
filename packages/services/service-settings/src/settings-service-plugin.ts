@@ -624,7 +624,7 @@ export function buildSettingAuditWriter(
           },
           entry.actorId ?? null,
         );
-        await eng.insert(object, {
+        const row = {
           namespace: entry.namespace,
           key: entry.key,
           scope: entry.scope,
@@ -637,16 +637,25 @@ export function buildSettingAuditWriter(
           request_id: entry.requestId ?? null,
           reason: entry.reason ?? null,
           created_at: new Date().toISOString(),
+        };
+        // The explicit system opt-in, as the settings row write carries: the
+        // settings audit is the platform's own ledger, written after the
+        // settings door already authorized the change, and not a write that
+        // may rely on a missing principal to pass the security middleware's
+        // principal-less hand-off (ADR-0096 D5). One literal object per call
+        // site, so each write names the table it lands in.
+        if (object === PLATFORM_SETTING_AUDIT_OBJECT) {
+          // [ADR-0131 D7] A global value is deployment-level: its row names no
+          // organization, in the sibling that has no organization column.
+          await eng.insert('sys_platform_setting_audit', row, { bypassTenantAudit: true, context: { isSystem: true } });
+        } else {
           // [ADR-0131 D3/D9] The organization whose value changed — the
-          // settings row's own owner. A global value names none, and its row
-          // goes to the sibling that has no organization column (D7).
-          ...(object === SETTING_AUDIT_OBJECT && entry.organizationId ? { organization_id: entry.organizationId } : {}),
-          // The explicit system opt-in, as the settings row write carries:
-          // the settings audit is the platform's own ledger, written after
-          // the settings door already authorized the change, and not a
-          // write that may rely on a missing principal to pass the security
-          // middleware's principal-less hand-off (ADR-0096 D5).
-        }, { bypassTenantAudit: true, context: { isSystem: true } });
+          // settings row's own owner.
+          await eng.insert('sys_setting_audit', {
+            ...row,
+            ...(entry.organizationId ? { organization_id: entry.organizationId } : {}),
+          }, { bypassTenantAudit: true, context: { isSystem: true } });
+        }
       } catch (err: any) {
         // A durability loss, not a functional one: the settings write already
         // landed and everything keeps looking normal, while the per-key
