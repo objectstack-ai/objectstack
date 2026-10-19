@@ -835,6 +835,20 @@ note sits beside them.
    - 8d, `COALESCE` and `__global__`;
    - 8e, the NOT NULL constraint.
 
+**Scope note (2026-10-19, ruling records `6259899486` and `6261853191` on #15194).** ⛔ It changes no
+decision of this record and sits beside the release-scope note above.
+
+1. **The sprint** (record `6259899486`; 「不需要压缩到 3000内，你推送给我我会尽快审批」「并发上限 可以放宽」
+   「按照你的建议继续」). Stage 8b lifts the system-insert exemption under `single` only in 18.0. Under a
+   walled posture the exemption stands in 18.0, and the walled half lands in 18.x.
+2. **Databases.** A database an 18.0 install creates takes the same 18.x upgrade path as a v17 one.
+3. **Where the walled refusal stands.** It covers the `os` boot path only: `os serve`, and through it
+   `os dev` and `os start`. The one-shot `os` kernel boots (the `os migrate` family, `os verify`,
+   `os secret`, `os storage`) and embedded hosts (`createStandaloneStack`, `@objectstack/adapter-hono`)
+   are not refused, and none of them is a supported walled deployment in 18.0.
+4. **Docs are off the release gate** (record `6261853191`; 「文档可以延后」「或者并行处理，不要影响我发版本」).
+   C11 (#15214) runs in parallel to 18.0 and never holds it.
+
 ---
 
 ## 3. Non-goals
