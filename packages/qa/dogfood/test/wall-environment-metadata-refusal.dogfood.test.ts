@@ -144,8 +144,7 @@ async function ok(res: Response, status = 200): Promise<void> {
   expect(res.status, await res.clone().text()).toBe(status);
 }
 
-for (const posture of ['isolated', 'group'] as const) {
-  /**
+/**
  * [C8 stage 8b] The organization a `single` session is active in: the Default
  * Organization, which an organization-less system grant is now stamped with
  * (ADR-0131 D9). A precheck that resolves with no organization would read the
@@ -154,7 +153,8 @@ for (const posture of ['isolated', 'group'] as const) {
 const sessionOrgOf = async (h: Harness): Promise<string | undefined> =>
   (await (await h.stack.kernel.getServiceAsync<{ defaultOrgId(): Promise<string | null> }>('tenancy')).defaultOrgId()) ?? undefined;
 
-describe(`[ADR-0131 D12 items 7–8] ${posture}: every environment-metadata write is the platform operator's`, () => {
+for (const posture of ['isolated', 'group'] as const) {
+  describe(`[ADR-0131 D12 items 7–8] ${posture}: every environment-metadata write is the platform operator's`, () => {
     let h: Harness;
     const previous = process.env.OS_TENANCY_POSTURE;
     const p = posture.slice(0, 3);
