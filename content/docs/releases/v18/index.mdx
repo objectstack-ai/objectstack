@@ -1,14 +1,16 @@
 ---
 title: v18
-description: "The v18 line, in prerelease on npm's `next` tag. It carries ADR-0131 (organization ownership is total, with no NULL `organization_id`) and lands its breaking changes in stages, each with its own migration. `latest` stays on 17.x until the line reaches GA."
+description: "The v18 line and its GA release, 18.0.0, which closes the `18.0.0-next.N` prerelease train and publishes to npm's `latest` tag. It carries ADR-0131 (organization ownership is total, with no NULL `organization_id`) and landed its breaking changes in stages, each with its own migration."
 ---
 
-> **Release status: v18 has no GA release yet.** The line publishes as
-> `18.0.0-next.N` prereleases on npm's `next` dist-tag. The `latest` tag stays
-> on the 17.x line, so a plain install keeps resolving 17.x, and a `^17`
-> dependency range never moves to 18. You get a v18 prerelease only by asking
-> for one: `@next` on every `@objectstack/*` dependency together, or an exact
-> `18.0.0-next.N`. There is no GA date.
+> **Release status: 18.0.0 is GA — the release this page documents.** It
+> closes the v18 prerelease train, which published as `18.0.0-next.N` on npm's
+> `next` dist-tag. The 18.0.0 cut leaves Changesets pre mode, so the
+> `@objectstack/*` packages stop publishing as `18.0.0-next.N`, and 18.0.0
+> publishes to npm's `latest` dist-tag, which moves from 17.x to 18 with it. A
+> `^17` dependency range still never moves to 18 by itself: move every
+> `@objectstack/*` dependency to 18 together, and read
+> [Upgrading](/docs/upgrading) before you do.
 
 **The v18 line** exists for one decision whose changes do not fit in a 17.x
 minor: [ADR-0131](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0131-total-organization-ownership-no-null-organization-id.md),
@@ -24,9 +26,9 @@ under the same rules.
 - **Through `next` before `latest`.** Every major is published to the `next`
   dist-tag for at least one RC cycle before `latest`
   ([ADR-0087](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0087-metadata-protocol-upgrade-contract.md)
-  D6). Changesets is in pre mode with the tag `next`, so every release cut from
-  `main` is the next `18.0.0-next.N`, carrying everything merged since the cut
-  before it.
+  D6). While Changesets was in pre mode with the tag `next`, every release cut
+  from `main` was the next `18.0.0-next.N`, carrying everything merged since
+  the cut before it; 18.0.0 is the cut that takes the line to `latest`.
 - **One stage, one changeset, one migration.** ADR-0131 lands in stages, in the
   order the ADR records, and each stage that breaks something says so in its
   own changeset: what breaks, and how to move from the old shape to the new
@@ -59,6 +61,7 @@ under the same rules.
 
   `npx skills remove --all` replaces the first command when these are the only
   skills the project has.
-- **GA ends the prerelease.** Reaching GA exits pre mode and publishes the line
-  to `latest`. Curated notes for the line's releases are compiled at release
-  time and are not written yet; until then, the changesets are the record.
+- **18.0.0 ends the prerelease.** It is the GA cut: it leaves pre mode and
+  publishes the line to `latest`. Curated notes for the line's releases are
+  compiled at release time and are not written yet; until then, the changesets
+  are the record.
