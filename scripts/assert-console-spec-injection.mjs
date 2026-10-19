@@ -150,8 +150,9 @@ function readPinnedReference(objectuiDir, vendoredDir) {
 
 const vendoredPin = readPinnedReference(path.resolve(args.objectui), path.resolve(args.vendored));
 const vendoredName = vendoredPin
-  ? `objectui's own @objectstack/spec build of objectstack ${vendoredPin.slice(0, 12)}`
+  ? `@objectstack/spec of objectui's own build of objectstack ${vendoredPin.slice(0, 12)}`
   : 'PUBLISHED @objectstack/spec';
+const vendoredOnly = vendoredPin ? 'pin-only' : 'published-only';
 
 const assetsDir = path.resolve(args.assets);
 // The dist root is the assets dir's parent: build-console.sh passes
@@ -244,7 +245,7 @@ if (staleCounts.pool > 0 && staleDetector === null) {
   console.error("  it could look for is in the bundle, and objectui's own source at the pin carries");
   console.error('  each one too, so none can tell the published spec from objectui\'s own text.');
   console.error('  The injection is UNVERIFIED by this check.');
-  console.error(`    published-only descriptions: ${staleCounts.pool}, all of them carried by objectui's source`);
+  console.error(`    ${vendoredOnly} descriptions: ${staleCounts.pool}, all of them carried by objectui's source`);
   console.error(`    first of them: "${staleHostCarried[0]}"`);
   process.exit(2);
 }
@@ -255,7 +256,7 @@ if (freshPresent !== true && stalePresent !== true) {
   console.error('✗ Neither spec appears in the built console — no @objectstack/spec');
   console.error('  content matched. The injection is UNVERIFIED by this check.');
   console.error(`    injected-only descriptions in the bundle: ${freshCounts.inBundle} of ${freshCounts.pool}`);
-  console.error(`    published-only descriptions in the bundle: ${staleCounts.inBundle} of ${staleCounts.pool}`);
+  console.error(`    ${vendoredOnly} descriptions in the bundle: ${staleCounts.inBundle} of ${staleCounts.pool}`);
   for (const line of [...freshNote('    '), ...staleNote('    ')]) console.error(line);
   process.exit(2);
 }
@@ -267,7 +268,7 @@ if (stalePresent === true) {
   console.error('  in the Studio designer — the defect objectstack#8134 exists to end.');
   console.error('');
   console.error(`  Text found in the bundle that ONLY the vendored spec has (${staleCounts.inBundle} of`);
-  console.error(`  ${staleCounts.pool} published-only descriptions), the first of them:`);
+  console.error(`  ${staleCounts.pool} ${vendoredOnly} descriptions), the first of them:`);
   console.error(`    "${staleDetector}"`);
   if (staleCounts.hostCarried > 0) {
     console.error('');
@@ -299,9 +300,9 @@ for (const line of freshNote('        ')) console.log(line);
 if (staleDetector) {
   console.log(`    absent  (vendored only): "${staleDetector}"`);
   if (staleCounts.hostCarried === 0) {
-    console.log(`      — and all ${staleCounts.pool} published-only descriptions are absent`);
+    console.log(`      — and all ${staleCounts.pool} ${vendoredOnly} descriptions are absent`);
   } else {
-    console.log(`      — and ${staleCounts.pool - staleCounts.hostCarried} of ${staleCounts.pool} published-only descriptions are absent;`);
+    console.log(`      — and ${staleCounts.pool - staleCounts.hostCarried} of ${staleCounts.pool} ${vendoredOnly} descriptions are absent;`);
     for (const line of staleNote('        ')) console.log(line);
   }
 }
