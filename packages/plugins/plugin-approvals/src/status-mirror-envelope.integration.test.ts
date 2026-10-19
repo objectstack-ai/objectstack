@@ -272,15 +272,16 @@ describe("the status mirror hands a runAs:'user' cascade the person's own reques
     expect('permissions' in write, 'the write carries no permission sets of its own').toBe(false);
   }
 
+  /** The consumers first (what an author's automation sees), then the producer fact that explains it. */
   async function expectPersonInOrg(seen: { write: any; hook: any; flow: any }, userId: string, org: string) {
-    expectAttributedWrite(seen.write, userId, org);
     const expected = await requestEnvelope(userId, org);
     expect(seen.hook.userId).toBe(userId);
     expect(seen.hook.isSystem).toBe(false);
     expect(envelopeOf(seen.hook), "the runAs:'user' hook").toEqual(expected);
     expect(seen.flow.userId).toBe(userId);
     expect(envelopeOf(seen.flow), "the runAs:'user' record-change flow").toEqual(expected);
-    return expected;
+    expectAttributedWrite(seen.write, userId, org);
+    return seen;
   }
 
   it('open, through the approval node: the submitter in the record organisation, and no role held only in another organisation', async () => {
@@ -289,10 +290,11 @@ describe("the status mirror hands a runAs:'user' cascade the person's own reques
     const requestId = await openNode('d_open', 'submitter', ['approver']);
     const [request] = await ql.find('sys_approval_request', { where: { id: requestId }, context: SYS });
     expect(request.organization_id, 'fixture premise: the request is stamped with the record organisation').toBe(ORG_A);
-    const expected = await expectPersonInOrg(await cascade(before), 'submitter', ORG_A);
+    const { hook, flow } = await expectPersonInOrg(await cascade(before), 'submitter', ORG_A);
     // The person whose memberships differ: what A grants, never what B does.
-    expect(expected.positions).not.toContain(ROLE_ONLY_IN_B);
-    expect(expected.org_user_ids).toEqual(['approver', 'peer', 'submitter']);
+    expect(hook.positions).not.toContain(ROLE_ONLY_IN_B);
+    expect(flow.positions).not.toContain(ROLE_ONLY_IN_B);
+    expect(sorted(hook.org_user_ids)).toEqual(['approver', 'peer', 'submitter']);
   });
 
   it('decide approve: the approver carries the grant they hold beyond the baseline, and their organisation peers', async () => {
@@ -300,9 +302,11 @@ describe("the status mirror hands a runAs:'user' cascade the person's own reques
     const requestId = await openNode('d_approve', 'submitter', ['approver']);
     const before = mark();
     await svc.decide(requestId, { decision: 'approve', actorId: 'approver' } as any, asPerson('approver'));
-    const expected = await expectPersonInOrg(await cascade(before), 'approver', ORG_A);
-    expect(expected.permissions).toContain(EXTRA_SET);
-    expect(expected.org_user_ids).toEqual(['approver', 'peer', 'submitter']);
+    const { hook, flow } = await expectPersonInOrg(await cascade(before), 'approver', ORG_A);
+    // The grant beyond the baseline is the approver's, so the automation that runs as them holds it.
+    expect(hook.permissions).toContain(EXTRA_SET);
+    expect(flow.permissions).toContain(EXTRA_SET);
+    expect(sorted(hook.org_user_ids)).toEqual(['approver', 'peer', 'submitter']);
   });
 
   it('decide reject: the approver, in the record organisation', async () => {
@@ -310,8 +314,8 @@ describe("the status mirror hands a runAs:'user' cascade the person's own reques
     const requestId = await openNode('d_reject', 'submitter', ['approver']);
     const before = mark();
     await svc.decide(requestId, { decision: 'reject', actorId: 'approver' } as any, asPerson('approver'));
-    const expected = await expectPersonInOrg(await cascade(before), 'approver', ORG_A);
-    expect(expected.permissions).toContain(EXTRA_SET);
+    const { hook } = await expectPersonInOrg(await cascade(before), 'approver', ORG_A);
+    expect(hook.permissions).toContain(EXTRA_SET);
   });
 
   it('recall: the submitter, in the record organisation', async () => {
@@ -319,8 +323,9 @@ describe("the status mirror hands a runAs:'user' cascade the person's own reques
     const requestId = await openNode('d_recall', 'submitter', ['approver']);
     const before = mark();
     await svc.recall(requestId, { actorId: 'submitter' } as any, asPerson('submitter'));
-    const expected = await expectPersonInOrg(await cascade(before), 'submitter', ORG_A);
-    expect(expected.positions).not.toContain(ROLE_ONLY_IN_B);
+    const { hook, flow } = await expectPersonInOrg(await cascade(before), 'submitter', ORG_A);
+    expect(hook.positions).not.toContain(ROLE_ONLY_IN_B);
+    expect(flow.positions).not.toContain(ROLE_ONLY_IN_B);
   });
 
   it('send back for revision: the approver, in the record organisation', async () => {
@@ -357,9 +362,10 @@ describe("the status mirror hands a runAs:'user' cascade the person's own reques
     const requestId = await openNode('d_xorg', 'submitter', ['xorg']);
     const before = mark();
     await svc.decide(requestId, { decision: 'approve', actorId: 'xorg' } as any, asPerson('xorg'));
-    const expected = await expectPersonInOrg(await cascade(before), 'xorg', ORG_A);
+    const { hook, flow } = await expectPersonInOrg(await cascade(before), 'xorg', ORG_A);
     // The record organisation's members (and the approver), never their own organisation's.
-    expect(expected.org_user_ids).toEqual(['approver', 'peer', 'submitter', 'xorg']);
+    expect(sorted(hook.org_user_ids)).toEqual(['approver', 'peer', 'submitter', 'xorg']);
+    expect(sorted(flow.org_user_ids)).toEqual(['approver', 'peer', 'submitter', 'xorg']);
   });
 
   it("the organisation is the record's live one: a record re-parented while its request was pending", async () => {
