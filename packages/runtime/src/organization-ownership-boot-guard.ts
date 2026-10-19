@@ -91,6 +91,9 @@ import { resolveRuntimeVersion } from './runtime-version.js';
  * `MigrationRecoveryPlugin`. ⛔ Never in `createStandaloneStack`'s own list:
  * every CLI data and schema boot shares that builder, the ceremony's own boot
  * among them, and a guard there would refuse the one command that clears it.
+ * That builder composes the birth half alone
+ * ({@link OrganizationOwnershipBirthMarkerPlugin}), which writes the marker on
+ * a store it created from empty and never refuses.
  *
  * A store with no physical columns to read (memory, MongoDB), or a
  * composition with no ledger or no store serving it, has nothing to judge:
@@ -351,6 +354,80 @@ type MarkerReading =
   | { state: 'unreadable' }
   | { state: 'unverified'; generation: number }
   | { state: 'verified'; generation: number };
+
+/**
+ * [Ruling record 6269955919, ① A] The birth half alone, for a boot that
+ * composes no guard: every CLI data and schema boot (`createStandaloneStack`),
+ * which can be the boot that creates a fresh install's store (`os migrate
+ * apply`, `os seed` before the first `os serve`). It writes the birth marker
+ * under exactly the guard's conditions — a ledger served by a SQL store this
+ * boot created from empty, no marker on it, no table in an earlier shape — and
+ * never refuses: judging the database stays the served boot's. Without it, the
+ * first `os serve` of an install whose store a CLI boot created would find no
+ * marker on a store it did not create, and refuse a fresh install.
+ *
+ * The ceremony's own boots never trip it: they hold their DDL back
+ * (`deferSchemaDdl`) or skip schema sync, so their store reports nothing
+ * created.
+ */
+export class OrganizationOwnershipBirthMarkerPlugin implements Plugin {
+  readonly name = ORGANIZATION_OWNERSHIP_BIRTH_MARKER_PLUGIN_NAME;
+  readonly type = 'standard';
+  readonly version = '1.0.0';
+  readonly dependencies: string[] = [];
+  /** As the guard: after the engine's schema sync and the ledger's registration. */
+  readonly optionalDependencies: string[] = ['com.objectstack.engine.objectql', 'com.objectstack.platform-objects'];
+
+  async init(_ctx: PluginContext): Promise<void> {}
+
+  async start(ctx: PluginContext): Promise<void> {
+    let engine: GuardEngine | undefined;
+    try {
+      engine = (ctx as any).getService?.('objectql');
+    } catch {
+      return;
+    }
+    if (!engine || typeof engine.getDriverForObject !== 'function') return;
+    const logger = (ctx as any)?.logger as { info?: (msg: string) => void; error?: (msg: string) => void } | undefined;
+    try {
+      await recordOrganizationOwnershipBirth(engine, logger);
+    } catch (error) {
+      // Durability: the store keeps looking healthy, and its first served boot
+      // will refuse it as one an earlier release created.
+      logger?.error?.(
+        `[organization-ownership] this store was created from empty and its birth marker (sys_migration ` +
+          `'${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') could not be written ` +
+          `(${error instanceof Error ? error.message : String(error)}): the first 'os serve' will refuse it as a ` +
+          `database an earlier release created. Fix the write and run this command again, or run 'os migrate ` +
+          `organization-ownership' on it.`,
+      );
+    }
+  }
+}
+
+/** The birth-marker plugin's kernel name. */
+export const ORGANIZATION_OWNERSHIP_BIRTH_MARKER_PLUGIN_NAME = 'com.objectstack.organization-ownership-birth-marker' as const;
+
+/**
+ * Write the birth marker when, and only when, this boot created the ledger's
+ * store from empty and no marker and no table in an earlier shape is there.
+ * The marker written, or `null` when none was owed. Throws when the write fails.
+ */
+export async function recordOrganizationOwnershipBirth(
+  engine: GuardEngine,
+  logger?: { info?: (msg: string) => void },
+  now: () => Date = () => new Date(),
+): Promise<OrganizationOwnershipBirthMarker | null> {
+  if (!ledgerStoreCreatedFromEmpty(engine)) return null;
+  if ((await readMarker(engine)).state !== 'absent') return null;
+  if ((await findV17ShapeTables(engine)).length > 0) return null;
+  const birth = await writeBirthMarker(engine, now());
+  logger?.info?.(
+    `[organization-ownership] a datastore created from empty: birth marker written (shape generation ` +
+      `${birth.shapeGeneration}, platform ${birth.platformVersion}).`,
+  );
+  return birth;
+}
 
 /**
  * The ceremony's marker. `inert` when this composition registers no ledger

@@ -28,7 +28,9 @@ import { AppPlugin } from './app-plugin.js';
 import {
   assertOrganizationOwnershipMigrated,
   isOrganizationOwnershipBootRefusal,
+  OrganizationOwnershipBirthMarkerPlugin,
   OrganizationOwnershipBootGuardPlugin,
+  recordOrganizationOwnershipBirth,
   ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME,
   ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE,
 } from './organization-ownership-boot-guard.js';
@@ -285,6 +287,27 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling �
     v17Shape();
     await expect(assertOrganizationOwnershipMigrated(engine({ client: 'memory', stats: CREATED_EMPTY }))).resolves.toBeUndefined();
     expect(markerRow()).toBeUndefined();
+  });
+
+  it('⭐ the birth half alone (every CLI boot): writes the marker on a store it created from empty, and never refuses', async () => {
+    columnlessShape();
+    // A store this boot found: nothing owed, nothing written, no refusal.
+    await expect(recordOrganizationOwnershipBirth(engine({ stats: FOUND }))).resolves.toBeNull();
+    expect(markerRow()).toBeUndefined();
+    // A v17-shape store is never given a birth marker, even one reported created.
+    db.exec(`DROP TABLE sys_job; CREATE TABLE sys_job (id TEXT PRIMARY KEY, status TEXT, organization_id TEXT);`);
+    await expect(recordOrganizationOwnershipBirth(engine({ stats: CREATED_EMPTY }))).resolves.toBeNull();
+    expect(markerRow()).toBeUndefined();
+    db.exec(`DROP TABLE sys_job; CREATE TABLE sys_job (id TEXT PRIMARY KEY, status TEXT);`);
+    // Created from empty: the marker, once; the plugin over a failing write logs and starts.
+    const ctx: any = { getService: () => engine({ stats: CREATED_EMPTY }), logger: {} };
+    await new OrganizationOwnershipBirthMarkerPlugin().start(ctx);
+    expect(JSON.parse(String(markerRow()!.details)).birth.shapeGeneration).toBe(ORGANIZATION_OWNERSHIP_SHAPE_GENERATION);
+    db.exec('DELETE FROM sys_migration');
+    const errors: string[] = [];
+    const failing: any = { getService: () => engine({ stats: CREATED_EMPTY, failInsert: true }), logger: { error: (m: string) => errors.push(m) } };
+    await expect(new OrganizationOwnershipBirthMarkerPlugin().start(failing)).resolves.toBeUndefined();
+    expect(errors).toEqual([expect.stringMatching(/the first 'os serve' will refuse it/)]);
   });
 
   it('⭐ the plugin refuses in its own start(), registering no hook: a refused boot stops before any later plugin starts', async () => {
