@@ -165,8 +165,9 @@ export interface ApprovalResumeSurface {
      * (`ResumeSignal.resumedBy`, ruling A on `FlowSchema.runAs`): the same
      * person the verdict mirror writes as ({@link actingUserId}). The engine
      * runs a `runAs: 'user'` flow's nodes after the decision as them,
-     * resolving their own grants; absent when no human decided (the SLA
-     * sweep), and then the run keeps the identity it had.
+     * resolving their own grants, and a `runAs: 'system'` flow's with them as
+     * the attribution user of its unchanged elevation; absent when no human
+     * decided (the SLA sweep), and then the run keeps the identity it had.
      */
     resumedBy?: string;
     /**

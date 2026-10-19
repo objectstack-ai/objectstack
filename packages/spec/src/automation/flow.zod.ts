@@ -1135,8 +1135,12 @@ export const FlowSchema = lazySchema(() => strictObject(
   // before it keep the trigger user's. So a post-decision write is attributed
   // to the decider (`updated_by`, the audit log), and a post-decision node the
   // decider may not perform is refused, loudly, and the run reports it; a flow
-  // whose approval must write what the approver may not declares `system`. A
-  // flow with no human decision node runs as its trigger user throughout.
+  // whose approval must write what the approver may not declares `system`.
+  // `system` flows keep system privileges; after the decision their attribution
+  // user is the decider (`{ isSystem: true, userId: <decider> }`, the shape the
+  // approvals verdict mirror writes with), so their post-decision writes, and
+  // `ctx.user` in the hooks those writes fire, name the decider too. A flow
+  // with no human decision node runs as its trigger user throughout.
   //
   // A run under `user` that resolves NO trigger user has nothing to scope to, so
   // its data operations are REFUSED (#3760). This is NOT a schedule-only case —
@@ -1157,7 +1161,8 @@ export const FlowSchema = lazySchema(() => strictObject(
     .enum(['system', 'user'])
     .default('user')
     .describe(
-      'Execution identity for the run: system = elevated (bypasses RLS), user = the human whose act is running ' +
+      'Execution identity for the run: system = elevated (bypasses RLS) — system flows keep system privileges; after ' +
+        'an approval decision their attribution user is the decider; user = the human whose act is running ' +
         'this segment: the trigger user until a human decision, the decider after it (RLS-respecting; the nodes ' +
         "after an approval decision run with the decider's identity and permissions, so a node the decider may " +
         'not perform is refused). ' +

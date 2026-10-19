@@ -6561,8 +6561,19 @@ export class AutomationEngine implements IAutomationService {
      * decision, a cold resume or a repair replay continues from the decider's
      * segment and never falls back to the submitter.
      *
-     * Unchanged, by the letter of the ruling:
-     *  - a `runAs:'system'` run (its posture and its carried user both);
+     * A `runAs:'system'` run moves its ATTRIBUTION user and nothing else (ruling
+     * 6267719791 Q1 A: 「`'system'` flows keep system privileges; after the
+     * decision their attribution user is the decider」). Its nodes after the
+     * decision run as `{ isSystem: true, userId: DECIDER }` — the shape the
+     * approvals verdict mirror already writes with — so `updated_by`, the audit
+     * row and `ctx.user` in the hooks those writes fire name the decider, while
+     * elevation is untouched and no grant is resolved (a system run's data
+     * context carries none: {@link resolveRunDataContext}'s system arm). The
+     * trigger user's positions, permission sets and peers are removed here too,
+     * so `current_user` in the segment is the decider and never the decider's id
+     * over the submitter's grants.
+     *
+     * Unchanged:
      *  - a signal with no decider — an SLA auto-decision, a screen, a wait
      *    timer, every engine-built continuation (a subflow parent's own nodes
      *    included: the parent declares no decision node of its own);
@@ -6583,7 +6594,6 @@ export class AutomationEngine implements IAutomationService {
         const context = run.context;
         const decider = signal[RESUME_AUTHORITY_SERVICE] === true ? signal.resumedBy : undefined;
         if (typeof decider !== 'string' || decider === '') return context;
-        if (context?.runAs === 'system') return context;
         if (context?.userId === decider) return context;
         const switched: SeededRunContext = {
             ...(context ?? {}),
@@ -6593,6 +6603,8 @@ export class AutomationEngine implements IAutomationService {
         delete switched.positions;
         delete switched.permissions;
         delete switched.org_user_ids;
+        // A system run keeps its elevation: attribution moves, no grant is resolved.
+        if (switched.runAs === 'system') return switched;
         await this.seedRunGrants(run.flowName, switched, 'deciding');
         return switched;
     }
@@ -8220,8 +8232,10 @@ export class AutomationEngine implements IAutomationService {
             const variablesAtPause = this.cloneVariablesAtPause(run, runId);
 
             // Ruling A on `FlowSchema.runAs`: who runs the nodes after this
-            // pause — the decider, when the owning service's signal names one on
-            // a `runAs:'user'` run; otherwise the identity the run paused with.
+            // pause — the decider, when the owning service's signal names one
+            // (with their own grants on a `runAs:'user'` run, as the attribution
+            // user of a still-elevated `runAs:'system'` run); otherwise the
+            // identity the run paused with.
             // Resolved BEFORE the claim, so nothing here can run after the
             // suspension is consumed and leave it consumed with no continuation;
             // the persisted `run.context` is left as it was, and the repair

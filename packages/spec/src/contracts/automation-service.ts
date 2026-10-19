@@ -74,9 +74,10 @@ export interface AutomationContext {
     /** Trigger event type (e.g. 'on_create', 'on_update') */
     event?: string;
     /**
-     * The acting user: who triggered the automation — or, on a `runAs: 'user'`
-     * run that an approval decision resumed, the decider, for the nodes after
-     * that decision (`FlowSchema.runAs`; {@link ResumeSignal.resumedBy}).
+     * The acting user: who triggered the automation — or, on a run that an
+     * approval decision resumed, the decider, for the nodes after that
+     * decision, on both postures (`FlowSchema.runAs`;
+     * {@link ResumeSignal.resumedBy}).
      */
     userId?: string;
     /**
@@ -154,13 +155,15 @@ export interface AutomationContext {
      * the write. The label is a FALLBACK, not a replacement — the audit writer
      * records `session.userId ?? session.actor` on `sys_audit_log.actor` — and
      * elevation never costs the run its operator: a `runAs:'system'` run
-     * carries the triggering user through UNCHANGED whenever the trigger
-     * resolved one (#5494), so its writes still stamp `created_by` /
-     * `updated_by` and `sys_audit_log.user_id` with that human, exactly as the
-     * same trigger would under `runAs:'user'` — until a human decision: an
-     * approval decision switches a `runAs:'user'` run to the decider for the
-     * nodes after it (`FlowSchema.runAs`), while a `runAs:'system'` run keeps
-     * carrying its trigger user. `runAs` declares the run's
+     * carries the triggering user through whenever the trigger resolved one
+     * (#5494), so its writes still stamp `created_by` / `updated_by` and
+     * `sys_audit_log.user_id` with that human, exactly as the same trigger
+     * would under `runAs:'user'` — and after a human decision that parity
+     * holds with the decider: an approval decision moves the acting user to
+     * the decider for the nodes after it on BOTH postures (`FlowSchema.runAs`).
+     * A `runAs:'user'` run takes the decider's permissions with them; a
+     * `runAs:'system'` run keeps its elevation and only its attribution user
+     * moves. `runAs` declares the run's
      * AUTHORIZATION posture and leaves ATTRIBUTION alone (ADR-0073 D2).
      *
      * The `svc:flow:` label is therefore what a genuinely USER-LESS run falls
@@ -610,7 +613,10 @@ export interface ResumeSignal {
      * the decision run as this user, with the identity and permissions the
      * engine resolves for them through the same grants resolver a trigger
      * user's run is seeded through (positions, permission sets, organisation
-     * peers), never with the trigger user's; see `FlowSchema.runAs`. Absent
+     * peers), never with the trigger user's. On a `runAs: 'system'` run they
+     * keep the run's elevation and carry this user as their attribution user
+     * (`{ isSystem: true, userId }`), with no grant resolved; see
+     * `FlowSchema.runAs`. Absent
      * when no human decided (an SLA auto-decision), and then the run keeps the
      * identity it had.
      *
