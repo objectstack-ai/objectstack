@@ -166,10 +166,14 @@ describe('storage success envelope (#3689)', () => {
       schema: FileUploadResponseSchema,
       dataKeys: ['fileId', 'path', 'name', 'size', 'mimeType', 'lastModified', 'created'],
       run: async () => {
-        const routes = mount(await tmpAdapter(), new StorageMetadataStore(null));
+        const adapter = await tmpAdapter();
+        const routes = mount(adapter, new StorageMetadataStore(null));
         const presigned = await drive(routes, 'POST', `${BASE}/upload/presigned`, {
           body: { filename: 'test.txt', mimeType: 'text/plain', size: 5 },
         });
+        // The backend holds the declared bytes — a commit without them is
+        // refused 409 (#24548), which is not the branch this case drives.
+        await adapter.upload(`user/${presigned.body.data.fileId}.txt`, Buffer.from('hello'));
         return drive(routes, 'POST', `${BASE}/upload/complete`, {
           body: { fileId: presigned.body.data.fileId },
         });
