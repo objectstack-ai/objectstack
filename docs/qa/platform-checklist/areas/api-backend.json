@@ -2823,7 +2823,7 @@
       "title": "Error answers made honest on v18: a hook refusal on a hand-built write route answers 400 with the hook's own sentence, a crash answers a generic 500 that withholds the caught message, and a unique-constraint refusal is 409 UNIQUE_VIOLATION with details at the action door, MCP and sandboxed bodies too",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2856,9 +2856,9 @@
           "evidence": "the body"
         },
         {
-          "clause": "the duplicate insert through the action door → 409 UNIQUE_VIOLATION with details naming the field",
+          "clause": "the duplicate insert through the action door → 409 UNIQUE_VIOLATION with `details` in the composite shape: exactly `object` (the object's name) and `developerMessage`, no `field` — a field's `unique: true` is a tenancy-scoped composite index, so the driver names no single column (`field` is added only when the refusal states one)",
           "oracle": "api",
-          "verify": "status + code + details",
+          "verify": "status + error.code + the key set of error.details (exactly developerMessage and object) + details.object",
           "evidence": "the body"
         },
         {
@@ -2885,6 +2885,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "acceptance[2] asserts the composite details shape (QA run #24541 acceptance[2] fail, disposition assertion-defect; parked on #24579 §1). #24541: \"details carry field only when the driver names a single column; a tenancy-scoped composite unique names none\" — the pin packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts asserts the details keys are exactly developerMessage and object for an engine write, adding field only when DuplicateRecordError states a column, and driver-sql builds a field's unique: true as the (organization, field) composite. The clause asked for details naming the field, which no stock unique field produces. acceptance[1] is unchanged: QA run #24558's fail there is the product defect #24561; re-derived from main 5a871e4e41, where every source cited here is byte-identical to the run subject 5b14b7f3",
+          "ref": "#PR-PENDING"
         }
       ]
     }

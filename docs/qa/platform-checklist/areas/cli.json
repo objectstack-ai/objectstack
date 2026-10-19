@@ -1832,10 +1832,10 @@
     },
     {
       "id": "cli.organization-ownership-ceremony",
-      "title": "The v18 upgrade ceremony `os migrate organization-ownership`: a bare run writes a plan and changes nothing, --apply demands a reviewed --plan-file (and --backup-taken), refuses a mismatched plan, an open SQLite holder (database-busy) and an unresolved dialect, checkpoints its steps, and `os migrate apply --allow-destructive` holds every organization_id drop until the ceremony marker is verified; then `os migrate comment-reactions --apply` converts reactions idempotently — end to end, plan → backup → apply → v18 boot",
+      "title": "`os migrate organization-ownership` in 18.0, which supports fresh installs only: plan and apply alike refuse NOT_IMPLEMENTED before reading anything and leave the database unchanged, and `os migrate apply --allow-destructive` still withholds every organization_id drop on a v17-shaped database; the ceremony class the refusal keeps underneath (plan, refusals, checkpoints, drop gate) and `os migrate comment-reactions --apply` stay pinned — the v17 → v18 ceremony itself ships in an 18.x release",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -1846,46 +1846,42 @@
         "requires": [
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
           "a COPY of a v17-shaped SQLite DB (platform-core.v18-boot-refusals names how to get one) — never the original"
+        ],
+        "knownGaps": [
+          "WITHDRAWN IN 18.0 and deliberately not scored here: the ceremony's own arms — the plan file a bare run writes, its plan-file-required / plan-*-mismatch / database-busy refusals, the sys_migration adr-0131-organization-ownership checkpoint a reviewed apply writes, and a migrated copy booting under v18 — are not clauses of this revision. QA run #24551: \"ruling records 6259608309 (item 1) and 6259698357 then cut 18.0 to fresh installs on the single posture, carried by .changeset/pre/15212-180-guards-fresh-single-only.md, the ADR-0131 release-scope note and organization-ownership.ts …\"; the registered command (packages/cli/src/commands/migrate/organization-ownership.ts#MigrateOrganizationOwnership) refuses before the ceremony runs. A runner scores none of these arms — neither `fail` (QA run #24551's reading of revision 1) nor `skipped` (QA run #24556's, c1/c2/c4): they are not on the item. The 18.x release that ships the upgrade path restores them as clauses in the revision that re-registers the ceremony; their revision-1 wording is in this file's git history",
+          "acceptance[3] scores the drop gate's exit code, `message` and `tables`, not its prose: that prose still prescribes `os migrate organization-ownership --out PLAN` and `--apply --plan-file PLAN`, which 18.0 refuses — a product defect tracked on #24567, not a fail of this clause"
         ]
       },
       "steps": [
-        "`os migrate organization-ownership` on the copy; read the plan file; checksum the DB before/after",
-        "`--apply` without --plan-file; with a plan for another DB; with the DB open in a second process",
-        "`--apply --plan-file PLAN --backup-taken`; read sys_migration row adr-0131-organization-ownership",
-        "`os migrate apply --allow-destructive` before and after the marker is verified",
-        "`os migrate comment-reactions --apply` twice",
-        "`os serve` on the migrated copy — it must boot (platform-core.v18-boot-refusals is the before-state)"
+        "`os migrate organization-ownership --database-url file:COPY` on the v17-shaped copy, plain and with `--json`; checksum the DB before and after, and list the working directory for organization-ownership-plan-*.json",
+        "`--apply` without --plan-file; `--apply --plan-file P --backup-taken` with P any path (18.0 writes no plan, and the refusal reads none); `--apply` with the DB held open by a second process; each with `--json` too",
+        "`os migrate apply --allow-destructive --yes --json` on the v17-shaped copy; checksum the DB before and after",
+        "`os migrate comment-reactions --apply` twice"
       ],
       "acceptance": [
         {
-          "clause": "the ceremony's plan, refusals, checkpoints, drop gate and reactions conversion — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "clause": "the 18.0 release refusal of the registered command, and the ceremony class it keeps whole underneath (plan, refusals, checkpoints, drop gate, reactions conversion) — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
           "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "the bare run writes organization-ownership-plan-*.json and the DB checksum is unchanged",
+          "clause": "a bare run (plan mode, plain or `--json`) is refused before it reads anything: exit 1 with NOT_IMPLEMENTED — `--json` answers {error: plan_refused, reason: upgrade-unavailable, code: NOT_IMPLEMENTED, detail}, the plain form prints the refusal with `(NOT_IMPLEMENTED)` — no organization-ownership-plan-*.json is written, and the DB checksum is unchanged",
           "oracle": "build",
-          "verify": "file + checksums",
-          "evidence": "plan name + checksums"
+          "verify": "exit code + the JSON object (or the printed refusal) per form + a directory listing + checksums before/after",
+          "evidence": "the refusal per form, the listing, the checksum pair"
         },
         {
-          "clause": "--apply without a plan → plan-file-required; a mismatched plan → plan-*-mismatch; an open holder → database-busy (exit 1, nothing applied)",
+          "clause": "every --apply arm — no --plan-file, a --plan-file with --backup-taken, the DB held open by a second process — is refused the same way before reading anything: exit 1, `--json` {error: apply_refused, reason: upgrade-unavailable, code: NOT_IMPLEMENTED}; none answers the ceremony's own plan-file-required, plan-*-mismatch or database-busy, which nothing reaches in 18.0, and nothing is applied",
           "oracle": "build",
-          "verify": "exit code + reason per arm",
+          "verify": "exit code + error / reason / code per arm + checksums before/after",
           "evidence": "per-arm lines"
         },
         {
-          "clause": "the reviewed apply checkpoints in sys_migration and the drop gate withholds organization_id drops until then",
+          "clause": "the drop gate still holds on a v17-shaped DB: `os migrate apply --allow-destructive` refuses every organization_id drop the ceremony owns — exit 1, `--json` message refused_organization_ownership_unmigrated with `tables` naming them — and applies nothing",
           "oracle": "build",
-          "verify": "sys_migration row + apply output",
-          "evidence": "excerpts"
-        },
-        {
-          "clause": "the migrated copy boots under v18",
-          "oracle": "log",
-          "verify": "boot output reaches listening",
-          "evidence": "the line"
+          "verify": "exit code + the JSON message and tables + checksums before/after",
+          "evidence": "the excerpt and the checksum pair"
         }
       ],
       "negative": [
@@ -1896,10 +1892,12 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/cli/src/commands/migrate/organization-ownership.apply-flags.test.ts + packages/cli/src/utils/organization-ownership-apply.test.ts + packages/cli/src/commands/migrate/organization-ownership.occupancy.integration.test.ts + packages/cli/src/commands/migrate/organization-ownership.dialect.test.ts + packages/cli/src/commands/migrate/apply-organization-ownership-gate.integration.test.ts + packages/cli/src/commands/migrate/comment-reactions.integration.test.ts + packages/cli/src/utils/organization-ownership-host-supplement.integration.test.ts"
+        "ref": "packages/cli/src/commands/migrate/organization-ownership.apply-flags.test.ts + packages/cli/src/utils/organization-ownership-apply.test.ts + packages/cli/src/commands/migrate/organization-ownership.occupancy.integration.test.ts + packages/cli/src/commands/migrate/organization-ownership.dialect.test.ts + packages/cli/src/commands/migrate/apply-organization-ownership-gate.integration.test.ts + packages/cli/src/commands/migrate/comment-reactions.integration.test.ts + packages/cli/src/utils/organization-ownership-host-supplement.integration.test.ts + packages/cli/src/commands/migrate/organization-ownership.release-refusal.test.ts"
       },
       "source": [
         "packages/cli/src/commands/migrate/organization-ownership.ts",
+        "packages/cli/src/commands/migrate/organization-ownership.ts#ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE",
+        ".changeset/pre/15212-180-guards-fresh-single-only.md",
         "packages/spec/src/system/fate-supplement.zod.ts#OrganizationOwnershipSupplementSchema",
         "packages/cli/src/utils/organization-ownership-drop-gate.ts",
         "docs/adr/0131-total-organization-ownership-no-null-organization-id.md",
@@ -1911,6 +1909,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "re-pointed to the 18.0 release refusal (QA run #24551 acceptance[1]–[4] fail, disposition stale-spec, RUNNER rule 7 agreeing; parked on #24579 §1). 18.0 was narrowed to fresh installs by ruling — #24551: \"ruling records 6259608309 (item 1) and 6259698357 then cut 18.0 to fresh installs on the single posture\" — and the registered `os migrate organization-ownership` refuses plan and apply alike with NOT_IMPLEMENTED before reading anything. acceptance[1] and [2] now score that refusal (no plan written, the DB unchanged, every apply arm refused the same way); acceptance[3] keeps the drop-gate half and drops the sys_migration checkpoint half; revision 1's acceptance[4] (the migrated copy boots) is removed. The ledger has no clause-level skip, so the ceremony's own arms are recorded in fixtures.knownGaps[0] as withdrawn and deliberately not scored, the shape knownGaps already carries for a half an item does not score. That is the one reading for both runs: a runner scores those arms neither `fail` (#24551, revision 1) nor `skipped` (QA run #24556, c1/c2/c4), and both runs captured the refusal each re-pointed clause now asserts. automated.ref gains organization-ownership.release-refusal.test.ts, the pin of the registered command (the other pins drive the ceremony class beneath it); acceptance[0], the title, the steps and source follow; re-derived from main 5a871e4e41, where every source cited here is byte-identical to the run subject 5b14b7f3",
+          "ref": "#PR-PENDING"
         }
       ]
     },

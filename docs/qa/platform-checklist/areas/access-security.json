@@ -3799,10 +3799,10 @@
     },
     {
       "id": "access-security.share-link-combined-gates",
-      "title": "Share links with two gates combined: signed_in + password answers an anonymous caller 401 SIGN_IN_REQUIRED whatever password is sent, email + password answers a uniform 404 INVALID_OR_EXPIRED, and /messages answers exactly like /resolve",
+      "title": "Share links with two gates combined: signed_in + password answers an anonymous caller 401 SIGN_IN_REQUIRED whatever password is sent, email + password answers a uniform 404 INVALID_OR_EXPIRED, and /messages opens exactly where /resolve opens",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3841,9 +3841,9 @@
           "evidence": "the bodies"
         },
         {
-          "clause": "/messages answers identically to /resolve on every call",
+          "clause": "/messages is open iff /resolve is open on the same call — open meaning the call passes the link's token, audience and password gates: where /resolve refuses at a gate (401 / 404 / 410), /messages answers its one refusal, 404 NOT_FOUND; where /resolve passes, /messages answers 200 for an `ai_conversations` link and 400 UNSUPPORTED for any other object (the stock showcase has no ai_conversations object, so 400 UNSUPPORTED is the open answer there). The refusal codes differ by pinned design, so only the open/refused verdict is compared (a malformed password header is refused 400 VALIDATION_FAILED by both, before either reads the link)",
           "oracle": "api",
-          "verify": "status+code pairs",
+          "verify": "pair each /resolve answer with the /messages answer to the same call: refused → 404 NOT_FOUND, passed → 200 or 400 UNSUPPORTED; a /messages 200 or 400 UNSUPPORTED where /resolve refused is a fail",
           "evidence": "the paired lines"
         }
       ],
@@ -3865,6 +3865,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "acceptance[3] re-pointed to open/refused parity (QA run #24559 acceptance[3] fail, disposition assertion defect; parked on #24579 §1; QA run #24558 scored the same clause on that corrected intent). #24559 records the divergence as \"the pinned design (share-link-envelope.conformance.test.ts: messages for an unresolvable token → 404 NOT_FOUND; for a non-ai_conversations link → 400 UNSUPPORTED)\" and re-points the clause to \"/messages opens iff /resolve opens\". packages/plugins/plugin-sharing/src/share-link-routes.ts#registerShareLinkRoutes hands /messages the same audience inputs and answers every refusal 404 NOT_FOUND, and packages/runtime/src/domains/share-links-messages-audience.test.ts holds both mounts to one open/refused verdict per audience. The clause asked for identical status+code pairs, which the design contradicts on every refused call. The title follows; re-derived from main 5a871e4e41, where every source cited here is byte-identical to the run subject 5b14b7f3",
+          "ref": "#PR-PENDING"
         }
       ]
     }

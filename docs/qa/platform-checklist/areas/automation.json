@@ -1987,10 +1987,10 @@
     },
     {
       "id": "automation.flow-authoring-refusals-v18",
-      "title": "Flow authoring contract on v18, refused at `os validate` AND at PUT /meta/flow: single-brace {…} value tokens (CEL only; text slots use {{ }}), $-prefixed bound variable names, builtin node config keys/values the executor does not declare, dangling or repeated edges, `record`/`user.id` roots a flow cannot bind, retryPolicy.maxRetry, and an anonymous endpoint targeting a runAs:\"system\" flow",
+      "title": "Flow authoring contract on v18, refused at `os validate` — and at PUT /meta/flow for every flow-body arm but the CEL root scope, which only `os validate` judges: single-brace {…} value tokens (CEL only; text slots use {{ }}), $-prefixed bound variable names, builtin node config keys/values the executor does not declare, dangling or repeated edges, `record`/`user.id` roots a flow cannot bind, retryPolicy.maxRetry, and an anonymous endpoint targeting a runAs:\"system\" flow",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -2006,7 +2006,7 @@
       },
       "steps": [
         "for each arm run `os validate` in the scratch app and record exit code + rule id + located path: fields:{owner:\"{record.owner}\"}; notify title \"{record.name}\"; screen field named \"$x\"; create_record outputVariable:42; notify bogusKey; an edge to a removed node; a REST-triggered flow reading record.x; `user.id` in CEL; job retryPolicy:{maxRetry:3}; an authRequired:false flow endpoint targeting a runAs:\"system\" flow",
-        "PUT the same flow bodies to a fresh showcase boot at /api/v1/meta/flow/qa_ARM (scratch names)",
+        "PUT the flow-body arms acceptance[2] lists to a boot of the scratch app at /api/v1/meta/flow/qa_ARM (scratch names); the endpoint arm PUTs the `runAs: \"system\"` body of the flow its code-declared endpoint names",
         "controls: the CEL envelope {dialect:\"cel\",source:\"record.owner\"}, a notify title \"Case {{ record.name }}\", and a query placeholder {current_user_id} in a CRUD filter operand all PASS"
       ],
       "acceptance": [
@@ -2023,9 +2023,9 @@
           "evidence": "one line per arm"
         },
         {
-          "clause": "the same bodies at PUT /meta/flow → 422 INVALID_METADATA and nothing stored",
+          "clause": "at PUT /api/v1/meta/flow the door refuses what it judges — 422 INVALID_METADATA with a located issue, and nothing stored — for the single-brace value and text tokens, the $-prefixed bound name, the undeclared builtin node config key and value, the dangling or repeated edge, an undeclared `retry` key under a `try_catch` node (`retry: {maxRetry: 3}`, the flow-shaped twin of the job arm) and a `runAs: \"system\"` flow that a code-declared `authRequired: false` endpoint names (issue at `runAs`). The two CEL root-scope arms — `record.x` in a flow no entrance hands a record, and `user.id` — answer 200 and are stored: this door does not judge root scope, by design, and `os validate` (acceptance[1]) refuses them. The job and the endpoint themselves are code-only types (PUT /meta/job and /meta/api answer 403 NOT_CREATABLE), so they are not PUT arms",
           "oracle": "api",
-          "verify": "status + read-back 404",
+          "verify": "status + code per arm, then GET the same name: a 422 arm reads back 404, a root-scope arm 200",
           "evidence": "per-arm lines"
         },
         {
@@ -2055,6 +2055,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "acceptance[2] narrowed to what the PUT door refuses (QA run #24545 acceptance[2] fail, disposition stale-spec; parked on #24579 §1; QA run #24558 flagged the same clause's \"PUT 422\" as too broad). #24545: the runtime PUT gate \"deliberately stands down on the CEL root-scope judgment (whole-stack, owned by os validate — which still refuses both arms, so negative clauses hold)\", by rulings 5791822697 (item 3) and 6104584601 (letter B) as packages/lint/src/flow-cel-root-scope.ts#perWriteSnapshotEntrance records, and the item's own pin validate-expressions.flow-cel-root.test.ts asserts the stand-down. So the record.x and user.id arms now expect 200 and a stored row at PUT. The job arm and the endpoint arm are not PUT /meta/flow bodies — job and api are code-only types, 403 NOT_CREATABLE (#24558) — so the clause names the flow-side twins the door does refuse: a try_catch node's retry.maxRetry, and the runAs: \"system\" flow a code-declared anonymous endpoint names (422 at runAs, #24545). steps[1] and the title follow; re-derived from main 5a871e4e41, where every source cited here is byte-identical to the run subject 5b14b7f3",
+          "ref": "#PR-PENDING"
         }
       ]
     },
