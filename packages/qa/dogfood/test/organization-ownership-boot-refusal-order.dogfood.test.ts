@@ -146,7 +146,13 @@ describe('[ADR-0131 D10 item 5] a 17.x database upgrades through the boot refusa
     // of that reviewed plan file — through the ceremony class (see the header).
     const ceremony = (args: string[]) => spawnSync(process.execPath, [
       '--input-type=module', '-e',
+      // The built module, as `bin/run.js` runs it: oclif's auto-transpile off,
+      // so an inherited NODE_ENV=test cannot send it to `src/` under tsx.
       'const [root, url, ...argv] = process.argv.slice(1);' +
+        " const { createRequire } = await import('node:module');" +
+        " const { pathToFileURL } = await import('node:url');" +
+        " const oclif = await import(pathToFileURL(createRequire(root + '/package.json').resolve('@oclif/core')).href);" +
+        ' (oclif.settings ?? oclif.default.settings).enableAutoTranspile = false;' +
         ' const { OrganizationOwnershipCeremony } = await import(url);' +
         ' await OrganizationOwnershipCeremony.run(argv, { root });',
       CLI_ROOT, CEREMONY_MODULE, '--database-url', `file:${file}`, ...args,
