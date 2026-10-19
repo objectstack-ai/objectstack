@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 231 |
-| Object name statically decidable | 160 |
+| Write call sites | 229 |
+| Object name statically decidable | 158 |
 | Object name chosen at run time | 71 |
-| Against a tenancy-enabled object | 159 |
+| Against a tenancy-enabled object | 157 |
 | Against an object declaring tenancy off | 1 |
 | Threading a tenant context | 171 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
-| Options argument unreadable | 52 |
-| …and decidably tenancy-enabled | 31 |
+| Options argument unreadable | 50 |
+| …and decidably tenancy-enabled | 29 |
 | Threading a decidably elevated context | 128 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 95 |
+| Threading a context of undecidable elevation | 93 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,11 +90,11 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-19 at `2623d6d6c`.
+Measured on 2026-10-19 at `723af9722`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 670 |
+| tracked non-test sources scanned | 671 |
 | engine-shaped types recognised | 79 |
 | declared objects in the registry | 116 |
 | same-named calls subtracted as non-engine | 166 |
@@ -183,8 +183,6 @@ Measured on 2026-10-19 at `2623d6d6c`.
 | `packages/plugins/plugin-sharing/src/sharing-service.ts` | `delete` | `sys_record_share` | enabled | elevated | 2 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts` | `insert` | `sys_record_share` | enabled | elevated | 1 |
 | `packages/plugins/plugin-sharing/src/sharing-service.ts` | `update` | `sys_record_share` | enabled | elevated | 1 |
-| `packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts` | `insert` | `sys_webhook` | enabled | options unreadable | 1 |
-| `packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts` | `update` | `sys_webhook` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-webhooks/src/migrate-webhook-secrets.ts` | `update` | `subscriptionsObject` | undecidable | options unreadable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `delete` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |

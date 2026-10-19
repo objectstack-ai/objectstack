@@ -47,78 +47,82 @@ interface HookEntry {
     packageId?: string;
 }
 
+/** Equality and `$in` — the two predicate shapes the reader and the dispatcher send. */
+function rowMatches(row: any, cond?: Record<string, any>): boolean {
+    if (!cond) return true;
+    return Object.entries(cond).every(([k, v]) => {
+        if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
+        return row[k] === v;
+    });
+}
+
 /**
  * The ObjectQL surface the dispatcher, the reader and the provenance hook
- * touch: `find({ where | filter })` with equality and `$in`, `insert`,
- * update-by-id with `beforeUpdate` hooks, and a `_registry.listItems(type)` for
- * declared metadata. Every write is recorded, so "nothing writes a row" is a
- * reading, not an assumption.
+ * touch: `find({ where | filter })` with equality and `$in` and the caller's
+ * `limit`, `insert`, update-by-id with `beforeUpdate` hooks, and a
+ * `_registry.listItems(type)` for declared metadata. Every write is recorded, so
+ * "nothing writes a row" is a reading, not an assumption.
  */
-class FakeEngine {
-    rows: Record<string, any[]> = {};
-    writes: Array<{ op: string; object: string; data: any }> = [];
-    declared: Record<string, any[]> = {};
-    failLedgerRead = false;
-    private hooks: HookEntry[] = [];
+function makeFakeEngine(rows: Record<string, any[]>, declared: Record<string, any[]>) {
+    const writes: Array<{ op: string; object: string; data: any }> = [];
+    let hooks: HookEntry[] = [];
+    return {
+        rows,
+        writes,
+        declared,
+        get _registry() {
+            return { listItems: (type: string) => [...(declared[type] ?? [])] };
+        },
+        async find(name: string, q?: any): Promise<any[]> {
+            const matched = (rows[name] ?? []).filter((r) => rowMatches(r, q?.filter ?? q?.where));
+            const bounded = q?.limit !== undefined ? matched.slice(0, q.limit) : matched;
+            return bounded.map((r) => ({ ...r }));
+        },
+        async findOne(name: string, q?: any): Promise<any> {
+            assertEngineFindOnePredicate(name, q);
+            return (await this.find(name, q))[0] ?? null;
+        },
+        async insert(name: string, data: any): Promise<any> {
+            writes.push({ op: 'insert', object: name, data });
+            (rows[name] = rows[name] ?? []).push({ ...data });
+            return data;
+        },
+        async update(name: string, data: any, opts?: any): Promise<any> {
+            writes.push({ op: 'update', object: name, data });
+            const id = data?.id ?? opts?.where?.id;
+            const cond = opts?.where ?? (id ? { id } : undefined);
+            const previous = (rows[name] ?? []).find((r) => rowMatches(r, cond));
+            const ctx = { input: { id, data }, previous: previous ? { ...previous } : undefined, session: opts?.context };
+            for (const h of hooks) {
+                if (h.event === 'beforeUpdate' && (!h.object || h.object === name)) await h.handler(ctx);
+            }
+            for (const r of rows[name] ?? []) if (rowMatches(r, cond)) Object.assign(r, data);
+            return { affected: 1 };
+        },
+        async delete(): Promise<any> {
+            return { affected: 0 };
+        },
+        async count(name: string): Promise<number> {
+            return (rows[name] ?? []).length;
+        },
+        registerHook(event: string, handler: (ctx: any) => any, options?: Record<string, any>): void {
+            hooks.push({ event, handler, object: options?.object, packageId: options?.packageId });
+        },
+        unregisterHooksByPackage(packageId: string): number {
+            const before = hooks.length;
+            hooks = hooks.filter((h) => h.packageId !== packageId);
+            return before - hooks.length;
+        },
+    };
+}
 
-    constructor(seed?: { rows?: Record<string, any[]>; declared?: Record<string, any[]> }) {
-        if (seed?.rows) this.rows = JSON.parse(JSON.stringify(seed.rows));
-        if (seed?.declared) this.declared = JSON.parse(JSON.stringify(seed.declared));
-    }
+type FakeEngine = ReturnType<typeof makeFakeEngine>;
 
-    get _registry() {
-        return { listItems: (type: string) => [...(this.declared[type] ?? [])] };
-    }
-
-    private matches(row: any, cond?: Record<string, any>): boolean {
-        if (!cond) return true;
-        return Object.entries(cond).every(([k, v]) => {
-            if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
-            return row[k] === v;
-        });
-    }
-
-    async find(name: string, q?: any): Promise<any[]> {
-        if (name === LEDGER && this.failLedgerRead) throw new Error('ledger down');
-        const all = this.rows[name] ?? [];
-        const out = all.filter((r) => this.matches(r, q?.filter ?? q?.where)).map((r) => ({ ...r }));
-        return typeof q?.limit === 'number' ? out.slice(0, q.limit) : out;
-    }
-    async findOne(name: string, q?: any): Promise<any> {
-        assertEngineFindOnePredicate(name, q);
-        return (await this.find(name, q))[0] ?? null;
-    }
-    async insert(name: string, data: any): Promise<any> {
-        this.writes.push({ op: 'insert', object: name, data });
-        (this.rows[name] = this.rows[name] ?? []).push({ ...data });
-        return data;
-    }
-    async update(name: string, data: any, opts?: any): Promise<any> {
-        this.writes.push({ op: 'update', object: name, data });
-        const id = data?.id ?? opts?.where?.id;
-        const cond = opts?.where ?? (id ? { id } : undefined);
-        const previous = (this.rows[name] ?? []).find((r) => this.matches(r, cond));
-        const ctx = { input: { id, data }, previous: previous ? { ...previous } : undefined, session: opts?.context };
-        for (const h of this.hooks) {
-            if (h.event === 'beforeUpdate' && (!h.object || h.object === name)) await h.handler(ctx);
-        }
-        for (const r of this.rows[name] ?? []) if (this.matches(r, cond)) Object.assign(r, data);
-        return { affected: 1 };
-    }
-    async delete(): Promise<any> {
-        return { affected: 0 };
-    }
-    async count(name: string): Promise<number> {
-        return (this.rows[name] ?? []).length;
-    }
-    registerHook(event: string, handler: (ctx: any) => any, options?: Record<string, any>): void {
-        this.hooks.push({ event, handler, object: options?.object, packageId: options?.packageId });
-    }
-    unregisterHooksByPackage(packageId: string): number {
-        const before = this.hooks.length;
-        this.hooks = this.hooks.filter((h) => h.packageId !== packageId);
-        return before - this.hooks.length;
-    }
+function newEngine(seed?: { rows?: Record<string, any[]>; declared?: Record<string, any[]> }): FakeEngine {
+    return makeFakeEngine(
+        seed?.rows ? JSON.parse(JSON.stringify(seed.rows)) : {},
+        seed?.declared ? JSON.parse(JSON.stringify(seed.declared)) : {},
+    );
 }
 
 class FakeRealtime {
@@ -230,7 +234,7 @@ async function startEnqueuer(engine: FakeEngine, logger?: any, deploymentWide?: 
 
 describe('declared webhooks — a fresh install dispatches from the registry', () => {
     it('a declared webhook dispatches on a matching event, with its secret, headers, method and timeout from the declaration', async () => {
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: {
                 webhook: [declaredWebhook({
                     triggers: ['create'], secret: 'shh', headers: { 'X-Env': 'prod' }, method: 'PUT', timeoutMs: 5000,
@@ -257,7 +261,7 @@ describe('declared webhooks — a fresh install dispatches from the registry', (
     });
 
     it('nothing writes a sys_webhook row: the plugin boot binds the reader and seeds zero rows', async () => {
-        const engine = new FakeEngine({ declared: { webhook: [declaredWebhook({ secret: 'shh' })] } });
+        const engine = newEngine({ declared: { webhook: [declaredWebhook({ secret: 'shh' })] } });
         const services: Record<string, unknown> = { objectql: engine, manifest: { register() {} } };
         const hooks: Record<string, Array<() => Promise<void>>> = {};
         const ctx: any = {
@@ -282,7 +286,7 @@ describe('declared webhooks — a fresh install dispatches from the registry', (
     });
 
     it('a declared webhook shipped inactive is not dispatched', async () => {
-        const engine = new FakeEngine({ declared: { webhook: [declaredWebhook({ isActive: false })] } });
+        const engine = newEngine({ declared: { webhook: [declaredWebhook({ isActive: false })] } });
         const { enqueuer, realtime, calls } = await startEnqueuer(engine);
         await realtime.publish(taskCreated());
         await flush();
@@ -292,7 +296,7 @@ describe('declared webhooks — a fresh install dispatches from the registry', (
 
     it('an invalid declaration is skipped with one warning per name, and a valid one beside it still dispatches', async () => {
         const warn = vi.fn();
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: { webhook: [declaredWebhook({ name: 'good' }), declaredWebhook({ name: 'bad', url: 'not-a-url' })] },
         });
         const { enqueuer, realtime, calls } = await startEnqueuer(engine, { warn, debug() {} });
@@ -318,7 +322,7 @@ describe('declared webhooks — the organization dimension follows the posture (
         // Under `single` every record carries the Default Organization (D9), and
         // the 18.0 seeded copy carried it too, so it delivered. The declaration
         // has no organization of its own; deployment-wide, it delivers as well.
-        const engine = new FakeEngine({ declared: { webhook: [declaredWebhook()] } });
+        const engine = newEngine({ declared: { webhook: [declaredWebhook()] } });
         const { enqueuer, realtime, calls } = await startEnqueuer(engine, undefined, true);
         await realtime.publish(orgEvent('org_default'));
         await flush();
@@ -329,7 +333,7 @@ describe('declared webhooks — the organization dimension follows the posture (
 
     it('under a wall a declared webhook stays org-less: an organization-walled event is refused, said once', async () => {
         const warn = vi.fn();
-        const engine = new FakeEngine({ declared: { webhook: [declaredWebhook()] } });
+        const engine = newEngine({ declared: { webhook: [declaredWebhook()] } });
         const { enqueuer, realtime, calls } = await startEnqueuer(engine, { warn, debug() {} }, false);
         await realtime.publish(orgEvent('org_a'));
         await realtime.publish(orgEvent('org_a'));
@@ -341,7 +345,7 @@ describe('declared webhooks — the organization dimension follows the posture (
 
     it('the plugin reads the posture from the tenancy service: `single` is deployment-wide, an absent service is walled', async () => {
         const boot = async (tenancy?: unknown) => {
-            const engine = new FakeEngine({ declared: { webhook: [declaredWebhook()] } });
+            const engine = newEngine({ declared: { webhook: [declaredWebhook()] } });
             const realtime = new FakeRealtime();
             const calls: any[] = [];
             const services: Record<string, unknown> = {
@@ -386,7 +390,7 @@ describe('declared webhooks — the organization dimension follows the posture (
 
 describe('declared webhooks — the activation ledger switches them (ADR-0131 D6 regime C)', () => {
     it('a ledger row with active:false switches a declared webhook off', async () => {
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: { webhook: [declaredWebhook()] },
             rows: { [LEDGER]: [ledgerRow('task_changed', false)] },
         });
@@ -398,7 +402,7 @@ describe('declared webhooks — the activation ledger switches them (ADR-0131 D6
     });
 
     it('a ledger row with active:true switches on a webhook shipped inactive', async () => {
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: { webhook: [declaredWebhook({ isActive: false })] },
             rows: { [LEDGER]: [ledgerRow('task_changed', true)] },
         });
@@ -410,7 +414,7 @@ describe('declared webhooks — the activation ledger switches them (ADR-0131 D6
     });
 
     it('another type\'s ledger row of the same name switches nothing', async () => {
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: { webhook: [declaredWebhook()] },
             rows: { [LEDGER]: [{ id: 'a1', metadata_type: 'flow', name: 'task_changed', active: false }] },
         });
@@ -422,7 +426,7 @@ describe('declared webhooks — the activation ledger switches them (ADR-0131 D6
     });
 
     it('a ledger write refreshes the cache in the same request — no wait for the periodic refresh', async () => {
-        const engine = new FakeEngine({ declared: { webhook: [declaredWebhook()] } });
+        const engine = newEngine({ declared: { webhook: [declaredWebhook()] } });
         const { enqueuer, realtime, calls } = await startEnqueuer(engine);
 
         engine.rows[LEDGER] = [ledgerRow('task_changed', false)];
@@ -437,8 +441,12 @@ describe('declared webhooks — the activation ledger switches them (ADR-0131 D6
 
     it('a ledger read that fails keeps each declared webhook at its declared isActive', async () => {
         const warn = vi.fn();
-        const engine = new FakeEngine({ declared: { webhook: [declaredWebhook()] } });
-        engine.failLedgerRead = true;
+        const engine = newEngine({ declared: { webhook: [declaredWebhook()] } });
+        const read = engine.find;
+        engine.find = async (name: string, q?: any) => {
+            if (name === LEDGER) throw new Error('ledger down');
+            return read.call(engine, name, q);
+        };
         const { enqueuer, realtime, calls } = await startEnqueuer(engine, { warn, debug() {} });
         await realtime.publish(taskCreated());
         await flush();
@@ -455,7 +463,7 @@ describe('declared webhooks — the activation ledger switches them (ADR-0131 D6
 describe('declared webhooks — an 18.0 database keeps its seeded rows, and nothing fires twice', () => {
     it('a pristine seeded row is ignored in favour of its declaration: one delivery, from the declaration', async () => {
         const wh = declaredWebhook({ secret: 'shh' });
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: { webhook: [wh] },
             rows: { sys_webhook: [seeded18_0Row('whk_seeded', wh)] },
         });
@@ -474,7 +482,7 @@ describe('declared webhooks — an 18.0 database keeps its seeded rows, and noth
 
     it('a pristine seeded row follows its declaration\'s switch: switched off, neither the row nor the declaration fires', async () => {
         const wh = declaredWebhook();
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: { webhook: [wh] },
             rows: { sys_webhook: [seeded18_0Row('whk_seeded', wh)], [LEDGER]: [ledgerRow('task_changed', false)] },
         });
@@ -486,7 +494,7 @@ describe('declared webhooks — an 18.0 database keeps its seeded rows, and noth
     });
 
     it('a pristine seeded row follows a changed declaration — the new URL, as the 18.0 seeder would have rewritten it', async () => {
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: { webhook: [declaredWebhook({ url: 'https://hooks.example/task-v2' })] },
             rows: { sys_webhook: [seeded18_0Row('whk_seeded', declaredWebhook())] },
         });
@@ -500,7 +508,7 @@ describe('declared webhooks — an 18.0 database keeps its seeded rows, and noth
     it('a seeded row an administrator switched off (customized) stays off: the declaration is withheld, said once', async () => {
         const warn = vi.fn();
         const wh = declaredWebhook();
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: { webhook: [wh] },
             rows: { sys_webhook: [seeded18_0Row('whk_seeded', wh, { active: false, customized: true })] },
         });
@@ -517,7 +525,7 @@ describe('declared webhooks — an 18.0 database keeps its seeded rows, and noth
 
     it('a seeded row an administrator pointed elsewhere (customized) answers as itself — one delivery, to the row\'s URL', async () => {
         const wh = declaredWebhook({ isActive: false });
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: { webhook: [wh] },
             rows: {
                 sys_webhook: [seeded18_0Row('whk_seeded', wh, {
@@ -535,7 +543,7 @@ describe('declared webhooks — an 18.0 database keeps its seeded rows, and noth
 
     it('an admin edit through the provenance stamp turns a pristine seeded row into one that answers as itself', async () => {
         const wh = declaredWebhook();
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: { webhook: [wh] },
             rows: { sys_webhook: [seeded18_0Row('whk_seeded', wh)] },
         });
@@ -554,7 +562,7 @@ describe('declared webhooks — an 18.0 database keeps its seeded rows, and noth
     });
 
     it('an administrator-authored row under a declared name answers as itself, and the declaration is withheld', async () => {
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: { webhook: [declaredWebhook()] },
             rows: {
                 sys_webhook: [{
@@ -572,7 +580,7 @@ describe('declared webhooks — an 18.0 database keeps its seeded rows, and noth
     });
 
     it('a pristine seeded row whose declaration is gone keeps dispatching, as it did on 18.0', async () => {
-        const engine = new FakeEngine({
+        const engine = newEngine({
             rows: { sys_webhook: [seeded18_0Row('whk_orphan', declaredWebhook({ name: 'retired_hook' }))] },
         });
         const { enqueuer, realtime, calls } = await startEnqueuer(engine);
@@ -592,16 +600,16 @@ describe('declared webhooks — the redelivery veto', () => {
         createWebhookRedeliverGuard(engine as any, 'sys_webhook', new DeclaredWebhookSource(engine, undefined));
 
     it('allows a declared webhook\'s delivery while it is declared and switched on', async () => {
-        const engine = new FakeEngine({ declared: { webhook: [declaredWebhook({ secret: 'shh' })] } });
+        const engine = newEngine({ declared: { webhook: [declaredWebhook({ secret: 'shh' })] } });
         expect(await guardFor(engine)({ source: 'webhook', refId: declaredWebhookRefId('task_changed') })).toBeUndefined();
     });
 
     it('refuses one whose declaration is gone, and one switched off through the ledger', async () => {
-        const gone = new FakeEngine();
+        const gone = newEngine();
         expect(await guardFor(gone)({ source: 'webhook', refId: declaredWebhookRefId('task_changed') }))
             .toMatch(/no longer declared/);
 
-        const off = new FakeEngine({
+        const off = newEngine({
             declared: { webhook: [declaredWebhook()] },
             rows: { [LEDGER]: [ledgerRow('task_changed', false)] },
         });
@@ -611,7 +619,7 @@ describe('declared webhooks — the redelivery veto', () => {
 
     it('judges an 18.0 pristine seeded row\'s old delivery by the declaration that now answers for it', async () => {
         const wh = declaredWebhook();
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: { webhook: [wh] },
             rows: { sys_webhook: [seeded18_0Row('whk_seeded', wh)], [LEDGER]: [ledgerRow('task_changed', false)] },
         });
@@ -621,7 +629,7 @@ describe('declared webhooks — the redelivery veto', () => {
 
     it('judges a customized seeded row by the row, as before', async () => {
         const wh = declaredWebhook();
-        const engine = new FakeEngine({
+        const engine = newEngine({
             declared: { webhook: [wh] },
             rows: {
                 sys_webhook: [seeded18_0Row('whk_seeded', wh, { customized: true })],
