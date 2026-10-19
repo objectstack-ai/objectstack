@@ -326,9 +326,11 @@ describe('[ADR-0131 D4] the unnamed-grant line says what 18.0 supports for a v17
   // The one wording pin in this file. 18.0 supports fresh installs only and its
   // `os migrate organization-ownership` refuses plan and apply on every
   // database, so the line an operator reads at boot must not send them to it;
-  // it carries the sentence the drop-gate refusal, the boot refusal and the
-  // command's own refusal carry. Everything else in the line is the report's
-  // own: the count, the field, the D4 reason, and that nothing was changed.
+  // it carries the sentence the drop-gate refusal of `os migrate apply
+  // --allow-destructive` carries (the boot refusal and the command's own
+  // refusal say the same in their own terms). Everything else in the line is
+  // the report's own: the count, the field, the D4 reason, and that nothing was
+  // changed.
   const V17_SENTENCE = '18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a '
     + '17.x release until the 18.x release that carries the upgrade path.';
 
