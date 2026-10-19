@@ -55,9 +55,13 @@
  *    to `POST /data/sys_permission_set` under a new name. Spelled as
  *    `plugin-security`'s own lock refusal spells that same path
  *    (`packaged-permission-set-lock.ts`), so one condition reads one way at
- *    every door.
+ *    every door;
+ *  - `sharing_rule` — both (ADR-0131 D6 charts it under regime C): the clone is
+ *    an organization rule under a new name, `POST /sharing/rules`, and the
+ *    switch is the activation ledger's row, `POST /security/_activation/sharing_rule/:name`,
+ *    body `{ enabled }`.
  *
- * Both switch routes are gated by the ONE §5 write-authority gate
+ * The switch routes are gated by the ONE §5 write-authority gate
  * (`packages/runtime/src/domains/activation-gate.ts`), so both carry the same
  * operator-only clause. Still absent: ADR-0126 §3's pre-charted `tool` /
  * `skill` / `position` — no sanctioned path is built for them, and a row with no
@@ -196,6 +200,14 @@ export const PACKAGED_BASE_REGIME: Readonly<Record<string, PackagedBaseRegimeRow
         routes: {
             clone: 'the "Clone" action on the permission set, '
                 + 'or POST /api/v1/security/permission-sets/:name/clone with a new name',
+        },
+    },
+    sharing_rule: {
+        regime: 'C',
+        routes: {
+            clone: 'POST /api/v1/sharing/rules, a copy of it as an organization rule',
+            switchOff: 'POST /api/v1/security/_activation/sharing_rule/:name, body {enabled: false}; '
+                + 'operator-only where one install serves several organizations',
         },
     },
     datasource: {

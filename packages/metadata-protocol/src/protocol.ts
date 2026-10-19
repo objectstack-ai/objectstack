@@ -17629,11 +17629,24 @@ export class ObjectStackProtocolImplementation implements
      * Keyed by type rather than branched inline so a second fragment type, if
      * one is ever declared, states its own remedy instead of inheriting an
      * unrelated one.
+     *
+     * [ADR-0131 D6] `sharing_rule` is the second type whose remedy is not its
+     * glob, for a different reason: it is regime C, and a regime-C item is
+     * customized at runtime — an organization authors its own rule through the
+     * sharing door, and a declared rule is cloned there and switched off through
+     * the activation ledger. "Declare it in source and redeploy" names only the
+     * package author's route, which is not the one a runtime caller has.
      */
-    private static readonly NESTED_TYPE_REMEDY: Readonly<Record<string, string>> = {
+    private static readonly CODE_ONLY_TYPE_REMEDY: Readonly<Record<string, string>> = {
         field: ' Fields are not standalone artifacts: author it inside its object and write the whole '
             + 'object instead (PUT /api/v1/meta/object/:object with the new field in `fields`), or declare '
             + 'it in the object source (**/*.object.ts) and redeploy.',
+        sharing_rule: ' A sharing rule is not runtime metadata: author an organization rule instead '
+            + '(POST /api/v1/sharing/rules, or Setup > Sharing Rules), or clone the declared rule under a new '
+            + 'name as an organization rule and switch the declared one off (POST '
+            + '/api/v1/security/_activation/sharing_rule/:name, body {enabled: false}; operator-only where one '
+            + 'install serves several organizations). A package declares its rules in the stack\'s '
+            + '`sharingRules` and redeploys.',
     };
 
     /**
@@ -17641,12 +17654,12 @@ export class ObjectStackProtocolImplementation implements
      * is supposed to declare this item instead. Read from the type's own
      * registry entry (`filePatterns`), so a newly-flagged type carries an
      * accurate hint the day it is flagged — nothing here to keep in sync,
-     * except the fragment types {@link NESTED_TYPE_REMEDY} names explicitly.
+     * except the types {@link CODE_ONLY_TYPE_REMEDY} names explicitly.
      */
     private static codeOnlySourceHint(type: string): string {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        const nested = ObjectStackProtocolImplementation.NESTED_TYPE_REMEDY[singular];
-        if (nested) return nested;
+        const named = ObjectStackProtocolImplementation.CODE_ONLY_TYPE_REMEDY[singular];
+        if (named) return named;
         const entry = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === singular);
         const pattern = entry?.filePatterns?.[0];
         return pattern ? ` Declare it in source (${pattern}) and redeploy.` : '';

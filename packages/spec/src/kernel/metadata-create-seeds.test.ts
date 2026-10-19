@@ -81,6 +81,10 @@ describe('metadata create seeds validate against their spec schemas', () => {
       // `picklist` is package-owned (`allowRuntimeCreate: false`): there is no
       // runtime create surface to seed. Same category as `capability`.
       'picklist',
+      // [ADR-0131 D6] `sharing_rule` is code-only (regime C): an organization
+      // authors its own rules through the sharing door, not `/meta`. Same
+      // category as `capability`.
+      'sharing_rule',
     ]);
     const seeded = new Set(listMetadataCreateSeedTypes());
     const missing = listMetadataTypeSchemaTypes().filter((t) => !seeded.has(t) && !KNOWN_UNSEEDED.has(t));
