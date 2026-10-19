@@ -7,7 +7,7 @@ fix(plugin-sharing)!: a new sharing rule, or a rename, cannot take a declared ru
 
 Clause-②: no (narrowing)
 
-<!-- adr-0087: not-required (no-migration-prescription) no spec key, export, option or stored shape is added, removed or renamed; the narrowing is a refusal of a write the platform never meant to accept (a row that silently replaced a vendor rule), and the edit path that stores a customised copy keeps accepting every body it accepted, plus the projection's id -->
+<!-- adr-0087: not-required (no-migration-prescription) no spec key, export, option or stored metadata shape is added, removed or renamed, so `objectstack migrate meta` has nothing to rewrite; what changes is the accept set of one write door, whose remedy is one key in the caller's request (the declared rule's id) or another name -->
 
 **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
 
