@@ -981,7 +981,7 @@ describe('ruling A — a decision resumes the run as the person who decided', ()
     } as never);
     expect(seen.before, 'the nodes before the decision run as the submitter').toEqual(flow === 'who_flow'
       ? { userId: 'submitter', permissions: ['deal_rep'] }
-      : { userId: 'submitter', permissions: [], isSystem: true });
+      : { userId: 'submitter', isSystem: true });
     return (await data.find('sys_approval_request', { where: { status: 'pending' } }))[0];
   }
 
@@ -998,7 +998,7 @@ describe('ruling A — a decision resumes the run as the person who decided', ()
     const req = await parked(automation, 'who_flow_sys');
     const out = await service.decide(req.id, { decision, actorId: 'u1', comment: decision }, DECIDER_CTX);
     expect(out.resumed, JSON.stringify(out)).toBe(true);
-    expect(seen[`after_${decision}`]).toEqual({ userId: 'u1', permissions: [], isSystem: true });
+    expect(seen[`after_${decision}`]).toEqual({ userId: 'u1', isSystem: true });
   });
 
   it('CONTROL: an SLA auto-decision names no decider, so the run keeps the identity it had', async () => {
