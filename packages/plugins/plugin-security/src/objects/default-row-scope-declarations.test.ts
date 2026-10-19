@@ -431,7 +431,6 @@ describe('a deployment with the shipped baseline is byte-for-byte unchanged on t
   // the one source every door and every explain composes from, for all four.
   const EXPLAINED = ['read'] as const;
   const COLLECTED = ['select', 'insert', 'update', 'delete'] as const;
-  const isAgent = (persona: string) => BASELINE_PERSONAS[persona].principalKind === 'agent';
 
   it('every persona reads every declarer exactly as without the declarations, and is explained the same', { timeout: 30_000 }, async () => {
     const after = await bootBaseline(true);
