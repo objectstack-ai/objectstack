@@ -19,15 +19,19 @@
  *     the resolver answers for THEM — with nothing of the submitter's left in
  *     it; the nodes before the decision keep the submitter's; the run's
  *     history keeps naming its trigger; a later pause in the same run does not
- *     fall back to the submitter. And the controls: a `runAs:'system'` run, a
- *     signal naming a decider without the owning service's marker, and a
- *     signal with no decider all continue exactly as before.
+ *     fall back to the submitter. A `runAs:'system'` run keeps its elevation
+ *     and carries the decider as its attribution user, with no grant resolved
+ *     (ruling 6267719791 Q1 A). And the controls: a signal naming a decider
+ *     without the owning service's marker, and a signal with no decider (on
+ *     both postures), all continue exactly as before.
  *  2. THE REAL STACK (ObjectKernel, ObjectQLPlugin's audit stamps, driver-sql
  *     on better-sqlite3 `:memory:`, the identity objects, the real
  *     SecurityPlugin and record sharing, the grants resolver the automation
  *     plugin bridges): the
- *     stored `updated_by` names the decider after the decision and the
- *     submitter before it; the decider's own grants are what admit the write;
+ *     stored `updated_by` and the `sys_audit_log` row (AuditPlugin's
+ *     writers) name the decider after the decision and the submitter before
+ *     it — on a `runAs:'system'` run too, whose readonly verdict column still
+ *     lands under its unchanged elevation (ruling 6267719791 Q1 A); the decider's own grants are what admit the write;
  *     and a post-decision node the decider may not perform — a field their
  *     permission set marks non-editable, which the submitter's set allows —
  *     is refused loudly, the run reporting the node, while the same node
@@ -47,6 +51,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { createIdentityObjectsPlugin } from '@objectstack/plugin-auth';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
+import { AuditPlugin } from '@objectstack/plugin-audit';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import { RESUME_AUTHORITY_SERVICE, type ResumeSignal } from '@objectstack/spec/contracts';
@@ -103,7 +108,7 @@ const write = (id: string, objectName: string, fields: Record<string, unknown>, 
  *                        └reject→ rejected → end
  * Every write is a node of its own, so each one's data context is read apart.
  */
-function reviewFlow(name: string, opts: { runAs?: 'system' | 'user'; gate?: string; objectName?: string; approveFields?: Record<string, unknown>; recorder?: boolean } = {}) {
+function reviewFlow(name: string, opts: { runAs?: 'system' | 'user'; gate?: string; objectName?: string; approveFields?: Record<string, unknown>; rejectFields?: Record<string, unknown>; recorder?: boolean } = {}) {
   const objectName = opts.objectName ?? 'deal';
   const r = opts.recorder === true;
   return {
@@ -117,7 +122,7 @@ function reviewFlow(name: string, opts: { runAs?: 'system' | 'user'; gate?: stri
       write('after1', objectName, opts.approveFields ?? { approved_note: 'approved' }, r),
       { id: 'gate2', type: 'decision_gate', label: 'Second review' },
       write('after2', objectName, { stage: 'won' }, r),
-      write('rejected', objectName, { stage: 'rejected' }, r),
+      write('rejected', objectName, opts.rejectFields ?? { stage: 'rejected' }, r),
       { id: 'end', type: 'end', label: 'End' },
     ],
     edges: [
@@ -153,7 +158,12 @@ function envelopeHarness(opts: { failFor?: string } = {}) {
   engine.registerNodeExecutor({
     type: 'record_identity',
     async execute(node, _variables, context) {
-      seen.set(node.id, resolveRunDataContext(context));
+      seen.set(node.id, {
+        ...resolveRunDataContext(context),
+        // The run context's own facts, beside the envelope: what `current_user`
+        // is built from in the segment's CEL.
+        raw: { userId: context?.userId, positions: context?.positions, permissions: context?.permissions },
+      });
       return { success: true };
     },
   });
@@ -249,12 +259,42 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
     expect(after.org_user_ids).toBeUndefined();
   });
 
+  it.each([['approve', 'after1'], ['reject', 'rejected']] as const)(
+    "runAs:'system' %s: the nodes after the decision keep their elevation and carry the decider as their attribution user, with no grant resolved",
+    async (decision, nodeId) => {
+      const h = envelopeHarness();
+      h.engine.registerFlow('sys_review', reviewFlow('sys_review', { runAs: 'system', recorder: true }) as never);
+      // The REST / action doors' shape: the trigger forwards its own grants.
+      const paused = await h.engine.execute('sys_review', { ...TRIGGER, positions: ['sales_rep'], permissions: ['deal_rep'] } as never);
+      expect(h.ctxOf('submit')).toMatchObject({ isSystem: true, userId: 'usr_rep' });
+
+      await h.engine.resume(paused.runId!, decided(decision, 'usr_mgr'));
+      const after = h.ctxOf(nodeId);
+      // Ruling 6267719791 Q1 A: `{ isSystem: true, userId: <decider> }`.
+      expect(after).toMatchObject({ isSystem: true, userId: 'usr_mgr', positions: [], permissions: [], tenantId: 'org_a' });
+      expect(after.org_user_ids).toBeUndefined();
+      // No permission resolution for a system run, and none of the submitter's
+      // grants left under the decider's name.
+      expect(h.resolved.map(([u]) => u), 'a system run resolves no grant for the decider').not.toContain('usr_mgr');
+      expect(after.raw).toEqual({ userId: 'usr_mgr', positions: undefined, permissions: undefined });
+    },
+  );
+
+  it("runAs:'system': the run history still names the trigger after the decider takes over", async () => {
+    const h = envelopeHarness();
+    h.engine.registerFlow('sys_review', reviewFlow('sys_review', { runAs: 'system', recorder: true }) as never);
+    const paused = await h.engine.execute('sys_review', { ...TRIGGER } as never);
+    const res = await h.engine.resume(paused.runId!, decided('reject', 'usr_mgr'));
+    expect(res.success, JSON.stringify(res)).toBe(true);
+    expect((await h.engine.getRun(paused.runId!))?.trigger?.userId).toBe('usr_rep');
+  });
+
   describe('controls — unchanged', () => {
-    it("CONTROL: a runAs:'system' run keeps its elevation and its carried trigger user", async () => {
+    it("CONTROL: a runAs:'system' run resumed with no decider keeps the user it carried", async () => {
       const h = envelopeHarness();
       h.engine.registerFlow('sys_review', reviewFlow('sys_review', { runAs: 'system', recorder: true }) as never);
       const paused = await h.engine.execute('sys_review', { ...TRIGGER } as never);
-      await h.engine.resume(paused.runId!, decided('approve', 'usr_mgr'));
+      await h.engine.resume(paused.runId!, decided('approve'));
       expect(h.ctxOf('after1')).toMatchObject({ isSystem: true, userId: 'usr_rep', positions: [], permissions: [] });
     });
 
@@ -312,6 +352,10 @@ const dealObject = {
     stage: { name: 'stage', label: 'Stage', type: 'text' },
     approved_note: { name: 'approved_note', label: 'Approved Note', type: 'text' },
     restricted_note: { name: 'restricted_note', label: 'Restricted Note', type: 'text' },
+    // HotCRM's verdict-column shape (`approval_status`, `approved_date`): a
+    // static `readonly` column objectql strips from every non-system UPDATE,
+    // so only an elevated write lands it.
+    verdict: { name: 'verdict', label: 'Verdict', type: 'text', readonly: true },
   },
 };
 
@@ -345,6 +389,7 @@ describe('on the real stack: attribution after the decision, and the refusal whe
     await kernel.use(createIdentityObjectsPlugin());
     await kernel.use(new SecurityPlugin({ defaultPermissionSets: [...securityDefaultPermissionSets, dealRepSet, dealManagerSet] }));
     await kernel.use(new SharingServicePlugin());
+    await kernel.use(new AuditPlugin());
     await kernel.bootstrap();
 
     ql = kernel.getService<ObjectQL>('objectql');
@@ -364,6 +409,11 @@ describe('on the real stack: attribution after the decision, and the refusal whe
 
     automation.registerFlow('deal_review', reviewFlow('deal_review') as never);
     automation.registerFlow('deal_review_restricted', reviewFlow('deal_review_restricted', { approveFields: { restricted_note: 'set after the decision' } }) as never);
+    automation.registerFlow('deal_review_system', reviewFlow('deal_review_system', {
+      runAs: 'system',
+      approveFields: { verdict: 'approved', approved_note: 'approved' },
+      rejectFields: { verdict: 'rejected', stage: 'rejected' },
+    }) as never);
   }, 30_000);
 
   afterAll(async () => {
@@ -376,6 +426,10 @@ describe('on the real stack: attribution after the decision, and the refusal whe
     return { userId, tenantId: orgA, isSystem: false, positions: g.positions, permissions: g.permissions, org_user_ids: g.org_user_ids };
   };
   const stored = async (id: string) => (await ql.findOne('deal', { where: { id }, context: SYS })) as any;
+  /** The `sys_audit_log` UPDATE rows `AuditPlugin`'s writers left for the deal, oldest first. */
+  const auditUpdates = async (id: string) =>
+    ((await ql.find('sys_audit_log', { where: { object_name: 'deal', record_id: id, action: 'update' }, context: SYS })) as any[])
+      .map((r) => ({ user_id: r.user_id, new_value: JSON.parse(String(r.new_value ?? '{}')) }));
 
   /** The rep creates a deal through their own request, then submits it. */
   async function submitted(flow: string, title: string) {
@@ -408,6 +462,9 @@ describe('on the real stack: attribution after the decision, and the refusal whe
     expect(row.approved_note).toBe('approved');
     expect(row.updated_by, 'the post-decision write is attributed to the decider').toBe('usr_mgr');
     expect(row.created_by).toBe('usr_rep');
+    const audit = await auditUpdates(dealId);
+    expect(audit.find((a) => a.new_value.approved_note === 'approved')?.user_id, 'the audit row names the decider').toBe('usr_mgr');
+    expect(audit.find((a) => a.new_value.stage === 'submitted')?.user_id, 'the pre-decision write stays the submitter\'s').toBe('usr_rep');
   });
 
   it('reject: the reject branch is attributed to the manager', async () => {
@@ -417,6 +474,7 @@ describe('on the real stack: attribution after the decision, and the refusal whe
     const row = await stored(dealId);
     expect(row.stage).toBe('rejected');
     expect(row.updated_by).toBe('usr_mgr');
+    expect((await auditUpdates(dealId)).find((a) => a.new_value.stage === 'rejected')?.user_id).toBe('usr_mgr');
   });
 
   it('a post-decision node the decider may not perform is refused loudly, and the run reports the node', async () => {
@@ -433,6 +491,39 @@ describe('on the real stack: attribution after the decision, and the refusal whe
     const run = await automation.getRun(runId);
     expect(run?.status).toBe('failed');
     expect(run?.steps?.find((s: any) => s.nodeId === 'after1')?.status).toBe('failure');
+  });
+
+  it("GUARD: `verdict` is a column only an elevated write lands — the manager's own request is stripped of it", async () => {
+    const created: any = await ql.insert('deal', { title: 'verdict guard' }, { context: await requestContext('usr_rep') });
+    await ql.update('deal', { id: created.id, verdict: 'hand-set', approved_note: 'by hand' }, { context: await requestContext('usr_mgr') });
+    const row = await stored(String(created.id));
+    expect(row.approved_note, 'guard: the manager may write this deal').toBe('by hand');
+    expect(row.verdict ?? null, 'a non-system write cannot land the readonly column').toBeNull();
+  });
+
+  it.each([['approve', 'approved'], ['reject', 'rejected']] as const)(
+    "runAs:'system' %s: the readonly verdict lands under unchanged elevation, and `updated_by` and the audit row name the manager",
+    async (decision, verdict) => {
+      const { dealId, runId } = await submitted('deal_review_system', `system ${decision}`);
+      const res = await automation.resume(runId, decided(decision, 'usr_mgr'));
+      expect(res.success, JSON.stringify(res)).not.toBe(false);
+      const row = await stored(dealId);
+      expect(row.verdict, 'elevation unchanged: the readonly column landed').toBe(verdict);
+      expect(row.updated_by, 'the post-decision write is attributed to the decider').toBe('usr_mgr');
+      const audit = await auditUpdates(dealId);
+      expect(audit.find((a) => a.new_value.verdict === verdict)?.user_id, 'the audit row names the decider').toBe('usr_mgr');
+      expect(audit.find((a) => a.new_value.stage === 'submitted')?.user_id, "the pre-decision write stays the submitter's").toBe('usr_rep');
+    },
+  );
+
+  it("CONTROL: a runAs:'system' run resumed with no decider keeps the submitter", async () => {
+    const { dealId, runId } = await submitted('deal_review_system', 'system, no decider');
+    const res = await automation.resume(runId, decided('approve'));
+    expect(res.success, JSON.stringify(res)).not.toBe(false);
+    const row = await stored(dealId);
+    expect(row.verdict).toBe('approved');
+    expect(row.updated_by).toBe('usr_rep');
+    expect((await auditUpdates(dealId)).find((a) => a.new_value.verdict === 'approved')?.user_id).toBe('usr_rep');
   });
 
   it('CONTROL: the same node resumed with no decider lands as the submitter, whose set allows it', async () => {

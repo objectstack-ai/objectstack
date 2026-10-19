@@ -941,7 +941,7 @@ describe('ruling A — a decision resumes the run as the person who decided', ()
 
   let data: ReturnType<typeof makeFakeEngine>;
   let service: ApprovalService;
-  let seen: Record<string, { userId?: string; permissions?: string[] }>;
+  let seen: Record<string, { userId?: string; permissions?: string[]; isSystem?: boolean }>;
   let rejectThrowsOnce: boolean;
 
   function boot() {
@@ -956,11 +956,12 @@ describe('ruling A — a decision resumes the run as the person who decided', ()
           throw new Error(DOWNSTREAM_FAILURE);
         }
         const ctx = resolveRunDataContext(context);
-        seen[node.id] = { userId: ctx?.userId, permissions: ctx?.permissions };
+        seen[node.id] = { userId: ctx?.userId, permissions: ctx?.permissions, ...(ctx?.isSystem ? { isSystem: true } : {}) };
         return { success: true };
       },
     } as never);
     automation.registerFlow('who_flow', WHO_FLOW as never);
+    automation.registerFlow('who_flow_sys', { ...WHO_FLOW, name: 'who_flow_sys', runAs: 'system' } as never);
     service.attachAutomation(automation);
     return automation;
   }
@@ -974,13 +975,13 @@ describe('ruling A — a decision resumes the run as the person who decided', ()
   const rowOf = async (id: string) =>
     (await data.find('sys_approval_request', { where: { id } }))[0];
 
-  async function parked(automation: AutomationEngine) {
-    await automation.execute('who_flow', {
+  async function parked(automation: AutomationEngine, flow = 'who_flow') {
+    await automation.execute(flow, {
       object: 'crm_deal', record: { id: 'd1' }, userId: 'submitter',
     } as never);
-    expect(seen.before, 'the nodes before the decision run as the submitter').toEqual({
-      userId: 'submitter', permissions: ['deal_rep'],
-    });
+    expect(seen.before, 'the nodes before the decision run as the submitter').toEqual(flow === 'who_flow'
+      ? { userId: 'submitter', permissions: ['deal_rep'] }
+      : { userId: 'submitter', permissions: [], isSystem: true });
     return (await data.find('sys_approval_request', { where: { status: 'pending' } }))[0];
   }
 
@@ -990,6 +991,14 @@ describe('ruling A — a decision resumes the run as the person who decided', ()
     const out = await service.decide(req.id, { decision, actorId: 'u1', comment: decision }, DECIDER_CTX);
     expect(out.resumed, JSON.stringify(out)).toBe(true);
     expect(seen[`after_${decision}`]).toEqual({ userId: 'u1', permissions: ['deal_manager'] });
+  });
+
+  it.each(['approve', 'reject'] as const)("runAs:'system' %s: the nodes after the decision keep their elevation and carry the decider as their attribution user (ruling 6267719791 Q1 A)", async (decision) => {
+    const automation = boot();
+    const req = await parked(automation, 'who_flow_sys');
+    const out = await service.decide(req.id, { decision, actorId: 'u1', comment: decision }, DECIDER_CTX);
+    expect(out.resumed, JSON.stringify(out)).toBe(true);
+    expect(seen[`after_${decision}`]).toEqual({ userId: 'u1', permissions: [], isSystem: true });
   });
 
   it('CONTROL: an SLA auto-decision names no decider, so the run keeps the identity it had', async () => {
