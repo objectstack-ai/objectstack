@@ -8527,6 +8527,13 @@ export class AutomationEngine implements IAutomationService {
                     const variablesSnapshot = Object.fromEntries(variables);
                     await this.persistSuspendedRun({
                         ...run,
+                        // The segment's identity, not the one the run parked
+                        // with last time: after a decision switch (ruling A on
+                        // `FlowSchema.runAs`) the next pause must continue as
+                        // the decider, whatever resumes it — never fall back to
+                        // the trigger user. Identical to `run.context` when no
+                        // switch happened.
+                        context,
                         nodeId: err.nodeId,
                         nodeType: err.nodeType,
                         variables: variablesSnapshot,
