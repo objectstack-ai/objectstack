@@ -2990,8 +2990,10 @@ const ObjectSchemaBase = strictObject(
    *
    * A `using` the row-filter compiler cannot lower is dropped with the
    * compiler's WARN and fails closed to zero rows, exactly as an authored
-   * policy's does; the authoring lint (`RLS_PREDICATE_UNENFORCEABLE`) walks
-   * permission sets only and does not judge this key. Explain names an applied
+   * policy's does. The CLI authoring lint judges this key as it judges a
+   * permission set's policy (`RLS_PREDICATE_UNENFORCEABLE` and its sibling
+   * ids, #24452); the runtime publish gate runs that rule on `permission`
+   * writes only, so an `object` save is not judged there. Explain names an applied
    * default as the object's own declaration, with its `label` and
    * `description`. The writers are to be the platform identity objects
    * (#24341); no object in this tree declares the key yet.
@@ -3007,9 +3009,10 @@ const ObjectSchemaBase = strictObject(
     + 'bypass skips row policies is unaffected; an object that declares none keeps the behaviour it has '
     + 'without the key. The default is judged like a held policy: its `operation`, `positions` and `enabled` '
     + 'decide where it applies, and a `using` the row-filter compiler cannot lower makes every read it '
-    + 'governs return no rows, with one warning in the server log. Authoring checks do not judge this '
-    + 'predicate, so keep it inside the lowerable subset. Explain names an applied default as the object\'s '
-    + 'own, not a permission set\'s.',
+    + 'governs return no rows, with one warning in the server log. `os validate`, `os build` and `os lint` '
+    + 'judge this predicate as they judge a permission set\'s policy and report one that cannot lower; saving '
+    + 'the object through the server does not run that check, so keep it inside the lowerable subset. Explain '
+    + 'names an applied default as the object\'s own, not a permission set\'s.',
   ),
 
   /**
