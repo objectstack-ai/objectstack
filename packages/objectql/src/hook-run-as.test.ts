@@ -400,7 +400,9 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       expect(context.isSystem).toBe(false);
       expect(context.org_user_ids).toBeUndefined();
       expect(warns).toHaveLength(1);
-      expect(String(warns[0]![0])).toMatch(/current_user\.org_user_ids drops out/);
+      // The variables whose policies drop out are named (#24639 adds the email).
+      expect(String(warns[0]![0])).toMatch(/current_user\.org_user_ids/);
+      expect(String(warns[0]![0])).toMatch(/current_user\.email/);
     });
 
     describe("[#24639] the pin carries the user's email too, so a current_user.email row policy matches", () => {

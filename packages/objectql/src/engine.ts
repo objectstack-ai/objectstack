@@ -147,7 +147,7 @@ import {
   // Layer 0 — see {@link buildDriverOptions}.
   computeTenantLayer0Verdict,
   // [#24497] The ONE grants resolver, the one the request path seeds a
-  // context's grants and peer list through — see `ScopedContext[SEED_USER_GRANTS]`.
+  // context's grants, peer list and email (#24639) through — see `ScopedContext[SEED_USER_GRANTS]`.
   resolveUserAuthzGrants,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
@@ -21840,8 +21840,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
 
   /**
    * [#24497] The second half of a hook's `runAs: 'user'` derivation: the
-   * user's grants and peer list, seeded through the one resolver the request
-   * path seeds them through (`resolveUserAuthzGrants`, `@objectstack/core`).
+   * user's grants, peer list and email (#24639), seeded through the one
+   * resolver the request path seeds them through (`resolveUserAuthzGrants`,
+   * `@objectstack/core`).
    * The hook wrapper awaits it on the api {@link withRunAs} derived; it stays
    * a separate, async step so `withRunAs` keeps its synchronous contract.
    *
@@ -21852,13 +21853,31 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * user's request saw their organisation's members too. Ruling A′ puts the
    * contract on the producer: every user context carries `org_user_ids`.
    *
+   * [#24639] The same contract holds for `email`: the RLS compiler binds
+   * `current_user.email` from the context's `email` and nothing else, so a
+   * hand-built context that named a user and carried no email made every
+   * email-keyed row policy (`assignee == current_user.email`) drop out, and
+   * the hook read nothing where the user's own request reads their rows. The
+   * email is the one the same resolution returns (the user's stored
+   * `sys_user.email`, from the user-row read that resolution already makes,
+   * as the request path falls back to it), so a context that resolves for its
+   * grants or peers pays nothing more for it. A context that lacks only the
+   * email pays the one resolution; a user with no stored email (a phone-only
+   * sign-up) pays it on every such dispatch and still carries none, which
+   * fails closed exactly as before.
+   *
    * The same rule as a `runAs: 'user'` flow's run setup (service-automation
    * `resolveRunContext`):
    *  - positions and permission sets the context already carries stay
    *    verbatim, so a narrowed ceiling is never re-broadened; only a context
    *    with no `permissions` takes the resolved ones;
    *  - a context that already carries a peer list keeps it;
-   *  - a context that needs neither resolves nothing and is returned as is.
+   *  - a context that already carries an email keeps it verbatim (the
+   *    session's, on a request-resolved context); only a context with none
+   *    takes the resolved one;
+   *  - a context that needs none of the three resolves nothing and is
+   *    returned as is. One that lacks only the email is NOT that context: it
+   *    resolves, and takes the email alone.
    *
    * The peer list is the members of the context's `tenantId`, the user
    * included; a context with no `tenantId` gets the user alone, as an
@@ -21877,7 +21896,8 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     if (!ctx.userId) return this;
     const needsGrants = !Array.isArray(ctx.permissions);
     const needsPeers = !Array.isArray(ctx.org_user_ids);
-    if (!needsGrants && !needsPeers) return this;
+    const needsEmail = !ctx.email;
+    if (!needsGrants && !needsPeers && !needsEmail) return this;
     const grants = await resolveUserAuthzGrants(
       this.engine,
       ctx.userId,
@@ -21888,6 +21908,7 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
         ...ctx,
         ...(needsGrants ? { positions: grants.positions, permissions: grants.permissions } : {}),
         ...(needsPeers ? { org_user_ids: grants.org_user_ids } : {}),
+        ...(needsEmail && grants.email ? { email: grants.email } : {}),
       },
       this.engine
     );
