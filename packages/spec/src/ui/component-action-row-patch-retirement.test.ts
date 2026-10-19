@@ -512,10 +512,12 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     };
     for (const root of WALK_ROOTS) walk(path.join(REPO_ROOT, root));
     // Anti-vacuity: the walk really covered the tree and the example apps'
-    // sources, and it really saw page action rows keyed by `type`.
+    // sources, and its first stage really saw page action rows keyed by `type`
+    // (two files at the retirement, both `@objectstack/lint` pins; the example
+    // apps author no page action row).
     expect(visited).toBeGreaterThan(1000);
     expect(exampleSources).toBeGreaterThan(50);
-    expect(rowSightings).toBeGreaterThan(5);
+    expect(rowSightings).toBeGreaterThan(0);
     expect(offenders, 'a page action row `patch` authoring means the retirement is being undone').toEqual([]);
   });
 });
