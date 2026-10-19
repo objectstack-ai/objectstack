@@ -104,6 +104,11 @@ const UNBOUND: StdLibBinding = { now: () => new Date(), timezone: 'UTC', permiss
  * `celEngine.evaluate` saves it, sets its own and restores the saved one in a
  * `finally`, so a nested evaluation and a thrown one both leave the outer
  * binding exactly as it was, and no binding outlives its evaluation.
+ *
+ * Every evaluation runs to completion inside `evaluate`: cel-js goes
+ * asynchronous only for a function registered as async, and this environment
+ * registers none. A Promise-valued scope value is refused (`Unsupported type:
+ * Promise`, a `runtime` fault), so no continuation ever reads the slot later.
  */
 let activeBinding: StdLibBinding = UNBOUND;
 
@@ -127,9 +132,28 @@ let evaluationEnv: Environment | undefined;
  *
  * With the environment built once, parsing and type-checking were most of what
  * an evaluation still cost, and one source is evaluated once per row. A cel-js
- * program is the parse-once, evaluate-many form of `env.evaluate`: it holds the
- * AST and the types its check recorded, never a value, so it answers every
- * scope exactly as a fresh parse would.
+ * program is the parse-once, evaluate-many form of `env.evaluate`.
+ *
+ * ⚠️ A program is NOT free of evaluation state. cel-js keeps per-run state on
+ * the AST itself:
+ *  - a comprehension (`exists`, `all`, `exists_one`, `map`, `filter`) keeps
+ *    its iteration context on the AST (`args.iterCtx`), and `cel.bind` keeps
+ *    its binding context there too (`bindCtx`). Each run re-parents that
+ *    overlay to its own scope (`OverlayContext.reuse`), and every variable the
+ *    step reads goes through that parent;
+ *  - a function call writes its arguments' RUNTIME types into the AST's
+ *    `argTypes` on every call, and then reads them back to pick an overload.
+ *
+ * In sequential use each of these is overwritten before it is read, so a
+ * cached program answers exactly as a fresh parse would. Two runs of ONE AST
+ * at once do not: a run re-entered from inside its own comprehension (a scope
+ * getter that evaluates the same source for another subject) would re-parent
+ * the outer run's overlay, and the outer run would read the inner run's
+ * `current_user` and `record`. So a program serves one run at a time
+ * ({@link runningPrograms}). A cached program also keeps its last
+ * evaluation's scope (the `RootContext` its overlays point at, and their
+ * `iterValue` / `accuValue`) reachable until the next evaluation of that
+ * source, bounded by the cache's size.
  *
  * The key is the source AFTER the rewrites (`rewriteTemporalEquality`,
  * `rewriteNullableTernary`, the overload retry's `rewriteFaultedOperands`), so a
@@ -142,6 +166,15 @@ let evaluationEnv: Environment | undefined;
 const evaluationPrograms = new Map<string, ReturnType<Environment['parse']>>();
 const EVALUATION_PROGRAM_CACHE_MAX = 500;
 
+/**
+ * The programs with a run in progress. A run that finds its source's cached
+ * program here, which is a nested evaluation of the same source, parses a
+ * private one instead, so no AST is ever run twice at once. Runs are
+ * synchronous (see {@link activeBinding}), so a run is over when the program
+ * returns or throws.
+ */
+const runningPrograms = new Set<ReturnType<Environment['parse']>>();
+
 /** Evaluate `source` on {@link evaluationEnv} through its cached program. */
 function runProgram(env: Environment, source: string, scope: Record<string, unknown>): unknown {
   let program = evaluationPrograms.get(source);
@@ -152,8 +185,15 @@ function runProgram(env: Environment, source: string, scope: Record<string, unkn
       if (first !== undefined) evaluationPrograms.delete(first);
     }
     evaluationPrograms.set(source, program);
+  } else if (runningPrograms.has(program)) {
+    return env.parse(source)(scope);
   }
-  return program(scope);
+  runningPrograms.add(program);
+  try {
+    return program(scope);
+  } finally {
+    runningPrograms.delete(program);
+  }
 }
 
 /**
