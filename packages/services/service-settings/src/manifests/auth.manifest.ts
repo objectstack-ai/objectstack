@@ -89,7 +89,7 @@ const manifest = {
       label: 'Audience',
       required: false,
       description:
-        'Who may become a user of this environment\'s apps. Allowlisted email domains always force email verification on. Open forces it on unless the deployment turns it off; a value saved in this console cannot. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
+        'Who may become a user of this system\'s apps. Allowlisted email domains always force email verification on. Open forces it on unless the deployment turns it off; a value saved in this console cannot. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
     },
     {
       type: 'select',

@@ -24,7 +24,7 @@ export const en: PlatformTranslationData = {
       title: 'Mail Delivery',
       description: 'SMTP and transactional email provider configuration.',
       groups: {
-        provider: { title: 'Provider', description: 'Choose how this environment sends outbound email.' },
+        provider: { title: 'Provider', description: 'Choose how this system sends outbound email.' },
         smtp: { title: 'SMTP' },
         api_key: { title: 'API key' },
         from_address: { title: 'From address' },
@@ -136,7 +136,7 @@ export const en: PlatformTranslationData = {
         },
         audience: {
           title: 'Audience',
-          description: 'Who may become a user of this environment\'s apps. Allowlisted email domains always force email verification on. Open forces it on unless the deployment turns it off; a value saved in this console cannot. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
+          description: 'Who may become a user of this system\'s apps. Allowlisted email domains always force email verification on. Open forces it on unless the deployment turns it off; a value saved in this console cannot. Invitations, admin-created users, SCIM provisioning, and enterprise SSO are admitted under every posture.',
         },
         password_policy: {
           title: 'Password policy',

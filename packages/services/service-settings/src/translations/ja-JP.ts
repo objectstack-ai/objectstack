@@ -20,7 +20,7 @@ export const jaJP: PlatformTranslationData = {
       title: 'メール配信',
       description: 'SMTP およびトランザクションメールプロバイダー設定。',
       groups: {
-        provider: { title: 'プロバイダー', description: 'この環境の送信方法を選択します。' },
+        provider: { title: 'プロバイダー', description: 'このシステムの送信方法を選択します。' },
         smtp: { title: 'SMTP' },
         api_key: { title: 'API キー' },
         from_address: { title: '差出人アドレス' },
@@ -91,7 +91,7 @@ export const jaJP: PlatformTranslationData = {
         },
         audience: {
           title: '登録対象',
-          description: 'この環境のアプリのユーザーになれる対象。「メールドメイン」ではメール確認が常に強制されます。「オープン」でも強制されますが、デプロイ側で無効にできます。このコンソールで保存した値では無効にできません。招待、管理者による作成、SCIM プロビジョニング、エンタープライズ SSO はどのポスチャでも許可されます。',
+          description: 'このシステムのアプリのユーザーになれる対象。「メールドメイン」ではメール確認が常に強制されます。「オープン」でも強制されますが、デプロイ側で無効にできます。このコンソールで保存した値では無効にできません。招待、管理者による作成、SCIM プロビジョニング、エンタープライズ SSO はどのポスチャでも許可されます。',
         },
         password_policy: {
           title: 'パスワードポリシー',
@@ -251,7 +251,7 @@ export const jaJP: PlatformTranslationData = {
       title: 'SMS 配信',
       description: 'OTP サインイン、招待、通知に使う SMS プロバイダー設定。',
       groups: {
-        provider: { title: 'プロバイダー', description: 'この環境が送信 SMS をどう送るかを選択します。' },
+        provider: { title: 'プロバイダー', description: 'このシステムが送信 SMS をどう送るかを選択します。' },
         aliyun: { title: 'Aliyun SMS' },
         twilio: { title: 'Twilio' },
         limits: { title: '送信上限', description: 'この配備の送信 SMS 量を制限します。SMS は有料チャネルで、1 通ごとに実費が発生します。' },

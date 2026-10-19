@@ -890,7 +890,7 @@ export function registerLastAdminGuard(
         `Refusing this ${words.noun}: '${object}' returned more than ${maxScan} rows, so the ` +
           `remaining administrators could not be verified (${BREAK_GLASS_CITATION}). ` +
           `${words.Verb} a narrower set of ${words.subject}, or raise the guard's maxScan if ` +
-          'this environment really is that large.',
+          'this system really is that large.',
         words.table,
       );
     }
@@ -1275,7 +1275,7 @@ export function registerLastAdminGuard(
     const walledRemedy = postureEnforcesWall(resolveTenancyPosture())
       ? ` ⚠️ This deployment runs a WALLED tenancy posture, where an unscoped '${ADMIN_FULL_ACCESS}' `
         + 'grant row is no longer an anchor for platform admin standing at all — restoring or '
-        + 're-activating that row will NOT give this environment an administrator. Declare one in '
+        + 're-activating that row will NOT give this system an administrator. Declare one in '
         + `${PLATFORM_OWNER_EMAIL_ENV} (a verified account's address, comma-separated for several) `
         + 'instead; that is the only channel to platform admin standing under a wall.'
       : '';
@@ -1301,7 +1301,7 @@ export function registerLastAdminGuard(
             `permission set is switched OFF — ${stranded.length} unscoped grant(s) confer nothing`,
         );
         throw refuse(
-          `Refusing this ${words.noun}: this environment recognises NO administrator because its ` +
+          `Refusing this ${words.noun}: this system recognises NO administrator because its ` +
             `'${ADMIN_FULL_ACCESS}' permission set is switched OFF in '${METADATA_ACTIVATION}' — ` +
             `${stranded.length} unscoped, in-window '${USER_PERMISSION_SET}' grant(s) still point ` +
             'at it and confer nothing while it is off. That is not the bootstrap window, and ' +
@@ -1351,7 +1351,7 @@ export function registerLastAdminGuard(
         `NOT a fresh install — ${dangling.length} dangling unscoped grant(s): ${dangling.join(', ')}`,
     );
     throw refuse(
-      `Refusing this ${words.noun}: this environment recognises NO administrator, and this is not ` +
+      `Refusing this ${words.noun}: this system recognises NO administrator, and this is not ` +
         `the bootstrap window — ${dangling.length} unscoped, in-window '${USER_PERMISSION_SET}' ` +
         'grant(s) still name a permission set the security catalog does not hold, ' +
         `or name none yet (${dangling.join(', ')}). That is the state a REMOVED '${ADMIN_FULL_ACCESS}' ` +
@@ -1507,16 +1507,16 @@ export function registerLastAdminGuard(
       if (remaining.length > 0) return;
 
       logger?.warn(
-        `[LastAdminGuard] refused a ${words.noun} that would have left this environment with no ` +
+        `[LastAdminGuard] refused a ${words.noun} that would have left this system with no ` +
           `unbanned administrator (target: ${losing.join(', ')})`,
       );
       const many = losing.length > 1;
       throw refuse(
         `Refusing to ${words.verb} ${losing.map((id) => `'${id}'`).join(', ')}: ` +
           `${many ? 'those are the last administrators' : 'that is the last administrator'} this ` +
-          `environment has that ${many ? 'are' : 'is'} not already banned, and ${words.gerund} ` +
+          `system has that ${many ? 'are' : 'is'} not already banned, and ${words.gerund} ` +
           `${many ? 'them' : 'that account'} would leave nobody able to administer the ` +
-          `environment or restore anyone's access (${BREAK_GLASS_CITATION}). ${REMEDY} ` +
+          `system or restore anyone's access (${BREAK_GLASS_CITATION}). ${REMEDY} ` +
           `If the ${words.noun} came from an identity provider, the SCIM deprovision is too ` +
           'broad — fix the IdP group, not this guard.',
         words.table,
@@ -1610,18 +1610,18 @@ export function registerLastAdminGuard(
 
       logger?.warn(
         `[LastAdminGuard] refused a ${words.noun} on '${table}' that would have left this ` +
-          `environment with no unbanned administrator (losing: ${losing.join(', ')})`,
+          `system with no unbanned administrator (losing: ${losing.join(', ')})`,
       );
       const many = losing.length > 1;
       throw refuse(
         `Refusing this ${words.noun}: it would revoke the administrator standing of ` +
           `${losing.map((id) => `'${id}'`).join(', ')}, ` +
           `${many ? 'who are the last administrators' : 'who is the last administrator'} this ` +
-          `environment has that ${many ? 'are' : 'is'} not already banned. The ` +
+          `system has that ${many ? 'are' : 'is'} not already banned. The ` +
           `'${table}' row is what MAKES ${many ? 'those accounts' : 'that account'} an ` +
           `administrator, so ${words.gerund} it has the same end state as ${words.gerund} ` +
           `${many ? 'the users themselves' : 'the user themselves'}: nobody would be able to ` +
-          `administer the environment or restore anyone's access (${BREAK_GLASS_CITATION}). ` +
+          `administer the system or restore anyone's access (${BREAK_GLASS_CITATION}). ` +
           `${REMEDY} ${standingOrigin(table, words.noun)}`,
         words.table,
       );
