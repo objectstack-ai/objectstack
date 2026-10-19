@@ -16,14 +16,14 @@
  * (owner, admin) and `delete_organization` (owner) rows — the rows
  * plugin-auth's `membership-reach-table.test.ts` pins equal to the door.
  *
- * ## The one action outside it: `change_slug`
+ * ## No action without its door
  *
- * Its target, `/api/v1/cloud/organizations/{id}/change-slug`, is served only
- * by the cloud orchestrator; on this composition it answers
- * `404 ENDPOINT_NOT_FOUND`. Where it is offered, and to whom, waits on a
- * decision about that action's shape (a door outside better-auth, so no reach
- * row describes it). It is held out of the graded set and out of the door
- * probe below, by name, so the day it changes this file is edited with it.
+ * The object used to declare `change_slug` too, whose target
+ * (`/api/v1/cloud/organizations/{id}/change-slug`) only the cloud orchestrator
+ * serves: on this composition it answered `404 ENDPOINT_NOT_FOUND`. The
+ * composition that mounts that route now declares the action itself, bound by
+ * `objectName` (`org-change-slug-bound-action.dogfood.test.ts`), so the record
+ * serves only the actions below, and the door probe calls every one of them.
  *
  * ## What this measures
  *
@@ -38,8 +38,8 @@
  *
  * The door probes then show the verdicts are the door's own: each refusal is
  * the vendor's 403 with its own code, each admission a 200 that took effect.
- * And every other `type: 'api'` action the record serves is called once at its
- * own target: none answers the router's `404 ENDPOINT_NOT_FOUND`.
+ * And every `type: 'api'` action the record serves is called once at its own
+ * target: none answers the router's `404 ENDPOINT_NOT_FOUND`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -62,8 +62,6 @@ const UPDATE = ['update_organization', 'rename_organization'] as const;
 /** `organization/delete`: the owner alone. */
 const DELETE = ['delete_organization'] as const;
 const ALL = [...EVERY_GRADE, ...INVITE, ...UPDATE, ...DELETE];
-/** Served, and held out of the graded set — see the docblock. */
-const UNDECIDED = ['change_slug'] as const;
 
 const EXPECTED: Record<Grade, readonly string[]> = {
   owner: ALL,
@@ -174,7 +172,7 @@ describe('sys_organization admin actions follow the membership grade, and every 
 
   it('every grade is served the same action set', () => {
     for (const grade of Object.keys(PROJECTED) as Grade[]) {
-      expect([...served[grade].keys()].sort(), grade).toEqual([...ALL, ...UNDECIDED].sort());
+      expect([...served[grade].keys()].sort(), grade).toEqual([...ALL].sort());
     }
   });
 
@@ -214,9 +212,8 @@ describe('sys_organization admin actions follow the membership grade, and every 
     expect(await findRows(ql, 'sys_organization', { id: org.doomed.id }, 1)).toEqual([]);
   }, 60_000);
 
-  it('every graded api action the record serves reaches a door this composition mounts — none answers ENDPOINT_NOT_FOUND', async () => {
-    const held: readonly string[] = UNDECIDED;
-    const apiActions = [...served.owner.values()].filter((a) => a.type === 'api' && !held.includes(a.name));
+  it('every api action the record serves reaches a door this composition mounts — none answers ENDPOINT_NOT_FOUND', async () => {
+    const apiActions = [...served.owner.values()].filter((a) => a.type === 'api');
     // The plain member and an organisation id no row carries: every door
     // refuses before it writes anything, and a refusal from the door is the
     // door's own answer, not the router's.
