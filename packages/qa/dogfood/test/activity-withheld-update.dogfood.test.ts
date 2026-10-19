@@ -115,8 +115,11 @@ describe('[#21388] an org peer is withheld the activity rows of a colleague’s 
     }
     const activitySet = await catalogPermissionSet(ql, activityReadSet.name);
     expect(activitySet, 'fixture permission set served by the security catalog').toBeTruthy();
+    // [C8 stage 8b] The grant carries the fixture organization the sessions are
+    // active in: this `single` install now holds two organizations, so an
+    // organization-less system insert is refused as ambiguous (ADR-0131 D9).
     for (const who of ['member', 'admin']) {
-      await ql.insert('sys_user_permission_set', { user_id: uid[who], permission_set: activitySet.name }, { context: SYS });
+      await ql.insert('sys_user_permission_set', { user_id: uid[who], permission_set: activitySet.name, organization_id: orgId }, { context: SYS });
     }
 
     // The colleague signs in twice through the auth door (two sign-in stamps),

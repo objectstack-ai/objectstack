@@ -42,6 +42,15 @@ interface Engine {
     getObject?(object: string): unknown;
 }
 
+/**
+ * [C8 stage 8b] The organization a `single` session is active in: the Default
+ * Organization, which an organization-less system insert of a grant or a
+ * position is now stamped with (ADR-0131 D9). Resolving with no organization
+ * would read the global arm only, which no fresh `single` install writes any more.
+ */
+const sessionOrgOf = async (s: VerifyStack): Promise<string | undefined> =>
+    (await (await s.kernel.getServiceAsync<{ defaultOrgId(): Promise<string | null> }>('tenancy')).defaultOrgId()) ?? undefined;
+
 describe('the permission-set clone door, on a booted showcase', () => {
     let stack: VerifyStack;
     let token: string;
@@ -117,7 +126,7 @@ describe('the permission-set clone door, on a booted showcase', () => {
             { id: 'usp_clone_door_holder', user_id: String(user.id), position: COPY_POSITION },
             { context: SYSTEM_CTX },
         );
-        const grants = await resolveUserAuthzGrants(ql as never, String(user.id), {});
+        const grants = await resolveUserAuthzGrants(ql as never, String(user.id), { tenantId: await sessionOrgOf(stack) });
         expect(grants.positions).toContain(COPY_POSITION);
         expect(grants.permissions).toContain(DEFAULT_COPY);
     });

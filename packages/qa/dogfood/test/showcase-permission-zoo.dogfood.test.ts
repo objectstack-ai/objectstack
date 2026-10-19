@@ -125,9 +125,14 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
   it('explain() reports the vama_bypass layer with the auditor set as contributor', async () => {
     const security: any = stack.kernel.getService('security');
     expect(security?.explain, 'security service exposes explain()').toBeTruthy();
+    // [C8 stage 8b] Asked in the organization a `single` session carries: the
+    // auditor's grant is an organization-less system insert, which now takes the
+    // Default Organization (ADR-0131 D9), and explain resolves the principal in
+    // the caller's organization, with none reading only the global arm.
+    const tenancy = await stack.kernel.getServiceAsync<{ defaultOrgId(): Promise<string | null> }>('tenancy');
     const decision = await security.explain(
       { object: 'showcase_private_note', operation: 'read', userId: auditorId },
-      { isSystem: true },
+      { isSystem: true, tenantId: (await tenancy.defaultOrgId()) ?? undefined },
     );
     expect(decision?.allowed).toBe(true);
     const vama = (decision?.layers ?? []).find((l: any) => l.layer === 'vama_bypass');

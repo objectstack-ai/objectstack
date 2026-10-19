@@ -90,9 +90,12 @@ describe('showcase (single): a platform object system insert takes the Default O
   });
 
   it('with a second organization the same insert is REFUSED, loudly, and nothing is written', async () => {
+    // A unit the user is not yet a member of, so the one-membership-per-unit
+    // constraint cannot answer before the organization rule does.
+    await ql.insert('sys_business_unit', { id: 'bu_c8_8b_carried', name: 'C8 8b carried', kind: 'department', active: true, organization_id: orgId }, { context: SYS });
     await ql.insert('sys_organization', { id: 'org_c8_8b_second', name: 'Second', slug: 'c8-8b-second' }, { context: SYS });
     await expect(
-      ql.insert('sys_business_unit_member', { id: 'bm_c8_8b_refused', business_unit_id: 'bu_c8_8b', user_id: userId }, { context: SYS }),
+      ql.insert('sys_business_unit_member', { id: 'bm_c8_8b_refused', business_unit_id: 'bu_c8_8b_carried', user_id: userId }, { context: SYS }),
     ).rejects.toMatchObject({
       code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
       status: 500,
@@ -100,7 +103,7 @@ describe('showcase (single): a platform object system insert takes the Default O
     });
     expect(await ql.findOne('sys_business_unit_member', { where: { id: 'bm_c8_8b_refused' }, context: SYS })).toBeFalsy();
     // Carrying the organization is the remedy the refusal names, and it lands.
-    await ql.insert('sys_business_unit_member', { id: 'bm_c8_8b_carried', business_unit_id: 'bu_c8_8b', user_id: userId, organization_id: orgId }, { context: SYS });
+    await ql.insert('sys_business_unit_member', { id: 'bm_c8_8b_carried', business_unit_id: 'bu_c8_8b_carried', user_id: userId, organization_id: orgId }, { context: SYS });
     expect((await ql.findOne('sys_business_unit_member', { where: { id: 'bm_c8_8b_carried' }, context: SYS }))?.organization_id).toBe(orgId);
   });
 });

@@ -145,7 +145,16 @@ async function ok(res: Response, status = 200): Promise<void> {
 }
 
 for (const posture of ['isolated', 'group'] as const) {
-  describe(`[ADR-0131 D12 items 7–8] ${posture}: every environment-metadata write is the platform operator's`, () => {
+  /**
+ * [C8 stage 8b] The organization a `single` session is active in: the Default
+ * Organization, which an organization-less system grant is now stamped with
+ * (ADR-0131 D9). A precheck that resolves with no organization would read the
+ * global arm only, which no fresh `single` install writes any more.
+ */
+const sessionOrgOf = async (h: Harness): Promise<string | undefined> =>
+  (await (await h.stack.kernel.getServiceAsync<{ defaultOrgId(): Promise<string | null> }>('tenancy')).defaultOrgId()) ?? undefined;
+
+describe(`[ADR-0131 D12 items 7–8] ${posture}: every environment-metadata write is the platform operator's`, () => {
     let h: Harness;
     const previous = process.env.OS_TENANCY_POSTURE;
     const p = posture.slice(0, 3);
@@ -328,7 +337,7 @@ describe('[ADR-0131 D12 items 7–8 · D11] single (CONTROL): the refusal is ine
   });
 
   it('a `manage_metadata` holder below the operator writes at the /meta (the stored rewrite included), /packages, install-local and /automation doors as before', async () => {
-    const a = await resolveUserAuthzGrants(h.ql as never, h.userA, {});
+    const a = await resolveUserAuthzGrants(h.ql as never, h.userA, { tenantId: await sessionOrgOf(h) });
     expect(a.systemPermissions).toContain('manage_metadata');
     expect(a.posture).not.toBe('PLATFORM_ADMIN');
     await ok(await h.stack.apiAs(h.tokA, 'PUT', '/meta/object/em_sin_obj', object('em_sin_obj', 'Object by A')));
