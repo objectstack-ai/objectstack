@@ -4,7 +4,8 @@ import { describe, it, expect } from 'vitest';
 import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { SysJob, SysJobRun, SysJobQueue } from './audit/index.js';
-import { SysMigration, SysMigrationJournal, SysSecret } from './system/index.js';
+import { isTenancyDisabled } from '@objectstack/spec/data';
+import { SysMigration, SysMigrationJournal, SysPlatformSettingAudit, SysSecret, SysSettingAudit } from './system/index.js';
 
 /**
  * [ADR-0131 D7] The deployment-level plumbing this package declares carries no
@@ -16,9 +17,10 @@ import { SysMigration, SysMigrationJournal, SysSecret } from './system/index.js'
  * on `fields` alone is a phantom check: an object that merely omits the field
  * still gets the column. `resolveInjectedSystemColumns` is the derivation
  * `applySystemFields` consumes to do the injecting, so it is the authority on
- * whether the column exists. The `sys_secret` control below is the same
+ * whether the column exists. The `sys_setting_audit` control below is the same
  * question asked of an object that DOES keep the column (its writer stamps the
- * caller's organization), so the predicate is shown able to answer `true`.
+ * organization whose value changed), so the predicate is shown able to answer
+ * `true`.
  *
  * ## Why the capability is pinned beside the column
  *
@@ -36,6 +38,8 @@ const DEPLOYMENT_LEVEL = [
   ['sys_job_queue', SysJobQueue],
   ['sys_migration', SysMigration],
   ['sys_migration_journal', SysMigrationJournal],
+  // [ruling record 6257510973, Q4 A] The settings audit trail's global rung.
+  ['sys_platform_setting_audit', SysPlatformSettingAudit],
 ] as const;
 
 describe('[ADR-0131 D7] deployment-level plumbing: no tenant column, platform-only reads', () => {
@@ -78,11 +82,53 @@ describe('[ADR-0131 D7] deployment-level plumbing: no tenant column, platform-on
   });
 
   it('control: a tenant-attributed object keeps the column, so the predicate can answer true', () => {
-    // `sys_secret` is written with the business write's driver options, so the
-    // SQL driver stamps the caller's organization on it. It is NOT
-    // deployment-level today; its fate is decided by the C7 inventory.
-    const plan = resolveInjectedSystemColumns(SysSecret);
+    // `sys_setting_audit` keeps the tenant and user rungs' rows, each stamped
+    // with the organization whose value changed (D3); only its global rung left
+    // for `sys_platform_setting_audit` (ruling record 6257510973, Q4 A).
+    const plan = resolveInjectedSystemColumns(SysSettingAudit);
     expect(plan.tenant).toBe(true);
     expect([...plan.names]).toContain('organization_id');
+  });
+});
+
+/**
+ * [ADR-0131 D7 · ruling record 6257510973, Q4 A] `sys_secret` is
+ * deployment-level, in the 18.x line's EXPAND shape: out of the tenancy
+ * machinery, with the 18.0 organization column still declared, nullable and
+ * unread, until the upgrade ceremony drops it.
+ *
+ * Why not `systemFields: { tenant: false }` yet, as the D7 family above
+ * declares: an 18.0 database holds a physical `organization_id` on this table,
+ * and the v18 boot guard reads "an object that declares no organization column
+ * whose table still carries one" as the v17 shape — it refuses the boot. The
+ * declared column is what keeps an 18.0 database booting (R2) while nothing
+ * stamps or scopes by it.
+ */
+describe('[ADR-0131 D7] sys_secret: deployment-level, the 18.0 column kept declared until the ceremony', () => {
+  it('is out of the tenancy machinery: the declared opt-out, and no injected tenant column', () => {
+    expect(SysSecret.name).toBe('sys_secret');
+    expect(isTenancyDisabled(SysSecret)).toBe(true);
+    expect(resolveInjectedSystemColumns(SysSecret).tenant).toBe(false);
+    // Per-object control: the same declaration without the opt-out is a
+    // tenant-column object again, so `true` above is the opt-out's doing.
+    const { tenancy: _optOut, ...withoutOptOut } = SysSecret as Record<string, unknown>;
+    expect(resolveInjectedSystemColumns(withoutOptOut).tenant).toBe(true);
+  });
+
+  it('keeps the 18.0 column declared — nullable, read-only, the 255-wide string 18.0 provisioned', () => {
+    const column = (SysSecret.fields as Record<string, any>).organization_id;
+    expect(column).toBeDefined();
+    expect(column.type).toBe('text');
+    expect(column.required ?? false).toBe(false);
+    expect(column.readonly).toBe(true);
+    expect(column.maxLength).toBe(255);
+    // Not the boot guard's v17 shape: that is `systemFields.tenant: false` with
+    // NO declared column, which would refuse an 18.0 database.
+    expect((SysSecret as { systemFields?: unknown }).systemFields).toBeUndefined();
+  });
+
+  it('keeps its read door: private by default, reads only on the generic API', () => {
+    expect((SysSecret as { access?: unknown }).access).toEqual({ default: 'private' });
+    expect((SysSecret as { enable?: { apiMethods?: unknown } }).enable?.apiMethods).toEqual(['get', 'list']);
   });
 });

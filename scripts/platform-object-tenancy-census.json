@@ -24,14 +24,14 @@
   "predicate": "resolveTenantFieldName(registered schema) !== null, where the registered schema is the authored schema plus the columns resolveInjectedSystemColumns says the registration injects (the applySystemFields pass). Both functions are loaded from source and executed; neither is re-spelled here.",
   "population": "every object registered by a tracked packages/**/*.object.ts module whose name carries a platform prefix (sys_ / cloud_ / ai_). The cloud repository's own cloud_ objects are not in this tree and so not in this census.",
   "totals": {
-    "registered": 83,
-    "inReach": 44,
-    "outOfReach": 39
+    "registered": 84,
+    "inReach": 42,
+    "outOfReach": 42
   },
   "reasonTotals": {
     "managedBy: 'better-auth'": 25,
-    "systemFields.tenant: false": 14,
-    "tenancy.enabled: false": 2
+    "systemFields.tenant: false": 15,
+    "tenancy.enabled: false": 4
   },
   "unexplained": [],
   "objects": [
@@ -187,9 +187,11 @@
     {
       "name": "sys_flow_credential",
       "file": "packages/services/service-automation/src/sys-flow-credential.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "tenancy.enabled: false"
+      ]
     },
     {
       "name": "sys_flow_dispatch",
@@ -483,6 +485,15 @@
       ]
     },
     {
+      "name": "sys_platform_setting_audit",
+      "file": "packages/platform-objects/src/system/sys-platform-setting-audit.object.ts",
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
+    },
+    {
       "name": "sys_presence",
       "file": "packages/services/service-realtime/src/objects/sys-presence.object.ts",
       "reach": "out",
@@ -571,9 +582,11 @@
     {
       "name": "sys_secret",
       "file": "packages/platform-objects/src/system/sys-secret.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "tenancy.enabled: false"
+      ]
     },
     {
       "name": "sys_session",
