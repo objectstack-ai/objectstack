@@ -605,3 +605,159 @@ describe('a template send from an earlier-starting plugin\'s kernel:ready (#2394
     await kernel.shutdown();
   });
 });
+
+// ── identity mail: the deployment-level sibling (ADR-0131 D7, Q2 A) ────────
+//
+// Identity mail — about a person, not an organization — persists to
+// `sys_identity_email`, and the same pipeline serves it. Expand-first: rows an
+// 18.0 install wrote to `sys_email` for that mail (organization-less,
+// `related_object: 'sys_user'`), and the `{ rowId }` jobs it queued for them,
+// stay where they are and keep being read and delivered from there.
+
+const IDENTITY = 'sys_identity_email';
+
+/** A row as an 18.0 install wrote a verification mail: in `sys_email`, no organization. */
+const eighteenZeroIdentityRow = (id: string, createdAt: string) => ({
+  id,
+  from_address: 'no-reply@example.test',
+  to_addresses: 'registrant@example.test',
+  subject: 'Verify your email',
+  body_text: 'verify: http://x/verify?token=t',
+  related_object: 'sys_user',
+  related_id: 'usr_registrant',
+  status: 'queued',
+  attempt_count: 0,
+  created_at: createdAt,
+});
+
+const identityInput = {
+  to: 'registrant@example.test',
+  from: 'no-reply@example.test',
+  subject: 'Verify your email',
+  text: 'verify: http://x/verify?token=t',
+  relatedObject: 'sys_user',
+  relatedId: 'usr_registrant',
+  identityMail: true,
+};
+
+describe('[ADR-0131 D7, Q2 A] identity mail is written to sys_identity_email', () => {
+  it('a fresh send lands in the sibling, with no organization key, and sys_email gets nothing', async () => {
+    const h = await boot();
+    await h.ready();
+
+    const res = await h.service().send(identityInput);
+
+    expect(res.status).toBe('sent');
+    const rows = h.engine.rows(IDENTITY);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: res.id, status: 'sent', related_object: 'sys_user', message_id: '<sent@x>' });
+    expect('organization_id' in rows[0]).toBe(false);
+    expect(h.sysEmail()).toEqual([]);
+  });
+
+  it('tenant mail is unchanged: no identityMail, the row is sys_email\'s and keeps its organization', async () => {
+    const h = await boot();
+    await h.ready();
+
+    const res = await h.service().send({ ...identityInput, identityMail: undefined, organizationId: 'org_a' });
+
+    expect(h.sysEmail()).toEqual([expect.objectContaining({ id: res.id, organization_id: 'org_a', status: 'sent' })]);
+    expect(h.engine.rows(IDENTITY)).toEqual([]);
+  });
+
+  it('identityMail beside organizationId is refused, and the refusal is recorded in the sibling without the organization', async () => {
+    const h = await boot();
+    await h.ready();
+
+    await expect(h.service().send({ ...identityInput, organizationId: 'org_a' })).rejects.toThrow(
+      /^VALIDATION_FAILED: identityMail and organizationId cannot be sent together/,
+    );
+
+    expect(h.transport.send).not.toHaveBeenCalled();
+    const rows = h.engine.rows(IDENTITY);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: 'failed' });
+    expect(String(rows[0].error)).toMatch(/^rejected before delivery: VALIDATION_FAILED/);
+    expect('organization_id' in rows[0]).toBe(false);
+    expect(h.sysEmail()).toEqual([]);
+  });
+
+  it('queue mode: the job names the sibling, and the worker delivers the sibling row in place', async () => {
+    const h = await boot({ queue: true, plugin: { queueDelivery: true } });
+    await h.ready();
+
+    const res = await h.service().send(identityInput);
+
+    expect(res.status).toBe('queued');
+    expect(h.jobs()).toHaveLength(1);
+    expect(JSON.parse(h.jobs()[0].payload_json)).toEqual({ rowId: res.id, object: IDENTITY });
+    expect(h.jobs()[0].idempotency_key).toBe(`${IDENTITY}:${res.id}`);
+
+    await h.adapter.pollOnce();
+
+    expect(h.engine.rows(IDENTITY)).toEqual([expect.objectContaining({ id: res.id, status: 'sent', attempt_count: 1 })]);
+    expect(h.sysEmail()).toEqual([]);
+    expect(h.jobs()[0]).toMatchObject({ status: 'completed' });
+  });
+
+  it('the outbox drain hook delivers a queued row inserted into the sibling', async () => {
+    const h = await boot();
+    await h.ready();
+
+    await h.engine.insert(IDENTITY, { ...eighteenZeroIdentityRow('id-drained', ago(0)) });
+    await flush();
+
+    expect(h.transport.send).toHaveBeenCalledTimes(1);
+    expect(h.engine.rows(IDENTITY)[0]).toMatchObject({ id: 'id-drained', status: 'sent' });
+  });
+
+  it('the boot sweep delivers a row stranded in the sibling', async () => {
+    const h = await boot();
+    h.engine.seed(IDENTITY, eighteenZeroIdentityRow('id-stranded', ago(min(30))));
+
+    const swept = await h.ready();
+
+    expect(swept).toMatchObject({ scanned: 1, sent: 1 });
+    expect(h.engine.rows(IDENTITY)[0]).toMatchObject({ id: 'id-stranded', status: 'sent' });
+    expect(infoLines(h.ctx).join('\n')).toMatch(/outbox sweep — 1 sys_identity_email row\(s\) stranded/);
+  });
+});
+
+describe('[ADR-0131 D7, Q2 A] expand-first: identity rows an 18.0 install wrote to sys_email are still read', () => {
+  it('the boot sweep delivers an 18.0 identity row from sys_email, in place, and moves nothing', async () => {
+    const h = await boot();
+    h.engine.seed('sys_email', eighteenZeroIdentityRow('row-18-0', ago(min(30))));
+
+    const swept = await h.ready();
+
+    expect(swept).toMatchObject({ scanned: 1, sent: 1 });
+    expect(h.sysEmail()).toEqual([expect.objectContaining({ id: 'row-18-0', status: 'sent', related_object: 'sys_user' })]);
+    expect(h.engine.rows(IDENTITY)).toEqual([]);
+  });
+
+  it('an 18.0 { rowId } job with no object reads sys_email and delivers that row', async () => {
+    const h = await boot({ queue: true, plugin: { queueDelivery: true } });
+    h.engine.seed('sys_email', eighteenZeroIdentityRow('row-18-0-job', ago(3_000)));
+    await h.ready();
+    // The job exactly as an 18.0 process published it: no `object` member.
+    await h.adapter.publish(EMAIL_SEND_QUEUE, { rowId: 'row-18-0-job' });
+
+    await h.adapter.pollOnce();
+
+    expect(h.sysEmail()).toEqual([expect.objectContaining({ id: 'row-18-0-job', status: 'sent', attempt_count: 1 })]);
+    expect(h.engine.rows(IDENTITY)).toEqual([]);
+  });
+
+  it('a job naming no mail log is refused loudly, and no row anywhere is touched', async () => {
+    const h = await boot({ queue: true, plugin: { queueDelivery: true } });
+    h.engine.seed('sys_email', eighteenZeroIdentityRow('row-x', ago(3_000)));
+    await h.ready();
+    await h.adapter.publish(EMAIL_SEND_QUEUE, { rowId: 'row-x', object: 'sys_user' });
+
+    await h.adapter.pollOnce();
+
+    expect(h.transport.send).not.toHaveBeenCalled();
+    expect(h.sysEmail()[0]).toMatchObject({ status: 'queued' });
+    expect(errorLines(h.ctx).join('\n')).toMatch(/names 'sys_user', which is not a mail log/);
+  });
+});

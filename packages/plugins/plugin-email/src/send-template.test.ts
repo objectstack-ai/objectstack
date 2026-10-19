@@ -85,6 +85,57 @@ describe('EmailService.sendTemplate', () => {
     expect(rows.get(res.id)?.organization_id).toBe('org_apex');
   });
 
+  it('forwards identityMail: the row and both of its writes go to sys_identity_email (ADR-0131 D7, Q2 A)', async () => {
+    const transport = new CaptureTransport();
+    const writes: Array<{ verb: string; object: string | undefined }> = [];
+    const rows = new Map<string, Record<string, any>>();
+    const svc = new EmailService({
+      transport,
+      defaultFrom: { address: 'no-reply@x.com' },
+      templateLoader: makeLoader([sampleTemplate]),
+      persistence: {
+        async insert(row, object) { writes.push({ verb: 'insert', object }); rows.set(row.id, { ...row }); return { id: row.id }; },
+        async update(id, patch, object) {
+          writes.push({ verb: 'update', object });
+          const cur = rows.get(id);
+          if (cur) rows.set(id, { ...cur, ...patch });
+        },
+      },
+    });
+    const res = await svc.sendTemplate({
+      template: 'auth.password_reset',
+      to: 'alice@x.com',
+      data: { user: { name: 'Alice' }, resetUrl: 'https://x.com/r/abc' },
+      identityMail: true,
+    });
+    expect(res.status).toBe('sent');
+    expect(writes).toEqual([
+      { verb: 'insert', object: 'sys_identity_email' },
+      { verb: 'update', object: 'sys_identity_email' },
+    ]);
+    expect('organization_id' in (rows.get(res.id) ?? {})).toBe(false);
+  });
+
+  it('without identityMail every write names sys_email, as before (control)', async () => {
+    const transport = new CaptureTransport();
+    const objects: Array<string | undefined> = [];
+    const svc = new EmailService({
+      transport,
+      defaultFrom: { address: 'no-reply@x.com' },
+      templateLoader: makeLoader([sampleTemplate]),
+      persistence: {
+        async insert(row, object) { objects.push(object); return { id: row.id }; },
+        async update(_id, _patch, object) { objects.push(object); },
+      },
+    });
+    await svc.sendTemplate({
+      template: 'auth.password_reset',
+      to: 'alice@x.com',
+      data: { user: { name: 'Alice' }, resetUrl: 'https://x.com/r/abc' },
+    });
+    expect(objects).toEqual(['sys_email', 'sys_email']);
+  });
+
   it('an org-less sendTemplate writes NO organization_id (over-denial control, #11741)', async () => {
     const transport = new CaptureTransport();
     const rows = new Map<string, Record<string, any>>();
