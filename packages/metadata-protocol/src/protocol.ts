@@ -12,7 +12,7 @@ import {
     type AnonymousFlowDoorCandidate,
 } from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, objectNotFoundError, recordNotFoundError, relationConditionSites } from '@objectstack/core';
-import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, isSandboxOwnFault, resolveTenancyPosture, resolveThrownHttpError, sandboxBusinessMessage } from '@objectstack/types';
+import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, resolveTenancyPosture, resolveThrownHttpError, sandboxBusinessMessage } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
 // this question with it is a bug (cloud#1020, #5233) — so the posture, and only
@@ -4021,13 +4021,13 @@ function sandboxRefusalSentence(err: unknown): string | undefined {
  * through {@link sandboxRefusalSentence} FIRST, which is
  * `sandboxBusinessMessage` (`@objectstack/types`), the import runner's read.
  *
- * And a sandboxed error's `.message` is never quoted, whatever it declared.
+ * And a sandbox origin's `.message` is never quoted, whatever it declared.
  * It is the wrapper, written for the log: a refusal that declared a 4xx used
  * to be quoted from there, wrapper and all, and so did a body that CRASHED
  * with a declared 4xx, which every data door answers `500` with its text
- * withheld. "Sandboxed" is the import runner's test (a sandbox origin or the
- * sandbox's own fault). What stays withheld is what the doors withhold: a
- * crash, the runner's own fault, a refusal that declared a 5xx, and every
+ * withheld. (The runner's own faults never declare a status, so the 4xx
+ * branch cannot reach them.) What stays withheld is what the doors withhold:
+ * a crash, the runner's own fault, a refusal that declared a 5xx, and every
  * non-sandbox error that declared no 4xx.
  */
 function clientFacingRowFailureText(err: unknown, fallback: string): string {
@@ -4036,8 +4036,7 @@ function clientFacingRowFailureText(err: unknown, fallback: string): string {
     // 500 as the fallback status: an error that declared nothing is a server
     // fault in row form, exactly what `toRowApiError`'s own code limb assumes.
     const { status } = resolveThrownHttpError(err, 500);
-    const sandboxed = isSandboxOrigin(err) || isSandboxOwnFault(err);
-    if (status >= 400 && status < 500 && !sandboxed) {
+    if (status >= 400 && status < 500 && !isSandboxOrigin(err)) {
         const declared = (err as { message?: unknown } | null | undefined)?.message;
         if (typeof declared === 'string' && declared.length > 0) return declared;
     }
