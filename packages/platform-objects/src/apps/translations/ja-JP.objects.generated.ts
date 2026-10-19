@@ -688,9 +688,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "メンバーを削除しました"
       },
       transfer_ownership: {
-        label: "所有権の移譲",
-        confirmText: "この組織の所有権を選択したメンバーに移譲しますか？あなたは管理者に降格され、所有者のみの権限を失います。",
-        successMessage: "所有権を移譲しました"
+        label: "所有者にする",
+        confirmText: "選択したメンバーをこの組織の所有者にしますか？このメンバーには、組織の削除を含む所有者のすべての権限が付与されます。あなたも引き続き所有者です。退く場合は、自分のメンバーシップで「ロールを変更」を使用してください。",
+        successMessage: "メンバーが所有者になりました"
       }
     }
   },

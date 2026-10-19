@@ -688,9 +688,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Member removed"
       },
       transfer_ownership: {
-        label: "Transfer Ownership",
-        confirmText: "Transfer ownership of this organization to the selected member? You will be demoted to admin and lose owner-only privileges.",
-        successMessage: "Ownership transferred"
+        label: "Make Owner",
+        confirmText: "Make the selected member an owner of this organization? They get every owner privilege, including deleting the organization. You stay an owner too; to step down, use Change Role on your own membership.",
+        successMessage: "Member is now an owner"
       }
     }
   },
