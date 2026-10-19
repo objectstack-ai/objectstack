@@ -150,7 +150,9 @@ export interface MetaReadGateListSource {
      * the way {@link listMetaItems} is — absent when this transport's protocol
      * has no by-name read, and then {@link loadObjectItem} asks the list as
      * before. Answers the read's envelope (`{ item }`). A THROW is a fault,
-     * ⛔ never "no such object".
+     * ⛔ never "no such object". [#24535] REST hands in the protocol's
+     * execution face (`getMetaItemForExecution`) where it has one: the same
+     * envelope and the same refusals, with an undecorated `item`.
      */
     getObjectItem?(name: string): Promise<unknown>;
 }
@@ -465,7 +467,8 @@ export async function loadObjectItems(source: MetaReadGateListSource): Promise<a
  * name. The list read serves every object decorated, and the decoration is a
  * full schema diagnostic of each one, so every `/data` request paid a
  * diagnostic pass over the whole registry to read one object's `enable`. The
- * by-name read decorates only the object it serves.
+ * by-name read decorates only the object it serves, and [#24535] its execution
+ * face, which REST hands in where the protocol has one, decorates nothing.
  *
  * The answers are the list's:
  *

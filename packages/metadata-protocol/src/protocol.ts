@@ -11210,7 +11210,8 @@ export class ObjectStackProtocolImplementation implements
      * The environment's rows only ({@link findEnvironmentRows}). A failed read
      * propagates: the caller owns its #5532 discrimination.
      *
-     * [#10757 leg 6] `cached` — the served face only ({@link getMetaItem}) —
+     * [#10757 leg 6] `cached` — the API faces only ({@link getMetaItem} and,
+     * [#24535], {@link getMetaItemForExecution}, which share this key) —
      * reads through the overlay cache that already holds the list read's rows
      * (`meta-overlay-cache.ts`, #11967), under a key naming this item: the
      * same raw rows, upstream of every parse, merge and hydration, retired the
@@ -11367,12 +11368,62 @@ export class ObjectStackProtocolImplementation implements
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
     }) {
+        return this.readMetaItemFace(request, 'served');
+    }
+
+    /**
+     * [#24535] The item {@link getMetaItem} reads — the same sources, the same
+     * overlay cache, the same merge, lock and governance, the same
+     * disabled-package refusal and withholding, the same envelope — handed
+     * back WITHOUT the serving decorations: no `_diagnostics` (the full schema
+     * `safeParse` of {@link computeMetadataDiagnostics}, and a view's
+     * cross-document reference diagnostics), no per-type credential redaction
+     * (`decorateMetadataItem` → `redactMetadataItem`), and no `registration`.
+     * The by-name twin of {@link getMetaItemsForExecution}, for the reason
+     * that method records, and the second face of the one body
+     * {@link readMetaItemFace}.
+     *
+     * It exists for a caller that ACTS on a definition and serves none of it.
+     * The REST API-exposure gate reads the object behind every
+     * `GET /api/v1/data/OBJECT` by name to judge its `enable` block, and
+     * nothing else; on the served face that read paid a full diagnostic
+     * `safeParse` of the object's definition per request (11.8% of a HotCRM
+     * read's CPU, measured), to compute a key the gate never reads.
+     *
+     * ⛔ Never serve what this returns from a door that answers a caller —
+     * HTTP, MCP, an export, a log line. Every such exit serves
+     * {@link getMetaItem}, whose redaction is the whole reason this method has
+     * to exist separately. A gate inside such a door may read a DECISION off
+     * it (the exposure gate reads `enable`); no byte of the body may reach the
+     * response.
+     */
+    async getMetaItemForExecution(request: {
+        type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
+        /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string,
+    }) {
+        return this.readMetaItemFace(request, 'execution');
+    }
+
+    /**
+     * The one body behind {@link getMetaItem} and
+     * {@link getMetaItemForExecution}: the disabled-package refusal and
+     * withholding {@link getMetaItem} documents, around {@link readMetaItem}.
+     * `face` decides ONLY whether the serving decorations are applied at the
+     * read's exits; every source, cache, merge, lock and governance step
+     * above them is shared, so the item a gate acts on and the item a caller
+     * is served cannot disagree about which body is behind the name.
+     */
+    private async readMetaItemFace(request: {
+        type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
+        member?: string,
+    }, face: 'served' | 'execution') {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
         if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
             throw objectPackageDisabledError(request.name);
         }
-        const answer = await this.readMetaItem(request, { servedRead: true });
+        const answer = await this.readMetaItem(request, { face });
         if (request.type === 'object' || request.type === 'package'
             || !isItemOfDisabledPackage(this.engine?.registry, answer?.item)) {
             return answer;
@@ -11388,15 +11439,21 @@ export class ObjectStackProtocolImplementation implements
      * disabled. Private on purpose; only this class's authoring callers read
      * it.
      *
-     * [#10757 leg 6] `servedRead` is set by {@link getMetaItem} alone: the
-     * served face reads the item's active rows through the overlay cache
-     * ({@link readItemActiveRows}). An authoring caller passes nothing and
-     * reads the store, so a save is never judged against a cached row.
+     * [#10757 leg 6] `face` is set by the API faces alone ({@link getMetaItem}
+     * and [#24535] {@link getMetaItemForExecution}, through
+     * {@link readMetaItemFace}): they read the item's active rows through the
+     * overlay cache ({@link readItemActiveRows}), under one entry for both. An
+     * authoring caller passes nothing and reads the store, so a save is never
+     * judged against a cached row.
+     *
+     * [#24535] `face: 'execution'` skips the serving decorations at this
+     * read's exits, and nothing else: see {@link getMetaItemForExecution}. An
+     * authoring caller is decorated as the served face is, as before.
      */
     private async readMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
-    }, opts: { servedRead?: boolean } = {}) {
+    }, opts: { face?: 'served' | 'execution' } = {}) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
         // [#23183] ADR-0048 §3.1: the app read keyed by PACKAGE ID, resolved
@@ -11421,6 +11478,13 @@ export class ObjectStackProtocolImplementation implements
         // Studio's editor opens a draft buffer with `state: 'draft'`;
         // runtime loaders omit it and get the live published row.
         const readState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
+        // [#24535] The serving decorations at this read's exits are the ONE
+        // thing the two API faces do not share. The served face (and an
+        // authoring caller) decorates as before; the execution face hands the
+        // governed item back as resolved ({@link getMetaItemForExecution}).
+        // Every read of `execution` below is one of those exits.
+        const execution = opts.face === 'execution';
+        const serveItem = <T>(resolved: T): T => (execution ? resolved : decorateMetadataItem(request.type, resolved));
         // ── [#20946, #20761 ruling rule 1, ADR-0126 §2 / §3] A shipped FLOW name ──
         //
         // `flow` is Regime C: the packaged base is locked, "⛔ Never silent
@@ -11502,12 +11566,13 @@ export class ObjectStackProtocolImplementation implements
         // ({@link readItemActiveRows}): the package-less binding, the served
         // row and the lock below each select from them by the `where` it would
         // have sent the store. They were five serial reads of the same rows,
-        // on every `/data` request. [#10757 leg 6] On the served face the read
-        // goes through the overlay cache; an authoring read is never kept.
+        // on every `/data` request. [#10757 leg 6] On the API faces (served and,
+        // [#24535], execution) the read goes through the overlay cache; an
+        // authoring read is never kept.
         let activeRows: StoredOverlayRow[] | undefined;
         if (readState === 'active') {
             try {
-                activeRows = await this.readItemActiveRows(request.type, request.name, opts.servedRead === true);
+                activeRows = await this.readItemActiveRows(request.type, request.name, opts.face !== undefined);
             } catch (error) {
                 // [#5532] Only an unprovisioned store holds no row; any other
                 // failure is a read that did not happen, never "no row".
@@ -11567,7 +11632,7 @@ export class ObjectStackProtocolImplementation implements
                     return {
                         type: request.type,
                         name: request.name,
-                        item: decorateMetadataItem(request.type, this.governServedObject(request.type, draftItem)),
+                        item: serveItem(this.governServedObject(request.type, draftItem)),
                     };
                 }
             } catch (error) {
@@ -11651,7 +11716,7 @@ export class ObjectStackProtocolImplementation implements
             return {
                 type: request.type,
                 name: request.name,
-                item: decorateMetadataItem(request.type, this.governServedObject(request.type, item)),
+                item: serveItem(this.governServedObject(request.type, item)),
                 // [#22114] The draft row's version token — the one a draft save
                 // (`?mode=draft`) at this address accepts as `If-Match`.
                 // [#22877] The member's own row's, as a save of that member's
@@ -11877,9 +11942,9 @@ export class ObjectStackProtocolImplementation implements
             overlay: overlayLockLayer,
         });
         // [#21761, #21803] …and the body carries that answer's lock family, so
-        // it states the lock the envelope below reports.
-        let decorated = decorateMetadataItem(
-            request.type,
+        // it states the lock the envelope below reports. [#24535] On the
+        // execution face `decorated` is that governed body undecorated.
+        let decorated = serveItem(
             this.governServedObject(
                 request.type,
                 mergeArtifactProtection(request.type, item, artifactItem, itemLock),
@@ -11890,8 +11955,8 @@ export class ObjectStackProtocolImplementation implements
         // object, kanban groupBy must be select-like). Zod cannot see
         // across documents; merge the cross-document errors into the
         // same `_diagnostics` envelope. Defensive: a failed lookup must
-        // never break a read.
-        if ((request.type === 'view' || request.type === 'views') && decorated && typeof decorated === 'object') {
+        // never break a read. [#24535] Served only: a serving decoration.
+        if (!execution && (request.type === 'view' || request.type === 'views') && decorated && typeof decorated === 'object') {
             try {
                 const viewDoc = decorated as Record<string, any>;
                 const sourceObject = viewDoc?.object
@@ -11931,8 +11996,9 @@ export class ObjectStackProtocolImplementation implements
         // [#23316] Beside `lock`, never inside `item`: the automation engine's
         // verdict on this flow ({@link resolveFlowRegistrationReader}), for an
         // item this read serves. The draft returns above carry none — a
-        // pending body is not what the engine holds.
-        const readRegistration = decorated !== undefined && decorated !== null
+        // pending body is not what the engine holds. [#24535] Served only, as
+        // the list's `registrations` are: the execution face carries none.
+        const readRegistration = !execution && decorated !== undefined && decorated !== null
             ? this.resolveFlowRegistrationReader(request.type)
             : undefined;
         return {
