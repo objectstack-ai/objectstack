@@ -54,7 +54,7 @@
  * `sys_webhook` row holding a declared name is judged by what the 18.0 seeder
  * would have done with it on this boot ({@link classifyDeclaredNameHolder}):
  *
- *  - **A pristine mirror** (`managed_by: 'package'`, not `customized`): the
+ *  - **A pristine mirror** (`managed_by` `package` or `platform`, not `customized`): the
  *    seeder would have overwritten it from the declaration. The row is ignored
  *    and the declaration answers.
  *  - **Any other row** (`customized: true`, or `managed_by: 'admin'`): the
@@ -251,5 +251,16 @@ export async function readWebhookActivation(engine: unknown, logger?: Logger): P
  * declaration is withheld.
  */
 export function classifyDeclaredNameHolder(row: { managed_by?: unknown; customized?: unknown }): 'mirror' | 'row' {
-    return row.managed_by === 'package' && row.customized !== true ? 'mirror' : 'row';
+    return isSeededProvenance(row.managed_by) && row.customized !== true ? 'mirror' : 'row';
+}
+
+/**
+ * The provenance values a seeded copy carries: `package` and `platform`, the
+ * same pair the provenance hook stamps `customized` on
+ * (`webhook-provenance.ts`) and the upgrade ceremony settles. One predicate,
+ * so the mirror skip, the redeliver guard and the ceremony never disagree on
+ * which rows are copies of a declaration.
+ */
+export function isSeededProvenance(managedBy: unknown): boolean {
+    return managedBy === 'package' || managedBy === 'platform';
 }
