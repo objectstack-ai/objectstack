@@ -1,5 +1,78 @@
 # @objectstack/objectql
 
+## 18.0.0-next.5
+
+### Minor Changes
+
+- fa26308: fix(objectql,runtime): a hook whose `handler` names a function gets `ctx.title(field?)` in-process, as an inline handler and a `body` do
+  
+  Clause-②: yes (widening)
+  
+  - **What was wrong.** A hook whose `handler` is a string naming a function ran in-process without `ctx.title`: `defineStack({ functions })` plus a hook naming an entry on a source boot (`@objectstack/verify`'s `bootStack(config)`, `os serve` over a config), and a string `handler` resolved from the artifact's `runtimeModule` (what `objectstack build` ships for a callable it could not lower to a `body`). The engine's binder resolved the name after the runtime had wrapped the inline handlers, so the function was called with the bare engine context and `await ctx.title()` threw `TypeError: ctx.title is not a function`.
+  - **What changed.** `bindHooksToEngine` (`@objectstack/objectql`) takes a `wrapHandler(handler, hook)` option, applied at bind to every handler a hook runs in-process, after a string `handler` resolves: an inline function, a name from the bind's `functions`, or a name the same package registered on the engine. A `body`'s handler (built by `bodyRunner`) never takes it. `ObjectQL.bindHooks` and the `IObjectQLEngine.bindHooks` contract (`@objectstack/spec`) carry the option. `bindAppArtifactHandlers` (`@objectstack/runtime`) passes the existing `withInProcessHookTitle` through it, in place of wrapping inline handlers before the bind, so the inline and the named handler take one wrap.
+  - **Unchanged.** A bind that passes no `wrapHandler` binds every handler exactly as resolved, so a host or harness that calls `bindHooks` itself, and a hook registered with `ql.registerHook(...)`, are not handed `ctx.title`. `HookContext` still declares no `title`.
+- fb0d85b: feat(spec,objectql)!: a top-level action bound by `objectName` to an object another package owns is listed on that object wherever it is served, and a bound action whose object no loaded package registers fails the boot
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, option, error code or stored shape is added, removed or renamed: `defineStack` accepts two more target kinds for an action's existing `objectName`, the served object gains entries in its existing `actions` array, and the boot refusal answers the existing `INVALID_METADATA` code. Nothing stored changes shape, so `objectstack migrate meta` has nothing to rewrite. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no Zod schema shape in packages/spec changes (not runtime-interface-only or type-surface-only); and nothing exported is retired (not runtime-export-retired). -->
+  
+  **BREAKING** (one narrowing beside a widening), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **Widening** (`@objectstack/spec`, `@objectstack/objectql`): an action declared in a stack's top-level `actions` with `objectName` naming an object that another package owns now reaches that object. `defineStack()` accepts the action when the stack extends the object through `objectExtensions`, or when the object is a known platform object (`sys_organization` and the rest of the platform's named list). It keeps the action in the top-level `actions`. The engine's schema registry then attaches it to the object at the one step every object read ends in. That covers `GET /api/v1/meta/object/<name>` (stored-row, MetadataService and registry layers alike), `engine.getSchema()` and the action router's object lookup, in whichever order the two packages register. The attached entry is the action's own declaration, so its `requiredPermissions`, `requiresMembershipReach` and execution identity are unchanged. An action the object already declares under the same name keeps the object's declaration. A disabled package's bound actions are not attached. Before this, such an action was refused by `defineStack()` whenever the stack declared an object of its own. Where it got through (an object-less stack, or `strict: false`), it registered but was listed on no object, so no client rendered it.
+  - **FROM** (`@objectstack/objectql`): a top-level action bound by `objectName` to an object no loaded package registers was registered and listed nowhere, and the boot succeeded. **TO:** the boot fails at `kernel:ready` with `INVALID_METADATA` (422), naming each such action, its package and the object. An artifact registered through the `manifest` service after the boot is refused before any of it registers. **Fix:** register the object (in the package or in one it depends on), or correct the action's `objectName`.
+  - **Unchanged:** a name `defineStack()` cannot attribute (an object this stack neither defines nor extends, and not a known platform object) is still refused at build with `STACK_CROSS_REFERENCE_INVALID`. A same-stack bound action is still merged into its object by `defineStack()` and is attached once.
+  
+  The `ObjectExtensionSchema` refusal for `actions` now says exactly this: declare a top-level action with `objectName: '<target>'` in the same stack; the schema registry attaches it to the object wherever the object is served; a target no loaded package registers fails the boot.
+
+### Patch Changes
+
+- 9112bcd: fix(objectql): a record read that hydrates a file field no longer makes a `sys_file` access attempt for a reader without `sys_file` read
+  
+  The engine expands a stored file id by reading `sys_file`, and it issued that read as the caller. A member who may read the record but not `sys_file` (the platform default) was refused it, and the security layer logged `[Security] Access denied: operation 'find' on object 'sys_file'` at WARN on every by-id and list read by that member, although the body served was right. Those lines buried the real denials in the operator's log.
+  
+  The engine now asks the security service's `canReadObject('sys_file')` first, the same object-level read gate the security middleware applies, and serves a refused caller the field-owned answer without the read. Nothing else changes:
+  
+  - The served body is byte-identical, by id and by list, for a reader with and without `sys_file` read. A file owned by the record still hydrates, and every other id still reads `{ id, metadataRefused: true }`.
+  - A direct `GET /api/v1/data/sys_file/:id` by the same reader still answers `403 PERMISSION_DENIED` and still logs its denial.
+  - With no security service, or one that offers no `canReadObject`, the engine reads as the caller, as before.
+  
+  The ask is one cached permission check per read, not per row.
+  
+  Clause-②: no (no accept set or public surface moves: the served bodies and every refusal are unchanged; owes the seat's review of record at `TIER_DEFAULT` before the queue)
+- 45bec43: fix(objectql): a formula reading a field its reference's target does not declare no longer makes the other formulas reading through the same reference read null
+  
+  Clause-②: no
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes, and nothing stored, is added, removed or renamed. A valid formula that read null beside a misspelt sibling now reads its value; no spec key, export, option, object definition or stored shape changes, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  The formula read loads, once per page, every column the object's formulas read through each reference. When one formula named a field the target does not declare, the whole reference was answered as undeclared. Every formula reading through it then read `null` and reported the other formula's field.
+  
+  - The undeclared fields are left out of that shared read and judged for each formula on its own.
+  - A formula that names one reads `null`, with a fault report naming only its own undeclared fields.
+  - A formula that reads only declared fields through the same reference gets the value it gets when read alone (`?fields=`).
+  
+  What to do. Nothing. A formula that read `null` this way now reads its value. To find the formula at fault, re-save the object: the save door refuses the misspelt read and names the field.
+- Updated dependencies [e67ac4b]
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [33a45cc]
+  - @objectstack/metadata-protocol@18.0.0-next.5
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/formula@18.0.0-next.5
+  - @objectstack/metadata@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
 ## 18.0.0-next.4
 
 ### Minor Changes

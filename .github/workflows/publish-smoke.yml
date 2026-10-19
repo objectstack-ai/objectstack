@@ -54,6 +54,9 @@
 # registry canary (schedule-triggered, unrelated to any release candidate)
 # with release-candidate smokes, and an unlabeled canary green reads as "the
 # RC smoke passed" (#14190 — a six-day outage misread from exactly that).
+# A `pending` in that history reading "Cancelled before a verdict" closes a run
+# that measured nothing (a newer smoke superseded it, as nearly every
+# cancellation is), so it counts as neither broken nor green.
 
 name: Publish Smoke
 
@@ -238,11 +241,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            state=success; desc='Fresh install of the release candidate: auth + CRUD green'
-          else
-            state=failure; desc='Release candidate fails a fresh install — see the run log'
-          fi
+          # job.status is success, failure or cancelled, and cancelled is no
+          # verdict: a newer smoke superseded this run (cancel-in-progress; it
+          # starts when this run ends and writes its own pending), timeout-minutes
+          # ran out, or someone stopped it. Nothing was measured, so never
+          # `failure`; nor `error`, which is red too and would flash the release
+          # PR red on every supersession.
+          case "${{ job.status }}" in
+            success)   state=success; desc='Fresh install of the release candidate: auth + CRUD green' ;;
+            cancelled) state=pending; desc='Cancelled before a verdict (superseded by a newer smoke, timed out, or stopped by hand) — nothing measured' ;;
+            *)         state=failure; desc='Release candidate fails a fresh install — see the run log' ;;
+          esac
           gh api "repos/$GITHUB_REPOSITORY/statuses/${{ needs.resolve.outputs.report-sha }}" \
             -f state="$state" -f context='publish-smoke / packed-tarballs' \
             -f description="$desc" \

@@ -1,5 +1,50 @@
 # @objectstack/lint
 
+## 18.0.0-next.5
+
+### Minor Changes
+
+- 45bec43: fix(lint)!: a formula that reads, through a reference, a field the reference's target does not declare is refused where it is written
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, stored shape or authorable spelling is added, removed or renamed. The field-formula pass now refuses one expression shape it accepted before: a one-hop read of a field the reference's target does not declare, which the runtime never computed a value for (the formula read null on every row). Nothing stored changes, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** (an authoring narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The field-formula pass judges the field a formula reads one hop through a reference against the target object's fields: the fields it declares, the system columns the platform adds to it, and `id`. `os validate`, `os build` and the object save door (`PUT /api/v1/meta/object/:name`) run the same pass, under the existing `EXPRESSION_INVALID` rule.
+  
+  - FROM: `record.book.name`, where `book` is a lookup to an object that declares no `name`, saved with a 200 and read `null` on every row. TO: refused (`422 INVALID_METADATA` at the save door). The message names the field and the target: "unknown field `name` on `<target>`".
+  - `record.book.title`, where the target declares `title`, passes as before.
+  - A target the stack does not carry is not judged. At the save door the stack carries the live registry's objects in the written package's closure, so a target from a package it depends on is judged.
+  
+  What to do. Read a field the target declares, or declare the field on the target object. Do not declare it on the object that carries the formula. At `os build` and `os validate` this pass does not see a target field that an `objectExtensions` entry contributes, while the save door judges the merged object.
+
+### Patch Changes
+
+- 4bd7215: fix(lint): the translation-reference rules now judge a locale pack's `picklists` face (#23566)
+  
+  Clause-②: no
+  
+  Before this change a locale pack's `picklists` entries were never checked. A key that named nothing passed `os lint --strict`, and at runtime the resolver simply never found it, so the label rendered in the source locale. The two existing rules now cover this face, each at the severity its field-level twin already has. No new rule id is added:
+  
+  - `picklists.<name>` for a list that no package in the stack declares is `translation-target-unknown` (error). When a declared name is close, the finding offers it as "Did you mean".
+  - `picklists.<name>.options.<key>`, where the key is not a value of the list or of a `picklistExtensions` entry for it, is `translation-option-key-unknown` (warning). A key spelled as an option's display label is told which value to rename it to.
+  
+  A list the stack only extends through `picklistExtensions`, and that no package of the stack declares, is skipped: its owner's options cannot be seen from here. A list declared by a sibling package of the same artifact resolves, and its option keys are judged. `os explain translation-target-unknown` and `os explain translation-option-key-unknown` name the new face.
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/formula@18.0.0-next.5
+  - @objectstack/sdui-parser@18.0.0-next.5
+
 ## 18.0.0-next.4
 
 ### Minor Changes

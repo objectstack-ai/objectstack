@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 15 — spawns the real producer once per single-cause fixture: three runs of the built CLI (a `serve --dev` that mints the stdio key, an `os compile` for the artifact, then the `os serve` under test); 11.6 s, the slowest of four local runs on a shared container, x 1.25, no CI reading yet
+// test-budget: 20 — spawns the real producer once per single-cause fixture: three runs of the built CLI (a `serve --dev` that mints the stdio key, an `os compile` for the artifact, then the `os serve` under test); re-measured 2026-10-19 over the 7 hourly runs that executed it (39174682274 to 39202368342, the window of shard-timings refresh run 39205844620): slowest CI reading 15.0 s (run 39184708096, 14999 ms) x 1.25, rounded up; rose from 15, which rested on a local reading and was off the 10 s grid
 
 /**
  * #24191 — `os serve` with the stdio MCP transport enabled and NO config

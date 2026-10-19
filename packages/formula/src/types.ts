@@ -40,6 +40,21 @@ import type { EffectiveObjectPermission } from '@objectstack/spec/security';
 export type EvalPermissions = Readonly<Record<string, EffectiveObjectPermission>>;
 
 /**
+ * The acting subject's held system capabilities — the
+ * {@link EvalContext.systemPermissions} payload, and the only input
+ * `hasCapability()` reads.
+ *
+ * **It is the published `/auth/me/permissions` shape, verbatim**: the
+ * `systemPermissions` array of `GetEffectivePermissionsResponse`, the same list
+ * the action gate checks an action's `requiredPermissions` against (ADR-0066
+ * D4). A caller carries it in here unchanged.
+ *
+ * **A pure DATA list, never a resolver**, for the reason {@link EvalPermissions}
+ * gives.
+ */
+export type EvalSystemPermissions = ReadonlyArray<string>;
+
+/**
  * Runtime context for evaluating an expression.
  *
  * Every field is optional — call sites populate only what they have. The CEL
@@ -118,6 +133,19 @@ export interface EvalContext {
    * real answer (this subject holds nothing) and evaluates to `false`.
    */
   permissions?: EvalPermissions;
+  /**
+   * The acting subject's held system capabilities — see
+   * {@link EvalSystemPermissions} for the shape and where it comes from.
+   *
+   * Read by exactly one binding, `current_user.hasCapability(name)`, and bound
+   * only when {@link user} is also present, on the terms {@link permissions}
+   * is: ⛔ NOT mounted as a CEL variable, so the function stays the only door.
+   *
+   * **Absent ≠ empty.** With no list at all `hasCapability()` THROWS
+   * (`ok: false, kind: 'runtime'`) rather than answering; an EMPTY list is a
+   * real answer (this subject holds no capability) and evaluates to `false`.
+   */
+  systemPermissions?: EvalSystemPermissions;
   /** Free-form bag for niche call sites; merged onto the variable scope. */
   extra?: Record<string, unknown>;
 }

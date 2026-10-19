@@ -1,5 +1,62 @@
 # @objectstack/platform-objects
 
+## 18.0.0-next.5
+
+### Minor Changes
+
+- 2ec6827: feat(metadata-protocol): the draft save records `draftChanges` — which surface, actor and instant last changed each key path of a pending draft — and the strict draft read serves it
+  
+  Clause-②: yes (widening)
+  
+  - **Recorded by the draft save.** `saveMetaItem({ mode: 'draft', surface })` compares the body it writes with the body it replaces, inside the write's own transaction: the draft row, else (the draft's first save) the active row its publish would replace, else nothing, which records `[]`, the whole body. A path is the object keys from the body root to the deepest changed key; an array is one leaf, with no index. Each changed path is stamped `{ by: surface ?? 'api', actor, at }`, where `actor` is the value the save's history event carries (or `null`) and `at` is the write's instant as `toISOString()`.
+  - **Kept until publish or discard.** No two entries share a path: a save replaces every entry at or under each path it changes, so the longest prefix answers for a key. A save that changes no key path leaves the entries as they were. Publish and discard delete the draft row, and the entries with it, so the next draft starts clean. A `migrate-stored` rewrite and an active save record nothing.
+  - **Served on the strict draft read only.** `getMetaItem({ state: 'draft' })` answering a stored draft row carries `draftChanges` beside `item`. It is absent on the active read, the cached branch, the `?preview=draft` read, and a draft row whose saves recorded none (one saved before this release) — never `[]`.
+  - **Stored on the row.** `sys_metadata` gains a nullable `draft_changes` column (`@objectstack/metadata-core`'s `SysMetadataObject`), never inside the stored body. Schema sync adds it to an existing table on boot with no manual step (measured on SQLite and the memory driver).
+  - **Translated labels.** `@objectstack/platform-objects`' translation bundles carry the new column's label and help text in every shipped locale.
+  - **An unknown `surface` is refused.** In-process, a value outside `copilot | studio | api` is refused `400 INVALID_REQUEST` before anything is written.
+
+### Patch Changes
+
+- 4d12b23: Clause-②: no (copy only: no accept set or public surface moves; owes the seat's review of record at `TIER_DEFAULT` before the queue)
+  
+  fix(platform-objects): SSO provider, OAuth application and Connect-an-Agent copy says "this system"
+  
+  - **What changed.** Inside the running system, user-facing copy names the system the user is in as "this system". The `sys_sso_provider` object description ("External SSO identity providers (OIDC / SAML) this system federates login to"), the `clientId` help text of its Register SSO Provider action ("OAuth client ID issued by the IdP for this system."), and the OAuth applications grid's empty state ("Register an application to let its clients sign users in with this system.") now say so. The `en` copy of the Connect-an-Agent page subtitle follows the page's new text.
+  - **Translations.** The zh-CN, ja-JP and es-ES values of the same strings are re-translated, and the recorded source hash of the Connect-an-Agent subtitle moves to the new English text in all three, so those locales keep serving their translation rather than falling back to English.
+  - **Unchanged.** Every object, field, action and page name, and all behaviour.
+- ff48407: Clause-②: no
+  
+  fix(spec): published copy that names the running system says "this system", or drops the noun, not "this environment"
+  
+  - **What changed.** Inside the running system, user-facing copy names the system the reader is in as "this system", or drops the noun. A permission set made here, not shipped by a package, is "authored in this system".
+    - The permission-set `packageId` refusal on the save, restore and publish doors now reads "a set written into no package is authored in this system, which an absent `packageId` states".
+    - The permission set's `packageId` help text in Setup ends "Leave empty for a set authored in this system." The English Setup forms bundle of `@objectstack/platform-objects` is regenerated from it.
+    - The `permission.managedBy` tombstone prescription, and the `permission-set-managed-by-retired` protocol-18 upgrade-guide entry, say "a set authored in this system carries neither".
+    - The `AudienceConfig.posture` and `AuthConfig.audience` describes say "who may self-register", with no noun. Their TSDoc says "who may become a user of this system's apps", the sentence the Setup Authentication group already reads.
+    - `AiModelsResponse.models` describes "Models this system offers". The `IMetadataService.listDiagnosed` TSDoc example reads "this system contains N items".
+  - **Kept "environment", where the word names a deployment or configuration scope.** `SeedLoaderConfig.env` ("Only load datasets matching this environment", the `prod | dev | test` tier), the `package-uninstall-environment-wide` upgrade-guide entry (the ADR-0131 environment-wide scope, as against an organization), and the environment artifact's consent-record TSDoc.
+  - **Unchanged.** Every error code, status, issue path, accepted value and export. Only the human-readable text moves.
+- b7a688e: Clause-②: no
+  
+  fix(client,platform-objects): the `ai.models()` TSDoc and the translated permission-set `packageId` help say "this system", as the spec now does
+  
+  - **What changed.** Inside the running system, published copy names the system the reader is in as "this system", and a permission set made here, not shipped by a package, is "authored in this system". `@objectstack/spec` already says both (`AiModelsResponse.models`, the permission set's `packageId` help text); this follows it in two more places.
+    - The TSDoc of `client.ai.models()` now reads "Models this system offers in the chat model picker (cloud ADR-0028)". The citation is qualified as `cloud ADR-0028`: the AI service that serves this list is a cloud package, and this repository's ADR-0028 is about metadata naming.
+    - The zh-CN, ja-JP and es-ES values of the permission set's `packageId` help text in the Setup forms bundle now say 本系统 / このシステム / este sistema where they said 本环境 / この環境 / este entorno, matching the English text "Leave empty for a set authored in this system."
+  - **Unchanged.** Every method, route, type, form field, key and behaviour. No translation key is added or removed.
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+
 ## 18.0.0-next.4
 
 ### Minor Changes

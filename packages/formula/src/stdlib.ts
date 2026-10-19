@@ -12,14 +12,15 @@
  * Function naming intentionally avoids the `os.` prefix because cel-js binds
  * dotted names to receiver types. Instead, the `os` namespace in CEL holds
  * *data* (`os.user`, `os.org`, `os.env`) supplied by the caller's
- * {@link EvalContext}. The one RECEIVER-form function this library registers —
- * `current_user.can(object, verb)` — uses that same binding rather than
- * fighting it: see {@link registerPermissionPredicate}.
+ * {@link EvalContext}. The two RECEIVER-form functions this library registers —
+ * `current_user.can(object, verb)` and `current_user.hasCapability(name)` — use
+ * that same binding rather than fighting it: see
+ * {@link registerPermissionPredicate} and {@link registerCapabilityPredicate}.
  */
 
 import type { Environment } from '@marcbachmann/cel-js';
 
-import type { EvalContext, EvalPermissions } from './types';
+import type { EvalContext, EvalPermissions, EvalSystemPermissions } from './types';
 import { createEvalUser, type EvalUser } from '@objectstack/spec';
 // The verb vocabulary lives on the SECURITY subpath, where the permission
 // contract it is seeded from lives — not on the root barrel, which exports a
@@ -151,6 +152,12 @@ export interface PermissionBinding {
   readonly subject: unknown;
   /** The subject's effective object permissions, or `undefined` when none were passed. */
   readonly permissions: EvalPermissions | undefined;
+  /**
+   * The subject's held system capabilities — the `systemPermissions` list of
+   * the published `/auth/me/permissions` response — or `undefined` when none
+   * were passed. Read by `current_user.hasCapability(name)` and nothing else.
+   */
+  readonly systemPermissions?: EvalSystemPermissions | undefined;
 }
 
 /**
@@ -213,7 +220,8 @@ export function registerPermissionPredicate(
         throw new Error(
           `can(object, verb): \`${verb}\` is not a permission verb. The accepted verbs are ` +
           `${OBJECT_PERMISSION_VERB_NAMES.join(', ')}. A capability outside that list is not ` +
-          'modelled as an object permission, so no answer about it would mean anything.',
+          'modelled as an object permission, so no answer about it would mean anything. To ask ' +
+          "whether the subject holds a system capability, write current_user.hasCapability('<name>').",
         );
       }
       if (binding?.subject === undefined || receiver !== binding.subject) {
@@ -243,6 +251,80 @@ export function registerPermissionPredicate(
 }
 
 /**
+ * Register `hasCapability` — the capability predicate — as a RECEIVER method,
+ * so the one authored spelling is `current_user.hasCapability(name)`.
+ *
+ * It asks the question the action gate asks (ADR-0066 D4): does the acting
+ * subject hold this system capability? The answer is read from the subject's
+ * held capabilities — the `systemPermissions` list `/auth/me/permissions`
+ * publishes, the same list an action's `requiredPermissions` is checked
+ * against — so a page node gated with it and an action gated on the same name
+ * agree for every viewer. That is what makes the action's declaration the one
+ * source of truth: a page predicate names the capability the action declares,
+ * never a proxy for it (`can('<object>', 'edit')` is a different question and
+ * answers differently for a subject who holds one and not the other).
+ *
+ * `visible` hides and `requiredPermissions` refuses (ADR-0066 D4): a predicate
+ * written with this function decides what is SHOWN, and the server stays the
+ * authority on what may be DONE.
+ *
+ * A name is just a string. ⛔ There is no registry lookup: a name no action
+ * declares is answered like any other — `true` when the subject holds it,
+ * `false` when it does not — because the list is the subject's, not the
+ * platform's catalog.
+ *
+ * Receiver-only and LOUD on exactly the terms `can` is (see
+ * {@link registerPermissionPredicate}): a bare call faults as a call-FORM
+ * fault, a receiver that is not the acting subject throws, a non-string or
+ * empty name throws, and a context carrying no capability list THROWS — ⛔
+ * never `true` (fail-open), ⛔ never a silent `false` (every gated node gone,
+ * indistinguishable from a real denial). An EMPTY list is a real answer and
+ * evaluates to `false`.
+ */
+export function registerCapabilityPredicate(
+  env: Environment,
+  binding: PermissionBinding | undefined,
+): Environment {
+  return env.registerFunction(
+    'dyn.hasCapability(dyn): bool',
+    (receiver: unknown, name: unknown): boolean => {
+      if (typeof name !== 'string' || name.length === 0) {
+        throw new Error(
+          'hasCapability(name): `name` must be a system capability NAME (a non-empty string), ' +
+          "e.g. current_user.hasCapability('manage_users').",
+        );
+      }
+      if (binding?.subject === undefined || receiver !== binding.subject) {
+        throw new Error(
+          'hasCapability(name) answers about the ACTING SUBJECT and must be called on it: write ' +
+          "current_user.hasCapability('<name>') (the `user` / `ctx.user` / `os.user` aliases are " +
+          'the same object and work too). Calling it on anything else would answer a question ' +
+          'about the current user while reading as a question about the receiver.',
+        );
+      }
+      const held = binding.systemPermissions;
+      if (held === undefined) {
+        throw new Error(
+          `hasCapability('${name}') cannot be answered: this evaluation context carries no ` +
+          'capability list. Pass `systemPermissions` on the EvalContext — the `systemPermissions` ' +
+          'list of the published /auth/me/permissions response. Refusing loudly is deliberate: ' +
+          'answering `true` would show what the subject may not have, and answering `false` would ' +
+          'hide it from everyone with no way to tell that apart from a real denial.',
+        );
+      }
+      if (!Array.isArray(held) || held.some((entry) => typeof entry !== 'string')) {
+        throw new Error(
+          `hasCapability('${name}') cannot be answered: the context's \`systemPermissions\` is not ` +
+          'a list of capability names. Pass the `systemPermissions` array of the published ' +
+          '/auth/me/permissions response unchanged.',
+        );
+      }
+      return held.includes(name);
+    },
+  );
+}
+
+/**
  * Register the ObjectStack standard library into a CEL environment.
  *
  * The `now` resolver is closed over so each call uses the pinned
@@ -251,9 +333,9 @@ export function registerPermissionPredicate(
  * Implementations are kept tiny and dependency-free — they're the contract
  * surface for AI authors and must stay legible.
  *
- * `can` is registered UNCONDITIONALLY, binding or not: whether a name exists in
- * this environment is a fact about the platform, not about one call site's
- * data. A conditional registration would make the publish gate's answer depend
+ * `can` and `hasCapability` are registered UNCONDITIONALLY, binding or not:
+ * whether a name exists in this environment is a fact about the platform, not
+ * about one call site's data. A conditional registration would make the publish gate's answer depend
  * on which context happened to build the environment, so an authored predicate
  * could pass the gate and be unknown at runtime — the very split this binding
  * exists to close.
@@ -265,6 +347,7 @@ export function registerStdLib(
   permissionBinding?: PermissionBinding,
 ): Environment {
   registerPermissionPredicate(env, permissionBinding);
+  registerCapabilityPredicate(env, permissionBinding);
   // `today()` / `daysFromNow()` / `daysAgo()` are calendar-day functions: they
   // resolve to the reference-tz calendar day expressed as a UTC-midnight Date
   // (ADR-0053 Phase 2 D1), never an instant carrying wall-clock time. For a

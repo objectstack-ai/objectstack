@@ -1277,6 +1277,25 @@ describe('visibility-predicate-unknown-function (#13594)', () => {
       .toContain(VISIBILITY_BARE_IDENTIFIER);
   });
 
+  it('admits the capability predicate `current_user.hasCapability(name)` — and still refuses an invented sibling', () => {
+    // cloud#3036 ruling A: a page predicate asks the question the action gate
+    // asks. `@objectstack/formula` registers `hasCapability` receiver-only, so
+    // the existence arm — keyed on the environment, never a list of ours —
+    // admits it with no edit here.
+    // Measured on a PAGE component node, the surface the ruling is about.
+    const page = (predicate: string) => ({
+      pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibleWhen: predicate }] }] }],
+    });
+    expect(validateVisibilityPredicates(page("current_user.hasCapability('manage_users')"))).toEqual([]);
+    // The control that makes the empty list a reading: one letter more is an
+    // unknown function, refused as an error on the same surface.
+    const invented = validateVisibilityPredicates(page("current_user.hasCapabilities('manage_users')"))
+      .filter((f) => f.rule === VISIBILITY_PREDICATE_UNKNOWN_FUNCTION);
+    expect(invented).toHaveLength(1);
+    expect(invented[0].severity).toBe('error');
+    expect(invented[0].message).toContain('`hasCapabilities`');
+  });
+
   it('⛔ offers no "did you mean" suggestion, however close the typo (refinement 2)', () => {
     // The ruling ships the engine's own wording and nothing on top of it, so a
     // one-edit typo gets the same treatment as a wholly invented name.

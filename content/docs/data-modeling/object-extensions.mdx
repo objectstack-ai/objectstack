@@ -83,8 +83,8 @@ each one by name with the alternative to use instead:
 | Key you might reach for | Declare this instead |
 |:---|:---|
 | `actions` | A top-level action with `objectName: '<target>'` in the same stack — it stays in the stack's top-level `actions`, and the engine's schema registry attaches it to the target object wherever the object is served, whichever package registers first; a target no loaded package registers fails the boot |
-| `hooks` | A top-level hook bound to the target object |
-| `listViews` | A top-level `view` bound to the target object |
+| `hooks` | A top-level hook in the stack that defines the target object — a hook follows the ownership of its object, and `defineStack()` refuses a top-level hook bound to an object the stack does not define, an extended one included |
+| `listViews` | A top-level `view` in the stack that defines the target object — `defineStack()` refuses a top-level `view` whose `list` or `form` data source is an object the stack does not define, an extended one included |
 | `fieldGroups` | Add the fields here and declare the groups on the owning object, or assign a Page for the layout |
 
 The same holds for any other key: the extension schema is strict, so an unknown key

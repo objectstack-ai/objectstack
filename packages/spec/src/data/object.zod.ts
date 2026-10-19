@@ -3996,12 +3996,22 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
       'top-level `actions`, and the engine\'s schema registry attaches it to the target ' +
       'object wherever the object is served, whichever package registers first. A target no ' +
       'loaded package registers fails the boot.',
+    // `hooks` and `listViews` name only what `defineStack()` measurably does.
+    // Its cross-reference check (`validateCrossReferences` in `stack.zod.ts`)
+    // judges a top-level hook's `object`, and a top-level view's `list` /
+    // `form` data source, against the objects the stack itself defines — an
+    // extended target is not one of them. For hooks that refusal is a recorded
+    // decision, ADR-0130 §1.5: "the split must follow hook ownership".
     hooks:
-      '`hooks` cannot be contributed through an object extension — declare a top-level ' +
-      'hook bound to the target object instead.',
+      '`hooks` cannot be contributed through an object extension — the merge does not carry ' +
+      'them. A hook follows the ownership of its object: declare it as a top-level hook in ' +
+      'the stack that defines the object. `defineStack()` refuses a top-level hook bound to ' +
+      'an object the stack does not define, an extended one included.',
     listViews:
-      '`listViews` cannot be contributed through an object extension — declare a ' +
-      'top-level `view` bound to the target object instead.',
+      '`listViews` cannot be contributed through an object extension — the merge does not ' +
+      'carry them. Declare the views as a top-level `view` in the stack that defines the ' +
+      'target object. `defineStack()` refuses a top-level `view` whose `list` or `form` data ' +
+      'source is an object the stack does not define, an extended one included.',
     fieldGroups:
       '`fieldGroups` cannot be contributed through an object extension — the merge does ' +
       'not carry them. Add the fields here and declare the groups on the owning object, ' +

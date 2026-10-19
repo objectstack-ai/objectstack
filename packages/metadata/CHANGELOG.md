@@ -1,5 +1,25 @@
 # @objectstack/metadata
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+  - @objectstack/metadata-fs@18.0.0-next.5
+
 ## 18.0.0-next.4
 
 ### Patch Changes
