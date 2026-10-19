@@ -3486,3 +3486,199 @@ describe('runtime authoring gate on PAGE writes — a component `data` naming th
         expect(JSON.parse(activePageRows(rows)[0]!.metadata)).toEqual(fixed);
     });
 });
+
+// A list view written into a PACKAGE is judged against that package's closure
+// (ruling #9612): the package, its declared dependencies, platform objects and
+// provenance-less rows. Through the real `saveMetaItem`, `publishMetaItem` and
+// `publishPackageDrafts`: a binding outside the closure — an object of a
+// package this one never declared, or an object that exists nowhere — is
+// REPORTED, at the advisory severity a flow's out-of-closure trigger object
+// gets at the same door (`protocol.package-closure-gate.test.ts`), never
+// skipped; a binding inside the closure keeps its field verdict, so an unknown
+// `columns` field is refused `422 list-view-field-unknown` as the overlay door
+// refuses it. A write that names no package is judged against the whole
+// collection, exactly as before.
+describe('runtime authoring gate on VIEW writes into a package — the closure verdict (#24563)', () => {
+    const OWN = 'com.acme.crm';
+    const DEP = 'com.acme.core';
+    const STRANGER = 'com.other.analytics';
+    const PLATFORM = 'com.objectstack.platform';
+    const OUTSIDE = 'list-view-object-outside-closure';
+    const FIELD_UNKNOWN = 'list-view-field-unknown';
+
+    const object = (name: string, packageId: string) => ({
+        name,
+        label: name,
+        _packageId: packageId,
+        fields: [{ name: 'title', type: 'text', label: 'Title' }],
+    });
+    /** The card's body: a flattened list overlay bound to `bound`, one known and one unknown column by default. */
+    const listView = (bound: string, columns: readonly string[] = ['title', 'zzz_nope']) => ({
+        name: `${bound}.qavfy_r1`,
+        object: bound,
+        viewKind: 'list',
+        label: 'r1',
+        type: 'grid',
+        data: { provider: 'object', object: bound },
+        columns: columns.map((field) => ({ field })),
+    });
+
+    /** A registry holding three packages — the written one, the one it declares, a stranger — and a platform object. */
+    function makePackagedProtocol() {
+        const { engine, rows } = makeStubEngine();
+        const packages: Record<string, { manifest: Record<string, unknown> }> = {
+            [OWN]: { manifest: { name: OWN, version: '1.0.0', dependencies: { [DEP]: '^1.0.0' } } },
+            [DEP]: { manifest: { name: DEP, version: '1.0.0' } },
+            [STRANGER]: { manifest: { name: STRANGER, version: '1.0.0' } },
+        };
+        engine.registry.listItems = (type: string) =>
+            type === 'object'
+                ? [
+                    object('crm_account', OWN),
+                    object('core_user', DEP),
+                    object('showcase_task', STRANGER),
+                    object('sys_widget_log', PLATFORM),
+                ]
+                : [];
+        engine.registry.getPackage = (id: string) => packages[id];
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        return { protocol, rows };
+    }
+
+    const saveView = (protocol: any, item: { name: string }, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'view', name: item.name, item, ...extra });
+    const activeViewRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'view' && r.state === 'active');
+    const rulesOf = (findings: any[] | undefined) => (findings ?? []).map((f: any) => f.rule);
+    /** The one outside-closure advisory, with the shape the door returns. */
+    const expectOutsideClosure = (advisories: any[] | undefined) => {
+        expect(rulesOf(advisories), JSON.stringify(advisories)).toEqual([OUTSIDE]);
+        expect(advisories![0]).toMatchObject({ severity: 'warning', path: 'views[0].data.object' });
+        // The fix names the remedy and the package it applies to.
+        expect(advisories![0].hint).toContain(OWN);
+        expect(advisories![0].hint).toContain('dependencies');
+    };
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('(a) REPORTS an active save bound to a package the written one never declared — the advisory rides the 2xx, never skipped', async () => {
+        const { protocol, rows } = makePackagedProtocol();
+
+        const result = await saveView(protocol, listView('showcase_task'), { packageId: OWN });
+
+        expect(result).toMatchObject({ success: true });
+        expectOutsideClosure(result.advisories);
+        // Reported, not refused: the flow verdict at this door.
+        expect(activeViewRows(rows)).toHaveLength(1);
+    });
+
+    it('(a) REPORTS an active save bound to an object that exists nowhere the same way', async () => {
+        const { protocol } = makePackagedProtocol();
+
+        const result = await saveView(protocol, listView('nosuch_obj'), { packageId: OWN });
+
+        expect(result).toMatchObject({ success: true });
+        expectOutsideClosure(result.advisories);
+    });
+
+    it('(b) REFUSES an unknown `columns` field on an object inside the closure — own, declared dependency, platform', async () => {
+        for (const bound of ['crm_account', 'core_user', 'sys_widget_log']) {
+            const { protocol, rows } = makePackagedProtocol();
+
+            const err = await saveView(protocol, listView(bound), { packageId: OWN }).catch((e: any) => e);
+
+            expect(err, `${bound}: the save resolved — the field verdict was skipped`).toBeInstanceOf(Error);
+            expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect(err.issues.map((i: any) => [i.rule, i.path])).toEqual([[FIELD_UNKNOWN, 'views[0].columns[1].field']]);
+            expect(activeViewRows(rows)).toEqual([]);
+        }
+    });
+
+    it('(b) admits a known `columns` field on an object inside the closure, with no advisory', async () => {
+        for (const bound of ['crm_account', 'core_user', 'sys_widget_log']) {
+            const { protocol, rows } = makePackagedProtocol();
+
+            const result = await saveView(protocol, listView(bound, ['title']), { packageId: OWN });
+
+            expect(result, bound).toMatchObject({ success: true });
+            expect(rulesOf(result.advisories), bound).toEqual([]);
+            expect(activeViewRows(rows)).toHaveLength(1);
+        }
+    });
+
+    it('(c) a write that names no package is unchanged — the overlay door refuses the stranger column and stays silent on nowhere', async () => {
+        const overlay = makePackagedProtocol();
+        const err = await saveView(overlay.protocol, listView('showcase_task')).catch((e: any) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.issues.map((i: any) => [i.rule, i.path])).toEqual([[FIELD_UNKNOWN, 'views[0].columns[1].field']]);
+        expect(activeViewRows(overlay.rows)).toEqual([]);
+
+        const nowhere = makePackagedProtocol();
+        const result = await saveView(nowhere.protocol, listView('nosuch_obj'));
+        expect(result).toMatchObject({ success: true });
+        expect(rulesOf(result.advisories)).toEqual([]);
+    });
+
+    it('(d) the draft → active promotion reports the out-of-closure binding, and refuses the in-closure unknown field', async () => {
+        const outside = makePackagedProtocol();
+        await expect(saveView(outside.protocol, listView('showcase_task'), { packageId: OWN, mode: 'draft' }))
+            .resolves.toMatchObject({ success: true });
+        const promoted = await outside.protocol.publishMetaItem({ type: 'view', name: 'showcase_task.qavfy_r1', packageId: OWN });
+        expectOutsideClosure(promoted.advisories);
+
+        const inside = makePackagedProtocol();
+        await saveView(inside.protocol, listView('crm_account'), { packageId: OWN, mode: 'draft' });
+        const err = await inside.protocol
+            .publishMetaItem({ type: 'view', name: 'crm_account.qavfy_r1', packageId: OWN })
+            .catch((e: any) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(rulesOf(err.issues)).toEqual([FIELD_UNKNOWN]);
+    });
+
+    it('(e) a package draft publish reports the out-of-closure binding on the published item, and refuses the in-closure unknown field', async () => {
+        const outside = makePackagedProtocol();
+        await saveView(outside.protocol, listView('showcase_task'), { packageId: OWN, mode: 'draft' });
+        const published = await outside.protocol.publishPackageDrafts({ packageId: OWN });
+        expect(published).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
+        expectOutsideClosure(published.published.find((p: any) => p.name === 'showcase_task.qavfy_r1')?.advisories);
+
+        const inside = makePackagedProtocol();
+        await saveView(inside.protocol, listView('crm_account'), { packageId: OWN, mode: 'draft' });
+        const refused = await inside.protocol.publishPackageDrafts({ packageId: OWN });
+        expect(refused).toMatchObject({ success: false, publishedCount: 0 });
+        expect(refused.failed[0]).toMatchObject({ name: 'crm_account.qavfy_r1', code: 'INVALID_METADATA' });
+        expect(rulesOf(refused.failed[0].issues)).toEqual([FIELD_UNKNOWN]);
+    });
+
+    it('(f) a view bound to an object drafted in the SAME batch is inside the closure — no phantom report, its fields judged', async () => {
+        const batchObject = {
+            name: 'crm_ticket',
+            label: 'Ticket',
+            sharingModel: 'private',
+            fields: { title: { type: 'text', label: 'Title' } },
+        };
+
+        const clean = makePackagedProtocol();
+        await clean.protocol.saveMetaItem({ type: 'object', name: 'crm_ticket', item: batchObject, packageId: OWN, mode: 'draft' });
+        await saveView(clean.protocol, listView('crm_ticket', ['title']), { packageId: OWN, mode: 'draft' });
+        const res = await clean.protocol.publishPackageDrafts({ packageId: OWN });
+        expect(res.failed).toEqual([]);
+        expect(rulesOf(res.published.find((p: any) => p.name === 'crm_ticket.qavfy_r1')?.advisories)).not.toContain(OUTSIDE);
+
+        const broken = makePackagedProtocol();
+        await broken.protocol.saveMetaItem({ type: 'object', name: 'crm_ticket', item: batchObject, packageId: OWN, mode: 'draft' });
+        await saveView(broken.protocol, listView('crm_ticket'), { packageId: OWN, mode: 'draft' });
+        const refused = await broken.protocol.publishPackageDrafts({ packageId: OWN });
+        const causal = refused.failed.find((f: any) => f.name === 'crm_ticket.qavfy_r1');
+        expect(causal?.code).toBe('INVALID_METADATA');
+        expect(rulesOf(causal.issues)).toEqual([FIELD_UNKNOWN]);
+    });
+});
