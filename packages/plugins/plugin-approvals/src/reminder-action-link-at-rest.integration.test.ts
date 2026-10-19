@@ -45,6 +45,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysNotification } from '@objectstack/platform-objects/audit';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import type { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
@@ -294,12 +295,12 @@ describe('positive control: a token held outside storage still decides once, as 
     }));
     const first = await post(rig.held.approve);
     expect(first.status).toBe(200);
-    const request: any = await rig.engine.findOne('sys_approval_request', { where: { id: rig.requestId }, context: SYSTEM } as any);
+    const request: any = await rig.engine.findOne('sys_approval_request', { where: { id: rig.requestId }, context: SYSTEM } satisfies EngineQueryOptions);
     expect(request?.status).toBe('approved');
 
     const decisions = (await rig.engine.find('sys_approval_action', {
       where: { request_id: rig.requestId, action: 'approve' }, context: SYSTEM,
-    } as any)) as any[];
+    } satisfies EngineQueryOptions)) as any[];
     expect(decisions).toHaveLength(1);
     expect(decisions[0].actor_id).toBe(APPROVER);
     expect(decisions[0].acted_as).toBe(APPROVER);
@@ -308,7 +309,7 @@ describe('positive control: a token held outside storage still decides once, as 
     expect(await rig.svc.redeemActionToken(rig.held.approve)).toMatchObject({ ok: false, reason: 'consumed' });
     const after = (await rig.engine.find('sys_approval_action', {
       where: { request_id: rig.requestId, action: 'approve' }, context: SYSTEM,
-    } as any)) as any[];
+    } satisfies EngineQueryOptions)) as any[];
     expect(after).toHaveLength(1);
   });
 });
