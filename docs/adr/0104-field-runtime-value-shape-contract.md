@@ -13,6 +13,12 @@
   physical column — a string column holding the bare `sys_file` id, switched
   per deployment on the `adr-0104-file-references` flag, never per version;
   driver card #15989 implements it.
+  · **Amended** (2026-10-19, #24268, PR #24392, merge commit `d79dc4883c`) —
+  D2's param-less pass-through is scoped to actions with a handler: a
+  declarative `operation: 'update'` action's empty or absent `params` list is
+  an empty accept set, refused through D2's own path, and at the MCP
+  `run_action` door a D2 refusal carries `code` + `status` (the ADR-0112
+  envelope), as at the REST door. See the note under D2 item 1.
 - **Date**: 2026-07-22
 - **Issue**: design follow-up generalizing #3405 / #3406 (inline lookup param
   silently stripped); relates #3407 (silently dropped writes), #1878 / #1891
@@ -194,6 +200,37 @@ free. Three changes:
    `400 VALIDATION_FAILED` per-field envelope *before* the handler runs.
    Actions declaring no `params` keep today's pass-through (there is nothing
    to check against), so existing param-less actions are untouched.
+
+   > **Amended 2026-10-19 (#24268, PR #24392, merge commit `d79dc4883c`) —
+   > the param-less pass-through is scoped to actions with a handler.** The
+   > sentence above was written when every action had a handler. A
+   > declarative `operation: 'update'` action (#14092, executed by #15079) has
+   > none: its bag is merged over `patch` and written to the row, so "there is
+   > nothing to check against" does not hold for it. Its declared `params`
+   > list is its whole wire write set, and an empty or absent list is an
+   > **empty accept set**, not an absent contract.
+   > `packages/runtime/src/action-execution.ts#enforceActionParams` judges
+   > such a bag against `[]` with the same validator, so every key except the
+   > dispatcher built-ins
+   > (`packages/spec/src/ui/action-params.zod.ts#ACTION_PARAM_BUILTIN_KEYS`:
+   > `recordId`, `objectName`, `_selectedIds`) is refused through this item's
+   > path: the same 400 at the REST door and the same
+   > `OS_ALLOW_LAX_ACTION_PARAMS` escape hatch, with no switch of its own. An
+   > empty bag still writes the `patch`. The discriminator is `operation`
+   > alone (`packages/runtime/src/action-execution.ts#isDeclarativeUpdateAction`),
+   > so every other param-less action (a script handler, an inline `body`, a
+   > `flow` target) keeps the pass-through. At the MCP `run_action` door,
+   > `packages/runtime/src/action-execution.ts#invokeBusinessAction` throws
+   > every D2 refusal with `code` + `status`, the 400 and the code the REST
+   > door derives from it, and `run_action` renders a thrown code as the
+   > ADR-0112 envelope `{ error: { code, message, status } }`
+   > (`packages/mcp/src/mcp-http-tools.ts#thrownRefusalEnvelope`), as at the
+   > REST door. Pinned in `packages/runtime/src/action-params-enforcement.test.ts`
+   > (the gate, the hatch), `packages/runtime/src/action-declarative-update.test.ts`
+   > (both doors, nothing written, and the handler control) and
+   > `packages/mcp/src/mcp-coded-refusal.test.ts` (`run_action`'s rendering of
+   > a thrown code). No other part of D2 changes.
+
 2. **Typed handler surface.** `defineAction` today validates config only. It
    gains a typed companion so registered handlers stop being
    `(ctx: any) => any`: `ctx.params` is typed by mapping each declared param
@@ -939,7 +976,10 @@ explicitly-set case; the v17 release notes carry the migration section (what
 a rejected bag looks like, how to fix the caller, the escape hatch's name).
 
 Actions declaring no `params` keep their pass-through — that boundary is
-unchanged from D2's landing. And the asymmetry with D1 stays load-bearing in
+unchanged from D2's landing. *(Amended 2026-10-19, #24268: the boundary holds
+for actions with a handler; a declarative `operation: 'update'` action's
+empty or absent `params` list is an empty accept set — see the note under D2
+item 1.)* And the asymmetry with D1 stays load-bearing in
 both directions: a version flip is wrong where complete per-deployment
 evidence is *possible* (D1's data), and right where it is impossible in
 principle and the failure mode is a self-describing 400 to the party who can
