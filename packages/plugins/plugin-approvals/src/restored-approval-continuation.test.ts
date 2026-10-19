@@ -987,7 +987,7 @@ describe('ruling A — a decision resumes the run as the person who decided', ()
   it.each(['approve', 'reject'] as const)('%s: the nodes after the decision run as the decider, with the decider\'s grants', async (decision) => {
     const automation = boot();
     const req = await parked(automation);
-    const out = await service.decide(req.id, { decision, comment: decision }, DECIDER_CTX);
+    const out = await service.decide(req.id, { decision, actorId: 'u1', comment: decision }, DECIDER_CTX);
     expect(out.resumed, JSON.stringify(out)).toBe(true);
     expect(seen[`after_${decision}`]).toEqual({ userId: 'u1', permissions: ['deal_manager'] });
   });
@@ -1005,7 +1005,7 @@ describe('ruling A — a decision resumes the run as the person who decided', ()
     const automation = boot();
     const req = await parked(automation);
     rejectThrowsOnce = true;
-    const err = await service.decide(req.id, { decision: 'reject', comment: 'no' }, DECIDER_CTX)
+    const err = await service.decide(req.id, { decision: 'reject', actorId: 'u1', comment: 'no' }, DECIDER_CTX)
       .then(() => null, (e: Error) => e);
     expect(err?.message).toMatch(/^RESUME_FAILED/);
     // The journal carries the decider beside the signal it re-issues.
