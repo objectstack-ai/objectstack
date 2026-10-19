@@ -206,13 +206,18 @@ The hash is `sha256:` + 64-hex of a canonical JSON serialization of the body, wi
 > writes.
 >
 > ⚠️ **"Peers re-read from the shared database" has one bound worth naming.** The
-> `sys_metadata` overlay read inside `protocol.ts:getMetaItems` is cached across
-> requests, keyed on the engine write epoch. A **local** write advances that epoch
-> before its own middleware chain runs, so read-your-writes is exact on the node
-> that made the write. A **peer's** write does not: `metadata.changed` invalidates
-> the MetadataManager caches this note is about, but it does not retire the
-> overlay-read cache. What retires that on a peer is either of two receipt
-> paths that bump the same local write epoch: the `metadata.mutated`
+> `sys_metadata` overlay rows `protocol.ts` reads — the list read inside
+> `getMetaItems`, and the served by-name read inside `getMetaItem` — are cached
+> across requests. A **local** `sys_metadata` write retires them when its
+> statement completes (an engine middleware sees it), so read-your-writes is
+> exact on the node that made the write; a write to any other object does not
+> retire them. Inside an engine transaction the statement completes before the
+> commit, so a read landing between the two can keep the pre-commit rows until
+> the next `sys_metadata` write or the TTL. A **peer's**
+> write does not either: `metadata.changed` invalidates the MetadataManager
+> caches this note is about, but it does not retire the overlay-read cache. What
+> retires that on a peer is either of two receipt paths that bump the local
+> write epoch for a non-`write` reason, which retires the cache wholesale: the `metadata.mutated`
 > channel's own — `protocol.ts`'s `applyRemoteMetadataMutation` calls
 > `bumpWriteEpoch(engine, 'remote')` right after its registry converges and
 > before local listeners run (#13609, 2026-09-03) — or the `authz.invalidated`
