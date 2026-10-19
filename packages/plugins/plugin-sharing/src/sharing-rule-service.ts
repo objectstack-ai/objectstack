@@ -179,6 +179,100 @@ export function isDeclaredSharingRule(rule: Pick<SharingRuleRow, 'id' | 'name' |
 }
 
 /**
+ * [ADR-0131 D6 regime O, guarded — ruling B′] What {@link SharingRuleService.defineRule}
+ * takes: the contract's input plus the id of the rule the write EDITS.
+ *
+ * A declared rule's projection lists under `id` = its name
+ * ({@link projectDeclaredRule}), so a caller that read it and saves it back —
+ * the edit that stores an organization's customised copy, the way to narrow or
+ * switch off a vendor rule — sends that id. A write that does not is a NEW rule,
+ * and a new rule cannot take a declared rule's name
+ * ({@link DeclaredSharingRuleNameConflictError}). Every other write ignores it:
+ * the upsert addresses a stored row by its name, as it always has.
+ */
+export type DefineSharingRuleWrite = DefineSharingRuleInput & {
+  /** The id of the rule this write edits — a declared rule's projection is addressed by its name. */
+  id?: string;
+};
+
+/**
+ * [ADR-0131 D6 regime O, guarded — ruling B′] A NEW `sys_sharing_rule` row, or
+ * a rename, that would take a declared rule's name.
+ *
+ * A row holding a declared rule's name in its scope replaces the declaration
+ * there whole (the `held` key in {@link SharingRuleService.declaredRules}) — that is the
+ * customisation model, and an edit of the declared rule is how an administrator
+ * opts into it. A row that took the name by being CREATED under it (Setup's New,
+ * a script, an AI tool) or RENAMED onto it would switch the vendor rule off
+ * without anyone having asked to, so every such write is refused before it lands.
+ *
+ * `code` + `status` are the declared envelope the `/data` door and the
+ * sharing-rule routes answer at its own status (409 `RESOURCE_CONFLICT`, the
+ * catalogue's code for a 409 — `HttpStatusErrorCodeMap`): the name is taken by
+ * an existing rule, which is a conflict, not a missing capability.
+ */
+export class DeclaredSharingRuleNameConflictError extends Error {
+  readonly code = 'RESOURCE_CONFLICT';
+  readonly status = 409;
+  /** The declared (vendor) rule whose name the write would take. */
+  readonly rule: string;
+  constructor(rule: Pick<DeclaredSharingRule, 'name' | 'object'>, write: 'create' | 'rename') {
+    super(
+      `sharing rule '${rule.name}' is declared by the application (on object '${rule.object}'), so ` +
+        (write === 'create' ? 'a new rule cannot take its name' : 'no rule can be renamed to it') +
+        ` — a row of that name would replace the declared rule. To narrow or switch off '${rule.name}', ` +
+        `edit the declared rule itself: save it with id '${rule.name}', the id the rule list ` +
+        '(GET /api/v1/sharing/rules) gives it, which stores the customised copy. Otherwise choose another name.',
+    );
+    this.name = 'DeclaredSharingRuleNameConflictError';
+    this.rule = rule.name;
+  }
+}
+
+/** Package id of {@link bindDeclaredRuleNameGuard}'s hooks. */
+export const DECLARED_RULE_NAME_GUARD_PACKAGE = 'plugin-sharing:declared-rule-name-guard';
+
+/**
+ * [ruling B′] Bind the guard above on `sys_sharing_rule` writes that do not
+ * come through {@link SharingRuleService.defineRule}: the `/data` door Setup's
+ * New and its edit form write through, scripts, imports. An insert of a
+ * declared name is refused, and so is an update that CHANGES `name` onto one;
+ * an update that leaves the name alone (a customised copy's `active` switch)
+ * passes.
+ *
+ * System writes pass: `defineRule` writes under the system context after making
+ * the same check itself, and the remaining system writers are the platform's
+ * own machinery (the ownership ceremony, migrations).
+ */
+export function bindDeclaredRuleNameGuard(
+  engine: {
+    registerHook(event: string, handler: (ctx: any) => any, options?: Record<string, any>): void;
+    unregisterHooksByPackage?(packageId: string): number;
+  },
+  rules: Pick<SharingRuleService, 'declaredRuleNamed'>,
+): void {
+  engine.unregisterHooksByPackage?.(DECLARED_RULE_NAME_GUARD_PACKAGE);
+  const guard = (insert: boolean) => async (ctx: any) => {
+    if ((ctx?.session as any)?.isSystem) return;
+    const data = ctx?.input?.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+    if (typeof data.name !== 'string') return;
+    // An update is a rename only against its pre-image (`ctx.previous`, the
+    // `HookContext` contract both update shapes bind before `beforeUpdate`): a
+    // full-form save re-sends the name it already has.
+    if (!insert) {
+      const previous = ctx?.previous as Record<string, unknown> | undefined;
+      if (!previous || typeof previous !== 'object' || data.name === previous.name) return;
+    }
+    const declared = await rules.declaredRuleNamed(data.name);
+    if (declared) throw new DeclaredSharingRuleNameConflictError(declared, insert ? 'create' : 'rename');
+  };
+  const opts = { object: 'sys_sharing_rule', packageId: DECLARED_RULE_NAME_GUARD_PACKAGE, priority: 100 };
+  engine.registerHook('beforeInsert', guard(true), opts);
+  engine.registerHook('beforeUpdate', guard(false), opts);
+}
+
+/**
  * The `sys_record_share` rows a rule's grants are: `source: 'rule'` plus the
  * rule's id. A declared rule served under a wall is one projection per
  * organization, all carrying the rule's name, so its grants are told apart by
@@ -652,7 +746,7 @@ export class SharingRuleService implements ISharingRuleService {
     );
   }
 
-  async defineRule(input: DefineSharingRuleInput, context: ExecutionContext): Promise<SharingRuleRow> {
+  async defineRule(input: DefineSharingRuleWrite, context: ExecutionContext): Promise<SharingRuleRow> {
     this.assertCanManageRules(context);
     if (!input.name) throw new Error('VALIDATION_FAILED: name is required');
     if (!input.label) throw new Error('VALIDATION_FAILED: label is required');
@@ -751,6 +845,18 @@ export class SharingRuleService implements ISharingRuleService {
       };
       await this.engine.update('sys_sharing_rule', patch, { context: SYSTEM_CTX });
       return rowFromRule({ ...row, ...patch });
+    }
+
+    // [ADR-0131 D6 regime O, guarded — ruling B′] No row holds this name in the
+    // caller's scope, so the write creates one. Under a declared rule's name that
+    // row replaces the declaration in the scope: allowed only as the EDIT of the
+    // projection the caller reads (it sends the projection's id, the rule's
+    // name), refused as a new rule.
+    const declared = await this.declaredRuleNamed(input.name);
+    if (declared) {
+      const editsProjection =
+        input.id === declared.name && (await this.declaredRules(context, { name: declared.name })).length > 0;
+      if (!editsProjection) throw new DeclaredSharingRuleNameConflictError(declared, 'create');
     }
 
     const newRow: any = {
@@ -910,6 +1016,46 @@ export class SharingRuleService implements ISharingRuleService {
     const orgId = this.callerOrgId(context);
     if (!orgId) return scopes;
     return scopes.includes(orgId) ? [orgId] : [];
+  }
+
+  /**
+   * [ruling B′] The declared rule named `name`, or `null` — whatever scope it
+   * is served in: a declaration is the application's in every organization, so
+   * its name is taken in every one ({@link DeclaredSharingRuleNameConflictError}).
+   */
+  async declaredRuleNamed(name: string): Promise<DeclaredSharingRule | null> {
+    if (!this.declaredSource || !name) return null;
+    return (await this.declaredSource.list()).find((r) => r.name === name) ?? null;
+  }
+
+  /**
+   * [ADR-0131 D6 regime O — ruling B′] Reconcile a declared rule's name-keyed
+   * grants in the scope a `sys_sharing_rule` write of that name touched, in the
+   * write's own request — not at the next boot's {@link sweepOrphanedRuleGrants}.
+   *
+   * The scope is the `held` key's ({@link declaredRules}): under `single` the
+   * one organization-less projection, so a row of the name in any organization
+   * answers everywhere; under a wall `organizationId`'s projection alone, so an
+   * organization's customised copy is its own. A row created under the name (the
+   * customised copy) or switched on or off leaves the declaration shadowed there,
+   * and its grants are revoked; a write that leaves no row holding the name
+   * serves the declaration again, and its grants are re-derived. Either way it is
+   * the one-rule pass every reconcile runs ({@link evaluateResolvedRule} over the
+   * {@link ruleGrantScope} of the projection).
+   *
+   * Scopes not known (a failed organization enumeration) reconcile nothing: the
+   * boot sweep's own rule for them — hold every declared grant — applies.
+   */
+  async reconcileDeclaredRuleName(name: string, organizationId: string | null): Promise<void> {
+    const declared = await this.declaredRuleNamed(name);
+    const scopes = this.declaredScopes;
+    if (!declared || scopes === null) return;
+    const single = scopes.includes(null);
+    const scope = single ? null : organizationId;
+    if (!single && (scope == null || !scopes.includes(scope))) return;
+    const served = (await this.declaredRules(SYSTEM_CTX, { name })).find((r) => r.organization_id === scope);
+    if (served) await this.evaluateResolvedRule(served);
+    else await this.purgeGrants(ruleGrantScope(projectDeclaredRule(declared, scope)));
   }
 
   async getRule(idOrName: string, context: ExecutionContext): Promise<SharingRuleRow | null> {

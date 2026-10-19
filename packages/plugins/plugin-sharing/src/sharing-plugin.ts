@@ -56,7 +56,7 @@ import {
   type SharingSecurityProbe,
   type SharingTenancyProbe,
 } from './sharing-service.js';
-import { SharingRuleService } from './sharing-rule-service.js';
+import { SharingRuleService, bindDeclaredRuleNameGuard } from './sharing-rule-service.js';
 import { ShareLinkService } from './share-link-service.js';
 import { registerShareLinkRoutes } from './share-link-routes.js';
 import { bindRuleHooks, unbindAllRuleHooks, bindRuleCriteriaGuard, RULE_REBIND_TRIGGER_PACKAGE } from './rule-hooks.js';
@@ -467,10 +467,23 @@ export class SharingServicePlugin implements Plugin {
      * logs and leaves the previous grants alone — it must never fail the
      * authoring write.
      */
-    const scheduleReconcile = (ruleId: string, deleted: boolean): Promise<void> => {
+    const scheduleReconcile = (
+      ruleId: string,
+      deleted: boolean,
+      names: ReadonlyArray<{ name: string; organizationId: string | null }>,
+    ): Promise<void> => {
       const run = this.ruleRebindChain.then(async () => {
         const ruleService = this.ruleService;
         if (!ruleService) return;
+        // [ADR-0131 D6 regime O — ruling B′] A write of a declared rule's name
+        // (the customised copy's creation, its `active` switch, its removal)
+        // reconciles the declaration's grants in that scope NOW, not at the next
+        // boot's orphan sweep. FIRST, so a failure here stops before the row's
+        // own pass below: the declaration's grants and the copy's are never both
+        // left in force by this write.
+        for (const { name, organizationId } of names) {
+          await ruleService.reconcileDeclaredRuleName(name, organizationId);
+        }
         if (deleted) {
           await ruleService.revokeRuleGrants(ruleId);
           return;
@@ -500,8 +513,16 @@ export class SharingServicePlugin implements Plugin {
       const data = hookCtx?.result ?? hookCtx?.input?.data ?? {};
       const ruleId = String(data?.id ?? hookCtx?.input?.id ?? '');
       if (!ruleId) return;
+      // The names this write touched, each in its row's organization: the
+      // pre-image's (a rename away from it, a delete) and the written row's.
+      const names = new Map<string, { name: string; organizationId: string | null }>();
+      for (const row of [hookCtx?.previous, deleted ? undefined : { ...(hookCtx?.previous ?? {}), ...data }]) {
+        if (!row || typeof row.name !== 'string' || !row.name) continue;
+        const organizationId = row.organization_id == null ? null : String(row.organization_id);
+        names.set(`${row.name}::${organizationId ?? ''}`, { name: row.name, organizationId });
+      }
       try {
-        await scheduleReconcile(ruleId, deleted);
+        await scheduleReconcile(ruleId, deleted, [...names.values()]);
       } catch (err: any) {
         ctx.logger.warn('SharingServicePlugin: sharing-rule grant reconcile failed — grants left unchanged', {
           rule: ruleId,
@@ -848,6 +869,11 @@ export class SharingServicePlugin implements Plugin {
             // sys_sharing_rule — it bypasses defineRule's validation, so the
             // match-all criteria gate has to sit on the table itself too.
             bindRuleCriteriaGuard(engine, ctx.logger as any);
+
+            // [ADR-0131 D6 regime O, guarded — ruling B′] …and so must the
+            // refusal of a NEW row, or a rename, that takes a declared rule's
+            // name: `defineRule` makes it for its own callers.
+            bindDeclaredRuleNameGuard(engine, this.ruleService);
 
             // [#2909 T1] Stamp `customized` on admin edits of seeded rules so
             // a customized copy keeps answering for its name — the declared
