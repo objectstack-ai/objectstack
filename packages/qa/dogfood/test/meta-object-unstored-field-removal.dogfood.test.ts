@@ -117,7 +117,8 @@ describe('dogfood: removing an unstored field through PUT /meta/object/:name', (
 
     const read = await call('GET', `/data/${NAME}/${recordId}`);
     expect(read.status, JSON.stringify(read.json)).toBe(200);
-    const record = read.json?.data ?? read.json;
-    expect(record, JSON.stringify(read.json)).toMatchObject({ name: 'INV-1', notes: 'keep me', amount: 21 });
+    expect(read.json?.record, JSON.stringify(read.json)).toMatchObject({
+      name: 'INV-1', notes: 'keep me', amount: 21, reference: expect.stringMatching(/\S/),
+    });
   });
 });

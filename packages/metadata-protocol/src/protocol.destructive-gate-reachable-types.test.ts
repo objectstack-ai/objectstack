@@ -537,7 +537,7 @@ describe('[#24411 §4] the destructive diff reads the field\'s own storage decla
         metadata: JSON.stringify({ name: OBJ, label: OBJ, fields: { ...STORED, doubled: DOUBLED } }),
     });
     const saveFields = (protocol: any, fields: Record<string, unknown>) =>
-        save(protocol, { type: 'object', name: OBJ, item: { name: OBJ, label: OBJ, fields } });
+        save(protocol, { type: 'object', name: OBJ, item: { name: OBJ, label: OBJ, sharingModel: 'private', fields } });
     const withoutField = (drop: keyof typeof STORED) =>
         Object.fromEntries(Object.entries({ ...STORED, doubled: DOUBLED }).filter(([k]) => k !== drop));
 
