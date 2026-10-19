@@ -17,8 +17,8 @@ import { Environment, EvaluationError, ParseError, serialize } from '@marcbachma
 import type { ASTNode } from '@marcbachmann/cel-js';
 import type { Expression } from '@objectstack/spec';
 
-import { buildScope, registerNumericCoercions, registerStdLib } from './stdlib';
-import type { PermissionBinding } from './stdlib';
+import { buildScope, registerBoundStdLib, registerNumericCoercions, registerStdLib } from './stdlib';
+import type { PermissionBinding, StdLibBinding } from './stdlib';
 import type { DialectEngine, EvalContext, EvalResult } from './types';
 import type { CelRootsRefusalCode, ExpressionRefusal } from './expression-refusal';
 
@@ -58,7 +58,8 @@ export const CEL_ENV_OPTIONS = {
  * {@link registerStdLib} and {@link registerNumericCoercions}.
  *
  * Exported (package-internal; NOT in `index.ts`) so the stdlib drift pin reads
- * the authoritative environment through the same constructor the engine uses.
+ * the authoritative environment through the same constructor the engine uses
+ * ({@link buildEnvReading}, which also builds the shared evaluation environment).
  *
  * `permissionBinding` is the acting subject plus its effective object
  * permissions and held system capabilities, pinned for this one evaluation
@@ -74,9 +75,51 @@ export function buildEnv(
   timezone = 'UTC',
   permissionBinding?: PermissionBinding,
 ): Environment {
-  const env = new Environment(CEL_ENV_OPTIONS);
-  return registerNumericCoercions(registerStdLib(env, now, timezone, permissionBinding));
+  const pinned: StdLibBinding = { now, timezone, permissionBinding };
+  return buildEnvReading(() => pinned);
 }
+
+/**
+ * The one constructor behind {@link buildEnv} and the shared evaluation
+ * environment: the same options and the same registrations, with the stdlib
+ * reading its `now`, timezone and permission binding through `read`.
+ */
+function buildEnvReading(read: () => StdLibBinding): Environment {
+  const env = new Environment(CEL_ENV_OPTIONS);
+  return registerNumericCoercions(registerBoundStdLib(env, read));
+}
+
+/**
+ * What the shared evaluation environment's stdlib answers from outside any
+ * evaluation: no permission binding, so `can` / `hasCapability` refuse exactly
+ * as an environment built without one does. No function of that environment
+ * runs outside `celEngine.evaluate`, which always sets its own binding.
+ */
+const UNBOUND: StdLibBinding = { now: () => new Date(), timezone: 'UTC', permissionBinding: undefined };
+
+/**
+ * The binding of the evaluation now running on {@link evaluationEnv}, or
+ * {@link UNBOUND} when none is.
+ *
+ * `celEngine.evaluate` saves it, sets its own and restores the saved one in a
+ * `finally`, so a nested evaluation and a thrown one both leave the outer
+ * binding exactly as it was, and no binding outlives its evaluation.
+ */
+let activeBinding: StdLibBinding = UNBOUND;
+
+/**
+ * The evaluation environment, built once and reused by every
+ * `celEngine.evaluate` (#24536). Building the stdlib per evaluation was most
+ * of an evaluation's cost.
+ *
+ * Sharing it is sound because a cel-js `Environment` keeps no per-evaluation
+ * state: each evaluation gets its own `RootContext`, the parser resets its
+ * input and limit counters at the start of every parse, and what the registry
+ * caches (type declarations, overload resolution) is keyed on types, never on
+ * values. What did vary per evaluation, the stdlib's `now`, timezone and
+ * permission binding, is read from {@link activeBinding}.
+ */
+let evaluationEnv: Environment | undefined;
 
 /**
  * The "never faults" BASELINE: the namespace roots the strict check env
@@ -1799,54 +1842,64 @@ export const celEngine: DialectEngine = {
     try {
       // Scope FIRST: `can` is answered about the acting subject by IDENTITY, and
       // the subject is the canonical `EvalUser` object `buildScope` mints. The
-      // environment therefore has to be built from the scope, not beside it —
+      // binding therefore has to be made from the scope, not beside it —
       // rebuilding a lookalike user here would give `current_user.can(…)` a
       // receiver that is equal to the bound one and not the same as it.
       const scope = buildScope(ctx);
-      const env = buildEnv(now, ctx.timezone ?? 'UTC', {
-        subject: scope.current_user,
-        permissions: ctx.permissions,
-        systemPermissions: ctx.systemPermissions,
-      });
-      // #3183 — coerce a date-field operand compared with `==`/`!=` against a
-      // temporal function (`date(record.d) == today()`), so a `Field.date` string
-      // matches the Timestamp instead of silently never equalling it. No-op (and
-      // no reserialize) for any source without such a comparison.
-      // #7168 — `scope` extends that to a Date-valued BINDING counterpart
-      // (`record.due == previous.due`, `previous` hydrated by the driver): the
-      // runtime type of a binding is not in the AST, so this arm is decided per
-      // row against the values in hand. Non-date operands are untouched.
-      // #3306 — then relax the null-guard idiom `cond ? <value> : null` so a
-      // nullable numeric/string formula evaluates instead of faulting cel-js's
-      // ternary unifier. All rewrites are no-ops for sources that don't need them.
-      const evalSource = rewriteNullableTernary(rewriteTemporalEquality(source, scope));
+      const env = (evaluationEnv ??= buildEnvReading(() => activeBinding));
+      const outer = activeBinding;
+      activeBinding = {
+        now,
+        timezone: ctx.timezone ?? 'UTC',
+        permissionBinding: {
+          subject: scope.current_user,
+          permissions: ctx.permissions,
+          systemPermissions: ctx.systemPermissions,
+        },
+      };
       try {
-        const raw = env.evaluate(evalSource, scope);
-        return { ok: true, value: coerce(raw) as T };
-      } catch (err) {
-        // ADR-0032 §1c — string-serialized fields make CEL raise
-        // `no such overload`: numeric fields (`rating` → `"5.0"`,
-        // `amount` → `"250000.00"`) on `record.rating >= 4` (#1534), and
-        // date/datetime fields (`end_date` → `"2026-06-20"`) on
-        // `record.end_date <= daysFromNow(60)` (#1530), since cel-js compares the
-        // raw string against the `google.protobuf.Timestamp` from `today()` etc.
-        // Coerce those operands — and ONLY those — and retry ONCE. #7098: the
-        // coercion is per operand POSITION, not scope-wide, so a comparison that
-        // already evaluated cleanly is never re-interpreted; the scope itself is
-        // never rewritten, so a numeric-looking string RETURNED by the expression
-        // keeps its type too. When no operand provably faulted, or the retry still
-        // cannot type-check, the original loud error is reported.
-        if (!isNumericOverloadError(err)) throw err;
-        const coercedSource = rewriteFaultedOperands(evalSource, scope);
-        if (coercedSource === null) throw err;
+        // #3183 — coerce a date-field operand compared with `==`/`!=` against a
+        // temporal function (`date(record.d) == today()`), so a `Field.date` string
+        // matches the Timestamp instead of silently never equalling it. No-op (and
+        // no reserialize) for any source without such a comparison.
+        // #7168 — `scope` extends that to a Date-valued BINDING counterpart
+        // (`record.due == previous.due`, `previous` hydrated by the driver): the
+        // runtime type of a binding is not in the AST, so this arm is decided per
+        // row against the values in hand. Non-date operands are untouched.
+        // #3306 — then relax the null-guard idiom `cond ? <value> : null` so a
+        // nullable numeric/string formula evaluates instead of faulting cel-js's
+        // ternary unifier. All rewrites are no-ops for sources that don't need them.
+        const evalSource = rewriteNullableTernary(rewriteTemporalEquality(source, scope));
         try {
-          const raw = env.evaluate(coercedSource, scope);
+          const raw = env.evaluate(evalSource, scope);
           return { ok: true, value: coerce(raw) as T };
-        } catch {
-          // Hydration did not resolve it — surface the original fault, not the
-          // retry's, so the message reflects what the author actually wrote.
-          throw err;
+        } catch (err) {
+          // ADR-0032 §1c — string-serialized fields make CEL raise
+          // `no such overload`: numeric fields (`rating` → `"5.0"`,
+          // `amount` → `"250000.00"`) on `record.rating >= 4` (#1534), and
+          // date/datetime fields (`end_date` → `"2026-06-20"`) on
+          // `record.end_date <= daysFromNow(60)` (#1530), since cel-js compares the
+          // raw string against the `google.protobuf.Timestamp` from `today()` etc.
+          // Coerce those operands — and ONLY those — and retry ONCE. #7098: the
+          // coercion is per operand POSITION, not scope-wide, so a comparison that
+          // already evaluated cleanly is never re-interpreted; the scope itself is
+          // never rewritten, so a numeric-looking string RETURNED by the expression
+          // keeps its type too. When no operand provably faulted, or the retry still
+          // cannot type-check, the original loud error is reported.
+          if (!isNumericOverloadError(err)) throw err;
+          const coercedSource = rewriteFaultedOperands(evalSource, scope);
+          if (coercedSource === null) throw err;
+          try {
+            const raw = env.evaluate(coercedSource, scope);
+            return { ok: true, value: coerce(raw) as T };
+          } catch {
+            // Hydration did not resolve it — surface the original fault, not the
+            // retry's, so the message reflects what the author actually wrote.
+            throw err;
+          }
         }
+      } finally {
+        activeBinding = outer;
       }
     } catch (err) {
       return classifyError(err);
