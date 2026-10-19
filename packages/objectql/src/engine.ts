@@ -2651,8 +2651,36 @@ type FormulaFaultSink = (field: string, error: EvalError) => void;
  * ({@link ObjectQL.resolveFormulaRelated}), or — when this read serves no hop
  * at all — the sentence saying why, which every traversing formula of the read
  * then reports.
+ *
+ * [#24410] `undeclared` is decided per FORMULA, never per reference: the
+ * related fields a reference's target does not declare, which the shared read
+ * never asks for. A formula naming one of them reads `null` with the
+ * `undeclared-field` reason; a sibling reading only declared fields through the
+ * same reference is served from the shared read exactly as it is alone.
  */
-type FormulaRelated = ((row: Record<string, unknown>) => RelatedRecordBinding | undefined) | string;
+type FormulaRelated = {
+  readonly bindings: (row: Record<string, unknown>) => RelatedRecordBinding | undefined;
+  readonly undeclared: ReadonlyMap<string, { readonly object: string; readonly fields: ReadonlySet<string> }>;
+} | string;
+
+/**
+ * [#24410] The named related fields a reference's target does not DECLARE —
+ * the one reading both seams that serve a hop make of it: the shared loader
+ * ({@link ObjectQL.resolveOneHopRelated}) and the formula read, which judges
+ * them per formula ({@link ObjectQL.resolveFormulaRelated}).
+ *
+ * [#8215] The PRIMARY KEY counts as declared, though no field map carries it:
+ * `record.<fk>.id` is the repair the traversal conflict refusal prescribes. An
+ * unknown target (`declared` absent) declares nothing to judge against, so
+ * nothing is undeclared.
+ */
+function undeclaredRelatedFields(
+  declared: Record<string, unknown> | undefined,
+  named: Iterable<string>,
+): string[] {
+  if (!declared) return [];
+  return [...named].filter((n) => n !== SystemFieldName.ID && !(n in declared));
+}
 
 /** [#24197] Why a hop was not served where no reader supplied one. */
 const FORMULA_HOP_NOT_SERVED =
@@ -2687,8 +2715,22 @@ function formulaHopScope(
   hops: ReadonlyMap<string, ReadonlySet<string>>,
   related: FormulaRelated | undefined,
 ): { ok: true; record: Record<string, unknown>; empty: string[] } | { ok: false; reason: string } {
-  if (typeof related !== 'function') return { ok: false, reason: related ?? FORMULA_HOP_NOT_SERVED };
-  const binding = related(rec);
+  if (related === undefined || typeof related === 'string') {
+    return { ok: false, reason: related ?? FORMULA_HOP_NOT_SERVED };
+  }
+  // [#24410] This formula's own undeclared reads first, before any row: they
+  // are a fault of the expression, whatever the record holds.
+  for (const [field, named] of hops) {
+    const missing = related.undeclared.get(field);
+    const own = missing ? [...named].filter((n) => missing.fields.has(n)) : [];
+    if (missing && own.length > 0) {
+      return {
+        ok: false,
+        reason: formulaHopRefusal(field, { object: missing.object, unavailable: 'undeclared-field', undeclaredFields: own }, named),
+      };
+    }
+  }
+  const binding = related.bindings(rec);
   let copy: Record<string, unknown> | undefined;
   const empty: string[] = [];
   for (const [field, named] of hops) {
@@ -6262,8 +6304,30 @@ export class ObjectQL implements IObjectQLEngine {
         + 'formula resolves ONE hop: a formula read this way does not read through a reference of its own '
         + '(a second hop). Store the value on this object as a field of its own to read it from there';
     }
-    const lookup = await this.resolveOneHopRelated(schema, wanted, rows, context, 'caller');
-    return (row) => lookup(row);
+    // [#24410] The read set per reference is the UNION of every formula's
+    // columns, and the loader answers a whole reference `undeclared-field` when
+    // any column of it is undeclared — so one formula's misspelt column nulled
+    // every sibling reading through the same reference. The undeclared columns
+    // are taken out of the shared read here and judged per formula
+    // ({@link formulaHopScope}); the loader reads the declared rest.
+    const fields = (schema?.fields ?? {}) as Record<string, unknown>;
+    const undeclared = new Map<string, { object: string; fields: ReadonlySet<string> }>();
+    for (const [fk, named] of wanted) {
+      const target = referenceTargetOf(fields[fk]);
+      // The loader's own verdicts stand for these: no target, or a hop into
+      // the stored-metadata-body family, which is never read.
+      if (!target || isStoredMetadataBodyObject(target)) continue;
+      const declared = (this._registry.getObject(target) as { fields?: Record<string, unknown> } | undefined)?.fields;
+      const missing = undeclaredRelatedFields(declared, named);
+      if (missing.length === 0) continue;
+      undeclared.set(fk, { object: target, fields: new Set(missing) });
+      for (const name of missing) named.delete(name);
+      if (named.size === 0) wanted.delete(fk);
+    }
+    const lookup = wanted.size > 0
+      ? await this.resolveOneHopRelated(schema, wanted, rows, context, 'caller')
+      : () => undefined;
+    return { bindings: (row) => lookup(row), undeclared };
   }
 
   /**
@@ -10277,9 +10341,7 @@ export class ObjectQL implements IObjectQLEngine {
       //
       // ⛔ This widens the READ SET by nothing: `id` is already unconditionally
       // in the projection below, because the by-id map is keyed on it.
-      const declaredHere = (n: string): boolean =>
-        n === SystemFieldName.ID || !!declared && n in declared;
-      const undeclared = declared ? named.filter((n) => !declaredHere(n)) : [];
+      const undeclared = undeclaredRelatedFields(declared, named);
       if (undeclared.length > 0) {
         resolved.set(fk, { object: target, byId: new Map(), undeclared });
         continue;
