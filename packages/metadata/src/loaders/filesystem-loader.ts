@@ -54,6 +54,51 @@ export class FilesystemLoader implements MetadataLoader {
 
   private cache = new Map<string, { data: any; etag: string; timestamp: number }>();
 
+  /**
+   * [#24537] What {@link findFile} last answered for each `(type, name)`: the
+   * path it opened, or `null` for a name no file holds. Without it every read
+   * paid one `fs.access` per resolvable extension — five under the plugin's
+   * format set, every time, for a miss as much as a hit — and a miss is the
+   * common case: `plugin-security`'s catalog read asks the metadata service for
+   * every held permission set the engine registry does not serve, on every
+   * authenticated request, and in an artifact-mode runtime no such file exists.
+   *
+   * Scoped to this instance — one loader per manager, one manager per kernel —
+   * and never shared. Only what can change the answer retires an entry:
+   *
+   * - this loader's own write ({@link save}) retires everything;
+   * - this loader's own walk of a type directory ({@link list},
+   *   {@link loadMany}, {@link loadManyKeyed} — all through
+   *   {@link resolvableNames}) retires that type, so a name the walk lists is
+   *   never answered `null` by a stale miss;
+   * - a read with `useCache: false` re-resolves from disk and keeps what it
+   *   found — the re-read `NodeMetadataManager`'s file watcher makes on an
+   *   `added` / `changed` event is exactly that read;
+   * - a remembered path the disk no longer has is re-resolved on the read that
+   *   finds it gone ({@link resolveStats}, {@link exists}) — which is what an
+   *   `unlink` event, or a deletion nothing reported, leaves behind.
+   *
+   * ⛔ What no event reaches: a file CREATED under `ROOT/TYPE/` by another
+   * process while no watcher runs (`watch: false`, every shipped composition's
+   * setting) stays unseen by a name already answered `null` until one of the
+   * above happens — the next walk of that type, a write through this loader, or
+   * a restart. There is deliberately no clock: the runtime's metadata comes from
+   * its artifact and its database, not from files dropped under its root.
+   *
+   * Bounded: {@link RESOLUTION_MEMO_CAP} entries, then it starts over, because
+   * the names come from callers (a request can ask for any name).
+   */
+  private readonly resolvedFiles = new Map<string, Map<string, string | null>>();
+  private resolvedFileCount = 0;
+
+  /**
+   * Moves on every retirement, so a probe that was already on disk when an
+   * entry was retired cannot write its older answer back over the retirement.
+   */
+  private resolutionEpoch = 0;
+
+  private static readonly RESOLUTION_MEMO_CAP = 10_000;
+
   constructor(
     private rootDir: string,
     private serializers: Map<MetadataFormat, MetadataSerializer>,
@@ -69,10 +114,13 @@ export class FilesystemLoader implements MetadataLoader {
     const { validate: _validate = true, useCache = true, ifNoneMatch } = options || {};
 
     try {
-      // Find the file
-      const filePath = await this.findFile(type, name);
+      // Find the file and stat it, in one resolution: the path read below is
+      // the one `resolveStats` actually stat-ed, which a remembered path the
+      // disk no longer has may have moved. `useCache: false` re-resolves from
+      // disk (see `resolvedFiles`).
+      const resolved = await this.resolveStats(type, name, !useCache);
 
-      if (!filePath) {
+      if (!resolved) {
         return {
           data: null,
           fromCache: false,
@@ -81,17 +129,7 @@ export class FilesystemLoader implements MetadataLoader {
         };
       }
 
-      // Get stats
-      const stats = await this.stat(type, name);
-
-      if (!stats) {
-        return {
-          data: null,
-          fromCache: false,
-          notModified: false,
-          loadTime: Date.now() - startTime,
-        };
-      }
+      const { filePath, stats } = resolved;
 
       // Check cache
       if (useCache && ifNoneMatch && stats.etag === ifNoneMatch) {
@@ -316,37 +354,81 @@ export class FilesystemLoader implements MetadataLoader {
 
   async exists(type: string, name: string): Promise<boolean> {
     const filePath = await this.findFile(type, name);
-    return filePath !== null;
+
+    if (filePath === null) {
+      return false;
+    }
+
+    // [#24537] A remembered path is confirmed with the one probe it needs, so
+    // `exists()` cannot go on answering `true` for a file that was deleted —
+    // the same repair `resolveStats` makes for `load()`.
+    try {
+      await fs.access(filePath);
+      return true;
+    } catch {
+      return (await this.findFile(type, name, true)) !== null;
+    }
   }
 
   async stat(type: string, name: string): Promise<MetadataStats | null> {
-    const filePath = await this.findFile(type, name);
+    return (await this.resolveStats(type, name, false))?.stats ?? null;
+  }
 
-    if (!filePath) {
-      return null;
-    }
+  /**
+   * [#24537] {@link stat}, plus the path it stat-ed — the one {@link load}
+   * then reads.
+   *
+   * A path {@link findFile} remembered can name a file that is gone: an
+   * `unlink` event re-reads nothing, and a deletion with no watcher running
+   * reports nothing at all. That read is where the memo learns it, so it is
+   * where the memo is repaired — the name is resolved again from disk, once,
+   * and whatever the disk holds now (another extension, or nothing) is the
+   * answer. Without it a deleted file would be logged as a stat failure on
+   * every read until a restart.
+   */
+  private async resolveStats(
+    type: string,
+    name: string,
+    fresh: boolean,
+  ): Promise<{ filePath: string; stats: MetadataStats } | null> {
+    for (let fromDisk = fresh; ; fromDisk = true) {
+      const filePath = await this.findFile(type, name, fromDisk);
 
-    try {
-      const stats = await fs.stat(filePath);
-      const content = await fs.readFile(filePath, 'utf-8');
-      const etag = this.generateETag(content);
-      const format = this.detectFormat(filePath);
+      if (!filePath) {
+        return null;
+      }
 
-      return {
-        size: stats.size,
-        modifiedAt: stats.mtime.toISOString(),
-        etag,
-        format,
-        path: filePath,
-      };
-    } catch (error) {
-      this.logger?.error('Failed to stat file', undefined, {
-        type,
-        name,
-        filePath,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return null;
+      try {
+        const stats = await fs.stat(filePath);
+        const content = await fs.readFile(filePath, 'utf-8');
+        const etag = this.generateETag(content);
+        const format = this.detectFormat(filePath);
+
+        return {
+          filePath,
+          stats: {
+            size: stats.size,
+            modifiedAt: stats.mtime.toISOString(),
+            etag,
+            format,
+            path: filePath,
+          },
+        };
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException | null)?.code;
+
+        if (!fromDisk && (code === 'ENOENT' || code === 'ENOTDIR')) {
+          continue;
+        }
+
+        this.logger?.error('Failed to stat file', undefined, {
+          type,
+          name,
+          filePath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      }
     }
   }
 
@@ -480,17 +562,21 @@ export class FilesystemLoader implements MetadataLoader {
           ? serializeTypeScriptForMetadataType(data, type, serializeOptions)
           : serializer.serialize(data, serializeOptions);
 
-      // Write to disk (atomic or direct)
-      if (atomic) {
-        const tempPath = `${filePath}.tmp`;
-        await fs.writeFile(tempPath, content, 'utf-8');
-        await fs.rename(tempPath, filePath);
-      } else {
-        await fs.writeFile(filePath, content, 'utf-8');
+      // Write to disk (atomic or direct). [#24537] Whatever this write does
+      // to the tree — a new file, a stem under another extension, a `path`
+      // anywhere under the root — every remembered resolution is retired,
+      // succeeded or not: a direct write can fail after creating the file.
+      try {
+        if (atomic) {
+          const tempPath = `${filePath}.tmp`;
+          await fs.writeFile(tempPath, content, 'utf-8');
+          await fs.rename(tempPath, filePath);
+        } else {
+          await fs.writeFile(filePath, content, 'utf-8');
+        }
+      } finally {
+        this.retireResolutions();
       }
-
-      // Update cache logic if needed (e.g., invalidate or update)
-      // For now, we rely on the watcher to pick up changes
 
       return {
         success: true,
@@ -610,8 +696,15 @@ export class FilesystemLoader implements MetadataLoader {
    * declined (option 2, keep the precedence and log): the loser would stay
    * unreachable and the listed set would stay different from the addressable
    * one.
+   *
+   * [#24537] Every walk passes through here, which makes it the one place a
+   * walk retires what {@link findFile} remembers for the type: the walk has
+   * just seen the directory, so no remembered answer is newer than it, and a
+   * name it lists can no longer be answered `null` from a stale miss.
    */
   private resolvableNames(type: string, typeDir: string, files: readonly string[]): string[] {
+    this.retireResolutions(type);
+
     const byName = new Map<string, Set<string>>();
 
     for (const file of files) {
@@ -641,9 +734,35 @@ export class FilesystemLoader implements MetadataLoader {
   }
 
   /**
-   * Find file for a given type and name
+   * Find file for a given type and name.
+   *
+   * [#24537] Answered from {@link resolvedFiles} when it holds the name — a
+   * hit or a miss, with no probe — and probed from disk otherwise, or always
+   * when `fromDisk` is set; the probe's answer is remembered either way.
    */
-  private async findFile(type: string, name: string): Promise<string | null> {
+  private async findFile(type: string, name: string, fromDisk = false): Promise<string | null> {
+    if (fromDisk) {
+      this.forgetResolution(type, name);
+    } else {
+      const remembered = this.resolvedFiles.get(type);
+
+      if (remembered?.has(name)) {
+        return remembered.get(name) ?? null;
+      }
+    }
+
+    const epoch = this.resolutionEpoch;
+    const found = await this.probeFile(type, name);
+
+    if (epoch === this.resolutionEpoch) {
+      this.rememberResolution(type, name, found);
+    }
+
+    return found;
+  }
+
+  /** The disk read behind {@link findFile}: one `fs.access` per resolvable extension, in precedence order. */
+  private async probeFile(type: string, name: string): Promise<string | null> {
     const typeDir = path.join(this.rootDir, type);
     const extensions = this.resolvableExtensions();
 
@@ -659,6 +778,53 @@ export class FilesystemLoader implements MetadataLoader {
     }
 
     return null;
+  }
+
+  private rememberResolution(type: string, name: string, filePath: string | null): void {
+    let remembered = this.resolvedFiles.get(type);
+
+    if (!remembered?.has(name) && this.resolvedFileCount >= FilesystemLoader.RESOLUTION_MEMO_CAP) {
+      this.resolvedFiles.clear();
+      this.resolvedFileCount = 0;
+      remembered = undefined;
+    }
+
+    if (!remembered) {
+      remembered = new Map<string, string | null>();
+      this.resolvedFiles.set(type, remembered);
+    }
+
+    if (!remembered.has(name)) {
+      this.resolvedFileCount += 1;
+    }
+
+    remembered.set(name, filePath);
+  }
+
+  private forgetResolution(type: string, name: string): void {
+    this.resolutionEpoch += 1;
+
+    if (this.resolvedFiles.get(type)?.delete(name)) {
+      this.resolvedFileCount -= 1;
+    }
+  }
+
+  /** Retire every remembered resolution of `type`, or of every type when none is named. */
+  private retireResolutions(type?: string): void {
+    this.resolutionEpoch += 1;
+
+    if (type === undefined) {
+      this.resolvedFiles.clear();
+      this.resolvedFileCount = 0;
+      return;
+    }
+
+    const remembered = this.resolvedFiles.get(type);
+
+    if (remembered) {
+      this.resolvedFileCount -= remembered.size;
+      this.resolvedFiles.delete(type);
+    }
   }
 
   /**

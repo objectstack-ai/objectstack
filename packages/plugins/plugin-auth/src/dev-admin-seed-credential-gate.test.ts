@@ -49,7 +49,7 @@
  * console reads the route and not the predicate.
  */
 
-import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterAll, afterEach, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -60,6 +60,29 @@ import { AuthPlugin } from './auth-plugin.js';
 import { SELF_REGISTRATION_CLOSED } from './audience-posture.js';
 import { decideDevAdminSeedGate } from './dev-admin-seed-gate.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
+import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
+import { sqliteEnginePool } from './__tests__/sqlite-engine-pool.testkit';
+// [#23184] better-auth's first module load is paid HERE, at module load, and
+// not inside the first clocked case: clocked windows measure behaviour, never
+// loading (AGENTS.md, Build & Test). `AuthManager` reaches these vendor modules
+// through a lazy `await import()`, so without these lines case ⓪ paid about a
+// second of vendor module evaluation on a dev container. The module cache hands
+// `AuthManager` these same instances. The one vendor value read at load is
+// `NODE_ENV` (better-auth's env module keeps the value it sees when it is first
+// evaluated), and that module is already evaluated before this point: the
+// `./auth-manager.js` import above reaches `better-auth/adapters` through
+// `./objectql-adapter.js`, and that import evaluates it. So these lines move no
+// capture: the vendor reads the same `NODE_ENV` as before, whatever the
+// `beforeEach` below sets, and nothing a case runs is different.
+import 'better-auth';
+import 'better-auth/api';
+import 'better-auth/plugins';
+import 'better-auth/plugins/bearer';
+import 'better-auth/plugins/custom-session';
+import 'better-auth/plugins/organization';
+import 'better-auth/plugins/organization/access';
+import '@better-auth/oauth-provider';
+import '@better-auth/core/error';
 
 const BASE = 'http://localhost:3000';
 const AUTH_BASE = '/api/v1/auth';
@@ -85,46 +108,61 @@ const SEED_ENV_KEYS = [
 ] as const;
 let savedEnv: Record<string, string | undefined> = {};
 
-const engines: ObjectQL[] = [];
-
 beforeEach(() => {
   savedEnv = Object.fromEntries(SEED_ENV_KEYS.map((k) => [k, process.env[k]]));
   for (const k of SEED_ENV_KEYS) delete process.env[k];
   process.env.NODE_ENV = 'development';
 });
 
-afterEach(async () => {
+afterEach(() => {
   for (const [k, v] of Object.entries(savedEnv)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
-  while (engines.length) {
-    const e = engines.pop();
-    try {
-      await (e as unknown as { destroy?(): Promise<void> })?.destroy?.();
-    } catch {
-      /* noop */
-    }
-  }
 });
 
-async function bootEngine(): Promise<ObjectQL> {
+/**
+ * [#23184] The engine every case starts from: booted ONCE per file and emptied
+ * before each case that takes it (`__tests__/sqlite-engine-pool.testkit.ts`),
+ * instead of booted per case. A boot here is `init()` plus the DDL for the 30
+ * objects plugin-auth registers, about 70 ms on a dev container and the
+ * costliest step of the cases that derive no password. The engine a case
+ * takes was built by the same steps a fresh boot runs, and the pool hands it
+ * over with every table empty, so each case still starts from the empty
+ * database it always did. Nothing in this file adds a hook, an object or a
+ * table to an engine; the pool refuses an engine whose schema changed, and one
+ * left holding an organization row.
+ */
+const engines = sqliteEnginePool(async () => {
   const engine = new ObjectQL();
-  engines.push(engine);
-  engine.registerDriver(
-    new SqlDriver({
-      client: 'better-sqlite3',
-      connection: { filename: ':memory:' },
-      useNullAsDefault: true,
-    }),
-    true,
-  );
+  const driver = new SqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: ':memory:' },
+    useNullAsDefault: true,
+  });
+  engine.registerDriver(driver, true);
   await engine.init();
   for (const object of AUTH_OBJECTS) {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
   }
   await engine.syncSchemas();
-  return engine;
+  return { engine, driver };
+});
+afterEach(engines.release);
+afterAll(engines.destroy);
+
+/**
+ * [#23184] A sign-in that follows the seed verifies the password against the
+ * hash the seed just stored, and a second seed run re-checks that same hash:
+ * the same password against the same salt, which the memo answers from the
+ * bytes the first derivation produced. Every fresh salt is still derived for
+ * real (`__tests__/scrypt-memo.testkit.ts`).
+ */
+const scrypt = memoizeScrypt();
+afterAll(scrypt.restore);
+
+async function bootEngine(): Promise<ObjectQL> {
+  return engines.take();
 }
 
 /** The population that makes this card: people, no credentials. */

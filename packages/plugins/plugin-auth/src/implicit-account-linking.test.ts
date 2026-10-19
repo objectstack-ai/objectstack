@@ -24,6 +24,24 @@ import {
   unlinkTombstoneIdentifier,
   unlinkTombstoneUserPrefix,
 } from './implicit-account-linking';
+// [#23184] better-auth's first module load is paid HERE, at module load, and
+// not inside the first clocked case: clocked windows measure behaviour, never
+// loading (AGENTS.md, Build & Test). `AuthManager` reaches these vendor modules
+// through a lazy `await import()`, so without these lines the first case that
+// builds an instance paid about 0.7 s of vendor module evaluation on a dev
+// container. The module cache hands `AuthManager` these same instances, and
+// better-auth's one load-time read (`NODE_ENV`, kept by its env module when
+// first evaluated) already happened at the `./auth-manager` import above,
+// through `better-auth/adapters`, so nothing a case runs is different.
+import 'better-auth';
+import 'better-auth/api';
+import 'better-auth/plugins';
+import 'better-auth/plugins/bearer';
+import 'better-auth/plugins/custom-session';
+import 'better-auth/plugins/generic-oauth';
+import 'better-auth/plugins/organization';
+import 'better-auth/plugins/organization/access';
+import '@better-auth/oauth-provider';
 
 // ── In-memory IDataEngine (the audience-posture harness shape) ───────────────
 
@@ -122,8 +140,16 @@ const provider = (providerId: string) => ({
   pkce: false,
 });
 
-const makeManager = (engine: any, config: Record<string, unknown> = {}) =>
-  new AuthManager({
+/**
+ * [#23184] The engine under each manager this file builds, for the managers a
+ * copied sign-up stands for (see {@link signUp}): every one but a manager with
+ * a `secondaryStorage`, where a sign-up writes its session to the cache rather
+ * than to the engine.
+ */
+const copyTargets = new WeakMap<AuthManager, any>();
+
+const makeManager = (engine: any, config: Record<string, unknown> = {}) => {
+  const manager = new AuthManager({
     secret: SECRET,
     baseUrl: BASE,
     dataEngine: engine,
@@ -157,6 +183,9 @@ const makeManager = (engine: any, config: Record<string, unknown> = {}) =>
     },
     ...config,
   } as any);
+  if (!('secondaryStorage' in config)) copyTargets.set(manager, engine);
+  return manager;
+};
 
 // ── The stubbed identity provider ────────────────────────────────────────────
 
@@ -221,8 +250,52 @@ const post = (manager: AuthManager, path: string, body: unknown, cookie?: string
     }),
   );
 
-/** Sign up with email + password; answers the session cookies. */
+/**
+ * [#23184] One sign-up, made ONCE per file through the real `/sign-up/email`
+ * route, on an engine and a manager of its own.
+ *
+ * A sign-up is the costly step of every end-to-end case here (one
+ * production-parameter scrypt derivation under a fresh salt, most of the
+ * case's wall), and no case is about it: each case is about what an external
+ * sign-in, a link or an unlink does to a local row that a sign-up made. So
+ * {@link signUp} gives a case's first sign-up a deep copy of the tables this
+ * one wrote, on the case's own engine, with the user row's address set to the
+ * case's own, and answers this sign-up's session cookies.
+ */
+const TEMPLATE_EMAIL = 'founder@example.test';
+let signedUp: Promise<{ tables: Map<string, any[]>; cookies: string[] }> | undefined;
+const signedUpOnce = () =>
+  (signedUp ??= (async () => {
+    const template = createMemoryEngine();
+    const res = await post(makeManager(template), 'sign-up/email', {
+      email: TEMPLATE_EMAIL,
+      password: PASSWORD,
+      name: 'Synthetic Person',
+    });
+    expect(res.status).toBe(200);
+    return { tables: template.tables, cookies: cookiesFrom(res) };
+  })());
+
+/**
+ * Sign up with email + password; answers the session cookies.
+ *
+ * [#23184] The first sign-up on a manager's still-empty engine is the one
+ * above, copied (see {@link signedUpOnce}); a sign-up on an engine that already
+ * holds a user, or under a `secondaryStorage` manager, runs live as before.
+ * Measured for every address and manager configuration this file signs up
+ * with, the copy holds the same rows a live sign-up of that address writes
+ * (ids, tokens, the hash and timestamps aside), and its cookie opens a session
+ * for that user. The copy is `structuredClone`, so no case's write reaches the
+ * template or another case.
+ */
 const signUp = async (manager: AuthManager, email: string): Promise<string[]> => {
+  const engine = copyTargets.get(manager);
+  if (engine && (engine.tables.get('sys_user') ?? []).length === 0) {
+    const { tables, cookies } = await signedUpOnce();
+    for (const [name, rows] of tables) engine.tables.set(name, structuredClone(rows));
+    userRow(engine, TEMPLATE_EMAIL).email = email.toLowerCase();
+    return cookies;
+  }
   const res = await post(manager, 'sign-up/email', { email, password: PASSWORD, name: 'Synthetic Person' });
   expect(res.status).toBe(200);
   return cookiesFrom(res);
