@@ -1,5 +1,232 @@
 # @objectstack/cloud-connection
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [e67ac4b]
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [9112bcd]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [45bec43]
+- Updated dependencies [33a45cc]
+- Updated dependencies [964a237]
+  - @objectstack/metadata-protocol@18.0.0-next.5
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/objectql@18.0.0-next.5
+  - @objectstack/runtime@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Minor Changes
+
+- a237d7f: feat(cloud-connection)!: Setup's "Installed Apps" entry opens Setup › Packages filtered to marketplace installs, and the separate Installed Apps page is no longer shipped
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/cloud-connection#MARKETPLACE_INSTALLED_UI_BUNDLE.pages) The retired operand is a member of a published runtime export of `@objectstack/cloud-connection`, and its break reaches a TypeScript consumer through the compiler at their own call site. The page it carried was plugin-registered in-memory metadata, registered by `MarketplaceInstallLocalPlugin` at `kernel:ready`, never a stored row. No spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  - `MARKETPLACE_INSTALLED_UI_BUNDLE.pages` -> delete (the bundle carries no page; its entry is read from `navigationContributions`)
+  
+  Setup › Packages is now the one list of what is installed: every row says where the package came from (Source: code, marketplace or authored), and the rows whose Source is marketplace carry the actions the Installed Apps page had, Details and Uninstall.
+  
+  - **What changes.** The "Installed Apps" entry in Setup's Apps group, which the install-local plugin (`MarketplaceInstallLocalPlugin`) contributes, now opens Packages with the Source filter set to marketplace. Its label and icon are unchanged. In `MARKETPLACE_INSTALLED_UI_BUNDLE` the entry `nav_marketplace_installed` is a `component` entry on `developer:packages` with `params: { source: 'marketplace' }`, which the console opens as `/apps/setup/component/developer/packages?source=marketplace`.
+  - **What is no longer shipped.** The bundle no longer carries the `marketplace_installed` page, so `GET /api/v1/meta/page` stops listing it and `MARKETPLACE_INSTALLED_UI_BUNDLE` has no `pages` key. In the console that page only redirected to the filtered Packages list. The `pages.marketplace_installed` entries leave the Setup translation bundle in `@objectstack/platform-objects` (en, zh-CN, ja-JP, es-ES). The Setup nav label `nav_marketplace_installed` keeps its translations.
+  - **Unchanged.** The entry still appears only when the install-local plugin is mounted, so a runtime without it shows no Installed Apps entry. "Browse Marketplace" and its route are not touched. The marketplace's own package page still carries Update and the sample-data Re-seed / Purge menu, and Details on a Packages row opens it.
+  
+  What to do. Nothing in a normal deployment. If you linked to the `marketplace_installed` page directly, link to Setup › Packages with `?source=marketplace` instead.
+- 8692a08: fix(cloud-connection)!: the marketplace `reseed-sample-data` door converts the installed package body forward once, as the install and the rehydrate do, so it reloads the translations those two doors load
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered translation-per-app-settings-removed, translation-validation-messages-removed, translation-component-submit-label-removed, translation-widget-sub-caption-removed) the reseed door now replays the conversion chain the install and the rehydrate already replay on the same stored body; the translation shapes it stops reloading are exactly the ones these four existing entries retire, and no spec key, export, option or stored shape is added, removed or renamed -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data` handed its side effects (the translations it reloads into the i18n service, and the seed datasets it runs) the package body exactly as the install ledger stores it. The install and the boot rehydrate hand the same side effects that body converted forward, through the ADR-0087 window the body's own `engines.protocol` opens (`ObjectQL.convertPackageBodyForward`). So for a package built before a translation retirement, a reseed reloaded a retired translation shape that the other two doors strip. The reseed now converts the body once, through the same entry point, after the protocol handshake has judged the entry as stored.
+  
+  - **Served less now:** for a package whose body declares a range this runtime admits, from a floor that predates a retirement, a reseed no longer reloads the translation shapes that the four translation conversions remove (`translation-per-app-settings-removed`, `translation-validation-messages-removed`, `translation-component-submit-label-removed` and `translation-widget-sub-caption-removed`). For example, a pre-17.4 per-app `settings` group is no longer loaded into the i18n service on reseed. After a reseed the i18n service holds what it holds after the install or a restart.
+  - **Refused now:** a stored body the converter throws on is no longer reloaded. The reseed raises the converter's error, as the install does, and loads nothing. Before, it reloaded the raw body. The protocol handshake that runs first throws on the same malformed range at every door, so this arises only for a body whose range reads differently to the handshake and to the converter.
+  - **Unchanged:** a body that declares no range is handed back as stored, so it reloads exactly as before. The handshake still runs first: a range that excludes this runtime is still answered `422 OS_PROTOCOL_INCOMPATIBLE`, before anything is converted or loaded. No conversion touches seed `data`, so a reseed seeds the same rows and answers the same counts. The ledger keeps the body as installed.
+  
+  What changes for you: nothing to rewrite. For such a package the install and every restart already log the conversion warning, once per conversion per process, and it names the remedy: rebuild the package with `os build` and republish it.
+- 6973014: fix(cloud-connection)!: `bind/start`, `bind/poll` and `unbind` require `setup.access`, and `GET /status` serves the connection's details only to a caller who holds it
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a runtime authorization narrowing at four of CloudConnectionPlugin's same-origin routes, not a metadata change: no spec key, export, option, config field or stored shape is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite; a caller who holds Setup Access is served exactly as before, and one who does not is refused or served less -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The Console's Cloud Connection page sits on the Setup app, which requires the Setup Access permission (`setup.access`). The routes behind that page did not ask for it: the three that change this runtime's cloud connection checked only that the caller was signed in, and `GET /api/v1/cloud-connection/status` served the connection record the control plane reports to every caller. Both now follow the page's rule.
+  
+  - **Refused now:** `POST /api/v1/cloud-connection/bind/start`, `POST /api/v1/cloud-connection/bind/poll` and `POST /api/v1/cloud-connection/unbind` answer a signed-in caller who does not hold `setup.access` with `403` and the standard `PERMISSION_DENIED` code, and the message names the capability. The refusal comes before any call to the control plane and before the stored credential is touched. What the caller holds is read through `resolveAuthzContext`, the platform's one authorization resolver, for the session these routes already read: a grant bound through a position, or scoped to the session's active organization, counts as it does everywhere else, and an API key sent beside the session lends its owner's grants to nobody.
+  - **Narrowed now:** `GET /api/v1/cloud-connection/status` still answers every caller `200`, so a probe can still tell that the plugin is mounted. A caller without `setup.access` (anonymous, signed in without it, or a session the ADR-0069 policy holds) is served `bound`, `runtimeId` and `provider` only. `environmentId` and `connection` are served to a caller who holds it.
+  - **Unchanged:** a caller who holds `setup.access` is served exactly as before, so the Console panel's connected view, its "Approved by" row included, keeps working for an administrator. An anonymous caller of the three connection-changing routes still gets `401`, and a held session still gets the ADR-0069 `403`. The other four session routes (`install`, `installation`, `installed`, `org-packages`) are not touched.
+  - **An unreadable permission store is not a denial.** When the grants cannot be read, the three connection-changing routes raise the platform's `SERVICE_UNAVAILABLE` outage (`503` through the host's error render) instead of answering a `403` that reads like a real refusal. `status` keeps answering, withholds the details, and logs the outage.
+  
+  What changes for you. Whoever manages this runtime's cloud connection needs Setup Access, which the default platform-administrator and organization-administrator permission sets already carry. A script that reads `connection` or `environmentId` from `GET /status` has to call it as a signed-in user who holds Setup Access.
+
+### Patch Changes
+
+- 2bcaefb: Clause-②: no
+  
+  fix(cloud-connection): an install-local uninstall takes the package's objects out of `GET /api/v1/meta/object` and `GET /api/v1/meta/object/NAME` at once, not at the next restart
+  
+  - **What was wrong.** An install-local install registers the package through the `manifest` service, and that register does two things: it puts the package in the engine's registry, and it copies each of the package's objects into the `metadata` service, stamped with the package's id. `DELETE /api/v1/marketplace/install-local/:manifestId` withdrew the registry half only. The object listing merges the `metadata` service into its answer and the by-name read asks that service first, so both kept serving every object of the uninstalled package, with its `_packageId`, until the runtime restarted, while `GET /api/v1/data/OBJECT` already answered `404`. The console's object pickers and Studio's object list offered objects that no longer existed.
+  - **What changes.** Right after the registry withdrawal, the DELETE removes from the `metadata` service each object copy stamped with the package's id whose name the registry no longer serves. The object listing and the by-name read stop serving the package's objects in the same process, as its data route, `GET /api/v1/meta/app` and `GET /api/v1/meta/permission` already did.
+  - **Not touched.** A same-name object the package did not copy there (one without its stamp) stays. The package's tables and rows are untouched, as before. A refused registry withdrawal still leaves the whole package loaded until the next restart, its copies included.
+  - **A copy the service refuses to remove** is reported on the DELETE answer as a failed `cleanups` entry named `metadata.unregister`, the way a refused registry withdrawal is reported, and the operator log names the objects kept and the remedy: restart the runtime. The uninstall cleanups still run, and the answer is still `200`. When nothing is refused, `cleanups` is unchanged.
+- 669296b: fix(cloud-connection): with `OS_RUNTIME_VERSION` unset, the server reports to the cloud the release `GET /api/v1/discovery` reports, not the Cloud Connection plugin's own `0.3.0`
+  
+  Clause-②: no
+  
+  `CloudConnectionPlugin` sends the server's version to the cloud in two places: as `runtime_version` on the approval links `POST /api/v1/cloud-connection/bind/start` returns, which the cloud's approval page shows next to the server's name, and as `runtime_version` in the registration request `POST /api/v1/cloud-connection/bind/poll` sends to the cloud's `/bind`. With `OS_RUNTIME_VERSION` unset, both carried the plugin's own `version` field, `0.3.0`. That string names the plugin, not the release the server runs, so an approver was shown `0.3.0` while discovery on the same server reported `18.0.0-next.*`.
+  
+  - **Unset now:** both places carry the `version` the server's discovery document reports. The plugin reads it from the discovery document itself, through the `protocol` service, each time it builds the approval links or the registration request, so the two answers cannot drift.
+  - **Set:** a set `OS_RUNTIME_VERSION` is sent verbatim, as before.
+  - **No discovery document:** on a server with no `protocol` service, or when reading it fails, neither place carries a version. The approval links have no `runtime_version` parameter and the registration request has no `runtime_version` key. Before, both carried `0.3.0`.
+  
+  What changes for you: nothing to rewrite. `OS_RUNTIME_VERSION` is now only needed to report a version other than the release, such as an image tag or a commit.
+- aa31569: Clause-②: no
+  
+  fix(objectql): withdrawing a package that extends another package's object puts the owner's definition back at `GET /api/v1/meta/object/NAME` at once, not at the next restart
+  
+  - **What was wrong.** When a package whose content is an `objectExtensions` field on another package's object is registered on a started kernel, the ObjectQL bridge rewrites the OWNER's copy of that object in the `metadata` service with the merged body, extension included. `DELETE /api/v1/marketplace/install-local/:manifestId` of the extender withdrew its contribution from the registry, so the object listing and the data plane dropped the field, but nothing rewrote the owner's copy. The by-name read asks that copy first, so `GET /api/v1/meta/object/NAME` kept serving the withdrawn field until the runtime restarted.
+  - **What changes.** The ObjectQL bridge remembers which owners' copies each package's extensions rewrote, and the `manifest` service gains `restoreExtendedObjectCopies(packageId)`: once the registry no longer holds the package, it re-registers each such copy with the registry's current definition. The install-local DELETE calls it right after the registry withdrawal. The by-name read then serves the owner's body without the extension's fields, as the listing and the data plane already did.
+  - **Not touched.** Only a copy stamped with the registry owner's id is rewritten, the same rule the bridge overwrites by, so an authored copy stays. The DELETE answer is unchanged. A copy that cannot be restored is logged once at `error`, naming the objects and the remedy: restart the runtime.
+- af284b0: feat(spec): the remaining `getSession` readers read `AuthSessionApi`'s declared result, and none reads a top-level `activeOrganizationId`
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec/contracts` — `AuthSessionApi.getSession`'s result gains three optional `user` members**, each declared for a named reader: `isPlatformAdmin` (`boolean`, the ADR-0068 D2 rung plugin-auth's `customSession` derives) and `role` (`string | null`, better-auth's `admin` plugin scalar), both read by `judgePlatformAdmin` in `@objectstack/plugin-auth`; and `name` (`string`), read by the runtime dispatcher's AI-route `req.user` resolver as the display name. Every member is optional, so every implementer and caller typechecks unchanged.
+  - **The readers read through the declared type instead of `any` or a cast** (types only, runtime behaviour unchanged): `judgePlatformAdmin` and the four platform-admin mounts in `@objectstack/plugin-auth` (better-auth's own session type now has to fit the declaration at those reads), the REST server's two session reads (`@objectstack/rest`), the dispatcher's posture read, `resolveSessionData` and both `HttpDispatcher` reads (`@objectstack/runtime`), the cloud-connection and install-local session reads (`@objectstack/cloud-connection`), the webhook redeliver door (`@objectstack/plugin-webhooks`), and the storage session bridge (`@objectstack/service-storage`).
+  - **Fix — the top-level `activeOrganizationId` fallback is removed** from the storage upload stamp (`@objectstack/service-storage`) and from install-local's `resolveActiveOrgId` (`@objectstack/cloud-connection`). The active organization is read from `session.activeOrganizationId` alone, where the contract declares it. No in-process producer answers a top-level `activeOrganizationId` (better-auth's read is `{ user, session }`), so for the shipped auth plugin nothing changes. An auth service that answered only the flattened shape now gets no organization: the upload is not stamped, and install-local reports no active organization. To fix it, answer the active organization on `session.activeOrganizationId`, as `AuthSessionApi` declares it.
+- 3a734e0: feat(spec)!: a page region named `main` takes only `width: 'full'` — `'small'`, `'medium'` and `'large'` there are refused at publish (#24326)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered page-main-region-width-refused, page-main-region-width-removed -->
+  
+  **BREAKING** — an accept-set narrowing on a published authoring surface, shipped as `minor` under the repo's launch-window convention.
+  
+  `PageRegionSchema.width` is one enum shared by every region, so a `main` region accepted `'small'`, `'medium'` and `'large'`. The console never read them: every layout draws `main` at the width the layout leaves it (the flexible column beside `sidebar` and `aside`; one grid cell on `dashboard`), and the only reader of `main.width` is the page itself, for `'full'`, which lifts the page's max-width cap. A three-column page that asked for a `large` main got the space the two rails left, and every door reported success.
+  
+  - `PageSchema` now refuses `width: 'small' | 'medium' | 'large'` on a region named `main` (matched case-insensitively, as the console matches it), at `regions.N.width`, on every page kind and template. The message names the region and `'full'` as the one width it takes. The doors are `definePage`, `defineStack` (so `os validate` and `os build`, `STACK_SCHEMA_INVALID` 422) and the metadata save door (422 `INVALID_METADATA`).
+  - `'full'` on `main` is unchanged, with its page-wide meaning. Every other region accepts the same widths as before.
+  - The check is exported as `checkPageMainRegionWidth` from `@objectstack/spec/ui`, so a mirror built from `PageSchema.shape` can attach the same rule.
+  - Data at rest keeps loading: the retired ADR-0087 conversion `page-main-region-width-removed` deletes those widths on read: a stored page row, a compiled artifact inside the window its declared protocol range opens, and a package body registered with its declared range. The page renders exactly as before.
+  - `@objectstack/mcp` (the Connect an Agent page) and `@objectstack/cloud-connection` (the Cloud Connection page) drop `width: 'large'` from their `main` region. Both render the same.
+  
+  ### Migration: FROM → TO
+  
+  | Wrote | Write instead |
+  | :--- | :--- |
+  | `width: 'small' \| 'medium' \| 'large'` on a region named `main` | drop it; `'full'` stays |
+  
+  Deleting the key changes nothing on screen. Write `width: 'full'` only when you want a full-bleed page, which drops the page's max-width cap.
+- 71fa166: Clause-②: no
+  
+  fix(cloud-connection): the sign-in refusals and the unmanaged-install copy no longer call the running system "this environment"
+  
+  - **What changed.** Inside the running system, user-facing copy names the system the user is in as "this system", or drops the noun. The seven `401 UNAUTHENTICATED` answers on `/api/v1/cloud-connection/*` now read "Sign in to connect a cloud account." (`bind/start`), "Sign in to install apps." (`install`) and "Sign in." (`bind/poll`, `unbind`, `installation`, `installed`, `org-packages`), where each used to say "Sign in to this environment …". On `/api/v1/marketplace/install-local`, the `409 RESOURCE_CONFLICT` that refuses a managed install over an unmanaged copy now names the holder as "the writable base 'BASE' — an unmanaged install of this package, or a base authored in this system — whose items are this system's own metadata", and the unmanaged install's success `note` reads "The package's metadata is now this system's own, in the base 'BASE' …".
+  - **Unchanged.** Every HTTP status, error code (`UNAUTHENTICATED`, `RESOURCE_CONFLICT`), `details` object and response shape. Server log lines are not touched.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [6e43b7b]
+- Updated dependencies [727091c]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [f3174ef]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [d702b18]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [5a9a80b]
+- Updated dependencies [1489952]
+- Updated dependencies [8eccf51]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [58a2faa]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [cbfa5e4]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [9822b05]
+- Updated dependencies [889bf12]
+- Updated dependencies [7a8733f]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [d79dc48]
+- Updated dependencies [1173017]
+- Updated dependencies [51ad8e4]
+- Updated dependencies [ec749fb]
+- Updated dependencies [ec749fb]
+- Updated dependencies [c4526a7]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [41c7405]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [6868514]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [1827571]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/runtime@18.0.0-next.4
+  - @objectstack/metadata-protocol@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

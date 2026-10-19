@@ -1,5 +1,240 @@
 # @objectstack/verify
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [9847f87]
+- Updated dependencies [8ed3786]
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [9112bcd]
+- Updated dependencies [94e60c0]
+- Updated dependencies [94e60c0]
+- Updated dependencies [9524666]
+- Updated dependencies [adb7910]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [45bec43]
+- Updated dependencies [964a237]
+- Updated dependencies [b7a688e]
+  - @objectstack/plugin-sharing@18.0.0-next.5
+  - @objectstack/plugin-hono-server@18.0.0-next.5
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/objectql@18.0.0-next.5
+  - @objectstack/runtime@18.0.0-next.5
+  - @objectstack/plugin-security@18.0.0-next.5
+  - @objectstack/plugin-auth@18.0.0-next.5
+  - @objectstack/rest@18.0.0-next.5
+  - @objectstack/platform-objects@18.0.0-next.5
+  - @objectstack/mcp@18.0.0-next.5
+  - @objectstack/service-datasource@18.0.0-next.5
+  - @objectstack/plugin-approvals@18.0.0-next.5
+  - @objectstack/service-automation@18.0.0-next.5
+  - @objectstack/service-package@18.0.0-next.5
+  - @objectstack/service-mailbox@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/metadata@18.0.0-next.5
+  - @objectstack/plugin-audit@18.0.0-next.5
+  - @objectstack/plugin-email@18.0.0-next.5
+  - @objectstack/plugin-webhooks@18.0.0-next.5
+  - @objectstack/service-analytics@18.0.0-next.5
+  - @objectstack/service-cache@18.0.0-next.5
+  - @objectstack/service-job@18.0.0-next.5
+  - @objectstack/service-messaging@18.0.0-next.5
+  - @objectstack/service-queue@18.0.0-next.5
+  - @objectstack/service-realtime@18.0.0-next.5
+  - @objectstack/service-settings@18.0.0-next.5
+  - @objectstack/service-sms@18.0.0-next.5
+  - @objectstack/service-storage@18.0.0-next.5
+  - @objectstack/trigger-api@18.0.0-next.5
+  - @objectstack/trigger-record-change@18.0.0-next.5
+  - @objectstack/trigger-schedule@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+  - @objectstack/plugin-pinyin-search@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Patch Changes
+
+- 1eae21f: fix(verify): the dashboard date-window family also proves sums and derived measures, and says why an average stays out
+  
+  Clause-②: no (no export, option or type moves: the family reads the measures it already read, and a widget it used to exclude can now be proven or contradicted)
+  
+  `runDashboardWindowProofs` (and `os verify --dashboard-windows`) now judges every verdict in fixture rows, so it compares every measure whose difference can be read back as rows:
+  
+  - **A `sum`** is probed. Each fixture row holds the summed field to the value the CRUD derivation synthesizes for it, or to the value the widget's own selection already holds there. The sum's difference over that value is the rows the window took in. FROM: a sum-only widget was `excluded` (`no-count-measure`), and a sum beside a count was an `excluded` measure (`not-a-count`). TO: `proven` or `contradicted` like a count. A sum of a relationship path, a summed field with no synthesizable value, and a held value that is not a non-zero number are `excluded` as `count-field-unsynthesizable`, and the reason names which.
+  - **A `derived` measure** (`ratio`, `sum`, `difference`, `product`) is probed through its operands, which the widget's own answer carries beside it. Each operand must be a count or a sum of the same dataset, and the fixture rows meet every operand's filter. Under each preset every operand must take in exactly the rows the window selects. The value the widget shows must equal `evaluateDerivedMeasures` (the server's own evaluator, from `@objectstack/service-analytics`) over that row's operands, or the preset is `contradicted` and the detail names both values. A derived measure over a derived one, or over a measure that is not a count or a sum, stays `excluded` (`not-a-count`), and the reason names the operand.
+  - **An `avg`, `min`, `max` or `count_distinct`** stays `excluded` (`not-a-count`, or `no-count-measure` for a widget with nothing else), with a reason that says why. What a fixture row does to it depends on rows the app already holds in the window: their number for an average, their extreme for a minimum or maximum, their values for a distinct count. Nothing the widget answers reveals that, so deriving it would mean guessing the data. The reason text changes: FROM `"avg_effort" aggregates avg of effort, not a row count` TO `"avg_effort" averages effort: an average is not additive — …`.
+  - The widget-level `no-count-measure` reason reads `no measure the widget selects can be compared (…)`. The `excludedKind` values are unchanged.
+  - **A new `not-run` cause.** The family gives up on a preset when a sum's own total is so large that its floating-point difference cannot resolve one fixture row. That needs 2^34 times the held value, and the detail says so.
+  - **Upgrading:** on an app whose dashboards bind sums or derived measures, `os verify --dashboard-windows` now probes those widgets. A window that does not reach them now fails the run (`hardFailures`), where before they were only counted as `excluded`.
+- d65826f: fix: framework writes on tenant-column objects name the organization they can derive (ADR-0131 D9)
+  
+  Clause-②: yes (widening)
+  
+  A write on a tenant-column object with no organization is derived under `single` and refused under a wall (ADR-0131 D9). Before the engine stops letting such writes through, each of these producers now names the organization it can derive itself. Under `single` that is the Default Organization, which is the owner the engine would derive anyway, so no reader changes. Under a wall the row names an organization only where the producer has one. The rows it cannot attribute are written exactly as before.
+  
+  - **`@objectstack/plugin-auth`.** The self-registration grant (`sys_user_permission_set`) and the auth mails about a user (verification, password reset, account invitation, magic link, change-email notice → `sys_email`) read one derivable organization: the `tenancy` service's `defaultOrgId()`. Under `single` that is the Default Organization. Under a wall it is none, because the registrant belongs to no organization yet. The verification and reset mails used to persist with no organization even under `single`.
+  - **`@objectstack/plugin-audit`.** An activity row (`sys_activity`) about a record with no organization of its own (a `sys_user`, a platform setting), written with no session organization (a sign-up), takes the Default Organization under `single`. The record's own organization and then the session's still win. The ledger's `tenant_id` attribution is unchanged. New optional `AuditWriterOptions.getDefaultOrganizationId()`; `AuditPlugin` wires it to the `tenancy` service.
+  - **`@objectstack/service-settings`.** The `sys_secret` ciphertext and the `sys_setting_audit` history row of a `tenant` or `user` value carry that value's organization, which is the same owner as its `sys_setting` row. A `global` value's rows name none. New optional `organization_id` on `SettingsSecretStore.insert`'s row and `organizationId` on `SettingsAuditWriter.write`'s entry; the built-in writers persist them. A failed `sys_setting_audit` write is now reported at `error`, not `warn`: the settings write succeeds while its history row is lost. The first report names the consequence and the fix. `buildSettingAuditWriter`'s optional logger argument keeps every sink it accepted (none, `{}`, or one with an optional `warn`) and additionally takes a sink that carries `error`. It reports through `error` when the sink has it, else through `warn`.
+  - **`@objectstack/verify`.** The RLS probe and position personas' grants (`sys_user_permission_set`, `sys_user_position`) belong to the organization the persona is a member of (the Default Organization under `single`). They used to be written with an explicit `organization_id: null`. A persona that belongs to no organization, or to several, names none.
+- Updated dependencies [b2e7870]
+- Updated dependencies [6a49efb]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [78652c0]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [646303e]
+- Updated dependencies [e9bc60b]
+- Updated dependencies [52ff308]
+- Updated dependencies [d1f082d]
+- Updated dependencies [f5ef054]
+- Updated dependencies [0d34066]
+- Updated dependencies [0c3db0f]
+- Updated dependencies [8d3dd6f]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [03ac4ec]
+- Updated dependencies [5e97907]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [6e43b7b]
+- Updated dependencies [727091c]
+- Updated dependencies [62c4441]
+- Updated dependencies [f792290]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [d702b18]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [9975c26]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [5a9a80b]
+- Updated dependencies [1489952]
+- Updated dependencies [04fd88a]
+- Updated dependencies [aaaeeac]
+- Updated dependencies [8eccf51]
+- Updated dependencies [8a88901]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [8259ea0]
+- Updated dependencies [9040945]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [2bcd406]
+- Updated dependencies [58a2faa]
+- Updated dependencies [e74ec56]
+- Updated dependencies [58a2faa]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [cbfa5e4]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [77e9f79]
+- Updated dependencies [83dfbc0]
+- Updated dependencies [9822b05]
+- Updated dependencies [889bf12]
+- Updated dependencies [7a8733f]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [e15897c]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [d79dc48]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [5da2e88]
+- Updated dependencies [51ad8e4]
+- Updated dependencies [ec749fb]
+- Updated dependencies [c4526a7]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [6868514]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [538f923]
+- Updated dependencies [d65826f]
+- Updated dependencies [741aa85]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [d8e11b5]
+- Updated dependencies [44a5011]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+- Updated dependencies [2a1e48a]
+- Updated dependencies [71fa166]
+- Updated dependencies [e22defb]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/plugin-security@18.0.0-next.4
+  - @objectstack/plugin-auth@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/plugin-sharing@18.0.0-next.4
+  - @objectstack/rest@18.0.0-next.4
+  - @objectstack/service-settings@18.0.0-next.4
+  - @objectstack/service-storage@18.0.0-next.4
+  - @objectstack/plugin-audit@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/runtime@18.0.0-next.4
+  - @objectstack/plugin-hono-server@18.0.0-next.4
+  - @objectstack/plugin-email@18.0.0-next.4
+  - @objectstack/plugin-webhooks@18.0.0-next.4
+  - @objectstack/plugin-approvals@18.0.0-next.4
+  - @objectstack/mcp@18.0.0-next.4
+  - @objectstack/metadata@18.0.0-next.4
+  - @objectstack/plugin-pinyin-search@18.0.0-next.4
+  - @objectstack/service-analytics@18.0.0-next.4
+  - @objectstack/service-automation@18.0.0-next.4
+  - @objectstack/service-cache@18.0.0-next.4
+  - @objectstack/service-datasource@18.0.0-next.4
+  - @objectstack/service-job@18.0.0-next.4
+  - @objectstack/service-mailbox@18.0.0-next.4
+  - @objectstack/service-messaging@18.0.0-next.4
+  - @objectstack/service-package@18.0.0-next.4
+  - @objectstack/service-queue@18.0.0-next.4
+  - @objectstack/service-realtime@18.0.0-next.4
+  - @objectstack/service-sms@18.0.0-next.4
+  - @objectstack/trigger-api@18.0.0-next.4
+  - @objectstack/trigger-record-change@18.0.0-next.4
+  - @objectstack/trigger-schedule@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Patch Changes

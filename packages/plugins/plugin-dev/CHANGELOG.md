@@ -1,5 +1,159 @@
 # @objectstack/plugin-dev
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [8ed3786]
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [9112bcd]
+- Updated dependencies [94e60c0]
+- Updated dependencies [94e60c0]
+- Updated dependencies [9524666]
+- Updated dependencies [adb7910]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [45bec43]
+- Updated dependencies [964a237]
+  - @objectstack/plugin-hono-server@18.0.0-next.5
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/objectql@18.0.0-next.5
+  - @objectstack/runtime@18.0.0-next.5
+  - @objectstack/plugin-security@18.0.0-next.5
+  - @objectstack/plugin-auth@18.0.0-next.5
+  - @objectstack/rest@18.0.0-next.5
+  - @objectstack/account@18.0.0-next.5
+  - @objectstack/setup@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/driver-memory@18.0.0-next.5
+  - @objectstack/service-i18n@18.0.0-next.5
+  - @objectstack/service-realtime@18.0.0-next.5
+  - @objectstack/service-storage@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Patch Changes
+
+- Updated dependencies [b2e7870]
+- Updated dependencies [6a49efb]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [646303e]
+- Updated dependencies [e9bc60b]
+- Updated dependencies [52ff308]
+- Updated dependencies [d1f082d]
+- Updated dependencies [f5ef054]
+- Updated dependencies [0d34066]
+- Updated dependencies [8d3dd6f]
+- Updated dependencies [03ac4ec]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [6e43b7b]
+- Updated dependencies [727091c]
+- Updated dependencies [f792290]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [d702b18]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [9975c26]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [5a9a80b]
+- Updated dependencies [1489952]
+- Updated dependencies [aaaeeac]
+- Updated dependencies [8eccf51]
+- Updated dependencies [8a88901]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [8259ea0]
+- Updated dependencies [9040945]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [2bcd406]
+- Updated dependencies [58a2faa]
+- Updated dependencies [e74ec56]
+- Updated dependencies [58a2faa]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [cbfa5e4]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [83dfbc0]
+- Updated dependencies [9822b05]
+- Updated dependencies [889bf12]
+- Updated dependencies [7a8733f]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [d79dc48]
+- Updated dependencies [1173017]
+- Updated dependencies [51ad8e4]
+- Updated dependencies [ec749fb]
+- Updated dependencies [c4526a7]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [6868514]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [d65826f]
+- Updated dependencies [741aa85]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [d8e11b5]
+- Updated dependencies [44a5011]
+- Updated dependencies [f573976]
+- Updated dependencies [2a1e48a]
+- Updated dependencies [e22defb]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/plugin-security@18.0.0-next.4
+  - @objectstack/plugin-auth@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/rest@18.0.0-next.4
+  - @objectstack/service-storage@18.0.0-next.4
+  - @objectstack/runtime@18.0.0-next.4
+  - @objectstack/plugin-hono-server@18.0.0-next.4
+  - @objectstack/driver-memory@18.0.0-next.4
+  - @objectstack/service-i18n@18.0.0-next.4
+  - @objectstack/service-realtime@18.0.0-next.4
+  - @objectstack/account@18.0.0-next.4
+  - @objectstack/setup@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Patch Changes

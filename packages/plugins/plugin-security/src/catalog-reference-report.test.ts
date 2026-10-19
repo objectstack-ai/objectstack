@@ -199,7 +199,11 @@ const orgCtx = (organizationId: string | null) =>
 async function insertRows(b: Booted, object: string, rows: Array<Record<string, unknown>>): Promise<void> {
   for (const row of rows) {
     const organizationId = (row.organization_id as string | undefined) ?? null;
-    await b.engine.insert(object, row, { context: orgCtx(organizationId) } as any);
+    // [C8 stage 8b] An organization-less row is legacy residue, landed straight
+    // through the driver: under `single` the engine stamps or refuses such a
+    // platform insert (ADR-0131 D9), and this rig holds two organizations.
+    if (organizationId === null) await (b.engine as any).getDriver(object).create(object, row);
+    else await b.engine.insert(object, row, { context: orgCtx(organizationId) } as any);
   }
 }
 

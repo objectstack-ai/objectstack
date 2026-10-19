@@ -1,5 +1,178 @@
 # @objectstack/plugin-security
 
+## 18.0.0-next.5
+
+### Minor Changes
+
+- 94e60c0: fix(plugin-security)!: the row-policy collection applies an object's declared `defaultRowScope` when no permission set the caller holds carries a row policy for the object
+  
+  Clause-②: no (narrowing) — the narrowing is real only for a principal with no platform baseline whose permission sets carry no row policy for an object that declares a default; no object in this release declares one, and no export, option, schema or stored shape moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime row-scope narrowing at the security plugin's one row-policy collection, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped: `ObjectSchema.defaultRowScope` already parses, and this change only gives it its reader, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is the rows a principal reads on an object that declares a default when none of its permission sets carries a row policy for that object and operation: it now reads under the object's default instead of under no row filter. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers the collection and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `ObjectSchema.defaultRowScope` declares an object's default row-level security policy. Until now no server read it. The security plugin's row-policy collection (`collectRLSPolicies`), which every read, write and explain composes from, now applies it:
+  
+  - **When it applies.** When the policies the caller's permission sets carry for the object and the operation come out empty, the object's default is collected in their place, for the declaring object. Empty means what the collection already meant by it: a held policy for every object (`'*'`) counts, while a held policy that is switched off, outside the caller's positions, or for another operation does not.
+  - **How it is judged.** Exactly as a held policy: its `operation`, `positions` and `enabled` decide where it applies, and its `using` and `check` compile through the same compiler. So it scopes reads, the by-id and bulk write filters, and the post-image check, and `checkAuthoredRowWrite` reads it as the declaration it is. A `using` the compiler cannot lower is dropped with the same warning and fails closed to zero rows, as an authored policy's does.
+  - **Explain** names an applied default as the object's own declaration, with its `name`, `label` and `description`: the row-level layer's `detail` says so, and a record-grained explanation names the rule after the default, reached `via: 'object_default'`.
+  - **Unchanged:** a policy an authored set carries for the object is used as authored, with the default not added to it; a principal whose superuser bypass skips row policies never reaches the collection; an object that declares no default collects exactly what it collected before. A deployment that composes the platform baseline is unaffected for the identity objects, whose shipped sets carry their own policies.
+  
+  What changes for you: nothing until an object declares `defaultRowScope`. Once one does, a principal whose permission sets carry no row policy for it reads only the rows the default admits. To give such a principal a different scope, put a row policy for the object in a permission set it holds; that policy is then used instead of the default.
+
+### Patch Changes
+
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [b7a688e]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+  - @objectstack/platform-objects@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/formula@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Minor Changes
+
+- b2e7870: fix(security): under the `single` tenancy posture the first-user platform-admin grant is owned by the Default Organization, and every reader of platform standing reads that row
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, export, option, error code or stored shape is added, removed or renamed: the new resolver and guard helpers and the guard's organization standing-key list are module-private, and `bootstrapPlatformAdmin`'s `reason` was already a string. The only stored-shape move — an organization-less `admin_full_access` grant becoming the Default Organization's — is ADR-0131 D10's ceremony (`os migrate organization-ownership --apply`), so there is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no Zod schema in packages/spec changes (not runtime-interface-only or type-surface-only in the spec sense); and nothing exported is removed (not runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM** (`@objectstack/plugin-security`): a `single` deployment holding several organizations, none slugged `default`, promoted its first user with an organization-less `admin_full_access` grant. **TO:** it is not promoted; the bootstrap logs one `error` line, returns `reason: 'default_organization_unresolved'` and writes no grant row. **Fix:** give the intended organization the slug `default` (or keep one organization, or declare a walled posture); the next `kernel:ready` or sign-up pass promotes.
+  - **FROM** (`@objectstack/plugin-auth`): a `sys_organization` `slug` change or delete was never refused. **TO:** it is refused with `403 PERMISSION_DENIED` when that organization is the Default Organization whose `admin_full_access` grant is the last unbanned administrator's anchor. **Fix:** give another account administrator standing first, then make the change.
+  - **FROM** (`@objectstack/plugin-auth`): `ensureDefaultOrganization` under `single`, with a sole organization of another slug, created a second, `default`-slugged organization and bound the administrator there. **TO:** it reuses the sole organization; no second organization is created. **Fix:** none needed; an install that wants a `default`-slugged organization re-slugs its existing one or creates it explicitly.
+  - **Widening** (`@objectstack/core`): under `single` only an organization-less `admin_full_access` grant conferred `PLATFORM_ADMIN`. Now a grant owned by the Default Organization confers it too and applies in every organization; a pre-existing Default-Organization-scoped `admin_full_access` grant gains the rung on upgrade; and `sys_organization` becomes a standing-deriving table (the resolver reads it only under `single` for a holder of an organization-owned `admin_full_access` grant — one or two small reads per uncached request; the last-administrator guard adds three to six small reads per guarded write).
+  
+  - **The promotion writes the Default Organization (`@objectstack/plugin-security`).** A `single` deployment with no configuration still promotes its first user that can sign in. The `admin_full_access` grant row that promotion writes now carries the Default Organization as its `organization_id` (ADR-0131 D5), never NULL. The Default Organization is the one with `slug = 'default'`, else the only organization: the organization the auth plugin creates at boot. A deployment that names no Default Organization (several organizations, none with the slug `default`) is not promoted. The bootstrap logs one `error` line saying why and returns `reason: 'default_organization_unresolved'`. It writes no grant without an owner. `OS_PLATFORM_OWNER_EMAIL` is still the walled-posture channel and is not required under `single`.
+  - **The authorization resolver reads that row (`@objectstack/core`).** Under `single`, `PLATFORM_ADMIN` derives from an `admin_full_access` grant owned by the Default Organization, and still from the organization-less row an earlier release wrote. The anchoring grant applies in whichever organization the user acts in, as the organization-less row always did. A grant of the set owned by any other organization confers the set in that organization, never platform standing. Under a walled posture no grant anchors standing (unchanged). One predicate decides both postures, with the posture as its parameter. The resolver reads `sys_organization` only for a user who holds an organization-owned `admin_full_access` grant under `single`.
+  - **An upgraded database keeps its administrator.** `os migrate organization-ownership --apply` gives a `single` database's organization-less grants to the Default Organization, the platform admin's grant included. Before this change the resolver then stopped grading that admin `PLATFORM_ADMIN`, and every later boot found no organization-less holder and promoted again. The holder scan now reads the Default Organization's grant, so a migrated database keeps its admin and promotes nobody else. A user who holds both rows counts as one holder.
+  - **The last-administrator guard and the default-organization bootstrap read it too (`@objectstack/plugin-auth`).** The break-glass guard counts the holder of the Default Organization's grant as a platform admin and treats that grant as evidence that the environment once had one. It also judges the two organization writes that move the anchor off that grant: changing the Default Organization's `slug` while another organization exists, and deleting it. Either is refused when it would leave no administrator who can sign in. `ensureDefaultOrganization` finds the admin through the same grant. Under `single` it also reuses the Default Organization when that is a sole organization with another slug, where it used to create a second, `default`-slugged organization.
+
+### Patch Changes
+
+- 6a49efb: fix(plugin-security): the `sys_user_position.position` refusal names the security catalog type it judged against, and reads no retired catalog table
+  
+  A `sys_user_position` write naming no position in the security catalog is still refused `400 VALIDATION_FAILED` with one `reference_not_found` entry at `position`. That entry's `constraint.target` now reads `position`, the security catalog type the value is judged against, instead of `sys_position`, a catalog table that is no longer registered. The sibling `sys_user_permission_set.permission_set` refusal already answers `target: 'permission'`. A client that read `constraint.target` should expect `position`.
+  
+  The refusal no longer looks a refused value up as a `sys_position` record id to suggest that row's name. That lookup could not succeed on a current deployment, so it never suggested a name. Every refused value now gets the same remedy: write the machine name of an existing position, or declare the position first.
+  
+  Also removed: the unused internal `per-organization-catalog.ts` module, which nothing imported. Nothing else changes.
+  
+  Clause-②: no
+- eebaf3b: feat(objectql,core): the driver's tenant read scope is the organization wall's verdict — one predicate for Layer 0 and every driver (ADR-0131 D8)
+  
+  Clause-②: yes (widening)
+  
+  - **What changed.** The engine no longer derives `DriverOptions.tenantId` / `tenantIds` beside the organization wall. `buildDriverOptions` projects the wall's own verdict onto them: the verdict plugin-security records on the operation (`OperationContext.tenantLayer0Verdict`) where its wall ran, and otherwise the same function over the engine's own facts (the posture in force, the context's organization and membership set). The function, `computeTenantLayer0Verdict` with its input type `TenantLayer0Input`, moves to `@objectstack/core` (new export); `@objectstack/plugin-security`'s `tenant-layer.ts` re-exports it and its Layer 0 is byte-identical.
+  - **FROM → TO, per posture, for a read, count, aggregate, update or delete on an object with an organization column:**
+  
+    | posture / caller | driver scope before | driver scope now |
+    |:--|:--|:--|
+    | `single`, any caller naming an organization | that organization (plus organization-less rows) | **none** |
+    | `isolated`, member | the active organization | unchanged |
+    | `group`, member | the membership set | unchanged |
+    | walled, exempt `PLATFORM_ADMIN` on a posture-permitting object, or the verified platform owner's read | the active organization | **none** — what Layer 0 already admitted |
+    | walled, system context naming an organization | that organization | unchanged |
+  
+  - **Not changed.** Inserts and upserts keep the active organization as `tenantId` in every posture: the row is stamped with it, its counter scopes by it, and an upsert that would merge into another organization's row is still refused. Both `orWhereNull` compatibility arms in `SqlDriver.applyTenantScope` stay (their retirement is a later stage of ADR-0131 D13).
+  - **Who notices.** A `single` deployment that holds more than one organization was kept apart by the driver only by accident; postures now differ only in enforcement (ADR-0131 D11), and `single` enforces no wall. To keep organizations apart, run the `isolated` or `group` posture. Code that relied on a context organization to narrow a read on `single` names the organization in its own `where`.
+  - **Migration.** ADR-0087 semantic entry `driver-read-scope-follows-tenant-wall`. A deployment's `platformGlobalObjects` carve-out already reaches the driver through the column plan (ADR-0131 D7): a declared object carries no organization column, so neither wall has anything to scope.
+- 2bcd406: fix(plugin-security): the security catalog echo keeps naming a disabled package's permission set or position as that package's
+  
+  The echo reads which package owns a stored overlay from the protocol's by-name read. That read now withholds a disabled package's item and keeps its protection envelope, so the echo reads the envelope's `packageId` instead of `item._packageId`. Before, a disabled package's set was echoed unowned, lost its ADR-0090 D5 audience-binding suggestion, and stayed unowned after the package was re-enabled until the next save, publish or boot. Enforcement is unchanged.
+- 44a5011: Clause-②: no
+  
+  Refusals and Setup help text that a user reads inside the running system no longer call that system
+  "this environment". They say "this system", or they drop the noun.
+  
+  - `@objectstack/plugin-auth`: the two self-registration refusals drop the noun ("Self-registration is
+    closed (audience posture invite_only).", "Self-registration is limited to approved email domains, …").
+    So do the OAuth self-service `503` ("OIDC provider is not enabled") and the SSO `400`
+    `DOMAIN_VERIFICATION_DISABLED` ("Domain verification is not enabled (set
+    OS_SSO_DOMAIN_VERIFICATION)."). The last-administrator guard's refusals and its two warning lines say
+    "this system", including "nobody able to administer the system". The OIDC authorize-gate refusal
+    (`403 ENV_ACCESS_DENIED`) keeps "this environment". Only the cloud control plane installs that gate,
+    and there the noun names the environment a cloud user is signing in to.
+  - `@objectstack/plugin-security`: the diagnostic `message` of the packaged-permission-set lock now reads
+    "… is declared by package '…' and is locked — editing it here would …". The provenance-unknown
+    refusal says "this system could not determine …". Both `userMessage` texts are unchanged.
+  - `@objectstack/service-settings`: the Mail and SMS provider groups read "Choose how this system sends
+    outbound email." and "… outbound SMS.". The Authentication audience group reads "Who may become a user
+    of this system's apps.". The zh-CN, ja-JP and es-ES bundles change only the noun, to 本系统,
+    このシステム and este sistema.
+  
+  Only the human-readable text moves. Every HTTP status, error code, settings key and response shape
+  stays as it was.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

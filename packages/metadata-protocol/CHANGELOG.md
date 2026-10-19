@@ -1,5 +1,222 @@
 # @objectstack/metadata-protocol
 
+## 18.0.0-next.5
+
+### Minor Changes
+
+- 2ec6827: feat(metadata-protocol): the draft save records `draftChanges` — which surface, actor and instant last changed each key path of a pending draft — and the strict draft read serves it
+  
+  Clause-②: yes (widening)
+  
+  - **Recorded by the draft save.** `saveMetaItem({ mode: 'draft', surface })` compares the body it writes with the body it replaces, inside the write's own transaction: the draft row, else (the draft's first save) the active row its publish would replace, else nothing, which records `[]`, the whole body. A path is the object keys from the body root to the deepest changed key; an array is one leaf, with no index. Each changed path is stamped `{ by: surface ?? 'api', actor, at }`, where `actor` is the value the save's history event carries (or `null`) and `at` is the write's instant as `toISOString()`.
+  - **Kept until publish or discard.** No two entries share a path: a save replaces every entry at or under each path it changes, so the longest prefix answers for a key. A save that changes no key path leaves the entries as they were. Publish and discard delete the draft row, and the entries with it, so the next draft starts clean. A `migrate-stored` rewrite and an active save record nothing.
+  - **Served on the strict draft read only.** `getMetaItem({ state: 'draft' })` answering a stored draft row carries `draftChanges` beside `item`. It is absent on the active read, the cached branch, the `?preview=draft` read, and a draft row whose saves recorded none (one saved before this release) — never `[]`.
+  - **Stored on the row.** `sys_metadata` gains a nullable `draft_changes` column (`@objectstack/metadata-core`'s `SysMetadataObject`), never inside the stored body. Schema sync adds it to an existing table on boot with no manual step (measured on SQLite and the memory driver).
+  - **Translated labels.** `@objectstack/platform-objects`' translation bundles carry the new column's label and help text in every shipped locale.
+  - **An unknown `surface` is refused.** In-process, a value outside `copilot | studio | api` is refused `400 INVALID_REQUEST` before anything is written.
+- 33a45cc: fix(metadata-protocol): removing a field that stores nothing is not a destructive change
+  
+  Clause-②: yes (widening) (the save door newly accepts, without `force`, a removal it refused; owes the seat's `TIER_DEFAULT` review of record before the queue)
+  
+  - **What changed.** The object save's safety diff (`PUT /api/v1/meta/object/:name`, and every other door that reaches `saveMetaItem`'s destructive gate) now judges each finding by whether the field is stored, using the spec's storage predicate `isVirtualSearchField` (`SEARCH_VIRTUAL_TYPES`) on the field's own declaration — the predicate the sortability projection already reads. A `formula` field is computed on read and has no column (ADR-0079 addendum, item 9), so:
+    - removing a `formula` field saves `200` without `?force=true` (it answered `409 DESTRUCTIVE_CHANGE` with "existing data in this column will become inaccessible");
+    - retyping a `formula` field into a stored kind saves without `force`: the new column starts empty, and no stored value is lost.
+  - **Not changed.** Removing a stored field, including an engine-computed but stored one (`autonumber`, `summary`), still answers `409 DESTRUCTIVE_CHANGE` with the same `field_removed` finding and message. Retyping a stored field into a `formula` still answers `409` with `field_type_change`. The `force` mechanism, the messages and the error codes are unchanged.
+  - **Who notices.** An author or an agent that removes a formula field no longer needs `force=true` for it, so `force=true` stays reserved for a real loss of stored data.
+
+### Patch Changes
+
+- e67ac4b: `duplicatePackage` no longer renames, in free text, a name that is both a prefixed package object and a field key of one of the package's objects. Such a name (for example a field keyed `acme_deal` on the object `acme_deal`) may name the field, so it is now rewritten only at object-reference properties (`object`, `reference`, `objectName`, a permission set's `objects` keys, …), the way a bare object name already is. A copied list view's `columns` and a copied form's `sections[].fields` keep naming the field the copy has, instead of a field named after the renamed object: the list view is no longer refused at the copy with `list-view-field-unknown`, and the form no longer copies a field the copy does not have. Free text naming such an object (a description) is left as stored; a prefixed object no field key spells is still renamed in free text as before.
+- Updated dependencies [4bd7215]
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [45bec43]
+  - @objectstack/lint@18.0.0-next.5
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/formula@18.0.0-next.5
+  - @objectstack/metadata@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+  - @objectstack/sdui-parser@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Minor Changes
+
+- f3174ef: fix(metadata-protocol)!: `installPackage` judges the whole manifest by the install door's declaration, so the primitive refuses a manifest `POST /api/v1/packages` refuses
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No stored metadata moves and nothing is converted: the refused values arrive in a call's manifest argument, and stored `sys_packages` rows are untouched and keep hydrating as stored (the boot hydration does not judge `type` / `scope`). The only conversion that could exist (rewrite `application` to `app`, `environment` to `project`) would be a silent rewrite of what an author declared, which this change refuses on purpose, so there is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); the narrowing is the runtime accept set of a primitive that parses an existing published declaration, with no declaration or export changed (not type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `ObjectStackProtocolImplementation.installPackage` parsed only `manifest.id`, so an in-process caller stored manifests the install door answers `400 VALIDATION_ERROR` for. The primitive now parses the manifest through `PackageInstallManifestSchema` (`@objectstack/spec/api`, `ManifestSchema` with `scope` narrowed to `project`), the declaration the door parses, after its version default and before any write.
+  
+  - **FROM:** `protocol.installPackage({ manifest })` with `type: 'application'`, `scope: 'environment'`, `scope: 'cloud'` / `'system'`, no `type`, or a key the manifest does not declare (such as a metadata collection, `pages`) registered the package and wrote its `sys_packages` row.
+  - **TO:** the call throws with `statusCode: 400` (an HTTP boundary answers `VALIDATION_ERROR`), the message names each refused key path (`manifest.type`, `manifest.scope`, …) with the declaration's own sentence, and neither the registry nor `sys_packages` is written. A malformed `manifest.id` still answers first, with its own sentence and repair.
+  - **Unchanged:** a manifest with no `version` still installs with `version: '0.1.0'`, a missing `namespace` is still derived from the id, and the manifest is stored as sent (the parse's `scope` / `defaultDatasource` defaults are not copied onto it).
+  - **Rows already stored** with `type: 'application'` / `scope: 'environment'` keep hydrating at boot, as stored. A new write of the same manifest, including a `duplicatePackage` of such a base, is refused.
+  - **The fix for a caller:** write a declared `type` (`app` for an application package) and leave `scope` out, or write `scope: 'project'`.
+- a06f0d4: fix(metadata-protocol)!: the by-name `/meta` read refuses an object of a disabled package with `404 OBJECT_PACKAGE_DISABLED`, as the object list and the data plane already do
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of a runtime read door, getMetaItem and getMetaItemLayered for an object whose owning package is disabled: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the read -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Disabling a package already took its objects out of `GET /meta/objects` and refused their data with `404 OBJECT_PACKAGE_DISABLED`. The by-name read still served them. It now gives the same answer.
+  
+  - **Refused now:** `getMetaItem({ type: 'object', name })` (`GET /api/v1/meta/object/:name`, the plural spelling included) for an object whose owning package is disabled. The refusal applies to every state the read serves: the active read, `state: 'draft'` and `previewDrafts`. `getMetaItemLayered` (`?layers=true`) refuses it too. The answer is `404` with `code: 'OBJECT_PACKAGE_DISABLED'` and `object`, built by the same constructor as the data plane's refusal, so the two cannot drift.
+  - **Unchanged:** objects of enabled packages, other metadata types, and the registry's resolution reads (`registry.getObject`, `registry.listItems('object')`), which keep serving a disabled package's objects for migrations and cross-package references.
+  - **Still checked:** saving an object of a disabled package still runs the destructive-change check. A save that drops a field still answers `409 DESTRUCTIVE_CHANGE` until it is confirmed with `force`. The check reads the object's prior schema through the protocol's internal read, not the refusing door.
+  
+  What changes for you: a client that read a disabled package's object by name now gets `404 OBJECT_PACKAGE_DISABLED`. Re-enable the package to read it again.
+- 2bcd406: fix(metadata-protocol)!: the by-name `/meta` read answers a disabled package's item of every type but `object` and `package` as absent, as the list already omits it
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of a runtime read door, getMetaItem for an item whose owning package is disabled: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the read -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Disabling a package already took its apps, views, pages, dashboards, flows and every other item out of `GET /meta/:type`. The by-name read `GET /meta/:type/:name` still served them. It now answers such an item the way it answers a name with nothing behind it.
+  
+  - **Absent now:** `getMetaItem({ type, name })` for an item whose `_packageId` names a disabled package, for every type except `object` and `package`. The active read and `previewDrafts` serve no `item`, which both transports answer `404 RESOURCE_NOT_FOUND`, byte for byte the answer for a missing name. The strict draft read (`state: 'draft'`) throws the missing draft's `404 NO_DRAFT`. The list read and the by-name read ask one predicate, so they hide the same items.
+  - **Kept:** the protection envelope (`lock`, `editable`, `deletable`, `version` and the rest) still reports the write doors' verdicts about the address, because a disable does not change how the lock gate judges a save there. Only `item` and a flow's `registration` are withheld.
+  - **Unchanged:** objects, which keep their `404 OBJECT_PACKAGE_DISABLED`; packages, which are never hidden, so a disabled package can still be read and re-enabled; items of enabled packages; and `getMetaItemLayered` (`?layers=true`, `/layers`) and `/published`, which still serve a disabled package's non-object item.
+  
+  What changes for you: a client that read a disabled package's app, view, page or other item by name now gets `404 RESOURCE_NOT_FOUND`, as for a missing name. Re-enable the package to read it again.
+- e74ec56: fix(metadata-protocol)!: `listDrafts` omits a disabled package's drafts, as the list read omits its items
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of the pending-drafts list for drafts whose owning package is disabled: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the list -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `GET /meta/_drafts` (both transports) listed a disabled package's pending drafts, while the by-name draft read answers them `404 NO_DRAFT` and the list read omits the package's items.
+  
+  - **Omitted now:** every draft whose `packageId` names a disabled package, with or without `?packageId=`. The predicate is the one the list and by-name reads ask. Drafts of the `package` type are never hidden.
+  - **Unchanged:** the package batch doors (`POST /packages/:id/publish-drafts`, `/discard-drafts`) still publish and discard a disabled package's drafts; they read the store directly. Other packages' drafts are listed as before.
+  
+  What changes for you: re-enable the package to see its pending drafts in the list again.
+- 1e001c7: feat(metadata-protocol): `publishPackageDrafts` takes an opt-in `backfill` that writes the literal `defaultValue` of fields the publish adds into the object's existing rows, as the caller
+  
+  Clause-②: yes (widening)
+  
+  - **New request keys.** `backfill?: Array<{ object, field }>` names fields this publish adds; `context` is the caller's execution context the writes run as. Absent or `[]`, no row is touched.
+  - **Judged before anything is published.** Every entry must name an object drafted in the package, a field its draft declares, a field the published object does not have yet, and a literal `defaultValue` (a runtime token such as `NOW()` or `current_user`, or an expression, is resolved per new record and is refused). A malformed entry, a duplicate, or a backfill without a caller context is refused too. All problems come back in one `400 VALIDATION_ERROR`, one `issues[]` entry per problem with its `backfill.N` path, and nothing is promoted or written.
+  - **Written after the publish, as the caller.** Once the drafts are live and the new column exists, rows whose value is absent are read and written 200 at a time through `updateManyData` with the caller's context, so permissions, RLS/FLS, validation and record hooks run as on that caller's own edit. A value already stored is never overwritten.
+  - **New response key `backfillApplied`:** `{ success, fields: [{ object, field, updated, error?, code? }] }`, one element per requested field. `updated` counts the rows this publish wrote. A field stops at its first failing row and reports the rows written so far with the error; the publish is not undone. On the SQL driver the new column's DEFAULT already fills existing rows, so `updated` is 0 there.
+- 41c7405: fix(metadata-protocol)!: an organization-scoped seed load refuses a row whose natural key a row with no organization already holds, by name in the seed result, instead of inserting a twin of it
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes, and no stored shape, is added, removed, renamed or converted: the change is which rows a seed load writes. The refused rows are ones with a NULL organization_id, and attributing them to an organization is the `os migrate organization-ownership` ceremony's job, so there is nothing for `objectstack migrate meta` to rewrite. The result keeps its shape: the refusal is one more entry in the existing `errors` array (`ReferenceResolutionError`), and no spec schema changes. -->
+  
+  **BREAKING** (a seed load writes fewer rows), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  An organization-scoped seed load (`SeedLoaderService` with `config.organizationId`: the per-organization replay, the marketplace walled install and the sample-data reseed) looked up existing rows by natural key among that organization's rows only. A row holding the same natural key with `organization_id` NULL, as a database whose rows predate organization stamping holds them, was invisible to that lookup, so the upsert inserted a twin beside it that carried the organization. Nothing was reported: 0 errors, nothing logged. On a HotCRM 4.0.1 → 5.0.0 upgrade this doubled every seeded event, task, attendee and line item.
+  
+  - **FROM:** in `upsert` or `ignore` mode, with `config.organizationId` set, a seed record whose natural key no row of that organization holds, but a row with no organization does, was inserted as a new row for the organization.
+  - **TO:** that record is refused. The load reports it in `errors` with the existing `ReferenceResolutionError` shape: `field: 'organization_id'`, `targetObject` the seeded object itself, `targetField` the natural key, `attemptedValue` its value, and a message that names the row holding the key and the remedy. It counts as errored, the load answers `success: false`, and the refusal is logged at `error`, once per dataset. The row with no organization is left exactly as it is: the loader never adopts it. Every other record still loads.
+  - **Unchanged:** a key the organization's own row holds is matched as before, even when an unowned row also holds it. Another organization's rows stay invisible to the lookup. A fully stamped database loads with 0 inserts. `update` mode (which never inserts) and the `insert` / `replace` modes are unchanged, and so is a load with no `config.organizationId` (the single-posture boot), which still matches the unowned row.
+  
+  What to do. Attribute the rows that have no organization with `os migrate organization-ownership` (plan, then `--apply`), then run the seed again: each row is then the organization's own, and the upsert matches it.
+
+### Patch Changes
+
+- e46ce7b: Clause-②: no
+  
+  fix(metadata-protocol): the global search palette titles a hit by its `nameField` before the deprecated `titleFormat`
+  
+  - **What changed.** `searchAll` (`GET /api/v1/search`) now resolves a hit's `title` in this order: the primary-title pointer (`nameField`, or the deprecated alias `displayNameField`), then the `titleFormat` template, then the conventional name fields, then first/last name, then the record id. Before, `titleFormat` came first. ADR-0079 D3 and the `titleFormat` schema description both say an explicit `nameField` takes precedence.
+  - **What it means for a deployment.** An object that declares both keys is now titled by its `nameField` value. For example, an approval request shows `Discount Sign-off · opp_45` instead of `flow:deal_desk · opp_45`. The registry also designates a `nameField` for any object that has a title-eligible field (a text-like field, or a formula returning text). So an object that declares only `titleFormat` is now titled by that designated field too. The template still titles a row when the object has no pointer, or when the pointer's value is empty on that row.
+  - **Fix for an author who wants the composite title back:** add a `formula` field with `returnType: 'text'` that builds the composite, set `nameField` to it, and drop `titleFormat`. This is the migration ADR-0079 prescribes (`os explain title-format-retired`).
+  - **`@objectstack/spec`:** the description of `SearchAllHitSchema.title` now states the same order. No schema shape changed.
+- ec749fb: fix(metadata-protocol): global search judges an object's searchable set without its `internal: true` fields, the set the engine scans
+  
+  Global search (`searchAll`, `GET /api/v1/search`) passes over an object with nothing to scan before it queries. It judged that from the object's fields including `internal: true` ones, which the engine never searches. An object whose only text field is internal therefore passed the skip and reached the engine, which now refuses a search over an empty set, so the whole sweep would have failed. The skip now leaves internal fields out, so such an object is passed over and the sweep answers `200` with the other objects' hits.
+  
+  What to do. Nothing.
+- cf540a7: Clause-②: no
+  
+  fix(metadata-protocol): the save door's lock refusals and its default-record-page refusal say "authored in this system"
+  
+  - **What changed.** Three refusal texts said an item saved through the metadata API is "authored in this environment". They now say "authored in this system": the `protection`-block refusal, the lock-family-key refusal, and the holder text a default-record-page conflict prints for a page no package ships (`page 'NAME', authored in this system`). Inside the running system, user-facing copy names the system the user is in as "this system".
+  - **Unchanged.** Every error code (`VALIDATION_ERROR`, `DEFAULT_RECORD_PAGE_CONFLICT`), status and `issues[]` entry.
+- 1827571: Clause-②: no
+  
+  perf(metadata-protocol): the by-name item read reads the item's stored active rows once, so a `GET /api/v1/data/:object` makes one `sys_metadata` read of the object instead of five
+  
+  - **What changed.** `getMetaItem` (the read the API-exposure gate makes on every `/data` request) used to send its three active-row selections to the store one at a time: which package the item belongs to, the served row once per spelling of the type (`object`, then `objects`), and the rows its lock is chosen from, once per spelling. Now it reads the item's active rows once, for both spellings (`type IN ('object', 'objects')`), and each selection picks its rows from that one read with the same conditions it used to send the store. The item read's `version` reuses the package binding the read already selected.
+  - **Measured.** On Postgres behind a 50 ms round-trip proxy, the median `GET /api/v1/data/todo_task` (example todo app, signed-in admin) went from 551 ms with 5 `sys_metadata` statements to 340 ms with 1.
+  - **Unchanged.** The served item, its lock and `version`, and every refusal stay the same. Nothing is cached across calls, so a metadata write is seen by the next request. An object with a stored row still has one more read behind `version` (the repository's write-address head).
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [9c74d40]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [5e97907]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [85be049]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/lint@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/metadata@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+  - @objectstack/sdui-parser@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

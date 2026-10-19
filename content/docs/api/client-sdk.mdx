@@ -392,7 +392,7 @@ for await (const frame of await client.ai.chatStream({ messages })) {
 }
 
 await client.ai.complete({ prompt: 'Summarise this account in one line:' });
-await client.ai.models();                // plan-filtered picker list (ADR-0028)
+await client.ai.models();                // plan-filtered picker list (cloud ADR-0028)
 
 // Conversations — all six routes, scoped to the authenticated user server-side.
 const conv = await client.ai.conversations.create({ title: 'Q3 pipeline' });

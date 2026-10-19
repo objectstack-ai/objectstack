@@ -1293,6 +1293,11 @@ export class AutomationServicePlugin implements Plugin {
                     return {
                         positions: grants.positions,
                         permissions: grants.permissions,
+                        // The peer list the request path seeds through this
+                        // same resolver: the run's organization's members and
+                        // the user, so `sys_user_org_members` resolves for the
+                        // run as it does for the user's own request.
+                        org_user_ids: grants.org_user_ids,
                         ...(tenantId ? { tenantId } : {}),
                     };
                 });

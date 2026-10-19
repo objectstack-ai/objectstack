@@ -171,10 +171,12 @@ async function seedPopulation(engine: ObjectQL): Promise<void> {
   ] as const) {
     await engine.insert('sys_user', { id, email, name: id }, SYSTEM);
   }
-  await engine.insert(
+  // [C8 stage 8b] A legacy organization-less catalogue row, landed beneath the engine:
+  // under `single` the engine refuses an organization-less platform insert while the
+  // install holds no organization (ADR-0131 D9), and this rig holds none.
+  await (engine as any).getDriver('sys_permission_set').create(
     'sys_permission_set',
     { id: 'ps_member_default', name: 'member_default', label: 'member_default', active: true },
-    SYSTEM,
   );
 }
 

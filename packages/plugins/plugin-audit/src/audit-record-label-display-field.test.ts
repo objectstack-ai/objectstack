@@ -38,6 +38,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 
 import { AuditPlugin } from './audit-plugin.js';
+import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 
 const ACTIVITY = 'sys_activity';
 const HARNESS_PACKAGE = 'com.objectstack.audit.test.record-label-display-field';
@@ -152,6 +153,7 @@ describe('[#21878] the activity record label is the ADR-0079 title, with the id 
       init: async (ctx: any) => ctx.registerService('security', security),
       start: async () => {},
     } as any);
+    await kernel.use(singlePostureTenancy());
     await kernel.use(new AuditPlugin());
     await kernel.bootstrap();
 

@@ -23,6 +23,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 import { AuditPlugin } from './audit-plugin.js';
 import { backfillActivityChangedFields } from './activity-changed-fields-backfill.js';
+import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 
 const ACTIVITY = 'sys_activity';
 const ITEM = 'acb_item';
@@ -61,6 +62,7 @@ describe('[ADR-0139 E6] backfillActivityChangedFields', () => {
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
+    await kernel.use(singlePostureTenancy());
     await kernel.use(new AuditPlugin());
     await kernel.bootstrap();
     engine = kernel.getService<ObjectQL>('objectql');

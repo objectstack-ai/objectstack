@@ -431,6 +431,20 @@ spelling moves: the copy-once import, full editability, no upgrade channel and t
   naming the posture: a template import would hand every tenant an editable shared schema. Under `single`
   it is how a customer takes an app and makes it theirs wholesale — Salesforce's unmanaged package.
 
+> **Note (2026-10-19, ruling of record `6258883445` on #24378, letter A, which supersedes ruling
+> `6257388265`, letter B′) — `sharing_rule` is charted under regime C.** A managed declared sharing rule
+> is read-only and clonable. **Switching it off** is the `active` bit of a `sys_metadata_activation` row
+> of type `sharing_rule`. Like the bit for flows and actions, it is deployment-level and operator-gated
+> under a wall. There is no per-organization switch-off, and organizations still author their own rules
+> (D3). **Customising** is a clone under a new name, plus the base switched off. **Same-name shadowing is
+> retired.** A `sys_sharing_rule` row that takes a declared rule's name in its scope is refused, whether
+> it is new or renamed. A declaration that arrives over an authored row, as in a package upgrade, is
+> reported loudly at load and never becomes an overlay. **D10's ownership ceremony** migrates each
+> existing customised copy to a clone plus the base switched off, and deletes the uncustomised mirrors
+> (fate 2). The promise that a customised copy keeps answering and a switch-off survives redeploys is
+> kept by that migration and the ledger, not by shadowing. This is a ruled decision that #24421 builds;
+> it has not shipped.
+
 Creating one's own item — a new permission set, position, view, flow — is environment authoring
 (Studio, or Setup acting as a metadata editor under `single`), gated as D2/D3 describe and refused to
 tenants of a shared-DB deployment. It is not customization of a managed item; pre-filling the form from a
@@ -499,6 +513,18 @@ settings — `sys_setting`'s global rung leaves the tenant-scoped table: infrast
 configuration; a tenant-less object holds only values an operator must change without a restart (ruled
 2026-09-04). Such objects are governed by object permission, not by the wall.
 
+> **Note (2026-10-19, ruling of record `6257388265` on #24378, letter B′) — the activation ledger reads
+> one way.** The clause above saying `sys_metadata_activation` "is reverted before 17.3 and does not
+> return" is left over from the draft before the standard-package reversal, which re-scoped its card
+> (#15024) from a revert to a column drop (§7). D6, D13, D14 and C0 hold the reading: the object
+> stays as the tenant-less activation ledger and carries regime C's disable bit. It is off D13's
+> retirement list, and its reserved organization column was dropped before 17.3. It is a member of this
+> paragraph's family. The code follows this reading: the object is declared with
+> `systemFields: { tenant: false }` (`packages/platform-objects/src/system/sys-metadata-activation.object.ts`),
+> and flows, actions, positions and permission sets read it. Sharing rules join them as a fifth reader by
+> ruling `6258883445` on #24378, which is ruled and not yet shipped (the D6 note above). The clause stays
+> as written, and this note governs how it is read.
+
 ⚠️ **Membership in this list is decided by the writer, not by the object's name.** The read-side ledger
 grouped `sys_http_delivery`, `sys_inbox_message`, `sys_notification*` and `sys_email` as "plumbing"; the
 tree has since decided otherwise for each — #13565 stamps `sys_http_delivery` from the webhook's
@@ -508,6 +534,32 @@ cloud's reading. An object whose writer attributes rows to an organization is te
 column (NOT NULL, D3); an object no writer attributes is deployment-level and loses it. The C7
 inventory records the verdict per object with the writer fact as its citation — this record names only
 the objects whose verdict the tree already states.
+
+> **Note (2026-10-19, ruling of record `6257510973` on #24377, letter Q2 A) — identity mail is
+> deployment-level.** Some mail goes to a person before any organization is theirs to stamp: verify,
+> reset, magic link, email change, and an account invitation to a person with no organization. That
+> mail is written to a sibling of `sys_email` that has no organization column and the same row shape.
+> The same outbox, status and attachment pipeline serves it. Tenant mail stays in `sys_email` with
+> its organization NOT NULL, and #11303 decision 2 keeps it stamped at its producers. ⛔ Neither a
+> nullable column nor unpersisted mail. This is a ruled decision that a C8 stage builds; it has not
+> shipped.
+
+> **Note (2026-10-19, ruling of record `6257510973` on #24377, letter Q4 A) — `sys_secret` has no
+> organization column.** A secret's ownership follows the row that references it: `sys_setting` /
+> `sys_platform_setting`, the webhook, the flow credential, the field's record, or the datasource.
+> Every read stays by id under privilege. This is a ruled decision that a C8 stage builds; it has not
+> shipped.
+
+> **Note (2026-10-19, ruling of record `6257510973` on #24377, letter Q4 A) — `sys_setting_audit`'s
+> global rung moves to a deployment-level sibling.** This is the same departure `sys_setting`'s global
+> rung already makes. The settings audit's tenant and user rows stay in `sys_setting_audit` with the
+> organization NOT NULL. This is a ruled decision that a C8 stage builds; it has not shipped.
+
+> **Note (2026-10-19, ruling of record `6259141885` on #24435, letter Q1 A) — `sys_flow_credential` is
+> deployment-level.** The object is to declare `systemFields: { tenant: false }`, so it has no
+> organization column. A credential's ownership follows the flow it belongs to, and a flow is
+> environment metadata (D2, D6). This matches the `sys_secret` note above. This is a ruled decision that
+> a C8 stage builds; it has not shipped.
 
 The #12699 deployment declaration becomes **total**: an object a deployment declares platform-global
 gets **no organization column on that deployment** (the injected-columns plan reads the declaration),
@@ -761,6 +813,41 @@ sits beside them.
    (`packages/spec/src/identity/eval-user.zod.ts#ADMIN_FULL_ACCESS_CAPABILITIES`). D7's "as an editor
    under `single` for capability holders" is the accurate wording, and D3's "no Studio capability is
    required" is withdrawn by this ruling.
+
+**Release-scope note (2026-10-19, ruling records `6259608309` and `6259698357` on #15194).** Two ruling
+records of the maintainer (「同意」, twice) split the v18 line between 18.0 and later 18.x releases.
+⛔ Neither changes a decision of this record: the line, the fence above and §8's order stand, and this
+note sits beside them.
+
+1. **18.0 ships for fresh installs, on the `single` posture only.** A v17 database stays on 17.x
+   until the 18.x release that carries the upgrade path. In 18.0, `os migrate organization-ownership`
+   refuses to run, and the walled postures (`group`, `isolated`) are refused at the operator's boot
+   path. Both refusals name the 18.x release that will carry the missing piece.
+2. **Stage 8b ships in 18.0.** Every system insert is stamped or refused; under `single` it is stamped
+   with the Default Organization.
+3. **These ship in 18.x:**
+   - the v17 → v18 upgrade path, which is the ceremony's deferred fates and moves;
+   - the walled postures;
+   - C8 stages 8b-0d, 8b-0e and 8b-0g: the identity-mail and settings-audit siblings, the column-less
+     `sys_secret` and `sys_flow_credential`, and declared webhooks served from the registry (the D7
+     notes above);
+   - 8c, the organization-less read branches;
+   - 8d, `COALESCE` and `__global__`;
+   - 8e, the NOT NULL constraint.
+
+**Scope note (2026-10-19, ruling records `6259899486` and `6261853191` on #15194).** ⛔ It changes no
+decision of this record and sits beside the release-scope note above.
+
+1. **The sprint** (record `6259899486`; 「不需要压缩到 3000内，你推送给我我会尽快审批」「并发上限 可以放宽」
+   「按照你的建议继续」). Stage 8b lifts the system-insert exemption under `single` only in 18.0. Under a
+   walled posture the exemption stands in 18.0, and the walled half lands in 18.x.
+2. **Databases.** A database an 18.0 install creates takes the same 18.x upgrade path as a v17 one.
+3. **Where the walled refusal stands.** It covers the `os` boot path only: `os serve`, and through it
+   `os dev` and `os start`. The one-shot `os` kernel boots (the `os migrate` family, `os verify`,
+   `os secret`, `os storage`) and embedded hosts (`createStandaloneStack`, `@objectstack/adapter-hono`)
+   are not refused, and none of them is a supported walled deployment in 18.0.
+4. **Docs are off the release gate** (record `6261853191`; 「文档可以延后」「或者并行处理，不要影响我发版本」).
+   C11 (#15214) runs in parallel to 18.0 and never holds it.
 
 ---
 

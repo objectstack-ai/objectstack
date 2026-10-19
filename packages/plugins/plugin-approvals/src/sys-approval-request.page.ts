@@ -49,9 +49,16 @@ import type { Page } from '@objectstack/spec/ui';
  *    The approvals get serves it by the same chain: the stored label, else
  *    the snapshot's `__nodeLabel`, else the humanized node id. A request with
  *    no step at all serves neither field, and the strip draws no step chip.
- *  - The Object chip is `object_name`, the target object's API name as
- *    stored. The object declares no field that holds that object's label, so
- *    the strip has none to list in its place.
+ *  - There is no Object chip. `object_name` is the target object's API name
+ *    as stored (`showcase_announcement`), and the object declares no field
+ *    that holds that object's label. The page names the target object in the
+ *    Details tab instead: the `record_id` / `object_name` pair's card heads the
+ *    target record with its object's label, translated and read from the
+ *    object's definition when the page draws, so a relabelled object reads its
+ *    new label. Where the card cannot read the target (the reader may not
+ *    read it, or the platform deleted it), the page names no object at all.
+ *    `object_name` leaves the object's `highlightFields` too, by the rule
+ *    above, so the Details tab does not draw it as a row.
  *  - `tabs` is authored: Details (`record:details`, a bare node: see the
  *    strip above) and Timeline — `sys_approval_action` as a
  *    related list keyed on `request_id`, newest first. The `tabs` slot is
@@ -88,7 +95,7 @@ export const SysApprovalRequestDetailPage: Page = {
     highlights: {
       type: 'record:highlights',
       properties: {
-        fields: ['process_label', 'object_name', 'status', 'current_step_label', 'submitter_id', 'updated_at'],
+        fields: ['process_label', 'status', 'current_step_label', 'submitter_id', 'updated_at'],
       },
     },
 

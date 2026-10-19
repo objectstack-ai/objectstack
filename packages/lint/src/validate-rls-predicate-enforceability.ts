@@ -143,9 +143,22 @@
  *
  * ## Scope
  *
- * `permissions[].rowLevelSecurity[]` only. `rowLevelSecurity` is declared on
- * `PermissionSetSchema` and nowhere else — `ObjectSchema` has no such key — and
- * `permissions` is the one stack key `StackSchema` declares for permission sets.
+ * Two declared surfaces, and nothing else:
+ *
+ * - `permissions[].rowLevelSecurity[]`. `rowLevelSecurity` is declared on
+ *   `PermissionSetSchema` and nowhere else — `ObjectSchema` has no such key —
+ *   and `permissions` is the one stack key `StackSchema` declares for
+ *   permission sets.
+ * - `objects[].defaultRowScope` (#24452). `ObjectSchema.defaultRowScope` is ONE
+ *   policy of the same shape without `object` (`DefaultRowScopeSchema`), the
+ *   declaring object implied. The security plugin's row-policy collection
+ *   applies it when the caller's held sets carry no row policy for the object
+ *   and operation, and from there it takes the path a held policy takes: the
+ *   same `RLSCompiler`, the same drop, the same `RLS_DENY_FILTER`. So it is
+ *   judged by the same passes ({@link judgePolicy}), with the declaring object
+ *   as its target, at the same severity. Its findings name the object's
+ *   default, never a permission set, because no permission set carries it.
+ *
  * Walking `objects[].rowLevelSecurity` or `permissionSets` "just in case" would
  * add a branch that no spec-valid stack can ever reach: exactly the #4984 defect,
  * where a red line read rejected aliases and was therefore inert for every stack
@@ -1451,6 +1464,120 @@ function referenceFindings(
   return findings;
 }
 
+/** Where one policy sits: the object it targets, how a finding names it, and its config path. */
+interface PolicySite {
+  /** The policy's target object (`''` when it names none). */
+  object: string;
+  /** Human-readable location, the finding's `where`. */
+  where: string;
+  /** Config path of the policy itself; each clause appends `.using` / `.check`. */
+  path: string;
+}
+
+/**
+ * Every finding one policy's `using` and `check` earn — the whole judgement,
+ * shape pass and reference pass, for a policy wherever it is declared. The
+ * walker below calls it for a permission set's policy and for an object's
+ * default row scope alike, so the two sources cannot be judged differently.
+ */
+function judgePolicy(
+  graph: ObjectGraph,
+  policy: AnyRec,
+  site: PolicySite,
+  options: { judgeFilter?: IObjectQLEngine['judgeFilter'] },
+): RlsPredicateFinding[] {
+  const findings: RlsPredicateFinding[] = [];
+  for (const clause of ['using', 'check'] as const) {
+    const source = str(policy[clause]);
+    // Absent / blank is Zod's to judge (`using` is required on the schema);
+    // inventing a second complaint about the shape here would be the
+    // double-report this rule avoids for everything else.
+    if (!source.trim()) continue;
+
+    // ── The verdict. This is the consumer's own function, not a model of
+    // it: `RLSCompiler.compileFilter` calls the SAME `isSupportedRlsExpression`
+    // to decide whether a dropped policy warrants its WARN. There is no
+    // heuristic here to drift.
+    const object = site.object;
+    const where = site.where;
+    const path = `${site.path}.${clause}`;
+
+    if (isSupportedRlsExpression(source)) {
+      // [#16119] The shape is fine, so the REFERENCE pass owns this predicate.
+      // Disjoint from everything below by construction: the three shape ids
+      // only ever run on predicates this branch has already returned from.
+      // [#20158] The engine judges the READ SCOPE only: a `using` on a
+      // `select` / `all` policy that names its object.
+      const judge =
+        clause === 'using' && object && READ_SCOPE_OPERATIONS.has(str(policy.operation))
+          ? options.judgeFilter
+          : undefined;
+      findings.push(
+        ...referenceFindings(graph, source, clause, where, path, object, judge),
+      );
+      continue;
+    }
+
+    // ── The explanation. Re-derived only to tell the author WHICH fix they
+    // need; the red/green boundary above never consults it. (Both agree by
+    // construction — pinned in both directions in this rule's tests.)
+    const bridged = sqlPredicateToCel(source);
+    const why = isPushdownableCel(bridged);
+    const detail = why.ok ? '' : why.detail;
+    const parseError = !why.ok && why.reason === 'parse-error';
+    // A bounds overrun and a syntax fault both arrive as `parse-error` (the
+    // runtime deliberately collapses them — see this file's docblock), so
+    // the two are separated here, and only here.
+    const overrun = parseError ? boundsOverrunOf(bridged) : null;
+
+    if (overrun) {
+      // `limit` is null only for a bounds fault this package cannot NAME
+      // (unreachable on cel-js 8.0.0). Degrade honestly rather than guess a
+      // key, which would send the author to shorten the wrong axis.
+      const bound = overrun.limit ?? 'an unnamed platform CEL bound';
+      const budget = overrun.limitValue !== null ? ` (platform limit ${overrun.limitValue})` : '';
+      const measured = overrun.measured !== null ? `, this predicate measures ${overrun.measured}` : '';
+      findings.push({
+        severity: 'error',
+        rule: RLS_PREDICATE_OVER_BUDGET,
+        where,
+        path,
+        message:
+          `RLS ${clause} is valid CEL but overruns the parse bound ${bound}${budget}${measured} ` +
+          `(${overrun.summary}), ${droppedClause(clause)}`,
+        // [#22161] One line; the four options in full, and why a top-level
+        // `&&` must never be split, are the explanation's.
+        hint: OVER_BUDGET_FIX,
+      });
+      continue;
+    }
+
+    if (parseError) {
+      findings.push({
+        severity: 'error',
+        rule: RLS_PREDICATE_UNPARSEABLE,
+        where,
+        path,
+        message:
+          `RLS ${clause} does not parse as CEL, even after the legacy SQL bridge (${detail}), ` +
+          droppedClause(clause),
+        hint: UNPARSEABLE_FIX,
+      });
+      continue;
+    }
+
+    findings.push({
+      severity: 'error',
+      rule: RLS_PREDICATE_UNENFORCEABLE,
+      where,
+      path,
+      message: `RLS ${clause} is not lowerable (${refusalVerdict(detail)}), ${droppedClause(clause)}`,
+      hint: LOWERABLE_REWRITE,
+    });
+  }
+  return findings;
+}
+
 /**
  * Gate every stack-declared RLS predicate on the ONE thing the runtime does
  * with it: lower it to a FilterCondition (ADR-0056 D4).
@@ -1479,104 +1606,41 @@ export function validateRlsPredicateEnforceability(
   // re-derived here.
   const graph: ObjectGraph = indexObjectGraph(cfg);
 
+  // The permission sets' policies (`permissions[].rowLevelSecurity[]`).
   recordsOf(cfg.permissions).forEach((ps, psIndex) => {
+    const psName = str(ps.name) || String(psIndex);
     recordsOf(ps.rowLevelSecurity).forEach((policy, pIndex) => {
-      for (const clause of ['using', 'check'] as const) {
-        const source = str(policy[clause]);
-        // Absent / blank is Zod's to judge (`using` is required on the schema);
-        // inventing a second complaint about the shape here would be the
-        // double-report this rule avoids for everything else.
-        if (!source.trim()) continue;
-
-        // ── The verdict. This is the consumer's own function, not a model of
-        // it: `RLSCompiler.compileFilter` calls the SAME `isSupportedRlsExpression`
-        // to decide whether a dropped policy warrants its WARN. There is no
-        // heuristic here to drift.
-        const psNameEarly = str(ps.name) || String(psIndex);
-        const policyNameEarly = str(policy.name) || String(pIndex);
-        const objectEarly = str(policy.object);
-        const whereEarly =
-          `permission set "${psNameEarly}" policy "${policyNameEarly}"` +
-          (objectEarly ? ` on object "${objectEarly}"` : '');
-        const pathEarly = `permissions[${psIndex}].rowLevelSecurity[${pIndex}].${clause}`;
-
-        if (isSupportedRlsExpression(source)) {
-          // [#16119] The shape is fine, so the REFERENCE pass owns this predicate.
-          // Disjoint from everything below by construction: the three shape ids
-          // only ever run on predicates this branch has already returned from.
-          // [#20158] The engine judges the READ SCOPE only: a `using` on a
-          // `select` / `all` policy that names its object.
-          const judge =
-            clause === 'using' && objectEarly && READ_SCOPE_OPERATIONS.has(str(policy.operation))
-              ? options.judgeFilter
-              : undefined;
-          findings.push(
-            ...referenceFindings(graph, source, clause, whereEarly, pathEarly, objectEarly, judge),
-          );
-          continue;
-        }
-
-        // ── The explanation. Re-derived only to tell the author WHICH fix they
-        // need; the red/green boundary above never consults it. (Both agree by
-        // construction — pinned in both directions in this rule's tests.)
-        const bridged = sqlPredicateToCel(source);
-        const why = isPushdownableCel(bridged);
-        const detail = why.ok ? '' : why.detail;
-        const parseError = !why.ok && why.reason === 'parse-error';
-        // A bounds overrun and a syntax fault both arrive as `parse-error` (the
-        // runtime deliberately collapses them — see this file's docblock), so
-        // the two are separated here, and only here.
-        const overrun = parseError ? boundsOverrunOf(bridged) : null;
-
-        const where = whereEarly;
-        const path = pathEarly;
-
-        if (overrun) {
-          // `limit` is null only for a bounds fault this package cannot NAME
-          // (unreachable on cel-js 8.0.0). Degrade honestly rather than guess a
-          // key, which would send the author to shorten the wrong axis.
-          const bound = overrun.limit ?? 'an unnamed platform CEL bound';
-          const budget = overrun.limitValue !== null ? ` (platform limit ${overrun.limitValue})` : '';
-          const measured = overrun.measured !== null ? `, this predicate measures ${overrun.measured}` : '';
-          findings.push({
-            severity: 'error',
-            rule: RLS_PREDICATE_OVER_BUDGET,
-            where,
-            path,
-            message:
-              `RLS ${clause} is valid CEL but overruns the parse bound ${bound}${budget}${measured} ` +
-              `(${overrun.summary}), ${droppedClause(clause)}`,
-            // [#22161] One line; the four options in full, and why a top-level
-            // `&&` must never be split, are the explanation's.
-            hint: OVER_BUDGET_FIX,
-          });
-          continue;
-        }
-
-        if (parseError) {
-          findings.push({
-            severity: 'error',
-            rule: RLS_PREDICATE_UNPARSEABLE,
-            where,
-            path,
-            message:
-              `RLS ${clause} does not parse as CEL, even after the legacy SQL bridge (${detail}), ` +
-              droppedClause(clause),
-            hint: UNPARSEABLE_FIX,
-          });
-          continue;
-        }
-
-        findings.push({
-          severity: 'error',
-          rule: RLS_PREDICATE_UNENFORCEABLE,
-          where,
-          path,
-          message: `RLS ${clause} is not lowerable (${refusalVerdict(detail)}), ${droppedClause(clause)}`,
-          hint: LOWERABLE_REWRITE,
-        });
-      }
+      const object = str(policy.object);
+      findings.push(
+        ...judgePolicy(graph, policy, {
+          object,
+          where:
+            `permission set "${psName}" policy "${str(policy.name) || String(pIndex)}"` +
+            (object ? ` on object "${object}"` : ''),
+          path: `permissions[${psIndex}].rowLevelSecurity[${pIndex}]`,
+        }, options),
+      );
     });
+  });
+
+  // [#24452] Each object's default row scope (`objects[].defaultRowScope`):
+  // the same policy shape without `object`, which the declaring object
+  // implies. The security plugin's row-policy collection hands it to the same
+  // `RLSCompiler` an authored policy reaches, so it is judged by the same
+  // passes, with the declaring object as its target — see this file's
+  // `## Scope`.
+  recordsOf(cfg.objects).forEach((obj, oIndex) => {
+    const scope = obj.defaultRowScope;
+    if (!scope || typeof scope !== 'object' || Array.isArray(scope)) return;
+    const object = str(obj.name);
+    const scopeName = str((scope as AnyRec).name);
+    findings.push(
+      ...judgePolicy(graph, scope as AnyRec, {
+        object,
+        where: `default row scope${scopeName ? ` "${scopeName}"` : ''} of object "${object || String(oIndex)}"`,
+        path: `objects[${oIndex}].defaultRowScope`,
+      }, options),
+    );
   });
 
   return findings;

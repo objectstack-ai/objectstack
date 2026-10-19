@@ -33,6 +33,20 @@
           "message": "Type 'false' does not satisfy the constraint 'true'."
         }
       ]
+    },
+    {
+      "retired": "a page action row's own `patch` (action:button, action:icon and the action:group / action:menu member), retired as a key -- a retiredKey() tombstone sending the author to the `patch` of the action the row's `name` names (#24394) -- objectui's action-button undo test still authors `patch` on an `action:button` node",
+      "objectstack_pr": 24442,
+      "objectstack_commit": "69f342b92470e0b66aa9b17ccd2fc7db04e4e568",
+      "downstream_card": "objectstack-ai/objectui#13022",
+      "registered_at": "2026-10-19",
+      "matches": [
+        {
+          "file": "packages/components/src/renderers/action/__tests__/action-button-undoable-11168.test.tsx",
+          "code": "TS2353",
+          "message": "Object literal may only specify known properties, and 'status' does not exist in type '{ \"[REMOVED] Key retired: run `os validate` for its migration.\": never; }'."
+        }
+      ]
     }
   ]
 }

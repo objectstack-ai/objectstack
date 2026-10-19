@@ -71,8 +71,11 @@
  *    org-less rows is `tenancy: { enabled: false }` — a metadata declaration,
  *    loud and checkable — never a per-write bypass flag, which is exactly the
  *    lenient-consumer accommodation Prime Directive #12 forbids.
- *  - **Platform-namespace objects the inventory did not admit** ({@link
- *    isPlatformObjectOutOfTenantAuditScope}, `platform-object-tenancy.ts`).
+ *  - **Under a WALLED posture only, platform-namespace objects the inventory
+ *    did not admit** ({@link isPlatformObjectOutOfTenantAuditScope},
+ *    `platform-object-tenancy.ts`). Under `single` this exclusion is gone
+ *    (ADR-0131 C8 stage 8b): a platform object with a tenant column takes the
+ *    Default Organization or is refused, like every other object.
  *
  *    ⚠️ This exclusion used to be the whole `sys_` / `cloud_` / `ai_`
  *    NAMESPACE, on the reasoning commit ff08691e6 recorded, that "an org-less row is defensible for
@@ -84,8 +87,9 @@
  *    none by this control. So the exclusion is now a per-object verdict, and an
  *    object nobody has adjudicated stays excluded and stays ON THE LIST.
  *
- *    ⚠️ This per-object exclusion STAYS until ADR-0131 C8, which retires it
- *    together with the ledger (D13); C1 withdrew only the seed loader's
+ *    ⚠️ C8 stage 8b lifted this exclusion under `single` only. Under a wall it
+ *    stands in 18.0 (epic ruling record 6259899486 on #15194, item 4) and
+ *    retires with the ledger in 18.x (D13). C1 withdrew the seed loader's
  *    namespace exemption. #8686's backfill (`seed-tenancy-backfill.ts`) still
  *    carries the NAMESPACE form; its residue attribution is C7's. Read the
  *    three together before changing any of them.
@@ -156,7 +160,8 @@ export const DEFAULT_TENANT_FIELD = 'organization_id';
  * #13491's re-ruling (2026-08-31, 联案 #13497) withdrew the wholesale namespace
  * reading — but its scope was the RUNTIME control only. So today:
  *
- *  - **the runtime write path** cuts PER OBJECT, by the hand-adjudicated
+ *  - **the runtime write path** no longer cuts under `single` (C8 stage 8b).
+ *    Under a walled posture it cuts PER OBJECT, by the hand-adjudicated
  *    classification in `platform-object-tenancy.ts` — the
  *    `PLATFORM_OBJECT_TENANCY` ledger, read through
  *    {@link classifyPlatformObjectTenancy} and

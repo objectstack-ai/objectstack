@@ -263,8 +263,12 @@ export function registerMetaItemWriteRoutes(this: MetaItemWriteRouteHost, scope:
                 // differently. Its `request` members are spread into the
                 // save below, each present only when the caller asked.
                 //
+                // [#24395] …and `?surface=` (`studio` | `api`; `copilot` is
+                // refused there), the authoring surface a draft save stamps
+                // on each key path it changes.
+                //
                 // The multiplicity guard runs FIRST: it refuses a repeated
-                // `force`, `package` or `mode` (see the `force` read below
+                // `force`, `package`, `mode` or `surface` (see the `force` read below
                 // for why that one is sharp) and UNWRAPS one occurrence
                 // encoded as an array, so `?mode=` reaches the mapping as
                 // the string it reads.
@@ -275,7 +279,7 @@ export function registerMetaItemWriteRoutes(this: MetaItemWriteRouteHost, scope:
                 // located 400 here, before anything is written, never
                 // dropped while the body's own member is saved.
                 if (refuseUnknownQueryParams(req, res, META_ITEM_SAVE_PARAMS)) return;
-                if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode'])) return;
+                if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode', 'surface'])) return;
                 const saveOptions = metaSaveRequestOptions({ headers: req.headers, query: req.query });
                 if (!saveOptions.ok) {
                     res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: saveOptions.message } });

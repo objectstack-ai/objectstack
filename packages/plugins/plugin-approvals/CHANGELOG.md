@@ -1,5 +1,105 @@
 # @objectstack/plugin-approvals
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [b7a688e]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+  - @objectstack/platform-objects@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/formula@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Patch Changes
+
+- e15897c: fix(plugin-approvals): the approval request page's highlights strip names the flow by its label, not `flow:NAME`
+  
+  Clause-②: no
+  
+  - **The strip's first chip is the flow's label.** `sys_approval_request_detail` lists `process_label` (the "Flow" field) where it listed `process_name`, so a request opened by the Deal Desk flow reads `Deal Desk` there instead of `flow:deal_desk`. The request lists already showed this label.
+  - **The object's `highlightFields` makes the same swap** (`process_label` in place of `process_name`, `record_id` kept). The page's Details tab is a bare `record:details` node, which draws the object's `highlightFields` minus the strip. A change to the strip alone would have moved `process_name` into that tab. Changed together, the tab still shows only the target record card. Other surfaces that read the object's list show the flow's label too: a request's record preview card, Studio's object settings, and the default columns of a list, kanban, related list or lookup picker that declares none. No first-party request list uses the default columns: each request list view declares its own.
+  - **When no label is available.** The console reads a request through the approvals get, which serves `process_label` as the stored label, else the flow label in the request's node-config snapshot, else the humanized machine name (`flow:deal_desk` → `Deal Desk`). A request the boot backfill has not labelled still shows a Flow chip. Only when all three are empty does the field have no value: the strip then draws no Flow chip, and the record title still names `process_name`.
+  
+  A patch: one entry in one platform object's field list and the same entry in its page. No export, type, accepted value or stored column changes.
+- 5da2e88: fix(plugin-approvals): the approval request page's highlights strip names the current step by its label, not the node id
+  
+  Clause-②: no
+  
+  - **The approvals get serves `current_step_label`.** `ApprovalRequestRow` declares it as the step's label under the `sys_approval_request` column's own name. Every door that serves a request now serves it with exactly `step_label`'s value: the get, the list, and the request that a decision, recall, send-back, resubmit, reassign, remind, info request or comment echoes back. `step_label` stays, with the same value, for the inbox and the emailed action-link pages. `current_step` stays the Approval node's machine id.
+  - **The strip's step chip is the step's label.** `sys_approval_request_detail` lists `current_step_label` (the "Approval Step" field) where it listed `current_step`, so a request waiting on the `approve_step` node reads `Manager Review` there instead of `approve_step`. The request lists already showed this label.
+  - **The object's `highlightFields` makes the same swap.** The page's Details tab is a bare `record:details` node, which draws the object's `highlightFields` minus the strip. A change to the strip alone would have moved `current_step` into that tab.
+  - **When no label is stored.** The get serves the stored label, else the node label in the request's node-config snapshot, else the humanized node id (`approve_step` → `Approve Step`). A request the boot backfill has not labelled still shows a step chip. A request with no step serves neither field, and the strip draws no step chip.
+  
+  A patch: one served key that the contract already declares, and one entry in one platform object's field list and in its page. No export, type, accepted value or stored column changes.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

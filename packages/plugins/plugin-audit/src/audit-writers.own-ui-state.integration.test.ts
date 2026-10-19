@@ -11,6 +11,7 @@ import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { SysUserPreference } from '@objectstack/platform-objects/identity';
 import { AuditPlugin } from './audit-plugin.js';
+import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 
 /**
  * [#23804, ruling record 6212163130] A user's own write to their own per-user
@@ -82,6 +83,7 @@ describe('audit writers — a user\'s own UI-state write leaves no ledger row, o
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' } } as any);
     await kernel.use(new ObjectQLPlugin());
+    await kernel.use(singlePostureTenancy());
     await kernel.use(new AuditPlugin());
     await kernel.bootstrap();
 

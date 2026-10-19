@@ -146,11 +146,15 @@ async function boot(makeDriver: () => Driver, posture: TenancyPosture) {
   await e.insert('sys_member', { id: `mem_removed_${n}`, user_id: USER_REMOVED, organization_id: BETA, role: 'member' }, SYS);
   // The catalogue rows the grant rows point at (the resolver maps id → name);
   // what each set CONFERS is declared in metadata below.
+  // [C8 stage 8b] They carry no organization, so they are landed straight
+  // through the driver, as the residue an older release left: under `single`
+  // the engine stamps or refuses such a platform insert (ADR-0131 D9), and this
+  // rig's engine holds two organizations.
   const catalogue = async (id: string, name: string) =>
-    e.insert('sys_permission_set', {
+    (engine as any).getDriver('sys_permission_set').create('sys_permission_set', {
       id, name, label: name, organization_id: null, managed_by: 'admin', active: true,
       object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
-    }, SYS);
+    });
   await catalogue(`ps_user_admin_${n}`, 'qa_user_admin');
   await catalogue(`ps_probe_${n}`, PROBE_SET);
   // Grant rows, each scoped to org_alpha. Removing a member deletes their

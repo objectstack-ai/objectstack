@@ -1,5 +1,102 @@
 # @objectstack/service-print
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/service-storage@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Minor Changes
+
+- d9a749b: Clause-②: no
+  
+  feat(service-print): print a record from the console — `PrintServicePlugin` mounts `POST /api/v1/print/records`, which prints the record as the signed-in caller and answers with the file it attached
+  
+  - **What it adds.** One HTTP route on the kernel's HTTP server, mounted at `kernel:ready` whenever the plugin is composed. Its JSON body is the in-process request, `{ app, object, recordId, page, filename? }`. The route resolves the caller with the platform's one authorization resolver, hands that caller's execution context and the request to `IPrintService.printRecordToFile`, and answers `201` with `{ fileId, attachmentId, size, filename }`. The service attaches the PDF once, as the caller; the route never attaches anything itself.
+  - **How an app uses it.** Declare a `type: 'api'` action whose `target` is `/api/v1/print/records`, with `recordIdParam: 'recordId'` and the rest of the request in `bodyExtra` (`app`, `object`, `page`). The console sends the clicked record's id and those fields, and shows a refusal's message as the action's error.
+  - **What the route refuses, before the service is asked:** an anonymous request (`UNAUTHENTICATED` / 401); a sign-in held by an authentication policy (`403` with the policy's own code); a request from an impersonation session (`PERMISSION_DENIED` / 403 — a print is archived in the session user's name, so it is never made for them by someone signed in as them); a query parameter, or a body field outside the request (`VALIDATION_ERROR` / 400). A permission store that cannot be read answers its own `SERVICE_UNAVAILABLE` / 503.
+  - **What it relays.** Every refusal the service declares keeps its `code` and `status` (`SERVICE_UNAVAILABLE` / 503 when no print engine is configured, `VALIDATION_ERROR` / 400 for a page without `print`, `RECORD_NOT_FOUND` / 404 for a record the caller cannot read, the files and attach refusals, `TIMEOUT` / 504, the archive's own). A 4xx keeps the service's message. A 5xx answers with the route's own sentence, and the service's text goes to the server fault log.
+  - **Stated limits.** The route writes no audit row of its own: a print's session sign-in and sign-out are recorded as any sign-in is, and `sys_file.owner_id` and `sys_attachment.uploaded_by` name the caller. An impersonation session is recognised by the mark the auth service writes on it (`session.impersonatedBy`, stored as `sys_session.impersonated_by`); an auth provider that marks impersonation some other way is not recognised.
+  - **Unchanged:** the in-process `print` service and its refusals, every export, every plugin option and environment variable, and the error-code vocabulary. A kernel with no HTTP server mounts no route and says so once at `kernel:ready`.
+
+### Patch Changes
+
+- 1fee13d: **Shipped in 18.0.0-next.3**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  Clause-②: no
+  
+  fix(service-print): the local placement binds its browser server's control socket to `127.0.0.1` itself, instead of relying on `playwright-core`'s default host
+  
+  - **What changed.** With `OS_PRINT_CHROMIUM_PATH` (option `chromiumPath`), each render and each boot probe starts a Chromium browser server and connects to it. That server's control socket is now opened with `host: '127.0.0.1'`. Before, no host was passed, so the bind followed `playwright-core`'s default (`localhost`, loopback only in the pinned 1.63.0). Whoever reaches that socket and knows its path drives a browser signed in as the requesting user. How far it reaches is now set by this package, and a `playwright-core` upgrade cannot widen it without a diff here.
+  - **What it means for a deployment.** Nothing changes on a host whose `localhost` is `127.0.0.1`, which is the usual case. On a host with no IPv4 loopback address, the local placement cannot open the socket. Its boot probe logs `Chromium could not be reached at the local executable …: listen EADDRNOTAVAIL …` and printing stays off. The socket is never bound to another address instead. On such a host, use the remote placement (`OS_PRINT_BROWSER_ENDPOINT`).
+  - **Unchanged:** the remote placement, the port (still random), every option and environment variable, and the exports.
+- b036ac5: feat(spec): `AuthSessionApi.getSession`'s result declares the fields its in-process readers read
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec/contracts` — `AuthSessionApi.getSession`'s result gains five optional members**, each declared for a named reader and typed as that reader takes it: `user.email` and `session.id` / `session.token` (read by `resolveAuthzContext`'s session arm in `@objectstack/core`), `user.authGate` as `unknown` (the ADR-0069 posture, which `normalizeAuthGate` validates against the closed posture vocabulary), and `session.impersonatedBy` as `string | null` (read by the print door's `impersonatorOf` in `@objectstack/service-print`). Before this, those reads went through `any` or a cast, so a field better-auth dropped or renamed compiled and read `undefined`. For `impersonatedBy`, that would have silently turned off the impersonation refusal. Every member is optional, so every implementer and caller typechecks unchanged.
+  - **`@objectstack/core`**: `resolveAuthzContext`'s session arm reads the session through the declared type instead of `any`. `ResolveAuthzInput.getSession`'s own type is unchanged. Runtime behaviour is unchanged.
+  - **`@objectstack/service-print`**: `impersonatorOf` reads `session.impersonatedBy` through the declared type instead of a cast. Runtime behaviour is unchanged.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [8d3dd6f]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [d8e11b5]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/service-storage@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

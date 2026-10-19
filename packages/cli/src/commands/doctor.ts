@@ -34,7 +34,7 @@ import {
 // The posture vocabulary, read from the package that DEFINES it (#5382) — the
 // fix list below enumerates the accepted values, and a second literal list
 // would be free to drift the day a posture is added.
-import { TENANCY_POSTURES, type TenancyPosture } from '@objectstack/spec/security';
+import { TENANCY_POSTURES, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 
 interface HealthCheckResult {
   name: string;
@@ -823,6 +823,32 @@ export function resolveTenancyPostureOrFinding(reading: DotenvReading): TenancyP
       },
     };
   }
+}
+
+/**
+ * The row doctor reports for a walled posture (`group` / `isolated`) in 18.0,
+ * or `null` for any other.
+ *
+ * 18.0 supports the `single` posture only, and `os serve` (so `os dev` and
+ * `os start`) refuses a walled one before it reads a config
+ * (`walledPostureRefusal` in `serve.ts`). Without this row doctor printed
+ * nothing about a valid posture, so it said nothing about a boot that will be
+ * refused. A `warning`, not an `error`: the one-shot commands doctor also
+ * fronts (`os migrate`, `os verify`, `os secret`, `os storage`) still boot
+ * under it. The 18.x release that restores walled postures deletes this row.
+ */
+export function walledPostureFinding(posture: TenancyPosture): HealthCheckResult | null {
+  if (!postureEnforcesWall(posture)) return null;
+  return {
+    name: 'Tenancy posture',
+    status: 'warning',
+    message:
+      `the tenancy posture is '${posture}' — 18.0 supports the 'single' posture only, so the next`
+      + ' `os serve` (and so `os dev` and `os start`) refuses it at boot',
+    fix:
+      'Set OS_TENANCY_POSTURE=single, or unset both OS_TENANCY_POSTURE and OS_MULTI_ORG_ENABLED;\n'
+      + '      or keep this deployment on a 17.x release until the 18.x release that carries walled postures.',
+  };
 }
 
 // ─── Config-Aware Checks ────────────────────────────────────────────
@@ -2022,6 +2048,204 @@ export function installedPackageLedgerChecks(
   return out;
 }
 
+// ─── Environment tool probes: "not on PATH" vs "ran and failed" (#24464) ──
+//
+// `pnpm -v`, `tsc -v` and `git --version` each ran inside a `try` whose
+// `catch` answered "Not found" for EVERY failure. A tool that is on PATH and
+// fails when it runs is a different fact, and the install fix does not fix
+// it: a Corepack-managed `pnpm` that cannot fetch the version it resolves
+// (offline, behind a proxy, a registry answering 429) was reported
+// `✗ pnpm  Not found` with `npm install -g pnpm@10.28.1`.
+//
+// How the failures show up — measured on Node 22.22 with `/bin/sh` = dash,
+// through the probe's own call, `execSync(cmd, { encoding: 'utf-8' })`:
+//
+//   world                                  error.code  status  first stderr line
+//   no `pnpm` on PATH                      (none)      127     /bin/sh: 1: pnpm: not found
+//   `pnpm` on PATH, its `node` missing     (none)      127     /usr/bin/env: 'node': No such file or directory
+//   `pnpm` on PATH, not executable         (none)      127     /bin/sh: 1: pnpm: Permission denied
+//   Corepack `pnpm`, registry answers 429  (none)      1       ...corepack.cjs:22058 (then the source line,
+//                                                              a caret, and `Error: Server answered with
+//                                                              HTTP 429 when performing the request to ...`)
+//
+// The command string runs through a shell, so a missing binary is never
+// Node's `ENOENT`, and the shell's 127 does not discriminate either: rows two
+// and three exit 127 with the tool present. The shell's own words are
+// localised, and on Windows `cmd.exe` answers "is not recognized as an
+// internal or external command" with exit 1 — the code a failing `pnpm.cmd`
+// exits with too. So once a probe has failed, the classifier asks the question
+// itself: is there a file on the PATH the probe ran with that the shell would
+// have found under that name? No ⇒ "not found", today's row unchanged. Yes ⇒
+// it ran and failed, and the row reports the child's own first meaningful
+// line. A lookup that misses answers today's row, so this can only be as
+// wrong as the code it replaces, in that direction.
+//
+// Windows: `cmd.exe` resolves a bare name by trying each `PATHEXT` extension in
+// the current directory and then in each `PATH` entry, and never runs an
+// extensionless file, so on `win32` the lookup tries exactly those candidates.
+// `execFileSync('pnpm', …)` without a shell is NOT a way round the shell
+// here: it does not find `pnpm.cmd` on Windows. Not measured on a Windows
+// host; the `win32` lookup is pinned in `test/doctor-tool-probe-failure.test.ts`.
+
+/** How one environment tool probe ran. */
+export type ToolProbe =
+  | { readonly outcome: 'ok'; readonly output: string }
+  | { readonly outcome: 'not-found' }
+  | {
+      readonly outcome: 'failed';
+      /** The child's first meaningful line ({@link firstMeaningfulLine}). */
+      readonly detail: string;
+      /** How it ended: `exited with code 1`, `was killed by SIGTERM`. */
+      readonly exit: string;
+      /** The child's whole stderr, which a cause-specific fix reads. */
+      readonly stderr: string;
+    };
+
+/** What a probe runs with; each field defaults to this process's own. */
+export interface ToolProbeOptions {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly cwd?: string;
+}
+
+/** The PATH lookup's inputs; `platform` picks the shell whose resolution it mirrors. */
+export interface ShellPathLookupOptions extends ToolProbeOptions {
+  readonly platform?: NodeJS.Platform;
+}
+
+/**
+ * Runs `command` through the shell, as the probes always have, and classifies
+ * a failure by whether `binary` is on the PATH it ran with.
+ */
+export function probeTool(command: string, binary: string, options: ToolProbeOptions = {}): ToolProbe {
+  try {
+    const output = execSync(command, { encoding: 'utf-8', env: options.env, cwd: options.cwd }).trim();
+    return { outcome: 'ok', output };
+  } catch (error) {
+    return classifyToolProbeFailure(command, binary, error, options);
+  }
+}
+
+/** The classifier behind {@link probeTool}: `error` is what `execSync(command)` threw. */
+export function classifyToolProbeFailure(
+  command: string,
+  binary: string,
+  error: unknown,
+  options: ShellPathLookupOptions = {},
+): ToolProbe {
+  if (!isOnShellPath(binary, options)) return { outcome: 'not-found' };
+  const failure = (error ?? {}) as { status?: unknown; signal?: unknown; code?: unknown; stdout?: unknown; stderr?: unknown };
+  const stderr = typeof failure.stderr === 'string' ? failure.stderr : '';
+  const stdout = typeof failure.stdout === 'string' ? failure.stdout : '';
+  const exit =
+    typeof failure.status === 'number'
+      ? `exited with code ${failure.status}`
+      : typeof failure.signal === 'string'
+        ? `was killed by ${failure.signal}`
+        : `could not run (${typeof failure.code === 'string' ? failure.code : 'unknown error'})`;
+  const detail = firstMeaningfulLine(stderr) ?? firstMeaningfulLine(stdout) ?? `\`${command}\` ${exit} with no output`;
+  return { outcome: 'failed', detail, exit, stderr };
+}
+
+/**
+ * Whether the shell `execSync` uses would find an executable named `binary`:
+ * `/bin/sh` walks `PATH` (an empty entry is the current directory) and takes
+ * the first FILE of that name — present but not executable is still found,
+ * and answered "Permission denied", not "not found"; `cmd.exe` tries the
+ * current directory and then each `PATH` entry with each `PATHEXT` extension.
+ */
+export function isOnShellPath(binary: string, options: ShellPathLookupOptions = {}): boolean {
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const cwd = options.cwd ?? process.cwd();
+  const isFile = (candidate: string): boolean => {
+    try {
+      return fs.statSync(candidate, { throwIfNoEntry: false })?.isFile() === true;
+    } catch {
+      return false;
+    }
+  };
+  if (platform === 'win32') {
+    // A plain object has no case-insensitive `Path` the way `process.env` does on Windows.
+    const read = (name: string): string | undefined =>
+      env[Object.keys(env).find((key) => key.toUpperCase() === name) ?? name];
+    const dirs = [cwd, ...(read('PATH') ?? '').split(';').map((dir) => dir.replace(/^"(.*)"$/, '$1')).filter(Boolean)];
+    // Windows file names are case-insensitive; npm writes the lower-case `.cmd`.
+    const extensions = (read('PATHEXT') || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).map((ext) => ext.toLowerCase());
+    return dirs.some((dir) => extensions.some((ext) => isFile(path.resolve(cwd, dir, `${binary}${ext}`))));
+  }
+  return (env.PATH ?? '').split(':').some((dir) => isFile(path.resolve(cwd, dir, binary)));
+}
+
+/**
+ * The line of a failed child's output a reader needs first. An uncaught Node
+ * error — Corepack's fetch failure is one — opens with `<file>:<line>`, the
+ * source line and a caret, and only then the `Error: …` line, so an error
+ * line is preferred wherever it sits; otherwise the first non-blank line.
+ */
+export function firstMeaningfulLine(text: string): string | undefined {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  return lines.find((line) => /^(?:[A-Z][A-Za-z]* )?[A-Za-z]*Error: /.test(line)) ?? lines[0];
+}
+
+/**
+ * Corepack's own words for a registry it could not use: `Error when
+ * performing the request to …` (no answer) and `Server answered with HTTP
+ * <status> when performing the request to …` (a refusal, 429 included), both
+ * from a stack under `corepack`; and `Network access disabled by the
+ * environment; can't reach …` (`COREPACK_ENABLE_NETWORK=0`).
+ */
+export function isCorepackFetchFailure(stderr: string): boolean {
+  return (
+    (stderr.includes(' when performing the request to ') && /corepack/i.test(stderr)) ||
+    /^Network access disabled by the environment; can't reach /m.test(stderr)
+  );
+}
+
+/** The fix for a pnpm whose Corepack could not fetch the pnpm it resolves. */
+export const COREPACK_FETCH_FIX =
+  'pnpm is installed; Corepack could not download the pnpm version it resolves, and reinstalling pnpm will not fix that. ' +
+  'Check the network or proxy, or pin pnpm with a "packageManager" field in package.json';
+
+/** The neutral fix for a tool that is on PATH and failed for any other reason. */
+export function toolFailedFix(binary: string, command: string, exit: string): string {
+  return `${binary} is on PATH, but \`${command}\` ${exit}: run \`${command}\` and read its error`;
+}
+
+/** The `pnpm` row. */
+export function pnpmCheck(options: ToolProbeOptions = {}): HealthCheckResult {
+  const probe = probeTool('pnpm -v', 'pnpm', options);
+  if (probe.outcome === 'ok') return { name: 'pnpm', status: 'ok', message: `Version ${probe.output}` };
+  if (probe.outcome === 'not-found') {
+    return { name: 'pnpm', status: 'error', message: 'Not found', fix: 'Install pnpm: npm install -g pnpm@10.28.1' };
+  }
+  return {
+    name: 'pnpm',
+    status: 'error',
+    message: probe.detail,
+    fix: isCorepackFetchFailure(probe.stderr) ? COREPACK_FETCH_FIX : toolFailedFix('pnpm', 'pnpm -v', probe.exit),
+  };
+}
+
+/** The `TypeScript` row: a warning either way, since a project-local `tsc` is the norm. */
+export function typescriptCheck(options: ToolProbeOptions = {}): HealthCheckResult {
+  const probe = probeTool('tsc -v', 'tsc', options);
+  if (probe.outcome === 'ok') return { name: 'TypeScript', status: 'ok', message: probe.output };
+  if (probe.outcome === 'not-found') {
+    return { name: 'TypeScript', status: 'warning', message: 'Not found in PATH', fix: 'Installed locally via pnpm' };
+  }
+  return { name: 'TypeScript', status: 'warning', message: probe.detail, fix: toolFailedFix('tsc', 'tsc -v', probe.exit) };
+}
+
+/** The `Git` row. */
+export function gitCheck(options: ToolProbeOptions = {}): HealthCheckResult {
+  const probe = probeTool('git --version', 'git', options);
+  if (probe.outcome === 'ok') return { name: 'Git', status: 'ok', message: probe.output };
+  if (probe.outcome === 'not-found') {
+    return { name: 'Git', status: 'warning', message: 'Not found', fix: 'Install Git for version control' };
+  }
+  return { name: 'Git', status: 'warning', message: probe.detail, fix: toolFailedFix('git', 'git --version', probe.exit) };
+}
+
 // ─── Command ────────────────────────────────────────────────────────
 
 export default class Doctor extends Command {
@@ -2095,40 +2319,11 @@ export default class Doctor extends Command {
       });
     }
     
-    // Check pnpm
-    try {
-      const pnpmVersion = execSync('pnpm -v', { encoding: 'utf-8' }).trim();
-      results.push({
-        name: 'pnpm',
-        status: 'ok',
-        message: `Version ${pnpmVersion}`,
-      });
-    } catch (error) {
-      results.push({
-        name: 'pnpm',
-        status: 'error',
-        message: 'Not found',
-        fix: 'Install pnpm: npm install -g pnpm@10.28.1',
-      });
-    }
-    
-    // Check TypeScript
-    try {
-      const tscVersion = execSync('tsc -v', { encoding: 'utf-8' }).trim();
-      results.push({
-        name: 'TypeScript',
-        status: 'ok',
-        message: tscVersion,
-      });
-    } catch (error) {
-      results.push({
-        name: 'TypeScript',
-        status: 'warning',
-        message: 'Not found in PATH',
-        fix: 'Installed locally via pnpm',
-      });
-    }
-    
+    // Check pnpm, then TypeScript (#24464: "not on PATH" and "ran and failed"
+    // are two rows — see `probeTool`).
+    results.push(pnpmCheck());
+    results.push(typescriptCheck());
+
     // Check if dependencies are installed
     const cwd = process.cwd();
     const nodeModulesPath = path.join(cwd, 'node_modules');
@@ -2186,22 +2381,8 @@ export default class Doctor extends Command {
       }
     }
     
-    // Check Git
-    try {
-      const gitVersion = execSync('git --version', { encoding: 'utf-8' }).trim();
-      results.push({
-        name: 'Git',
-        status: 'ok',
-        message: gitVersion,
-      });
-    } catch (error) {
-      results.push({
-        name: 'Git',
-        status: 'warning',
-        message: 'Not found',
-        fix: 'Install Git for version control',
-      });
-    }
+    // Check Git (#24464, the same classifier as pnpm's)
+    results.push(gitCheck());
 
     // #5387 — what doctor read the environment FROM, reported before anything
     // derived from it. Unconditional: an env-derived verdict whose inputs are
@@ -2238,9 +2419,13 @@ export default class Doctor extends Command {
     // #5382 — the posture verdict resolved at the top of `run()`, reported here
     // among the other environment facts. Only an unrecognized value produces a
     // row: a valid posture is not a finding, and doctor's output for every
-    // environment that can actually start is unchanged.
+    // environment that can actually start is unchanged. In 18.0 a walled
+    // posture cannot start under `os serve`, so it gets a row too.
     if (!postureReading.ok) {
       results.push(postureReading.result);
+    } else {
+      const walled = walledPostureFinding(postureReading.posture);
+      if (walled) results.push(walled);
     }
 
     // ── Installed-package ledger readability (#5429) ─────────────────

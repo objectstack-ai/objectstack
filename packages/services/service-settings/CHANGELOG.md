@@ -1,5 +1,133 @@
 # @objectstack/service-settings
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [b7a688e]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/platform-objects@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Minor Changes
+
+- d65826f: fix: framework writes on tenant-column objects name the organization they can derive (ADR-0131 D9)
+  
+  Clause-②: yes (widening)
+  
+  A write on a tenant-column object with no organization is derived under `single` and refused under a wall (ADR-0131 D9). Before the engine stops letting such writes through, each of these producers now names the organization it can derive itself. Under `single` that is the Default Organization, which is the owner the engine would derive anyway, so no reader changes. Under a wall the row names an organization only where the producer has one. The rows it cannot attribute are written exactly as before.
+  
+  - **`@objectstack/plugin-auth`.** The self-registration grant (`sys_user_permission_set`) and the auth mails about a user (verification, password reset, account invitation, magic link, change-email notice → `sys_email`) read one derivable organization: the `tenancy` service's `defaultOrgId()`. Under `single` that is the Default Organization. Under a wall it is none, because the registrant belongs to no organization yet. The verification and reset mails used to persist with no organization even under `single`.
+  - **`@objectstack/plugin-audit`.** An activity row (`sys_activity`) about a record with no organization of its own (a `sys_user`, a platform setting), written with no session organization (a sign-up), takes the Default Organization under `single`. The record's own organization and then the session's still win. The ledger's `tenant_id` attribution is unchanged. New optional `AuditWriterOptions.getDefaultOrganizationId()`; `AuditPlugin` wires it to the `tenancy` service.
+  - **`@objectstack/service-settings`.** The `sys_secret` ciphertext and the `sys_setting_audit` history row of a `tenant` or `user` value carry that value's organization, which is the same owner as its `sys_setting` row. A `global` value's rows name none. New optional `organization_id` on `SettingsSecretStore.insert`'s row and `organizationId` on `SettingsAuditWriter.write`'s entry; the built-in writers persist them. A failed `sys_setting_audit` write is now reported at `error`, not `warn`: the settings write succeeds while its history row is lost. The first report names the consequence and the fix. `buildSettingAuditWriter`'s optional logger argument keeps every sink it accepted (none, `{}`, or one with an optional `warn`) and additionally takes a sink that carries `error`. It reports through `error` when the sink has it, else through `warn`.
+  - **`@objectstack/verify`.** The RLS probe and position personas' grants (`sys_user_permission_set`, `sys_user_position`) belong to the organization the persona is a member of (the Default Organization under `single`). They used to be written with an explicit `organization_id: null`. A persona that belongs to no organization, or to several, names none.
+
+### Patch Changes
+
+- 0c3db0f: The settings routes' identity door resolves through `@objectstack/core`'s `resolveRequestExecutionContext`, the one request-to-`ExecutionContext` composition
+  
+  Clause-②: no
+  
+  - `SettingsServicePlugin` resolves the caller of every `/api/settings` route by calling `resolveRequestExecutionContext` with this door's differences as named parameters: `anonymous: 'fail-closed'`, `authGate: 'resolved'`, `credentials: 'api-key-and-session'`, `sessionApi: 'optional'`, `session: 'request'`, its own way to reach the `tenancy` service, `localization: 'withhold'`, no request locale, `accessToken: 'withhold'`, and no OAuth provenance or admission channel. The engine and auth-service lookups, the header normalisation, the tenancy wiring, the projection to `SettingsContext` and the fail-closed `catch` stay at the door.
+  - The answers are the ones the door gave before: an anonymous caller, an unrecognised cookie, a failed session read and a refused API key get `401 UNAUTHENTICATED`; a session or an API key owner the authentication policy holds gets `403` with its code and message; an unreadable permission store or tenancy service gets `503 SERVICE_UNAVAILABLE`; and an API key its own lifecycle refuses gets its `403` and code. A one-off probe of 29 fault wirings through the listing route read the same answer on both sides of the change.
+  - Nothing to do for a consumer: no export, route, configuration key or response shape changed.
+- 04fd88a: Clause-②: no
+  
+  fix(service-settings): the Setup settings pages name the organization or the environment where they said "workspace"
+  
+  - **What changed.** The built-in settings manifests and their en, zh-CN, ja-JP and es-ES bundles no longer say "workspace" (工作区, ワークスペース, espacio de trabajo). Each string now uses the noun for what the setting belongs to:
+    - **Organization** (组织 / 組織 / organización): the Branding name field, now **Organization name**, and the Branding description; the Company legal-name help; the Feature Flags description. These settings are stored once per organization.
+    - **Environment** (环境 / 環境 / entorno): the Provider section of Mail and of SMS. These settings are stored once for the running instance.
+    - Authentication, New user membership: the help now names the explicit act as **creating an organization**.
+  - **Unchanged:** every setting key, including `branding.workspace_name` and its `OS_BRANDING_WORKSPACE_NAME` override; stored values; the Settings hub `category` values; the keys and shape of the translation bundles; and the exports. Only the text a reader sees changed.
+- 44a5011: Clause-②: no
+  
+  Refusals and Setup help text that a user reads inside the running system no longer call that system
+  "this environment". They say "this system", or they drop the noun.
+  
+  - `@objectstack/plugin-auth`: the two self-registration refusals drop the noun ("Self-registration is
+    closed (audience posture invite_only).", "Self-registration is limited to approved email domains, …").
+    So do the OAuth self-service `503` ("OIDC provider is not enabled") and the SSO `400`
+    `DOMAIN_VERIFICATION_DISABLED` ("Domain verification is not enabled (set
+    OS_SSO_DOMAIN_VERIFICATION)."). The last-administrator guard's refusals and its two warning lines say
+    "this system", including "nobody able to administer the system". The OIDC authorize-gate refusal
+    (`403 ENV_ACCESS_DENIED`) keeps "this environment". Only the cloud control plane installs that gate,
+    and there the noun names the environment a cloud user is signing in to.
+  - `@objectstack/plugin-security`: the diagnostic `message` of the packaged-permission-set lock now reads
+    "… is declared by package '…' and is locked — editing it here would …". The provenance-unknown
+    refusal says "this system could not determine …". Both `userMessage` texts are unchanged.
+  - `@objectstack/service-settings`: the Mail and SMS provider groups read "Choose how this system sends
+    outbound email." and "… outbound SMS.". The Authentication audience group reads "Who may become a user
+    of this system's apps.". The zh-CN, ja-JP and es-ES bundles change only the noun, to 本系统,
+    このシステム and este sistema.
+  
+  Only the human-readable text moves. Every HTTP status, error code, settings key and response shape
+  stays as it was.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Patch Changes

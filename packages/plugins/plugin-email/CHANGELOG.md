@@ -1,5 +1,91 @@
 # @objectstack/plugin-email
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [b7a688e]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/platform-objects@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/formula@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Patch Changes
+
+- 8a88901: fix(plugin-auth,plugin-email): the organization invitation mail names the invitee's role by its label in the mail's language (`成员`, `メンバー`, `Miembro`, `Member`), not by the stored value `member`
+  
+  Clause-②: yes (widening)
+  
+  - **What changed.** The zh-CN, ja-JP and es-ES invitation mails printed the stored membership role inside a translated sentence: 「邀请您以 member 的身份加入」. The sender now passes `{{role}}` as the `sys_member.role` option label in the locale the mail is written in, the same label the console shows for that option. It reads the label through the runtime's i18n service and the console's own object translation path, so a tenant's translation of the option, made in Studio, reaches the mail too. The four bodies keep interpolating the one `role` variable; its name and type are unchanged, and its declaration now says it carries the label.
+  - **The plain-text part names the role too.** The four text bodies gain the role clause their HTML bodies carry, so both parts of the mail name the same facts. For example, the English text is now `Dana (dana@example.com) invited you to join Northwind on Acme as Member.`
+  - **Stated fallbacks.** A role list (`admin,member`) is labelled role by role and joined as a list in the mail's language (`管理员和成员`). A value with no option label is named as stored, and one warning names it. With no i18n service, or one that fails, the mail names the option's authored English label, never an empty string.
+  - **New option (widening).** `AuthManagerOptions.getI18n?: () => II18nService | undefined` is a lazy accessor for the `i18n` service, read when the invitation is sent. `AuthPlugin` wires it from the kernel. An embedder that builds `AuthManager` itself and omits it gets the authored labels.
+  - **What changes for you.** If you have overridden `auth.invitation` and interpolate `{{role}}`, it now receives the label, not the stored value.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Patch Changes

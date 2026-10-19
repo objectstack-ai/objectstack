@@ -1090,8 +1090,8 @@ describe('resolveUserAuthzGrants — userId-driven authz for non-HTTP surfaces (
     const ql = makeQl({
       sys_user: [{ id: 'u1', email: 'ada@x.com' }],
       sys_member: [{ user_id: 'u1', role: 'admin', organization_id: 'o1' }],
-      sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: null }],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'ehr_all', organization_id: null }],
+      sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: 'o1' }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'ehr_all', organization_id: 'o1' }],
       sys_permission_set: [{ id: 'psA', name: 'ehr_all', system_permissions: ['cap_ehr'] }],
     });
     const grants = await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'o1' });

@@ -54,6 +54,9 @@ import {
 // this plugin. This file holds no second literal: it returns the spec's object
 // and exports it under the name every consumer here already imports.
 import { RLS_DENY_FILTER as SPEC_RLS_DENY_FILTER } from '@objectstack/spec/data';
+// [#24164 ruling E′] An object's declared default row scope, recognised by
+// identity so its compiled filter can say where it came from.
+import { isObjectDefaultRowScopePolicy } from './object-default-row-scope.js';
 
 /**
  * Why a policy's predicate produced no filter — the compiler's OWN answer,
@@ -713,6 +716,24 @@ export function compiledPolicyNameOf(node: unknown): string | undefined {
 }
 
 /**
+ * [#24164 ruling E′] The object default row scope each compiled policy filter
+ * came from, recorded by {@link RLSCompiler.compileFilter} beside
+ * {@link POLICY_OF_COMPILED_FILTER}, for the same reason and in the same way:
+ * the compiled filter is built fresh, so its identity is its policy's.
+ */
+const OBJECT_DEFAULT_OF_COMPILED_FILTER = new WeakMap<object, RowLevelSecurityPolicy>();
+
+/**
+ * [#24164 ruling E′] The object's declared default row scope whose compiled
+ * filter `node` is, or `undefined` for any other node (a held set's policy, a
+ * composed `$or` / `$and`, the deny sentinel). Lets explain name an applied
+ * default as the object's declaration, never as a permission set's policy.
+ */
+export function compiledObjectDefaultRowScopeOf(node: unknown): RowLevelSecurityPolicy | undefined {
+  return node !== null && typeof node === 'object' ? OBJECT_DEFAULT_OF_COMPILED_FILTER.get(node) : undefined;
+}
+
+/**
  * Is this field constraint an emptied membership, and what CONSTANT does it
  * evaluate to? `{ $in: [] }` is constant FALSE on every backend ("IN ()
  * matches nothing"); `{ $nin: [] }` is constant TRUE ("NOT IN () excludes
@@ -1017,6 +1038,7 @@ export class RLSCompiler {
           if (comparands.ok) {
             filters.push(comparands.filter);
             POLICY_OF_COMPILED_FILTER.set(comparands.filter, (policy as { name?: string }).name ?? '(unnamed)');
+            if (isObjectDefaultRowScopePolicy(policy)) OBJECT_DEFAULT_OF_COMPILED_FILTER.set(comparands.filter, policy);
           } else {
             deniedBy.push({ policy, cause: { reason: 'refused-comparand', detail: comparands.detail } });
           }

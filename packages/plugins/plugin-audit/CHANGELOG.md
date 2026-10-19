@@ -1,5 +1,138 @@
 # @objectstack/plugin-audit
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [9112bcd]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [45bec43]
+- Updated dependencies [b7a688e]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/objectql@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+  - @objectstack/platform-objects@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Minor Changes
+
+- d65826f: fix: framework writes on tenant-column objects name the organization they can derive (ADR-0131 D9)
+  
+  Clause-②: yes (widening)
+  
+  A write on a tenant-column object with no organization is derived under `single` and refused under a wall (ADR-0131 D9). Before the engine stops letting such writes through, each of these producers now names the organization it can derive itself. Under `single` that is the Default Organization, which is the owner the engine would derive anyway, so no reader changes. Under a wall the row names an organization only where the producer has one. The rows it cannot attribute are written exactly as before.
+  
+  - **`@objectstack/plugin-auth`.** The self-registration grant (`sys_user_permission_set`) and the auth mails about a user (verification, password reset, account invitation, magic link, change-email notice → `sys_email`) read one derivable organization: the `tenancy` service's `defaultOrgId()`. Under `single` that is the Default Organization. Under a wall it is none, because the registrant belongs to no organization yet. The verification and reset mails used to persist with no organization even under `single`.
+  - **`@objectstack/plugin-audit`.** An activity row (`sys_activity`) about a record with no organization of its own (a `sys_user`, a platform setting), written with no session organization (a sign-up), takes the Default Organization under `single`. The record's own organization and then the session's still win. The ledger's `tenant_id` attribution is unchanged. New optional `AuditWriterOptions.getDefaultOrganizationId()`; `AuditPlugin` wires it to the `tenancy` service.
+  - **`@objectstack/service-settings`.** The `sys_secret` ciphertext and the `sys_setting_audit` history row of a `tenant` or `user` value carry that value's organization, which is the same owner as its `sys_setting` row. A `global` value's rows name none. New optional `organization_id` on `SettingsSecretStore.insert`'s row and `organizationId` on `SettingsAuditWriter.write`'s entry; the built-in writers persist them. A failed `sys_setting_audit` write is now reported at `error`, not `warn`: the settings write succeeds while its history row is lost. The first report names the consequence and the fix. `buildSettingAuditWriter`'s optional logger argument keeps every sink it accepted (none, `{}`, or one with an optional `warn`) and additionally takes a sink that carries `error`. It reports through `error` when the sink has it, else through `warn`.
+  - **`@objectstack/verify`.** The RLS probe and position personas' grants (`sys_user_permission_set`, `sys_user_position`) belong to the organization the persona is a member of (the Default Organization under `single`). They used to be written with an explicit `organization_id: null`. A persona that belongs to no organization, or to several, names none.
+
+### Patch Changes
+
+- f7af839: Clause-②: no
+  
+  Setup's Diagnostics group has one audit entry, "Audit Log", and it opens the audit browser
+  
+  - **What changed.** `@objectstack/plugin-audit` contributed two Setup entries onto the same rows: "Audit Logs" (the `sys_audit_log` record list) and "Audit Log Browser" (the console's `audit:log` page). It now contributes one, "Audit Log", which opens the browser. The browser filters by action, object, actor and date, offers the record list's views (Writes, Auth, Record Views, …) as presets, and links to the record list ("Open as list"). Those two parts of the page ship in the console this release pins.
+  - **Ids.** The entry keeps the id `nav_audit_logs`, so a sidebar pin a user set on "Audit Logs" stays on the new entry. The id `nav_audit_log_browser` is no longer served; a pin set on it no longer shows, and the user can pin "Audit Log" instead.
+  - **Labels.** `@objectstack/platform-objects` serves the entry's label in the four shipped locales (Audit Log, 审计日志, 監査ログ, Registro de auditoría), and drops the "Audit Log Browser" label.
+  - **Unchanged.** The `sys_audit_log` object, its list views, its routes and its data API answer as before. The record list is no longer an entry in Setup's menu, so the ⌘K palette's record search in Setup no longer searches audit rows.
+- 62c4441: Clause-②: no
+  
+  fix(plugin-audit): a read of the activity stream, the compliance ledger or comments that names its parent objects writes one parent-record branch per named object, not one per registered object
+  
+  - **What changed.** The parent-record read gate on `sys_activity`, `sys_audit_log` and `sys_comment` ANDs one branch per parent object into every read: a `ReadableIds` leaf, or the bounded probe for an on-behalf-of caller, a middleware-narrowed parent or a parent on another datasource. It wrote one for every registered object, whatever the read asked for. When the read's own `where` names the objects its rows are about (`object_name` as a plain value, `$eq` or `$in` of machine names, at the top level or inside a top-level `$and`), the gate now writes branches for those objects only, and the bounded probe pre-scans only the named objects of its classes, or does not run. The activity stream's withheld-update rule, which wrote one branch per enumerated object too, narrows the same way.
+  - **What it costs now.** Measured on SQLite with 148 registered objects: a newest-first 20-row activity read filtered to 3 objects went from a 711.8 KB statement with 2,629 bindings to 14.9 KB with 60, for the rows and again for the total, and its two probe pre-scans no longer run.
+  - **Unchanged:** the rows, the totals and the grouped counts every reader is served. A read of any other shape (no `object_name` filter, an `$or`, a `$not`, another operator, a value that is not a machine name) keeps every branch, as before. No export, option or stored shape changes.
+  - **One failure mode is gone:** a leaf or a probe for an object the read does not name is no longer composed or run, so a refusal composing it, or a failing pre-scan for it, no longer fails or denies that read.
+- 77e9f79: fix(plugin-audit): an activity summary written right after a workspace language change is stored in the new language, not the old one
+  
+  Clause-②: no (no export, option key, signature or schema changes; the held write locale is retired sooner, and the option docs say when)
+  
+  - **What was wrong.** The audit writer held the write locale for each tenant/user scope for 30 seconds, and nothing retired it when the `localization.locale` setting changed. A `sys_activity.summary` line is stored once, at write time, so every audited write in that window (a user's create, a seed publish) kept the old language for good.
+  - **What changes.** A write to `sys_setting` or `sys_platform_setting` through the engine now retires every held write locale. That covers a change made through the settings API, which persists through the engine, and a direct row write such as a seeder's, which emits no settings event. These are the same writes that retire `resolveLocalizationContext`'s own cache. A lookup still in flight when such a write lands is not held. The 30-second bound stays for what the writer cannot see: the storage behind a host `getLocale` resolver, and a settings write on another node.
+  - **Unchanged:** the host `getLocale` resolver is still asked first, and a write with no settings change between it and the last one is still answered from the held locale, without a settings read.
+- 538f923: fix: an activity row is written only when an organization is derivable, never with a NULL organization, and the v18 ownership ceremony deletes the existing NULL activity rows it cannot attribute (ADR-0131 D9)
+  
+  Clause-②: no
+  
+  - **`@objectstack/plugin-audit`.** The audit writer's activity mirror (`sys_activity`) takes its organization from the record, then from the acting session, then from the `tenancy` service's Default Organization under `single`. When none of them names one, the mirror now writes no activity row at all. Before, it wrote a row with `organization_id` NULL. Under a wall that row was readable by no organization member. The change is still recorded: the compliance ledger row (`sys_audit_log`) is written as before, with its `tenant_id` attribution. Under `single` the Default Organization is always derivable, so nothing changes there. A record that names its organization keeps its activity row, with that organization.
+  - **`@objectstack/cli`.** `os migrate organization-ownership` still attributes a NULL `sys_activity` row when its record carries an organization. On a walled database (any posture but `single`), the mirror-deletion step now deletes the NULL rows no anchor attributes, such as activity about a sign-up's `sys_user`. Before, those rows were reported as unattributable and held certification. They are 14-day telemetry that the mirror no longer writes, and `sys_audit_log` keeps each change. The plan counts them as the departure `underivable-activity`, and warns before the first write that `--apply` deletes them. The apply report lists the count as the table's `deleted`. Under `single` the Default Organization takes these rows, as before, and nothing is deleted.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [ec749fb]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

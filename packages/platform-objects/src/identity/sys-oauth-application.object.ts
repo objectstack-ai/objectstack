@@ -233,7 +233,7 @@ export const SysOauthApplication = ObjectSchema.create({
       pagination: { pageSize: 50 },
       emptyState: {
         title: 'No OAuth applications yet',
-        message: 'Register an application to let its clients sign users in with this environment.',
+        message: 'Register an application to let its clients sign users in with this system.',
       },
     },
     mine: {

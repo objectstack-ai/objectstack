@@ -45,8 +45,11 @@ import { InboxMessage, NotificationDelivery, NotificationPreference, Notificatio
 
 const SYSTEM = { context: { isSystem: true } as ExecutionContext };
 
-const SYS_ORGANIZATION = { name: 'sys_organization', label: 'Organization', fields: { name: { type: 'text', label: 'Name' } } };
-const SYS_USER = { name: 'sys_user', label: 'User', fields: { name: { type: 'text', label: 'Name' } } };
+// [C8 stage 8b] Declared as the platform declares them: better-auth owns both tables,
+// so the registration injects no organization column. A bare schema would gain one,
+// and under `single` the first organization's own insert would then be refused.
+const SYS_ORGANIZATION = { name: 'sys_organization', label: 'Organization', managedBy: 'better-auth', fields: { name: { type: 'text', label: 'Name' } } };
+const SYS_USER = { name: 'sys_user', label: 'User', managedBy: 'better-auth', fields: { name: { type: 'text', label: 'Name' } } };
 
 const silentLogger: any = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
 silentLogger.child = () => silentLogger;

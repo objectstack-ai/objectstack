@@ -1,5 +1,104 @@
 # @objectstack/plugin-hono-server
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- 8ed3786: The `/auth/me` endpoints resolve their caller through `@objectstack/core`'s `resolveRequestExecutionContext`, the one request-to-`ExecutionContext` composition
+  
+  Clause-②: no
+  
+  - `makeExecutionContextResolver`, which `GET /auth/me/permissions`, `GET /auth/me/localization` and `GET /me/apps` call, resolves the caller by calling `resolveRequestExecutionContext` with this door's differences as named parameters: `anonymous: 'fail-closed'`, `authGate: 'withhold'`, `credentials: 'session-only'`, `sessionApi: 'required'`, `session: 'request'`, no tenancy posture, `localization: 'withhold'`, no request locale, `accessToken: 'withhold'`, and no OAuth provenance or admission channel. The per-request service reads, the environment-kernel resolution and the fail-closed `catch` stay at the door. Every platform door that resolves a request's caller now calls the one composition.
+  - One answer changes. When the auth service's session read carries `session.userId` but no `user.id` (no user object, a user without an id, or `user.id: null`), these endpoints answered as signed out; they now answer as signed in as that user, which is how the runtime dispatcher, REST, the settings routes and the storage download already read it. No session producer yields that shape: in this repository better-auth's session read returns no session when the session's user is missing and plugin-auth passes its read through, and cloud's control plane uses the same plugin-auth read.
+  - Every other answer is unchanged: no credential, an unrecognised cookie, a failing session read, an API key alone and a host with no auth service get each route's signed-out body; a session the authentication policy holds is still served on these allow-listed routes, with no `authGate` on its context; an unreadable permission store is still the host's `503 SERVICE_UNAVAILABLE`.
+  - Nothing to do for a consumer: no export, route, configuration key or response shape changed.
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/observability@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Patch Changes
+
+- f792290: Clause-②: no
+  
+  perf(plugin-auth, plugin-hono-server): an authenticated request reads 8 rows in 4 round trips before its handler, down from 11 in 7, and `/auth/me/*` resolves the caller's grants once
+  
+  Measured on a real engine (SQLite through `@objectstack/driver-sql`), for a signed-in user whose session has an active organization:
+  
+  | before the handler | before | after |
+  |:--|:--|:--|
+  | REST and dispatcher doors (`resolveAuthzContext` with the in-process session read) | 11 reads, 7 round trips | 8 reads, 4 round trips |
+  | `GET /auth/me/permissions`, `/auth/me/localization`, `/me/apps` | 17 reads, 9 round trips | 8 reads, 4 round trips |
+  | `GET /api/v1/auth/get-session` | 11 reads, 7 round trips | 10 reads, 6 round trips when it reads the signing key; 8 in 4 while the key is held |
+  
+  - **An in-process session read no longer signs a JWT.** better-auth runs `/get-session`'s after-hooks for a server-side `auth.api.getSession(...)` call too, so every door that asked "who is calling" had the jwt plugin read the signing key (two `sys_jwks` round trips) and sign a `set-auth-jwt` header the caller then discarded. The hook now runs only when the call answers an HTTP request. `GET /api/v1/auth/get-session` still carries `set-auth-jwt`, signed exactly as before. A server-side caller that wants the header dispatches the request through `AuthManager.handleRequest`.
+  - **The session token is not read back after the session was found by it.** `sys_session.token` is withheld from ordinary reads and recovered for better-auth through a privileged read. better-auth finds the session by its token, so that read had nothing to add. It was a second round trip between the session row and the user row on every session read. A read keyed on any other column still recovers the token.
+  - **`/auth/me/*` and `/me/apps` resolve the grants once.** These routes resolved the caller's grants twice per request: once inside the session read (for the payload's `positions[]`) and once more for their own context. They now resolve through `resolveAuthzContext`, whose request-scoped memo serves the second resolution from the first while no write has landed in between. The memo ends with the request. The routes still admit a session only, and the session's active organization stands as before.
+  - **An unreadable authorization store is an outage on `/auth/me/*` and `/me/apps`, not a signed-out caller.** Because these routes now authorize through `resolveAuthzContext`, they follow the rule every transport through it follows: a permission-store read that fails answers `503` with the code `SERVICE_UNAVAILABLE` (on `HonoHttpServer`'s error seam) instead of `{ authenticated: false }` or `{ apps: [] }`, which a client cannot tell from an anonymous caller. A store whose tables were never created is not an outage: those routes answer the signed-in caller with no grants, as before.
+  - **The signing key is held across requests, under two bounds.** The keyring the jwt plugin signs with is kept after a read. Any write to `sys_jwks` that passes this process's engine drops it at once, and it is never kept longer than 30 seconds, which bounds a write this process cannot see (another node minting a key). An engine without a middleware seam keeps nothing. On a host without Ed25519 the keyring is still filtered to keys the host can use.
+  
+  Unchanged: the session and user every door resolves, every grant, the `/get-session` body and its renewal, every option and environment variable, and the exports. No new configuration key. The one answer that changes is the outage answer above.
+- 2a1e48a: fix(plugin-hono-server): a request for port 0 no longer warns that port 0 is in use
+  
+  Clause-②: no (no export, option or type moves: a log line stops firing for a legal request)
+  
+  - **What changed.** `HonoServerPlugin`'s `kernel:listening` hook compared the requested port with the bound one and warned `Port 0 is in use, using port N instead` whenever they differed. Port `0` asks for a kernel-assigned port, so the two can never match and nothing was in use. Every `os serve --port 0` boot printed that warning under the banner's Boot diagnostics, at the default log level and at `info`. The warning now fires only for a non-zero request that the adapter moved to another port.
+  - **Unchanged.** A kernel-assigned boot prints the existing `HTTP server started successfully` line, which already names the bound port, and nothing else. A non-zero request whose port is held still warns, naming the requested and the bound port.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/observability@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

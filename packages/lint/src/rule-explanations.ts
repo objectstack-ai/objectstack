@@ -1207,10 +1207,13 @@ const RLS_UNCOMPILABLE_DROP =
   'CLOSED, which is why such a policy is survivable; it reads as an authorization and behaves as a refusal.';
 
 /**
- * What a dropped `using` does. The INSERT half: the ADR-0058 D4 write check
- * takes its set from `writeCheckPolicies`, so when no applicable policy for the
- * insert declares a `check`, every applicable policy's `using` is compiled as
- * its check. Measured through the real `SecurityPlugin` on an `insert` and an
+ * What a dropped `using` does, for both sources a policy has: a permission
+ * set's `rowLevelSecurity[]` and an object's `defaultRowScope` (#24452), which
+ * the security plugin's row-policy collection applies alone, only when the
+ * held sets carry no row policy for the object and operation. The INSERT
+ * half: the ADR-0058 D4 write check takes its set from `writeCheckPolicies`,
+ * so when no applicable policy for the insert declares a `check`, every
+ * applicable policy's `using` is compiled as its check. Measured through the real `SecurityPlugin` on an `insert` and an
  * `all` policy, for all three kinds of drop (an unlowerable shape, an
  * unresolved `current_user.*`, an undeclared column): with nothing else
  * compiling in that set, every single-record insert is refused (403); with
@@ -1221,8 +1224,13 @@ const RLS_DROPPED_USING =
   'A dropped `using`: when it is the only applicable policy for that object and operation, `compileFilter` ' +
   'returns the `RLS_DENY_FILTER` sentinel instead, which is AND-ed onto the where clause, so every select / ' +
   'update / delete on the object matches ZERO rows and the object disappears for every holder of the ' +
-  'permission set. When other policies also apply, this one just vanishes from the OR and grants none of the ' +
-  'access it appears to. On an `insert` or `all` policy the same `using` is also the single-record INSERT check ' +
+  'permission set that carries the policy. An object\'s `defaultRowScope` is applied only when the caller\'s ' +
+  'permission sets carry no row policy for that object and operation, so it is always the only applicable ' +
+  'policy: a dropped default makes the object disappear for every caller it applies to, and a caller whose ' +
+  'permission set carries its own row policy for the object is not affected. When other policies also apply, ' +
+  'which only a permission set\'s policy can meet, this one just vanishes from the OR and grants none of the ' +
+  'access it appears to. ' +
+  'On an `insert` or `all` policy the same `using` is also the single-record INSERT check ' +
   'whenever no applicable policy for the insert declares a `check` (ADR-0058 D4): when nothing else in that set ' +
   'compiles, every single-record insert it governs fails with `PermissionDeniedError`; when another policy\'s ' +
   '`using` compiles, that one alone decides the insert.';
@@ -1324,7 +1332,9 @@ const RLS_PREDICATE_UNENFORCEABLE_EXPLANATION: RuleExplanation = {
     'An RLS predicate is compiled to a row filter (ADR-0056 D4), so only the pushdown subset lowers. A ' +
       'function call (`size(…)`, `has(…)`), arithmetic, a ternary, a related-record path, a list literal under ' +
       '`==` / `!=` or the bare `current_user` root used as a value is outside it, and the compiler refuses it. ' +
-      'The finding quotes the verdict half of the compiler\'s own refusal.',
+      'The finding quotes the verdict half of the compiler\'s own refusal. It judges both places a row policy ' +
+      'is declared, which the runtime compiles alike: a permission set\'s `rowLevelSecurity` entry and an ' +
+      'object\'s `defaultRowScope`, whose `path` starts at `objects[N].defaultRowScope`.',
     'The lowerable subset is: `==` `!=` `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, and the ' +
       'string methods `startsWith` / `endsWith` / `contains` — over SINGLE-column field paths (ADR-0058 D2), ' +
       'compared against a literal or a `current_user.*` value. Three traps in particular: (1) a function call — ' +
@@ -1890,8 +1900,15 @@ const MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'toggle; `min` and `max`: number, currency, percent, rating, slider, progress, summary, date, ' +
       'datetime, time, boolean, toggle.',
     'So the fix is a field of an accepted type, or an aggregate the field\'s declaration accepts. A ' +
-      'quantity that must be added up or averaged has to be STORED as a numeric field (a computed ' +
-      'column) and aggregated as one.',
+      'quantity that must be added up or averaged has to be STORED as a numeric field and aggregated as ' +
+      'one.',
+    // Held equal to `VIRTUAL_FIELD_AGGREGATE_REMEDY` (`@objectstack/spec/data`) — the `fix:` line, and
+    // the compile leg's remedy, for this pair — by `validate-dataset-measure-aggregates.test.ts`.
+    'A `formula` field stores no value, whatever its `returnType` says, so `sum`, `avg`, `min` and `max` ' +
+      'over one have no column to read, and a count substituted for the total is a plausible wrong ' +
+      'number. Its fix line reads: The field is computed on read and stores no value: store the value as ' +
+      'a number field (kept by a hook) and aggregate that. `count` / `count_distinct` answer a different ' +
+      'question: how many records.',
     JSON_STORED_COLUMN,
     'The per-type row cannot see `multiple: true`, so `count_distinct` over a multi-capable field ' +
       'flagged that way is refused by the declaration: the value is a list stored as JSON, and ' +
@@ -3188,7 +3205,8 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       '(`manifest.navigationContributions`), the contributed ids alone, because the app\'s own ' +
       'entries are declared and translated by the package that owns it. `dashboards.DASH` a ' +
       'dashboard, `.widgets.ID` a widget `id` on it, and `.actions.URL` a header action\'s ' +
-      '`actionUrl`, not its label.',
+      '`actionUrl`, not its label. `picklists.LIST` a picklist\'s `name` that a package of this ' +
+      'stack declares.',
     // The terminal toast keys are held to `FLOW_TERMINAL_MESSAGE_KEYS` by the rule's test.
     '`flows.FLOW` a flow\'s machine `name`; `.successMessage` / `.errorMessage` a toast the flow ' +
       'itself authors (a bundle cannot add one); `.screens.NODE` the `id` of a `type: \'screen\'` ' +
@@ -3202,8 +3220,9 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'and `.acknowledge` an action that declares a `resultDialog` at all; ' +
       '`resultDialog.fields.PATH` the literal `path` of a declared dialog field, dots included. A ' +
       'bundle translates what the action declares and cannot add an outcome or a dialog.',
-    'Not judged: a platform object in the registry, and an object this stack only extends through ' +
-      '`objectExtensions[]` — the owner\'s field set is not visible from here, so the whole subtree ' +
+    'Not judged: a platform object in the registry, an object this stack only extends through ' +
+      '`objectExtensions[]`, and a picklist it only extends through `picklistExtensions[]` — the ' +
+      'owner\'s declaration is not visible from here, so the whole subtree ' +
       'is skipped (a platform-prefixed name that no platform package, official plugin or cloud ' +
       'runtime object registers is reported on the object key alone). `messages`, ' +
       '`validationMessages`, `settings`, `settingsCommon` and `metadataForms` ' +
@@ -3222,11 +3241,12 @@ const TRANSLATION_OPTION_KEY_UNKNOWN_EXPLANATION: RuleExplanation = {
       'spelling (`direct_mail`, not `Direct Mail` or `direct-mail`). A key that matches an ' +
       'option\'s label is reported with the value to rename it to; any other key with the nearest ' +
       'declared value.',
-    'Judged on three surfaces, each against the one option list its resolver walks: an object ' +
+    'Judged on four surfaces, each against the one option list its resolver walks: an object ' +
       'field\'s `options`; an action param\'s inline `options` (a param that references a `field` ' +
       'and declares no inline list takes the field\'s list when the dialog renders, so its keys are ' +
-      'not judged); and a flow screen field\'s own `options`. A map under something that declares ' +
-      'no options at all is read by nothing.',
+      'not judged); a flow screen field\'s own `options`; and a picklist\'s `options` together with ' +
+      'those its `picklistExtensions[]` entries add, which every field referencing the list ' +
+      'inherits. A map under something that declares no options at all is read by nothing.',
     'A warning, where `translation-target-unknown` is an error: a mis-keyed option names ' +
       'something real, so its fix is a rename, not a deletion.',
   ],

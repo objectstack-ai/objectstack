@@ -52,6 +52,15 @@ interface Engine {
     update(object: string, data: Record<string, unknown>, options?: unknown): Promise<unknown>;
 }
 
+/**
+ * [C8 stage 8b] The organization a `single` session is active in: the Default
+ * Organization, which an organization-less system insert of a grant or a
+ * position is now stamped with (ADR-0131 D9). Resolving with no organization
+ * would read the global arm only, which no fresh `single` install writes any more.
+ */
+const sessionOrgOf = async (s: VerifyStack): Promise<string | undefined> =>
+    (await (await s.kernel.getServiceAsync<{ defaultOrgId(): Promise<string | null> }>('tenancy')).defaultOrgId()) ?? undefined;
+
 describe('the catalog activation door, on a booted showcase', () => {
     let stack: VerifyStack;
     let token: string;
@@ -86,7 +95,8 @@ describe('the catalog activation door, on a booted showcase', () => {
 
     it('the resolver over the booted engine stops granting through a switched-off position, and grants again once it is back on', async () => {
         // Its own holder, so the leg depends on nothing a boot seeds later: a
-        // signed-up member, assigned the `exec` position unscoped.
+        // signed-up member, assigned the `exec` position by a system write, which
+        // under `single` takes the Default Organization (C8 stage 8b).
         await stack.signUp(HOLDER_EMAIL);
         const [user] = await ql.find('sys_user', { where: { email: HOLDER_EMAIL }, limit: 1, context: SYSTEM_CTX });
         expect(user?.id, `no sys_user row for ${HOLDER_EMAIL}`).toBeTruthy();
@@ -99,20 +109,20 @@ describe('the catalog activation door, on a booted showcase', () => {
 
         // CONTROL: before the flip the position grants its set — without it the
         // two assertions below would pass on a holder that was never granted.
-        const before = await resolveUserAuthzGrants(ql as never, holder, {});
+        const before = await resolveUserAuthzGrants(ql as never, holder, { tenantId: await sessionOrgOf(stack) });
         expect(before.positions).toContain(HELD_POSITION);
         expect(before.permissions).toContain(HELD_POSITION_SET);
 
         const offRes = await flip('position', HELD_POSITION, { enabled: false });
         expect(offRes.status, await offRes.clone().text()).toBe(200);
-        const off = await resolveUserAuthzGrants(ql as never, holder, {});
+        const off = await resolveUserAuthzGrants(ql as never, holder, { tenantId: await sessionOrgOf(stack) });
         expect(off.positions).not.toContain(HELD_POSITION);
         expect(off.permissions).not.toContain(HELD_POSITION_SET);
 
         const onRes = await flip('position', HELD_POSITION, { enabled: true });
         expect(onRes.status, await onRes.clone().text()).toBe(200);
         expect(await rowsOf('position', HELD_POSITION)).toHaveLength(1);
-        const on = await resolveUserAuthzGrants(ql as never, holder, {});
+        const on = await resolveUserAuthzGrants(ql as never, holder, { tenantId: await sessionOrgOf(stack) });
         expect(on.positions).toContain(HELD_POSITION);
         expect(on.permissions).toContain(HELD_POSITION_SET);
     });
@@ -211,7 +221,7 @@ describe('the catalog activation door, on a booted showcase', () => {
         );
 
         // CONTROL: before any flip the position grants its set.
-        const before = await resolveUserAuthzGrants(ql as never, holder, {});
+        const before = await resolveUserAuthzGrants(ql as never, holder, { tenantId: await sessionOrgOf(stack) });
         expect(before.positions).toContain(ENV_POSITION);
         expect(before.permissions).toContain(ENV_SET);
 
@@ -221,7 +231,7 @@ describe('the catalog activation door, on a booted showcase', () => {
         expect(positionRows).toHaveLength(1);
         expect(positionRows[0].active === false || positionRows[0].active === 0).toBe(true);
         expect(positionRows[0].package_id ?? null).toBeNull();
-        const positionSwitchedOff = await resolveUserAuthzGrants(ql as never, holder, {});
+        const positionSwitchedOff = await resolveUserAuthzGrants(ql as never, holder, { tenantId: await sessionOrgOf(stack) });
         expect(positionSwitchedOff.positions).not.toContain(ENV_POSITION);
         expect(positionSwitchedOff.permissions).not.toContain(ENV_SET);
 
@@ -234,13 +244,13 @@ describe('the catalog activation door, on a booted showcase', () => {
         const setRows = await rowsOf('permission', ENV_SET);
         expect(setRows).toHaveLength(1);
         expect(setRows[0].package_id ?? null).toBeNull();
-        const setSwitchedOff = await resolveUserAuthzGrants(ql as never, holder, {});
+        const setSwitchedOff = await resolveUserAuthzGrants(ql as never, holder, { tenantId: await sessionOrgOf(stack) });
         expect(setSwitchedOff.positions).toContain(ENV_POSITION);
         expect(setSwitchedOff.permissions).not.toContain(ENV_SET);
 
         const setOn = await flip('permission', ENV_SET, { enabled: true });
         expect(setOn.status, await setOn.clone().text()).toBe(200);
-        const after = await resolveUserAuthzGrants(ql as never, holder, {});
+        const after = await resolveUserAuthzGrants(ql as never, holder, { tenantId: await sessionOrgOf(stack) });
         expect(after.positions).toContain(ENV_POSITION);
         expect(after.permissions).toContain(ENV_SET);
     });

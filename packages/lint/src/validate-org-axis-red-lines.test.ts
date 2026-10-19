@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { ObjectStackSchema } from '@objectstack/spec';
 import { ObjectSchema } from '@objectstack/spec/data';
 import {
+  DefaultRowScopeSchema,
   PermissionSetSchema,
   RowLevelSecurityPolicySchema,
   ShareRecipientType,
@@ -73,9 +74,11 @@ function sharingRule(input: SharingRule): Record<string, unknown> {
 /**
  * Same guard for the permission-set fixtures rule ① reads (#5009).
  *
- * `permissions[].rowLevelSecurity` is the ONLY authorable RLS surface —
- * `ObjectSchema` declares no `rowLevelSecurity` (nor `rls`) and is `.strict()`,
- * so the object-level traversal this rule used to carry could not run against a
+ * `permissions[].rowLevelSecurity` is the ONLY authorable LIST of RLS policies.
+ * An object declares at most ONE policy, `defaultRowScope` (#24164 ruling E′:
+ * the policy that applies when no held set carries one for the object), and no
+ * `rowLevelSecurity` (nor `rls`) list; `ObjectSchema` is `.strict()`, so the
+ * object-level list traversal this rule used to carry could not run against a
  * stack that parses. Building rule ①'s fixtures through the real schema is what
  * keeps that from quietly coming back: a fixture for a surface the spec does
  * not have now fails HERE.
@@ -293,6 +296,70 @@ describe('validateOrgAxisRedLines — ① no permission inheritance on the org a
     ).toEqual([]);
   });
 
+  // [#24452] An object's default row scope is a Layer-1 policy the security
+  // plugin applies when the caller's held sets carry no row policy for the
+  // object, so a default that walks the org parent is the same second
+  // hierarchy. The fixture passes `ObjectSchema` (the key's own door).
+  it('flags an object `defaultRowScope` whose `using` walks the org parent, naming the object, not a set', () => {
+    const findings = validateOrgAxisRedLines({
+      objects: [
+        objectFixture({
+          name: 'work_order',
+          defaultRowScope: {
+            name: 'work_order_child_orgs',
+            operation: 'select',
+            using: 'organization_id IN (current_user.parent_organization_id)',
+          },
+        }),
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: ORG_AXIS_PERMISSION_INHERITANCE,
+      where: 'default row scope "work_order_child_orgs" of object "work_order"',
+      path: 'objects[0].defaultRowScope.using',
+    });
+    expect(findings[0].message).toMatch(/^RLS using reads `parent_organization_id`/);
+    expect(`${findings[0].where} ${findings[0].message}`).not.toMatch(/permission set/);
+    expect(findings[0].hint).toMatch(/accessible_org_ids/);
+  });
+
+  it('flags a default row scope `check` that walks the org parent', () => {
+    const findings = validateOrgAxisRedLines({
+      objects: {
+        work_order: objectFixture({
+          name: 'work_order',
+          defaultRowScope: {
+            name: 'work_order_hq_writes',
+            operation: 'insert',
+            check: "parent_organization_id = 'org_hq'",
+          },
+        }),
+      },
+    });
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([
+      [ORG_AXIS_PERMISSION_INHERITANCE, 'objects[0].defaultRowScope.check'],
+    ]);
+  });
+
+  it('stays silent on a default row scope scoped by membership (CONTROL)', () => {
+    expect(
+      rules({
+        objects: [
+          objectFixture({
+            name: 'work_order',
+            defaultRowScope: {
+              name: 'work_order_my_orgs',
+              operation: 'all',
+              using: 'organization_id IN (current_user.accessible_org_ids)',
+            },
+          }),
+        ],
+      }),
+    ).toEqual([]);
+  });
+
   it('stays silent on membership-based and business-unit scoping (the sanctioned paths)', () => {
     expect(
       rules({
@@ -349,11 +416,12 @@ const MANIFEST = { id: 'com.example.org-axis-probe', name: 'org_axis_probe', ver
 const ORG_WALKING_POLICY = { name: 'rollup', using: 'parent_organization_id = current_user.organization_id' };
 
 describe('validateOrgAxisRedLines — undeclared keys are the schema’s job, not this rule’s (#5009)', () => {
-  it('object-level RLS is not an authoring surface: `ObjectSchema` declares neither `rowLevelSecurity` nor `rls`', () => {
+  it('an object-level RLS policy LIST is not an authoring surface: `ObjectSchema` declares neither `rowLevelSecurity` nor `rls` (its one object-level policy is `defaultRowScope`)', () => {
     const objectKeys = Object.keys(ObjectSchema.shape);
     expect(objectKeys).not.toContain('rowLevelSecurity');
     expect(objectKeys).not.toContain('rls');
-    // The only declared home for RLS policies is the permission set.
+    // The only declared home for a LIST of RLS policies is the permission set;
+    // an object's own single policy is `defaultRowScope`.
     expect(Object.keys(PermissionSetSchema.shape)).toContain('rowLevelSecurity');
 
     // And `ObjectSchema` is `.strict()`, so this is not a silent strip: a stack
@@ -665,9 +733,15 @@ const READ_SURFACES: Array<{
   },
   {
     receiver: 'object',
-    expected: ['systemFields', 'tenancy'],
+    expected: ['defaultRowScope', 'name', 'systemFields', 'tenancy'],
     declaredBy: 'ObjectSchema',
     keys: () => shapeKeys(ObjectSchema),
+  },
+  {
+    receiver: 'scope',
+    expected: ['name'],
+    declaredBy: 'DefaultRowScopeSchema',
+    keys: () => shapeKeys(DefaultRowScopeSchema),
   },
   {
     receiver: 'rule',
@@ -691,15 +765,19 @@ describe('validateOrgAxisRedLines — reads only keys the spec declares (meta-te
     expect(read.filter((k) => !declared.includes(k))).toEqual([]);
   });
 
-  it('the RLS clause list is spelled from `RowLevelSecurityPolicySchema` keys', () => {
-    // `policy[clause]` is a COMPUTED read, so the scan above cannot see it; the
-    // word list it indexes with is checked here instead.
-    const match = /for \(const clause of \[([^\]]*)\] as const\)/.exec(RULE_CODE);
-    expect(match, 'the clause loop moved — update this guard').not.toBeNull();
-    const clauses = [...match![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
-    expect(clauses).toEqual(['using', 'check']);
-    const declared = shapeKeys(RowLevelSecurityPolicySchema);
-    expect(clauses.filter((c) => !declared.includes(c))).toEqual([]);
+  it('each RLS clause list is spelled from the keys its policy schema declares', () => {
+    // `policy[clause]` / `scope[clause]` are COMPUTED reads, so the scan above
+    // cannot see them; the word lists they index with are checked here instead,
+    // one per loop: the permission-set policy's, then the default row scope's.
+    const loops = [...RULE_CODE.matchAll(/for \(const clause of \[([^\]]*)\] as const\)/g)];
+    expect(loops, 'a clause loop moved — update this guard').toHaveLength(2);
+    const schemas = [RowLevelSecurityPolicySchema, DefaultRowScopeSchema];
+    loops.forEach((loop, i) => {
+      const clauses = [...loop[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+      expect(clauses).toEqual(['using', 'check']);
+      const declared = shapeKeys(schemas[i]);
+      expect(clauses.filter((c) => !declared.includes(c))).toEqual([]);
+    });
   });
 });
 
@@ -782,6 +860,21 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: unknown }> = [
     },
   },
   {
+    label: '① object default row scope `using`',
+    stack: {
+      objects: [
+        objectFixture({
+          name: 'work_order',
+          defaultRowScope: {
+            name: 'work_order_child_orgs',
+            operation: 'select',
+            using: 'organization_id IN (current_user.parent_organization_id)',
+          },
+        }),
+      ],
+    },
+  },
+  {
     label: '① sharing-rule `condition`',
     stack: {
       sharingRules: [
@@ -829,9 +922,11 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: unknown }> = [
 describe('validateOrgAxisRedLines — every branch is reachable by a spec-valid stack (meta-test, #5009)', () => {
   it('maps every `findings.push` site in the source', () => {
     const sites = pushSites();
-    // ① permission-set RLS, ① sharing rule, ② cross-org BU grant. The fourth —
+    // ① permission-set RLS, ① object default row scope (#24452), ① sharing
+    // rule, ② cross-org BU grant. The old object-level list —
     // `objects[].rowLevelSecurity[].${clause}` — is gone: no such surface.
-    expect(sites).toHaveLength(3);
+    expect(sites).toHaveLength(4);
+    expect(sites.map((s) => s.pathTemplate)).toContain('objects[${oIndex}].defaultRowScope.${clause}');
     expect(sites.map((s) => s.pathTemplate)).not.toContain(
       'objects[${oIndex}].rowLevelSecurity[${pIndex}].${clause}',
     );

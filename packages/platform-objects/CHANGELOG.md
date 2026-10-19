@@ -1,5 +1,194 @@
 # @objectstack/platform-objects
 
+## 18.0.0-next.5
+
+### Minor Changes
+
+- 2ec6827: feat(metadata-protocol): the draft save records `draftChanges` — which surface, actor and instant last changed each key path of a pending draft — and the strict draft read serves it
+  
+  Clause-②: yes (widening)
+  
+  - **Recorded by the draft save.** `saveMetaItem({ mode: 'draft', surface })` compares the body it writes with the body it replaces, inside the write's own transaction: the draft row, else (the draft's first save) the active row its publish would replace, else nothing, which records `[]`, the whole body. A path is the object keys from the body root to the deepest changed key; an array is one leaf, with no index. Each changed path is stamped `{ by: surface ?? 'api', actor, at }`, where `actor` is the value the save's history event carries (or `null`) and `at` is the write's instant as `toISOString()`.
+  - **Kept until publish or discard.** No two entries share a path: a save replaces every entry at or under each path it changes, so the longest prefix answers for a key. A save that changes no key path leaves the entries as they were. Publish and discard delete the draft row, and the entries with it, so the next draft starts clean. A `migrate-stored` rewrite and an active save record nothing.
+  - **Served on the strict draft read only.** `getMetaItem({ state: 'draft' })` answering a stored draft row carries `draftChanges` beside `item`. It is absent on the active read, the cached branch, the `?preview=draft` read, and a draft row whose saves recorded none (one saved before this release) — never `[]`.
+  - **Stored on the row.** `sys_metadata` gains a nullable `draft_changes` column (`@objectstack/metadata-core`'s `SysMetadataObject`), never inside the stored body. Schema sync adds it to an existing table on boot with no manual step (measured on SQLite and the memory driver).
+  - **Translated labels.** `@objectstack/platform-objects`' translation bundles carry the new column's label and help text in every shipped locale.
+  - **An unknown `surface` is refused.** In-process, a value outside `copilot | studio | api` is refused `400 INVALID_REQUEST` before anything is written.
+
+### Patch Changes
+
+- 4d12b23: Clause-②: no (copy only: no accept set or public surface moves; owes the seat's review of record at `TIER_DEFAULT` before the queue)
+  
+  fix(platform-objects): SSO provider, OAuth application and Connect-an-Agent copy says "this system"
+  
+  - **What changed.** Inside the running system, user-facing copy names the system the user is in as "this system". The `sys_sso_provider` object description ("External SSO identity providers (OIDC / SAML) this system federates login to"), the `clientId` help text of its Register SSO Provider action ("OAuth client ID issued by the IdP for this system."), and the OAuth applications grid's empty state ("Register an application to let its clients sign users in with this system.") now say so. The `en` copy of the Connect-an-Agent page subtitle follows the page's new text.
+  - **Translations.** The zh-CN, ja-JP and es-ES values of the same strings are re-translated, and the recorded source hash of the Connect-an-Agent subtitle moves to the new English text in all three, so those locales keep serving their translation rather than falling back to English.
+  - **Unchanged.** Every object, field, action and page name, and all behaviour.
+- ff48407: Clause-②: no
+  
+  fix(spec): published copy that names the running system says "this system", or drops the noun, not "this environment"
+  
+  - **What changed.** Inside the running system, user-facing copy names the system the reader is in as "this system", or drops the noun. A permission set made here, not shipped by a package, is "authored in this system".
+    - The permission-set `packageId` refusal on the save, restore and publish doors now reads "a set written into no package is authored in this system, which an absent `packageId` states".
+    - The permission set's `packageId` help text in Setup ends "Leave empty for a set authored in this system." The English Setup forms bundle of `@objectstack/platform-objects` is regenerated from it.
+    - The `permission.managedBy` tombstone prescription, and the `permission-set-managed-by-retired` protocol-18 upgrade-guide entry, say "a set authored in this system carries neither".
+    - The `AudienceConfig.posture` and `AuthConfig.audience` describes say "who may self-register", with no noun. Their TSDoc says "who may become a user of this system's apps", the sentence the Setup Authentication group already reads.
+    - `AiModelsResponse.models` describes "Models this system offers". The `IMetadataService.listDiagnosed` TSDoc example reads "this system contains N items".
+  - **Kept "environment", where the word names a deployment or configuration scope.** `SeedLoaderConfig.env` ("Only load datasets matching this environment", the `prod | dev | test` tier), the `package-uninstall-environment-wide` upgrade-guide entry (the ADR-0131 environment-wide scope, as against an organization), and the environment artifact's consent-record TSDoc.
+  - **Unchanged.** Every error code, status, issue path, accepted value and export. Only the human-readable text moves.
+- b7a688e: Clause-②: no
+  
+  fix(client,platform-objects): the `ai.models()` TSDoc and the translated permission-set `packageId` help say "this system", as the spec now does
+  
+  - **What changed.** Inside the running system, published copy names the system the reader is in as "this system", and a permission set made here, not shipped by a package, is "authored in this system". `@objectstack/spec` already says both (`AiModelsResponse.models`, the permission set's `packageId` help text); this follows it in two more places.
+    - The TSDoc of `client.ai.models()` now reads "Models this system offers in the chat model picker (cloud ADR-0028)". The citation is qualified as `cloud ADR-0028`: the AI service that serves this list is a cloud package, and this repository's ADR-0028 is about metadata naming.
+    - The zh-CN, ja-JP and es-ES values of the permission set's `packageId` help text in the Setup forms bundle now say 本系统 / このシステム / este sistema where they said 本环境 / この環境 / este entorno, matching the English text "Leave empty for a set authored in this system."
+  - **Unchanged.** Every method, route, type, form field, key and behaviour. No translation key is added or removed.
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Minor Changes
+
+- 1173017: `sys_organization` now declares a `rename_organization` action ("Rename Organization") at `record_header` and `list_item`, so an organization record page can rename the organization. It collects `name` (required) and `logo`, both pre-filled from the record, and no `slug`. It calls better-auth's `/api/v1/auth/organization/update` exactly as `update_organization` does (the record's id as `organizationId`, the fields under `data`), and it is gated on `multiOrgEnabled` like the other organization actions. Because the request carries no slug, the organization keeps its slug. It is declared before `change_slug`, so on the record header it takes the third inline slot and `change_slug` moves into the `⋯` overflow menu.
+  
+  `update_organization` (name, slug and logo, list row only) and `change_slug` are unchanged.
+  
+  `@objectstack/spec` books the new action in `PUBLIC_AUTH_FEATURES.multiOrgEnabled.gatedInputs`, beside `update_organization`.
+  
+  Clause-②: yes
+- f573976: `sys_organization`'s organisation-admin actions are now offered only to the membership grades whose requests the door accepts. Before, they were gated on `multiOrgEnabled` alone, so a plain member saw them, and better-auth refused every click with 403:
+  
+  - `update_organization` ("Edit Organization", list row) and `rename_organization` ("Rename Organization", record header and list row) declare `requiresMembershipReach: 'update_organization'`: owner and admin.
+  - `delete_organization` ("Delete Organization", list row) declares `requiresMembershipReach: 'delete_organization'`: the owner alone.
+  
+  The `multiOrgEnabled` gate stays as the last term of each predicate. `invite_user` is unchanged, and `set_active_organization`, `leave_organization`, `create_organization` and `change_slug` stay as they were.
+  
+  Clause-②: yes (widening)
+
+### Patch Changes
+
+- f7af839: Clause-②: no
+  
+  Setup's Diagnostics group has one audit entry, "Audit Log", and it opens the audit browser
+  
+  - **What changed.** `@objectstack/plugin-audit` contributed two Setup entries onto the same rows: "Audit Logs" (the `sys_audit_log` record list) and "Audit Log Browser" (the console's `audit:log` page). It now contributes one, "Audit Log", which opens the browser. The browser filters by action, object, actor and date, offers the record list's views (Writes, Auth, Record Views, …) as presets, and links to the record list ("Open as list"). Those two parts of the page ship in the console this release pins.
+  - **Ids.** The entry keeps the id `nav_audit_logs`, so a sidebar pin a user set on "Audit Logs" stays on the new entry. The id `nav_audit_log_browser` is no longer served; a pin set on it no longer shows, and the user can pin "Audit Log" instead.
+  - **Labels.** `@objectstack/platform-objects` serves the entry's label in the four shipped locales (Audit Log, 审计日志, 監査ログ, Registro de auditoría), and drops the "Audit Log Browser" label.
+  - **Unchanged.** The `sys_audit_log` object, its list views, its routes and its data API answer as before. The record list is no longer an entry in Setup's menu, so the ⌘K palette's record search in Setup no longer searches audit rows.
+- a237d7f: feat(cloud-connection)!: Setup's "Installed Apps" entry opens Setup › Packages filtered to marketplace installs, and the separate Installed Apps page is no longer shipped
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/cloud-connection#MARKETPLACE_INSTALLED_UI_BUNDLE.pages) The retired operand is a member of a published runtime export of `@objectstack/cloud-connection`, and its break reaches a TypeScript consumer through the compiler at their own call site. The page it carried was plugin-registered in-memory metadata, registered by `MarketplaceInstallLocalPlugin` at `kernel:ready`, never a stored row. No spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  - `MARKETPLACE_INSTALLED_UI_BUNDLE.pages` -> delete (the bundle carries no page; its entry is read from `navigationContributions`)
+  
+  Setup › Packages is now the one list of what is installed: every row says where the package came from (Source: code, marketplace or authored), and the rows whose Source is marketplace carry the actions the Installed Apps page had, Details and Uninstall.
+  
+  - **What changes.** The "Installed Apps" entry in Setup's Apps group, which the install-local plugin (`MarketplaceInstallLocalPlugin`) contributes, now opens Packages with the Source filter set to marketplace. Its label and icon are unchanged. In `MARKETPLACE_INSTALLED_UI_BUNDLE` the entry `nav_marketplace_installed` is a `component` entry on `developer:packages` with `params: { source: 'marketplace' }`, which the console opens as `/apps/setup/component/developer/packages?source=marketplace`.
+  - **What is no longer shipped.** The bundle no longer carries the `marketplace_installed` page, so `GET /api/v1/meta/page` stops listing it and `MARKETPLACE_INSTALLED_UI_BUNDLE` has no `pages` key. In the console that page only redirected to the filtered Packages list. The `pages.marketplace_installed` entries leave the Setup translation bundle in `@objectstack/platform-objects` (en, zh-CN, ja-JP, es-ES). The Setup nav label `nav_marketplace_installed` keeps its translations.
+  - **Unchanged.** The entry still appears only when the install-local plugin is mounted, so a runtime without it shows no Installed Apps entry. "Browse Marketplace" and its route are not touched. The marketplace's own package page still carries Update and the sample-data Re-seed / Purge menu, and Details on a Packages row opens it.
+  
+  What to do. Nothing in a normal deployment. If you linked to the `marketplace_installed` page directly, link to Setup › Packages with `?source=marketplace` instead.
+- b0a1df0: `sys_organization` now declares an `invite_user` action at `record_header`, so an organization record page can offer "Invite User" as its primary header button. It calls `/api/v1/auth/organization/invite-member` with the record's id as `organizationId`, asks for `email` and `role` (the role picker offers only the roles the caller may grant), and is gated like the other three invite mirrors: the `organization` capability and the owner / admin / delegated_admin grades. Its `order: -1` puts it first in the header.
+  
+  `leave_organization` keeps `variant: 'danger'` and now declares `order: 1`, so it sorts last among the header actions and folds into the `⋯` overflow menu instead of taking the third inline slot. Its confirmation now names what is lost: the organization's environments and members (en, zh-CN, ja-JP and es-ES).
+  
+  `@objectstack/spec` books the new action in `PUBLIC_AUTH_FEATURES.organization.gatedInputs`, beside the other three invite mirrors.
+  
+  Clause-②: no
+- a19b2a7: Clause-②: no
+  
+  fix(platform-objects): the System Overview dashboard's six metric tiles declare `layout.h: 1`, one row tall, where they declared `2`
+  
+  The `system_overview` dashboard the Setup app ships (`SystemOverviewDashboard`) authored every one of its six `type: 'metric'` tiles (Total Users, Organizations, Active Sessions, Packages Installed, Login Events, Config Changes) at `layout.h: 2`. The console draws a widget over the grid rows its `h` names, each row floors at 5rem and grows to its content, and a metric card fills its box, so each tile drew a box about twice the height of its content: the title and the number in the top half, the lower half empty. The platform draws what the metadata declares, so the authored size is what is corrected.
+  
+  - **FROM:** the six metric tiles declare `layout: { …, h: 2 }`.
+  - **TO:** the six metric tiles declare `layout: { …, h: 1 }`; each now draws at content height.
+  - **Unchanged:** every `x`, `y` and `w`, the chart and table widgets (`h: 4`), every widget id, filter and binding, and every export.
+  - **An org that already published an overlay of `system_overview`** is served that overlay as stored (ADR-0126 Regime O), so it keeps the tile heights it was saved with.
+- 99e9d29: feat(plugin-auth): an OAuth consent binds the consenting user's active organization, the access token carries it as `organization_id`, and `verifyMcpAccessToken` returns it as `organizationId`
+  
+  Clause-②: yes (widening)
+  
+  - **What changed.** When a user consents to an OAuth client, the embedded authorization server records the consenting session's active organization as the consent's `reference_id`. The value rides the authorization code onto the refresh family it starts (`sys_oauth_refresh_token.reference_id`), and every access token minted from either carries it as the `organization_id` claim. It is written through the installed `@better-auth/oauth-provider`'s own seams (`postLogin.consentReferenceId` and `customAccessTokenClaims`); no new configuration key or environment variable.
+  - **The session's organization, never the request's.** The value is read from the consenting session only. Nothing in the authorize request, the consent body or the client's registration can choose it.
+  - **No organization, no claim.** A user with no active organization at consent gets a consent with no reference, and tokens with no `organization_id`. There is no guessed or default organization; such a token's principal resolves with global grants only.
+  - **A refresh keeps the consent's organization.** A refresh token mints access tokens in the organization its consent bound, even after the user switches the browser session to another organization. Authorizing again while another organization is active asks for a second consent, for that organization.
+  - **Existing consents re-confirm once.** A consent stored before this change has no reference, so the next authorization made while the user has an active organization shows the consent page again, once. Until the user re-confirms, a refresh family started before this change keeps minting tokens with no `organization_id`, so they carry global grants only.
+  - **`AuthManager.verifyMcpAccessToken`.** Its result type gains `organizationId?: string`, matching `IAuthService.verifyMcpAccessToken` in `@objectstack/spec/contracts`, and it returns the token's `organization_id` claim there. A token whose `organization_id` is present but is not a non-empty string is refused, as every other malformed token is: this server never mints one. The organization is a record, not an authorization. The caller vets it on every request by the rule that vets a session's active organization (`vetOrganizationClaim`, `@objectstack/core`).
+  - **`@objectstack/platform-objects`.** The `reference_id` field description on `sys_oauth_consent`, `sys_oauth_refresh_token` and `sys_oauth_access_token` now names the bound organization, instead of "Caller-supplied correlation identifier". Prose only; no field, type or schema change.
+- 8baeda5: fix(platform-objects): `sys_member`'s `transfer_ownership` row action says the selected member becomes an owner and the caller keeps their role
+  
+  The action sends better-auth's `POST /organization/update-member-role` with `role: 'owner'`. That endpoint writes the selected member's role and nothing else, so the caller stays an owner and the organization ends with two. The action's confirm used to promise "You will be demoted to admin and lose owner-only privileges"; nobody was demoted.
+  
+  The copy now says what happens, in all four locales:
+  
+  - label: FROM "Transfer Ownership" TO "Make Owner";
+  - confirm: the selected member becomes an owner with every owner privilege, the caller stays an owner, and to step down the caller uses Change Role on their own membership;
+  - success message: FROM "Ownership transferred" TO "Member is now an owner".
+  
+  To hand ownership over, run Make Owner on the new owner's row, then Change Role on your own row to `admin`. better-auth refuses that second step only while you are the organization's last owner (`YOU_CANNOT_LEAVE_THE_ORGANIZATION_WITHOUT_AN_OWNER`).
+  
+  The action's `name`, `target`, request body, parameters, `requiresMembershipReach` and `variant` are unchanged, so a page or test that names `transfer_ownership` keeps working. A test that expected the caller to be `admin` after the action expected a demotion the endpoint never performed: it now reads `owner`, and reads `admin` only after the caller's own Change Role.
+  
+  Clause-②: no (provisional: copy only; if the measurement forces another shape, the dev reports before building it; owes the seat's review of record at `TIER_DEFAULT` before the queue)
+- cf540a7: Clause-②: no
+  
+  fix(platform-objects): `sys_metadata_activation`'s description and its `package_id` field description say "authored in this system"
+  
+  - **What changed.** The activation ledger's object description and the description of its `package_id` field described an item no package ships as "authored in this environment". Both now say "authored in this system". Inside the running system, user-facing copy names the system the user is in as "this system".
+  - **Unchanged.** The object's fields, their types and every stored value.
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [f573976]
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

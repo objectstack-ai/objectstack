@@ -1,5 +1,13 @@
 # create-objectstack
 
+## 18.0.0-next.5
+
+No changes in this release.
+
+## 18.0.0-next.4
+
+No changes in this release.
+
 ## 18.0.0-next.3
 
 ### Patch Changes

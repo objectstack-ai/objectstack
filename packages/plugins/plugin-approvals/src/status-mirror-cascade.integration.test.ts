@@ -327,6 +327,10 @@ describe('an approval decision cascades as the deciding user (#3783)', () => {
       {
         name: 'sys_organization',
         label: 'Organization',
+        // [C8 stage 8b] better-auth owns the table, as `sys-organization.object.ts`
+        // declares: no injected organization column, so the Default Organization's
+        // own insert below is not judged as an organization-less platform write.
+        managedBy: 'better-auth',
         fields: { name: { type: 'text', label: 'Name' }, slug: { type: 'text', label: 'Slug' } },
       } as any,
       '@objectstack/plugin-auth',

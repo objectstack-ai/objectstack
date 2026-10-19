@@ -64,7 +64,7 @@ export type {
 } from './cel-engine';
 export { cronEngine } from './cron-engine';
 export { templateEngine, TEMPLATE_FORMATTERS, formatValue } from './template-engine';
-export { registerStdLib, buildScope, registerPermissionPredicate } from './stdlib';
+export { registerStdLib, buildScope, registerPermissionPredicate, registerCapabilityPredicate } from './stdlib';
 export type { PermissionBinding } from './stdlib';
 // objectui#4421 / batch #147 — the permission predicate's data door. `can` reads
 // `EvalContext.permissions` and nothing else, and this is how that map is built
@@ -158,4 +158,4 @@ export type {
   ExpressionSourceKind,
 } from './expression-refusal';
 export type { SeedValue, SeedPrimitive } from './seed-eval';
-export type { DialectEngine, EvalContext, EvalResult, EvalError, EvalPermissions } from './types';
+export type { DialectEngine, EvalContext, EvalResult, EvalError, EvalPermissions, EvalSystemPermissions } from './types';

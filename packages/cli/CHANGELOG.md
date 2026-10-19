@@ -1,5 +1,432 @@
 # @objectstack/cli
 
+## 18.0.0-next.5
+
+### Minor Changes
+
+- ae6bd1a: feat(cli)!: 18.0 supports fresh `single` installs only — `os migrate organization-ownership` refuses, and `os serve` refuses a walled posture at boot
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes, and no stored shape an author owns, is added, removed, renamed or converted: a CLI command and two deployment postures that used to run now refuse, with no spec key, export, config field or error code removed or renamed. The remedy is an operator's one, stated below: stay on 17.x, or run 18.0 under `single` on a fresh database. -->
+  
+  **BREAKING** (a command and a boot posture that used to run now refuse), shipped as `minor` under the launch-window convention for breaking changes. 18.0 supports fresh installs under the `single` tenancy posture only; upgrading a v17 database and the walled postures arrive in an 18.x release.
+  
+  - **FROM** `os migrate organization-ownership` (plan) and `os migrate organization-ownership --apply …` running the v18 ownership ceremony **TO** both refusing with exit `1` and the standard code `NOT_IMPLEMENTED` (under `--json`: `{ error: 'plan_refused' | 'apply_refused', reason: 'upgrade-unavailable', code: 'NOT_IMPLEMENTED', detail }`), reading and writing nothing. The 18.0 ceremony is knowingly incomplete, and an incomplete ceremony must never certify an old database. **Fix:** keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path. `os dev`'s in-place upgrade of a v17 development database runs this command, so it now stops with the same refusal and changes nothing.
+  - **FROM** `os serve` (and so `os dev` and `os start`) booting with `OS_TENANCY_POSTURE=group` or `isolated`, or with `OS_MULTI_ORG_ENABLED=true`, **TO** a FATAL refusal at the tenancy-posture gate, exit `1`, naming `NOT_IMPLEMENTED` and the 18.x release, before a config is read. `OS_ALLOW_DEGRADED_TENANCY` does not lift it, and no flag or variable does. **Fix:** set `OS_TENANCY_POSTURE=single` (or unset it and `OS_MULTI_ORG_ENABLED`), or keep a walled deployment on a 17.x release.
+  
+  **What stays as it was.** A fresh install under `single` boots exactly as before. The boot guard that refuses a v17-shaped database is unchanged. Kernel-level boots (`@objectstack/verify`'s `bootStack`, embedded hosts) still accept every posture.
+
+### Patch Changes
+
+- Updated dependencies [9847f87]
+- Updated dependencies [8ed3786]
+- Updated dependencies [e67ac4b]
+- Updated dependencies [4bd7215]
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [9112bcd]
+- Updated dependencies [94e60c0]
+- Updated dependencies [94e60c0]
+- Updated dependencies [9524666]
+- Updated dependencies [adb7910]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [45bec43]
+- Updated dependencies [45bec43]
+- Updated dependencies [33a45cc]
+- Updated dependencies [964a237]
+- Updated dependencies [b7a688e]
+- Updated dependencies [3b086e7]
+  - @objectstack/plugin-sharing@18.0.0-next.5
+  - @objectstack/plugin-hono-server@18.0.0-next.5
+  - @objectstack/metadata-protocol@18.0.0-next.5
+  - @objectstack/lint@18.0.0-next.5
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/objectql@18.0.0-next.5
+  - @objectstack/runtime@18.0.0-next.5
+  - @objectstack/plugin-security@18.0.0-next.5
+  - @objectstack/plugin-auth@18.0.0-next.5
+  - @objectstack/rest@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+  - @objectstack/platform-objects@18.0.0-next.5
+  - @objectstack/mcp@18.0.0-next.5
+  - @objectstack/client@18.0.0-next.5
+  - @objectstack/console@18.0.0-next.5
+  - @objectstack/verify@18.0.0-next.5
+  - @objectstack/service-datasource@18.0.0-next.5
+  - @objectstack/cloud-connection@18.0.0-next.5
+  - @objectstack/plugin-approvals@18.0.0-next.5
+  - @objectstack/service-automation@18.0.0-next.5
+  - @objectstack/service-package@18.0.0-next.5
+  - @objectstack/service-mailbox@18.0.0-next.5
+  - @objectstack/account@18.0.0-next.5
+  - @objectstack/setup@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - create-objectstack@18.0.0-next.5
+  - @objectstack/driver-memory@18.0.0-next.5
+  - @objectstack/driver-mongodb@18.0.0-next.5
+  - @objectstack/driver-sql@18.0.0-next.5
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.5
+  - @objectstack/driver-turso@18.0.0-next.5
+  - @objectstack/formula@18.0.0-next.5
+  - @objectstack/metadata@18.0.0-next.5
+  - @objectstack/observability@18.0.0-next.5
+  - @objectstack/plugin-audit@18.0.0-next.5
+  - @objectstack/plugin-email@18.0.0-next.5
+  - @objectstack/plugin-webhooks@18.0.0-next.5
+  - @objectstack/service-analytics@18.0.0-next.5
+  - @objectstack/service-cache@18.0.0-next.5
+  - @objectstack/service-job@18.0.0-next.5
+  - @objectstack/service-messaging@18.0.0-next.5
+  - @objectstack/service-queue@18.0.0-next.5
+  - @objectstack/service-realtime@18.0.0-next.5
+  - @objectstack/service-settings@18.0.0-next.5
+  - @objectstack/service-sms@18.0.0-next.5
+  - @objectstack/service-storage@18.0.0-next.5
+  - @objectstack/trigger-api@18.0.0-next.5
+  - @objectstack/trigger-record-change@18.0.0-next.5
+  - @objectstack/trigger-schedule@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+  - @objectstack/plugin-pinyin-search@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Minor Changes
+
+- 78652c0: feat(cli,plugin-sharing)!: in the 17 → 18 ownership ceremony, a row whose owner cannot be derived blocks certification, and a declared-rule mirror's grants are renamed only onto a rule plugin-sharing serves
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, option, error code or stored shape is added, removed or renamed, and nothing exported is removed: the ceremony's report gains one field (`TableOutcome.held`), its verdict counts change, and plugin-sharing gains one export. The only stored state that moves is the operator's own: a row whose owner cannot be derived is given its organization or deleted by hand, which `objectstack migrate meta` has nothing to rewrite for. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no Zod schema in packages/spec changes (not runtime-interface-only or type-surface-only in the spec sense); and nothing exported is retired (not runtime-export-retired). -->
+  
+  **BREAKING** (narrowings), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM** (`@objectstack/cli`): `os migrate organization-ownership --apply` on a database holding a row whose owner cannot be derived exited `0` with `blocking: 0`, counted the row in `advisory`, and verified the `sys_migration` marker. This covers a reported (fate 4) row, and a row whose anchor is missing under a wall (fate 3). **TO:** it exits `1`, counts the row in `blocking`, and leaves the marker unverified, so a v18 `os serve` / `os start` does not start on the database. **Fix:** give each row its organization (write its `organization_id`, or repair the anchor its reason names), or delete it by hand, then re-run `--apply` with the same plan file.
+  - **FROM** (`@objectstack/cli`): a database an earlier version of this command certified while it held such a row was certified again by the next `--apply`. **TO:** that run leaves its marker unverified, for the same rows. **Fix:** the same as above.
+  - **FROM** (`@objectstack/cli`): `os dev`'s in-place upgrade of a development database started the server again whenever every ceremony step finished. **TO:** it starts it only when the post-check also holds nothing (`blocking` 0); otherwise it prints each table that holds, with its count and remedy, and the command that resumes the run. **Fix:** resolve the rows it names, then run the printed command.
+  - **FROM** (`@objectstack/cli`): the `mirror-deletion` step renamed the grants of a declared-rule mirror onto its rule's name, and deleted the mirror, even when plugin-sharing does not serve that rule (a condition that does not translate, an unmappable recipient, a retired owner-based rule); the next boot's orphaned-grant sweep then revoked those grants. **TO:** while `sys_record_share` grants name such a mirror, the step blocks, naming the rule, its rows and the reason, and writes nothing. **Fix:** correct the rule's declaration in its package so it is served, or delete each mirror row and the grants that name it, then re-run `--apply`.
+  
+  `@objectstack/cli` — **unattributable rows hold certification (ADR-0131 D10 fate 4).** The ceremony still never guesses an owner for such a row and never deletes it. The post-check now holds each one against the verdict:
+  
+  - Each table that holds one carries `held: { rows, remedy }` in the apply report, and counts those rows in its `remaining`. The terminal output names each table, its row count and the remedy.
+  - `advisory` now counts only the rows of an advisory departure and the reported rows of a table whose `organization_id` is not the tenancy anchor (`sys_sso_provider`, the retired `sys_scim_provider`). A row there that is bound to no organization is legitimate, is reported, and does not block.
+  - So a verified marker means no organization-less row on any table that the tenancy anchor governs.
+  - The plan's summary line says that such rows will hold `--apply`'s certification until they are resolved.
+  
+  `@objectstack/cli` — **the ceremony asks plugin-sharing which declared sharing rules it serves.** The port the `mirror-deletion` step reads (`DeclaredSharingRulesPort.rules()`, formerly `names()`) judges each declared rule through plugin-sharing's own translation. A mirror's grants are renamed only onto a rule that is served. A mirror of a refused rule that no grant names is still deleted.
+  
+  `@objectstack/plugin-sharing` — **exports `translateDeclaredSharingRule`** with its `DeclaredSharingRule` and `DeclaredSharingRuleSkip` types. It is the one translation enforcement serves a declared rule through. It is pure, and it is unchanged.
+- 5e97907: feat(plugin-sharing,cli)!: declared sharing rules are read from the registry — the boot writes no `sys_sharing_rule` row for them, and the 17 → 18 ownership ceremony deletes the copies the retired seeder wrote
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered sharing-rule-declared-mirror-retired -->
+  
+  The narrowings, FROM → TO, each with its one-line remedy:
+  
+  - `DELETE /api/v1/sharing/rules/:idOrName` on a declared rule — FROM `204`, the seeded row deleted (and written again by the next boot), TO `403 PERMISSION_DENIED`. Remedy: change or remove the rule in its declaration in the package; an organization's own rule is deleted as before.
+  - `sys_sharing_rule` — FROM one `managed_by: package` row per declared rule, TO none: the boot writes none and the ownership ceremony deletes the copies the seeder wrote (Setup's Sharing Rules object list, which lists rows, no longer shows declared rules). Remedy: read declared rules through `GET /api/v1/sharing/rules`, which lists them beside the organization's own; on an upgraded database run `os migrate organization-ownership --apply` with a fresh plan.
+  
+  The retirement note for the seeder is the ADR-0087 semantic entry `sharing-rule-declared-mirror-retired`.
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `@objectstack/plugin-sharing` no longer copies a stack's declared `sharingRules` into `sys_sharing_rule` at boot. ADR-0131 D2 retires that seeder (`bootstrapDeclaredSharingRules`). The sharing-rule service reads each declared rule from the registry whenever it reads the rule set: listing, getting, evaluating, the per-record hooks, the boot backfill and the orphaned-grant sweep. Rules an organization authors keep their `sys_sharing_rule` rows.
+  
+  - **A declared rule still grants, and stops granting when its declaration goes.** It is translated from the registry's copy exactly as the seeder translated it: the CEL `condition` is lowered to a `criteria` filter, and `sharedWith` becomes the recipient. A condition that does not lower is not served, and never as a match-all. It says so in one WARN line per rule per process. A declared rule's id is its NAME, and the grants it materialises carry the name as `sys_record_share.source_id`. Remove the declaration and the next boot's orphaned-grant sweep revokes those grants.
+  - **Scopes follow the posture, as the seeder's passes did.** Under `single` a declared rule is served once, organization-less, so every organization reads it. Under a wall it is served once per organization — every organization, read page by page. An organization created after boot is served from its creation on. If the organizations cannot be read at boot, no declared rule is served until the next boot, and the boot's orphaned-grant sweep revokes none of their grants meanwhile: a failed read is never a revocation.
+  - **A stored row of the same name answers for it.** Under `single` that is a row of that name in any organization, and under a wall that organization's own row. Such a row is an organization's own rule, a seeded copy an administrator customized, or a seeded copy the ceremony has not deleted yet. The declared rule is not served beside it, the same as while the seeder ran: it never overwrote an admin-authored or customized row.
+  - **`DELETE /api/v1/sharing/rules/:idOrName` refuses a declared rule** with `403 PERMISSION_DENIED`. It has no row: it is changed or removed in its declaration. Before this release a platform administrator could delete the seeded row, and the next boot wrote it again. An organization's own rule is deleted as before.
+  - **Setup's Sharing Rules object list no longer shows declared rules.** It lists `sys_sharing_rule` rows. `GET /api/v1/sharing/rules` lists both.
+  
+  `@objectstack/cli` — **`os migrate organization-ownership --apply` deletes the declared-rule mirrors.** The `declared-rule-mirrors` rows on `sys_sharing_rule` are the seeder's uncustomized copies (`managed_by` `package` or `platform`, `customized` not true). They now block certification until the ceremony's `mirror-deletion` step removes them. It works in the ruled order. It renames every grant naming a mirror by row id (`sys_record_share.source_id`, `source = 'rule'`) to the rule's name and verifies that no grant names a mirror any more. Only then does it delete the mirrors. Under a wall it deletes the organization-stamped copies too.
+  - A mirror whose rule no installed package declares, and that grants still name, blocks with nothing written. The blocker names the rows and the remedy. A mirror no grant names is deleted.
+  - The step also runs on a database whose ceremony already completed while an earlier release still seeded the rows, where they were advisory. Re-run `--apply` with a fresh plan.
+  - `DECLARED_SHARING_RULE_SEEDER_RUNS` is now `false`. A customized copy and an organization's own rule stay. Under `single` they take the Default Organization, as before.
+  
+  `@objectstack/lint` — the sharing-rule enforceability verdicts and `os explain` say what now happens to a declared rule whose condition does not lower. It is "never served", not "never seeded", because it is never written to `sys_sharing_rule`. The rule ids, severities, paths and what each rule accepts or refuses are unchanged.
+
+### Patch Changes
+
+- 1eae21f: fix(cli): `os verify --dashboard-windows` describes the measures it proves: counts, sums and derived measures
+  
+  Clause-②: no (the flag, its default and what it accepts are unchanged; only its help text moves)
+  
+  The `--dashboard-windows` flag description ended "(date and datetime fields; count measures)". The date-window family in `@objectstack/verify` now also proves sums and derived measures over counts or sums, so it reads FROM "(date and datetime fields; count measures)" TO "(date and datetime fields; count, sum and derived measures)". Nothing else about the flag changes.
+- 7d6ec91: Clause-②: no
+  
+  fix(cli): `os start` with the stdio MCP transport answers the `initialize` an MCP client writes when it spawns the server, and boots the configured app
+  
+  - **What was wrong.** An MCP client writes `initialize` to the server's stdin as soon as it spawns it. `os start` hands its stdin down to the processes it starts, and the CLI's argument parser fills an omitted positional argument from a pending stdin line. So the client's `initialize` became a config path. In a project with no `dist/objectstack.json`, the automatic compile step failed with `Config file not found: …/{"jsonrpc":"2.0",…}` and `os start` exited 1. In a project with a compiled artifact, the server printed `No objectstack.config.ts found — booting from artifact`, booted without the config's own plugins, and never answered `initialize`.
+  - **What changed.** The automatic compile step now gets no stdin, and `os start` names the config path when it starts `os serve` (the same `objectstack.config.ts` in the working directory that `os serve` used by default). The client's first message stays in the pipe for the stdio transport, and the config is loaded.
+  - **Unchanged:** the flags and environment variables of `os start`, `os serve` and `os compile`, and which config and artifact a boot uses.
+- d3d0644: fix(cli): `os migrate plan` no longer lists `sys_packages` among the tables "declared by no object in this plan" after `os migrate apply` has created it
+  
+  Clause-②: no
+  
+  `sys_packages` is the package registry's table. It is not an object: `PackageServicePlugin` creates it with its own DDL, and `os migrate apply` creates it from the registry's `package.storage` declaration. The plan's unmanaged-table sweep built its known set from the planned drivers' managed tables and the declared objects only, so on every applied deployment the plan reported the live registry table as if it were stranded.
+  
+  - **Now:** the sweep also counts the tables the boot's composition declares outside the object set. It reads that name from the same `package.storage` declaration the plan creates the table from. It reads it on every boot, whether or not the table exists yet, the skip-schema-sync boot of a Turso remote primary included. On `examples/app-crm` after `os migrate apply --yes`, the plan lists only a genuinely stranded `sys_*` table.
+  - **Still reported:** a `sys_packages` table in the database of a deployment that composes no package registry. Nothing there declares it.
+  - **Refused in one more case:** a `package.storage` service whose shape this CLI does not read now fails `plan`, `apply` and `organization-ownership` on a skip-schema-sync boot too, with the error those commands already gave on every other boot: `@objectstack/cli` and `@objectstack/service-package` must come from the same release.
+  - **Unchanged:** the `--json` keys, the section's wording, and what `apply` creates.
+- d702b18: fix(cli,runtime): a dangling symlink standing as the SQLite database's directory is refused at once by `os dev` and `os serve`, naming the database file and the directory, instead of failing the boot later in a plugin's start
+  
+  Clause-②: no
+  
+  **What was wrong.** `os dev` (for its default database under `OS_HOME/data`) and the standalone host behind `os serve` and `os start` (for a `file:` or `wasm-sqlite://` database URL) make the database file's directory before the driver opens it. Both accepted any `EEXIST` answer while making a missing level. A symbolic link that points nowhere answers `EEXIST` to `mkdir`, so it was taken for a directory, and the boot went on until the driver could not open the file. `os dev` then exited 1 with `Plugin com.objectstack.auth failed to start - rollback complete: The database refused to run this query for object 'sys_organization'`, and `os serve` with `Plugin package-service failed to start - rollback complete: The database refused to run a raw statement`. Neither message named the file, the directory or the link.
+  
+  **What an operator sees now.** Both make the directory with the same bounded walk as the other `OS_HOME` paths, which accepts `EEXIST` only when a directory stands there. A dangling link as the directory is refused before the boot starts: `os dev` prints `The default database '…/data/objectstack.db' cannot be created: its directory '…/data' could not be made: EEXIST: …` and exits 1, and `os serve` prints `[StandaloneStack] SQLite database file '…' cannot be created: its directory '…' could not be made: EEXIST: …` and exits 1. Remove the link, or point it at a directory that exists. A dangling link higher up the path was already refused at once, with `ENOENT` at the level below the link; it is now refused with `EEXIST` at the link itself.
+  
+  Nothing else changes. A directory that can be made is still made, every missing level of it; a directory that exists, or a symbolic link to one, is used as it stands; and a path the operating system refuses for any other reason (`ENOENT`, `ENOTDIR`, a regular file holding the directory's name) is refused with the same code and text as before.
+- 7715d04: `os serve` says once when it cannot write its runtime state file, naming the file and the operating system's error, and goes on booting
+  
+  Clause-②: no
+  
+  - **Before:** when `runtime.<environment>.<project>.json` could not be written — an `OS_HOME` under `/proc`, or one below a regular file (`ENOTDIR`) — the write's catch printed nothing. The boot printed its ready banner, an `os dev` parent got its `objectstack:listening` message, and a supervisor that then read the file got `ENOENT` with no reason anywhere.
+  - **Now:** one warning on stderr, among the other boot warnings and before the banner, names the file it could not write and carries the operating system's error verbatim (for example `ENOTDIR: not a directory, stat '…'`). It says the server runs on without the file and that `OS_HOME` must point at a directory the process can write.
+  - **Unchanged:** the file stays best-effort, so the boot never fails on it; its name, its payload and its removal on exit; the banner and the IPC message; stdout, which stays the stdio MCP transport's alone.
+- f963d8e: fix(cli): `os migrate plan` and `os migrate apply` examine the objects a `datasourceMapping` rule routes to a declared datasource, the declared default included, in that datasource, as `os serve` connects it (#24120)
+  
+  Clause-②: no
+  
+  A project whose primary store is a declared datasource routed as the default (`datasources: [{ name: 'qa_main', … }]` with `datasourceMapping: [{ default: true, datasource: 'qa_main' }]`) got a plan that examined nothing. The plan resolved `qa_main`'s database as its primary, but it registered no driver under the name `qa_main`, so every object the rule routes there, platform objects included, was bound to no driver. The plan printed `Examined 0 managed table(s)` and a PARTIAL plan. Meanwhile `os dev` on the same project reported drift in that database and named `os migrate` as the remedy.
+  
+  - **Now:** `plan` and `apply` connect the project's declared **managed** datasources the way `os serve` connects them: through the same `datasource-connection` service, under the declared name, for the datasources a mapping rule routes objects to, an object binds to, or that set `autoConnect`. Each datasource that objects live in is diffed and applied beside the primary. A composition note names each one and its database, in both the human output and the `--json` output. On a `datasourceMapping`-default project, the plan's drift is the drift `os dev` reports there.
+  - **Not connected:** a datasource whose schema the remote owns (`schemaMode: 'external'` or `'validate-only'`). Its objects are federated, and a plan has no table on it.
+  - **Refused now:** a routed managed datasource that cannot connect fails `plan`, `apply` and `unmapped-columns` with the connect error `os serve` gives for it. It is no longer skipped with a PARTIAL plan. `OS_ALLOW_DRIVER_CONNECT_FAILURE` degrades it here as it does there.
+  - **`os migrate unmapped-columns` follows:** it filters the plan's own findings, so it composes the same datasources. On such a project it reads an object's unmapped columns from the declared datasource. Before, it refused with "not in the set os migrate plan diffs: it is bound to no driver".
+  - **Unchanged:** a project that declares no datasource gets the plan it got before. `os migrate security-catalog-overlays` and `organization-ownership` boot as before. The unmanaged-table sweep's `physicalTables` counts each database once, although the primary and a declared default resolved from it are two connections to one file.
+- b7f29dd: Clause-②: no
+  
+  fix(cli): `os serve` with the stdio MCP transport and no config argument answers the `initialize` an MCP client writes when it spawns the server, and boots the configured app
+  
+  - **What was wrong.** An MCP client writes `initialize` to the server's stdin as soon as it spawns it. The CLI's argument parser fills an omitted positional argument from a pending stdin line, and `os serve`'s config path is an optional positional. So, started without a config path, `os serve` took the client's `initialize` as its config path. In a project with a compiled `dist/objectstack.json`, it printed `No objectstack.config.ts found — booting from artifact`, booted without the config's own plugins, and never answered `initialize`. `os start` already named the path when it started `os serve`; this is the same defect for `os serve` started directly.
+  - **What changed.** `os serve` no longer reads its config path from stdin. Without the argument it uses `objectstack.config.ts` in the working directory, as its help says, and the client's first message stays in the pipe for the stdio transport. Reading the config path from stdin was never documented, and no script, test or doc in this repository relied on it; to serve another config, pass its path as the argument.
+  - **Unchanged:** the flags and environment variables of `os serve`, and which config and artifact a boot uses when the path is given or when nothing waits on stdin.
+- a8adf66: Clause-②: no
+  
+  fix(cli): on a first run, `os start` writes its compile step's progress to stderr, so stdout carries only the stdio MCP transport's JSON-RPC frames
+  
+  - **What was wrong.** With `OS_MCP_STDIO_ENABLED=true`, stdout is the stdio MCP transport's protocol channel, and an MCP client parses every line it reads there as JSON-RPC. `os start` already writes its own banner and progress to stderr, but in a project with no `dist/objectstack.json` it compiles the config first, and that compile step wrote its progress (`◆ Compile`, `✓ Build complete`, `Artifact: …`, 24 lines for a one-object app) to stdout, ahead of the answer to the client's `initialize`.
+  - **What changed.** The automatic compile step's output now goes to stderr, next to the rest of `os start`'s own output, with or without the stdio transport. Nothing is dropped: the same lines still print, on stderr.
+  - **Unchanged:** the flags and environment variables of `os start` and `os compile`, when `os start` compiles, the artifact it writes, and `os compile`'s own output when you run it directly.
+- 51ad8e4: Clause-②: yes (widening)
+  
+  fix(cli,runtime): the 17 → 18 organization-ownership upgrade of a single-posture database that holds no organization leaves no row without one, the boot the ceremony prescribes writes nothing before it is refused, and a ceremony that did not verify is never served (ADR-0131 D3, D10)
+  
+  A 17.x single-posture install whose seed ran before any organization existed holds rows of organization-owned objects with `organization_id` NULL and an empty `sys_organization`. Upgrading it took this path: the ceremony's attribution checkpointed itself done at zero rows; the boot its rewrite step asks for created the Default Organization and let the inline seed stamp some rows before it refused; the second `--apply` did not run attribution again, dropped the columns and recorded discrepancies with `verified_at` NULL; and `os start` then served that database.
+  
+  - **The ceremony creates the Default Organization (`@objectstack/cli`).** Under the `single` posture, on a database that holds no organization and rows no anchor names, `os migrate organization-ownership` plans those rows as the Default Organization's and says so in a plan warning (`defaultOrganizationCreatedByApply: true` in the plan file). `--apply` creates it before its first write, through plugin-auth's boot invariant (the row a single-posture boot creates), and gives it every such row. A run that cannot create it — a boot without the auth family that declares `sys_organization` — blocks at attribution, naming why, instead of attributing nothing and certifying. Nothing is created under a walled posture, or when the database holds organizations.
+  - **The ceremony names the Default Organization as the boot does (`@objectstack/cli`).** Under `single` it is the organization with `slug = 'default'`, else the sole organization whatever its slug — the boot invariant's and the tenancy service's definition (ADR-0093 D3). Before, the plan required `slug = 'default'`, so a database whose only organization had another slug kept its unanchored rows NULL through the ceremony while v18 derives every owner from that organization. Several organizations, none of them `default`, still name none, and their rows are reported. In the plan file (the command's own output, not a published schema) `defaultOrganization.slug` is now that organization's own slug, no longer always `'default'`.
+  - **A checkpointed attribution runs again (`@objectstack/cli`)** whenever the plan derives an owner for rows still NULL: a row the operator made attributable since, or one an earlier run found no Default Organization for. It writes only where `organization_id` is NULL, so no owner already written is derived again. A database left by an earlier release's ceremony in that state is completed by re-running `--apply`.
+  - **The boot guard judges before any plugin writes (`@objectstack/runtime`, `@objectstack/plugin-auth`).** `OrganizationOwnershipBootGuardPlugin` judges in its own `start()`, after the engine's schema sync (the column the rewrite step waits for is still added) and before every plugin that writes rows at start: `AppPlugin` (the inline seed), `AuthPlugin` and the identity-objects plugin (the Default Organization) name it (`com.objectstack.organization-ownership-boot-guard`) in `optionalDependencies`. A refused boot leaves every row as it found it.
+  - **A ceremony that did not verify is refused (`@objectstack/runtime`).** With no table left in the v17 shape, a boot whose `adr-0131-organization-ownership` marker exists and is not verified — the post-check found rows the ceremony has not carried — is refused with `ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED`, naming the re-run. A database with no marker (a fresh one) boots as before.
+  - **The refusal now arrives as a `cause` (`@objectstack/runtime`).** A failed `start()` is reported by the kernel as its own error ("Plugin … failed to start"), with the plugin's error as its `cause`. A host that composes the guard and inspects the boot error asks `isOrganizationOwnershipBootRefusal` of each `cause` down the chain: asked of the kernel's own error it now answers `false`. `assertOrganizationOwnershipMigrated(engine)` still throws the refusal itself. `os serve` and `os dev` read it from the chain.
+  - **One new export (`@objectstack/plugin-auth`, `minor`).** `ensureDefaultOrganizationExists(ql, options?)` — the Default Organization's boot invariant, find-or-create under `single` — for the ceremony, so the organization it creates is the row a single-posture boot creates, from one producer. A host composing a kernel still never calls it: `AuthPlugin` and the identity-objects plugin keep the invariant on every boot. No other package entry changes.
+  
+  Unchanged: the ceremony's steps, fates and refusals otherwise; a walled posture's unattributable rows (reported, never assigned); the boot of a fresh or verified database; and every plugin's order on a kernel that does not compose the guard. Repairing a database whose organization-scoped seed load already inserted twins of NULL-organization rows is an operator's data repair.
+- 538f923: fix: an activity row is written only when an organization is derivable, never with a NULL organization, and the v18 ownership ceremony deletes the existing NULL activity rows it cannot attribute (ADR-0131 D9)
+  
+  Clause-②: no
+  
+  - **`@objectstack/plugin-audit`.** The audit writer's activity mirror (`sys_activity`) takes its organization from the record, then from the acting session, then from the `tenancy` service's Default Organization under `single`. When none of them names one, the mirror now writes no activity row at all. Before, it wrote a row with `organization_id` NULL. Under a wall that row was readable by no organization member. The change is still recorded: the compliance ledger row (`sys_audit_log`) is written as before, with its `tenant_id` attribution. Under `single` the Default Organization is always derivable, so nothing changes there. A record that names its organization keeps its activity row, with that organization.
+  - **`@objectstack/cli`.** `os migrate organization-ownership` still attributes a NULL `sys_activity` row when its record carries an organization. On a walled database (any posture but `single`), the mirror-deletion step now deletes the NULL rows no anchor attributes, such as activity about a sign-up's `sys_user`. Before, those rows were reported as unattributable and held certification. They are 14-day telemetry that the mirror no longer writes, and `sys_audit_log` keeps each change. The plan counts them as the departure `underivable-activity`, and warns before the first write that `--apply` deletes them. The apply report lists the count as the table's `deleted`. Under `single` the Default Organization takes these rows, as before, and nothing is deleted.
+- Updated dependencies [b2e7870]
+- Updated dependencies [6a49efb]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [78652c0]
+- Updated dependencies [1eae21f]
+- Updated dependencies [9c74d40]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [646303e]
+- Updated dependencies [e9bc60b]
+- Updated dependencies [52ff308]
+- Updated dependencies [d1f082d]
+- Updated dependencies [f5ef054]
+- Updated dependencies [0d34066]
+- Updated dependencies [0c3db0f]
+- Updated dependencies [8d3dd6f]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [03ac4ec]
+- Updated dependencies [5e97907]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [6e43b7b]
+- Updated dependencies [727091c]
+- Updated dependencies [8692a08]
+- Updated dependencies [62c4441]
+- Updated dependencies [f792290]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [2bcaefb]
+- Updated dependencies [f3174ef]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [d702b18]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [9975c26]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [5a9a80b]
+- Updated dependencies [1489952]
+- Updated dependencies [04fd88a]
+- Updated dependencies [aaaeeac]
+- Updated dependencies [6973014]
+- Updated dependencies [669296b]
+- Updated dependencies [8eccf51]
+- Updated dependencies [8a88901]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [8259ea0]
+- Updated dependencies [9040945]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [2bcd406]
+- Updated dependencies [2bcd406]
+- Updated dependencies [58a2faa]
+- Updated dependencies [e74ec56]
+- Updated dependencies [58a2faa]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [cbfa5e4]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [77e9f79]
+- Updated dependencies [83dfbc0]
+- Updated dependencies [9822b05]
+- Updated dependencies [889bf12]
+- Updated dependencies [7a8733f]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [e15897c]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [d79dc48]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [5da2e88]
+- Updated dependencies [51ad8e4]
+- Updated dependencies [f5e98a3]
+- Updated dependencies [ec749fb]
+- Updated dependencies [ec749fb]
+- Updated dependencies [c4526a7]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [85be049]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [41c7405]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [6868514]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [538f923]
+- Updated dependencies [d65826f]
+- Updated dependencies [741aa85]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [d8e11b5]
+- Updated dependencies [44a5011]
+- Updated dependencies [1827571]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+- Updated dependencies [2a1e48a]
+- Updated dependencies [71fa166]
+- Updated dependencies [71fa166]
+- Updated dependencies [e22defb]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/plugin-security@18.0.0-next.4
+  - @objectstack/plugin-auth@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/plugin-sharing@18.0.0-next.4
+  - @objectstack/verify@18.0.0-next.4
+  - @objectstack/lint@18.0.0-next.4
+  - @objectstack/rest@18.0.0-next.4
+  - @objectstack/service-settings@18.0.0-next.4
+  - @objectstack/service-storage@18.0.0-next.4
+  - @objectstack/plugin-audit@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/cloud-connection@18.0.0-next.4
+  - @objectstack/runtime@18.0.0-next.4
+  - @objectstack/plugin-hono-server@18.0.0-next.4
+  - @objectstack/metadata-protocol@18.0.0-next.4
+  - @objectstack/plugin-email@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/plugin-webhooks@18.0.0-next.4
+  - @objectstack/client@18.0.0-next.4
+  - @objectstack/plugin-approvals@18.0.0-next.4
+  - @objectstack/console@18.0.0-next.4
+  - @objectstack/mcp@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/driver-memory@18.0.0-next.4
+  - @objectstack/driver-mongodb@18.0.0-next.4
+  - @objectstack/driver-sql@18.0.0-next.4
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.4
+  - @objectstack/driver-turso@18.0.0-next.4
+  - @objectstack/metadata@18.0.0-next.4
+  - @objectstack/plugin-pinyin-search@18.0.0-next.4
+  - @objectstack/service-analytics@18.0.0-next.4
+  - @objectstack/service-automation@18.0.0-next.4
+  - @objectstack/service-cache@18.0.0-next.4
+  - @objectstack/service-datasource@18.0.0-next.4
+  - @objectstack/service-job@18.0.0-next.4
+  - @objectstack/service-mailbox@18.0.0-next.4
+  - @objectstack/service-messaging@18.0.0-next.4
+  - @objectstack/service-package@18.0.0-next.4
+  - @objectstack/service-queue@18.0.0-next.4
+  - @objectstack/service-realtime@18.0.0-next.4
+  - @objectstack/service-sms@18.0.0-next.4
+  - @objectstack/trigger-api@18.0.0-next.4
+  - @objectstack/trigger-record-change@18.0.0-next.4
+  - @objectstack/trigger-schedule@18.0.0-next.4
+  - @objectstack/account@18.0.0-next.4
+  - @objectstack/setup@18.0.0-next.4
+  - create-objectstack@18.0.0-next.4
+  - @objectstack/observability@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

@@ -161,9 +161,13 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     // with no active organization only global grants apply, so this is the one
     // spelling under which it still carries `manage_sharing` and still reaches
     // `adminOrgScope`.
-    await ql.insert('sys_user_permission_set', {
-      user_id: orgLessUserId, permission_set: 'sharing_admin_8158', organization_id: null,
-    }, { context: SYS });
+    // [C8 stage 8b] A global grant is legacy residue in 18.0: the engine now stamps
+    // or refuses an organization-less system insert under `single` (ADR-0131 D9),
+    // so it is landed beneath the engine. The readers still apply it until C8's
+    // NULL-reader stages.
+    const globalGrant = (row: Record<string, unknown>) =>
+      ql.getDriver('sys_user_permission_set').create('sys_user_permission_set', { ...row, organization_id: null });
+    await globalGrant({ id: 'ups_8158_org_less', user_id: orgLessUserId, permission_set: 'sharing_admin_8158' });
     // The #8158 grant as filed — scoped to tenant A — for the control (which
     // has tenant A active) and for the org-scoped persona (which has none).
     for (const userId of [orgBoundUserId, orgScopedOrgLessUserId]) {
@@ -190,9 +194,7 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     await stack.signUp(OPERATOR_EMAIL, PASSWORD);
     const adminSet = await catalogPermissionSet(ql, 'admin_full_access');
     expect(adminSet, 'admin_full_access is served by the security catalog').toBeTruthy();
-    await ql.insert('sys_user_permission_set', {
-      user_id: await uid(OPERATOR_EMAIL), permission_set: adminSet.name, organization_id: null,
-    }, { context: SYS });
+    await globalGrant({ id: 'ups_8158_operator', user_id: await uid(OPERATOR_EMAIL), permission_set: adminSet.name });
 
     // Sign in AFTER the grants, so every session is minted by the same path
     // with the membership state above already in place. The org-less personas

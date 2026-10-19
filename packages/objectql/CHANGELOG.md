@@ -1,5 +1,259 @@
 # @objectstack/objectql
 
+## 18.0.0-next.5
+
+### Minor Changes
+
+- fa26308: fix(objectql,runtime): a hook whose `handler` names a function gets `ctx.title(field?)` in-process, as an inline handler and a `body` do
+  
+  Clause-②: yes (widening)
+  
+  - **What was wrong.** A hook whose `handler` is a string naming a function ran in-process without `ctx.title`: `defineStack({ functions })` plus a hook naming an entry on a source boot (`@objectstack/verify`'s `bootStack(config)`, `os serve` over a config), and a string `handler` resolved from the artifact's `runtimeModule` (what `objectstack build` ships for a callable it could not lower to a `body`). The engine's binder resolved the name after the runtime had wrapped the inline handlers, so the function was called with the bare engine context and `await ctx.title()` threw `TypeError: ctx.title is not a function`.
+  - **What changed.** `bindHooksToEngine` (`@objectstack/objectql`) takes a `wrapHandler(handler, hook)` option, applied at bind to every handler a hook runs in-process, after a string `handler` resolves: an inline function, a name from the bind's `functions`, or a name the same package registered on the engine. A `body`'s handler (built by `bodyRunner`) never takes it. `ObjectQL.bindHooks` and the `IObjectQLEngine.bindHooks` contract (`@objectstack/spec`) carry the option. `bindAppArtifactHandlers` (`@objectstack/runtime`) passes the existing `withInProcessHookTitle` through it, in place of wrapping inline handlers before the bind, so the inline and the named handler take one wrap.
+  - **Unchanged.** A bind that passes no `wrapHandler` binds every handler exactly as resolved, so a host or harness that calls `bindHooks` itself, and a hook registered with `ql.registerHook(...)`, are not handed `ctx.title`. `HookContext` still declares no `title`.
+- fb0d85b: feat(spec,objectql)!: a top-level action bound by `objectName` to an object another package owns is listed on that object wherever it is served, and a bound action whose object no loaded package registers fails the boot
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, option, error code or stored shape is added, removed or renamed: `defineStack` accepts two more target kinds for an action's existing `objectName`, the served object gains entries in its existing `actions` array, and the boot refusal answers the existing `INVALID_METADATA` code. Nothing stored changes shape, so `objectstack migrate meta` has nothing to rewrite. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no Zod schema shape in packages/spec changes (not runtime-interface-only or type-surface-only); and nothing exported is retired (not runtime-export-retired). -->
+  
+  **BREAKING** (one narrowing beside a widening), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **Widening** (`@objectstack/spec`, `@objectstack/objectql`): an action declared in a stack's top-level `actions` with `objectName` naming an object that another package owns now reaches that object. `defineStack()` accepts the action when the stack extends the object through `objectExtensions`, or when the object is a known platform object (`sys_organization` and the rest of the platform's named list). It keeps the action in the top-level `actions`. The engine's schema registry then attaches it to the object at the one step every object read ends in. That covers `GET /api/v1/meta/object/<name>` (stored-row, MetadataService and registry layers alike), `engine.getSchema()` and the action router's object lookup, in whichever order the two packages register. The attached entry is the action's own declaration, so its `requiredPermissions`, `requiresMembershipReach` and execution identity are unchanged. An action the object already declares under the same name keeps the object's declaration. A disabled package's bound actions are not attached. Before this, such an action was refused by `defineStack()` whenever the stack declared an object of its own. Where it got through (an object-less stack, or `strict: false`), it registered but was listed on no object, so no client rendered it.
+  - **FROM** (`@objectstack/objectql`): a top-level action bound by `objectName` to an object no loaded package registers was registered and listed nowhere, and the boot succeeded. **TO:** the boot fails at `kernel:ready` with `INVALID_METADATA` (422), naming each such action, its package and the object. An artifact registered through the `manifest` service after the boot is refused before any of it registers. **Fix:** register the object (in the package or in one it depends on), or correct the action's `objectName`.
+  - **Unchanged:** a name `defineStack()` cannot attribute (an object this stack neither defines nor extends, and not a known platform object) is still refused at build with `STACK_CROSS_REFERENCE_INVALID`. A same-stack bound action is still merged into its object by `defineStack()` and is attached once.
+  
+  The `ObjectExtensionSchema` refusal for `actions` now says exactly this: declare a top-level action with `objectName: '<target>'` in the same stack; the schema registry attaches it to the object wherever the object is served; a target no loaded package registers fails the boot.
+
+### Patch Changes
+
+- 9112bcd: fix(objectql): a record read that hydrates a file field no longer makes a `sys_file` access attempt for a reader without `sys_file` read
+  
+  The engine expands a stored file id by reading `sys_file`, and it issued that read as the caller. A member who may read the record but not `sys_file` (the platform default) was refused it, and the security layer logged `[Security] Access denied: operation 'find' on object 'sys_file'` at WARN on every by-id and list read by that member, although the body served was right. Those lines buried the real denials in the operator's log.
+  
+  The engine now asks the security service's `canReadObject('sys_file')` first, the same object-level read gate the security middleware applies, and serves a refused caller the field-owned answer without the read. Nothing else changes:
+  
+  - The served body is byte-identical, by id and by list, for a reader with and without `sys_file` read. A file owned by the record still hydrates, and every other id still reads `{ id, metadataRefused: true }`.
+  - A direct `GET /api/v1/data/sys_file/:id` by the same reader still answers `403 PERMISSION_DENIED` and still logs its denial.
+  - With no security service, or one that offers no `canReadObject`, the engine reads as the caller, as before.
+  
+  The ask is one cached permission check per read, not per row.
+  
+  Clause-②: no (no accept set or public surface moves: the served bodies and every refusal are unchanged; owes the seat's review of record at `TIER_DEFAULT` before the queue)
+- 45bec43: fix(objectql): a formula reading a field its reference's target does not declare no longer makes the other formulas reading through the same reference read null
+  
+  Clause-②: no
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes, and nothing stored, is added, removed or renamed. A valid formula that read null beside a misspelt sibling now reads its value; no spec key, export, option, object definition or stored shape changes, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  The formula read loads, once per page, every column the object's formulas read through each reference. When one formula named a field the target does not declare, the whole reference was answered as undeclared. Every formula reading through it then read `null` and reported the other formula's field.
+  
+  - The undeclared fields are left out of that shared read and judged for each formula on its own.
+  - A formula that names one reads `null`, with a fault report naming only its own undeclared fields.
+  - A formula that reads only declared fields through the same reference gets the value it gets when read alone (`?fields=`).
+  
+  What to do. Nothing. A formula that read `null` this way now reads its value. To find the formula at fault, re-save the object: the save door refuses the misspelt read and names the field.
+- Updated dependencies [e67ac4b]
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [33a45cc]
+  - @objectstack/metadata-protocol@18.0.0-next.5
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/formula@18.0.0-next.5
+  - @objectstack/metadata@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Minor Changes
+
+- eebaf3b: feat(objectql,core): the driver's tenant read scope is the organization wall's verdict — one predicate for Layer 0 and every driver (ADR-0131 D8)
+  
+  Clause-②: yes (widening)
+  
+  - **What changed.** The engine no longer derives `DriverOptions.tenantId` / `tenantIds` beside the organization wall. `buildDriverOptions` projects the wall's own verdict onto them: the verdict plugin-security records on the operation (`OperationContext.tenantLayer0Verdict`) where its wall ran, and otherwise the same function over the engine's own facts (the posture in force, the context's organization and membership set). The function, `computeTenantLayer0Verdict` with its input type `TenantLayer0Input`, moves to `@objectstack/core` (new export); `@objectstack/plugin-security`'s `tenant-layer.ts` re-exports it and its Layer 0 is byte-identical.
+  - **FROM → TO, per posture, for a read, count, aggregate, update or delete on an object with an organization column:**
+  
+    | posture / caller | driver scope before | driver scope now |
+    |:--|:--|:--|
+    | `single`, any caller naming an organization | that organization (plus organization-less rows) | **none** |
+    | `isolated`, member | the active organization | unchanged |
+    | `group`, member | the membership set | unchanged |
+    | walled, exempt `PLATFORM_ADMIN` on a posture-permitting object, or the verified platform owner's read | the active organization | **none** — what Layer 0 already admitted |
+    | walled, system context naming an organization | that organization | unchanged |
+  
+  - **Not changed.** Inserts and upserts keep the active organization as `tenantId` in every posture: the row is stamped with it, its counter scopes by it, and an upsert that would merge into another organization's row is still refused. Both `orWhereNull` compatibility arms in `SqlDriver.applyTenantScope` stay (their retirement is a later stage of ADR-0131 D13).
+  - **Who notices.** A `single` deployment that holds more than one organization was kept apart by the driver only by accident; postures now differ only in enforcement (ADR-0131 D11), and `single` enforces no wall. To keep organizations apart, run the `isolated` or `group` posture. Code that relied on a context organization to narrow a read on `single` names the organization in its own `where`.
+  - **Migration.** ADR-0087 semantic entry `driver-read-scope-follows-tenant-wall`. A deployment's `platformGlobalObjects` carve-out already reaches the driver through the column plan (ADR-0131 D7): a declared object carries no organization column, so neither wall has anything to scope.
+- d537a31: feat(objectql)!: a formula field reads one hop through a reference field — `record.book.title` on a loan now reads the book's title instead of `null`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, stored shape or authorable spelling is added, removed or renamed. A formula field that reads `record.LOOKUP.FIELD` now computes; before, it read null on every row. The narrowing is in what a formula over a reference evaluates to in two shapes that never computed a value for a set reference (a second hop, and a reference read both through and as a plain value): both now read null on every row with a reported reason, so there is nothing stored for `objectstack migrate meta` to rewrite. -->
+  
+  The read path (`find`, `findOne`, and the record a create or update hands back) now preloads the related fields a formula names ONE hop through a lookup or master-detail field, before it computes the formula. A junction object's composed title, `record.book.title + ' · ' + record.reader.name`, shows both names.
+  
+  - **How it reads.** One batched read per reference field per page of rows, never one per row, naming only `id` and the related fields the formulas name. The loader is the one validation rules already use for `record.LOOKUP.FIELD`. The row a read returns still holds the foreign key; only the formula sees the related record.
+  - **As whom.** The hop is read under the reader's own permissions (row-level and field-level security, the organization wall). A related record the reader may not see reads as not found, and a related field it may not see reads as empty, so a formula never shows the reader a value they could not read directly.
+  - **When there is no related record.** A reference to a record that is not found, or that the reader may not read, leaves the formula null and reports why, naming the related object and field. An empty reference is evaluated: write `record.reader.?name.orValue('—')` to give the formula a value while the reference is empty.
+  - **One hop only.** A second hop (`record.book.shelf.code`) and a reference read both through and as a plain value are not evaluated: the field reads null and the reported reason uses the same wording the lint uses. A formula on the related object that reads a hop of its own reads null on a hop read, so two objects whose titles read each other terminate.
+  - **Sorting and search.** A formula value is stored nowhere, so a formula title still cannot be sorted by (`400 INVALID_SORT`) or searched, as before.
+  
+  What to do. Nothing for a formula that reads its own fields. A formula that reads through a reference now shows a value. One that reads two hops should read a field stored on the related object instead.
+- 1bf5f6e: feat(objectql): evaluate a formula field over a record in hand the way a read serves it, one hop through a reference included
+  
+  A formula title over lookups (`record.book.title + ' · ' + record.reader.name`) is computed on every read since the formula read path reads one hop. A record no read returned, such as the state a hook fires on, had no way to get the same value: the synchronous `evaluateFormulaField` reads no hop, so it answered `null`.
+  
+  - **`ScopedContext.serveFormulaField(objectName, record, field)`** evaluates one declared formula field over `record` with the read path's own evaluation, under that context: the one hop it reads through a reference (one batched read per reference field, through the reader's own permissions, on the context's transaction when it carries one), the `can()` permission map, and the fault report. A related record the reader may not read, a missing one and a second hop leave the field `null` with the read's reason, as a read does. `ObjectQL.serveFormulaField(objectName, record, field, context)` is the engine method behind it.
+  - **`resolveServedRecordTitle(schema, record, channel)`** is the async sibling of `resolveRecordTitle`: this record's title, with a formula title served on `channel` (a `ScopedContext`). `resolveRecordTitle` is unchanged and still reads no hop.
+  - **`servedRecordTitle(schema, row)`** reads the title a read already served off the row it returned, instead of re-deriving it.
+  
+  What to do. Nothing. Code that names a record it holds in hand and wants the title a read shows calls `resolveServedRecordTitle` with the caller's `ScopedContext`.
+- ec749fb: feat(objectql)!: a `search` over an object with no searchable field is refused with `400 INVALID_FIELD` instead of answering every row
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, stored shape or authorable spelling is added, removed or renamed. The narrowing is in what a read answers: a non-blank `search` term over an object whose resolved search set is empty used to be dropped (200, every row) and is now a 400 that names the object and the remedy. The remedy is a metadata edit the author makes by hand (declare `searchableFields`, or add a stored text field), so there is nothing stored for `objectstack migrate meta` to rewrite. -->
+  
+  A search term is matched against the object's resolved search fields: its `searchableFields` declaration (entries that name a stored field), or else the default set (the name/title field and the text, email, phone, url, autonumber, textarea, markdown and select fields). On an object where that set is empty, such as a junction object made of two lookups and a formula title, the term used to add no filter, so `?search=zzzz-nothing` and `?search=Dune` returned the same rows, and a user read every row as a match.
+  
+  - **What changes.** `find`, `findOne`, `count` and `aggregate` answer a non-blank `search` over an empty resolved set with `400 INVALID_FIELD` (`param: 'search'`). That covers every door that reaches the engine: the REST list and query routes (and the list's `total`), the grouped read, the dispatcher, the SDK and a hook's `ctx.api`. The message names the object, says why the set is empty, and gives the two remedies.
+  - **Unchanged.** A blank or whitespace term is not a search and still answers every row. An object with a searchable field filters as before. An explicit `searchFields` naming a field outside the set keeps its own `400 INVALID_FIELD` at the data door. Global search (`GET /api/v1/search`) still passes over an object with nothing to scan and answers `200`.
+  
+  What to do. If a read now answers `400 INVALID_FIELD` with "has no searchable field", declare `searchableFields` on that object naming a stored field, or mirror the composed title onto a stored text field and search that. A client that offers a search box on such an object should hide it, or show the refusal.
+- 2f569a9: fix(objectql)!: an `objectExtensions` entry no longer adds platform system columns to the object it extends, so an extension of `sys_organization` or `sys_user` no longer hides the record from its own organisation
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served field set of an extended object whose own declaration withholds injected columns: no stored metadata changes shape, no spec key, export or error code is added or removed, and an author has nothing to rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); the change is the registry's runtime planning, not a declaration or a type (not runtime-interface-only or type-surface-only); and nothing exported is removed (not runtime-export-retired). -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The registry ran the injected-system-columns plan on every contributor, an extension body included. An extension body carries none of the keys the plan reads (`managedBy`, `systemFields`, `tenancy`, `ownership`), so it was planned as an ordinary object, and the merge added `organization_id`, `created_by` and `updated_by` (and on a non-`sys_` target, `owner_id` and `owning_business_unit_id`) to a target whose own declaration withholds them. On a multi-tenant deployment an extension of `sys_organization` or `sys_user` (`managedBy: 'better-auth'`) therefore created an `organization_id` column that is NULL on every row, and the tenant wall then answered a member's list of their organisation and of the users with `[]`, and their own records `404 RECORD_NOT_FOUND` by id. The injected definition also replaced a column the target declares itself.
+  
+  Now only a base layer (the owner, or a tenant overlay) is planned. The extended object's system columns are its base layer's, in whichever order the two packages register.
+  
+  - **Served less now:** an extended object whose declaration withholds a system column no longer reports or stores it. This covers `managedBy: 'better-auth'`, `systemFields: false`, `tenancy.enabled: false` and an `ownership` other than `user`. For example, `sys_sso_provider` (which plugin-auth extends with `oidc_client_secret`) no longer carries `created_by` or `updated_by`, and its `organization_id` is again the `text` column the object declares instead of the platform's read-only lookup.
+  - **Unchanged:** the extension's own fields, labels, validations and indexes merge exactly as before. An audit field an extension declares (`created_at`, `created_by`, `updated_at`, `updated_by`) is still forced read-only wherever the target carries the audit family. An extended ordinary object carries the same system columns, which come from its owner. No existing column is dropped from a database: a column an earlier release created stays in the table, and the registry no longer declares it.
+  
+  What changes for you: nothing to rewrite. If code read `organization_id`, `created_by` or `updated_by` on an extended `sys_*` identity object, it read a NULL column that the object never declared. Read the owner's own columns instead.
+- 69147ab: fix(objectql)!: the one-hop read through a reference never reads a stored-metadata-body table, and the lint refuses that read where it is written
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No stored metadata moves and nothing is converted: what narrows is a served value (a formula field or a validation rule that reads through a reference into a stored-metadata-body table) and an author-time verdict on such an expression; no spec key, export, option, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); nothing exported is removed (not runtime-export-retired) and no type changes (not type-surface-only or runtime-interface-only). -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The tables of the stored-metadata-body family (`STORED_METADATA_BODY_OBJECTS`) are projected or refused at every door that serves them. The one-hop read a formula field and a validation rule share (`resolveOneHopRelated`) was an ordinary engine read, which the family's projection does not reach.
+  
+  - **`@objectstack/objectql`.** A hop whose target is a family table is not read, whichever authority the hop is read under. A formula field reading through it is `null` with its reason, on every read, write response and `serveFormulaField` call (the seam a hook body's `ctx.title()` reads through). A validation rule reading through it has no verdict, so the write it judges is refused. The answer is the one an unreadable related record gets, so it says nothing about the row. A hop into any other object is unchanged.
+  - **`@objectstack/lint`.** A formula field's `expression`, or a validation rule's hydrated `condition`, that reads through a reference into a family table is an error, with the prescription. `os validate`, `os build` and the object save door run the same pass, so the author learns it at save rather than from a `null`.
+  
+  What to do. Remove the read through the reference. Stored metadata is read through the metadata API (`GET /api/v1/meta/:type/:name`), where its body is projected. Reading the reference field itself (the stored id) is unchanged.
+- cf16a0d: fix(objectql)!: `expand` and the master-detail `parent` root never hydrate a stored-metadata-body table
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No stored metadata moves and nothing is converted: what narrows is a served value (the expansion of a reference into a stored-metadata-body table) and a verdict (a field rule reading `parent` on a detail whose master is such a table); no spec key, export, option, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); nothing exported is removed (not runtime-export-retired) and no type changes (not type-surface-only or runtime-interface-only). -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The tables of the stored-metadata-body family (`STORED_METADATA_BODY_OBJECTS`) are projected or refused at every door that serves them, but only for the object a request names. Two relationship hydrations in the engine read a family row as an ordinary row, which that projection does not reach.
+  
+  - **`expand`.** A reference field whose target is a family table is not expanded, at any depth and for any caller: the field keeps its stored id, the answer a reference the caller may not expand already gets. This covers `expand` / `$expand` on the data read, `findOne`, the nested query form and a hook body's `ctx.api` read. Expanding a reference into any other object is unchanged.
+  - **The master-detail `parent` root.** A detail whose master is a family table never reads its header. `parent` is unbound, so a `requiredWhen` or `readonlyWhen` that reads it fails closed exactly as it does for a header the caller cannot read, on insert, update and the `validate()` preview, and the verdict never depends on the row. A master outside the family is unchanged.
+  
+  What to do. Read stored metadata through the metadata API (`GET /api/v1/meta/:type/:name`), where its body is projected, rather than by expanding a reference to it or reading it as a master-detail header. The stored id on the reference field is unchanged.
+
+### Patch Changes
+
+- 2ac0616: refactor(objectql): the record validator reads `isMissing` / `isEmptyForRequired` from `@objectstack/core` instead of private copies
+  
+  Clause-②: no
+  
+  - **No behaviour change.** The object-level `required` check, the `required_cleared` PATCH check, the blank-to-`null` normalisation of typed columns and the value-shape scan judge "missing" exactly as before; the private copies of the two predicates are deleted and `@objectstack/core`'s exports, moved there unchanged, are imported at every read site.
+  - **Why:** `@objectstack/rest`'s public-form submit route now judges a form's `required` by the same rule, and it cannot import the engine.
+- aa31569: Clause-②: no
+  
+  fix(objectql): withdrawing a package that extends another package's object puts the owner's definition back at `GET /api/v1/meta/object/NAME` at once, not at the next restart
+  
+  - **What was wrong.** When a package whose content is an `objectExtensions` field on another package's object is registered on a started kernel, the ObjectQL bridge rewrites the OWNER's copy of that object in the `metadata` service with the merged body, extension included. `DELETE /api/v1/marketplace/install-local/:manifestId` of the extender withdrew its contribution from the registry, so the object listing and the data plane dropped the field, but nothing rewrote the owner's copy. The by-name read asks that copy first, so `GET /api/v1/meta/object/NAME` kept serving the withdrawn field until the runtime restarted.
+  - **What changes.** The ObjectQL bridge remembers which owners' copies each package's extensions rewrote, and the `manifest` service gains `restoreExtendedObjectCopies(packageId)`: once the registry no longer holds the package, it re-registers each such copy with the registry's current definition. The install-local DELETE calls it right after the registry withdrawal. The by-name read then serves the owner's body without the extension's fields, as the listing and the data plane already did.
+  - **Not touched.** Only a copy stamped with the registry owner's id is rewritten, the same rule the bridge overwrites by, so an authored copy stays. The DELETE answer is unchanged. A copy that cannot be restored is logged once at `error`, naming the objects and the remedy: restart the runtime.
+- cf540a7: Clause-②: no
+  
+  fix(objectql): the default-record-page and security-catalog refusals name an item made here, not shipped by a package, as "authored in this system"
+  
+  - **What changed.** The holder text a `DEFAULT_RECORD_PAGE_CONFLICT` refusal prints for a page no package ships now reads `page "NAME", authored in this system`, and the holder text a `NAMESPACE_CONFLICT` refusal prints for the environment catalog reads `the environment catalog (an item authored in this system, not shipped by a package)`. Both said "authored in this environment". Inside the running system, user-facing copy names the system the user is in as "this system".
+  - **Unchanged.** Every error code, status and envelope field (`existing`, `incoming`, `existingHolder: { kind: 'environment' }`). "The environment catalog" is the documented name of that holder (ADR-0048), so it stays.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [f3174ef]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [ec749fb]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [41c7405]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [1827571]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/metadata-protocol@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/metadata@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

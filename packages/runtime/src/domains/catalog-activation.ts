@@ -3,7 +3,10 @@
 /**
  * [ADR-0126 §3 regime C, as ADR-0131 D6 amends it] THE ACTIVATION DOOR for the
  * security catalog: `POST /security/_activation/:type/:name`, body
- * `{ enabled?: boolean }`, `:type` one of `position` / `permission`.
+ * `{ enabled?: boolean }`, `:type` one of `position` / `permission`, and — since
+ * ADR-0131 D6 charts declared sharing rules under regime C — `sharing_rule`, a
+ * rule a package declares, read from the sharing-rule service (`sharingRules`)
+ * rather than the security catalog.
  *
  * ## Why it exists
  *
@@ -59,6 +62,7 @@ import {
     readActivationBody,
     POSITION_ACTIVATION_SUBJECT,
     PERMISSION_SET_ACTIVATION_SUBJECT,
+    SHARING_RULE_ACTIVATION_SUBJECT,
     type ActivationSubject,
 } from './activation-gate.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -72,9 +76,12 @@ export const CATALOG_ACTIVATION_SEGMENT = '_activation';
  * types the resolver reads from the ledger; `capability` is code-only on the
  * regime and has no switch.
  */
-const CATALOG_ACTIVATION_SUBJECTS: Readonly<Record<'position' | 'permission', ActivationSubject>> = {
+const CATALOG_ACTIVATION_SUBJECTS: Readonly<Record<'position' | 'permission' | 'sharing_rule', ActivationSubject>> = {
     position: POSITION_ACTIVATION_SUBJECT,
     permission: PERMISSION_SET_ACTIVATION_SUBJECT,
+    // [ADR-0131 D6 regime C] A declared sharing rule — read from the sharing-rule
+    // service, which serves no declaration this ledger switches off.
+    sharing_rule: SHARING_RULE_ACTIVATION_SUBJECT,
 };
 
 type CatalogActivationType = keyof typeof CATALOG_ACTIVATION_SUBJECTS;
@@ -87,7 +94,24 @@ function isCatalogActivationType(type: string): type is CatalogActivationType {
 const NOUN: Readonly<Record<CatalogActivationType, string>> = {
     position: 'Position',
     permission: 'Permission set',
+    sharing_rule: 'Declared sharing rule',
 };
+
+/**
+ * [ADR-0131 D6 regime C] The declaration a `sharing_rule` row addresses, as the
+ * sharing-rule service (`sharingRules`, plugin-sharing) reads it: declared in
+ * the code, whether or not the ledger has it switched off. A rule an
+ * organization authored is a `sys_sharing_rule` row with a switch of its own
+ * (`active`) and is never addressed here.
+ */
+interface DeclaredSharingRuleReader {
+    declaredRuleNamed(name: string): Promise<{ name: string; packageId?: string } | null>;
+}
+
+function declaredSharingRuleReaderOf(service: unknown): DeclaredSharingRuleReader | undefined {
+    const candidate = service as Partial<DeclaredSharingRuleReader> | null | undefined;
+    return typeof candidate?.declaredRuleNamed === 'function' ? (candidate as DeclaredSharingRuleReader) : undefined;
+}
 
 /**
  * Does this request belong to the door? Every `POST` under `_activation`, with
@@ -198,8 +222,47 @@ export async function handleCatalogActivationWrite(
     if (!ql) {
         return { handled: true, response: deps.error('Data engine not available', 503) };
     }
-    const reader = securityCatalogReaderOf(ql);
-    if (!reader) {
+    let entry: { name: string; packageId?: string } | undefined;
+    if (type === 'sharing_rule') {
+        const rules = declaredSharingRuleReaderOf(await deps.resolveService(context, 'sharingRules'));
+        if (!rules) {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Cannot verify the declaration of sharing rule '${name}' — no sharing-rule service is bound to this ` +
+                    `deployment. Refusing rather than writing an activation row for a name nobody can confirm exists.`,
+                    503,
+                    { code: 'SERVICE_UNAVAILABLE' },
+                ),
+            };
+        }
+        try {
+            entry = (await rules.declaredRuleNamed(name)) ?? undefined;
+        } catch (err: any) {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Cannot verify the declaration of sharing rule '${name}' — the declared rules could not be read ` +
+                    `(${err?.message ?? String(err)}). Refusing rather than writing an activation row for a name nobody ` +
+                    `can confirm exists.`,
+                    503,
+                    { code: 'SERVICE_UNAVAILABLE' },
+                ),
+            };
+        }
+        if (!entry) {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Sharing rule '${name}' is not declared by the application — there is nothing to switch ` +
+                    `${enabled ? 'on' : 'off'}. A rule your organization authored is switched by its own \`active\` field.`,
+                    404,
+                ),
+            };
+        }
+    }
+    const reader = type === 'sharing_rule' ? undefined : securityCatalogReaderOf(ql);
+    if (type !== 'sharing_rule' && !reader) {
         return {
             handled: true,
             response: deps.error(
@@ -211,9 +274,8 @@ export async function handleCatalogActivationWrite(
             ),
         };
     }
-    let entry: SecurityCatalogEntry | undefined;
     try {
-        entry = await reader.resolve(type, name);
+        if (reader) entry = (await reader.resolve(type as 'position' | 'permission', name)) as SecurityCatalogEntry | undefined;
     } catch (err: any) {
         return {
             handled: true,

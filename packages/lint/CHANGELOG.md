@@ -1,5 +1,178 @@
 # @objectstack/lint
 
+## 18.0.0-next.5
+
+### Minor Changes
+
+- 45bec43: fix(lint)!: a formula that reads, through a reference, a field the reference's target does not declare is refused where it is written
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, stored shape or authorable spelling is added, removed or renamed. The field-formula pass now refuses one expression shape it accepted before: a one-hop read of a field the reference's target does not declare, which the runtime never computed a value for (the formula read null on every row). Nothing stored changes, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** (an authoring narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The field-formula pass judges the field a formula reads one hop through a reference against the target object's fields: the fields it declares, the system columns the platform adds to it, and `id`. `os validate`, `os build` and the object save door (`PUT /api/v1/meta/object/:name`) run the same pass, under the existing `EXPRESSION_INVALID` rule.
+  
+  - FROM: `record.book.name`, where `book` is a lookup to an object that declares no `name`, saved with a 200 and read `null` on every row. TO: refused (`422 INVALID_METADATA` at the save door). The message names the field and the target: "unknown field `name` on `<target>`".
+  - `record.book.title`, where the target declares `title`, passes as before.
+  - A target the stack does not carry is not judged. At the save door the stack carries the live registry's objects in the written package's closure, so a target from a package it depends on is judged.
+  
+  What to do. Read a field the target declares, or declare the field on the target object. Do not declare it on the object that carries the formula. At `os build` and `os validate` this pass does not see a target field that an `objectExtensions` entry contributes, while the save door judges the merged object.
+
+### Patch Changes
+
+- 4bd7215: fix(lint): the translation-reference rules now judge a locale pack's `picklists` face (#23566)
+  
+  Clause-②: no
+  
+  Before this change a locale pack's `picklists` entries were never checked. A key that named nothing passed `os lint --strict`, and at runtime the resolver simply never found it, so the label rendered in the source locale. The two existing rules now cover this face, each at the severity its field-level twin already has. No new rule id is added:
+  
+  - `picklists.<name>` for a list that no package in the stack declares is `translation-target-unknown` (error). When a declared name is close, the finding offers it as "Did you mean".
+  - `picklists.<name>.options.<key>`, where the key is not a value of the list or of a `picklistExtensions` entry for it, is `translation-option-key-unknown` (warning). A key spelled as an option's display label is told which value to rename it to.
+  
+  A list the stack only extends through `picklistExtensions`, and that no package of the stack declares, is skipped: its owner's options cannot be seen from here. A list declared by a sibling package of the same artifact resolves, and its option keys are judged. `os explain translation-target-unknown` and `os explain translation-option-key-unknown` name the new face.
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/formula@18.0.0-next.5
+  - @objectstack/sdui-parser@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Minor Changes
+
+- d537a31: feat(lint)!: a formula field's `expression` is judged on the one-hop line — one hop through a reference passes, a second hop is refused
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, stored shape or authorable spelling is added, removed or renamed. The field-formula pass now refuses two expression shapes it accepted before, and the runtime never computed a value for either over a set reference: a read two hops through references, and a reference read both through and as a plain value. Nothing stored changes, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  The field-formula pass now passes `traversalHydration` for a formula `expression`, because the engine's formula read path loads one hop through a reference field.
+  
+  - `record.book.title + ' · ' + record.reader.name` passes, as before. It now also computes at run time.
+  - `record.book.shelf.code` (two hops) is refused. The refusal names the field and says a formula resolves one hop.
+  - `record.reader == null ? '—' : record.reader.name` (the reference read both through and as a plain value) is refused. The refusal names `record.reader.?name.orValue('—')`, the read that gives an empty reference a value.
+  
+  What to do. Read a field stored on the related object instead of a second hop, and replace a null test on a reference with the optional read.
+- 69147ab: fix(objectql)!: the one-hop read through a reference never reads a stored-metadata-body table, and the lint refuses that read where it is written
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No stored metadata moves and nothing is converted: what narrows is a served value (a formula field or a validation rule that reads through a reference into a stored-metadata-body table) and an author-time verdict on such an expression; no spec key, export, option, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); nothing exported is removed (not runtime-export-retired) and no type changes (not type-surface-only or runtime-interface-only). -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The tables of the stored-metadata-body family (`STORED_METADATA_BODY_OBJECTS`) are projected or refused at every door that serves them. The one-hop read a formula field and a validation rule share (`resolveOneHopRelated`) was an ordinary engine read, which the family's projection does not reach.
+  
+  - **`@objectstack/objectql`.** A hop whose target is a family table is not read, whichever authority the hop is read under. A formula field reading through it is `null` with its reason, on every read, write response and `serveFormulaField` call (the seam a hook body's `ctx.title()` reads through). A validation rule reading through it has no verdict, so the write it judges is refused. The answer is the one an unreadable related record gets, so it says nothing about the row. A hop into any other object is unchanged.
+  - **`@objectstack/lint`.** A formula field's `expression`, or a validation rule's hydrated `condition`, that reads through a reference into a family table is an error, with the prescription. `os validate`, `os build` and the object save door run the same pass, so the author learns it at save rather than from a `null`.
+  
+  What to do. Remove the read through the reference. Stored metadata is read through the metadata API (`GET /api/v1/meta/:type/:name`), where its body is projected. Reading the reference field itself (the stored id) is unchanged.
+
+### Patch Changes
+
+- 9c74d40: fix(lint): the last eight fenced author-time rule ids print a `fix:` line of one remedy sentence, and `os explain RULE_ID` carries what those lines used to explain
+  
+  Clause-②: no
+  
+  - **Shorter fix lines.** Each finding of these 8 rule ids now carries a `hint` (the CLI's `fix:` line, the runtime finding's `hint`) of one remedy sentence of at most 200 characters on every variant the lint suite fires (lengths are the `hint` alone; the CLI prints it after `fix: `). The longest of each, before → after:
+    - flow template holes (`validate-flow-template-paths.ts`): `flow-template-field-unprovisioned` (362 → 175) and `flow-template-lookup-traversal` (316 → 139);
+    - page bindings (`validate-page-field-bindings.ts`): `page-field-unprovisioned` (362 → 175) and `page-section-group-unknown` (279 → 151);
+    - `print-page-block-unprintable` (362 → 170), `form-section-group-unknown` (275 → 147), `filter-token-unknown` (259 → 170) and `component-props-invalid` (258 → 188; its value-rejection line 248–258 → 157–167, while its retired-key line, 164–181, and its node-binding line, 188, were one remedy already and are unchanged).
+  - **Examples.** `print-page-block-unprintable` FROM ``Replace or remove the block. The printable blocks are `page:section`, `page:card`, … `object-metric`. If the page is not a document, delete its `print` declaration instead.`` (362) TO ``Replace the block with a printable one (`os explain print-page-block-unprintable` lists them) or remove it; if the page is not a document, delete its `print` declaration.`` (170). `flow-template-lookup-traversal` on a flow variable FROM ``A record read into a flow variable is not expanded either — config.expand is the START node's opt-in and covers the trigger record alone. Reference the foreign-key id directly ('{{ currentCase.owner_id }}'), project the value via a formula field on 'crm_case', or add a get_record node that reads the related record.`` (316) TO ``Write '{{ currentCase.owner_id }}' (the id) or a formula field on 'crm_case', or read the related record with a get_record node.`` (128).
+  - **Lists are no longer echoed.** The two section-group ids no longer append the object's declared field groups: the line names the nearest declared group ("Did you mean") instead. An object with no field groups gets one line: declare `fieldGroups: [{ key, label }]` and `group` on the member fields, or enumerate the section's `fields`. `print-page-block-unprintable` no longer lists the thirteen printable blocks; `os explain` does. `filter-token-unknown`'s line for a placeholder with no near miss names the two vocabularies briefly, and its `os explain` entry in full.
+  - **The anchor ids converge.** `page-field-unprovisioned` and `flow-template-field-unprovisioned` now print the shared one-line anchor fix the other unprovisioned-anchor ids print (`If the remote table carries 'owner_id', declare it in ext_customer's own fields (mapped through columnMap); otherwise drop the reference or opt the object out of the injection`, 175).
+  - **`os explain RULE_ID` carries the rest.** Each of the 8 ids gains a `RULE_EXPLANATIONS` entry in `@objectstack/lint`, so its `rule:` line now carries the `os explain` pointer. What the fix lines stopped saying is there: how to vouch for an unprovisioned anchor through `columnMap` or opt the object out of the injection (`ownership: 'none'`, `systemFields: { audit: false }`); what the start node's `config.expand` does (a one-hop re-read of the triggering record as the run's identity) and why it covers the trigger record alone; how a section inherits a field group's members, and that membership is declared on the field; the printable block list, held equal to the spec's `PRINTABLE_PAGE_COMPONENT_TYPES`, and the three reasons a block is refused; the context tokens and date macros a filter value resolves, where `{record_id}` resolves, and that a literal shaped like a placeholder must be renamed; and where a page component's props schema lives, why the page and not the schema is what to fix in almost every case, and the retired-key and node-binding cases.
+  - **At the runtime publish gate** (Studio, REST `PUT /api/v1/meta`, and the MCP and AI authors that write through that door), FROM → TO measured at the door. On a `page` write, as 422 `issues[].hint`: `print-page-block-unprintable` 362 → 170, `component-props-invalid`'s value-rejection line 248 → 157 (`page:tabs`), 250 → 159 (`object-grid`), 253 → 162 (`record:details`) and 258 → 167 (`record:related_list`). On a `flow` write, as 2xx `advisories[].hint`: `flow-template-field-unprovisioned` 362 → 175, `flow-template-lookup-traversal` 249 → 131 (trigger root) and 314 → 126 (flow variable), on a probe hopping through `crm_case.account`. The two page-binding ids do not fire on a `page` write, and `filter-token-unknown` and `form-section-group-unknown` run at the CLI only. No write changes channel.
+  - **Unchanged:** every `message` (the verdict), rule id, severity and `path`, and what each rule accepts or refuses.
+- 5e97907: feat(plugin-sharing,cli)!: declared sharing rules are read from the registry — the boot writes no `sys_sharing_rule` row for them, and the 17 → 18 ownership ceremony deletes the copies the retired seeder wrote
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered sharing-rule-declared-mirror-retired -->
+  
+  The narrowings, FROM → TO, each with its one-line remedy:
+  
+  - `DELETE /api/v1/sharing/rules/:idOrName` on a declared rule — FROM `204`, the seeded row deleted (and written again by the next boot), TO `403 PERMISSION_DENIED`. Remedy: change or remove the rule in its declaration in the package; an organization's own rule is deleted as before.
+  - `sys_sharing_rule` — FROM one `managed_by: package` row per declared rule, TO none: the boot writes none and the ownership ceremony deletes the copies the seeder wrote (Setup's Sharing Rules object list, which lists rows, no longer shows declared rules). Remedy: read declared rules through `GET /api/v1/sharing/rules`, which lists them beside the organization's own; on an upgraded database run `os migrate organization-ownership --apply` with a fresh plan.
+  
+  The retirement note for the seeder is the ADR-0087 semantic entry `sharing-rule-declared-mirror-retired`.
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `@objectstack/plugin-sharing` no longer copies a stack's declared `sharingRules` into `sys_sharing_rule` at boot. ADR-0131 D2 retires that seeder (`bootstrapDeclaredSharingRules`). The sharing-rule service reads each declared rule from the registry whenever it reads the rule set: listing, getting, evaluating, the per-record hooks, the boot backfill and the orphaned-grant sweep. Rules an organization authors keep their `sys_sharing_rule` rows.
+  
+  - **A declared rule still grants, and stops granting when its declaration goes.** It is translated from the registry's copy exactly as the seeder translated it: the CEL `condition` is lowered to a `criteria` filter, and `sharedWith` becomes the recipient. A condition that does not lower is not served, and never as a match-all. It says so in one WARN line per rule per process. A declared rule's id is its NAME, and the grants it materialises carry the name as `sys_record_share.source_id`. Remove the declaration and the next boot's orphaned-grant sweep revokes those grants.
+  - **Scopes follow the posture, as the seeder's passes did.** Under `single` a declared rule is served once, organization-less, so every organization reads it. Under a wall it is served once per organization — every organization, read page by page. An organization created after boot is served from its creation on. If the organizations cannot be read at boot, no declared rule is served until the next boot, and the boot's orphaned-grant sweep revokes none of their grants meanwhile: a failed read is never a revocation.
+  - **A stored row of the same name answers for it.** Under `single` that is a row of that name in any organization, and under a wall that organization's own row. Such a row is an organization's own rule, a seeded copy an administrator customized, or a seeded copy the ceremony has not deleted yet. The declared rule is not served beside it, the same as while the seeder ran: it never overwrote an admin-authored or customized row.
+  - **`DELETE /api/v1/sharing/rules/:idOrName` refuses a declared rule** with `403 PERMISSION_DENIED`. It has no row: it is changed or removed in its declaration. Before this release a platform administrator could delete the seeded row, and the next boot wrote it again. An organization's own rule is deleted as before.
+  - **Setup's Sharing Rules object list no longer shows declared rules.** It lists `sys_sharing_rule` rows. `GET /api/v1/sharing/rules` lists both.
+  
+  `@objectstack/cli` — **`os migrate organization-ownership --apply` deletes the declared-rule mirrors.** The `declared-rule-mirrors` rows on `sys_sharing_rule` are the seeder's uncustomized copies (`managed_by` `package` or `platform`, `customized` not true). They now block certification until the ceremony's `mirror-deletion` step removes them. It works in the ruled order. It renames every grant naming a mirror by row id (`sys_record_share.source_id`, `source = 'rule'`) to the rule's name and verifies that no grant names a mirror any more. Only then does it delete the mirrors. Under a wall it deletes the organization-stamped copies too.
+  - A mirror whose rule no installed package declares, and that grants still name, blocks with nothing written. The blocker names the rows and the remedy. A mirror no grant names is deleted.
+  - The step also runs on a database whose ceremony already completed while an earlier release still seeded the rows, where they were advisory. Re-run `--apply` with a fresh plan.
+  - `DECLARED_SHARING_RULE_SEEDER_RUNS` is now `false`. A customized copy and an organization's own rule stay. Under `single` they take the Default Organization, as before.
+  
+  `@objectstack/lint` — the sharing-rule enforceability verdicts and `os explain` say what now happens to a declared rule whose condition does not lower. It is "never served", not "never seeded", because it is never written to `sys_sharing_rule`. The rule ids, severities, paths and what each rule accepts or refuses are unchanged.
+- 85be049: fix(lint): `filter-token-unknown` states what the runtime does with an unresolvable filter placeholder: the data engine refuses the query with `FILTER_TOKEN_UNKNOWN` / 400
+  
+  Clause-②: no
+  
+  The finding's message said the value "is sent to the data engine as a literal string, matches no record, and the surface renders empty". The runtime does not do that. The data engine refuses a query that carries an unresolvable placeholder, `FILTER_TOKEN_UNKNOWN` with HTTP 400, rather than compare it as a literal string. The message now reads:
+  
+  ```text
+  Filter value "{current_user}" is not a resolvable placeholder. The data engine refuses a query that carries it (`FILTER_TOKEN_UNKNOWN`, 400), so the surface never shows the data the filter meant.
+  ```
+  
+  Unchanged: the rule id, its severity (`error`), the finding's `path`, its `hint` (the `fix:` line), and which values the rule reports. The message's first sentence is unchanged as well. `os explain filter-token-unknown` already stated the refusal and is unchanged.
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [f573976]
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/sdui-parser@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Patch Changes

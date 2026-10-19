@@ -30,6 +30,7 @@ import {
   runIsUnscopedUserMode,
   flowTouchesData,
   UnscopedRunDataAccessError,
+  type SeededRunContext,
 } from '../runtime-identity.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
@@ -439,7 +440,33 @@ describe("runAs:'user' resolves the triggering user's grants at run setup (#3356
     }
   });
 
-  it('does NOT re-resolve when the trigger already carried permissions (agent/REST envelope preserved)', async () => {
+  it('does NOT re-broaden a trigger that already carried permissions — only the peer list is taken (agent/REST envelope preserved)', async () => {
+    const engine = new AutomationEngine(makeLogger());
+    const { data, calls } = fakeData();
+    registerCrudNodes(engine, ctxWith(data));
+    engine.registerFlow('usr', allOpsFlow('usr', 'user'));
+
+    const seen: Array<{ userId: string; tenantId?: string }> = [];
+    engine.setUserGrantsResolver((userId, tenantId) => {
+      seen.push({ userId, tenantId });
+      return { positions: ['SHOULD_NOT_APPLY'], permissions: ['SHOULD_NOT_APPLY'], org_user_ids: ['u1', 'u2'] };
+    });
+
+    // An already-resolved envelope — e.g. an ADR-0090 agent ceiling acting
+    // on-behalf-of a user (always non-empty). Must be honored verbatim, NOT
+    // re-broadened to the human's full grants. No door forwards the peer
+    // list, so the resolver is asked for that, in the run's organization.
+    await engine.execute('usr', { userId: 'u1', positions: ['agent'], permissions: ['mcp_agent_read'], tenantId: 't1' });
+    expect(seen).toEqual([{ userId: 'u1', tenantId: 't1' }]);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) {
+      expect(c.ctx.permissions).toEqual(['mcp_agent_read']);
+      expect(c.ctx.positions).toEqual(['agent']);
+      expect(c.ctx.org_user_ids, `${c.op} lost the seeded peer list`).toEqual(['u1', 'u2']);
+    }
+  });
+
+  it('resolves nothing when the trigger already carried permissions AND a peer list (a subflow child, a resumed leg)', async () => {
     const engine = new AutomationEngine(makeLogger());
     const { data, calls } = fakeData();
     registerCrudNodes(engine, ctxWith(data));
@@ -448,17 +475,60 @@ describe("runAs:'user' resolves the triggering user's grants at run setup (#3356
     let called = 0;
     engine.setUserGrantsResolver(() => {
       called++;
-      return { positions: ['SHOULD_NOT_APPLY'], permissions: ['SHOULD_NOT_APPLY'] };
+      return { positions: ['SHOULD_NOT_APPLY'], permissions: ['SHOULD_NOT_APPLY'], org_user_ids: ['SHOULD_NOT_APPLY'] };
     });
 
-    // An already-resolved envelope — e.g. an ADR-0090 agent ceiling acting
-    // on-behalf-of a user (always non-empty). Must be honored verbatim, NOT
-    // re-broadened to the human's full grants.
-    await engine.execute('usr', { userId: 'u1', positions: ['agent'], permissions: ['mcp_agent_read'], tenantId: 't1' });
+    await engine.execute('usr', {
+      userId: 'u1', positions: ['member'], permissions: ['member_default'], tenantId: 't1', org_user_ids: ['u1', 'u3'],
+    } as SeededRunContext);
     expect(called).toBe(0);
+    expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) {
-      expect(c.ctx.permissions).toEqual(['mcp_agent_read']);
-      expect(c.ctx.positions).toEqual(['agent']);
+      expect(c.ctx.permissions).toEqual(['member_default']);
+      expect(c.ctx.org_user_ids).toEqual(['u1', 'u3']);
+    }
+  });
+
+  it('seeds the peer list beside the resolved grants and threads it to EVERY data op', async () => {
+    const engine = new AutomationEngine(makeLogger());
+    const { data, calls } = fakeData();
+    registerCrudNodes(engine, ctxWith(data));
+    engine.registerFlow('usr', allOpsFlow('usr', 'user'));
+    engine.setUserGrantsResolver(() => ({ positions: ['org_member'], permissions: ['member_default'], org_user_ids: ['u1', 'u2'] }));
+
+    const res = await engine.execute('usr', { userId: 'u1', tenantId: 't1' });
+    expect(res.success).toBe(true);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) expect(c.ctx.org_user_ids, `${c.op} lost the seeded peer list`).toEqual(['u1', 'u2']);
+  });
+
+  it('a resolver that answers no peer list seeds none — the data context carries no org_user_ids, never a made-up one', async () => {
+    const engine = new AutomationEngine(makeLogger());
+    const { data, calls } = fakeData();
+    registerCrudNodes(engine, ctxWith(data));
+    engine.registerFlow('usr', allOpsFlow('usr', 'user'));
+    engine.setUserGrantsResolver(() => ({ positions: ['org_member'], permissions: ['member_default'] }));
+
+    await engine.execute('usr', { userId: 'u1', tenantId: 't1' });
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) expect('org_user_ids' in c.ctx, `${c.op} carried an invented peer list`).toBe(false);
+  });
+
+  it('a resolver error with permissions already carried keeps the envelope, seeds no peers, and says which half degraded', async () => {
+    const { logger, warns } = recordingLogger();
+    const engine = new AutomationEngine(logger);
+    const { data, calls } = fakeData();
+    registerCrudNodes(engine, ctxWith(data));
+    engine.registerFlow('usr', allOpsFlow('usr', 'user'));
+    engine.setUserGrantsResolver(() => { throw new Error('db down'); });
+
+    const res = await engine.execute('usr', { userId: 'u1', positions: ['member'], permissions: ['member_default'], tenantId: 't1' });
+    expect(res.success).toBe(true);
+    expect(runAsWarns(warns).some((w) => w.includes("keep the trigger's positions and permission sets"))).toBe(true);
+    for (const c of calls) {
+      expect(c.ctx.isSystem).toBe(false);
+      expect(c.ctx.permissions).toEqual(['member_default']);
+      expect('org_user_ids' in c.ctx).toBe(false);
     }
   });
 

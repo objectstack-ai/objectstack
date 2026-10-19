@@ -131,11 +131,18 @@ export const ORGANIZATIONS_RUNTIME_PKG = '@objectstack/organizations';
  * hold hard-coded expectations of this prose, so a reword here reddens a pin on
  * each command from one edit. If only one ever reddened, the table would be
  * shared in name only.
+ *
+ * The two walled entries say that 18.0 refuses them, because `os serve` does,
+ * before it reads a config: a fix list that offered them bare would send the
+ * operator from one refusal to the next. The 18.x release that restores walled
+ * postures deletes {@link WALLED_POSTURE_RELEASE_NOTE}.
  */
+export const WALLED_POSTURE_RELEASE_NOTE = '; refused at boot in 18.0, which supports single only';
+
 export const TENANCY_POSTURE_FIX_HINTS: Readonly<Record<string, string>> = {
   single: 'one organization, no organization wall — the default',
-  group: 'organization wall enforced by the open engine, one shared database',
+  group: `organization wall enforced by the open engine, one shared database${WALLED_POSTURE_RELEASE_NOTE}`,
   isolated:
     `organization wall + the ${ORGANIZATIONS_RUNTIME_PKG} runtime `
-    + "(the legacy spelling 'multi' is accepted and normalizes to this)",
+    + `(the legacy spelling 'multi' is accepted and normalizes to this)${WALLED_POSTURE_RELEASE_NOTE}`,
 };

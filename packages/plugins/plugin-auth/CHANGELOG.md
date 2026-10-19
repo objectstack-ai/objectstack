@@ -1,5 +1,266 @@
 # Changelog
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- 9524666: fix(plugin-auth): the self-registration grant settles on the registrant's first membership, owned by that organization (ADR-0131 D3)
+  
+  Clause-②: no
+  
+  The declared self-registration permission set (`auth.audience.selfRegistrationPermissionSet`) is an assignment, and an assignment is an organization row (ADR-0131 D3). It is now written with the registrant's first membership and owned by that membership's organization, under every posture. It is never written without an organization.
+  
+  - **`single`: unchanged.** The membership reconciler binds the Default Organization in the same `user.create.after` hook, so a sign-up still ends with one grant, owned by the Default Organization.
+  - **A wall (`group`, `isolated`).** A self-registrant belongs to no organization at sign-up, so the sign-up writes no `sys_user_permission_set` row. It used to write one with no organization. The grant is held as a pending claim in `sys_verification`, which is deployment-level and survives a restart. The first `sys_member` row written for the user lands exactly one grant, owned by that organization. That row can come from creating an organization (the creator becomes its owner), accepting an invitation, being added by an administrator, or any other membership writer. A later membership writes no second grant.
+  - **The claim waits 365 days.** A registrant who first joins an organization after that holds only the deployment's baseline. An engine with no middleware seam cannot settle a claim, so there a registrant with no organization is reported ungranted at `error` at sign-up instead.
+  - Grants already written without an organization by earlier walled sign-ups are not touched here.
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [b7a688e]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/rest@18.0.0-next.5
+  - @objectstack/platform-objects@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/service-messaging@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Minor Changes
+
+- b2e7870: fix(security): under the `single` tenancy posture the first-user platform-admin grant is owned by the Default Organization, and every reader of platform standing reads that row
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, export, option, error code or stored shape is added, removed or renamed: the new resolver and guard helpers and the guard's organization standing-key list are module-private, and `bootstrapPlatformAdmin`'s `reason` was already a string. The only stored-shape move — an organization-less `admin_full_access` grant becoming the Default Organization's — is ADR-0131 D10's ceremony (`os migrate organization-ownership --apply`), so there is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no Zod schema in packages/spec changes (not runtime-interface-only or type-surface-only in the spec sense); and nothing exported is removed (not runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM** (`@objectstack/plugin-security`): a `single` deployment holding several organizations, none slugged `default`, promoted its first user with an organization-less `admin_full_access` grant. **TO:** it is not promoted; the bootstrap logs one `error` line, returns `reason: 'default_organization_unresolved'` and writes no grant row. **Fix:** give the intended organization the slug `default` (or keep one organization, or declare a walled posture); the next `kernel:ready` or sign-up pass promotes.
+  - **FROM** (`@objectstack/plugin-auth`): a `sys_organization` `slug` change or delete was never refused. **TO:** it is refused with `403 PERMISSION_DENIED` when that organization is the Default Organization whose `admin_full_access` grant is the last unbanned administrator's anchor. **Fix:** give another account administrator standing first, then make the change.
+  - **FROM** (`@objectstack/plugin-auth`): `ensureDefaultOrganization` under `single`, with a sole organization of another slug, created a second, `default`-slugged organization and bound the administrator there. **TO:** it reuses the sole organization; no second organization is created. **Fix:** none needed; an install that wants a `default`-slugged organization re-slugs its existing one or creates it explicitly.
+  - **Widening** (`@objectstack/core`): under `single` only an organization-less `admin_full_access` grant conferred `PLATFORM_ADMIN`. Now a grant owned by the Default Organization confers it too and applies in every organization; a pre-existing Default-Organization-scoped `admin_full_access` grant gains the rung on upgrade; and `sys_organization` becomes a standing-deriving table (the resolver reads it only under `single` for a holder of an organization-owned `admin_full_access` grant — one or two small reads per uncached request; the last-administrator guard adds three to six small reads per guarded write).
+  
+  - **The promotion writes the Default Organization (`@objectstack/plugin-security`).** A `single` deployment with no configuration still promotes its first user that can sign in. The `admin_full_access` grant row that promotion writes now carries the Default Organization as its `organization_id` (ADR-0131 D5), never NULL. The Default Organization is the one with `slug = 'default'`, else the only organization: the organization the auth plugin creates at boot. A deployment that names no Default Organization (several organizations, none with the slug `default`) is not promoted. The bootstrap logs one `error` line saying why and returns `reason: 'default_organization_unresolved'`. It writes no grant without an owner. `OS_PLATFORM_OWNER_EMAIL` is still the walled-posture channel and is not required under `single`.
+  - **The authorization resolver reads that row (`@objectstack/core`).** Under `single`, `PLATFORM_ADMIN` derives from an `admin_full_access` grant owned by the Default Organization, and still from the organization-less row an earlier release wrote. The anchoring grant applies in whichever organization the user acts in, as the organization-less row always did. A grant of the set owned by any other organization confers the set in that organization, never platform standing. Under a walled posture no grant anchors standing (unchanged). One predicate decides both postures, with the posture as its parameter. The resolver reads `sys_organization` only for a user who holds an organization-owned `admin_full_access` grant under `single`.
+  - **An upgraded database keeps its administrator.** `os migrate organization-ownership --apply` gives a `single` database's organization-less grants to the Default Organization, the platform admin's grant included. Before this change the resolver then stopped grading that admin `PLATFORM_ADMIN`, and every later boot found no organization-less holder and promoted again. The holder scan now reads the Default Organization's grant, so a migrated database keeps its admin and promotes nobody else. A user who holds both rows counts as one holder.
+  - **The last-administrator guard and the default-organization bootstrap read it too (`@objectstack/plugin-auth`).** The break-glass guard counts the holder of the Default Organization's grant as a platform admin and treats that grant as evidence that the environment once had one. It also judges the two organization writes that move the anchor off that grant: changing the Default Organization's `slug` while another organization exists, and deleting it. Either is refused when it would leave no administrator who can sign in. `ensureDefaultOrganization` finds the admin through the same grant. Under `single` it also reuses the Default Organization when that is a sole organization with another slug, where it used to create a second, `default`-slugged organization.
+- 8a88901: fix(plugin-auth,plugin-email): the organization invitation mail names the invitee's role by its label in the mail's language (`成员`, `メンバー`, `Miembro`, `Member`), not by the stored value `member`
+  
+  Clause-②: yes (widening)
+  
+  - **What changed.** The zh-CN, ja-JP and es-ES invitation mails printed the stored membership role inside a translated sentence: 「邀请您以 member 的身份加入」. The sender now passes `{{role}}` as the `sys_member.role` option label in the locale the mail is written in, the same label the console shows for that option. It reads the label through the runtime's i18n service and the console's own object translation path, so a tenant's translation of the option, made in Studio, reaches the mail too. The four bodies keep interpolating the one `role` variable; its name and type are unchanged, and its declaration now says it carries the label.
+  - **The plain-text part names the role too.** The four text bodies gain the role clause their HTML bodies carry, so both parts of the mail name the same facts. For example, the English text is now `Dana (dana@example.com) invited you to join Northwind on Acme as Member.`
+  - **Stated fallbacks.** A role list (`admin,member`) is labelled role by role and joined as a list in the mail's language (`管理员和成员`). A value with no option label is named as stored, and one warning names it. With no i18n service, or one that fails, the mail names the option's authored English label, never an empty string.
+  - **New option (widening).** `AuthManagerOptions.getI18n?: () => II18nService | undefined` is a lazy accessor for the `i18n` service, read when the invitation is sent. `AuthPlugin` wires it from the kernel. An embedder that builds `AuthManager` itself and omits it gets the authored labels.
+  - **What changes for you.** If you have overridden `auth.invitation` and interpolate `{{role}}`, it now receives the label, not the stored value.
+- 99e9d29: feat(plugin-auth): an OAuth consent binds the consenting user's active organization, the access token carries it as `organization_id`, and `verifyMcpAccessToken` returns it as `organizationId`
+  
+  Clause-②: yes (widening)
+  
+  - **What changed.** When a user consents to an OAuth client, the embedded authorization server records the consenting session's active organization as the consent's `reference_id`. The value rides the authorization code onto the refresh family it starts (`sys_oauth_refresh_token.reference_id`), and every access token minted from either carries it as the `organization_id` claim. It is written through the installed `@better-auth/oauth-provider`'s own seams (`postLogin.consentReferenceId` and `customAccessTokenClaims`); no new configuration key or environment variable.
+  - **The session's organization, never the request's.** The value is read from the consenting session only. Nothing in the authorize request, the consent body or the client's registration can choose it.
+  - **No organization, no claim.** A user with no active organization at consent gets a consent with no reference, and tokens with no `organization_id`. There is no guessed or default organization; such a token's principal resolves with global grants only.
+  - **A refresh keeps the consent's organization.** A refresh token mints access tokens in the organization its consent bound, even after the user switches the browser session to another organization. Authorizing again while another organization is active asks for a second consent, for that organization.
+  - **Existing consents re-confirm once.** A consent stored before this change has no reference, so the next authorization made while the user has an active organization shows the consent page again, once. Until the user re-confirms, a refresh family started before this change keeps minting tokens with no `organization_id`, so they carry global grants only.
+  - **`AuthManager.verifyMcpAccessToken`.** Its result type gains `organizationId?: string`, matching `IAuthService.verifyMcpAccessToken` in `@objectstack/spec/contracts`, and it returns the token's `organization_id` claim there. A token whose `organization_id` is present but is not a non-empty string is refused, as every other malformed token is: this server never mints one. The organization is a record, not an authorization. The caller vets it on every request by the rule that vets a session's active organization (`vetOrganizationClaim`, `@objectstack/core`).
+  - **`@objectstack/platform-objects`.** The `reference_id` field description on `sys_oauth_consent`, `sys_oauth_refresh_token` and `sys_oauth_access_token` now names the bound organization, instead of "Caller-supplied correlation identifier". Prose only; no field, type or schema change.
+- 51ad8e4: Clause-②: yes (widening)
+  
+  fix(cli,runtime): the 17 → 18 organization-ownership upgrade of a single-posture database that holds no organization leaves no row without one, the boot the ceremony prescribes writes nothing before it is refused, and a ceremony that did not verify is never served (ADR-0131 D3, D10)
+  
+  A 17.x single-posture install whose seed ran before any organization existed holds rows of organization-owned objects with `organization_id` NULL and an empty `sys_organization`. Upgrading it took this path: the ceremony's attribution checkpointed itself done at zero rows; the boot its rewrite step asks for created the Default Organization and let the inline seed stamp some rows before it refused; the second `--apply` did not run attribution again, dropped the columns and recorded discrepancies with `verified_at` NULL; and `os start` then served that database.
+  
+  - **The ceremony creates the Default Organization (`@objectstack/cli`).** Under the `single` posture, on a database that holds no organization and rows no anchor names, `os migrate organization-ownership` plans those rows as the Default Organization's and says so in a plan warning (`defaultOrganizationCreatedByApply: true` in the plan file). `--apply` creates it before its first write, through plugin-auth's boot invariant (the row a single-posture boot creates), and gives it every such row. A run that cannot create it — a boot without the auth family that declares `sys_organization` — blocks at attribution, naming why, instead of attributing nothing and certifying. Nothing is created under a walled posture, or when the database holds organizations.
+  - **The ceremony names the Default Organization as the boot does (`@objectstack/cli`).** Under `single` it is the organization with `slug = 'default'`, else the sole organization whatever its slug — the boot invariant's and the tenancy service's definition (ADR-0093 D3). Before, the plan required `slug = 'default'`, so a database whose only organization had another slug kept its unanchored rows NULL through the ceremony while v18 derives every owner from that organization. Several organizations, none of them `default`, still name none, and their rows are reported. In the plan file (the command's own output, not a published schema) `defaultOrganization.slug` is now that organization's own slug, no longer always `'default'`.
+  - **A checkpointed attribution runs again (`@objectstack/cli`)** whenever the plan derives an owner for rows still NULL: a row the operator made attributable since, or one an earlier run found no Default Organization for. It writes only where `organization_id` is NULL, so no owner already written is derived again. A database left by an earlier release's ceremony in that state is completed by re-running `--apply`.
+  - **The boot guard judges before any plugin writes (`@objectstack/runtime`, `@objectstack/plugin-auth`).** `OrganizationOwnershipBootGuardPlugin` judges in its own `start()`, after the engine's schema sync (the column the rewrite step waits for is still added) and before every plugin that writes rows at start: `AppPlugin` (the inline seed), `AuthPlugin` and the identity-objects plugin (the Default Organization) name it (`com.objectstack.organization-ownership-boot-guard`) in `optionalDependencies`. A refused boot leaves every row as it found it.
+  - **A ceremony that did not verify is refused (`@objectstack/runtime`).** With no table left in the v17 shape, a boot whose `adr-0131-organization-ownership` marker exists and is not verified — the post-check found rows the ceremony has not carried — is refused with `ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED`, naming the re-run. A database with no marker (a fresh one) boots as before.
+  - **The refusal now arrives as a `cause` (`@objectstack/runtime`).** A failed `start()` is reported by the kernel as its own error ("Plugin … failed to start"), with the plugin's error as its `cause`. A host that composes the guard and inspects the boot error asks `isOrganizationOwnershipBootRefusal` of each `cause` down the chain: asked of the kernel's own error it now answers `false`. `assertOrganizationOwnershipMigrated(engine)` still throws the refusal itself. `os serve` and `os dev` read it from the chain.
+  - **One new export (`@objectstack/plugin-auth`, `minor`).** `ensureDefaultOrganizationExists(ql, options?)` — the Default Organization's boot invariant, find-or-create under `single` — for the ceremony, so the organization it creates is the row a single-posture boot creates, from one producer. A host composing a kernel still never calls it: `AuthPlugin` and the identity-objects plugin keep the invariant on every boot. No other package entry changes.
+  
+  Unchanged: the ceremony's steps, fates and refusals otherwise; a walled posture's unattributable rows (reported, never assigned); the boot of a fresh or verified database; and every plugin's order on a kernel that does not compose the guard. Repairing a database whose organization-scoped seed load already inserted twins of NULL-organization rows is an operator's data repair.
+
+### Patch Changes
+
+- 03ac4ec: fix(plugin-auth): the invitation role cap's refusals on `POST /organization/invite-member` carry an error code, and a membership read that fails answers `503` instead of a refusal
+  
+  Clause-②: no
+  
+  The role cap in `beforeCreateInvitation` refused with `403` and a message but no `code`, while better-auth's own `owner` refusal on the same endpoint carries one. A client, the console's Invite User dialog among them, could not tell the refusals apart without reading English prose. Each refusal now carries the code the error-code ledger registers for it under `@objectstack/plugin-auth`, in the same `{ message, code }` body:
+  
+  - `INVITE_ROLE_ABOVE_ISSUER`: the requested role grades above the issuer's own, for example a `delegated_admin` inviting as `admin`.
+  - `INVITE_ISSUER_MEMBER_ONLY`: an issuer below admin grade asked for a role other than a plain `member`, for example a `delegated_admin` inviting as `delegated_admin`.
+  - `INVITE_ISSUER_UNVERIFIED`: fail-closed. The issuer's membership role was not established: the read found no usable `sys_member` row, or the `AuthManager` has no data engine to read from.
+  
+  A membership read that throws is a store outage, not a verdict about the issuer. It used to answer the same `403` as an unverified issuer. It now answers `503` with the code `SERVICE_UNAVAILABLE`, as the organization slug guard does for its own read faults. No invitation is created either way.
+  
+  Unchanged: which invitations are admitted, the status of every refusal (`403`), better-auth's own `owner` refusal, and the exports.
+- f792290: Clause-②: no
+  
+  perf(plugin-auth, plugin-hono-server): an authenticated request reads 8 rows in 4 round trips before its handler, down from 11 in 7, and `/auth/me/*` resolves the caller's grants once
+  
+  Measured on a real engine (SQLite through `@objectstack/driver-sql`), for a signed-in user whose session has an active organization:
+  
+  | before the handler | before | after |
+  |:--|:--|:--|
+  | REST and dispatcher doors (`resolveAuthzContext` with the in-process session read) | 11 reads, 7 round trips | 8 reads, 4 round trips |
+  | `GET /auth/me/permissions`, `/auth/me/localization`, `/me/apps` | 17 reads, 9 round trips | 8 reads, 4 round trips |
+  | `GET /api/v1/auth/get-session` | 11 reads, 7 round trips | 10 reads, 6 round trips when it reads the signing key; 8 in 4 while the key is held |
+  
+  - **An in-process session read no longer signs a JWT.** better-auth runs `/get-session`'s after-hooks for a server-side `auth.api.getSession(...)` call too, so every door that asked "who is calling" had the jwt plugin read the signing key (two `sys_jwks` round trips) and sign a `set-auth-jwt` header the caller then discarded. The hook now runs only when the call answers an HTTP request. `GET /api/v1/auth/get-session` still carries `set-auth-jwt`, signed exactly as before. A server-side caller that wants the header dispatches the request through `AuthManager.handleRequest`.
+  - **The session token is not read back after the session was found by it.** `sys_session.token` is withheld from ordinary reads and recovered for better-auth through a privileged read. better-auth finds the session by its token, so that read had nothing to add. It was a second round trip between the session row and the user row on every session read. A read keyed on any other column still recovers the token.
+  - **`/auth/me/*` and `/me/apps` resolve the grants once.** These routes resolved the caller's grants twice per request: once inside the session read (for the payload's `positions[]`) and once more for their own context. They now resolve through `resolveAuthzContext`, whose request-scoped memo serves the second resolution from the first while no write has landed in between. The memo ends with the request. The routes still admit a session only, and the session's active organization stands as before.
+  - **An unreadable authorization store is an outage on `/auth/me/*` and `/me/apps`, not a signed-out caller.** Because these routes now authorize through `resolveAuthzContext`, they follow the rule every transport through it follows: a permission-store read that fails answers `503` with the code `SERVICE_UNAVAILABLE` (on `HonoHttpServer`'s error seam) instead of `{ authenticated: false }` or `{ apps: [] }`, which a client cannot tell from an anonymous caller. A store whose tables were never created is not an outage: those routes answer the signed-in caller with no grants, as before.
+  - **The signing key is held across requests, under two bounds.** The keyring the jwt plugin signs with is kept after a read. Any write to `sys_jwks` that passes this process's engine drops it at once, and it is never kept longer than 30 seconds, which bounds a write this process cannot see (another node minting a key). An engine without a middleware seam keeps nothing. On a host without Ed25519 the keyring is still filtered to keys the host can use.
+  
+  Unchanged: the session and user every door resolves, every grant, the `/get-session` body and its renewal, every option and environment variable, and the exports. No new configuration key. The one answer that changes is the outage answer above.
+- 9040945: fix(plugin-auth): the MCP access-token verifier follows the signing keyring instead of holding its own copy of the key set for five minutes
+  
+  Clause-②: no
+  
+  - **What changed.** `AuthManager.verifyMcpAccessToken` no longer keeps its own copy of the signing key set for five minutes. It reads the key set on every call through the same keyring reader the token signer and `/jwks` use, so the set it checks a signature against is held only under both halves of the cross-request caching rule: a `sys_jwks` write that passes this process's data engine retires it in the same operation, and a 30-second bound covers a write the process cannot see, such as one made on another node.
+  - **A token signed by a key the set does not carry gets one fresh read.** Before such a token is refused, the keyring is read once more from the table, and the token is checked again. That read is shared by every token that arrives while it is in flight, and a new one starts no sooner than 30 seconds after the previous one, so tokens that name keys which do not exist cost at most one keyring read per 30 seconds. A token whose key is still absent after that read is refused, as before.
+  - **Unchanged.** Issuer, audience, expiry, the `client_credentials` refusal and the `organization_id` claim are checked exactly as before. Only the public key set `/jwks` publishes is used for verification. No export, configuration key or environment variable is added.
+- af284b0: feat(spec): the remaining `getSession` readers read `AuthSessionApi`'s declared result, and none reads a top-level `activeOrganizationId`
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec/contracts` — `AuthSessionApi.getSession`'s result gains three optional `user` members**, each declared for a named reader: `isPlatformAdmin` (`boolean`, the ADR-0068 D2 rung plugin-auth's `customSession` derives) and `role` (`string | null`, better-auth's `admin` plugin scalar), both read by `judgePlatformAdmin` in `@objectstack/plugin-auth`; and `name` (`string`), read by the runtime dispatcher's AI-route `req.user` resolver as the display name. Every member is optional, so every implementer and caller typechecks unchanged.
+  - **The readers read through the declared type instead of `any` or a cast** (types only, runtime behaviour unchanged): `judgePlatformAdmin` and the four platform-admin mounts in `@objectstack/plugin-auth` (better-auth's own session type now has to fit the declaration at those reads), the REST server's two session reads (`@objectstack/rest`), the dispatcher's posture read, `resolveSessionData` and both `HttpDispatcher` reads (`@objectstack/runtime`), the cloud-connection and install-local session reads (`@objectstack/cloud-connection`), the webhook redeliver door (`@objectstack/plugin-webhooks`), and the storage session bridge (`@objectstack/service-storage`).
+  - **Fix — the top-level `activeOrganizationId` fallback is removed** from the storage upload stamp (`@objectstack/service-storage`) and from install-local's `resolveActiveOrgId` (`@objectstack/cloud-connection`). The active organization is read from `session.activeOrganizationId` alone, where the contract declares it. No in-process producer answers a top-level `activeOrganizationId` (better-auth's read is `{ user, session }`), so for the shipped auth plugin nothing changes. An auth service that answered only the flattened shape now gets no organization: the upload is not stamped, and install-local reports no active organization. To fix it, answer the active organization on `session.activeOrganizationId`, as `AuthSessionApi` declares it.
+- 83dfbc0: fix(plugin-auth): the organization, invitation-placement and phone-OTP hook refusals carry their ADR-0112 codes
+  
+  Clause-②: no
+  
+  Eight refusals thrown from plugin-auth's better-auth hooks answered with `message` alone, so a client could only show or match English prose. Each now carries a `code` it can branch on, and keeps its HTTP status.
+  
+  - `POST /auth/organization/create`: the reserved `__global__` id or slug answers 400 `VALIDATION_ERROR`. Where the deployment's effective tenancy posture enforces no organization wall (`/auth/config` publishes `features.multiOrgEnabled: false`), creating an organization answers 403 `ORGANIZATION_CREATION_DISABLED`.
+  - `POST /auth/organization/invite-member` with placement intent (`businessUnitId` and `positions`): with no delegated-administration runtime to authorize it, 403 `INVITE_PLACEMENT_UNSUPPORTED`; refused by the delegated-administration gate, 403 `INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE`.
+  - `POST /auth/organization/update` with a new slug: while the organization has an active environment (any environment that is neither archived nor failed), 403 `ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS`. Its message no longer says environments "still reference" the organization or tells you to rename their hostnames: the guard reads no hostname, and archiving those environments is the remedy. When the guard's own read cannot answer, 503 `SERVICE_UNAVAILABLE`.
+  - Phone OTP sends (`/auth/phone-number/send-otp`, `/auth/phone-number/request-password-reset`): the per-number limit and the deployment's daily SMS quota both answer 429 `RATE_LIMIT_EXCEEDED`. It is one code for both walls, so a caller still cannot tell which budget it hit. The body is better-auth's flat `code` and `message`, with no `Retry-After` header.
+  - **One behaviour change:** a placement check that fails before the gate reaches a verdict (the issuer's grants could not be read from the store) now answers 503 `SERVICE_UNAVAILABLE`, not a 403 scope refusal carrying the store's message. No invitation is created either way.
+- d65826f: fix: framework writes on tenant-column objects name the organization they can derive (ADR-0131 D9)
+  
+  Clause-②: yes (widening)
+  
+  A write on a tenant-column object with no organization is derived under `single` and refused under a wall (ADR-0131 D9). Before the engine stops letting such writes through, each of these producers now names the organization it can derive itself. Under `single` that is the Default Organization, which is the owner the engine would derive anyway, so no reader changes. Under a wall the row names an organization only where the producer has one. The rows it cannot attribute are written exactly as before.
+  
+  - **`@objectstack/plugin-auth`.** The self-registration grant (`sys_user_permission_set`) and the auth mails about a user (verification, password reset, account invitation, magic link, change-email notice → `sys_email`) read one derivable organization: the `tenancy` service's `defaultOrgId()`. Under `single` that is the Default Organization. Under a wall it is none, because the registrant belongs to no organization yet. The verification and reset mails used to persist with no organization even under `single`.
+  - **`@objectstack/plugin-audit`.** An activity row (`sys_activity`) about a record with no organization of its own (a `sys_user`, a platform setting), written with no session organization (a sign-up), takes the Default Organization under `single`. The record's own organization and then the session's still win. The ledger's `tenant_id` attribution is unchanged. New optional `AuditWriterOptions.getDefaultOrganizationId()`; `AuditPlugin` wires it to the `tenancy` service.
+  - **`@objectstack/service-settings`.** The `sys_secret` ciphertext and the `sys_setting_audit` history row of a `tenant` or `user` value carry that value's organization, which is the same owner as its `sys_setting` row. A `global` value's rows name none. New optional `organization_id` on `SettingsSecretStore.insert`'s row and `organizationId` on `SettingsAuditWriter.write`'s entry; the built-in writers persist them. A failed `sys_setting_audit` write is now reported at `error`, not `warn`: the settings write succeeds while its history row is lost. The first report names the consequence and the fix. `buildSettingAuditWriter`'s optional logger argument keeps every sink it accepted (none, `{}`, or one with an optional `warn`) and additionally takes a sink that carries `error`. It reports through `error` when the sink has it, else through `warn`.
+  - **`@objectstack/verify`.** The RLS probe and position personas' grants (`sys_user_permission_set`, `sys_user_position`) belong to the organization the persona is a member of (the Default Organization under `single`). They used to be written with an explicit `organization_id: null`. A persona that belongs to no organization, or to several, names none.
+- 44a5011: Clause-②: no
+  
+  Refusals and Setup help text that a user reads inside the running system no longer call that system
+  "this environment". They say "this system", or they drop the noun.
+  
+  - `@objectstack/plugin-auth`: the two self-registration refusals drop the noun ("Self-registration is
+    closed (audience posture invite_only).", "Self-registration is limited to approved email domains, …").
+    So do the OAuth self-service `503` ("OIDC provider is not enabled") and the SSO `400`
+    `DOMAIN_VERIFICATION_DISABLED` ("Domain verification is not enabled (set
+    OS_SSO_DOMAIN_VERIFICATION)."). The last-administrator guard's refusals and its two warning lines say
+    "this system", including "nobody able to administer the system". The OIDC authorize-gate refusal
+    (`403 ENV_ACCESS_DENIED`) keeps "this environment". Only the cloud control plane installs that gate,
+    and there the noun names the environment a cloud user is signing in to.
+  - `@objectstack/plugin-security`: the diagnostic `message` of the packaged-permission-set lock now reads
+    "… is declared by package '…' and is locked — editing it here would …". The provenance-unknown
+    refusal says "this system could not determine …". Both `userMessage` texts are unchanged.
+  - `@objectstack/service-settings`: the Mail and SMS provider groups read "Choose how this system sends
+    outbound email." and "… outbound SMS.". The Authentication audience group reads "Who may become a user
+    of this system's apps.". The zh-CN, ja-JP and es-ES bundles change only the noun, to 本系统,
+    このシステム and este sistema.
+  
+  Only the human-readable text moves. Every HTTP status, error code, settings key and response shape
+  stays as it was.
+- e22defb: fix(plugin-auth): a migrate-and-exit boot (`OS_MIGRATE_AND_EXIT=1`) no longer provisions the development admin, whatever `NODE_ENV` says
+  
+  Clause-②: no
+  
+  - **What changed.** `objectstack serve` reads `OS_MIGRATE_AND_EXIT` only after the kernel bootstrap, and the dev-admin seed runs on `kernel:ready`, inside that bootstrap. So a migration run with `NODE_ENV=development` seeded exactly as a dev boot does: run against an empty database, it left a known-credential login behind. `isDevAdminSeedArmed()` now answers "not armed" when `OS_MIGRATE_AND_EXIT` is `1`, the same spelling `serve` exits on, and the clause wins over an explicit `OS_SEED_ADMIN=1`. A migrate-and-exit boot of an empty database now creates no `sys_user` row and no `sys_account` row.
+  - **The walled owner check follows.** It reads the same function, so on a migration run the seed no longer counts as a way to verify a declared platform owner. A walled migrate-and-exit boot of an empty database completes its schema sync as before; it just seeds no login.
+  - **Unchanged.** The `objectstack dev` seed: still armed under `NODE_ENV=development` on a database with no login, and still off under `OS_SEED_ADMIN=0`. Any `OS_MIGRATE_AND_EXIT` value other than `1` is a boot that goes on to serve, and keeps its seed. A database that already holds a login was never seeded and is not touched.
+  - **If a pipeline relied on the seed.** Create the first account through the deployment's own provisioning path after the migration step, as a production deployment does.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [646303e]
+- Updated dependencies [e9bc60b]
+- Updated dependencies [52ff308]
+- Updated dependencies [d1f082d]
+- Updated dependencies [f5ef054]
+- Updated dependencies [0d34066]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [9975c26]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [aaaeeac]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8259ea0]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [58a2faa]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/rest@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/service-messaging@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

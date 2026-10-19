@@ -42,6 +42,16 @@ export interface RunIdentityContext {
   positions: string[];
   /** Acting user's explicit permission-set names. */
   permissions: string[];
+  /**
+   * The acting user's fellow-organization peers, the user included: the value
+   * RLS reads as `current_user.org_user_ids` (`sys_user_org_members` and every
+   * other `id in current_user.org_user_ids` policy). Present on a
+   * `runAs:'user'` run whose setup seeded it ({@link runOrgUserIds}); a policy
+   * that reads it compiles `unresolved-variable` and drops out without it, so
+   * the run would see only the rows its other policies admit. Never set on a
+   * `runAs:'system'` run, whose `isSystem` short-circuit precedes every policy.
+   */
+  org_user_ids?: string[];
   /** Acting user's tenant/org id. */
   tenantId?: string;
   /**
@@ -109,6 +119,36 @@ export class UnscopedRunDataAccessError extends Error {
 export interface RunDataContext extends RunIdentityContext {}
 
 /**
+ * A flow run's {@link AutomationContext} as run setup leaves it: the context
+ * the trigger supplied, plus the identity facts the engine seeds for a
+ * `runAs:'user'` run. `AutomationEngine.resolveRunContext` is the only writer.
+ *
+ * `org_user_ids` is the request path's peer list, from the same resolver: the
+ * automation plugin bridges the engine's grants resolver to
+ * `@objectstack/core`'s `resolveUserAuthzGrants`, which `resolveAuthzContext`
+ * also seeds a request's `org_user_ids` through. So it is the members of the
+ * run's organization (`tenantId`) plus the acting user, or the acting user
+ * alone when the run has no organization, exactly as a request in that
+ * organization answers. It rides the run context from setup on: into every
+ * data node through {@link resolveRunDataContext}, into a `subflow` / `map`
+ * child with the rest of the parent's context, and through a suspension with
+ * the persisted context, the way `positions` / `permissions` do.
+ */
+export interface SeededRunContext extends AutomationContext {
+  org_user_ids?: string[];
+}
+
+/**
+ * The peer list run setup seeded on `context` ({@link SeededRunContext}), or
+ * `undefined` when there is none. `undefined` is never widened into a list:
+ * the policies that read it drop out instead, which narrows (fail closed).
+ */
+export function runOrgUserIds(context: AutomationContext | undefined): string[] | undefined {
+  const peers = (context as SeededRunContext | undefined)?.org_user_ids;
+  return Array.isArray(peers) ? peers : undefined;
+}
+
+/**
  * Translate a flow run's {@link AutomationContext} into the ObjectQL `context`
  * its CRUD nodes must pass, honoring `runAs` (ADR-0049 / #1888):
  *
@@ -132,10 +172,14 @@ export interface RunDataContext extends RunIdentityContext {}
  *    `flowRunId` are its provenance, and ADR-0118 D1 forbids inventing a
  *    sentinel or pseudo-user in its place.
  *  - `runAs:'user'` (default) → the triggering user's identity
- *    (`{ userId, positions, permissions, tenantId? }`), so the security middleware
- *    enforces that user's row-level security. The run can never exceed the
- *    triggering user's grants. Empty `positions` falls back to the platform's
- *    baseline permission set, exactly like a fresh member's own REST request.
+ *    (`{ userId, positions, permissions, org_user_ids?, tenantId? }`), so the
+ *    security middleware enforces that user's row-level security. The run can
+ *    never exceed the triggering user's grants. Empty `positions` falls back to
+ *    the platform's baseline permission set, exactly like a fresh member's own
+ *    REST request. `org_user_ids` is the peer list run setup seeded
+ *    ({@link SeededRunContext}): with it, `sys_user` answers the acting user and
+ *    their organization's members, as the same user's request does; without
+ *    it, every policy that reads it drops out.
  *  - neither (an effective `runAs:'user'` run with no trigger user) → **throws**
  *    {@link UnscopedRunDataAccessError} (#3760). This used to return a
  *    provenance-only envelope and let the run proceed UNSCOPED — the #1888
@@ -225,6 +269,8 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
     positions: Array.isArray(context.positions) ? context.positions : [],
     permissions: Array.isArray(context.permissions) ? context.permissions : [],
   };
+  const orgUserIds = runOrgUserIds(context);
+  if (orgUserIds) out.org_user_ids = orgUserIds;
   if (context.tenantId) out.tenantId = context.tenantId;
   if (flowRunId) out.flowRunId = flowRunId;
   return out;

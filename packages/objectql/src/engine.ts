@@ -146,6 +146,9 @@ import {
   // [ADR-0131 D8] The ONE tenant read predicate, shared with plugin-security's
   // Layer 0 — see {@link buildDriverOptions}.
   computeTenantLayer0Verdict,
+  // [#24497] The ONE grants resolver, the one the request path seeds a
+  // context's grants and peer list through — see `ScopedContext[SEED_USER_GRANTS]`.
+  resolveUserAuthzGrants,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
@@ -290,7 +293,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 // [#20331] The divergent view-container `name` refusal — the ONE judge this
 // registrar and `os validate` both call.
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
-import { bindHooksToEngine } from './hook-binder.js';
+import { bindHooksToEngine, type BindHooksOptions } from './hook-binder.js';
 import { declaredHookCondition } from './hook-wrappers.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
@@ -310,7 +313,7 @@ import {
   divergingHookPayloadKeys,
   MultiUpdateHookKeyDivergenceError,
 } from './multi-update-hook-key-divergence.js';
-import { UnscopedHookApi, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
+import { UnscopedHookApi, SEED_USER_GRANTS, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 // [#19911] The settlement's question "does judging the FK's own lock need the
@@ -2651,8 +2654,36 @@ type FormulaFaultSink = (field: string, error: EvalError) => void;
  * ({@link ObjectQL.resolveFormulaRelated}), or — when this read serves no hop
  * at all — the sentence saying why, which every traversing formula of the read
  * then reports.
+ *
+ * [#24410] `undeclared` is decided per FORMULA, never per reference: the
+ * related fields a reference's target does not declare, which the shared read
+ * never asks for. A formula naming one of them reads `null` with the
+ * `undeclared-field` reason; a sibling reading only declared fields through the
+ * same reference is served from the shared read exactly as it is alone.
  */
-type FormulaRelated = ((row: Record<string, unknown>) => RelatedRecordBinding | undefined) | string;
+type FormulaRelated = {
+  readonly bindings: (row: Record<string, unknown>) => RelatedRecordBinding | undefined;
+  readonly undeclared: ReadonlyMap<string, { readonly object: string; readonly fields: ReadonlySet<string> }>;
+} | string;
+
+/**
+ * [#24410] The named related fields a reference's target does not DECLARE —
+ * the one reading both seams that serve a hop make of it: the shared loader
+ * ({@link ObjectQL.resolveOneHopRelated}) and the formula read, which judges
+ * them per formula ({@link ObjectQL.resolveFormulaRelated}).
+ *
+ * [#8215] The PRIMARY KEY counts as declared, though no field map carries it:
+ * `record.<fk>.id` is the repair the traversal conflict refusal prescribes. An
+ * unknown target (`declared` absent) declares nothing to judge against, so
+ * nothing is undeclared.
+ */
+function undeclaredRelatedFields(
+  declared: Record<string, unknown> | undefined,
+  named: Iterable<string>,
+): string[] {
+  if (!declared) return [];
+  return [...named].filter((n) => n !== SystemFieldName.ID && !(n in declared));
+}
 
 /** [#24197] Why a hop was not served where no reader supplied one. */
 const FORMULA_HOP_NOT_SERVED =
@@ -2687,8 +2718,22 @@ function formulaHopScope(
   hops: ReadonlyMap<string, ReadonlySet<string>>,
   related: FormulaRelated | undefined,
 ): { ok: true; record: Record<string, unknown>; empty: string[] } | { ok: false; reason: string } {
-  if (typeof related !== 'function') return { ok: false, reason: related ?? FORMULA_HOP_NOT_SERVED };
-  const binding = related(rec);
+  if (related === undefined || typeof related === 'string') {
+    return { ok: false, reason: related ?? FORMULA_HOP_NOT_SERVED };
+  }
+  // [#24410] This formula's own undeclared reads first, before any row: they
+  // are a fault of the expression, whatever the record holds.
+  for (const [field, named] of hops) {
+    const missing = related.undeclared.get(field);
+    const own = missing ? [...named].filter((n) => missing.fields.has(n)) : [];
+    if (missing && own.length > 0) {
+      return {
+        ok: false,
+        reason: formulaHopRefusal(field, { object: missing.object, unavailable: 'undeclared-field', undeclaredFields: own }, named),
+      };
+    }
+  }
+  const binding = related.bindings(rec);
   let copy: Record<string, unknown> | undefined;
   const empty: string[] = [];
   for (const [field, named] of hops) {
@@ -4866,6 +4911,8 @@ export class ObjectQL implements IObjectQLEngine {
     strict?: boolean;
     warnLegacyHandler?: boolean;
     metrics?: any;
+    /** Wraps each in-process handler after its name resolves — see {@link BindHooksOptions.wrapHandler}. */
+    wrapHandler?: BindHooksOptions['wrapHandler'];
   }): void {
     const merged = { ...(opts ?? {}), logger: this.logger } as any;
     if (!merged.bodyRunner && this._defaultBodyRunner) {
@@ -6262,8 +6309,30 @@ export class ObjectQL implements IObjectQLEngine {
         + 'formula resolves ONE hop: a formula read this way does not read through a reference of its own '
         + '(a second hop). Store the value on this object as a field of its own to read it from there';
     }
-    const lookup = await this.resolveOneHopRelated(schema, wanted, rows, context, 'caller');
-    return (row) => lookup(row);
+    // [#24410] The read set per reference is the UNION of every formula's
+    // columns, and the loader answers a whole reference `undeclared-field` when
+    // any column of it is undeclared — so one formula's misspelt column nulled
+    // every sibling reading through the same reference. The undeclared columns
+    // are taken out of the shared read here and judged per formula
+    // ({@link formulaHopScope}); the loader reads the declared rest.
+    const fields = (schema?.fields ?? {}) as Record<string, unknown>;
+    const undeclared = new Map<string, { object: string; fields: ReadonlySet<string> }>();
+    for (const [fk, named] of wanted) {
+      const target = referenceTargetOf(fields[fk]);
+      // The loader's own verdicts stand for these: no target, or a hop into
+      // the stored-metadata-body family, which is never read.
+      if (!target || isStoredMetadataBodyObject(target)) continue;
+      const declared = (this._registry.getObject(target) as { fields?: Record<string, unknown> } | undefined)?.fields;
+      const missing = undeclaredRelatedFields(declared, named);
+      if (missing.length === 0) continue;
+      undeclared.set(fk, { object: target, fields: new Set(missing) });
+      for (const name of missing) named.delete(name);
+      if (named.size === 0) wanted.delete(fk);
+    }
+    const lookup = wanted.size > 0
+      ? await this.resolveOneHopRelated(schema, wanted, rows, context, 'caller')
+      : () => undefined;
+    return { bindings: (row) => lookup(row), undeclared };
   }
 
   /**
@@ -7171,16 +7240,20 @@ export class ObjectQL implements IObjectQLEngine {
     // system write that threaded one. Nothing to resolve; this is the shape the
     // ruling asks every system write to reach.
     if (carriesOrganization(execCtx?.tenantId)) return undefined;
-    // [#13491] Platform-namespace objects are excluded PER OBJECT, not
-    // wholesale. The 2026-08-31 ruling withdrew the blanket
-    // `isPlatformNamespaceObject(object)` exemption that used to stand here:
-    // commit ff08691e6's "an org-less row is defensible for `sys_permission_set`"
-    // inherits per object, and the namespace also holds objects whose org-less
-    // rows are a defect — five instances of that class, all found by hand.
-    // `unclassified` keeps the old exclusion so an unadjudicated object's
-    // behaviour does not move; see `platform-object-tenancy.ts` for the
-    // inventory and why the classification cannot be read off the schema.
-    if (isPlatformObjectOutOfTenantAuditScope(object)) return undefined;
+    // [ADR-0131 D9, C8 stage 8b] Under `single` a platform object has no
+    // exemption: with a tenant column it is in scope like any other object, so
+    // its organization-less system insert is stamped with the Default
+    // Organization or refused below — never left NULL.
+    //
+    // ⚠️ WALLED POSTURES ONLY: #13491's per-object exemption still stands under
+    // `group` / `isolated` (epic ruling record 6259899486 on #15194, item 4).
+    // 18.0 refuses a walled posture at the operator's boot path, and the walled
+    // half of the lift lands in 18.x, after the stages that give the walled
+    // writers an organization of their own. The cut is a POSTURE condition on
+    // purpose — ⛔ never re-narrow it with a per-table list.
+    if (isPlatformObjectOutOfTenantAuditScope(object) && this.resolveEnginePosture() !== 'single') {
+      return undefined;
+    }
     const objectSchema = this._registry.getObject(object) as any;
     // A federated object's schema is the REMOTE's (ADR-0015); the platform's
     // injected column says nothing about it, which is the same reason
@@ -10176,7 +10249,43 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const wanted = collectPredicateRelationships(schema);
     if (wanted.size === 0) return unbound;
-    return this.resolveOneHopRelated(schema, wanted, rows, context, 'predicate');
+    // [#24468] The read set per reference is the UNION of every rule's
+    // columns, and the loader answers a whole reference `undeclared-field` when
+    // any column of it is undeclared — so one rule's misspelt column left every
+    // sibling rule through the same reference without a verdict, each refusing
+    // the write with the other rule's field. The undeclared columns are taken
+    // out of the shared read here and judged per rule (`resolveTraversalScope`
+    // reads `undeclaredFields` against the rule's own columns); the loader
+    // reads the declared rest, under the same authority and bound as before.
+    // ⛔ Nothing undeclared enters the system-authority read either way.
+    const fields = (schema?.fields ?? {}) as Record<string, unknown>;
+    const undeclared = new Map<string, { object: string; fields: string[] }>();
+    for (const [fk, named] of wanted) {
+      const target = referenceTargetOf(fields[fk]);
+      // The loader's own verdicts stand for these: no target, or a hop into
+      // the stored-metadata-body family, which is never read.
+      if (!target || isStoredMetadataBodyObject(target)) continue;
+      const declared = (this._registry.getObject(target) as { fields?: Record<string, unknown> } | undefined)?.fields;
+      const missing = undeclaredRelatedFields(declared, named);
+      if (missing.length === 0) continue;
+      undeclared.set(fk, { object: target, fields: missing });
+      for (const name of missing) named.delete(name);
+      if (named.size === 0) wanted.delete(fk);
+    }
+    const lookup = wanted.size > 0
+      ? await this.resolveOneHopRelated(schema, wanted, rows, context, 'predicate')
+      : unbound;
+    if (undeclared.size === 0) return lookup;
+    return (row) => {
+      if (!row) return undefined;
+      const binding: Record<string, RelatedFieldBinding> = { ...(lookup(row) ?? {}) };
+      for (const [fk, { object, fields: missing }] of undeclared) {
+        // A reference no rule reads a declared column through has no row to
+        // serve; the binding says why, and every rule through it names its own.
+        binding[fk] = { ...(binding[fk] ?? { object, unavailable: 'undeclared-field' }), undeclaredFields: missing };
+      }
+      return binding;
+    };
   }
 
   /**
@@ -10277,9 +10386,7 @@ export class ObjectQL implements IObjectQLEngine {
       //
       // ⛔ This widens the READ SET by nothing: `id` is already unconditionally
       // in the projection below, because the by-id map is keyed on it.
-      const declaredHere = (n: string): boolean =>
-        n === SystemFieldName.ID || !!declared && n in declared;
-      const undeclared = declared ? named.filter((n) => !declaredHere(n)) : [];
+      const undeclared = undeclaredRelatedFields(declared, named);
       if (undeclared.length > 0) {
         resolved.set(fk, { object: target, byId: new Map(), undeclared });
         continue;
@@ -13305,10 +13412,19 @@ export class ObjectQL implements IObjectQLEngine {
    * that record — and hydrates when it allows. Every other id keeps the
    * refused marker. See {@link readParentDerivedFiles}.
    *
-   * Batched: at most one `sys_file` `id $in […]` read per call (no N+1) — and,
-   * on the refused arm only, one more system read plus one verdict call; zero
-   * reads when no field holds a string value (the blob-only case), so the step
-   * is free for objects that have not adopted references.
+   * ASKED BEFORE READ (#24335): the caller's `sys_file` read is issued only
+   * when the security service admits it — {@link callerMayReadSysFile}, the
+   * middleware's own object-level read gate. A caller it refuses goes
+   * straight to the refused arm, the answer that read's refusal produced, so
+   * the served value is the same and no access attempt is made: the security
+   * layer logs no denial for a read the reader never asked for. A direct
+   * `sys_file` read by that reader is refused, and logged, exactly as before.
+   *
+   * Batched: one admission ask and at most one `sys_file` `id $in […]` read
+   * per call (no N+1) — and, on the refused arm only, one more system read
+   * plus one verdict call; zero of each when no field holds a string value
+   * (the blob-only case), so the step is free for objects that have not
+   * adopted references.
    */
   private async resolveFileReferences(
     objectName: string,
@@ -13354,6 +13470,13 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const uniqueIds = [...new Set(candidateIds)];
     if (uniqueIds.length === 0) return records; // blob-only / empty → zero cost
+
+    // [#24335] Ask before reading: a caller the security service refuses
+    // `sys_file` read is served the refused arm without the read whose
+    // refusal would have produced it.
+    if (!(await this.callerMayReadSysFile(execCtx))) {
+      return this.serveRefusedFileHydration(objectName, records, fileFields, uniqueIds, execCtx);
+    }
 
     // One batched sys_file read. `__expandRead` mirrors the lookup-expansion
     // sub-read (a system-built marker, never from client input). Metadata only —
@@ -13408,37 +13531,12 @@ export class ObjectQL implements IObjectQLEngine {
       // them. The marker stays on everything else: an id another record owns
       // (copied in), an attachment-only or unclaimed file, an id with no row,
       // and every id when the verdict is unwired or cannot be asked.
+      //
+      // [#24335] A caller the security service's admission already refused
+      // never reaches this read (see {@link callerMayReadSysFile}); this arm
+      // still serves a refusal the admission did not foresee, the same way.
       if (isReadRefusal(error)) {
-        const owned = await this.readParentDerivedFiles(objectName, records, uniqueIds, execCtx);
-        this.logger.debug('sys_file read refused for this caller; file fields carry the refused marker', {
-          object: objectName,
-          fields: fileFields,
-          refusedIds: uniqueIds.length,
-          parentDerivedIds: owned.size,
-        });
-        const refused = (id: string): FileRefusedValue => ({ id, metadataRefused: true });
-        // Judged per ELEMENT and per RECORD: the verdict covers a file only on
-        // the record whose field owns it, so the same id copied into a second
-        // record is still refused there. An owned, allowed id with no servable
-        // row reads as the bare id — what a `sys_file` reader gets for it.
-        const valueFor = (record: any, v: unknown): unknown => {
-          if (!isFileIdToken(v)) return v;
-          const hit = owned.get(v);
-          if (!hit || record?.id == null || hit.ownerId !== String(record.id)) return refused(v);
-          return hit.row ? toFileValue(hit.row) : v;
-        };
-        for (const record of records) {
-          for (const fieldName of fileFields) {
-            const val = record[fieldName];
-            if (val == null) continue;
-            if (Array.isArray(val)) {
-              record[fieldName] = val.map((v: unknown) => valueFor(record, v));
-            } else {
-              record[fieldName] = valueFor(record, val);
-            }
-          }
-        }
-        return records;
+        return this.serveRefusedFileHydration(objectName, records, fileFields, uniqueIds, execCtx);
       }
       // Everything else (connection drop, timeout, a database-level permission
       // fault, query error) means the rows may well exist and simply were not
@@ -13479,6 +13577,87 @@ export class ObjectQL implements IObjectQLEngine {
             typeof v === 'string' && fileMap.has(v) ? toFileValue(fileMap.get(v)) : v);
         } else if (typeof val === 'string' && fileMap.has(val)) {
           record[fieldName] = toFileValue(fileMap.get(val));
+        }
+      }
+    }
+    return records;
+  }
+
+  /**
+   * [#24335] May this caller read `sys_file` at all? Asked of the registered
+   * security service's `canReadObject` BEFORE {@link resolveFileReferences}
+   * issues the caller's own `sys_file` read, as the parent-record read gate
+   * asks before it reads a parent object ("A skipped object is not an access
+   * attempt", plugin-audit). `canReadObject` is the security middleware's own
+   * object-level read gate, arm for arm, and answers without logging or
+   * throwing; the read it spares is one that gate would refuse, and
+   * plugin-security logs every refusal at WARN — a line on every ordinary
+   * record read by a reader without `sys_file` read, burying the real denials.
+   *
+   * Asked with the caller's envelope minus its operation-private `__` keys
+   * (`withoutOperationPrivateKeys`, as {@link readParentDerivedFiles} asks its
+   * verdict): no second derivation of authority, and no muting of the
+   * middleware's log — the reader's own `sys_file` read still logs its denial.
+   *
+   * It only ever NARROWS what is read: `true` still reads as the caller, and
+   * that read still decides. Unasked ⇒ `true`, the read goes to the middleware
+   * as it did before: no usable security service, one whose contract omits the
+   * optional `canReadObject`, or an ask that throws. Any other answer than
+   * `true` ⇒ the refused arm, which is what that read's refusal served.
+   */
+  private async callerMayReadSysFile(execCtx?: ExecutionContext): Promise<boolean> {
+    const security = this.resolveReadableIdsSecurity();
+    if (security.kind !== 'usable' || typeof security.svc.canReadObject !== 'function') return true;
+    const caller = withoutOperationPrivateKeys((execCtx ?? {}) as Record<string, unknown>);
+    try {
+      return (await security.svc.canReadObject('sys_file', caller as ExecutionContext)) === true;
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * The refused arm of {@link resolveFileReferences}: this caller may not read
+   * `sys_file`, whether its admission said so up front (#24335) or its read was
+   * refused. Each id a record of this result owns is put to the field-owned
+   * verdict ({@link readParentDerivedFiles}, #22637) and hydrates when it
+   * allows; every other id becomes `{ id, metadataRefused: true }`
+   * (`FileRefusedValueSchema`). Logged at `debug`: the answer is handed to
+   * the caller in the value.
+   */
+  private async serveRefusedFileHydration(
+    objectName: string,
+    records: any[],
+    fileFields: string[],
+    uniqueIds: string[],
+    execCtx?: ExecutionContext,
+  ): Promise<any[]> {
+    const owned = await this.readParentDerivedFiles(objectName, records, uniqueIds, execCtx);
+    this.logger.debug('sys_file read refused for this caller; file fields carry the refused marker', {
+      object: objectName,
+      fields: fileFields,
+      refusedIds: uniqueIds.length,
+      parentDerivedIds: owned.size,
+    });
+    const refused = (id: string): FileRefusedValue => ({ id, metadataRefused: true });
+    // Judged per ELEMENT and per RECORD: the verdict covers a file only on
+    // the record whose field owns it, so the same id copied into a second
+    // record is still refused there. An owned, allowed id with no servable
+    // row reads as the bare id — what a `sys_file` reader gets for it.
+    const valueFor = (record: any, v: unknown): unknown => {
+      if (!isFileIdToken(v)) return v;
+      const hit = owned.get(v);
+      if (!hit || record?.id == null || hit.ownerId !== String(record.id)) return refused(v);
+      return hit.row ? toFileValue(hit.row) : v;
+    };
+    for (const record of records) {
+      for (const fieldName of fileFields) {
+        const val = record[fieldName];
+        if (val == null) continue;
+        if (Array.isArray(val)) {
+          record[fieldName] = val.map((v: unknown) => valueFor(record, v));
+        } else {
+          record[fieldName] = valueFor(record, val);
         }
       }
     }
@@ -21636,6 +21815,61 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     if (!this.executionContext.userId) return new UnscopedHookApi(ref);
     return new ScopedContext(
       { ...this.executionContext, isSystem: false },
+      this.engine
+    );
+  }
+
+  /**
+   * [#24497] The second half of a hook's `runAs: 'user'` derivation: the
+   * user's grants and peer list, seeded through the one resolver the request
+   * path seeds them through (`resolveUserAuthzGrants`, `@objectstack/core`).
+   * The hook wrapper awaits it on the api {@link withRunAs} derived; it stays
+   * a separate, async step so `withRunAs` keeps its synchronous contract.
+   *
+   * A hook fired from a hand-built `{ isSystem: true, userId }` context (the
+   * approvals writes) was pinned with no `org_user_ids`, so every row policy
+   * reading `current_user.org_user_ids` compiled `unresolved-variable` and
+   * dropped out: the hook saw its own `sys_user` row only, while the same
+   * user's request saw their organisation's members too. Ruling A′ puts the
+   * contract on the producer: every user context carries `org_user_ids`.
+   *
+   * The same rule as a `runAs: 'user'` flow's run setup (service-automation
+   * `resolveRunContext`):
+   *  - positions and permission sets the context already carries stay
+   *    verbatim, so a narrowed ceiling is never re-broadened; only a context
+   *    with no `permissions` takes the resolved ones;
+   *  - a context that already carries a peer list keeps it;
+   *  - a context that needs neither resolves nothing and is returned as is.
+   *
+   * The peer list is the members of the context's `tenantId`, the user
+   * included; a context with no `tenantId` gets the user alone, as an
+   * organisation-less request does. A resolver failure (an unreadable
+   * permission store) is thrown to the caller, which keeps the unseeded api.
+   *
+   * Called on the api {@link withRunAs}`('user')` derived, which is never
+   * elevated, so it does not re-judge the elevation flag.
+   *
+   * Keyed on {@link SEED_USER_GRANTS}, a symbol the package entry does not
+   * export, so it is no nameable member of this class's published face (see
+   * the symbol's docblock in `hook-run-as.ts`).
+   */
+  async [SEED_USER_GRANTS](): Promise<ScopedContext> {
+    const ctx = this.executionContext;
+    if (!ctx.userId) return this;
+    const needsGrants = !Array.isArray(ctx.permissions);
+    const needsPeers = !Array.isArray(ctx.org_user_ids);
+    if (!needsGrants && !needsPeers) return this;
+    const grants = await resolveUserAuthzGrants(
+      this.engine,
+      ctx.userId,
+      ctx.tenantId ? { tenantId: ctx.tenantId } : {},
+    );
+    return new ScopedContext(
+      {
+        ...ctx,
+        ...(needsGrants ? { positions: grants.positions, permissions: grants.permissions } : {}),
+        ...(needsPeers ? { org_user_ids: grants.org_user_ids } : {}),
+      },
       this.engine
     );
   }

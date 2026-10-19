@@ -1,5 +1,83 @@
 # @objectstack/client
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- b7a688e: Clause-②: no
+  
+  fix(client,platform-objects): the `ai.models()` TSDoc and the translated permission-set `packageId` help say "this system", as the spec now does
+  
+  - **What changed.** Inside the running system, published copy names the system the reader is in as "this system", and a permission set made here, not shipped by a package, is "authored in this system". `@objectstack/spec` already says both (`AiModelsResponse.models`, the permission set's `packageId` help text); this follows it in two more places.
+    - The TSDoc of `client.ai.models()` now reads "Models this system offers in the chat model picker (cloud ADR-0028)". The citation is qualified as `cloud ADR-0028`: the AI service that serves this list is a cloud package, and this repository's ADR-0028 is about metadata naming.
+    - The zh-CN, ja-JP and es-ES values of the permission set's `packageId` help text in the Setup forms bundle now say 本系统 / このシステム / este sistema where they said 本环境 / この環境 / este entorno, matching the English text "Leave empty for a set authored in this system."
+  - **Unchanged.** Every method, route, type, form field, key and behaviour. No translation key is added or removed.
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Minor Changes
+
+- 1e001c7: feat(client): `packages.publishDrafts(id, { backfill })` sends the opt-in backfill of new fields' defaults
+  
+  Clause-②: yes (widening)
+  
+  - `opts.backfill?: Array<{ object, field }>` is sent in the publish body; the response's `backfillApplied` reports the rows written per field. A field the publish does not add, or one without a literal `defaultValue`, refuses the whole request with a `400` before anything is published.
+
+### Patch Changes
+
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Patch Changes

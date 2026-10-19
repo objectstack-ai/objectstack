@@ -154,8 +154,9 @@ export interface AuditWriterOptions {
    * record nor the acting session names one: the Default Organization under
    * `single` (the only organization there is), `null` under a wall — the
    * `tenancy` service's `defaultOrgId()`. Asked only for such a row, never
-   * for one whose organization is already known. Absent, or an answer that
-   * throws → the row names none, as before.
+   * for one whose organization is already known. Absent, `null`, or an answer
+   * that throws → no activity row is written; the ledger row still is
+   * (ruling 6257510973 item 3: activity is never a NULL row).
    */
   getDefaultOrganizationId?(): Promise<string | null | undefined>;
 }
@@ -2227,11 +2228,19 @@ export function installAuditWriters(
     // takes the derivable one: the Default Organization under `single`. Only
     // the activity row: the ledger's `tenant_id` above is an attribution of
     // what the row is ABOUT (D7) and stays the record's.
+    //
+    // [ADR-0131 D9; ruling 6257510973 item 3, Q3 A] When none is derivable (a
+    // wall, with neither the record nor the session naming one), NO activity
+    // row is written — never a NULL one. The ledger row still is:
+    // `sys_audit_log` is the deployment-level record of the change (D7).
+    let activityOrganizationKnown = true;
     if (objectHasField('sys_activity', 'organization_id')) {
-      activityRow.organization_id = tenantId ?? (await derivableActivityOrganization()) ?? null;
+      const organizationId = tenantId ?? (await derivableActivityOrganization());
+      activityOrganizationKnown = organizationId != null;
+      if (activityOrganizationKnown) activityRow.organization_id = organizationId;
     }
 
-    const activityRowToWrite = mirrorsActivity ? activityRow : undefined;
+    const activityRowToWrite = mirrorsActivity && activityOrganizationKnown ? activityRow : undefined;
     // [#21262] The ledger row is written first; the writer advances this
     // before the activity row, so after a throw it names the refused table.
     const progress: AuditTrailWriteProgress = { writing: 'sys_audit_log' };

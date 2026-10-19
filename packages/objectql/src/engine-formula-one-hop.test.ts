@@ -289,6 +289,24 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
       expect(row?.title).toBeNull();
       expect(faultsOn('lib_loan', 'title')[0].message).toContain("'lib_book' declares no such field");
     });
+
+    it('[#24410] an undeclared related field nulls only its own formula: a sibling through the same reference is served as it is alone', async () => {
+      registerLoan(TITLE, { bad: { type: 'formula', expression: 'record.book.isbn' } });
+      const alone = await engine.find('lib_loan', { fields: ['title'], limit: 4, context: READER });
+      d.calls.length = 0;
+      const rows = await engine.find('lib_loan', { limit: 4, context: READER });
+      expect(rows.map((r) => r.title)).toEqual(alone.map((r) => r.title));
+      expect(rows.map((r) => r.title)).toEqual(['Dune · Ann', 'Emma · Ann', 'Ulysses · Bo', 'Dune · Bo']);
+      expect(rows.map((r) => r.bad)).toEqual([null, null, null, null]);
+      // The undeclared column never enters the shared read; ONE book read still serves the page.
+      expect(relatedReads('lib_book')).toBe(1);
+      expect([...d.calls.find((c) => c.object === 'lib_book')!.ast.fields].sort()).toEqual(['id', 'title']);
+      // Each formula's own report: the bad one names its column, the sibling reports nothing.
+      expect(faultsOn('lib_loan', 'title')).toEqual([]);
+      const fault = faultsOn('lib_loan', 'bad');
+      expect(fault).toHaveLength(1);
+      expect(fault[0].message).toContain("the formula reads 'isbn' through `book` (object 'lib_book')");
+    });
   });
 
   describe('one hop is the depth', () => {

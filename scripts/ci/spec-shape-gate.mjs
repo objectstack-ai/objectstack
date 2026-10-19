@@ -1135,12 +1135,12 @@ export function renderSummary({ sha, downstreamSha = null, commit = null, event 
   const link = `https://github.com/${UPSTREAM_REPO}/commit/${sha}`;
   const out = [];
   out.push(`### Spec Shape Gate -- \`${UPSTREAM_REPO}@${short}\` against \`${DOWNSTREAM_REPO}@${String(downstreamSha ?? 'main').slice(0, 12)}\``, '');
-  out.push(`Compiled ${DOWNSTREAM_REPO} at \`main\`${downstreamSha ? ` (\`${String(downstreamSha).slice(0, 12)}\`)` : ''} against \`${SPEC_PACKAGE_NAME}\` built and packed from [${short}](${link})${event ? ` (\`${event}\` run)` : ''}.`);
+  out.push(`Compiled ${DOWNSTREAM_REPO} at \`main\`${downstreamSha ? ` (\`${String(downstreamSha).slice(0, 12)}\`)` : ''} against \`${SPEC_PACKAGE_NAME}\` and every other \`@objectstack/*\` package it installs, built and packed from [${short}](${link})${event ? ` (\`${event}\` run)` : ''}.`);
   if (commit) out.push('', `> ${commit}`);
   out.push('');
 
   if (status === 0 && rows.length === 0) {
-    out.push(`✅ ${DOWNSTREAM_REPO} type-checks against \`${SPEC_PACKAGE_NAME}\` at that commit.`);
+    out.push(`✅ ${DOWNSTREAM_REPO} type-checks against \`@objectstack/*\` at that commit.`);
   } else if (rows.length === 0) {
     out.push(
       `⛔ The typecheck failed (exit ${status}) and **no diagnostic could be attributed to a file**.`,

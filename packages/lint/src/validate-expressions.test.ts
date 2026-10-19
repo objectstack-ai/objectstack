@@ -3549,6 +3549,10 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // metadata keys; the metadata keys the index is built from (`type`,
       // `reference`) are read off the tabled `def` receiver.
       'storedMetadataBodyReferenceIndex', 'familyRefs', 'traversals',
+      // [#24468] The undeclared-hop refusal's whole traversal analysis, read for
+      // its `traversals` and `multiHopFields` — the formula package's own
+      // result keys, never metadata keys.
+      'analysis',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

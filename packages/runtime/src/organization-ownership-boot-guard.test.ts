@@ -95,6 +95,11 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5)', () => {
     // The apply the refusal names is one the ceremony accepts: a reviewed plan file and the backup acknowledged.
     expect(err.message).toMatch(/os migrate organization-ownership --apply --plan-file PLAN --backup-taken/);
     expect(err.message).toMatch(/the ceremony has not run on it/);
+    // In 18.0 the command it names refuses too, so the refusal names the release answer itself, ahead of the command.
+    const release = err.message.indexOf('18.0 does not upgrade a v17 database');
+    expect(release).toBeGreaterThan(-1);
+    expect(err.message.indexOf('17.x release until the 18.x release', release)).toBeGreaterThan(release);
+    expect(release).toBeLessThan(err.message.indexOf("Run 'os migrate organization-ownership --out PLAN'"));
   });
 
   it('a development boot names the ceremony with --dev, so it boots the way the refused boot did', async () => {

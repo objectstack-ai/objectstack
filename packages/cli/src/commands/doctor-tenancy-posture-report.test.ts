@@ -61,6 +61,7 @@ import { TENANCY_POSTURES } from '@objectstack/spec/security';
 
 import Doctor, {
   resolveTenancyPostureOrFinding,
+  walledPostureFinding,
   readDotenvFiles,
   type DotenvReading,
 } from './doctor.js';
@@ -290,7 +291,9 @@ describe('os doctor reports an unrecognized posture and exits non-zero', () => {
 
   it('names OS_TENANCY_POSTURE, refuses to call the environment functional, and exits 1', async () => {
     // ── Control: the same environment with a posture that parses ──────────
-    process.env.OS_TENANCY_POSTURE = 'isolated';
+    // `single`, not `isolated`: 18.0 refuses a walled posture at `os serve`, so
+    // doctor reports one (`walledPostureFinding`, below) and it is no control.
+    process.env.OS_TENANCY_POSTURE = 'single';
     const healthy = await runDoctor();
 
     // Doctor completes normally. This is the sentence #5382 quoted, and here it
@@ -343,4 +346,33 @@ describe('os doctor reports an unrecognized posture and exits non-zero', () => {
     // `}, 60_000)` cases in this package (`utils/sqlite-occupancy.test.ts`,
     // `utils/schema-migrate.deferred-ddl.integration.test.ts`).
   }, 60_000);
+
+  it('18.0 — a walled posture is reported as a warning naming the `os serve` refusal, and exits 0', async () => {
+    process.env.OS_TENANCY_POSTURE = 'group';
+    const walled = await runDoctor();
+    expect(walled.out).toContain('Tenancy posture');
+    expect(walled.out).toContain("the tenancy posture is 'group'");
+    expect(walled.out).toContain('`os serve`');
+    expect(walled.out).toContain('Environment is functional but has some warnings');
+    expect(walled.exitCode).toBeUndefined();
+  }, 60_000);
+});
+
+describe('walledPostureFinding — 18.0 supports `single` only', () => {
+  it('answers null for `single`, a warning row for each walled posture', () => {
+    for (const posture of TENANCY_POSTURES) {
+      const row = walledPostureFinding(posture);
+      if (posture === 'single') {
+        expect(row).toBeNull();
+        continue;
+      }
+      expect(row?.name).toBe('Tenancy posture');
+      expect(row?.status).toBe('warning');
+      expect(row?.message).toContain(`'${posture}'`);
+      expect(row?.message).toContain('18.0');
+      expect(row?.fix).toContain('OS_TENANCY_POSTURE=single');
+    }
+    expect(TENANCY_POSTURES).toContain('group');
+    expect(TENANCY_POSTURES).toContain('isolated');
+  });
 });

@@ -81,7 +81,7 @@ derivation off for that class: an authored `update` predicate then decides
 the `update` *filter* alone, widening past the platform's owner-scoped write
 floor exactly as written. Nothing is derived for `insert`
 (there is no pre-existing row to be visible), and a caller holding the
-read-side superuser bypass (`viewAllRecords` on a private or platform-global
+read-side superuser bypass (`viewAllRecords` on a private or deployment-level
 object) is not narrowed, because their readable set is already unbounded.
 
 **A write widener never reaches a row the caller cannot read.** "You may not

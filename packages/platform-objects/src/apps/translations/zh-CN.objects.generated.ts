@@ -1491,7 +1491,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "全部",
         emptyState: {
           title: "尚无 OAuth 应用",
-          message: "注册应用后，其客户端即可通过此环境让用户登录。"
+          message: "注册应用后，其客户端即可通过本系统让用户登录。"
         }
       },
       mine: {
@@ -1894,7 +1894,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_sso_provider: {
     label: "SSO 提供方",
     pluralLabel: "SSO 提供方",
-    description: "本环境用于联合登录的外部 SSO 身份提供方（OIDC / SAML）",
+    description: "本系统用于联合登录的外部 SSO 身份提供方（OIDC / SAML）",
     fields: {
       id: {
         label: "ID"
@@ -1965,7 +1965,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           },
           clientId: {
             label: "客户端 ID",
-            helpText: "IdP 为本环境签发的 OAuth 客户端 ID。"
+            helpText: "IdP 为本系统签发的 OAuth 客户端 ID。"
           },
           clientSecret: {
             label: "客户端密钥",
@@ -3075,6 +3075,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       metadata: {
         label: "元数据",
         help: "元数据负载的 JSON 序列化内容"
+      },
+      draft_changes: {
+        label: "草稿变更",
+        help: "待发布草稿的逐键来源（JSON 序列化）：每个键路径最后由哪个来源（copilot、studio、api）、哪位操作者、在何时修改。已发布行为空。"
       },
       extends: {
         label: "继承自"

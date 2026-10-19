@@ -1,5 +1,63 @@
 # @objectstack/hono
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [8ed3786]
+- Updated dependencies [fa26308]
+- Updated dependencies [2ec6827]
+- Updated dependencies [964a237]
+  - @objectstack/plugin-hono-server@18.0.0-next.5
+  - @objectstack/runtime@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
+## 18.0.0-next.4
+
+### Patch Changes
+
+- 9822b05: fix(hono): on a `createHonoApp` host a `HEAD` is answered as its `GET` (no body), as the standalone server answers it; `HEAD /api/v1/mcp/skill` no longer answers `405` with `Allow: GET`
+  
+  Clause-②: no
+  
+  `createHonoApp`'s `${prefix}/*` catch-all handed the dispatcher the request's raw verb. Hono answers a `HEAD` from the `GET` route, but the verb still read `HEAD`, and the dispatcher's domains decide by comparing it with `GET`, so a `HEAD` was not answered as its `GET` on this host. Measured: `HEAD /api/v1/mcp/skill` answered `405 METHOD_NOT_ALLOWED` with `Allow: GET`; `/health`, `/ready` and the scoped root `/environments/:id` answered `404 ROUTE_NOT_FOUND`; signed in, `/analytics/meta` answered `404` and `/ai/agents` `501`; anonymous, the public `/share-links/:token/resolve` answered `401` where `GET` answers `501`. With an auth service, `HEAD /auth/config` answered `404` (it was forwarded to better-auth instead of answered as the `GET`).
+  
+  - **`@objectstack/hono`.** The catch-all now dispatches a `HEAD` as `GET`, and the `/auth/config` branch answers a `HEAD` as its `GET`. Every dispatcher route answers `HEAD` with its `GET` answer's status and headers, and Hono drops the body. A path that serves no `GET` keeps its `GET` answer for `HEAD` (its `405` and `Allow`, or `401` to an anonymous caller). The standalone server (`HonoServerPlugin` with the dispatcher plugin) already answered `HEAD` this way. Only the verb changes: a domain that forwards the request (the `/mcp` transport, the `/approvals/act` page) is still handed the client's `HEAD` request.
+  - **`@objectstack/runtime`.** The `/approvals/act` domain decides whether a request is a `HEAD` from the forwarded request's own method, not from the dispatcher's verb. So a `HEAD` still reaches the approvals member as a `GET` and is answered with no body.
+- 1ef0ee8: fix(hono): on a `createHonoApp` host, `GET /api/v1/mcp/skill` answers the raw markdown with one `Content-Type: text/markdown; charset=utf-8` and `Cache-Control: no-store`, as the standalone server does
+  
+  Clause-②: no
+  
+  - **What a caller got.** The skill is served as a single string event on the dispatcher's `result` stream channel. The adapter's stream writer framed every event outside a Vercel data stream as `data: <JSON>`, so the body was an SSE frame of a JSON-encoded string (`data: "---\nname: …"`), not markdown. It also set its own `Content-Type` and `Cache-Control` beside the domain's, so the answer carried `text/markdown; charset=utf-8, text/markdown; charset=utf-8` and `no-cache, no-store` (on a socket: two `Content-Type` lines and two `Cache-Control` lines).
+  - **What it answers now.** A string event is written as given, in every stream mode, and a header the producer sets replaces the adapter's default of the same name, whatever its case. Object events are still one `data:` frame each (one JSON line in a Vercel data stream), and a stream that sets no headers still gets `text/event-stream`, `no-cache` and `keep-alive`.
+  - **Unchanged:** the AI chat streams, which reach the same writer as pre-encoded Vercel data stream frames or as object parts, and every other route.
+- Updated dependencies [6e43b7b]
+- Updated dependencies [727091c]
+- Updated dependencies [f792290]
+- Updated dependencies [eda6f14]
+- Updated dependencies [d702b18]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [5a9a80b]
+- Updated dependencies [8eccf51]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [58a2faa]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [cbfa5e4]
+- Updated dependencies [9822b05]
+- Updated dependencies [889bf12]
+- Updated dependencies [7a8733f]
+- Updated dependencies [1e001c7]
+- Updated dependencies [d79dc48]
+- Updated dependencies [51ad8e4]
+- Updated dependencies [c4526a7]
+- Updated dependencies [6868514]
+- Updated dependencies [2a1e48a]
+  - @objectstack/runtime@18.0.0-next.4
+  - @objectstack/plugin-hono-server@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes
