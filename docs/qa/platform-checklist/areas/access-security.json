@@ -3501,10 +3501,10 @@
     },
     {
       "id": "access-security.security-catalog-one-holder-and-boot-report",
-      "title": "The security catalog has exactly one holder per name: two packages declaring one permission-set / position name refuse boot (422 NAMESPACE_CONFLICT on install-local), a body packageId that disagrees with its package is refused, `os migrate security-catalog-overlays` clears environment shadows, and boot reports grants naming undefined catalog entries",
+      "title": "The security catalog has exactly one holder per name: two packages declaring one permission-set / position name refuse boot (on install-local, 422 PLUGIN_REGISTER_FAILED naming each name and its holder), a body packageId that disagrees with its package is refused, `os migrate security-catalog-overlays` clears environment shadows, and boot reports grants naming undefined catalog entries",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3532,10 +3532,10 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "install-local of a package redeclaring a catalog name → 422 NAMESPACE_CONFLICT (or PLUGIN_REGISTER_FAILED) with conflicts[], and nothing is recorded as installed",
+          "clause": "install-local of an inline manifest (a `{ manifest }` body) whose package redeclares a catalog name → 422 PLUGIN_REGISTER_FAILED whose message names each conflicting name and its holder, and nothing is recorded as installed",
           "oracle": "api",
-          "verify": "status + code + conflicts; package list unchanged",
-          "evidence": "refusal body + the list"
+          "verify": "status + error.code + error.message: every redeclared permission-set / position name appears in the message with the package or environment that already holds it; GET /api/v1/packages lists the same packages before and after. ⛔ No `conflicts[]` is expected on this door: it answers its own registered PLUGIN_REGISTER_FAILED and interpolates only the register error's message (that route's entry in packages/spec/src/api/error-code-ledger.zod.ts); the structured `conflicts` ride the thrown SecurityCatalogNameConflictError, which the boot-refusal pins in automated.ref assert",
+          "evidence": "the refusal body + the package list before and after"
         },
         {
           "clause": "a permission-set save whose body packageId disagrees with the target package → 400 VALIDATION_ERROR at packageId",
@@ -3576,6 +3576,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "acceptance[1] (clause, verify, evidence) and the title's install-local parenthetical re-pointed — an assertion defect found by the 18.0 QA sweep (QA run #24558, access-security.security-catalog-one-holder-and-boot-report acceptance[1]: FAIL, confirmed by an independent RUNNER rule 7 re-derivation; card #24567 row 2, folded from #24568). The product is right and the clause was wrong: on an inline manifest the install-local door (packages/cloud-connection/src/marketplace-install-local-plugin.ts) answers its OWN registered 422 PLUGIN_REGISTER_FAILED and interpolates only the register error's message — that route's documented contract in packages/spec/src/api/error-code-ledger.zod.ts — so it never carried NAMESPACE_CONFLICT or a `conflicts[]`, and no pin in automated.ref asserts either at this door. The run measured the refusal twice: the names and their holders inside the message, nothing installed (27 packages before and after). The clause now asserts that; a structured `conflicts[]` on this door would be a separate enhancement decision, not taken here. The other four clauses are unchanged",
+          "ref": "#24567"
         }
       ]
     },

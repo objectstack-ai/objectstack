@@ -2977,7 +2977,7 @@
       "title": "A v18 server refuses to boot rather than serve wrongly: against a 17.x-shaped database (a physical organization_id on a non-tenant table, no verified ADR-0131 ceremony marker) it stops before listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED naming the tables and the command, and with security on but no identity objects it stops with AuthzIdentityObjectsMissingError",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -2991,7 +2991,7 @@
         ]
       },
       "steps": [
-        "checksum the v17 DB; run `os serve` (v18) against it with -d file:COPY.db; read the output and exit code; checksum again",
+        "snapshot the v17 copy through SQLite — its schema (`sqlite_master`, `pragma_table_info` per table) and every table's rows, read with the sqlite3 CLI or node:sqlite so a `-wal` file is included (copy the v17 DB together with its `-wal`, or checkpoint the original before copying); run `os serve` (v18) against the copy with `OS_DATABASE_URL=file:COPY.db` (`os serve` has no `-d` flag); read the output and exit code; snapshot again and diff the two",
         "run `os dev` on a scratch config with services:{auth:false} and security on"
       ],
       "acceptance": [
@@ -3008,10 +3008,10 @@
           "evidence": "the refusal excerpt"
         },
         {
-          "clause": "the refused boot did not alter the database",
+          "clause": "the refused boot wrote no row and ran no D10 step: every table the v17 copy held keeps every row and every value in the columns it held (no row added, deleted or changed — so no column dropped, no mirror row deleted, no organization_id attributed), every table the boot created is empty, and `sys_migration` holds no `adr-0131-organization-ownership` marker. The additive schema sync the engine runs before the guard judges (new tables, new columns, new indexes) is expected and is not a failure",
           "oracle": "build",
-          "verify": "checksum before == after",
-          "evidence": "the two checksums"
+          "verify": "a row-level diff of the two SQLite snapshots from steps[0], read through SQLite so the `-wal` is included: for each table present before, its pre-existing columns compared row by row (ordered by primary key) — no difference; for each table present only after, its row count — 0; `SELECT id FROM sys_migration WHERE id = 'adr-0131-organization-ownership'` — no row. ⛔ Not a file checksum: in WAL mode the boot's DDL can sit in COPY.db-wal with the main file's hash unchanged, and the additive sync changes the hash with no row written, so a checksum answers neither question",
+          "evidence": "per-table row counts before and after, the (empty) row diff over the pre-existing columns, the tables the boot created with their row counts, and the sys_migration read"
         },
         {
           "clause": "the auth-less security boot is refused naming createIdentityObjectsPlugin(), not served with 503s",
@@ -3043,6 +3043,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "acceptance[2] (clause, verify, evidence) and steps[0] re-worded — an assertion defect found by the 18.0 QA sweep (QA run #24556, platform-core.v18-boot-refusals acceptance[2]: FAIL, confirmed by an independent RUNNER rule 7 re-derivation; card #24567 row 1). The product is right and the clause was wrong: the guard judges in its own start(), after the engine (whose start() runs the additive schema sync the ceremony waits for) and ahead of every plugin that writes a row (packages/runtime/src/organization-ownership-boot-guard.ts), and ADR-0131 D10 item 5 says the refusing runtime never auto-migrates (the ceremony's fates); nothing in it forbids additive schema sync. So a refused boot legitimately adds tables, columns and indexes, and 'did not alter the database' (checksum before == after) failed on a correct product. The clause now asserts what the guard promises — no row written, no D10 step run — through a row-level SQLite diff that includes the `-wal` (the run's second boot left the main file's hash unchanged with its DDL in the `-wal`). steps[0] also stops passing `-d` to `os serve`, which declares no such flag (the same run's checklist-accuracy finding); `OS_DATABASE_URL` is what the run booted with. The other three clauses are unchanged",
+          "ref": "#24567"
         }
       ]
     },

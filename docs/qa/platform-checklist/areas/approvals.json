@@ -1556,10 +1556,10 @@
     },
     {
       "id": "approvals.act-door-and-admin-rescue-slate",
-      "title": "Approvals on v18: the email action door /approvals/act works through the dispatcher exactly as the self-hosted mount (GET renders, POST redeems, PUT 405 Allow: GET, POST, a dead link a 200 page, a policy-held session not 403'd before the token), and an approval over an unstaffed position opens on the org administrators as ordinary approvers",
+      "title": "Approvals on v18: the email action door /approvals/act works through the dispatcher exactly as the self-hosted mount (GET renders, POST redeems, a PUT neither door claims an ordinary 404 miss with no Allow header, a dead link a 200 page, a policy-held session not 403'd before the token), and an approval over an unstaffed position opens on the org administrators as ordinary approvers",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1586,10 +1586,10 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "GET renders the action page, POST redeems, PUT → 405 with Allow: GET, POST, a dead token → a 200 page (not an error envelope)",
+          "clause": "GET renders the action page, POST redeems, a dead token → a 200 page (not an error envelope), and PUT — a method neither wire door claims — is that door's ordinary miss: 404 with no Allow header, never reaching the member (ENDPOINT_NOT_FOUND on the self-hosted `os dev` boot, whose raw-app mount registers only GET and POST; ROUTE_NOT_FOUND on the hosted dispatcher door, whose `/approvals/act` domain claims only GET, HEAD and POST). 405 with Allow: GET, POST is the in-process ApprovalService.handleActionPage member's answer only, which no wire request reaches with a PUT",
           "oracle": "api",
-          "verify": "status + headers per verb",
-          "evidence": "four lines"
+          "verify": "status + headers per verb; for the PUT also error.code and the absence of an Allow header. The member's 405 is not a wire leg: it is pinned in-process by packages/plugins/plugin-approvals/src/action-page-member.integration.test.ts, and the dispatcher's 404 miss by packages/runtime/src/domains/approvals-act.test.ts (both in automated.ref)",
+          "evidence": "four lines (the PUT's with its error.code and its headers)"
         },
         {
           "clause": "the unstaffed request appears in each org admin's pending list and the decision is recorded via_override:false",
@@ -1614,6 +1614,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; approvals.approver-resolution-matrix still says admin_rescue is decidable only via the privileged override — stale against 22824 (reported, not edited here)",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "acceptance[1] (clause, verify, evidence) and the title's PUT leg re-worded — an assertion defect found by the 18.0 QA sweep (QA run #24542, approvals.act-door-and-admin-rescue-slate clause 1: FAIL; card #24543). The product is right and the clause was wrong: on a stock `os dev` showcase boot `PUT /api/v1/approvals/act?token=…` answered 404 ENDPOINT_NOT_FOUND with no Allow header (twice; DELETE and PATCH the same), which is the design — the self-hosted mount registers only GET and POST (changeset 22578), the dispatcher domain claims only GET, HEAD and POST and lets every other method fall through (packages/runtime/src/domains/approvals.ts), and the item's own pin packages/runtime/src/domains/approvals-act.test.ts asserts that miss (404 ROUTE_NOT_FOUND) with the member never run. 405 with Allow: GET, POST belongs to the in-process member ApprovalService.handleActionPage alone (packages/plugins/plugin-approvals/src/action-page-member.integration.test.ts). The GET, POST and dead-token legs held and are unchanged, as are the other two clauses",
+          "ref": "#24543"
         }
       ]
     }
