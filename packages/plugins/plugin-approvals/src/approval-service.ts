@@ -161,6 +161,16 @@ export interface ApprovalResumeSurface {
     output?: Record<string, unknown>;
     branchLabel?: string;
     /**
+     * The person whose approve / reject decision this resume carries
+     * (`ResumeSignal.resumedBy`, ruling A on `FlowSchema.runAs`): the same
+     * person the verdict mirror writes as ({@link actingUserId}). The engine
+     * runs a `runAs: 'user'` flow's nodes after the decision as them,
+     * resolving their own grants, and a `runAs: 'system'` flow's with them as
+     * the attribution user of its unchanged elevation; absent when no human
+     * decided (the SLA sweep), and then the run keeps the identity it had.
+     */
+    resumedBy?: string;
+    /**
      * #3801: the engine refuses a resume of an `approval` suspension unless
      * the signal carries this marker — the proof that the resume is the tail
      * of a decision THIS service already authorized and recorded, not a raw
@@ -772,6 +782,13 @@ export interface StrandedContinuationSignal {
   decision: string;
   /** How the original door described the outcome in prose, e.g. `the reject decision`. */
   what: string;
+  /**
+   * The decider the original resume carried ({@link ApprovalResumeSurface}'s
+   * `resumedBy`), so a replay continues the nodes after the decision as the
+   * person who decided, never as the run's trigger user. Absent when the
+   * original carried none.
+   */
+  resumedBy?: string;
 }
 
 /**
@@ -4023,7 +4040,7 @@ export class ApprovalService implements IApprovalService {
    */
   private async serviceResume(
     runId: string,
-    signal: { output?: Record<string, unknown>; branchLabel?: string },
+    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string },
   ): Promise<{ runId: string; repairable: boolean; error: string } | undefined> {
     const result = await this.automation!.resume!(runId, { ...signal, [RESUME_AUTHORITY_SERVICE]: true });
     const reported = result as
@@ -4219,7 +4236,7 @@ export class ApprovalService implements IApprovalService {
     runId: string,
     requestId: string,
     what: string,
-    signal: { output?: Record<string, unknown>; branchLabel?: string },
+    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string },
     decision: string,
   ): Promise<{ resumed: boolean; resumeError?: string; resumeFailure?: ResumeFailureReport }> {
     const missing = this.missingRunCapability(runId, requestId, what, 'resume');
@@ -4279,6 +4296,7 @@ export class ApprovalService implements IApprovalService {
       if (repairable) {
         await this.journalStrandedContinuation(requestId, {
           branchLabel: signal.branchLabel, output: signal.output, decision, what,
+          ...(signal.resumedBy ? { resumedBy: signal.resumedBy } : {}),
         });
       }
       throw strandedDecisionFailure(
@@ -4321,6 +4339,12 @@ export class ApprovalService implements IApprovalService {
       const branchLabel = result.decision === 'approve'
         ? APPROVAL_BRANCH_LABELS.approve
         : APPROVAL_BRANCH_LABELS.reject;
+      // Ruling A on `FlowSchema.runAs`: the decider rides the hand-off, so the
+      // nodes after the decision run as the person who decided — the person
+      // the verdict mirror above already wrote as. The SLA sweep's context
+      // vouches for nobody, so its auto-decision names no decider and the run
+      // keeps the identity it had.
+      const decider = actingUserId(context);
       const outcome = await this.resumeRecordedOutcome(
         result.runId, requestId, `the ${result.decision} decision`,
         {
@@ -4331,6 +4355,7 @@ export class ApprovalService implements IApprovalService {
           // Reserved keys are spread LAST so no output can shadow them (the
           // whitelist already rejects them; this is defense in depth).
           output: { ...(result.outputs ?? {}), decision: result.decision, requestId },
+          ...(decider ? { resumedBy: decider } : {}),
         },
         result.decision,
       );
@@ -6410,7 +6435,12 @@ export class ApprovalService implements IApprovalService {
     // so a continuation that strands AGAIN is repairable exactly like the first.
     const outcome = await this.resumeRecordedOutcome(
       runId, requestId, signal.what,
-      { branchLabel: signal.branchLabel, output: signal.output },
+      {
+        branchLabel: signal.branchLabel, output: signal.output,
+        // The journalled decider (ruling A): the replayed nodes after the
+        // decision run as the person who decided, not as the run's trigger.
+        ...(typeof signal.resumedBy === 'string' && signal.resumedBy ? { resumedBy: signal.resumedBy } : {}),
+      },
       signal.decision,
     );
 

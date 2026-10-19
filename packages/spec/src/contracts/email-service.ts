@@ -77,12 +77,28 @@ export interface SendEmailInput {
    * export and cleanup script that filters by organization, which is worse
    * than a null. Producers that already hold one (e.g. the messaging email
    * channel's `delivery.notification.organizationId`) thread it here; omit
-   * it when the caller genuinely has none (auth verification /
-   * password-reset mail) — absent stays legal and the row is simply
-   * unstamped. Forward-stamping only; pre-existing org-less rows are not
+   * it when the caller genuinely has none — absent stays legal and the row
+   * is simply unstamped. Mail about a person rather than an organization
+   * (auth verification, password reset) is {@link identityMail} instead. Forward-stamping only; pre-existing org-less rows are not
    * backfilled.
    */
   organizationId?: string;
+  /**
+   * Identity mail: a message about a PERSON rather than an organization —
+   * verification, password reset, magic link, email-change notice, an
+   * account invitation to someone who belongs to no organization yet.
+   *
+   * `true` routes the persisted row to `sys_identity_email`, the
+   * deployment-level sibling of `sys_email` with the same row shape and no
+   * organization column (ADR-0131 D7, ruling of record 6257510973, letter
+   * Q2 A), delivered by the same outbox, status and attachment pipeline.
+   * Absent or `false` keeps the row in `sys_email`, the tenant mail log.
+   *
+   * Identity mail has no organization to carry, so `organizationId` alongside
+   * `identityMail: true` is refused as a validation failure — never one of the
+   * two silently dropped.
+   */
+  identityMail?: boolean;
 }
 
 /**
@@ -221,6 +237,12 @@ export interface SendTemplateInput {
    * opts into no overlay resolution.
    */
   organizationId?: string;
+  /**
+   * Identity mail, forwarded into the {@link SendEmailInput} this template
+   * send performs. Same contract as {@link SendEmailInput.identityMail}: the
+   * row goes to `sys_identity_email`, and `organizationId` beside it is refused.
+   */
+  identityMail?: boolean;
 }
 
 /**

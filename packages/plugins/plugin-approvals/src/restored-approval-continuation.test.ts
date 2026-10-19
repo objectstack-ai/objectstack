@@ -39,7 +39,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AutomationEngine, InMemorySuspendedRunStore } from '@objectstack/service-automation';
+import { AutomationEngine, InMemorySuspendedRunStore, resolveRunDataContext } from '@objectstack/service-automation';
 // [#4550] The engine double below routes its write verbs through ObjectQL's OWN
 // dispatch predicates rather than a hand-mirrored copy.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
@@ -891,5 +891,140 @@ describe('#15389 — a restored approval suspension has an issuer again', () => 
     expect(ambiguous?.message).toMatch(/cannot tell a decided rejection from an ADR-0044/);
     // ⛔ And it refused by NOT resuming — the run is still parked, still repairable.
     expect(await second.hasSuspendedRun(amb.flow_run_id)).toBe(true);
+  });
+});
+
+/**
+ * Ruling A on `FlowSchema.runAs` — the decider rides the decision hand-off.
+ *
+ * 「the human whose act is running this segment: the trigger user until a
+ * human decision, the decider after it」. `decide` hands the engine the person
+ * who decided (the same person the verdict mirror writes as) on the
+ * service-stamped resume signal, and the engine runs a `runAs: 'user'` flow's
+ * nodes after the decision as them, with their own resolved grants. The SLA
+ * sweep's auto-decision vouches for nobody, so it names no decider. And the
+ * decider is journalled with a stranded continuation, so the repair replay
+ * (#15389, this file's subject) continues as the person who decided — never
+ * falling back to the run's trigger user.
+ *
+ * Read on the run's own data context, `resolveRunDataContext(context)`: the
+ * envelope every CRUD node hands ObjectQL. The engine-side switch, and the
+ * attribution on a real stack, are pinned in `service-automation`'s
+ * `resume-decider-identity.integration.test.ts`.
+ */
+describe('ruling A — a decision resumes the run as the person who decided', () => {
+  const DECIDER_CTX = { userId: 'u1', isSystem: false, positions: [], permissions: [] } as any;
+  const GRANTS: Record<string, { positions: string[]; permissions: string[] }> = {
+    submitter: { positions: ['sales_rep'], permissions: ['deal_rep'] },
+    u1: { positions: ['sales_manager'], permissions: ['deal_manager'] },
+  };
+  /** start → before → approval ─approve→ after_approve / ─reject→ after_reject → end */
+  const WHO_FLOW = {
+    name: 'who_flow', label: 'Who Flow', type: 'autolaunched',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      { id: 'before', type: 'whoami', label: 'Before' },
+      { id: 'review', type: 'approval', label: 'Review', config: { approvers: [{ type: 'user', value: 'u1' }] } },
+      { id: 'after_approve', type: 'whoami', label: 'After approve' },
+      { id: 'after_reject', type: 'whoami', label: 'After reject' },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'before' },
+      { id: 'e2', source: 'before', target: 'review' },
+      { id: 'e3', source: 'review', target: 'after_approve', label: 'approve' },
+      { id: 'e4', source: 'review', target: 'after_reject', label: 'reject' },
+      { id: 'e5', source: 'after_approve', target: 'end' },
+      { id: 'e6', source: 'after_reject', target: 'end' },
+    ],
+  };
+
+  let data: ReturnType<typeof makeFakeEngine>;
+  let service: ApprovalService;
+  let seen: Record<string, { userId?: string; permissions?: string[]; isSystem?: boolean }>;
+  let rejectThrowsOnce: boolean;
+
+  function boot() {
+    const automation = new AutomationEngine(noopLogger as any, new InMemorySuspendedRunStore());
+    automation.setUserGrantsResolver(async (userId) => GRANTS[userId]);
+    registerApprovalNode(automation, service, noopLogger as any);
+    automation.registerNodeExecutor({
+      type: 'whoami',
+      async execute(node: any, _vars: any, context: any) {
+        if (node.id === 'after_reject' && rejectThrowsOnce) {
+          rejectThrowsOnce = false;
+          throw new Error(DOWNSTREAM_FAILURE);
+        }
+        const ctx = resolveRunDataContext(context);
+        seen[node.id] = { userId: ctx?.userId, permissions: ctx?.permissions, ...(ctx?.isSystem ? { isSystem: true } : {}) };
+        return { success: true };
+      },
+    } as never);
+    automation.registerFlow('who_flow', WHO_FLOW as never);
+    automation.registerFlow('who_flow_sys', { ...WHO_FLOW, name: 'who_flow_sys', runAs: 'system' } as never);
+    service.attachAutomation(automation);
+    return automation;
+  }
+
+  beforeEach(() => {
+    seen = {}; rejectThrowsOnce = false;
+    data = makeFakeEngine();
+    service = new ApprovalService({ engine: data as any, logger: noopLogger });
+  });
+
+  const rowOf = async (id: string) =>
+    (await data.find('sys_approval_request', { where: { id } }))[0];
+
+  async function parked(automation: AutomationEngine, flow = 'who_flow') {
+    await automation.execute(flow, {
+      object: 'crm_deal', record: { id: 'd1' }, userId: 'submitter',
+    } as never);
+    expect(seen.before, 'the nodes before the decision run as the submitter').toEqual(flow === 'who_flow'
+      ? { userId: 'submitter', permissions: ['deal_rep'] }
+      : { userId: 'submitter', permissions: [], isSystem: true });
+    return (await data.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+  }
+
+  it.each(['approve', 'reject'] as const)('%s: the nodes after the decision run as the decider, with the decider\'s grants', async (decision) => {
+    const automation = boot();
+    const req = await parked(automation);
+    const out = await service.decide(req.id, { decision, actorId: 'u1', comment: decision }, DECIDER_CTX);
+    expect(out.resumed, JSON.stringify(out)).toBe(true);
+    expect(seen[`after_${decision}`]).toEqual({ userId: 'u1', permissions: ['deal_manager'] });
+  });
+
+  it.each(['approve', 'reject'] as const)("runAs:'system' %s: the nodes after the decision keep their elevation and carry the decider as their attribution user (ruling 6267719791 Q1 A)", async (decision) => {
+    const automation = boot();
+    const req = await parked(automation, 'who_flow_sys');
+    const out = await service.decide(req.id, { decision, actorId: 'u1', comment: decision }, DECIDER_CTX);
+    expect(out.resumed, JSON.stringify(out)).toBe(true);
+    expect(seen[`after_${decision}`]).toEqual({ userId: 'u1', permissions: [], isSystem: true });
+  });
+
+  it('CONTROL: an SLA auto-decision names no decider, so the run keeps the identity it had', async () => {
+    const automation = boot();
+    const req = await parked(automation);
+    // The sweep's shape: a system context that vouches for nobody.
+    const out = await service.decide(req.id, { decision: 'approve', actorId: 'u1', comment: 'SLA escalation' }, SYSTEM_CTX);
+    expect(out.resumed, JSON.stringify(out)).toBe(true);
+    expect(seen.after_approve).toEqual({ userId: 'submitter', permissions: ['deal_rep'] });
+  });
+
+  it('a stranded decision is replayed as the person who decided, not as the trigger user', async () => {
+    const automation = boot();
+    const req = await parked(automation);
+    rejectThrowsOnce = true;
+    const err = await service.decide(req.id, { decision: 'reject', actorId: 'u1', comment: 'no' }, DECIDER_CTX)
+      .then(() => null, (e: Error) => e);
+    expect(err?.message).toMatch(/^RESUME_FAILED/);
+    // The journal carries the decider beside the signal it re-issues.
+    const journal = JSON.parse((await rowOf(req.id)).node_config_json).__strandedContinuation;
+    expect(journal).toMatchObject({ decision: 'reject', resumedBy: 'u1' });
+
+    expect((await automation.restoreConsumedSuspension(req.flow_run_id)).restored).toBe(true);
+    const out = await service.continueRestoredRun(req.id, { requestedBy: 'ops', reason: 'fixed the record' });
+    expect(out.resumed, JSON.stringify(out)).toBe(true);
+    expect(out.source).toBe('journal');
+    expect(seen.after_reject, 'the replay fell back to the trigger user').toEqual({ userId: 'u1', permissions: ['deal_manager'] });
   });
 });

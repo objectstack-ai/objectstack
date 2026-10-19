@@ -36,6 +36,11 @@ import {
   type EmailAttachmentReclaimPayload,
   type EmailAttachmentStorage,
 } from './attachment-storage.js';
+import {
+  IDENTITY_EMAIL_OBJECT,
+  TENANT_EMAIL_OBJECT,
+  type EmailLogObject,
+} from './email-log-objects.js';
 
 /**
  * Queue topic durable email delivery is published to and consumed from
@@ -54,8 +59,14 @@ export const EMAIL_SEND_QUEUE = 'email.send.async';
  * `send()` with the raw input, which inserted a fresh row per retry.
  */
 export interface EmailSendQueuePayload {
-  /** `sys_email.id` of the row to deliver. */
+  /** `sys_email.id` (or `sys_identity_email.id`) of the row to deliver. */
   rowId: string;
+  /**
+   * The log the row lives in. Written only for `sys_identity_email`; absent
+   * reads as `sys_email`, which is also every job an 18.0 process published
+   * (see `email-log-objects.ts`).
+   */
+  object?: EmailLogObject;
 }
 
 /**
@@ -151,8 +162,13 @@ export interface EmailPersistence {
    * Persist `row` and confirm it by returning **`row.id`** — see the contract
    * on {@link EmailPersistence}. Returning any other id throws.
    */
-  insert(row: Record<string, any>): Promise<{ id: string } | string>;
-  update?(id: string, patch: Record<string, any>): Promise<void>;
+  insert(row: Record<string, any>, object?: EmailLogObject): Promise<{ id: string } | string>;
+  /**
+   * `object` names the log the row lives in: `sys_identity_email` for
+   * identity mail, `sys_email` otherwise. An implementation written before
+   * the sibling existed ignores it and keeps every row in its one store.
+   */
+  update?(id: string, patch: Record<string, any>, object?: EmailLogObject): Promise<void>;
   /**
    * [#8149] Recover the `internal: true` `headers_json` column for rows the
    * engine's generic read path handed back without it.
@@ -165,7 +181,7 @@ export interface EmailPersistence {
    * {@link ../internal-header-readback} for why the probe is the schema flag
    * and never the absence of the key.
    */
-  readHeadersJson?(rowIds: readonly string[]): Promise<Map<string, unknown> | undefined>;
+  readHeadersJson?(rowIds: readonly string[], object?: EmailLogObject): Promise<Map<string, unknown> | undefined>;
 }
 
 /**
@@ -211,6 +227,32 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
 function addressPart(addr: EmailAddress): string {
   const obj = typeof addr === 'string' ? { address: addr } : (addr ?? { address: undefined });
   return String(obj.address ?? '').trim();
+}
+
+/**
+ * The log a send is recorded in (ADR-0131 D7, ruling of record 6257510973,
+ * letter Q2 A): identity mail — about a person, not an organization — in the
+ * deployment-level `sys_identity_email`; everything else in `sys_email`.
+ */
+function emailLogObjectOf(input: Partial<SendEmailInput> | undefined): EmailLogObject {
+  return input?.identityMail === true ? IDENTITY_EMAIL_OBJECT : TENANT_EMAIL_OBJECT;
+}
+
+/**
+ * Identity mail has no organization: its log carries no organization column.
+ * A caller naming both has one of them wrong, and dropping either silently
+ * would write the row somewhere its caller did not mean — so the send is
+ * refused, as every other malformed input is, and recorded as rejected.
+ */
+function assertIdentityMailCarriesNoOrganization(input: Partial<SendEmailInput> | undefined): void {
+  if (input?.identityMail === true && input.organizationId) {
+    throw new Error(
+      'VALIDATION_FAILED: identityMail and organizationId cannot be sent together — identity mail is about '
+      + `a person, not an organization, and its log (${IDENTITY_EMAIL_OBJECT}) has no organization column. `
+      + 'Fix: drop organizationId for verification, password-reset, magic-link and other mail about a person, '
+      + 'or drop identityMail for mail that belongs to the organization.',
+    );
+  }
 }
 
 /**
@@ -666,6 +708,7 @@ export class EmailService implements IEmailService {
   private async sendInternal(input: SendEmailInput, allowQueue: boolean): Promise<SendEmailResult> {
     let normalized: NormalizedEmailMessage;
     try {
+      assertIdentityMailCarriesNoOrganization(input);
       normalized = normalizeMessage(input, this.options.defaultFrom);
     } catch (err: any) {
       // Validation failures must surface to the caller — AND leave a record.
@@ -704,6 +747,9 @@ export class EmailService implements IEmailService {
     // while it under-describes its own message, which the boot sweep would
     // then deliver stripped.
     const id = newId();
+    // The log this message is recorded in, decided once: every write and
+    // every job below names the same object (ADR-0131 D7, Q2 A).
+    const object = emailLogObjectOf(input);
 
     // ── OUT-OF-ROW ATTACHMENT CONTENT (#5172) ──────────────────────────────
     // Over the in-row budget, in queue mode, with the storage capability
@@ -745,7 +791,8 @@ export class EmailService implements IEmailService {
       // Commit b706af987 — pass-through ONLY. This writer runs under a constant system
       // context, so the input's organization is the one fact it may stamp:
       // no resolution, no default, no fabrication (a wrong organization_id is
-      // worse than a null). Absent ⇒ the column stays unwritten.
+      // worse than a null). Absent ⇒ the column stays unwritten. Identity mail
+      // never reaches here with one (refused above): its log has no column.
       ...(input.organizationId ? { organization_id: input.organizationId } : {}),
       status: 'queued',
       attempt_count: 0,
@@ -770,10 +817,10 @@ export class EmailService implements IEmailService {
         let res: { id: string } | string | undefined;
         let insertThrew = false;
         try {
-          res = await this.options.persistence.insert(baseRow);
+          res = await this.options.persistence.insert(baseRow, object);
         } catch (err: any) {
           insertThrew = true;
-          this.options.logger?.warn('EmailService: sys_email persist failed (non-fatal)', { error: err?.message });
+          this.options.logger?.warn(`EmailService: ${object} persist failed (non-fatal)`, { error: err?.message });
         }
         if (!insertThrew) {
           // Deliberately OUTSIDE the catch above. An insert that *fails* is an
@@ -804,7 +851,7 @@ export class EmailService implements IEmailService {
           this.reportQueueDegradation(
             'the sys_email row could not be persisted, so a queued job would have nothing to deliver',
           );
-        } else if (await this.publishRow(queue, id)) {
+        } else if (await this.publishRow(queue, id, object)) {
           // The row is in the database at `queued` and the job is in the
           // queue's own store: a process death here loses neither.
           return { id, status: 'queued' };
@@ -814,7 +861,7 @@ export class EmailService implements IEmailService {
       // failed, or queue mode is off for this send): the in-memory message is
       // still whole, so the mail goes out — and the content still has to be
       // reclaimed afterwards, which is why the keys travel with the delivery.
-      return await this.deliverNormalized(id, normalized, undefined, storageKeys);
+      return await this.deliverNormalized(id, normalized, undefined, storageKeys, object);
     } finally {
       // Release EXACTLY what was reserved above — the one id, and only here.
       // Here and not earlier: the reservation has to outlive the whole body,
@@ -858,6 +905,10 @@ export class EmailService implements IEmailService {
     if (!persistence) return;
     const reason = String((err as any)?.message ?? err ?? 'rejected').slice(0, 900);
     const raw = (input ?? {}) as Partial<SendEmailInput>;
+    // Recorded in the log the message was meant for. Identity mail's log has
+    // no organization column, so a refused `organizationId` beside
+    // `identityMail` (one of the rejections recorded here) is not written.
+    const object = emailLogObjectOf(raw);
     const row: Record<string, any> = {
       id: newId(),
       from_address: rawAddressText(raw.from ?? this.options.defaultFrom) || UNSTATED_COLUMN,
@@ -871,7 +922,7 @@ export class EmailService implements IEmailService {
       ...(raw.relatedObject ? { related_object: raw.relatedObject } : {}),
       ...(raw.relatedId ? { related_id: raw.relatedId } : {}),
       ...(raw.sentBy ? { sent_by: raw.sentBy } : {}),
-      ...(raw.organizationId ? { organization_id: raw.organizationId } : {}),
+      ...(raw.organizationId && object === TENANT_EMAIL_OBJECT ? { organization_id: raw.organizationId } : {}),
       status: 'failed',
       // Prefixed so the column distinguishes the two ways a send fails: this
       // message never reached a transport, so reading it as "the SMTP host
@@ -880,10 +931,10 @@ export class EmailService implements IEmailService {
       attempt_count: 0,
     };
     try {
-      await persistence.insert(row);
+      await persistence.insert(row, object);
     } catch (persistErr: any) {
       this.options.logger?.warn(
-        'EmailService: sys_email rejection record could not be persisted (non-fatal)',
+        `EmailService: ${object} rejection record could not be persisted (non-fatal)`,
         { error: persistErr?.message, rejection: reason },
       );
     }
@@ -1044,11 +1095,14 @@ export class EmailService implements IEmailService {
    * already committed at `queued`, and leaving it for nobody to pick up is
    * the durability gap this feature exists to close.
    */
-  private async publishRow(queue: IQueueService, rowId: string): Promise<boolean> {
+  private async publishRow(queue: IQueueService, rowId: string, object: EmailLogObject): Promise<boolean> {
     const wiring = this.options.queueDelivery;
     if (!wiring) return false;
+    // `object` rides only for the sibling: a `sys_email` job keeps the exact
+    // payload 18.0 published, which is also how an 18.0 job is read.
+    const payload: EmailSendQueuePayload = object === TENANT_EMAIL_OBJECT ? { rowId } : { rowId, object };
     try {
-      await queue.publish<EmailSendQueuePayload>(EMAIL_SEND_QUEUE, { rowId }, {
+      await queue.publish<EmailSendQueuePayload>(EMAIL_SEND_QUEUE, payload, {
         maxAttempts: wiring.maxAttempts,
         // `maxAttempts` is the canonical field; `retries` is its legacy
         // spelling and is the ONLY one `MemoryQueueAdapter` reads. Both are
@@ -1059,9 +1113,9 @@ export class EmailService implements IEmailService {
         backoff: wiring.backoff,
         // One row, one job: a re-publish for the same row (a retried caller,
         // a redelivered upstream event) collapses onto the existing message
-        // instead of racing a second worker onto the same sys_email row.
-        idempotencyKey: `sys_email:${rowId}`,
-        metadata: { object: 'sys_email', rowId },
+        // instead of racing a second worker onto the same row.
+        idempotencyKey: `${object}:${rowId}`,
+        metadata: { object, rowId },
       });
       return true;
     } catch (err: any) {
@@ -1085,11 +1139,11 @@ export class EmailService implements IEmailService {
    * shared key is what makes sweeping a row that still has a pending job
    * collapse onto that job instead of racing a second worker onto the row.
    */
-  async enqueuePersistedRow(rowId: string): Promise<boolean> {
+  async enqueuePersistedRow(rowId: string, object: EmailLogObject = TENANT_EMAIL_OBJECT): Promise<boolean> {
     if (!rowId) return false;
     const queue = this.options.queueDelivery?.resolve();
     if (!queue) return false;
-    return this.publishRow(queue, rowId);
+    return this.publishRow(queue, rowId, object);
   }
 
   /**
@@ -1123,6 +1177,7 @@ export class EmailService implements IEmailService {
     normalized: NormalizedEmailMessage,
     opts?: DeliverAttemptOptions,
     reclaimKeys?: string[],
+    object: EmailLogObject = TENANT_EMAIL_OBJECT,
   ): Promise<SendEmailResult> {
     // Defaults reproduce the pre-#5160 loop exactly.
     const maxAttempts = Math.max(1, opts?.maxAttempts ?? (this.options.retries ?? 0) + 1);
@@ -1138,8 +1193,8 @@ export class EmailService implements IEmailService {
           message_id: messageId,
           sent_at: new Date().toISOString(),
           attempt_count: priorAttempts + attempt,
-        });
-        await this.scheduleAttachmentReclaim(rowId, reclaimKeys);
+        }, object);
+        await this.scheduleAttachmentReclaim(rowId, reclaimKeys, object);
         return { id: rowId, status, messageId };
       } catch (err: any) {
         lastError = err;
@@ -1154,8 +1209,8 @@ export class EmailService implements IEmailService {
       status: 'failed',
       error: errMessage,
       attempt_count: priorAttempts + maxAttempts,
-    });
-    await this.scheduleAttachmentReclaim(rowId, reclaimKeys);
+    }, object);
+    await this.scheduleAttachmentReclaim(rowId, reclaimKeys, object);
     return { id: rowId, status: 'failed', error: errMessage };
   }
 
@@ -1174,12 +1229,16 @@ export class EmailService implements IEmailService {
    * (retention, purge) reclaim the content instead of orphaning it — see
    * `attachment-reclaim.ts`.
    */
-  private async scheduleAttachmentReclaim(rowId: string, keys: string[] | undefined): Promise<void> {
+  private async scheduleAttachmentReclaim(
+    rowId: string,
+    keys: string[] | undefined,
+    object: EmailLogObject,
+  ): Promise<void> {
     if (!keys || keys.length === 0) return;
     const queue = this.options.queueDelivery?.resolve();
     if (!queue) {
       this.options.logger?.error?.(
-        `EmailService: ${keys.length} attachment storage object(s) for sys_email row '${rowId}' cannot be `
+        `EmailService: ${keys.length} attachment storage object(s) for ${object} row '${rowId}' cannot be `
         + 'scheduled for reclamation — no durable queue service is available now, although one was when the '
         + 'content was stored. Those bytes will stay in the storage backend until they are deleted by '
         + 'hand. Fix: keep @objectstack/service-queue (over an ObjectQL engine) mounted for the life of the '
@@ -1190,23 +1249,26 @@ export class EmailService implements IEmailService {
     try {
       await queue.publish<EmailAttachmentReclaimPayload>(
         EMAIL_ATTACHMENT_RECLAIM_QUEUE,
-        { rowId, keys },
+        // `object` rides only for the sibling, as on the delivery job: the
+        // reclaimer re-reads the row, and reading the wrong log would find
+        // no row and delete content a queued row still needs.
+        object === TENANT_EMAIL_OBJECT ? { rowId, keys } : { rowId, keys, object },
         {
           delay: EMAIL_ATTACHMENT_RECLAIM_GRACE_MS,
           // One row, one reclaim job: every retry of a message finalizes the
           // row again, and each of those would otherwise arm its own copy.
-          idempotencyKey: `sys_email_attachments:${rowId}`,
+          idempotencyKey: `${object}_attachments:${rowId}`,
           // A reclaim that cannot run is a byte leak, not a lost message, so
           // it gets a real budget and then the DLQ, where it is visible.
           maxAttempts: 5,
           retries: 4,
           backoff: { type: 'exponential', delayMs: 60_000, maxDelayMs: 60 * 60_000 },
-          metadata: { object: 'sys_email', rowId },
+          metadata: { object, rowId },
         },
       );
     } catch (err: any) {
       this.options.logger?.error?.(
-        `EmailService: could not publish the attachment-reclaim job for sys_email row '${rowId}' `
+        `EmailService: could not publish the attachment-reclaim job for ${object} row '${rowId}' `
         + `(${String(err?.message ?? err)}). Its ${keys.length} storage object(s) will stay in the backend `
         + 'until deleted by hand. Fix: check the durable queue service, then delete leftovers under the '
         + 'sys_email/attachments/ prefix.',
@@ -1230,6 +1292,7 @@ export class EmailService implements IEmailService {
   async deliverPersistedRow(
     row: Record<string, any>,
     opts?: DeliverAttemptOptions,
+    object: EmailLogObject = TENANT_EMAIL_OBJECT,
   ): Promise<SendEmailResult> {
     const rowId = String(row?.id ?? '');
     if (!rowId) throw new Error('deliverPersistedRow: row.id is required');
@@ -1249,7 +1312,7 @@ export class EmailService implements IEmailService {
     // boot's sweep) delivers it intact. Marking it `failed` here would burn
     // the one durable record of a message that is still perfectly
     // deliverable. Inert when nothing redacts: no accessor call at all.
-    const recoveredHeaders = await this.options.persistence?.readHeadersJson?.([rowId]);
+    const recoveredHeaders = await this.options.persistence?.readHeadersJson?.([rowId], object);
     const source = withRecoveredHeaders(row, recoveredHeaders);
 
     // Keys read from the ROW, so a row delivered by the queue worker (which
@@ -1269,10 +1332,10 @@ export class EmailService implements IEmailService {
         status: 'failed',
         error: errMessage,
         attempt_count: Math.max(0, opts?.priorAttempts ?? 0),
-      });
+      }, object);
       return { id: rowId, status: 'failed', error: errMessage };
     }
-    return this.deliverNormalized(rowId, normalized, opts, reclaimKeys);
+    return this.deliverNormalized(rowId, normalized, opts, reclaimKeys, object);
   }
 
   /**
@@ -1288,12 +1351,12 @@ export class EmailService implements IEmailService {
     return (storageKey: string) => fetchAttachmentContent(storage, storageKey);
   }
 
-  private async updateRow(id: string, patch: Record<string, any>): Promise<void> {
+  private async updateRow(id: string, patch: Record<string, any>, object: EmailLogObject): Promise<void> {
     if (!this.options.persistence?.update) return;
     try {
-      await this.options.persistence.update(id, patch);
+      await this.options.persistence.update(id, patch, object);
     } catch (err: any) {
-      this.options.logger?.warn('EmailService: sys_email update failed (non-fatal)', { id, error: err?.message });
+      this.options.logger?.warn(`EmailService: ${object} update failed (non-fatal)`, { id, error: err?.message });
     }
   }
 
@@ -1443,6 +1506,9 @@ export class EmailService implements IEmailService {
       // Commit b706af987 — sendTemplate is itself a producer of send(): forward the
       // caller's organization so the sys_email row it persists is stamped.
       ...(input.organizationId ? { organizationId: input.organizationId } : {}),
+      // [ADR-0131 D7, Q2 A] …and its identity-mail routing, so the row lands in
+      // `sys_identity_email`. `send()` refuses the two together.
+      ...(input.identityMail ? { identityMail: true } : {}),
     };
     return this.send(sendInput);
   }

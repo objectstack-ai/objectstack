@@ -189,7 +189,7 @@ reproduce them. Where it disagrees, it disagrees on the page:
 | :--- | :--- | ---: |
 | 175 write call sites | quoted in the merged changeset | **229** |
 | 24 carrying no tenant context | quoted in the merged changeset | **2** provable and tenancy-enabled; **29** more whose options argument is unreadable |
-| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **158 of 229** decidable, **71** undecidable |
+| 127 of 175 statically decidable, 48 runtime-parameter-name sites | restated on the `isSystem`-scoping card | **155 of 229** decidable, **74** undecidable |
 | 135 (77%) silenced by the `isSystem` guard before the posture gate | the lost issue body — **no surviving corroboration** | **not reproduced**: 128 decidably elevated, 0 decidably not, 93 undecidable |
 | 141 and 132, two independent re-derivations | the card that filed this work | — |
 
@@ -201,7 +201,7 @@ at any commit.
 
 Two structural facts do plausibly widen this reading against any hand or regex
 one, and both are counted in the generated tables below: the 40 sites reached
-through an erased (`any`) receiver, and the 50 that name their object through a
+through an erased (`any`) receiver, and the 49 that name their object through a
 `const` rather than inline. An instrument that read either the way a person does
 would report a smaller number and would not say so.
 
@@ -224,9 +224,9 @@ cannot read, and they are neither in nor out.
 | what | count |
 | :--- | ---: |
 | write call sites on the application surface | **229** |
-| …whose object name is statically decidable | 158 |
-| …whose object name is chosen at run time | 71 |
-| …against an object with tenancy ENABLED | 157 |
+| …whose object name is statically decidable | 155 |
+| …whose object name is chosen at run time | 74 |
+| …against an object with tenancy ENABLED | 154 |
 | …against an object that declares tenancy off | 1 |
 | threading a tenant context | 171 |
 | PROVABLY carrying none (options read, no context key) | **8** |
@@ -244,10 +244,10 @@ cannot read, and they are neither in nor out.
 | receiver erased, placed by an `object: string` PARAMETER | 5 |
 | receiver erased, placed by an `UNTYPED_RECEIVERS` row | 5 |
 
-| object name spelled inline | 108 |
-| object name spelled through a `const` | 50 |
+| object name spelled inline | 106 |
+| object name spelled through a `const` | 49 |
 | object name is an `object: string` parameter | 7 |
-| object name is some other run-time expression | 64 |
+| object name is some other run-time expression | 67 |
 
 ### Subtractions the census could NOT defend — enforced
 
@@ -297,13 +297,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-19 at `723af9722`.
+Measured on 2026-10-19 at `9bce0aafa`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 671 |
+| tracked non-test sources scanned | 672 |
 | engine-shaped types recognised | 79 |
-| declared objects in the registry | 116 |
+| declared objects in the registry | 117 |
 | same-named calls subtracted as non-engine | 166 |
 
 {/* END GENERATED: tenant-audit-census */}
