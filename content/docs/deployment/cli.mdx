@@ -203,13 +203,13 @@ organization-ownership shape until the [ownership ceremony](#os-migrate-organiza
 has run on it.
 
 <Callout type="warn">
-18.0 supports fresh installs only and does not upgrade a v17 database: keep a
-v17 database on a 17.x release until the 18.x release that carries the upgrade
-path. In 18.0, `os dev` on a v17 database in a local SQLite file still takes
-step 1's copy, then stops at step 2: the ceremony refuses (`NOT_IMPLEMENTED`),
-and `os dev` prints that refusal and where the copy is, and exits without
-changing the database. Any other database gets no copy, and `os dev` exits
-with the same answer.
+18.0 supports fresh `single` installs; upgrades and walled postures arrive in 18.x. In 18.0 the ceremony refuses, so `os dev` stops at step 2 with its
+refusal and changes nothing.
+18.0 does not upgrade a v17 database: keep a v17 database on a 17.x release
+until the 18.x release that carries the upgrade path. For a local SQLite file,
+`os dev` in 18.0 still takes step 1's copy first and prints where it is,
+beside the ceremony's `NOT_IMPLEMENTED` refusal; any other database gets no
+copy and the same answer.
 </Callout>
 
 In the 18.x release that carries the upgrade path, `os dev` runs that ceremony
@@ -1496,12 +1496,11 @@ has run. In the 18.x release that carries the upgrade path, `os dev` runs it on
 its own for a local SQLite database (see [`os dev`](#os-dev)).
 
 <Callout type="warn">
-18.0 supports fresh installs only and does not upgrade a v17 database: keep a
-v17 database on a 17.x release until the 18.x release that carries the upgrade
-path. In 18.0 this command refuses, plan and apply alike: it exits `1` with
+18.0 supports fresh `single` installs; upgrades and walled postures arrive in 18.x. In 18.0 this command refuses, plan and apply alike: it exits `1` with
 `NOT_IMPLEMENTED` (under `--json`, `code` beside `error`) and reads and
-writes nothing. The invocations below, and what the list after them says the
-ceremony does, are that 18.x release's.
+writes nothing. Keep a v17 database on a 17.x release until the 18.x release
+that carries the upgrade path. The invocations below, and what the list after
+them says the ceremony does, are that 18.x release's.
 </Callout>
 
 ```bash
