@@ -19,6 +19,7 @@
 // `sys_share_link` and a green run that proves nothing about it. The
 // generator's census (`REQUIRED_TABLES` in `./fixture-manifest.ts`) is the
 // second line: it refuses to write a fixture with an empty required table.
+import showcaseStack from '@objectstack/example-showcase';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { OrganizationOwnershipBootGuardPlugin } from '@objectstack/runtime';
 import type { VerifyStack } from '@objectstack/verify';
@@ -45,12 +46,28 @@ export const FIXTURE_NAMES = {
   shareLinkObject: 'showcase_client_brief',
 } as const;
 
+/**
+ * The showcase configuration itself. Under vitest the package's default export
+ * IS the stack; under `tsx` (the generator's runner) the example package has no
+ * `"type": "module"`, so its `.ts` entry loads as CommonJS and the default import
+ * is the interop wrapper `{ default, onEnable }` — measured: `requires` read
+ * `undefined` there, `bootStack` mounted none of the showcase's providers, and
+ * the boot registered no `sys_webhook`.
+ */
+const SHOWCASE: unknown = (() => {
+  const mod = showcaseStack as unknown as { requires?: unknown; default?: unknown };
+  return mod.requires === undefined && mod.default !== undefined ? mod.default : mod;
+})();
+
 /** The composition every boot of the fixture shares, the 18.0 one here and HEAD's in the harness. */
 export function bootFixture(databaseFile: string): Promise<VerifyStack> {
-  return bootShowcase({
-    databaseFile,
-    extraPlugins: [new AuditPlugin(), new OrganizationOwnershipBootGuardPlugin()],
-  });
+  return bootShowcase(
+    {
+      databaseFile,
+      extraPlugins: [new AuditPlugin(), new OrganizationOwnershipBootGuardPlugin()],
+    },
+    SHOWCASE,
+  );
 }
 
 async function expectStatus(res: Response, ok: number[], what: string): Promise<any> {
@@ -108,6 +125,17 @@ export async function useTheInstall(stack: VerifyStack): Promise<void> {
     'invite-member',
   );
 
+  // Identity mail proper: a password reset, addressed to a person, not to an organization.
+  await expectStatus(
+    await stack.api('/auth/request-password-reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: memberB.email, redirectTo: '/reset-password' }),
+    }),
+    [200],
+    'password reset request',
+  );
+
   // A setting change and its audit; an encrypted setting, and so a secret.
   const put = (ns: string, body: unknown) =>
     stack.raw(`/api/settings/${ns}`, {
@@ -126,10 +154,16 @@ export async function useTheInstall(stack: VerifyStack): Promise<void> {
   const hooks = rowsOf(await expectStatus(await stack.apiAs(adminTok, 'GET', `/data/sys_webhook?name=${FIXTURE_NAMES.webhook}`), [200], 'webhook list'));
   const hook = hooks.find((h: any) => h?.name === FIXTURE_NAMES.webhook);
   if (!hook?.id) throw new Error(`populate: the declared webhook ${FIXTURE_NAMES.webhook} has no seeded row`);
-  await expectStatus(await stack.apiAs(adminTok, 'PATCH', `/data/sys_webhook/${hook.id}`, { is_active: true }), [200], 'activate webhook');
+  await expectStatus(await stack.apiAs(adminTok, 'PATCH', `/data/sys_webhook/${hook.id}`, { active: true }), [200], 'activate webhook');
 
   // Record use: activity, audit and the webhook's delivery tail.
-  const task = await expectStatus(await stack.apiAs(adminTok, 'POST', '/data/showcase_task', { title: FIXTURE_NAMES.task }), [200, 201], 'create task');
+  const projects = rowsOf(await expectStatus(await stack.apiAs(adminTok, 'GET', '/data/showcase_project'), [200], 'project list'));
+  if (!projects[0]?.id) throw new Error('populate: the showcase seeded no project to file the task under');
+  const task = await expectStatus(
+    await stack.apiAs(adminTok, 'POST', '/data/showcase_task', { title: FIXTURE_NAMES.task, project: projects[0].id }),
+    [200, 201],
+    'create task',
+  );
   const taskId = task?.id ?? task?.record?.id ?? task?.data?.id;
   if (!taskId) throw new Error(`populate: the task create returned no id: ${JSON.stringify(task).slice(0, 300)}`);
   await expectStatus(await stack.apiAs(adminTok, 'PATCH', `/data/showcase_task/${taskId}`, { title: `${FIXTURE_NAMES.task} — edited` }), [200], 'edit task');

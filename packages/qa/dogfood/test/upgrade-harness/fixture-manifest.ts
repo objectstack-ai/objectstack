@@ -35,8 +35,8 @@ export interface ReshapedTable {
  * go green over an empty table.
  */
 export const RESHAPED_TABLES: readonly ReshapedTable[] = [
-  { table: 'sys_webhook', steps: [1, 5], why: 'the declared webhook mirror rows the registry read replaces; the ceremony deletes them (D10 fate 2)', keyColumns: ['id', 'name', 'organization_id', 'is_active'] },
-  { table: 'sys_http_delivery', steps: [1, 5], why: 'the mirror rows\' delivery tails, re-sourced by the ceremony', keyColumns: ['id', 'webhook_id', 'organization_id'] },
+  { table: 'sys_webhook', steps: [1, 5], why: 'the declared webhook mirror rows the registry read replaces; the ceremony deletes them (D10 fate 2)', keyColumns: ['id', 'name', 'organization_id', 'active'] },
+  { table: 'sys_http_delivery', steps: [1, 5], why: 'the mirror rows\' delivery tails, re-sourced by the ceremony', keyColumns: ['id', 'ref_id', 'organization_id'] },
   { table: 'sys_secret', steps: [2, 5], why: 'loses its organization column; ownership follows the referencing row', keyColumns: ['id', 'organization_id'] },
   { table: 'sys_setting', steps: [2], why: 'the referencing row a secret\'s ownership follows', keyColumns: ['id', 'organization_id'] },
   { table: 'sys_setting_audit', steps: [2, 5], why: 'its global rung moves to a deployment-level sibling', keyColumns: ['id', 'organization_id'] },
