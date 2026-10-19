@@ -13,8 +13,8 @@
  *
  * Two layers, each pinning what the other cannot see:
  *
- *  1. THE ENVELOPE (a bare engine, a recording data double, a grants-resolver
- *     stub): the data context every post-decision node hands the data engine
+ *  1. THE ENVELOPE (a bare engine, a recording node, a grants-resolver stub):
+ *     the data context every post-decision node hands the data engine
  *     is the decider's — their id, positions, permission sets and peers, as
  *     the resolver answers for THEM — with nothing of the submitter's left in
  *     it; the nodes before the decision keep the submitter's; the run's
@@ -50,11 +50,10 @@ import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import { RESUME_AUTHORITY_SERVICE, type ResumeSignal } from '@objectstack/spec/contracts';
-import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { AutomationEngine } from './engine.js';
 import { AutomationServicePlugin } from './plugin.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
-import { registerCrudNodes } from './builtin/crud-nodes.js';
+import { resolveRunDataContext } from './runtime-identity.js';
 
 const silentLogger = (): any => {
   const l: any = { info() {}, warn() {}, error() {}, debug() {} };
@@ -86,30 +85,39 @@ const decided = (branchLabel: 'approve' | 'reject', resumedBy?: string): ResumeS
   [RESUME_AUTHORITY_SERVICE]: true,
 });
 
-const write = (id: string, objectName: string, fields: Record<string, unknown>) => ({
-  id, type: 'update_record', label: id,
-  config: { objectName, filter: { id: { dialect: 'cel', source: 'dealId' } }, fields },
-});
+/**
+ * A post-decision write. On the real stack it is an `update_record`; in the
+ * envelope layer it is `record_identity`, a node that records exactly what a
+ * CRUD node hands ObjectQL as `options.context` — `resolveRunDataContext` of
+ * the run context it was given — so no data-engine double stands in.
+ */
+const write = (id: string, objectName: string, fields: Record<string, unknown>, recorder = false) => (recorder
+  ? { id, type: 'record_identity', label: id }
+  : {
+    id, type: 'update_record', label: id,
+    config: { objectName, filter: { id: { dialect: 'cel', source: 'dealId' } }, fields },
+  });
 
 /**
  * start → submit → gate1 ─approve→ after1 → gate2 ─approve→ after2 → end
  *                        └reject→ rejected → end
  * Every write is a node of its own, so each one's data context is read apart.
  */
-function reviewFlow(name: string, opts: { runAs?: 'system' | 'user'; gate?: string; objectName?: string; approveFields?: Record<string, unknown> } = {}) {
+function reviewFlow(name: string, opts: { runAs?: 'system' | 'user'; gate?: string; objectName?: string; approveFields?: Record<string, unknown>; recorder?: boolean } = {}) {
   const objectName = opts.objectName ?? 'deal';
+  const r = opts.recorder === true;
   return {
     name, label: name, type: 'autolaunched',
     ...(opts.runAs ? { runAs: opts.runAs } : {}),
     variables: [{ name: 'dealId', type: 'text', isInput: true }],
     nodes: [
       { id: 'start', type: 'start', label: 'Start' },
-      write('submit', objectName, { stage: 'submitted' }),
+      write('submit', objectName, { stage: 'submitted' }, r),
       { id: 'gate1', type: opts.gate ?? 'decision_gate', label: 'Manager review' },
-      write('after1', objectName, opts.approveFields ?? { approved_note: 'approved' }),
+      write('after1', objectName, opts.approveFields ?? { approved_note: 'approved' }, r),
       { id: 'gate2', type: 'decision_gate', label: 'Second review' },
-      write('after2', objectName, { stage: 'won' }),
-      write('rejected', objectName, { stage: 'rejected' }),
+      write('after2', objectName, { stage: 'won' }, r),
+      write('rejected', objectName, { stage: 'rejected' }, r),
       { id: 'end', type: 'end', label: 'End' },
     ],
     edges: [
@@ -138,27 +146,26 @@ const GRANTS: Record<string, { positions: string[]; permissions: string[]; org_u
 };
 
 function envelopeHarness(opts: { failFor?: string } = {}) {
-  const writes: Array<{ node: unknown; ctx: any }> = [];
+  const seen = new Map<string, any>();
   const resolved: Array<[string, string | undefined]> = [];
-  const data: any = {
-    async find() { return []; },
-    async findOne(obj: string, q: any) { assertEngineFindOnePredicate(obj, q); return null; },
-    async insert() { return { id: 'x' }; },
-    async update(_obj: string, fields: any, opts2: any) { writes.push({ node: fields, ctx: opts2?.context }); return { id: 'd1' }; },
-    async delete() { return { ok: true }; },
-  };
   const engine = new AutomationEngine(silentLogger(), new InMemorySuspendedRunStore());
-  registerCrudNodes(engine, { logger: silentLogger(), getService: (n: string) => (n === 'data' ? data : undefined) } as any);
   registerGates(engine);
+  engine.registerNodeExecutor({
+    type: 'record_identity',
+    async execute(node, _variables, context) {
+      seen.set(node.id, resolveRunDataContext(context));
+      return { success: true };
+    },
+  });
   engine.setUserGrantsResolver(async (userId, tenantId) => {
     resolved.push([userId, tenantId]);
     if (userId === opts.failFor) throw new Error(`grants store unreachable for ${userId}`);
     const g = GRANTS[userId];
     return g ? { ...g, tenantId } : undefined;
   });
-  /** The data context of the write that set `stage` / `approved_note` to `value`. */
-  const ctxOf = (key: string, value: unknown) => writes.find((w) => (w.node as any)?.[key] === value)?.ctx;
-  return { engine, writes, resolved, ctxOf };
+  /** The data context the named post-decision node would have handed ObjectQL. */
+  const ctxOf = (nodeId: string) => seen.get(nodeId);
+  return { engine, resolved, ctxOf };
 }
 
 const TRIGGER = { userId: 'usr_rep', tenantId: 'org_a', params: { dealId: 'd1' } };
@@ -166,19 +173,19 @@ const TRIGGER = { userId: 'usr_rep', tenantId: 'org_a', params: { dealId: 'd1' }
 describe("after an approval decision a runAs:'user' run's data operations carry the decider's identity and permissions", () => {
   it('approve: the nodes after the decision run as the decider, with the decider\'s own resolved grants', async () => {
     const h = envelopeHarness();
-    h.engine.registerFlow('review', reviewFlow('review') as never);
+    h.engine.registerFlow('review', reviewFlow('review', { recorder: true }) as never);
     const paused = await h.engine.execute('review', { ...TRIGGER } as never);
     expect(paused.status).toBe('paused');
 
     // Before the decision: the submitter, as today.
-    const before = h.ctxOf('stage', 'submitted');
+    const before = h.ctxOf('submit');
     expect(before).toMatchObject({ isSystem: false, userId: 'usr_rep', permissions: ['deal_rep'] });
     expect(before.positions).toContain('sales_rep');
 
     const res = await h.engine.resume(paused.runId!, decided('approve', 'usr_mgr'));
     expect(res.status, JSON.stringify(res)).toBe('paused'); // parked again at gate2
 
-    const after = h.ctxOf('approved_note', 'approved');
+    const after = h.ctxOf('after1');
     expect(after, 'the post-decision write never reached the data engine').toBeTruthy();
     expect(after.isSystem).toBe(false);
     expect(after.userId).toBe('usr_mgr');
@@ -196,34 +203,34 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
 
   it('reject: the reject branch runs as the decider too', async () => {
     const h = envelopeHarness();
-    h.engine.registerFlow('review', reviewFlow('review') as never);
+    h.engine.registerFlow('review', reviewFlow('review', { recorder: true }) as never);
     const paused = await h.engine.execute('review', { ...TRIGGER } as never);
     const res = await h.engine.resume(paused.runId!, decided('reject', 'usr_mgr'));
     expect(res.success, JSON.stringify(res)).toBe(true);
-    expect(h.ctxOf('stage', 'rejected')).toMatchObject({ userId: 'usr_mgr', permissions: ['deal_manager'] });
+    expect(h.ctxOf('rejected')).toMatchObject({ userId: 'usr_mgr', permissions: ['deal_manager'] });
   });
 
   it('a later pause keeps the decider: a resume that names no decider does not fall back to the submitter', async () => {
     const h = envelopeHarness();
-    h.engine.registerFlow('review', reviewFlow('review') as never);
+    h.engine.registerFlow('review', reviewFlow('review', { recorder: true }) as never);
     const paused = await h.engine.execute('review', { ...TRIGGER } as never);
     await h.engine.resume(paused.runId!, decided('approve', 'usr_mgr'));
     // The second gate continued by its owning service with no human decider
     // (an SLA auto-decision's shape).
     const res = await h.engine.resume(paused.runId!, decided('approve'));
     expect(res.success, JSON.stringify(res)).toBe(true);
-    expect(h.ctxOf('stage', 'won')).toMatchObject({ userId: 'usr_mgr', permissions: ['deal_manager'] });
+    expect(h.ctxOf('after2')).toMatchObject({ userId: 'usr_mgr', permissions: ['deal_manager'] });
   });
 
   it('a second decision moves the segment to its own decider, and the run history still names the trigger', async () => {
     const h = envelopeHarness();
-    h.engine.registerFlow('review', reviewFlow('review') as never);
+    h.engine.registerFlow('review', reviewFlow('review', { recorder: true }) as never);
     const paused = await h.engine.execute('review', { ...TRIGGER } as never);
     await h.engine.resume(paused.runId!, decided('approve', 'usr_mgr'));
     const res = await h.engine.resume(paused.runId!, decided('approve', 'usr_dir'));
     expect(res.success, JSON.stringify(res)).toBe(true);
-    expect(h.ctxOf('stage', 'won')).toMatchObject({ userId: 'usr_dir', permissions: ['deal_director'] });
-    expect(h.ctxOf('stage', 'won').org_user_ids).toEqual(GRANTS.usr_dir.org_user_ids);
+    expect(h.ctxOf('after2')).toMatchObject({ userId: 'usr_dir', permissions: ['deal_director'] });
+    expect(h.ctxOf('after2').org_user_ids).toEqual(GRANTS.usr_dir.org_user_ids);
 
     const run = await h.engine.getRun(paused.runId!);
     expect(run?.status).toBe('completed');
@@ -232,10 +239,10 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
 
   it("a decider whose grants cannot be resolved runs on the baseline, never on the submitter's grants", async () => {
     const h = envelopeHarness({ failFor: 'usr_mgr' });
-    h.engine.registerFlow('review', reviewFlow('review') as never);
+    h.engine.registerFlow('review', reviewFlow('review', { recorder: true }) as never);
     const paused = await h.engine.execute('review', { ...TRIGGER } as never);
     await h.engine.resume(paused.runId!, decided('approve', 'usr_mgr'));
-    const after = h.ctxOf('approved_note', 'approved');
+    const after = h.ctxOf('after1');
     expect(after.userId).toBe('usr_mgr');
     expect(after.positions).toEqual([]);
     expect(after.permissions).toEqual([]);
@@ -245,28 +252,28 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
   describe('controls — unchanged', () => {
     it("CONTROL: a runAs:'system' run keeps its elevation and its carried trigger user", async () => {
       const h = envelopeHarness();
-      h.engine.registerFlow('sys_review', reviewFlow('sys_review', { runAs: 'system' }) as never);
+      h.engine.registerFlow('sys_review', reviewFlow('sys_review', { runAs: 'system', recorder: true }) as never);
       const paused = await h.engine.execute('sys_review', { ...TRIGGER } as never);
       await h.engine.resume(paused.runId!, decided('approve', 'usr_mgr'));
-      expect(h.ctxOf('approved_note', 'approved')).toMatchObject({ isSystem: true, userId: 'usr_rep', positions: [], permissions: [] });
+      expect(h.ctxOf('after1')).toMatchObject({ isSystem: true, userId: 'usr_rep', positions: [], permissions: [] });
     });
 
     it('CONTROL: a decider named WITHOUT the owning service\'s marker changes nothing', async () => {
       const h = envelopeHarness();
-      h.engine.registerFlow('open_review', reviewFlow('open_review', { gate: 'open_gate' }) as never);
+      h.engine.registerFlow('open_review', reviewFlow('open_review', { gate: 'open_gate', recorder: true }) as never);
       const paused = await h.engine.execute('open_review', { ...TRIGGER } as never);
       // What an HTTP body can build: no symbol-keyed marker.
       const res = await h.engine.resume(paused.runId!, { branchLabel: 'approve', resumedBy: 'usr_mgr' });
       expect(res.status, JSON.stringify(res)).toBe('paused');
-      expect(h.ctxOf('approved_note', 'approved')).toMatchObject({ userId: 'usr_rep', permissions: ['deal_rep'] });
+      expect(h.ctxOf('after1')).toMatchObject({ userId: 'usr_rep', permissions: ['deal_rep'] });
     });
 
     it('CONTROL: a service resume that names no decider (an SLA auto-decision) keeps the run as it was', async () => {
       const h = envelopeHarness();
-      h.engine.registerFlow('review', reviewFlow('review') as never);
+      h.engine.registerFlow('review', reviewFlow('review', { recorder: true }) as never);
       const paused = await h.engine.execute('review', { ...TRIGGER } as never);
       await h.engine.resume(paused.runId!, decided('approve'));
-      expect(h.ctxOf('approved_note', 'approved')).toMatchObject({ userId: 'usr_rep', permissions: ['deal_rep'] });
+      expect(h.ctxOf('after1')).toMatchObject({ userId: 'usr_rep', permissions: ['deal_rep'] });
     });
 
     it('CONTROL: a flow with no human decision node runs as its trigger user throughout', async () => {
@@ -274,12 +281,12 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
       h.engine.registerFlow('straight', {
         name: 'straight', label: 'straight', type: 'autolaunched',
         variables: [{ name: 'dealId', type: 'text', isInput: true }],
-        nodes: [{ id: 'start', type: 'start', label: 'Start' }, write('w', 'deal', { stage: 'straight' }), { id: 'end', type: 'end', label: 'End' }],
+        nodes: [{ id: 'start', type: 'start', label: 'Start' }, write('w', 'deal', { stage: 'straight' }, true), { id: 'end', type: 'end', label: 'End' }],
         edges: [{ id: 'e1', source: 'start', target: 'w' }, { id: 'e2', source: 'w', target: 'end' }],
       } as never);
       const res = await h.engine.execute('straight', { ...TRIGGER } as never);
       expect(res.success, JSON.stringify(res)).toBe(true);
-      expect(h.ctxOf('stage', 'straight')).toMatchObject({ userId: 'usr_rep', permissions: ['deal_rep'] });
+      expect(h.ctxOf('w')).toMatchObject({ userId: 'usr_rep', permissions: ['deal_rep'] });
     });
   });
 });

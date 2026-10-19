@@ -81,6 +81,15 @@ export default defineConfig({
         find: /^@objectstack\/plugin-auth$/,
         replacement: path.resolve(__dirname, '../../plugins/plugin-auth/src/index.ts'),
       },
+      {
+        // `resume-decider-identity.integration.test.ts` composes record sharing
+        // (`SharingServicePlugin`): a `private` object's write verdict is the
+        // sharing service's, which is what lets a manager's `modifyAllRecords`
+        // reach a deal the rep owns. Read from source for the reason the entries
+        // above give. Same anchored-regex rule.
+        find: /^@objectstack\/plugin-sharing$/,
+        replacement: path.resolve(__dirname, '../../plugins/plugin-sharing/src/index.ts'),
+      },
     ],
   },
 });
