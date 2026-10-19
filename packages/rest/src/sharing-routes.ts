@@ -692,12 +692,6 @@ export function registerSharingRuleEndpoints(this: SharingRuleRouteHost, basePat
                 // refuses a match-all criteria, so the typo surfaces as a
                 // 400 naming the field instead of a silent 201.
                 const input = {
-                    // [ADR-0131 D6 regime O, guarded] The id of the rule this
-                    // write EDITS: a declared rule's projection is listed (and
-                    // saved back) under its name, which is what lets the
-                    // service tell the edit that stores its customised copy
-                    // from a new rule taking its name — refused, 409.
-                    id: body.id,
                     name: body.name,
                     label: body.label,
                     description: body.description,

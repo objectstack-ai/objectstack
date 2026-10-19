@@ -58,6 +58,12 @@ import type { DeclaredSharingRule, DeclaredSharingRuleSource } from './declared-
 const SYSTEM_CTX: ExecutionContext = { isSystem: true, positions: [], permissions: [] };
 
 /**
+ * [ADR-0131 D6 regime C] The `sys_metadata_activation.metadata_type` a declared
+ * sharing rule's switch is recorded under — its registry type.
+ */
+export const SHARING_RULE_ACTIVATION_TYPE = 'sharing_rule';
+
+/**
  * [#15072] The `FieldSchema.name` machine-name grammar, as `packages/spec`
  * spells it inline (`data/field.zod.ts`; `shared/identifiers.zod.ts` records
  * that object and field names are bound there and by no exported schema). A
@@ -179,32 +185,16 @@ export function isDeclaredSharingRule(rule: Pick<SharingRuleRow, 'id' | 'name' |
 }
 
 /**
- * [ADR-0131 D6 regime O, guarded — ruling B′] What {@link SharingRuleService.defineRule}
- * takes: the contract's input plus the id of the rule the write EDITS.
+ * [ADR-0131 D6 regime C — ruling A on the declared sharing rules] A
+ * `sys_sharing_rule` row — new, or renamed — that would take a declared rule's
+ * name.
  *
- * A declared rule's projection lists under `id` = its name
- * ({@link projectDeclaredRule}), so a caller that read it and saves it back —
- * the edit that stores an organization's customised copy, the way to narrow or
- * switch off a vendor rule — sends that id. A write that does not is a NEW rule,
- * and a new rule cannot take a declared rule's name
- * ({@link DeclaredSharingRuleNameConflictError}). Every other write ignores it:
- * the upsert addresses a stored row by its name, as it always has.
- */
-export type DefineSharingRuleWrite = DefineSharingRuleInput & {
-  /** The id of the rule this write edits — a declared rule's projection is addressed by its name. */
-  id?: string;
-};
-
-/**
- * [ADR-0131 D6 regime O, guarded — ruling B′] A NEW `sys_sharing_rule` row, or
- * a rename, that would take a declared rule's name.
- *
- * A row holding a declared rule's name in its scope replaces the declaration
- * there whole (the `held` key in {@link SharingRuleService.declaredRules}) — that is the
- * customisation model, and an edit of the declared rule is how an administrator
- * opts into it. A row that took the name by being CREATED under it (Setup's New,
- * a script, an AI tool) or RENAMED onto it would switch the vendor rule off
- * without anyone having asked to, so every such write is refused before it lands.
+ * A declared sharing rule is read-only and clonable: it is customised by a
+ * CLONE under a new name, with the declared rule switched off through the
+ * activation ledger ({@link SharingRuleService.reconcileDeclaredRuleActivation}).
+ * Same-name shadowing is retired, so no write may take a declared rule's name
+ * — Setup's New, a script, an AI tool, `POST /api/v1/sharing/rules` — and every
+ * such write is refused before it lands.
  *
  * `code` + `status` are the declared envelope the `/data` door and the
  * sharing-rule routes answer at its own status (409 `RESOURCE_CONFLICT`, the
@@ -220,9 +210,9 @@ export class DeclaredSharingRuleNameConflictError extends Error {
     super(
       `sharing rule '${rule.name}' is declared by the application (on object '${rule.object}'), so ` +
         (write === 'create' ? 'a new rule cannot take its name' : 'no rule can be renamed to it') +
-        ` — a row of that name would replace the declared rule. To narrow or switch off '${rule.name}', ` +
-        `edit the declared rule itself: save it with id '${rule.name}', the id the rule list ` +
-        '(GET /api/v1/sharing/rules) gives it, which stores the customised copy. Otherwise choose another name.',
+        `. Declared rules are read-only: to customise '${rule.name}', create your own rule under another name and ` +
+        `switch the declared one off (POST /api/v1/security/_activation/sharing_rule/${rule.name} with ` +
+        '{ "enabled": false }).',
     );
     this.name = 'DeclaredSharingRuleNameConflictError';
     this.rule = rule.name;
@@ -233,7 +223,7 @@ export class DeclaredSharingRuleNameConflictError extends Error {
 export const DECLARED_RULE_NAME_GUARD_PACKAGE = 'plugin-sharing:declared-rule-name-guard';
 
 /**
- * [ruling B′] Bind the guard above on `sys_sharing_rule` writes that do not
+ * [ADR-0131 D6 regime C] Bind the guard above on `sys_sharing_rule` writes that do not
  * come through {@link SharingRuleService.defineRule}: the `/data` door Setup's
  * New and its edit form write through, scripts, imports. An insert of a
  * declared name is refused, and so is an update that CHANGES `name` onto one;
@@ -270,6 +260,43 @@ export function bindDeclaredRuleNameGuard(
   const opts = { object: 'sys_sharing_rule', packageId: DECLARED_RULE_NAME_GUARD_PACKAGE, priority: 100 };
   engine.registerHook('beforeInsert', guard(true), opts);
   engine.registerHook('beforeUpdate', guard(false), opts);
+}
+
+/** Package id of {@link bindSharingRuleActivationReconcile}'s hooks. */
+export const SHARING_RULE_ACTIVATION_RECONCILE_PACKAGE = 'plugin-sharing:sharing-rule-activation-reconcile';
+
+/**
+ * [ADR-0131 D6 regime C] Reconcile a declared rule's grants when its
+ * activation-ledger row is written: the `sys_metadata_activation` write the
+ * activation door (`POST /security/_activation/sharing_rule/:name`) makes is
+ * followed, in the same request, by
+ * {@link SharingRuleService.reconcileDeclaredRuleActivation} — off revokes
+ * every grant carrying the rule's name, on re-derives them. A failure is the
+ * write's failure: it reaches the door, which answers it, rather than leaving a
+ * switched-off rule's grants standing behind a successful flip.
+ */
+export function bindSharingRuleActivationReconcile(
+  engine: {
+    registerHook(event: string, handler: (ctx: any) => any, options?: Record<string, any>): void;
+    unregisterHooksByPackage?(packageId: string): number;
+  },
+  rules: Pick<SharingRuleService, 'reconcileDeclaredRuleActivation'>,
+): void {
+  engine.unregisterHooksByPackage?.(SHARING_RULE_ACTIVATION_RECONCILE_PACKAGE);
+  const handler = async (ctx: any) => {
+    // The update patch carries `{ id, active, package_id }`; type and name come
+    // from the pre-image (`ctx.previous`), an insert's from the row itself.
+    const row = { ...(ctx?.previous ?? {}), ...(ctx?.result ?? ctx?.input?.data ?? {}) };
+    if (row.metadata_type !== SHARING_RULE_ACTIVATION_TYPE || typeof row.name !== 'string' || !row.name) return;
+    await rules.reconcileDeclaredRuleActivation(row.name);
+  };
+  for (const event of ['afterInsert', 'afterUpdate', 'afterDelete']) {
+    engine.registerHook(event, handler, {
+      object: METADATA_ACTIVATION_TABLE,
+      packageId: SHARING_RULE_ACTIVATION_RECONCILE_PACKAGE,
+      priority: 200,
+    });
+  }
 }
 
 /**
@@ -440,6 +467,8 @@ export class SharingRuleService implements ISharingRuleService {
   private declaredScopes: ReadonlyArray<string | null> | null = [null];
   /** [ADR-0131 D2] The held-back sweep under unknown scopes says so once per process. */
   private unknownScopesSweepWarned = false;
+  /** [ADR-0131 D6 regime C] The declaration-over-row conflicts already reported, `name::scope`. */
+  private readonly declarationOverRowReported = new Set<string>();
 
   constructor(opts: SharingRuleServiceOptions) {
     this.engine = opts.engine;
@@ -746,7 +775,7 @@ export class SharingRuleService implements ISharingRuleService {
     );
   }
 
-  async defineRule(input: DefineSharingRuleWrite, context: ExecutionContext): Promise<SharingRuleRow> {
+  async defineRule(input: DefineSharingRuleInput, context: ExecutionContext): Promise<SharingRuleRow> {
     this.assertCanManageRules(context);
     if (!input.name) throw new Error('VALIDATION_FAILED: name is required');
     if (!input.label) throw new Error('VALIDATION_FAILED: label is required');
@@ -847,17 +876,10 @@ export class SharingRuleService implements ISharingRuleService {
       return rowFromRule({ ...row, ...patch });
     }
 
-    // [ADR-0131 D6 regime O, guarded — ruling B′] No row holds this name in the
-    // caller's scope, so the write creates one. Under a declared rule's name that
-    // row replaces the declaration in the scope: allowed only as the EDIT of the
-    // projection the caller reads (it sends the projection's id, the rule's
-    // name), refused as a new rule.
+    // [ADR-0131 D6 regime C] No row holds this name in the caller's scope, so
+    // the write creates one — and no row may take a declared rule's name.
     const declared = await this.declaredRuleNamed(input.name);
-    if (declared) {
-      const editsProjection =
-        input.id === declared.name && (await this.declaredRules(context, { name: declared.name })).length > 0;
-      if (!editsProjection) throw new DeclaredSharingRuleNameConflictError(declared, 'create');
-    }
+    if (declared) throw new DeclaredSharingRuleNameConflictError(declared, 'create');
 
     const newRow: any = {
       id: uid('srule'),
@@ -980,6 +1002,11 @@ export class SharingRuleService implements ISharingRuleService {
     if (filter.name !== undefined) rules = rules.filter((r) => r.name === filter.name);
     const scopes = this.declaredScopesFor(context);
     if (rules.length === 0 || scopes.length === 0) return [];
+    // [ADR-0131 D6 regime C] A declared rule the activation ledger switches off
+    // is served nowhere: the row is deployment-level, so it covers every scope.
+    const off = await this.readSwitchedOffDeclaredRules();
+    if (off.size > 0) rules = rules.filter((r) => !off.has(r.name));
+    if (rules.length === 0) return [];
 
     const single = this.declaredScopes?.includes(null) === true;
     const holders = await this.engine.find('sys_sharing_rule', {
@@ -995,11 +1022,68 @@ export class SharingRuleService implements ISharingRuleService {
     const out: SharingRuleRow[] = [];
     for (const scope of scopes) {
       for (const rule of rules) {
-        if (held.has(single ? rule.name : `${rule.name}::${scope}`)) continue;
+        if (held.has(single ? rule.name : `${rule.name}::${scope}`)) {
+          this.reportDeclarationOverAuthoredRow(rule, scope);
+          continue;
+        }
         out.push(projectDeclaredRule(rule, scope));
       }
     }
     return out;
+  }
+
+  /**
+   * [ADR-0131 D6 regime C] A declaration whose name a `sys_sharing_rule` row
+   * already holds in a scope — a package upgrade that ships a rule an
+   * organization authored under the same name, or a copy customised before
+   * same-name shadowing was retired. The row is never made an overlay of the
+   * declaration: it is that organization's own rule and answers as itself. The
+   * declaration is NOT served in that scope beside it — serving both would
+   * re-grant what a customised copy switched off — and that is said loudly,
+   * once per name and scope per process, with the remedy.
+   */
+  private reportDeclarationOverAuthoredRow(rule: DeclaredSharingRule, scope: string | null): void {
+    const key = `${rule.name}::${scope ?? ''}`;
+    if (this.declarationOverRowReported.has(key)) return;
+    this.declarationOverRowReported.add(key);
+    const message =
+      `[sharing-rule] declared sharing rule '${rule.name}' arrives over a stored sys_sharing_rule row of the same ` +
+      `name${scope ? ` in organization '${scope}'` : ''}, so the declared rule is NOT in force there and grants nothing ` +
+      'while the row keeps answering as its own rule. Remedy: rename the stored rule, which makes it a clone of its ' +
+      `own, and switch the declared rule off (POST /api/v1/security/_activation/sharing_rule/${rule.name} with ` +
+      '{ "enabled": false }) if it must not grant.';
+    const log = this.logger?.error ?? this.logger?.warn;
+    log?.call(this.logger, message, { rule: rule.name, organization: scope });
+  }
+
+  /**
+   * [ADR-0131 D6 regime C] The declared rules the activation ledger
+   * (`sys_metadata_activation`, type `sharing_rule`) switches off. No row means
+   * the declared default — on. Read as {@link readPositionActive} reads the same
+   * ledger: a composition with no ledger object issues no read, and a read that
+   * fails switches nothing off for this pass, never a mass revocation.
+   */
+  private async readSwitchedOffDeclaredRules(): Promise<Set<string>> {
+    const off = new Set<string>();
+    const registry = (this.engine as { registry?: { getObject?: (name: string) => unknown } }).registry;
+    if (typeof registry?.getObject === 'function' && !registry.getObject(METADATA_ACTIVATION_TABLE)) return off;
+    try {
+      const rows = await this.engine.find(METADATA_ACTIVATION_TABLE, {
+        filter: { metadata_type: SHARING_RULE_ACTIVATION_TYPE },
+        fields: ['metadata_type', 'name', 'active'],
+        limit: 100000,
+        context: SYSTEM_CTX,
+      });
+      for (const row of (Array.isArray(rows) ? rows : []) as Array<{ name?: unknown; active?: unknown }>) {
+        if (row.active === false || row.active === 0) off.add(String(row.name));
+      }
+    } catch (err: any) {
+      this.logger?.warn?.(
+        `[sharing-rule] ${METADATA_ACTIVATION_TABLE} read failed — declared sharing rules treated as ACTIVE for this pass`,
+        { error: err?.message },
+      );
+    }
+    return off;
   }
 
   /**
@@ -1019,8 +1103,9 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   /**
-   * [ruling B′] The declared rule named `name`, or `null` — whatever scope it
-   * is served in: a declaration is the application's in every organization, so
+   * [ADR-0131 D6 regime C] The declared rule named `name`, or `null` — whatever
+   * scope it is served in, and whether or not the activation ledger has it
+   * switched off: a declaration is the application's in every organization, so
    * its name is taken in every one ({@link DeclaredSharingRuleNameConflictError}).
    */
   async declaredRuleNamed(name: string): Promise<DeclaredSharingRule | null> {
@@ -1029,34 +1114,30 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   /**
-   * [ADR-0131 D6 regime O — ruling B′] Reconcile a declared rule's name-keyed
-   * grants in the scope a `sys_sharing_rule` write of that name touched, in the
-   * write's own request — not at the next boot's {@link sweepOrphanedRuleGrants}.
+   * [ADR-0131 D6 regime C] Reconcile a declared rule's name-keyed grants with
+   * its activation-ledger row, in the request that wrote the row
+   * ({@link bindSharingRuleActivationReconcile}) — not at the next boot's
+   * {@link sweepOrphanedRuleGrants}.
    *
-   * The scope is the `held` key's ({@link declaredRules}): under `single` the
-   * one organization-less projection, so a row of the name in any organization
-   * answers everywhere; under a wall `organizationId`'s projection alone, so an
-   * organization's customised copy is its own. A row created under the name (the
-   * customised copy) or switched on or off leaves the declaration shadowed there,
-   * and its grants are revoked; a write that leaves no row holding the name
-   * serves the declaration again, and its grants are re-derived. Either way it is
-   * the one-rule pass every reconcile runs ({@link evaluateResolvedRule} over the
-   * {@link ruleGrantScope} of the projection).
-   *
-   * Scopes not known (a failed organization enumeration) reconcile nothing: the
-   * boot sweep's own rule for them — hold every declared grant — applies.
+   * The ledger row is deployment-level (it carries no organization), so the
+   * switch covers every scope the declaration is served in. Switched off, it is
+   * served nowhere ({@link declaredRules}) and every grant carrying its name is
+   * revoked; switched on, each projection's one-rule pass re-derives its grants.
+   * An organization's own rules keep their row ids, so no grant of theirs is
+   * touched.
    */
-  async reconcileDeclaredRuleName(name: string, organizationId: string | null): Promise<void> {
-    const declared = await this.declaredRuleNamed(name);
-    const scopes = this.declaredScopes;
-    if (!declared || scopes === null) return;
-    const single = scopes.includes(null);
-    const scope = single ? null : organizationId;
-    if (!single && (scope == null || !scopes.includes(scope))) return;
-    const served = (await this.declaredRules(SYSTEM_CTX, { name })).find((r) => r.organization_id === scope);
-    if (served) await this.evaluateResolvedRule(served);
-    else await this.purgeGrants(ruleGrantScope(projectDeclaredRule(declared, scope)));
+  async reconcileDeclaredRuleActivation(name: string): Promise<void> {
+    // Unknown scopes serve nothing and judge nothing — the boot sweep's rule for
+    // them (hold every declared grant) applies here too.
+    if (this.declaredScopes === null || !(await this.declaredRuleNamed(name))) return;
+    const served = await this.declaredRules(SYSTEM_CTX, { name });
+    if (served.length === 0) {
+      await this.purgeGrants({ source: 'rule', source_id: name });
+      return;
+    }
+    for (const projection of served) await this.evaluateResolvedRule(projection);
   }
+
 
   async getRule(idOrName: string, context: ExecutionContext): Promise<SharingRuleRow | null> {
     this.assertCanManageRules(context); // [ADR-0111 D6]
@@ -1144,10 +1225,12 @@ export class SharingRuleService implements ISharingRuleService {
       // [ADR-0131 D2] A declared rule is code: there is no row to delete, and
       // its grants follow the declaration. 403, never a silent no-op that
       // reads as success while the rule keeps granting.
-      if ((await this.declaredRules(context, { name: idOrName })).length > 0) {
+      // [ADR-0131 D6 regime C] Switched off or not: its name is the declaration's.
+      if (await this.declaredRuleNamed(idOrName)) {
         throw new Error(
           `PERMISSION_DENIED: sharing rule '${idOrName}' is declared in the application's code, not stored — ` +
-            'it is changed or removed in that declaration, and its grants follow it.',
+            'it is changed or removed in that declaration, and its grants follow it. To stop it granting here, ' +
+            'switch it off through the activation ledger.',
         );
       }
       return;
