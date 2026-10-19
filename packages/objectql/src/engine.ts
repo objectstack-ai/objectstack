@@ -7173,16 +7173,20 @@ export class ObjectQL implements IObjectQLEngine {
     // system write that threaded one. Nothing to resolve; this is the shape the
     // ruling asks every system write to reach.
     if (carriesOrganization(execCtx?.tenantId)) return undefined;
-    // [#13491] Platform-namespace objects are excluded PER OBJECT, not
-    // wholesale. The 2026-08-31 ruling withdrew the blanket
-    // `isPlatformNamespaceObject(object)` exemption that used to stand here:
-    // commit ff08691e6's "an org-less row is defensible for `sys_permission_set`"
-    // inherits per object, and the namespace also holds objects whose org-less
-    // rows are a defect — five instances of that class, all found by hand.
-    // `unclassified` keeps the old exclusion so an unadjudicated object's
-    // behaviour does not move; see `platform-object-tenancy.ts` for the
-    // inventory and why the classification cannot be read off the schema.
-    if (isPlatformObjectOutOfTenantAuditScope(object)) return undefined;
+    // [ADR-0131 D9, C8 stage 8b] Under `single` a platform object has no
+    // exemption: with a tenant column it is in scope like any other object, so
+    // its organization-less system insert is stamped with the Default
+    // Organization or refused below — never left NULL.
+    //
+    // ⚠️ WALLED POSTURES ONLY: #13491's per-object exemption still stands under
+    // `group` / `isolated` (epic ruling record 6259899486 on #15194, item 4).
+    // 18.0 refuses a walled posture at the operator's boot path, and the walled
+    // half of the lift lands in 18.x, after the stages that give the walled
+    // writers an organization of their own. The cut is a POSTURE condition on
+    // purpose — ⛔ never re-narrow it with a per-table list.
+    if (isPlatformObjectOutOfTenantAuditScope(object) && this.resolveEnginePosture() !== 'single') {
+      return undefined;
+    }
     const objectSchema = this._registry.getObject(object) as any;
     // A federated object's schema is the REMOTE's (ADR-0015); the platform's
     // injected column says nothing about it, which is the same reason
