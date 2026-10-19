@@ -555,6 +555,12 @@ the objects whose verdict the tree already states.
 > rung already makes. The settings audit's tenant and user rows stay in `sys_setting_audit` with the
 > organization NOT NULL. This is a ruled decision that a C8 stage builds; it has not shipped.
 
+> **Note (2026-10-19, ruling of record `6259141885` on #24435, letter Q1 A) — `sys_flow_credential` is
+> deployment-level.** The object is to declare `systemFields: { tenant: false }`, so it has no
+> organization column. A credential's ownership follows the flow it belongs to, and a flow is
+> environment metadata (D2, D6). This matches the `sys_secret` note above. This is a ruled decision that
+> a C8 stage builds; it has not shipped.
+
 The #12699 deployment declaration becomes **total**: an object a deployment declares platform-global
 gets **no organization column on that deployment** (the injected-columns plan reads the declaration),
 so Layer 0 and the driver agree by having nothing to scope. This is how the cloud control plane
