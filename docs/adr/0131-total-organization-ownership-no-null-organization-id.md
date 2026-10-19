@@ -431,18 +431,19 @@ spelling moves: the copy-once import, full editability, no upgrade channel and t
   naming the posture: a template import would hand every tenant an editable shared schema. Under `single`
   it is how a customer takes an app and makes it theirs wholesale — Salesforce's unmanaged package.
 
-> **Note (2026-10-19, ruling of record `6257388265` on #24378, letter B′) — `sharing_rule` is charted
-> under regime O, guarded.** A stored `sys_sharing_rule` row carrying a declared rule's name, in its
-> scope, replaces the declared rule **whole**; `active: false` on that row is the switch-off; D10's
-> ownership ceremony deletes only uncustomised mirrors. The row is made by editing the declared rule's
-> projected row in Setup. A sharing rule an organization writes stays its row (D3), so under a wall an
-> organization's overlay is its own and under `single` the one overlay answers everywhere (ruling item 4).
-> Two rules guard the regime. **The guard:** a write that creates a `sys_sharing_rule` row, or renames
-> one, to a declared rule's name in that scope, and is not an edit of the projected row, is refused at
-> the write door with the vendor rule named. **The immediate reconcile:** a same-name write (the
-> customised copy's creation, or its `active` change) reconciles the shadowed declaration's name-keyed
-> grants at once, not at the next boot's `sweepOrphanedRuleGrants`. Both are built by #24421. ⛔ Sharing
-> rules get no activation-ledger type, and same-name rows are not refused as a class.
+> **Note (2026-10-19, ruling of record `6258883445` on #24378, letter A, which supersedes ruling
+> `6257388265`, letter B′) — `sharing_rule` is charted under regime C.** A managed declared sharing rule
+> is read-only and clonable. **Switching it off** is the `active` bit of a `sys_metadata_activation` row
+> of type `sharing_rule`. Like the bit for flows and actions, it is deployment-level and operator-gated
+> under a wall. There is no per-organization switch-off, and organizations still author their own rules
+> (D3). **Customising** is a clone under a new name, plus the base switched off. **Same-name shadowing is
+> retired.** A `sys_sharing_rule` row that takes a declared rule's name in its scope is refused, whether
+> it is new or renamed. A declaration that arrives over an authored row, as in a package upgrade, is
+> reported loudly at load and never becomes an overlay. **D10's ownership ceremony** migrates each
+> existing customised copy to a clone plus the base switched off, and deletes the uncustomised mirrors
+> (fate 2). The promise that a customised copy keeps answering and a switch-off survives redeploys is
+> kept by that migration and the ledger, not by shadowing. This is a ruled decision that #24421 builds;
+> it has not shipped.
 
 Creating one's own item — a new permission set, position, view, flow — is environment authoring
 (Studio, or Setup acting as a metadata editor under `single`), gated as D2/D3 describe and refused to
@@ -520,8 +521,9 @@ configuration; a tenant-less object holds only values an operator must change wi
 > retirement list, and its reserved organization column was dropped before 17.3. It is a member of this
 > paragraph's family. The code follows this reading: the object is declared with
 > `systemFields: { tenant: false }` (`packages/platform-objects/src/system/sys-metadata-activation.object.ts`),
-> and flows, actions, positions and permission sets read it. The clause stays as written, and this note
-> governs how it is read.
+> and flows, actions, positions and permission sets read it. Sharing rules join them as a fifth reader by
+> ruling `6258883445` on #24378, which is ruled and not yet shipped (the D6 note above). The clause stays
+> as written, and this note governs how it is read.
 
 ⚠️ **Membership in this list is decided by the writer, not by the object's name.** The read-side ledger
 grouped `sys_http_delivery`, `sys_inbox_message`, `sys_notification*` and `sys_email` as "plumbing"; the
