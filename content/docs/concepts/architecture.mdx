@@ -242,7 +242,8 @@ export const CustomerView = defineView({
       { field: 'annual_revenue' },
       { field: 'primary_contact' },
     ],
-    filterableFields: ['industry', 'annual_revenue'],
+    // A quick-filter bar above the list: end users pick an industry to narrow the rows.
+    userFilters: { element: 'dropdown', fields: [{ field: 'industry' }] },
     sort: [{ field: 'name', order: 'asc' }],
   },
 });
