@@ -129,18 +129,23 @@ beforeAll(async () => {
   ], SYS);
   // Grace holds the directory too, so an agent acting for her keeps it under
   // the D10 intersection; the plain user holds nothing beyond the baseline.
-  await e.insert('sys_permission_set', {
+  // [C8 stage 8b] The three grant-side rows below carry no organization: under
+  // `single` the engine stamps or refuses such a platform insert (ADR-0131 D9),
+  // and this rig holds no organization, so they are landed straight through the
+  // driver, as the residue an older release left. The explainer reads them as before.
+  const residue = (o: string, row: Record<string, unknown>) => (engine as any).getDriver(o).create(o, row);
+  await residue('sys_permission_set', {
     id: 'ps_pp_directory', name: DIRECTORY_SET.name, label: DIRECTORY_SET.name, organization_id: null, managed_by: 'admin',
     active: true, object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
-  }, SYS);
-  await e.insert('sys_user_permission_set', {
+  });
+  await residue('sys_user_permission_set', {
     id: 'ups_pp_grace', user_id: GRACE, permission_set: DIRECTORY_SET.name,
-  }, SYS);
+  });
   // A position Lin holds because Grace delegated it, until a date far ahead.
-  await e.insert('sys_user_position', {
+  await residue('sys_user_position', {
     id: 'up_pp_lin_delegated', user_id: LIN, position: DELEGATED_POSITION,
     delegated_from: GRACE, valid_until: DELEGATED_UNTIL,
-  }, SYS);
+  });
   await e.insert(BOARD, [{ id: 'b_pp_1', name: 'one' }], SYS);
 
   const sets = [MEMBER_DEFAULT, DIRECTORY_SET, MASKED_DIRECTORY_SET, USERS_ONLY_SET];

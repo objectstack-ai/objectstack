@@ -113,7 +113,10 @@ async function boot(opts: { posture: Posture; sets?: PermissionSet[]; ledger?: R
     type: 'plugin',
     scope: 'system',
     objects: [
-      { name: 'sys_organization', label: 'Organization', fields: { name: { name: 'name', type: 'text' } } },
+      // [C8 stage 8b] better-auth owns the table (`sys-organization.object.ts`): no
+      // injected organization column, so an organization's own insert is not judged
+      // as an organization-less platform write.
+      { name: 'sys_organization', label: 'Organization', managedBy: 'better-auth', fields: { name: { name: 'name', type: 'text' } } },
       opts.ledger ?? LEDGER_NOW,
     ],
   } as never);

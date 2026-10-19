@@ -169,22 +169,27 @@ beforeAll(async () => {
   for (const id of [MEMBER, ADMIN.userId, BLIND_ADMIN.userId, DELEGATE.userId, REFUSED_ADMIN.userId, REFUSED_DELEGATE.userId, EDIT_ONLY_USER]) {
     await e.insert('sys_user', { id, name: id, email: `${id}@example.test` }, SYS);
   }
+  // [C8 stage 8b] The grant-side rows below carry no organization: under `single`
+  // the engine stamps or refuses such a platform insert (ADR-0131 D9), and this rig
+  // holds no organization, so they are landed straight through the driver, as the
+  // residue an older release left. The explainer reads them as before.
+  const residue = (o: string, row: Record<string, unknown>) => (engine as any).getDriver(o).create(o, row);
   // The explained member's grant, as the explainer resolves it: a grant row
   // pointing at a catalogue row; what the set confers is declared in metadata.
-  await e.insert('sys_permission_set', {
+  await residue('sys_permission_set', {
     id: 'ps_ag_member', name: MEMBER_SET.name, label: MEMBER_SET.name, organization_id: null, managed_by: 'admin',
     active: true, object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
-  }, SYS);
-  await e.insert('sys_user_permission_set', {
+  });
+  await residue('sys_user_permission_set', {
     id: 'ups_ag_member', user_id: MEMBER, permission_set: MEMBER_SET.name,
-  }, SYS);
-  await e.insert('sys_permission_set', {
+  });
+  await residue('sys_permission_set', {
     id: 'ps_ag_edit_only', name: EDIT_ONLY_SET.name, label: EDIT_ONLY_SET.name, organization_id: null, managed_by: 'admin',
     active: true, object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
-  }, SYS);
-  await e.insert('sys_user_permission_set', {
+  });
+  await residue('sys_user_permission_set', {
     id: 'ups_ag_edit_only', user_id: EDIT_ONLY_USER, permission_set: EDIT_ONLY_SET.name,
-  }, SYS);
+  });
   await e.insert(BOARD, [
     { id: HIDDEN, name: 'hidden', owner_id: 'usr_ag_owner' },
     { id: OPEN, name: 'open', owner_id: 'usr_ag_owner' },
