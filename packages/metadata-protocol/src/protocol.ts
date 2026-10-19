@@ -12,7 +12,7 @@ import {
     type AnonymousFlowDoorCandidate,
 } from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, objectNotFoundError, recordNotFoundError, relationConditionSites } from '@objectstack/core';
-import { declaredUserMessage, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
+import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, isSandboxOwnFault, resolveTenancyPosture, resolveThrownHttpError, sandboxBusinessMessage } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
 // this question with it is a bug (cloud#1020, #5233) — so the posture, and only
@@ -3630,6 +3630,21 @@ type BatchDataRowResult = BatchOperationResult;
  * boundary. And a producer that merely SPEAKS `DUPLICATE_RECORD` — a hook
  * throwing the registered code without being the engine's class — keeps its
  * own code on the row, the same discrimination the whole-request arm makes.
+ *
+ * ## [#24561] A sandboxed body's refusal is not a server fault in row form
+ *
+ * The `INTERNAL_ERROR` default assumes an error that declared nothing is a
+ * fault. A sandboxed hook body's bare `throw new Error('…')` declares no status
+ * or code either, yet every data door (`/data`, `/createMany`, `/import`)
+ * serves it as a `400` refusal in the body's words, so a batch row said
+ * `INTERNAL_ERROR` beside the doors' `VALIDATION_ERROR` for the same refusal.
+ * {@link sandboxRefusalSentence} is the one test both limbs ask: when it
+ * answers, the `code` limb derives from the `400` the doors serve (the
+ * `declared ?? 400` of `classifyDataError`, `@objectstack/types`). A code or
+ * status the body DID declare still wins, as for every other producer.
+ *
+ * ⛔ `httpStatus` is NOT stamped for it. That limb carries only a status the
+ * producer declared (above), and this body declared none.
  */
 function toRowApiError(err: any, fallback: string): ApiError {
     const thrown = isEngineDuplicateRecordEnvelope(err)
@@ -3638,8 +3653,9 @@ function toRowApiError(err: any, fallback: string): ApiError {
             ? (err.code as ApiError['code'])
             : undefined;
     const { declaredStatus } = resolveThrownHttpError(err);
+    const servedStatus = declaredStatus ?? (sandboxRefusalSentence(err) !== undefined ? 400 : undefined);
     return {
-        code: thrown ?? (declaredStatus !== undefined ? standardErrorCodeForHttpStatus(declaredStatus) : 'INTERNAL_ERROR'),
+        code: thrown ?? (servedStatus !== undefined ? standardErrorCodeForHttpStatus(servedStatus) : 'INTERNAL_ERROR'),
         message: clientFacingRowFailureText(err, fallback),
         ...(declaredStatus !== undefined ? { httpStatus: declaredStatus } : {}),
     };
@@ -3869,6 +3885,29 @@ export function clientFacingFailureText(err: unknown, fallback: string): string 
 }
 
 /**
+ * [#24561] The sentence a sandboxed hook body's business refusal says on a
+ * batch row, or `undefined` when this error is not one.
+ *
+ * The read is `sandboxBusinessMessage` (`@objectstack/types`), the one every
+ * sibling door makes (the import runner, `/data`, `/createMany`), never a
+ * pattern-strip of the wrapper off `.message`. It already declines a body
+ * that CRASHED and the sandbox's own fault. The one condition added here is
+ * the doors' own: a refusal that declared a server-band status is answered as
+ * a fault with its text withheld (`classifyDataError`'s `declared < 500`, read
+ * through the same `declaredHttpStatus`), so it is not a sentence for a row
+ * either.
+ *
+ * Both limbs of {@link toRowApiError} ask this, so the row's `code` and
+ * `message` cannot disagree about whether a refusal was disclosed.
+ */
+function sandboxRefusalSentence(err: unknown): string | undefined {
+    const sentence = sandboxBusinessMessage(err);
+    if (sentence === undefined) return undefined;
+    const declared = declaredHttpStatus(err);
+    return declared === undefined || declared < 500 ? sentence : undefined;
+}
+
+/**
  * [#8502] The per-row `errors[].message` a bulk data write puts on its
  * response — the producer's own refusal when it declared one, otherwise a
  * stable sentence naming the operation.
@@ -3969,18 +4008,43 @@ export function clientFacingFailureText(err: unknown, fallback: string): string 
  * this function owes is one-directional and is pinned in BOTH directions by
  * that integration file: it logs when it WITHHOLDS, and is silent when it
  * does not.
+ *
+ * ## [#24561] A sandboxed body's refusal is read the way every sibling door reads it
+ *
+ * The undeclared hook above is an IN-PROCESS hook. A sandboxed (QuickJS) hook
+ * body is a different producer: its runner puts the body's own sentence on
+ * `SandboxError.innerMessage` for the caller and keeps the
+ * `hook '<name>' threw: …` debug wrapper on `.message` for the log. `/data`,
+ * `/createMany` and `/import` answer that sentence; this sink withheld it as a
+ * fault, so `POST /data/:object/batch` alone said "the reason is in the server
+ * log" for a refusal the hook wrote for the caller. The sentence is now read
+ * through {@link sandboxRefusalSentence} FIRST, which is
+ * `sandboxBusinessMessage` (`@objectstack/types`), the import runner's read.
+ *
+ * And a sandboxed error's `.message` is never quoted, whatever it declared.
+ * It is the wrapper, written for the log: a refusal that declared a 4xx used
+ * to be quoted from there, wrapper and all, and so did a body that CRASHED
+ * with a declared 4xx, which every data door answers `500` with its text
+ * withheld. "Sandboxed" is the import runner's test (a sandbox origin or the
+ * sandbox's own fault). What stays withheld is what the doors withhold: a
+ * crash, the runner's own fault, a refusal that declared a 5xx, and every
+ * non-sandbox error that declared no 4xx.
  */
 function clientFacingRowFailureText(err: unknown, fallback: string): string {
+    const sentence = sandboxRefusalSentence(err);
+    if (sentence !== undefined) return sentence;
     // 500 as the fallback status: an error that declared nothing is a server
     // fault in row form, exactly what `toRowApiError`'s own code limb assumes.
     const { status } = resolveThrownHttpError(err, 500);
-    if (status >= 400 && status < 500) {
+    const sandboxed = isSandboxOrigin(err) || isSandboxOwnFault(err);
+    if (status >= 400 && status < 500 && !sandboxed) {
         const declared = (err as { message?: unknown } | null | undefined)?.message;
         if (typeof declared === 'string' && declared.length > 0) return declared;
     }
     console.warn(
         '[Protocol] Withheld a caught error\'s text from a batch row: the producer declared no '
-        + 'client-facing refusal (no 4xx status or statusCode, and not the VALIDATION_FAILED shape), so its '
+        + 'client-facing refusal (no 4xx status or statusCode, not the VALIDATION_FAILED shape, and not a '
+        + 'sandboxed body\'s business refusal), so its '
         + 'sentence must not be quoted back on response data. The row says: '
         + `"${fallback}" — cause (withheld from the response):`,
         err,
