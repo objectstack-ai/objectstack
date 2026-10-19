@@ -95,6 +95,10 @@ const GATED_AT: Readonly<Record<string, string>> = {
   // shape (`stack.zod.ts`: `z.array(CapabilityDeclarationSchema)`), and that
   // shape is `.strict()`, so both gates reject an undeclared key identically.
   capability: 'capabilities',
+  // [ADR-0131 D6] `sharing_rule` joined the registry as a code-only, CLOSED
+  // shape: the stack authors it at `sharingRules:` as a flat array of the
+  // registry's own `.strict()` `SharingRuleSchema`, so it is gated from the start.
+  sharing_rule: 'sharingRules',
   agent: 'agents',
   tool: 'tools',
   skill: 'skills',
