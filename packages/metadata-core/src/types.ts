@@ -145,7 +145,12 @@ export const MetadataEventSchema = z.object({
   actor: z.string().nullable(),
   message: z.string().optional(),
   ts: z.string(),
-  source: z.string().describe('Origin label: "fs", "studio", "rest", "ai", "git-import", …'),
+  source: z.string().describe(
+    'Which write path produced the event: an open label its writer stamps, not an enum of '
+    + 'authoring surfaces to pick from or match against (e.g. `protocol.saveMetaItem`, '
+    + '`protocol.publishMetaItem`, `migrate-stored`, `sys-metadata-repo` as '
+    + '`SysMetadataRepository`\'s default, or `fs` from `FileSystemRepository`).',
+  ),
 });
 
 export type MetadataEvent = z.infer<typeof MetadataEventSchema>;
