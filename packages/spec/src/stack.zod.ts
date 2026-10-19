@@ -18,7 +18,7 @@ import { StackServerConfigSchema } from './system/stack-server.zod';
 import { StackEmailConfigSchema } from './system/email-config.zod';
 import { StackSmsConfigSchema } from './system/sms-config.zod';
 import { DevLoginSchema } from './system/dev-login.zod';
-import { hasPlatformObjectPrefix } from './system/constants/platform-object-names';
+import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from './system/constants/platform-object-names';
 import { objectStackErrorMap, formatZodError } from './shared/error-map.zod';
 import { strictObject } from './shared/strict-object';
 import { deepEqualAuthored } from './shared/deep-equal';
@@ -4027,6 +4027,11 @@ function validateCrossReferences(
   // `retiredKey()` tombstone on `ListViewSchema`), so there is no reference
   // left to resolve rather than a resolution left unchecked.
 
+  const extendedObjectNames = new Set<string>(
+    (config.objectExtensions ?? [])
+      .map((ext) => (isRecord(ext) ? ext.extend : undefined))
+      .filter((name): name is string => typeof name === 'string' && name.length > 0),
+  );
   if (config.actions) {
     for (const action of config.actions) {
       // Validate flow-type actions reference a defined flow
@@ -4043,8 +4048,24 @@ function validateCrossReferences(
         );
       }
 
-      // Validate action → object references (objectName)
-      if (action.objectName && !objectNames.has(action.objectName)) {
+      // Validate action → object references (objectName). [#24400] Two kinds
+      // of target outside this stack's `objects` are accepted, because this
+      // stack's own metadata says the object exists elsewhere: one it EXTENDS
+      // (`objectExtensions` — the route that shape's `guidance.actions` names,
+      // since an extension cannot carry `actions`), and a KNOWN platform
+      // object (`isPlatformProvidedObjectName`, a named list — not the
+      // prefix, so `sys_organizaton` is still refused here). Such an action
+      // stays at the top level ({@link mergeActionsIntoObjects}), and the
+      // engine's registry attaches it to the object when the object is served;
+      // a target no loaded package registers is refused at boot. Any other
+      // name is refused here: this stack cannot tell another package's object
+      // from a typo.
+      if (
+        action.objectName &&
+        !objectNames.has(action.objectName) &&
+        !extendedObjectNames.has(action.objectName) &&
+        !isPlatformProvidedObjectName(action.objectName)
+      ) {
         errors.push(
           `Action '${action.name}' references object '${action.objectName}' which is not defined in objects.`,
         );
@@ -4173,6 +4194,15 @@ function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
  * array. Actions without `objectName` (global actions) are left in place. The
  * top-level `actions` array is preserved for global access (e.g., platform
  * overview, search).
+ *
+ * [#24400] An action whose `objectName` names an object NOT in this stack — one
+ * this stack extends through `objectExtensions`, or a platform object, the two
+ * cases `validateCrossReferences` accepts — is merged into nothing here,
+ * because this merge cannot see another package's objects. It stays in the
+ * top-level `actions`, registers as a standalone `action` item, and the
+ * engine's `SchemaRegistry` attaches it to the target when the target is
+ * served (`attachBoundActions`, in whichever order the two register). A
+ * target no loaded package registers fails the boot, naming the action.
  *
  * Idempotent over its own output (#14847): a bound action the object already
  * carries BY IDENTITY is not appended again. That is the shape `composeStacks`

@@ -82,7 +82,7 @@ each one by name with the alternative to use instead:
 
 | Key you might reach for | Declare this instead |
 |:---|:---|
-| `actions` | A top-level action with `objectName: '<target>'` — `defineStack()` attaches it to the object |
+| `actions` | A top-level action with `objectName: '<target>'` in the same stack — it stays in the stack's top-level `actions`, and the engine's schema registry attaches it to the target object wherever the object is served, whichever package registers first; a target no loaded package registers fails the boot |
 | `hooks` | A top-level hook bound to the target object |
 | `listViews` | A top-level `view` bound to the target object |
 | `fieldGroups` | Add the fields here and declare the groups on the owning object, or assign a Page for the layout |

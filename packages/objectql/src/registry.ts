@@ -101,6 +101,108 @@ import {
   type PicklistOptionLike,
   type PicklistReference,
 } from './picklist-resolution.js';
+import { standaloneActionOwnerKey, isObjectLessActionKey } from './action-governance.js';
+
+/**
+ * [#24400] A bound top-level action whose target object no package has
+ * registered — see {@link SchemaRegistry.findUnboundActionTargets}.
+ */
+export interface UnboundActionTarget {
+  /** The action's `name`. */
+  action: string;
+  /** The object its `objectName` names. */
+  objectName: string;
+  /** The package that ships the action. */
+  packageId: string | undefined;
+}
+
+/** The boot refusal's error: the `INVALID_METADATA` envelope (ADR-0112) the picklist refusal also answers. */
+export interface UnboundActionTargetError extends Error {
+  code: 'INVALID_METADATA';
+  status: 422;
+  httpStatus: 422;
+}
+
+/**
+ * [#24400] The refusal for bound top-level actions whose target object no
+ * loaded package registers — every one of them, so an author fixes the set in
+ * one pass. `undefined` when there are none.
+ *
+ * Refused rather than dropped: such an action registers, is listed on no
+ * object, and no client renders it — the silent drop the extension guidance
+ * would otherwise lead an author into.
+ */
+export function describeUnboundActionTargets(
+  unbound: readonly UnboundActionTarget[],
+): UnboundActionTargetError | undefined {
+  if (unbound.length === 0) return undefined;
+  const lines = unbound.map(
+    (u) => `action '${u.action}' (${u.packageId ? `package '${u.packageId}'` : 'a registration with no package'}) `
+      + `is bound to object '${u.objectName}'`,
+  );
+  const err = new Error(
+    `${lines.length === 1 ? 'A top-level action is' : `${lines.length} top-level actions are`} bound by `
+    + `\`objectName\` to an object that no loaded package registers: ${lines.join('; ')}. A bound action `
+    + 'is attached to its object when the object is served, so with no such object it would be listed '
+    + 'nowhere. Register the object (in the package or in one it depends on), or correct the '
+    + '`objectName`.',
+  ) as UnboundActionTargetError;
+  err.code = 'INVALID_METADATA';
+  err.status = 422;
+  err.httpStatus = 422;
+  return err;
+}
+
+/** A manifest and its nested `plugins[]`, which register under its package (`registerPlugin`). */
+function manifestAndNestedPlugins(manifest: any): any[] {
+  const plugins = Array.isArray(manifest?.plugins)
+    ? manifest.plugins.filter((p: unknown) => p !== null && typeof p === 'object')
+    : [];
+  return [manifest, ...plugins];
+}
+
+/**
+ * [#24400] The bound top-level actions one manifest brings — its own
+ * `actions` and its nested plugins', each with the object it is bound to —
+ * read BEFORE the manifest registers, by the post-boot install door.
+ */
+export function collectManifestBoundActions(manifest: any, packageId: string | undefined): UnboundActionTarget[] {
+  const out: UnboundActionTarget[] = [];
+  for (const source of manifestAndNestedPlugins(manifest)) {
+    for (const action of Array.isArray(source?.actions) ? source.actions : []) {
+      if (!action || typeof action !== 'object' || typeof action.name !== 'string') continue;
+      const objectName = standaloneActionOwnerKey(action);
+      if (isObjectLessActionKey(objectName)) continue;
+      out.push({ action: action.name, objectName, packageId });
+    }
+  }
+  return out;
+}
+
+/** [#24400] The object names one manifest declares, nested plugins included, in either authored spelling. */
+export function collectManifestObjectNames(manifest: any): string[] {
+  const names: string[] = [];
+  for (const source of manifestAndNestedPlugins(manifest)) {
+    const objects = source?.objects;
+    if (Array.isArray(objects)) {
+      for (const o of objects) if (typeof o?.name === 'string') names.push(o.name);
+    } else if (objects && typeof objects === 'object') {
+      names.push(...Object.keys(objects));
+    }
+  }
+  return names;
+}
+
+/**
+ * Stable sort by `order` (unset reads as `0`), by reference when no action
+ * sets one — the rule `defineStack()` applies to each object's merged actions
+ * (`sortActionsByOrder` in `@objectstack/spec`'s stack builder, which is
+ * internal there), so an attached action sorts exactly as a same-stack one.
+ */
+function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
+  if (!actions.some((a) => a?.order !== undefined)) return actions;
+  return actions.slice().sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0));
+}
 
 /**
  * Reserved namespaces that do not get FQN prefix applied.
@@ -3354,7 +3456,113 @@ export class SchemaRegistry {
     // A picklist-bound field is served with its list's options resolved onto
     // it — here, in the fold every object read and the write door share, so
     // the set a client is offered and the set a write is judged by are one.
-    return this.resolvePicklistFields(merged);
+    return this.finishServedObject(merged);
+  }
+
+  /**
+   * The tail every object read ends in — {@link resolveObject} (through
+   * {@link foldExtendersOntoDefinition}), the code layer, and
+   * {@link foldObjectExtendersOnto}, which the protocol's stored-row and
+   * MetadataService layers run. A step added here reaches every one of them.
+   *
+   * 1. picklist-bound fields get their list's options resolved onto them;
+   * 2. [#24400] the code packages' bound top-level actions are attached
+   *    ({@link attachBoundActions}).
+   */
+  private finishServedObject<T>(body: T): T {
+    return this.attachBoundActions(this.resolvePicklistFields(body));
+  }
+
+  /**
+   * [#24400] Attach to an object the top-level actions that code packages
+   * bind to it by `objectName` — whichever package registered them, and in
+   * either registration order.
+   *
+   * `defineStack()` merges a bound action into its target only when the target
+   * is in the SAME stack (`mergeActionsIntoObjects`). An action bound to an
+   * object another package owns — the route `ObjectExtensionSchema`'s
+   * `guidance.actions` names, since an extension cannot carry `actions` — stays
+   * at the stack's top level and registers here as a standalone `action` item.
+   * The router already dispatched it (`resolveRouteActionDeclaration`, rung 2),
+   * but no served object listed it, so no client rendered it. Attaching it
+   * HERE, at read time, is what makes it order-independent: the object and
+   * the action may register in either order, and the cached fold is dropped
+   * when an action registers ({@link registerItem}) or leaves.
+   *
+   * What attaches: a standalone `action` item a CODE package shipped
+   * (`isCodeArtifactBody` — never a tenant-authored row), whose owner key
+   * ({@link standaloneActionOwnerKey}, the router's own test) is this object's
+   * name, and whose package is not disabled. Attached BY REFERENCE, so the
+   * served entry is the very declaration rung 2 resolves: its
+   * `requiredPermissions`, `requiresMembershipReach` and execution identity
+   * travel with it unchanged, and nothing about the object's own write policy
+   * moves.
+   *
+   * Deduplicated by NAME, which is also what makes the step idempotent over a
+   * body that already carries the action — the same-stack merge's copy, a
+   * MetadataService copy bridged from {@link getAllObjects}, or a stored row
+   * written back from a served read. An action the object already declares
+   * keeps the object's declaration, the precedence the router applies (rung 1
+   * before rung 2). A target no package registers is refused at boot, not
+   * here — see {@link findUnboundActionTargets}.
+   *
+   * Returns `body` by reference when nothing attaches.
+   */
+  private attachBoundActions<T>(body: T): T {
+    if (body === null || typeof body !== 'object') return body;
+    const objectName = (body as { name?: unknown }).name;
+    if (typeof objectName !== 'string' || objectName === '') return body;
+    const collection = this.metadata.get('action');
+    if (!collection || collection.size === 0) return body;
+    const declared = (body as { actions?: unknown }).actions;
+    const base: any[] = Array.isArray(declared) ? declared : [];
+    const present = new Set<unknown>(base.map((action) => action?.name));
+    const fresh: any[] = [];
+    for (const action of this.boundCodeActions()) {
+      if (standaloneActionOwnerKey(action) !== objectName || present.has(action.name)) continue;
+      present.add(action.name);
+      fresh.push(action);
+    }
+    if (fresh.length === 0) return body;
+    return { ...body, actions: sortActionsByOrder([...base, ...fresh]) };
+  }
+
+  /**
+   * [#24400] The standalone `action` items code packages ship that are bound
+   * to an object — the population {@link attachBoundActions} attaches and
+   * {@link findUnboundActionTargets} audits. A disabled package's actions are
+   * left out, as the rest of its items are withheld.
+   */
+  private boundCodeActions(): any[] {
+    const out: any[] = [];
+    for (const action of this.metadata.get('action')?.values() ?? []) {
+      if (!action || typeof action !== 'object' || typeof (action as any).name !== 'string') continue;
+      if (!isCodeArtifactBody(action)) continue;
+      if (isObjectLessActionKey(standaloneActionOwnerKey(action))) continue;
+      if (this.isPackageDisabled((action as any)._packageId)) continue;
+      out.push(action);
+    }
+    return out;
+  }
+
+  /**
+   * [#24400] The bound top-level actions whose target object NO package has
+   * registered — each one an action no served object will ever list, so it is
+   * refused at boot rather than dropped ({@link describeUnboundActionTargets}).
+   *
+   * Only meaningful once every package has registered: the ObjectQL plugin
+   * asks at `kernel:ready` (AGENTS.md, startup registry reads — a target a
+   * later package registers would otherwise read as missing), and judges each
+   * later artifact as it arrives.
+   */
+  findUnboundActionTargets(): UnboundActionTarget[] {
+    const out: UnboundActionTarget[] = [];
+    for (const action of this.boundCodeActions()) {
+      const objectName = standaloneActionOwnerKey(action);
+      if (this.resolveObjectKey(objectName) !== undefined) continue;
+      out.push({ action: action.name, objectName, packageId: action._packageId });
+    }
+    return out;
   }
 
   /**
@@ -3486,9 +3694,9 @@ export class SchemaRegistry {
     // resolved — the same step the fold below ends with — so a body this
     // registry never saw is served in the one shape every other read uses.
     // By reference when no field names a picklist.
-    if (fqn === undefined) return this.resolvePicklistFields(base);
+    if (fqn === undefined) return this.finishServedObject(base);
     const contributors = this.objectContributors.get(fqn);
-    if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return this.resolvePicklistFields(base);
+    if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return this.finishServedObject(base);
     return this.foldExtendersOntoDefinition(
       contributors,
       this.subtractExtenderContributions(contributors, base as unknown as ServiceObject),
@@ -4874,6 +5082,12 @@ export class SchemaRegistry {
 
     collection.set(storageKey, item);
     if (type === 'picklist') this.invalidateAll();
+    // [#24400] A bound action is attached to its target on read
+    // ({@link attachBoundActions}); drop that object's cached fold.
+    if (type === 'action') {
+      const target = standaloneActionOwnerKey(item);
+      if (!isObjectLessActionKey(target)) this.invalidate(target);
+    }
     this.log(`[Registry] Registered ${type}: ${storageKey}`);
   }
 
@@ -4902,7 +5116,8 @@ export class SchemaRegistry {
   unregisterItem(type: string, name: string) {
     // Every resolved object may carry this list's options; the removal below
     // is synchronous, so the next fold re-resolves against the store without it.
-    if (type === 'picklist') this.invalidateAll();
+    // [#24400] …and an object may carry this bound action ({@link attachBoundActions}).
+    if (type === 'picklist' || type === 'action') this.invalidateAll();
     const collection = this.metadata.get(type);
     if (!collection) {
       console.warn(`[Registry] Attempted to unregister non-existent ${type}: ${name}`);
@@ -5063,7 +5278,8 @@ export class SchemaRegistry {
     // The package's `picklistExtensions` leave with it, and every resolved
     // object is re-derived without its lists and its added values.
     const droppedExtensions = this.unregisterPicklistExtensionsByPackage(packageId);
-    if (droppedExtensions || removed.some((r) => r.startsWith('picklist/'))) this.invalidateAll();
+    // [#24400] …and so is every object its bound actions were attached to.
+    if (droppedExtensions || removed.some((r) => r.startsWith('picklist/') || r.startsWith('action/'))) this.invalidateAll();
     return { removed, orphanedOverlays };
   }
 
@@ -5772,6 +5988,9 @@ export class SchemaRegistry {
       pkg.statusChangedAt = new Date().toISOString();
       pkg.updatedAt = new Date().toISOString();
       this.log(`[Registry] Enabled package: ${id}`);
+      // [#24400] A disabled package's bound actions are not attached
+      // ({@link boundCodeActions}), so every object's fold is re-derived.
+      this.invalidateAll();
     }
     return pkg;
   }
@@ -5784,6 +6003,9 @@ export class SchemaRegistry {
       pkg.statusChangedAt = new Date().toISOString();
       pkg.updatedAt = new Date().toISOString();
       this.log(`[Registry] Disabled package: ${id}`);
+      // [#24400] A disabled package's bound actions are not attached
+      // ({@link boundCodeActions}), so every object's fold is re-derived.
+      this.invalidateAll();
     }
     return pkg;
   }
