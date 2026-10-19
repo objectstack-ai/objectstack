@@ -135,7 +135,7 @@
     "qa-media-constraints": {
       "title": "Scratch object qa_media carrying FIELD-level accept/maxSize (plus an extension-only accept field)",
       "why": "The showcase declares accept/maxSize ONLY on action params (examples/app-showcase/src/ui/actions/index.ts,337 — the dialog-widget/ADR-0059 upload-guard lane), never on an object FIELD, so the server-side record-write re-enforcement (field-accept-maxsize-server-enforced) has no stock target: without this recipe every clause of that item is blocked(fixture) on every run. Landing one constrained field in the showcase seeds proper would retire this recipe.",
-      "provenance": "authored from source in the 2026-08-20 scoped scan-functionality sweep (claude/new-session-0pv25p); call shapes copied from qa-scratch-authz (#7670), constraint keys from the FieldSchema declaration — not yet proven by a live run",
+      "provenance": "authored from source in the 2026-08-20 scoped scan-functionality sweep (claude/new-session-0pv25p); call shapes copied from qa-scratch-authz (#7670), constraint keys from the FieldSchema declaration. Proven live by QA run #24560 (framework 5b14b7f3, 2026-10-19): the sequence replayed cleanly and attachments-storage.field-accept-maxsize-server-enforced was scored on it",
       "app": "showcase",
       "requires": [
         "an admin session that holds the `manage_metadata` capability — same gate as qa-scratch-authz (PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1, packages/rest/src/rest-route-ledger.ts)",
@@ -642,7 +642,7 @@
       "title": "The platform lifecycle sweep reaps expired tombstones and abandoned pending uploads WITH byte reclaim; sweep-time re-verification vetoes rather than losing data",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": ["admin (setup access, drives the sweep)"],
@@ -663,7 +663,7 @@
         {
           "clause": "each reap-guard verdict variant behaves per its declared contract: pending → bytes best-effort deleted + row confirmed; deleted with zero references and no field owner → bytes reclaimed BEFORE the row delete; deleted-but-regained-reference → un-tombstoned and vetoed; non-attachments-scope tombstone with the ADR-0104 migration gate closed → kept (vetoed, still tombstoned); byte-delete failure → vetoed and retried next sweep",
           "oracle": "test",
-          "verify": "the dogfood lifecycle describe block ('sys_file orphan lifecycle (ADR-0057 reap guard)') passes; its cases map one-to-one onto these variants",
+          "verify": "the dogfood lifecycle describe block ('sys_file orphan lifecycle (ADR-0057 reap guard)') passes, and so does attachment-lifecycle.test.ts's createSysFileReapGuard block. The dogfood cases cover the pending, zero-reference, regained-reference and abandoned-upload variants; the byte-delete failure (vetoed, retried next sweep) and the non-attachments-scope tombstone with the migration gate closed (vetoed) are pinned only in the unit block — so neither file alone covers every variant",
           "evidence": "test run output"
         },
         {
@@ -697,14 +697,20 @@
         "byte-delete failure (veto, retry next sweep)"
       ],
       "traps": ["stale-dist"],
-      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts" },
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts + packages/services/service-storage/src/attachment-lifecycle.test.ts (its createSysFileReapGuard block: the byte-delete-failure veto and the field-file-with-the-gate-closed veto, the two variants the dogfood block does not drive)" },
       "source": [
         "packages/services/service-storage/src/attachment-lifecycle.ts#createSysFileReapGuard (createSysFileReapGuard — the verdict variants are its documented branch set, incl. the ADR-0104 isCollectionOpen gate re-read each sweep)",
         "packages/services/service-storage/src/objects/system-file.object.ts#deleted_at (lifecycle: ttl deleted_at+30d, retention 7d onlyWhen pending)",
         "docs/plans/release-15.1-test-plan.md §C4 (#2755/#2970)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: reap-guard verdict matrix enumerated from createSysFileReapGuard's source, pinned to the dogfood lifecycle suite; TTL/retention figures from the sys_file lifecycle declaration", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: reap-guard verdict matrix enumerated from createSysFileReapGuard's source, pinned to the dogfood lifecycle suite; TTL/retention figures from the sys_file lifecycle declaration", "ref": "claude/platform-test-checklist-ocwugl" },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "automated.ref and acceptance[0].verify corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24560, attachments-storage.orphan-tombstone-reap acceptance[0]; wave anchor #24579 §3): the verify said the dogfood block's cases map one-to-one onto the five variants, but two of them — the byte-delete-failure veto and the field file kept while the gate is closed — are pinned only by packages/services/service-storage/src/attachment-lifecycle.test.ts (createSysFileReapGuard), which automated.ref did not name. The run ran it singly and scored the clause on both files. automated.ref now names it and the verify says which file pins which variant. No clause changed",
+          "ref": "#PENDING-24579R2"
+        }
       ]
     },
     {
@@ -1080,7 +1086,7 @@
       "title": "Chunked upload integrity on v18: complete with a missing chunk is 409 with details.missingChunks and the session stays in_progress, a re-sent chunk counts once, parallel chunks all record, and an org switch mid-upload answers 409 on chunk and complete, and on progress only once the session's expiry stamp is due",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1090,6 +1096,9 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)"
+        ],
+        "knownGaps": [
+          "acceptance[0] names the org-switch guard among what the pins prove, but none of the three automated.ref files drives a CHUNKED door after an organization switch, so the door-level 409 of acceptance[3] (chunk PUT, chunked complete, a progress read whose expiry stamp is due) is unpinned. The guard is the doors' shared requireStartingOrganization (packages/services/service-storage/src/storage-routes.ts, asking packages/services/service-storage/src/metadata-store.ts#organizationOutOfWriteReach); the one door-level pin of it is the presigned COMMIT door's 409 RESOURCE_CONFLICT in packages/services/service-storage/src/error-envelope.conformance.test.ts, a sibling door, and chunk-part-record-concurrency.test.ts pins only the store-level miss. Score acceptance[0] on chunk accounting and the missing-chunk refusal alone, and do not cite the pins for the org-switch guard. acceptance[3]'s live leg also needs a second organization, which a stock 18.0 boot refuses (403 ORGANIZATION_CREATION_DISABLED, QA runs #24560 / #24558) — the wave's no-second-organization theme, parked on #24579 §2"
         ]
       },
       "steps": [
@@ -1100,7 +1109,7 @@
       ],
       "acceptance": [
         {
-          "clause": "chunk accounting, missing-chunk refusal and the org-switch guard — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "clause": "chunk accounting and the missing-chunk refusal — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). The org-switch guard of acceptance[3] has no chunked-door pin (knownGaps[0])",
           "oracle": "test",
           "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
@@ -1144,6 +1153,12 @@
           "date": "2026-10-19",
           "change": "acceptance[3] re-pointed and the chunk numbering made the API's (QA run #24560 acceptance[3] fail, disposition stale spec; parked on #24579 §1). #24560: \"the progress door (#22218, storage-routes.ts) deliberately keeps answering the uploader from any organization when there is nothing to stamp\" — packages/services/service-storage/src/storage-routes.ts#registerStorageRoutes asks the starting-organization gate on progress only when the expiry stamp is due, so after an org switch progress answers 200 unless the session's expires_at has passed, and 409 then; chunk PUT and complete answer 409 as before. The steps numbered chunks from 1 while the API numbers them from 0 (#24560 and #24558: the server answered missingChunks [1] for the step's \"chunk 2\"), so the steps now number from 0, acceptance[1] expects [1], and the org-switch step names all three calls. The title follows; re-derived from main 5a871e4e41, where every source cited here is byte-identical to the run subject 5b14b7f3",
           "ref": "#24622"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "acceptance[0].clause narrowed to what its pins prove and fixtures.knownGaps added — the out-of-scope §3 note of #24622's round (wave anchor #24579 §3; QA run #24560): none of the three automated.ref pins drives a chunked door after an organization switch, so the door-level 409 acceptance[3] asserts is unpinned. The only door-level pin of the shared guard (storage-routes.ts requireStartingOrganization) is the presigned commit door's, in error-envelope.conformance.test.ts, and chunk-part-record-concurrency.test.ts pins the store-level miss only. acceptance[0] no longer claims the org-switch guard. The knownGap records the unpinned leg, and points at §2 for its live half, which needs a second organization stock 18.0 refuses. acceptance[1]–[3] (#24622) are unchanged",
+          "ref": "#PENDING-24579R2"
         }
       ]
     }
