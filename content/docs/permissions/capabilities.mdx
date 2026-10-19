@@ -217,8 +217,11 @@ and resource `requiredPermissions` match capability names **as strings**. The
 boot writes no row for a capability, declared or curated: both are served by
 the registry. The `sys_capability` object itself is retired and no longer
 registered (ADR-0131 D3): a row an older database still holds is served by no
-route and read by nothing, and `os migrate organization-ownership --apply`
-reports the authored rows and deletes the seeded copies (ADR-0131 D10).
+route and read by nothing. In the 18.x release that carries the upgrade path
+(18.0 does not upgrade a v17 database: see
+[`os migrate organization-ownership`](/docs/deployment/cli#os-migrate-organization-ownership)),
+`os migrate organization-ownership --apply` reports the authored rows and
+deletes the seeded copies (ADR-0131 D10).
 Withdraw a capability by withdrawing the **grant**.
 </Callout>
 

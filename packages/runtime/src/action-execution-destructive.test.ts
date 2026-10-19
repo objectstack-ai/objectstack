@@ -29,7 +29,7 @@
  *   3. `actionAiExposureError` — excluded unless the author set
  *      `ai.exposed: true`
  *
- * All 14 of #7309's identity actions live on `sys_*` objects, are
+ * All 14 of #7309's identity actions lived on `sys_*` objects (13 still do), are
  * `type: 'api'` (not `script`/`flow`, so gate 2 excludes them independently
  * of gate 1), and none declares `ai.exposed`. So today's real declarations
  * are excluded on THREE independent grounds before `actionLooksDestructive`
@@ -136,14 +136,16 @@ describe("actionLooksDestructive: mode:'delete' and variant:'danger' still class
 
 // ---------------------------------------------------------------------------
 // The 6-of-14 flipped identity actions, read off their REAL declarations
-// (not hand-rolled fixtures) — the check the ruling explicitly calls for.
+// (not hand-rolled fixtures) — the check the ruling explicitly calls for. Five
+// are still platform declarations; the sixth, `sys_organization.change_slug`,
+// left the platform object (its door is the cloud orchestrator's, and the
+// composition that mounts it declares it), so it is pinned absent instead.
 // ---------------------------------------------------------------------------
 
-describe('the 6 identity actions #7309 flipped now read not-destructive, off their real declarations', () => {
+describe('the 5 identity actions #7309 flipped that the platform still declares read not-destructive, off their real declarations', () => {
     const flipped: Array<[string, any, any]> = [
         ['sys_user.generate_backup_codes', SysUser, 'generate_backup_codes'],
         ['sys_two_factor.regenerate_backup_codes', SysTwoFactor, 'regenerate_backup_codes'],
-        ['sys_organization.change_slug', SysOrganization, 'change_slug'],
         ['sys_oauth_application.enable_oauth_application', SysOauthApplication, 'enable_oauth_application'],
         ['sys_oauth_application.disable_oauth_application', SysOauthApplication, 'disable_oauth_application'],
         ['sys_oauth_application.rotate_client_secret', SysOauthApplication, 'rotate_client_secret'],
@@ -157,6 +159,11 @@ describe('the 6 identity actions #7309 flipped now read not-destructive, off the
         expect(action.mode).not.toBe('delete');
         expect(action.variant).not.toBe('danger');
         expect(actionLooksDestructive(deps, action)).toBe(false);
+    });
+
+    it('sys_organization no longer declares change_slug, the sixth', () => {
+        expect(flipped).toHaveLength(5);
+        expect((SysOrganization.actions ?? []).map((a: any) => a.name)).not.toContain('change_slug');
     });
 });
 
@@ -268,18 +275,20 @@ describe('the classification IS live-reachable for a shape gate 1/2/3 all pass �
 });
 
 // ---------------------------------------------------------------------------
-// Documents (with real assertions, not narration) why today's 14 identity
+// Documents (with real assertions, not narration) why today's 13 identity
 // actions never reach the classifier via the live MCP path — confirming the
 // #7828 triage comment's "double-gated dead" plus the third gate found while
-// verifying this card (isHeadlessInvokableAction: all 14 are `type: 'api'`).
+// verifying this card (isHeadlessInvokableAction: all 13 are `type: 'api'`).
+// #7309 converted 14; `sys_organization.change_slug` left the platform object.
 // ---------------------------------------------------------------------------
 
-describe('today, all 14 #7309 identity actions are excluded before actionLooksDestructive ever runs on them', () => {
-    // The canonical 14 sites #7309 converted — same set pinned by
+describe('today, all 13 #7309 identity actions the platform still declares are excluded before actionLooksDestructive ever runs on them', () => {
+    // The 13 of the 14 sites #7309 converted that the platform still
+    // declares — same set pinned by
     // `platform-objects/src/identity/action-confirm-one-dialog.test.ts`'s
     // `CONVERTED` map, reproduced here rather than imported so this suite
     // does not depend on that test file's internals staying exported.
-    const allFourteen: Array<[string, string, any, string]> = [
+    const allThirteen: Array<[string, string, any, string]> = [
         ['sys_user.ban_user', 'sys_user', SysUser, 'ban_user'],
         ['sys_user.delete_my_account', 'sys_user', SysUser, 'delete_my_account'],
         ['sys_user.disable_two_factor', 'sys_user', SysUser, 'disable_two_factor'],
@@ -291,26 +300,25 @@ describe('today, all 14 #7309 identity actions are excluded before actionLooksDe
         ['sys_two_factor.disable_two_factor', 'sys_two_factor', SysTwoFactor, 'disable_two_factor'],
         ['sys_two_factor.regenerate_backup_codes', 'sys_two_factor', SysTwoFactor, 'regenerate_backup_codes'],
         ['sys_account.unlink_account', 'sys_account', SysAccount, 'unlink_account'],
-        ['sys_organization.change_slug', 'sys_organization', SysOrganization, 'change_slug'],
         ['sys_sso_provider.delete_sso_provider', 'sys_sso_provider', SysSsoProvider, 'delete_sso_provider'],
         ['sys_team_member.remove_team_member', 'sys_team_member', SysTeamMember, 'remove_team_member'],
     ];
 
-    it('the fixture reproduces all 14 #7309 sites, no more, no fewer', () => {
-        expect(allFourteen).toHaveLength(14);
+    it('the fixture reproduces the 13 #7309 sites the platform still declares, no more, no fewer', () => {
+        expect(allThirteen).toHaveLength(13);
     });
 
-    it.each(allFourteen)('%s is excluded by isSystemObjectName (gate 1: sys_* fail-closed)', (_label, objName) => {
+    it.each(allThirteen)('%s is excluded by isSystemObjectName (gate 1: sys_* fail-closed)', (_label, objName) => {
         expect(isSystemObjectName(objName)).toBe(true);
     });
 
-    it.each(allFourteen)('%s is excluded by isHeadlessInvokableAction (gate 2: type is not script/flow)', (_label, _objName, obj, name) => {
+    it.each(allThirteen)('%s is excluded by isHeadlessInvokableAction (gate 2: type is not script/flow)', (_label, _objName, obj, name) => {
         const action = actionByName(obj, name);
         expect(action.type).toBe('api');
         expect(isHeadlessInvokableAction(deps, action, true)).toBe(false);
     });
 
-    it.each(allFourteen)('%s is excluded by actionAiExposureError (gate 3: ai.exposed not set)', (_label, _objName, obj, name) => {
+    it.each(allThirteen)('%s is excluded by actionAiExposureError (gate 3: ai.exposed not set)', (_label, _objName, obj, name) => {
         const action = actionByName(obj, name);
         expect(action.ai?.exposed).not.toBe(true);
         // Matches the real call site (domains/mcp.ts listActions): 2-arg, no
