@@ -277,7 +277,7 @@ import type * as M189 from './system/fate-supplement.zod.js';
 import type * as M190 from './kernel/execution-context.zod.js';
 
 // ---------------------------------------------------------------------------
-// 788 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 789 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1703,7 +1703,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 788 isomorphic pins', () => {
+  it('still declares all 789 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2546,7 +2546,13 @@ describe('ADR-0122 type-alias convention', () => {
     // 789 -> 788 is #24162: `RecordJsonProps` left with the retired
     // `record:json` element, so its pin (Iso_ui_component__RecordJsonProps)
     // left with it. -1.
-    expect(pins).toHaveLength(788);
+    //
+    // 788 -> 789 is #24395: `MetadataAuthoringSurfaceSchema`
+    // (`api/protocol.zod.ts`), the closed authoring-surface set a save states
+    // and `draftChanges[].by` reports — a plain string enum, so it is pinned
+    // here (Iso_api_protocol__MetadataAuthoringSurfaceSchema) rather than
+    // given a `…Parsed` synonym. +1 added.
+    expect(pins).toHaveLength(789);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
