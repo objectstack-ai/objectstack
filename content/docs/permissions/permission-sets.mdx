@@ -377,7 +377,7 @@ goes through the metadata door (`PUT` or `DELETE /api/v1/meta/permission/:name`)
 which requires `manage_metadata` — and, under a `group` or `isolated` tenancy
 posture, the platform operator. This has three author-visible consequences:
 
-- **A set shipped in code cannot be edited in the environment.** That is a set
+- **A set shipped in code cannot be edited in this system.** That is a set
   an installed package declares (a `*.permission.ts` file, a stack's
   `permissionSets`) or a platform default such as `member_default`. Editing it
   through Setup or the metadata API answers `403 NOT_OVERRIDABLE` and stores
@@ -392,7 +392,7 @@ posture, the platform operator. This has three author-visible consequences:
   rename. Clone the set to a new name instead.
 - **A delete depends on where the definition lives.** A set authored in this
   system is removed. A set that ships with an installed package/app cannot
-  be removed from the environment: its definition stays served from the
+  be removed from this system: its definition stays served from the
   package. Uninstall the owning package to remove a packaged set entirely.
 
 An older database keeps the `sys_permission_set` table and its rows, and

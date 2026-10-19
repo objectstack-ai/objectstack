@@ -265,8 +265,7 @@ creation); `client.auth.bootstrapStatus()` is the SDK method that builds it.
 
 It **fails open**: if no data engine is wired, or the count query throws, it
 answers `{ "hasOwner": true }` so a client falls through to the ordinary login
-flow rather than offering to create an owner on an environment that may already
-have one.
+flow rather than offering to create an owner when one may already exist.
 
 <Callout type="warn">
 This route is unauthenticated, so treat `hasOwner: false` as a hint to render a
