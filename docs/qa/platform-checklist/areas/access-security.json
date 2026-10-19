@@ -3534,7 +3534,7 @@
         {
           "clause": "install-local of an inline manifest (a `{ manifest }` body) whose package redeclares a catalog name → 422 PLUGIN_REGISTER_FAILED whose message names each conflicting name and its holder, and nothing is recorded as installed",
           "oracle": "api",
-          "verify": "status + error.code + error.message: every redeclared permission-set / position name appears in the message with the package or environment that already holds it; GET /api/v1/packages lists the same packages before and after. ⛔ No `conflicts[]` is expected on this door: it answers its own registered PLUGIN_REGISTER_FAILED and interpolates only the register error's message (that route's entry in packages/spec/src/api/error-code-ledger.zod.ts); the structured `conflicts` ride the thrown SecurityCatalogNameConflictError, which the boot-refusal pins in automated.ref assert",
+          "verify": "status + error.code + error.message: every redeclared catalog name (permission set, position or capability) appears in the message with the package, environment or built-in that already holds it; GET /api/v1/packages lists the same packages before and after. ⛔ No `conflicts[]` is expected on this door: it answers its own registered PLUGIN_REGISTER_FAILED and interpolates only the register error's message (that route's entry in packages/spec/src/api/error-code-ledger.zod.ts); the structured `conflicts` ride the thrown SecurityCatalogNameConflictError, which the boot-refusal pins in automated.ref assert",
           "evidence": "the refusal body + the package list before and after"
         },
         {
