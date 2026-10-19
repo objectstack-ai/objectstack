@@ -1207,10 +1207,13 @@ const RLS_UNCOMPILABLE_DROP =
   'CLOSED, which is why such a policy is survivable; it reads as an authorization and behaves as a refusal.';
 
 /**
- * What a dropped `using` does. The INSERT half: the ADR-0058 D4 write check
- * takes its set from `writeCheckPolicies`, so when no applicable policy for the
- * insert declares a `check`, every applicable policy's `using` is compiled as
- * its check. Measured through the real `SecurityPlugin` on an `insert` and an
+ * What a dropped `using` does, for both sources a policy has: a permission
+ * set's `rowLevelSecurity[]` and an object's `defaultRowScope` (#24452), which
+ * the security plugin's row-policy collection applies alone, only when the
+ * held sets carry no row policy for the object and operation. The INSERT
+ * half: the ADR-0058 D4 write check takes its set from `writeCheckPolicies`,
+ * so when no applicable policy for the insert declares a `check`, every
+ * applicable policy's `using` is compiled as its check. Measured through the real `SecurityPlugin` on an `insert` and an
  * `all` policy, for all three kinds of drop (an unlowerable shape, an
  * unresolved `current_user.*`, an undeclared column): with nothing else
  * compiling in that set, every single-record insert is refused (403); with
@@ -1221,8 +1224,13 @@ const RLS_DROPPED_USING =
   'A dropped `using`: when it is the only applicable policy for that object and operation, `compileFilter` ' +
   'returns the `RLS_DENY_FILTER` sentinel instead, which is AND-ed onto the where clause, so every select / ' +
   'update / delete on the object matches ZERO rows and the object disappears for every holder of the ' +
-  'permission set. When other policies also apply, this one just vanishes from the OR and grants none of the ' +
-  'access it appears to. On an `insert` or `all` policy the same `using` is also the single-record INSERT check ' +
+  'permission set that carries the policy. An object\'s `defaultRowScope` is applied only when the caller\'s ' +
+  'permission sets carry no row policy for that object and operation, so it is always the only applicable ' +
+  'policy: a dropped default makes the object disappear for every caller it applies to, and a caller whose ' +
+  'permission set carries its own row policy for the object is not affected. When other policies also apply, ' +
+  'which only a permission set\'s policy can meet, this one just vanishes from the OR and grants none of the ' +
+  'access it appears to. ' +
+  'On an `insert` or `all` policy the same `using` is also the single-record INSERT check ' +
   'whenever no applicable policy for the insert declares a `check` (ADR-0058 D4): when nothing else in that set ' +
   'compiles, every single-record insert it governs fails with `PermissionDeniedError`; when another policy\'s ' +
   '`using` compiles, that one alone decides the insert.';
@@ -1324,7 +1332,9 @@ const RLS_PREDICATE_UNENFORCEABLE_EXPLANATION: RuleExplanation = {
     'An RLS predicate is compiled to a row filter (ADR-0056 D4), so only the pushdown subset lowers. A ' +
       'function call (`size(…)`, `has(…)`), arithmetic, a ternary, a related-record path, a list literal under ' +
       '`==` / `!=` or the bare `current_user` root used as a value is outside it, and the compiler refuses it. ' +
-      'The finding quotes the verdict half of the compiler\'s own refusal.',
+      'The finding quotes the verdict half of the compiler\'s own refusal. It judges both places a row policy ' +
+      'is declared, which the runtime compiles alike: a permission set\'s `rowLevelSecurity` entry and an ' +
+      'object\'s `defaultRowScope`, whose `path` starts at `objects[N].defaultRowScope`.',
     'The lowerable subset is: `==` `!=` `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, and the ' +
       'string methods `startsWith` / `endsWith` / `contains` — over SINGLE-column field paths (ADR-0058 D2), ' +
       'compared against a literal or a `current_user.*` value. Three traps in particular: (1) a function call — ' +
