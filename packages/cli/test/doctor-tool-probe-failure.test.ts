@@ -65,9 +65,13 @@ function stubDir(label: string, name: string, body: string[], mode = 0o755): str
   return dir;
 }
 
-/** A stub that writes `text` to stderr and exits `code`. */
+/**
+ * A stub that writes `text` to stderr and exits `code`. Shell builtins only:
+ * the stub's `PATH` is its own directory, so `cat` and friends are absent.
+ */
 function failing(text: string, code: number): string[] {
-  return ["cat >&2 <<'STUB_EOF'", text, 'STUB_EOF', `exit ${code}`];
+  const quote = (line: string): string => `'${line.replace(/'/g, `'\\''`)}'`;
+  return [...text.split('\n').map((line) => `printf '%s\\n' ${quote(line)} >&2`), `exit ${code}`];
 }
 
 beforeAll(() => {
