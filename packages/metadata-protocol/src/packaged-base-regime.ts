@@ -205,7 +205,7 @@ export const PACKAGED_BASE_REGIME: Readonly<Record<string, PackagedBaseRegimeRow
     sharing_rule: {
         regime: 'C',
         routes: {
-            clone: 'POST /api/v1/sharing/rules, a copy of it as an organization rule',
+            clone: 'POST /api/v1/sharing/rules',
             switchOff: 'POST /api/v1/security/_activation/sharing_rule/:name, body {enabled: false}; '
                 + 'operator-only where one install serves several organizations',
         },
@@ -320,8 +320,8 @@ export function isOriginGatedType(type: string): boolean {
  * (`truncateClientMessage`, `packages/rest/src/error-response.ts`), past which
  * the tail is truncated. Characters outside the item's name, save / removal:
  * `flow` 395 / 388, `action` 349 / 342, `permission` 301 / 294,
- * `datasource` 192 / 193 — so a name of up to 88 characters arrives whole for
- * every row (pinned). [#21944] A row's `hostOwned` name is a fixed, short name
+ * `datasource` 192 / 193, `sharing_rule` 390 / 383 — so a name of up to 88
+ * characters arrives whole for every row (pinned). [#21944] A row's `hostOwned` name is a fixed, short name
  * with its own remedy (`default`: under 300 characters whole).
  */
 export function packagedBaseRegimeSentence(

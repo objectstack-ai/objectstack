@@ -17,8 +17,10 @@
  *
  * What is pinned, on both kernel shapes:
  *  - a create of a new name — `403` `NOT_CREATABLE`, in publish and draft mode,
- *    no row, nothing registered, and the refusal names the organization door;
+ *    no row, nothing registered;
  *  - a write over a declared rule's name — `403` `NOT_OVERRIDABLE`, no row;
+ *  - both refusals name the organization door and the activation ledger's
+ *    switch, under the REST door's 500-character message bound;
  *  - the listing — `allowRuntimeCreate: false`, `allowEnvironmentOverlay: false`;
  *  - the control: a new position is still created (`200`, a row), so the
  *    refusal is the type's, not the door's.
@@ -51,6 +53,9 @@ const DECLARED_RULE = {
 
 const strip = (item: Record<string, unknown>) =>
     Object.fromEntries(Object.entries(item).filter(([k]) => !k.startsWith('_')));
+
+/** The two routes a refusal names: the organization door, and the activation ledger's switch. */
+const SANCTIONED_ROUTES = ['POST /api/v1/sharing/rules', 'POST /api/v1/security/_activation/sharing_rule/:name'];
 
 /** A spec-valid rule under a name nothing declares — the probe the gap was measured with. */
 const PROBE_RULE = { ...strip(DECLARED_RULE), name: 'probe_meta_rule', label: 'Probe' };
@@ -230,8 +235,12 @@ describe('[ADR-0131 D6] the dispatcher /meta door authors no sharing rule', () =
                 ));
                 expect(res.status, JSON.stringify(res.body)).toBe(403);
                 expect(res.body?.error?.code).toBe('NOT_CREATABLE');
-                // The prescription names the sanctioned door, not a source glob.
-                expect(String(res.body?.error?.message)).toContain('POST /api/v1/sharing/rules');
+                // The prescription names both sanctioned paths, not a source glob, and
+                // arrives whole through the REST door, which truncates a message of
+                // 500 characters or more (`truncateClientMessage`).
+                const message = String(res.body?.error?.message);
+                for (const route of SANCTIONED_ROUTES) expect(message).toContain(route);
+                expect(message.length).toBeLessThan(500);
                 expect(rowsOf(engine, 'sharing_rule', PROBE_RULE.name)).toEqual([]);
                 expect(engine.runtimeItem('sharing_rule', PROBE_RULE.name)).toBeUndefined();
             });
@@ -244,6 +253,9 @@ describe('[ADR-0131 D6] the dispatcher /meta door authors no sharing rule', () =
             ));
             expect(res.status, JSON.stringify(res.body)).toBe(403);
             expect(res.body?.error?.code).toBe('NOT_OVERRIDABLE');
+            const message = String(res.body?.error?.message);
+            for (const route of SANCTIONED_ROUTES) expect(message).toContain(route);
+            expect(message.length).toBeLessThan(500);
             expect(rowsOf(engine, 'sharing_rule', DECLARED_RULE.name)).toEqual([]);
         });
 
