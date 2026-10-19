@@ -114,6 +114,15 @@ async function bootServed(projectDir: string, dbFile: string): Promise<void> {
   await kernel.use(new PlatformObjectsPlugin() as any);
   await runtime.start();
   await kernel.shutdown();
+  // This boot of THIS tree created the store from empty, so it wrote this
+  // release's birth marker; the database it stands in for (an earlier
+  // release's) carries none, and the cases below read the marker's absence.
+  const db = new Database(dbFile);
+  try {
+    db.prepare('DELETE FROM sys_migration WHERE id = ?').run(ORGANIZATION_OWNERSHIP_MIGRATION_ID);
+  } finally {
+    db.close();
+  }
 }
 
 interface Prepared {

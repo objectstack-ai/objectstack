@@ -193,6 +193,15 @@ async function bootV17(dbFile: string): Promise<void> {
   await kernel.use(osgcObjectsPlugin() as any);
   await runtime.start();
   await kernel.shutdown();
+  // This boot of THIS tree created the store from empty, so it wrote this
+  // release's birth marker; the v17 database it stands in for carries none,
+  // and the drop gate below reads that absence.
+  const db = new Database(dbFile);
+  try {
+    db.prepare(`DELETE FROM sys_migration WHERE id = 'adr-0131-organization-ownership'`).run();
+  } finally {
+    db.close();
+  }
 }
 
 /** A supplement row: `column-drop` for `drop`, `report` for every other host object. */
