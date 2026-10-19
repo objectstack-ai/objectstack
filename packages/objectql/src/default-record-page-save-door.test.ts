@@ -53,6 +53,8 @@ const sysMetadataObject: ServiceObject = {
         // it, and an `email_template` write keys its row by it.
         bundle_member: { name: 'bundle_member', label: 'Bundle Member', type: 'text' as const, maxLength: 100 },
         metadata: { name: 'metadata', label: 'Body', type: 'textarea' as const },
+        // [#24395] The draft row's per-key provenance, written by every draft save.
+        draft_changes: { name: 'draft_changes', label: 'Draft Changes', type: 'textarea' as const },
         checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
         state: { name: 'state', label: 'State', type: 'text' as const },
         version: { name: 'version', label: 'Version', type: 'number' as const },

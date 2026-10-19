@@ -3076,6 +3076,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "メタデータ",
         help: "JSON シリアライズされたメタデータペイロード"
       },
+      draft_changes: {
+        label: "下書きの変更",
+        help: "保留中の下書きのキー単位の出所（JSON シリアライズ）：各キーパスを最後に変更したサーフェス（copilot、studio、api）、操作者、日時。公開済みの行では null。"
+      },
       extends: {
         label: "継承元"
       },

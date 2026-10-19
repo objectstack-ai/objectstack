@@ -52,7 +52,7 @@ import {
 // The posture vocabulary, read from the package that DEFINES it (#5359) — the
 // boot gate's fix list enumerates the accepted values, and a second literal
 // list would be free to drift the day a posture is added.
-import { TENANCY_POSTURES, type TenancyPosture } from '@objectstack/spec/security';
+import { TENANCY_POSTURES, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 // #17329 — the PUBLISHED settlement contract, READ rather than re-derived, so
 // the `objectstack:seed-settled` announcement below asks the one component that
 // knows whether this boot's seeding has come to rest. The service is registered
@@ -2407,6 +2407,20 @@ export default class Serve extends Command {
       process.exit(1);
     }
     const tenancyPosture = postureGate.posture;
+
+    // ── 18.0: the `single` posture only (ruling record 6259698357) ─────
+    // A walled posture is refused here, at the same point and in the same
+    // shape as an unrecognized one: before a config is read, a plugin is
+    // mounted or anything is written. `os dev` and `os start` both boot
+    // through this command, so this is every operator's boot. Kernel-level
+    // boots (`@objectstack/verify`'s `bootStack`, the standalone stack)
+    // never pass here, which is what keeps the walled test suites running for
+    // the 18.x release that lifts this. No flag and no variable skips it.
+    const walledRefusal = walledPostureRefusal(tenancyPosture);
+    if (walledRefusal) {
+      console.error(walledRefusal);
+      process.exit(1);
+    }
 
     // [#22371] `--dev`, or NODE_ENV exactly `development` — `isDevelopmentBoot`
     // (`@objectstack/core`), the reading the auth secret's development fallback
@@ -6237,6 +6251,39 @@ export function resolveTenancyPostureOrRefusal(): TenancyPostureGateVerdict {
   }
 }
 
+
+/**
+ * The FATAL text `os serve` refuses a walled posture with in 18.0, or `null`
+ * for a posture 18.0 supports (ruling record 6259698357 on the v18 epic).
+ *
+ * 18.0 supports the `single` posture only, on fresh installs. The walled
+ * postures (`group`, `isolated`) arrive in an 18.x release: under `single`
+ * every system insert is stamped with the Default Organization, and the
+ * walled-only prerequisites were deferred. The code is the standard
+ * `NOT_IMPLEMENTED` (ADR-0112). The walled set is read off the spec's posture
+ * vocabulary (`postureEnforcesWall`), never listed here.
+ */
+export function walledPostureRefusal(posture: TenancyPosture): string | null {
+  if (!postureEnforcesWall(posture)) return null;
+  const walled = TENANCY_POSTURES.filter(postureEnforcesWall).join(', ');
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {};
+  const raw = env.OS_TENANCY_POSTURE;
+  const source = raw != null && String(raw).trim() !== ''
+    ? `OS_TENANCY_POSTURE=${JSON.stringify(String(raw))}`
+    : `OS_MULTI_ORG_ENABLED=${JSON.stringify(String(env.OS_MULTI_ORG_ENABLED ?? ''))} (OS_TENANCY_POSTURE is unset)`;
+  return chalk.red(
+    `\n  ✖ FATAL: tenancy posture '${posture}' is not supported in 18.0 (NOT_IMPLEMENTED).\n`
+    + `    Refusing to boot. 18.0 supports the 'single' posture only, on fresh installs; the walled\n`
+    + `    postures (${walled}) arrive in an 18.x release.\n\n`
+    + '    No config has been loaded, no plugin has been mounted, and the HTTP server was\n'
+    + '    never started — this deployment has not served a single request.\n\n'
+    + '    Fix one of:\n'
+    + '      • set OS_TENANCY_POSTURE=single, or unset both OS_TENANCY_POSTURE and OS_MULTI_ORG_ENABLED;\n'
+    + '      • keep this deployment on a 17.x release until the 18.x release that carries walled postures.\n\n'
+    + `    The posture was read from ${source}, in the process environment or a .env file\n`
+    + '    dotenv-flow loaded for this mode.\n',
+  );
+}
 
 /**
  * The diagnosis the optional i18n service load prints when it fails — a

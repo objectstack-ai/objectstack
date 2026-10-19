@@ -159,60 +159,58 @@
       "note": "ADR-0055 high-risk class (sharing): the `controlled_by_parent` value derives a detail object's access from its master — the security layer injects `masterFK IN (accessible master ids)` on reads and requires master edit-access on by-id writes. The proof asserts a member who cannot read the master can neither read nor by-id-write the detail, and is not over-blocked on a master they own. 2026-08-28: RE-ANCHORED (commit 93ea19bca) and REPOINTED — `sharing-service.ts:54` had rotted onto a blank line between an interface and a `makeShareId` docblock. Re-closed by hand against c459da6bc."
     },
     "defaultRowScope": {
-      "status": "planned",
-      "verifiedAt": "2026-10-18",
-      "evidence": "packages/spec/src/data/object.zod.ts#ObjectSchemaBase (declares the key, optional, typed as the default-row-scope shape); packages/spec/src/security/rls.zod.ts#DefaultRowScopeSchema (the shape: RowLevelSecurityPolicySchema's own members without `object`, with the same two rules, refineRowLevelSecurityPolicy)",
-      "authorWarn": true,
-      "authorHint": "Not applied yet: no server reads `defaultRowScope` in this release, so it filters no rows. Until the security plugin's row-policy collection applies it, restrict rows with a permission set's `rowLevelSecurity` policy.",
-      "note": "PLANNED, the reader pending — #24164 ruling E′ item 1 (spec half, #24338). The one reader is to be plugin-security's `collectRLSPolicies` (packages/plugins/plugin-security/src/security-plugin.ts), carried by objectstack-ai/objectstack#24340: measured before the key existed, `git grep defaultRowScope` over the whole tree at origin/main b2e78701f7 returns zero hits (control: `sharingModel` under packages/plugins hits), and objectui at the `.objectui-sha` pin 0707b4ae37 returns zero too (same control hits), so this declaration adds no reader and an object declaring the key is filtered exactly as before. The writers are to be the platform identity objects (packages/platform-objects), carried by objectstack-ai/objectstack#24341, which is blocked on this key alone, so its declarations can land before the reader does; until #24340 lands they too filter nothing. Flip to `live` on the commit that lands #24340, citing `collectRLSPolicies` as the evidence and its explain source as the second read point, and drop `authorWarn` / `authorHint` in that same edit: a warned `live` row reds this gate. Drilled into `children` rather than deferred to `permission/rowLevelSecurity`: every member is RowLevelSecurityPolicySchema's own instance, but the key sets differ (`object`, `priority` and `tags` are left out here), so the gate's equality check would refuse the deferral; each child is `planned` for the same reason as the container, and only the container carries `authorWarn`, so authoring the key warns once. Flip the children with the container.",
+      "status": "live",
+      "verifiedAt": "2026-10-19",
+      "evidence": "packages/plugins/plugin-security/src/security-plugin.ts#collectRLSPolicies (when the held sets' collection for the object and operation is empty, reads the registry schema's `defaultRowScope` and applies it as one policy through the same ADR-0105 D3 admission and `getApplicablePolicies` filter; the read door's Layer 1, the by-id pre-image gate, the bulk write filter, the post-image check, `checkAuthoredRowWrite` and explain all compose from this one collection); packages/plugins/plugin-security/src/object-default-row-scope.ts#objectDefaultRowScopePolicy (builds that policy, `object` implied, marked by identity); packages/plugins/plugin-security/src/explain-engine.ts#objectDefaultRowScopeSource (the second read point: explain names the applied default as the object's declaration, never a permission set)",
+      "note": "LIVE since #24340 (#24164 ruling E′ item 2), flipped from `planned` with `authorWarn` / `authorHint` dropped in the same edit, as the row's own note asked. The reader is plugin-security's `collectRLSPolicies`: when no held set carries a row policy for the object and operation (the collection's own emptiness, so a held `'*'` policy counts and a policy for another operation does not), the object's default applies; an authored set policy is used as authored; a superuser-bypass principal never reaches the collection; an object with no default collects as before. A `using` that does not lower fails closed exactly as an authored policy's does (the same compiler). Pinned through the real SecurityPlugin + ObjectQL over SqlDriver in packages/plugins/plugin-security/src/object-default-row-scope.test.ts, and ablated there: removing the branch turns every default-dependent pin red and leaves the controls green. The writers are still to be the platform identity objects (#24341); no object in this tree declares the key yet. Drilled into `children` rather than deferred to `permission/rowLevelSecurity` because the key sets differ (`object`, `priority` and `tags` are left out here), so the gate's equality check would refuse the deferral; the children are flipped with the container.",
       "children": {
         "name": {
-          "status": "planned",
-          "verifiedAt": "2026-10-18",
-          "evidence": "packages/spec/src/security/rls.zod.ts#DefaultRowScopeSchema (declares `name`: RowLevelSecurityPolicySchema's own member instance, the policy name, snake_case; the explain source a reader names)",
-          "note": "Planned with its container: no server reads `defaultRowScope` until the security plugin's `collectRLSPolicies` does."
+          "status": "live",
+          "verifiedAt": "2026-10-19",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#compileFilter (the uncompilable-predicate and fail-closed WARN lines name the policy by `name`); packages/plugins/plugin-security/src/explain-engine.ts#objectDefaultRowScopeSource (explain names the applied default by `name`)",
+          "note": "Live with its container (#24340): the default is collected as one policy and passes the held policies' own applicability filter and compiler, so this member is read exactly where the permission-set `rowLevelSecurity` member of the same instance is."
         },
         "label": {
-          "status": "planned",
-          "verifiedAt": "2026-10-18",
-          "evidence": "packages/spec/src/security/rls.zod.ts#DefaultRowScopeSchema (declares `label`: RowLevelSecurityPolicySchema's own member instance, the human-readable policy label)",
-          "note": "Planned with its container: no server reads `defaultRowScope` until the security plugin's `collectRLSPolicies` does."
+          "status": "live",
+          "verifiedAt": "2026-10-19",
+          "evidence": "packages/plugins/plugin-security/src/explain-engine.ts#objectDefaultRowScopeSource (draws `label` beside the default's name in the rls layer's detail, verbatim; an absent or blank label draws nothing)",
+          "note": "Live by the display-key rule (README, 'Designer previews count as consumers'): explain shows the label to the administrator reading why a row is visible, which for a display key is the whole claimed effect."
         },
         "description": {
-          "status": "planned",
-          "verifiedAt": "2026-10-18",
-          "evidence": "packages/spec/src/security/rls.zod.ts#DefaultRowScopeSchema (declares `description`: RowLevelSecurityPolicySchema's own member instance, the policy description)",
-          "note": "Planned with its container: no server reads `defaultRowScope` until the security plugin's `collectRLSPolicies` does."
+          "status": "live",
+          "verifiedAt": "2026-10-19",
+          "evidence": "packages/plugins/plugin-security/src/explain-engine.ts#objectDefaultRowScopeSource (draws `description` after the label in the rls layer's detail, verbatim; an absent or blank description draws nothing)",
+          "note": "Live with `label`, on the same reading: explain shows it to the administrator reading the access decision."
         },
         "operation": {
-          "status": "planned",
-          "verifiedAt": "2026-10-18",
-          "evidence": "packages/spec/src/security/rls.zod.ts#DefaultRowScopeSchema (declares `operation`: RowLevelSecurityPolicySchema's own member instance, which operations the scope applies to)",
-          "note": "Planned with its container: no server reads `defaultRowScope` until the security plugin's `collectRLSPolicies` does."
+          "status": "live",
+          "verifiedAt": "2026-10-19",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#getApplicablePolicies (`policy.operation === 'all'`, else compared against the mapped RLS op; the default passes this filter after the held collection comes back empty)",
+          "note": "Live with its container (#24340): the default is collected as one policy and passes the held policies' own applicability filter and compiler, so this member is read exactly where the permission-set `rowLevelSecurity` member of the same instance is."
         },
         "using": {
-          "status": "planned",
-          "verifiedAt": "2026-10-18",
-          "evidence": "packages/spec/src/security/rls.zod.ts#DefaultRowScopeSchema (declares `using`: RowLevelSecurityPolicySchema's own member instance, the row predicate)",
-          "note": "Planned with its container: no server reads `defaultRowScope` until the security plugin's `collectRLSPolicies` does."
+          "status": "live",
+          "verifiedAt": "2026-10-19",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#compileFilter (`policy.using` is the predicate on the read pass, and on a `check` pass for a policy that declares no `check`); packages/plugins/plugin-security/src/security-plugin.ts#writeCheckPolicies (hands USING-only policies to that `check` pass only when no applicable policy for the write declares `check`)",
+          "note": "Live with its container (#24340): the default is collected as one policy and passes the held policies' own applicability filter and compiler, so this member is read exactly where the permission-set `rowLevelSecurity` member of the same instance is."
         },
         "check": {
-          "status": "planned",
-          "verifiedAt": "2026-10-18",
-          "evidence": "packages/spec/src/security/rls.zod.ts#DefaultRowScopeSchema (declares `check`: RowLevelSecurityPolicySchema's own member instance, the write-image check, refused on a `select` / `delete` scope)",
-          "note": "Planned with its container: no server reads `defaultRowScope` until the security plugin's `collectRLSPolicies` does."
+          "status": "live",
+          "verifiedAt": "2026-10-19",
+          "evidence": "packages/plugins/plugin-security/src/security-plugin.ts#writeCheckPolicies (the policies that declare `check` when any applicable policy for the write does, otherwise each applicable policy's `using`); packages/plugins/plugin-security/src/rls-compiler.ts#compileFilter (`policyDeclaresClause(policy, 'check') ? check : policy.using` on the `check` pass)",
+          "note": "Live with its container (#24340): the default is collected as one policy and passes the held policies' own applicability filter and compiler, so this member is read exactly where the permission-set `rowLevelSecurity` member of the same instance is."
         },
         "positions": {
-          "status": "planned",
-          "verifiedAt": "2026-10-18",
-          "evidence": "packages/spec/src/security/rls.zod.ts#DefaultRowScopeSchema (declares `positions`: RowLevelSecurityPolicySchema's own member instance, the positions the scope applies to)",
-          "note": "Planned with its container: no server reads `defaultRowScope` until the security plugin's `collectRLSPolicies` does."
+          "status": "live",
+          "verifiedAt": "2026-10-19",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#getApplicablePolicies (`const domain = (policy as { positions?: string[] }).positions` — the applicability domain, matched flat against the caller's held positions)",
+          "note": "Live with its container (#24340): the default is collected as one policy and passes the held policies' own applicability filter and compiler, so this member is read exactly where the permission-set `rowLevelSecurity` member of the same instance is."
         },
         "enabled": {
-          "status": "planned",
-          "verifiedAt": "2026-10-18",
-          "evidence": "packages/spec/src/security/rls.zod.ts#DefaultRowScopeSchema (declares `enabled`: RowLevelSecurityPolicySchema's own member instance, whether the scope is active (default true))",
-          "note": "Planned with its container: no server reads `defaultRowScope` until the security plugin's `collectRLSPolicies` does."
+          "status": "live",
+          "verifiedAt": "2026-10-19",
+          "evidence": "packages/plugins/plugin-security/src/rls-compiler.ts#getApplicablePolicies (`(policy as { enabled?: boolean }).enabled === false` excluded before object / positions / operation matching; absent = active per the schema default)",
+          "note": "Live with its container (#24340): the default is collected as one policy and passes the held policies' own applicability filter and compiler, so this member is read exactly where the permission-set `rowLevelSecurity` member of the same instance is."
         }
       }
     },

@@ -93,6 +93,10 @@ import { isOriginGatedType, managedItemSealedSentence, packagedBaseRegimePrescri
 // its value from a selector or a body — owned by the migration that keys the
 // overlay index on it, so the key and the write head cannot disagree.
 import { OVERLAY_MEMBER_COLUMN, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
+import type { MetadataAuthoringSurface } from '@objectstack/spec/api';
+// [#24395] The draft save's per-key provenance — the diff, the keep rule and
+// the stored form, one module the strict draft read reads it back through.
+import { draftChangedPaths, mergeDraftChanges, storedDraftChanges } from './draft-changes.js';
 
 /**
  * Canonicalise a driver-materialised timestamp into the ISO-8601 string the
@@ -932,6 +936,53 @@ export class SysMetadataRepository implements MetadataRepository {
   }
 
   /**
+   * [#24395] The draft row's `draft_changes` after a draft {@link put} of
+   * `body` over `existing` (the draft row it updates, `null` for a create):
+   * the serialized entries to write, or `undefined` when they do not change
+   * (the save changed no key path), so the column is left as it was.
+   *
+   * The body the save replaced is the draft row's; for the draft's first save
+   * it is the ACTIVE row its publish would replace ({@link promoteDraft}
+   * writes the draft's binding): that package's row, else the package-less one
+   * a read of that package is served (ADR-0048 prefer-local). With neither the
+   * save created the item as a draft, recorded as `[]`, the whole body. Read
+   * inside the caller's transaction, so the body compared is the one replaced.
+   */
+  private async recordDraftChanges(
+    ref: Pick<MetaRef, 'type' | 'name'>,
+    body: Record<string, unknown>,
+    existing: any | null,
+    args: {
+      ctx: Record<string, unknown>;
+      member: string | null | undefined;
+      targetPackageId: string | null;
+      stamp: { by: MetadataAuthoringSurface; actor: string | null; at: string };
+    },
+  ): Promise<string | undefined> {
+    let replaced: any | null = existing;
+    if (!replaced) {
+      const context = { ...args.ctx, isSystem: true };
+      replaced = await this.findEnvironmentRow({
+        where: this.whereFor(ref, 'active', args.targetPackageId, args.member),
+        context,
+      });
+      if (!replaced && args.targetPackageId !== null) {
+        replaced = await this.findEnvironmentRow({
+          where: this.whereFor(ref, 'active', null, args.member),
+          context,
+        });
+      }
+    }
+    const before = replaced
+      ? (typeof replaced.metadata === 'string' ? JSON.parse(replaced.metadata) : replaced.metadata ?? {})
+      : undefined;
+    const paths = draftChangedPaths(before, body, ref.type);
+    if (paths.length === 0) return undefined;
+    const kept = existing ? storedDraftChanges(existing.draft_changes) ?? [] : [];
+    return JSON.stringify(mergeDraftChanges(kept, paths, args.stamp));
+  }
+
+  /**
    * Resolve a historical version by content hash (ADR-0009).
    *
    * Looks up `sys_metadata_history` by `(type, name, checksum)`. Returns null if no row matches. `executionPinned` types
@@ -978,7 +1029,19 @@ export class SysMetadataRepository implements MetadataRepository {
   async put(
     ref: MetaRef,
     spec: unknown,
-    opts: PutOptions & { state?: OverlayState; opType?: ExtendedOperation },
+    opts: PutOptions & {
+      state?: OverlayState;
+      opType?: ExtendedOperation;
+      /**
+       * [#24395] The authoring surface a `draft` put records as `by` on every
+       * key path it changes (`sys_metadata.draft_changes`, served as the
+       * strict draft read's `draftChanges`). A LOCAL extension, as `state` is.
+       * Omitted → the put records nothing and leaves the row's entries as
+       * they are, which is what a write that is not authoring (the
+       * `migrate-stored` rewrite) states. Ignored on an `active` put.
+       */
+      draftChangesBy?: MetadataAuthoringSurface;
+    },
   ): Promise<PutResult> {
     this.assertOpen();
     // [#7682] The base the caller NAMED is part of the authorization question,
@@ -1083,6 +1146,17 @@ export class SysMetadataRepository implements MetadataRepository {
         parentRowData.package_id = existingPkg ?? targetPackageId;
       } else {
         parentRowData.package_id = targetPackageId;
+      }
+      // [#24395] The draft's per-key provenance, recorded in this transaction
+      // against the body this write replaces: the draft row's, else (the
+      // draft's first save) the active row its publish would replace, else
+      // nothing (`[]`, the whole body). Only a column that changes is written.
+      if (state === 'draft' && opts.draftChangesBy !== undefined) {
+        const draftChanges = await this.recordDraftChanges(ref, body, existing, {
+          ctx, member, targetPackageId: parentRowData.package_id as string | null,
+          stamp: { by: opts.draftChangesBy, actor: opts.actor ?? null, at: now },
+        });
+        if (draftChanges !== undefined) parentRowData.draft_changes = draftChanges;
       }
       if (existing) {
         const existingId = (existing as { id?: string }).id;

@@ -59,7 +59,8 @@ import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-pr
 // chain, the deprecated `?layers=` flag's parse and the headers that flag is
 // served under.
 // [#22141] …and the save door's precondition and lifecycle
-// (`metaSaveRequestOptions`): `If-Match` / `If-None-Match: *` and `?mode=draft`.
+// (`metaSaveRequestOptions`): `If-Match` / `If-None-Match: *` and `?mode=draft`
+// — [#24395] and `?surface=` (`studio` | `api`, `copilot` refused).
 // [#22188] …and the one reading of `?package=` (`metaItemPackageBinding`),
 // under which `all` names no package, on every branch here that reads it.
 // [#23072] …and the by-name doors' query decision (`metaItemQueryRefusal`,
@@ -1581,7 +1582,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                         ...(packageId ? { packageId } : {}),
                         // [#22141] `parentVersion` and `mode`, each present
                         // only when the caller asked — read off the headers and
-                        // the query above, never off `item`.
+                        // the query above, never off `item`. [#24395] So is
+                        // `surface`: `?surface=studio|api`, the authoring
+                        // surface a draft save stamps per key path, and never
+                        // `copilot`, which the mapping refuses on this door.
                         ...saveOptions.request,
                         ...(actor ? { actor } : {}),
                     });

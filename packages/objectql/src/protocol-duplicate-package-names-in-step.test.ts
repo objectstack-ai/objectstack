@@ -25,11 +25,19 @@
  * 3. **A view-item id inside a value.** A form action's `target`
  *    (`ticket.entry`) kept the bare object's name, so the copy's button opened
  *    the source's form.
+ * 4. **A name that is both a prefixed object and a field key.** The free-text
+ *    rewrite renamed a value equal to `dupsrc_customer` as the object even
+ *    where it named the field of that key: a copied list view's `columns`
+ *    named `dupdst_customer`, a field the copy does not have (refused at the
+ *    copy, `list-view-field-unknown`), and a form's `sections[].fields` copied
+ *    it silently.
  *
  * ## The rules now
  *
  * A record entry's `name` that echoes its key follows the key; free text
- * renames an object's name only as a whole identifier; a view item's object
+ * renames an object's name only as a whole identifier, and never a name that
+ * is also a package object's field key (that one is renamed only at an
+ * object-reference property, as a bare name is); a view item's object
  * part takes `renameMap`'s rename, whole, and its view key is left as stored;
  * a value that IS such a name, whole, follows it.
  *
@@ -130,6 +138,7 @@ const Q = 'com.qa.dupdst';
 const R = 'com.qa.dupext';
 
 const PROSE = 'Linked from dupsrc_customer; see x_dupsrc_customer.';
+const NOTE_PROSE = 'Attached to dupsrc_note; see x_dupsrc_note.';
 const RULE = { readable: true, editable: false };
 
 const grid = (object: string, columns: string[]) => ({ type: 'grid', data: { provider: 'object', object }, columns });
@@ -147,6 +156,14 @@ const customerBody = {
         full_name: { name: 'full_name', type: 'text', label: 'Full name' },
         dupsrc_customer: { name: 'dupsrc_customer', type: 'text', label: 'Customer code' },
         x_dupsrc_customer: { name: 'x_dupsrc_customer', type: 'text', label: 'Extra' },
+    },
+};
+/** A prefixed object no field key spells: free text naming it follows the copy. */
+const noteBody = {
+    name: 'dupsrc_note', label: 'Note', description: NOTE_PROSE, sharingModel: 'private',
+    fields: {
+        x_dupsrc_note: { name: 'x_dupsrc_note', type: 'text', label: 'Extra' },
+        customer: { name: 'customer', type: 'lookup', reference: 'dupsrc_customer', label: 'Customer' },
     },
 };
 /** The object whose name lacks the `dupsrc_` prefix, with a lookup to the prefixed one. */
@@ -224,12 +241,13 @@ describe('ADR-0070 D4 — duplicatePackage keeps a copied name in step with what
         expect(engine.registry.getPackage(P)?.manifest?.namespace).toBe('dupsrc');
         await save(P, 'object', customerBody);
         await save(P, 'object', ticketBody);
+        await save(P, 'object', noteBody);
         await save(P, 'view', viewItem('ticket', 'board', 'list', grid('ticket', ['title'])));
-        await save(P, 'view', viewItem('dupsrc_customer', 'board', 'list', grid('dupsrc_customer', ['full_name', 'x_dupsrc_customer'])));
+        await save(P, 'view', viewItem('dupsrc_customer', 'board', 'list', grid('dupsrc_customer', ['full_name', 'dupsrc_customer', 'x_dupsrc_customer'])));
         await save(P, 'view', viewItem('dupext_account', 'board', 'list', grid('dupext_account', ['name'])));
         await save(P, 'view', viewItem('dupsrc_ext', 'board', 'list', grid('dupsrc_ext', ['name'])));
         await save(P, 'view', viewItem('ticket', 'entry', 'form', form('ticket', ['title'])));
-        await save(P, 'view', viewItem('dupsrc_customer', 'entry', 'form', form('dupsrc_customer', ['full_name'])));
+        await save(P, 'view', viewItem('dupsrc_customer', 'entry', 'form', form('dupsrc_customer', ['full_name', 'dupsrc_customer'])));
         await save(P, 'action', formAction('dupsrc_new_ticket', 'ticket', 'ticket.entry'));
         await save(P, 'action', formAction('dupsrc_new_customer', 'dupsrc_customer', 'dupsrc_customer.entry'));
         await save(P, 'action', formAction('dupsrc_new_account', 'dupext_account', 'dupext_account.entry'));
@@ -265,12 +283,46 @@ describe('ADR-0070 D4 — duplicatePackage keeps a copied name in step with what
     it('free text renames an object\'s name only as a whole identifier, never inside a longer one', async () => {
         await duplicate();
 
-        expect(storedBody('object', 'dupdst_customer', Q).description)
-            .toBe('Linked from dupdst_customer; see x_dupsrc_customer.');
+        expect(storedBody('object', 'dupdst_note', Q).description)
+            .toBe('Attached to dupdst_note; see x_dupsrc_note.');
+        expect(Object.keys(storedBody('object', 'dupdst_note', Q).fields)).toEqual(['x_dupsrc_note', 'customer']);
+        expect(storedBody('object', 'dupdst_note', Q).fields.x_dupsrc_note.name).toBe('x_dupsrc_note');
         // A copied view's column naming the field stays in step with the field.
-        expect(storedBody('view', 'dupdst_customer.board', Q).config.columns).toEqual(['full_name', 'x_dupsrc_customer']);
+        expect(storedBody('view', 'dupdst_customer.board', Q).config.columns)
+            .toEqual(['full_name', 'dupsrc_customer', 'x_dupsrc_customer']);
         // The source is untouched.
         expect(storedBody('object', 'dupsrc_customer', P)).toMatchObject({ description: PROSE, fields: customerBody.fields });
+    });
+
+    it('a name that is both a prefixed object and a field key is renamed only at object-reference properties', async () => {
+        const res = await duplicate();
+
+        // The copied list view is no longer refused for a column the copy lacks.
+        expect(res.failed).toEqual([]);
+        expect(res.copied).toEqual(expect.arrayContaining([
+            { type: 'view', name: 'dupdst_customer.board' },
+            { type: 'view', name: 'dupdst_customer.entry' },
+        ]));
+        // A value naming the FIELD keeps naming it: list-view columns and form fields.
+        const board = storedBody('view', 'dupdst_customer.board', Q);
+        expect(board.config.columns).toEqual(['full_name', 'dupsrc_customer', 'x_dupsrc_customer']);
+        const entry = storedBody('view', 'dupdst_customer.entry', Q);
+        expect(entry.config.sections[0].fields).toEqual(['full_name', 'dupsrc_customer']);
+        expect(Object.keys(storedBody('object', 'dupdst_customer', Q).fields)).toContain('dupsrc_customer');
+        // A value naming the OBJECT at a reference property follows the copy.
+        expect(board).toMatchObject({ object: 'dupdst_customer', config: { data: { object: 'dupdst_customer' } } });
+        expect(entry).toMatchObject({ object: 'dupdst_customer', config: { data: { object: 'dupdst_customer' } } });
+        expect(storedBody('object', 'dupdst_ticket', Q).fields.customer.reference).toBe('dupdst_customer');
+        expect(storedBody('object', 'dupdst_note', Q).fields.customer.reference).toBe('dupdst_customer');
+        expect(storedBody('action', 'dupdst_new_customer', Q).objectName).toBe('dupdst_customer');
+        expect(Object.keys(storedBody('permission', 'dupdst_ops', Q).objects)).toEqual(['dupdst_customer']);
+        // Free text naming it is left as stored (the ruled semantics: such a name
+        // may name the field); free text naming an ordinary prefixed object still
+        // follows the copy (the negative control, `dupsrc_note`, in the case above).
+        expect(storedBody('object', 'dupdst_customer', Q).description).toBe(PROSE);
+        // The copied record can be written through the copied form's fields.
+        await engine.insert('dupdst_customer', { id: 'c2', full_name: 'Ada', dupsrc_customer: 'C-2' });
+        expect(stores.get('dupdst_customer')?.get('c2')).toMatchObject({ full_name: 'Ada', dupsrc_customer: 'C-2' });
     });
 
     it('the copy of a bare object\'s view item takes the renamed object\'s prefix, and is the one a by-name read serves', async () => {

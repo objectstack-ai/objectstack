@@ -86,6 +86,7 @@ import {
 } from './platform-owner-wall-bypass.js';
 import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails, vetOrganizationClaim, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readDisabledCatalogNames } from '@objectstack/core';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
+import { objectDefaultRowScopePolicy } from './object-default-row-scope.js';
 import {
   isPlatformOwnershipFloorPolicy,
   masterGateCoversOperation,
@@ -8993,7 +8994,26 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * Collect all RLS policies from permission sets applicable to the given object/operation.
+   * The row-level security policies that apply to `objectName` for
+   * `operation`: the one collection every reader composes from — the read
+   * door's Layer 1, the by-id pre-image gate, the bulk write filter, the
+   * post-image check, `checkAuthoredRowWrite` and explain.
+   *
+   * [#24164 ruling E′, item 2] When no held set carries a row policy for this
+   * object and operation, the object's declared default row scope
+   * (`ObjectSchema.defaultRowScope`) applies in its place:
+   *  - "carries" is this collection's own emptiness, after the ADR-0105 D3
+   *    admission, `enabled`, the `positions` domain and `'*'` matching, so a
+   *    held `'*'` policy counts and a held policy for another operation does
+   *    not (`object-default-row-scope.ts` states the reading);
+   *  - an authored set policy is used as authored: the default is never added
+   *    to a non-empty collection;
+   *  - the default takes the path a held policy takes from the admission on,
+   *    so its `using` / `check` compile, and fail closed, exactly as an
+   *    authored policy's do;
+   *  - a superuser-bypass principal never reaches this method (the bypass is
+   *    decided by the caller, before the collection), and an object that
+   *    declares no default collects exactly what it collected before.
    */
   private collectRLSPolicies(
     permissionSets: PermissionSet[],
@@ -9013,28 +9033,48 @@ export class SecurityPlugin implements Plugin {
         // filter, the post-image check, `checkAuthoredRowWrite`, explain — sees
         // the same list, because this is the one place they all collect from.
         for (const policy of withOwnershipFloorAlternates(ps.rowLevelSecurity, floorAlternates)) {
-          // [ADR-0105 D3] When org isolation is NOT active, strip the tenant
-          // policies the PLATFORM itself ships — there is no meaningful active
-          // organization to compare against, so they would match zero rows (or
-          // be dropped by the field-existence safety net) for no benefit.
-          //
-          // Provenance, not pattern-matching (finding F1): the former substring
-          // test on `current_user.organization_id` also swallowed app-authored
-          // policies, silently unenforcing a declared security property. An
-          // authored policy now always reaches the compiler and fails closed
-          // there, where the operator can see it.
-          if (!this.orgScopingEnabled && isPlatformTenantPolicy(policy)) {
-            continue;
-          }
-          if (!this.orgScopingEnabled && isAuthoredTenantPolicy(policy)) {
-            this.warnAuthoredTenantPolicyOnce(policy, objectName);
-          }
-          allPolicies.push(policy);
+          if (this.admitCollectedPolicy(policy, objectName)) allPolicies.push(policy);
         }
       }
     }
 
-    return this.rlsCompiler.getApplicablePolicies(objectName, operation, allPolicies, heldPositions);
+    const held = this.rlsCompiler.getApplicablePolicies(objectName, operation, allPolicies, heldPositions);
+    if (held.length > 0) return held;
+    // [#24164 ruling E′] The held sets are silent on this object and
+    // operation: the object's own `defaultRowScope`, if it declares one. Read
+    // from the registry the engine compiles every find against, only here, on
+    // an empty collection (two in-memory map lookups, no I/O).
+    const schema = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(objectName) : null;
+    const objectDefault = objectDefaultRowScopePolicy(objectName, schema);
+    if (objectDefault === null || !this.admitCollectedPolicy(objectDefault, objectName)) return held;
+    return this.rlsCompiler.getApplicablePolicies(objectName, operation, [objectDefault], heldPositions);
+  }
+
+  /**
+   * [ADR-0105 D3] Whether one policy enters the collection under this
+   * deployment's tenancy posture. When org isolation is NOT active, the tenant
+   * policies the PLATFORM itself ships are stripped — there is no meaningful
+   * active organization to compare against, so they would match zero rows (or
+   * be dropped by the field-existence safety net) for no benefit.
+   *
+   * Provenance, not pattern-matching (finding F1): the former substring test
+   * on `current_user.organization_id` also swallowed app-authored policies,
+   * silently unenforcing a declared security property. An authored policy now
+   * always reaches the compiler and fails closed there, where the operator can
+   * see it.
+   *
+   * An object's default row scope passes the same test, so a default that
+   * spells a shipped tenant policy is stripped exactly as that policy's set
+   * copy is (the provenance key is `(object, name, using)`).
+   */
+  private admitCollectedPolicy(policy: RowLevelSecurityPolicy, objectName: string): boolean {
+    if (!this.orgScopingEnabled && isPlatformTenantPolicy(policy)) {
+      return false;
+    }
+    if (!this.orgScopingEnabled && isAuthoredTenantPolicy(policy)) {
+      this.warnAuthoredTenantPolicyOnce(policy, objectName);
+    }
+    return true;
   }
 
   /**

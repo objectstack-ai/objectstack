@@ -67,7 +67,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ORGANIZATION_OWNERSHIP_MIGRATION_ID } from '@objectstack/spec/system';
 import { isExitSignal } from './format.js';
 import MigrateApply from '../commands/migrate/apply.js';
-import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
+import { OrganizationOwnershipCeremony as MigrateOrganizationOwnership } from '../commands/migrate/organization-ownership.js';
 
 // Paid at module load, not inside a clocked case (`check:test-source-alias`).
 import '@objectstack/runtime';
