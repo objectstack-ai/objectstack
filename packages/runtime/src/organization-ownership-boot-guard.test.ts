@@ -23,6 +23,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ORGANIZATION_OWNERSHIP_SHAPE_GENERATION } from '@objectstack/spec/system';
 import { AppPlugin } from './app-plugin.js';
 import {
@@ -61,6 +62,7 @@ function engine(opts: { client?: unknown; dialectName?: string; failRead?: boole
     registry: { getAllObjects: () => OBJECTS },
     getDriverForObject: () => driver,
     async findOne(object: string, query: Record<string, unknown>) {
+      assertEngineFindOnePredicate(object, query);
       const exists = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`).all(object).length > 0;
       if (!exists) return null;
       const id = String((query.where as { id?: unknown } | undefined)?.id);

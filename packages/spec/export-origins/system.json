@@ -463,6 +463,7 @@
     "OrganizationOwnershipAnchor": "src/system/fate-supplement.zod.ts#OrganizationOwnershipAnchor (type)",
     "OrganizationOwnershipAnchorSchema": "src/system/fate-supplement.zod.ts#OrganizationOwnershipAnchorSchema (const)",
     "OrganizationOwnershipBirthMarker": "src/system/migration.zod.ts#OrganizationOwnershipBirthMarker (type)",
+    "OrganizationOwnershipBirthMarkerParsed": "src/system/migration.zod.ts#OrganizationOwnershipBirthMarkerParsed (type)",
     "OrganizationOwnershipBirthMarkerSchema": "src/system/migration.zod.ts#OrganizationOwnershipBirthMarkerSchema (const)",
     "OrganizationOwnershipCategory": "src/system/fate-supplement.zod.ts#OrganizationOwnershipCategory (type)",
     "OrganizationOwnershipCategorySchema": "src/system/fate-supplement.zod.ts#OrganizationOwnershipCategorySchema (const)",

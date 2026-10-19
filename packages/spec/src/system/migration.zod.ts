@@ -230,7 +230,8 @@ export const OrganizationOwnershipBirthMarkerSchema = lazySchema(() => z.object(
   createdAt: z.string().datetime()
     .describe('When the guard observed the store created from empty'),
 }).describe('Birth marker of a datastore created from empty: the ownership shape generation it was born in'));
-export type OrganizationOwnershipBirthMarker = z.infer<typeof OrganizationOwnershipBirthMarkerSchema>;
+export type OrganizationOwnershipBirthMarker = z.input<typeof OrganizationOwnershipBirthMarkerSchema>;
+export type OrganizationOwnershipBirthMarkerParsed = z.infer<typeof OrganizationOwnershipBirthMarkerSchema>;
 
 /**
  * The shape generation an {@link ORGANIZATION_OWNERSHIP_MIGRATION_ID} row's

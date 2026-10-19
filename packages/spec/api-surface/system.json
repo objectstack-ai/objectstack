@@ -483,6 +483,7 @@
     "OrganizationOwnershipAnchor (type)",
     "OrganizationOwnershipAnchorSchema (const)",
     "OrganizationOwnershipBirthMarker (type)",
+    "OrganizationOwnershipBirthMarkerParsed (type)",
     "OrganizationOwnershipBirthMarkerSchema (const)",
     "OrganizationOwnershipCategory (type)",
     "OrganizationOwnershipCategorySchema (const)",
