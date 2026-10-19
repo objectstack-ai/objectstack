@@ -128,6 +128,43 @@
           "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:891 (item gate); objectui @f8a9d0fb: packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`evalVis`, the CEL evaluation through the ExpressionProvider's `evaluateVisibility`, handed to `NavigationRenderer` and to `hasVisibleNavigationItems`); objectui @f8a9d0fb: packages/app-shell/src/views/nav-menu-renderer.tsx#NavMenuRenderer (the same `evalVis`, and each row returns nothing when `evalVis(item.visible)` is false)",
           "note": "the CEL visibility gate — enforced per item. This is the layer the retired `areas[].visible` (#4651) prescribes moving to: same CEL dialect, one level down, and actually evaluated. CLIENT-side only, at both levels, and deliberately so: #4722 made the server enforce `requiredPermissions` / `requiresService` inside `areas[]` but left CEL where it was, because evaluating it server-side needs a bound `user` context the REST read layer does not have. Anything that must never reach the browser belongs in `requiredPermissions`, not `visible` — the asymmetry is pinned in packages/rest/src/rest.test.ts. 2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0. The `NavigationRenderer` item-gate leg is unchanged by this re-point."
         },
+        "dataSource": {
+          "status": "planned",
+          "verifiedAt": "2026-10-19",
+          "evidenceScope": "cross-repo",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: no console renders a navigation entry's `dataSource`, so a `visible` that reads `data` has no value to read until the navigation renderer ships.",
+          "note": "PLANNED RECORD (#24332, 2026-10-19, shape 1 by the domain:spec seat's claim 6257260075; the spec half of the objectstack-ai/cloud#3002 letter A sidebar row): one API data source on a navigation entry, the page element's `ElementApiDataSourceSchema` BY REFERENCE (`{ provider: 'api', read: { url, method? }, path? }`, `read.url` a same-origin API path refused at parse otherwise, no credential key), declared on the shared nav base so the nine branches that spread it carry it (a separator refuses it). Its one declared reader is the same entry's `visible`, which reads the selected value as `data`; `label` and the target keys take no `data` read, and the binding is not published to `children`. PLANNED, not live: measured at the `.objectui-sha` pin 0707b4ae37 and unchanged at objectui main 749ed76, the shell evaluates every entry's `visible` through one shared evaluator built from the ambient scope (objectui: packages/app-shell/src/hooks/useNavMemberGates.ts#useNavMemberGates, which hands `evaluateNavigationVisibility(expr, evaluator)` to the item guard; objectui: packages/layout/src/NavigationRenderer.tsx#passesNavItemGuards, which calls `evaluateVisibility(item.visible)` with no per-entry scope), and objectui's own nav mirror (objectui: packages/types/src/zod/app.zod.ts) strips the key. No objectui source reads it. Carrier: the objectui renderer half, filed by the seat when this lands (read points `useNavMemberGates`, and `resolveNavItemLabel` / `resolveHref` in `NavigationRenderer.tsx` if the label and target forks are ruled). `authorWarn` is set because an entry authored with this key and a `data.*` gate today has no value to read; the lint fans `navigation.dataSource` over the top-level entries only (it reads a row and its direct children, no deeper), so an entry nested under a group is not warned. Flip to `live` on the commit that cites the console reader at the `.objectui-sha` pin, and drop `authorWarn` / `authorHint` in that same edit.",
+          "children": {
+            "provider": {
+              "status": "planned",
+              "verifiedAt": "2026-10-19",
+              "note": "Planned with its container `navigation.dataSource` (see that row): the page element binding's own key, reused by reference, and read by no console on a navigation entry yet. `provider: 'api'` is the binding's discriminator; it is the only provider a navigation entry admits."
+            },
+            "read": {
+              "status": "planned",
+              "verifiedAt": "2026-10-19",
+              "note": "Planned with its container `navigation.dataSource` (see that row): the page element binding's own key, reused by reference, and read by no console on a navigation entry yet. The read request: the one same-origin endpoint the entry binds.",
+              "children": {
+                "url": {
+                  "status": "planned",
+                  "verifiedAt": "2026-10-19",
+                  "note": "Planned with its container `navigation.dataSource` (see that row): the page element binding's own key, reused by reference, and read by no console on a navigation entry yet. Its same-origin refusal is live at parse, on this door as on the page element's (pinned in packages/spec/src/ui/app-nav-item-api-data-source.test.ts); what is planned is the READ."
+                },
+                "method": {
+                  "status": "planned",
+                  "verifiedAt": "2026-10-19",
+                  "note": "Planned with its container `navigation.dataSource` (see that row): the page element binding's own key, reused by reference, and read by no console on a navigation entry yet. `GET` alone, refused otherwise at parse."
+                }
+              }
+            },
+            "path": {
+              "status": "planned",
+              "verifiedAt": "2026-10-19",
+              "note": "Planned with its container `navigation.dataSource` (see that row): the page element binding's own key, reused by reference, and read by no console on a navigation entry yet. The dotted path selecting the value the entry's `visible` reads as `data`."
+            }
+          }
+        },
         "requiredPermissions": {
           "status": "live",
           "verifiedAt": "2026-09-27",
