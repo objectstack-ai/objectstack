@@ -600,6 +600,11 @@ not just "who did".
 > the walled `organization_admin` as tenant-level today; under this note it is organization-level.
 > No spec key is added, and the v18 upgrade entry's `replacement` text
 > (`18.walled-catalog-tenant-writes-retired`) stands as published: this note makes it true.
+>
+> The case held for #24164 is ruled (2026-10-18, ruling of record 6250748677, letter E′): an
+> object is to carry its own default row scope, to apply when no held set carries a row policy for
+> it ([ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md)'s 2026-10-18 note under
+> D1), so #24136 keeps the three conditions above and gains no fourth.
 
 ---
 

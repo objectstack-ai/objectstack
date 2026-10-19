@@ -20,7 +20,7 @@ export const esES: PlatformTranslationData = {
       title: 'Envío de correo',
       description: 'Configuración de SMTP y del proveedor de correo transaccional.',
       groups: {
-        provider: { title: 'Proveedor', description: 'Elige cómo envía correo saliente este entorno.' },
+        provider: { title: 'Proveedor', description: 'Elige cómo envía correo saliente este sistema.' },
         smtp: { title: 'SMTP' },
         api_key: { title: 'Clave de API' },
         from_address: { title: 'Dirección de remitente' },
@@ -91,7 +91,7 @@ export const esES: PlatformTranslationData = {
         },
         audience: {
           title: 'Audiencia',
-          description: 'Quién puede convertirse en usuario de las aplicaciones de este entorno. «Dominios de correo» siempre fuerza la verificación de correo. «Abierto» también la fuerza, salvo que el despliegue la desactive; un valor guardado en esta consola no puede hacerlo. Las invitaciones, los usuarios creados por administradores, el aprovisionamiento SCIM y el SSO empresarial se admiten bajo cualquier postura.',
+          description: 'Quién puede convertirse en usuario de las aplicaciones de este sistema. «Dominios de correo» siempre fuerza la verificación de correo. «Abierto» también la fuerza, salvo que el despliegue la desactive; un valor guardado en esta consola no puede hacerlo. Las invitaciones, los usuarios creados por administradores, el aprovisionamiento SCIM y el SSO empresarial se admiten bajo cualquier postura.',
         },
         password_policy: {
           title: 'Política de contraseñas',
@@ -251,7 +251,7 @@ export const esES: PlatformTranslationData = {
       title: 'Envío de SMS',
       description: 'Configuración del proveedor de SMS para inicio de sesión con OTP, invitaciones y notificaciones.',
       groups: {
-        provider: { title: 'Proveedor', description: 'Elige cómo envía este entorno los SMS salientes.' },
+        provider: { title: 'Proveedor', description: 'Elige cómo envía este sistema los SMS salientes.' },
         aliyun: { title: 'Aliyun SMS' },
         twilio: { title: 'Twilio' },
         limits: { title: 'Límites de gasto', description: 'Limita el volumen de SMS salientes del despliegue. El SMS es un canal de pago y cada envío cuesta dinero real.' },

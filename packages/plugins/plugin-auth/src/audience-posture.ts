@@ -473,7 +473,7 @@ export function decideAudienceAdmission(input: AudienceAdmissionInput): Audience
         admit: false,
         code: SELF_REGISTRATION_CLOSED,
         message:
-          'Self-registration is closed on this environment (audience posture invite_only). ' +
+          'Self-registration is closed (audience posture invite_only). ' +
           'Ask an administrator for an invitation.',
       };
     case 'email_domain':
@@ -484,7 +484,7 @@ export function decideAudienceAdmission(input: AudienceAdmissionInput): Audience
         admit: false,
         code: EMAIL_DOMAIN_NOT_ALLOWED,
         message:
-          'Self-registration on this environment is limited to approved email domains, and this address ' +
+          'Self-registration is limited to approved email domains, and this address ' +
           'is not on the list. Use your organization email, or ask an administrator for an invitation.',
       };
     case 'open':

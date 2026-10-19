@@ -1,6 +1,7 @@
 # ADR-0095: Authorization Kernel Chain — Tenant Isolation as Layer 0, a Monotonic Posture Ladder, Capability-Derived Posture
 
 **Status**: Accepted (2026-07-14) — implemented: D1 tenant Layer 0 (`plugin-security/src/tenant-layer.ts`), D2/D3 posture ladder (`core/src/security/posture-ladder.ts`), locked by `authz-matrix-gate.test.ts` + `posture-ladder.test.ts` (#2920 B1–B4)
+· **Amended** (2026-10-18, ruling of record 6250748677 on #24164, letter E′) — D1: Layer 0 is inert on 22 of the 23 platform objects that are to declare a default row scope, and walls the 23rd, `sys_user_preference`, to its organisation; on all 23, Layer 1 silence is to mean the object's declared default row scope, a protocol key (#24338), not no filter. See the note under D1.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0002](./0002-environment-database-isolation.md) (environment-per-database), [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (scope depth), [ADR-0066](./0066-unified-authorization-model.md) (unified authz model, superuser bypass), [ADR-0090](./0090-permission-model-v2-concept-convergence.md) (permission model v2), [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md) (tenancy service)
 **Scopes**: the "cross-tenant RLS does not exist here" claim in [ADR-0073](./0073-automation-execution-identity.md) (see Context)
@@ -173,6 +174,29 @@ owned by the enterprise auto-stamp, and update/delete targeting is enforced by
 the Layer 0 pre-image path. Adding a mandatory post-image tenant check would
 risk denying legitimate inserts before the auto-stamp runs — a regression, not a
 fix — so it is deliberately excluded from D1.
+
+> **Amended 2026-10-18 (#24339; ruling of record 6250748677 on #24164, letter E′
+> — the maintainer's 「同意」) — Layer 1 silence on the platform identity objects.**
+> Layer 0 is inert on 22 of the 23 objects the ruling names, which carry no
+> `organization_id` column: the seven SCIM projections (`sys_scim_user`,
+> `sys_scim_subject`, `sys_scim_projection_grant`, `sys_scim_identity_tombstone`,
+> `sys_scim_group`, `sys_scim_group_member`, `sys_scim_connection_binding`),
+> `sys_verification`, `sys_jwks`, `sys_organization`, `sys_user`, `sys_session`,
+> `sys_account`, `sys_team_member`, `sys_two_factor`, `sys_api_key`,
+> `sys_device_code`, `sys_oauth_access_token`, `sys_oauth_refresh_token`,
+> `sys_oauth_consent`, `sys_oauth_application` and `sys_audit_log`. The 23rd,
+> `sys_user_preference`, carries the organisation column, so Layer 0 bounds it to
+> its organisation and its declared default is to apply inside that wall
+> (measured: `scripts/platform-object-tenancy-census.json`, held to the tree by
+> `scripts/check-platform-object-tenancy-census.mjs`). On all 23, Layer 1
+> silence (no held set carries a row policy for the object) is to mean the
+> object's declared default row scope, not no filter. The default is a protocol
+> key on the object (`ObjectSchema.defaultRowScope`, #24338); the platform
+> objects are to declare it themselves (#24341), the one collection point is to
+> apply it (#24340), and the registry is to refuse an `extend` contributor that
+> sets or loosens it (#24341). Mainstream precedent: Salesforce OWD on the
+> object; Dataverse ownership type on the table; PostgreSQL
+> `CREATE POLICY ON table`.
 
 ### D2 — A monotonic posture ladder, resolved once
 

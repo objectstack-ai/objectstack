@@ -3502,7 +3502,7 @@ export class AuthPlugin implements Plugin {
 
         const authApi: any = await this.authManager!.getApi();
         if (!authApi?.createOAuthClient) {
-          return c.json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'OIDC provider is not enabled on this environment' } }, 503);
+          return c.json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'OIDC provider is not enabled' } }, 503);
         }
 
         // Forward request headers so better-auth can resolve the caller's

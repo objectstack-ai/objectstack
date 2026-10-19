@@ -37,7 +37,7 @@ stated once here and the script's own header is the authority on detail.
 
 ```bash
 pnpm install          # deps
-pnpm setup            # first-time: install + build spec
+pnpm run setup        # first-time: install + build spec (bare `pnpm setup` is pnpm's own built-in)
 pnpm build            # turbo build (excludes docs)
 pnpm test             # turbo test
 pnpm typecheck        # turbo typecheck — per-package `tsc --noEmit`; tsup/vitest never type-check

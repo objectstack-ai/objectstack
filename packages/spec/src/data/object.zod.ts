@@ -30,6 +30,9 @@ import { isMaskedOnReadFieldType } from './masked-field-types';
 // refuse one set. Public: re-exported from `@objectstack/spec/data`, with the
 // field predicate `isControlledByParentMasterField` it counts.
 import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
+// The object's default row scope: the RLS policy shape without `object`. No
+// cycle: `security/rls.zod` imports only zod and `shared/`.
+import { DefaultRowScopeSchema } from '../security/rls.zod';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
   'create', 'update', 'delete', // Write
@@ -2965,6 +2968,41 @@ const ObjectSchemaBase = strictObject(
    * is authored — the inheritance is derived from the relationship.
    */
   sharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent']).optional().describe('Org-Wide Default record visibility (OWD) for INTERNAL users. Canonical four only (legacy aliases removed, ADR-0090 D4): private (owner-only) | public_read (everyone reads, owner writes) | public_read_write (everyone reads+writes) | controlled_by_parent (derived from the master record). A CUSTOM object that omits this resolves to private at runtime (ADR-0090 D1).'),
+
+  /**
+   * The object's default row scope (#24164 ruling E′, item 1): one row-level
+   * security policy, the permission-set `rowLevelSecurity` entry shape without
+   * `object` ({@link DefaultRowScopeSchema}). Layer 1 silence on an object, no
+   * held set carrying a row policy for it, then means this policy rather than
+   * no filter.
+   *
+   * The describe states the CONTRACT, not shipped behaviour (Prime Directive
+   * #10, the claim as narrow as the enforcement): its one reader is to be
+   * plugin-security's `collectRLSPolicies`, the collection every read, write
+   * and explain door uses (#24340), and until that lands no server reads the
+   * key; its writers are to be the platform identity objects (#24341), and no
+   * object declares it yet. The liveness row is `planned` with an author
+   * warning until the reader lands.
+   *
+   * The ruling's semantics, which the reader is to meet: when no held set
+   * carries a row policy for this object, the default applies; an authored set
+   * policy is used as authored; a superuser-bypass principal is untouched (the
+   * bypass is decided before the collection); an object with no default keeps
+   * today's behaviour.
+   */
+  defaultRowScope: DefaultRowScopeSchema.optional().describe(
+    "The object's default row scope: one row-level security policy, written like a permission set's "
+    + '`rowLevelSecurity` entry without `object` (the declaring object is implied; writing `object` is '
+    + 'refused). The contract the security plugin\'s row-policy collection, the one step every read, write '
+    + 'and explain passes through, is to meet once it reads the key: when no permission set the caller '
+    + 'holds carries a row policy for this object, this policy is to apply; a policy an authored set '
+    + 'carries for the object is to be used as authored, with this default not added to it; a principal '
+    + 'whose superuser bypass skips row policies is to be unaffected; an object that declares none keeps '
+    + 'the behaviour it has without the key. The platform\'s identity objects are to declare it for their '
+    + 'own tables. Not applied yet: no server reads this key in this release, so declaring it filters no '
+    + 'rows. Until the collection applies it, restrict rows with a permission set\'s `rowLevelSecurity` '
+    + 'policy.',
+  ),
 
   /**
    * RETIRED (#23268, ADR-0049 enforce-or-remove; ruling of record 6159300530,
