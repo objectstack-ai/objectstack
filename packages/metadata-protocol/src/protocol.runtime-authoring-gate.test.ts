@@ -3205,6 +3205,155 @@ describe('runtime authoring gate on PAGE writes — the component props and type
     });
 });
 
+// #24491 — the visibility-predicate family at the runtime save door for a
+// `page`, on the principle of the ruling of record above (6161173492, letter
+// B): a page with a finding is fixed, then saved. `validateVisibilityPredicates`
+// and `validatePredicatePathRefs` declare `runtimeTypes: ['view', 'page']`, so
+// a page component `visibleWhen` that `os validate` / `os build` / `os lint`
+// refuse is refused at Studio, REST `/meta` and MCP with the build's own
+// finding. Stored pages keep loading and serving; only the next save of a page
+// with such a predicate is refused. The lint-level pins (every finding kind,
+// the path half on a page, the `view` control) are `@objectstack/lint`'s
+// `runtime-gate.page-visibility-predicate-writes.test.ts`.
+//
+// ⚠️ This package reaches `@objectstack/lint` through its built `dist/`, so a
+// registry edit is invisible here until `pnpm --filter @objectstack/lint build`
+// has run.
+describe('runtime authoring gate on PAGE writes — the component visibleWhen verdict (#24491)', () => {
+    const UNKNOWN_FUNCTION = 'visibility-predicate-unknown-function';
+    const FAMILY = ['validateVisibilityPredicates', 'validatePredicatePathRefs'];
+    /** One `page:header` whose props are declared, so a refusal is the predicate's. */
+    const page = (visibleWhen: unknown) => ({
+        name: 'pipeline_home',
+        label: 'Pipeline',
+        type: 'app',
+        regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title: 'Pipeline' }, visibleWhen }] }],
+    });
+    /** The card's shape: parses, is rooted nowhere wrong, and calls a function nothing registers. */
+    const bogusPage = () => page('totallyBogusFn(1)');
+    /** Registered functions, the shapes the examples and the platform's pages ship. */
+    const ACCEPTED = [
+        "has(record.status) && record.status == 'in_review'",
+        { dialect: 'cel', source: 'has(record.id) && has(record.email_verified) && record.email_verified == false' },
+        'size(record.name) > 0',
+    ];
+
+    const savePage = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'page', name: 'pipeline_home', item, ...extra });
+    const activePageRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'page' && r.state === 'active');
+    /** The build's error findings for one page, through the build's own entry. */
+    const buildErrors = (item: unknown) => {
+        const stack = { pages: [item] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack }).filter((f) => f.severity === 'error');
+    };
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('(a) REFUSES an active save of a component `visibleWhen` calling an unknown function, with the build\'s located finding; nothing stored', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const err = await savePage(protocol, bogusPage()).catch((e: any) => e);
+
+        expect(err, 'the save resolved — the door still accepts the page predicate').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.message).toMatch(/^page\/pipeline_home failed author-time validation: 1 issue — /);
+        expect(err.rulesRun).toEqual(expect.arrayContaining(FAMILY));
+        const issues = err.issues.filter((i: any) => i.rule === UNKNOWN_FUNCTION);
+        expect(issues, `issues: ${JSON.stringify(err.issues)}`).toHaveLength(1);
+        expect(issues[0]).toMatchObject({
+            severity: 'error',
+            where: 'page "pipeline_home"',
+            path: 'pages[0].regions[0].components[0]',
+        });
+        expect(issues[0].message).toContain('`totallyBogusFn`');
+        // A gate that refuses after persisting is a log line.
+        expect(activePageRows(rows)).toEqual([]);
+    });
+
+    it('(a) gates the draft → active promotion of the same page, so the draft door is no bypass', async () => {
+        const { protocol } = makeProtocol();
+        await expect(savePage(protocol, bogusPage(), { mode: 'draft' })).resolves.toMatchObject({ success: true });
+
+        const err = await protocol.publishMetaItem({ type: 'page', name: 'pipeline_home' }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.issues.map((i: any) => i.rule)).toContain(UNKNOWN_FUNCTION);
+    });
+
+    it('(b) the door and `os build` give the SAME finding for the refused page', async () => {
+        const { protocol } = makeProtocol();
+        const err = await savePage(protocol, bogusPage()).catch((e: any) => e);
+        const atDoor = (err.issues ?? []).filter((i: any) => i.rule === UNKNOWN_FUNCTION);
+
+        const atBuild = buildErrors(bogusPage());
+
+        // Non-vacuous on both sides: the build refuses the page with this one finding.
+        expect(atBuild.map((f) => f.rule)).toEqual([UNKNOWN_FUNCTION]);
+        expect(atDoor).toHaveLength(1);
+        // Compared key by key: a reworded or relocated door verdict is a second dialect.
+        for (const k of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+            expect(atDoor[0][k], `door and build disagree on '${k}'`).toBe(atBuild[0]![k]);
+        }
+    });
+
+    for (const [i, visibleWhen] of ACCEPTED.entries()) {
+        it(`(c) a page calling only registered functions saves, and the row lands (#${i}: ${JSON.stringify(visibleWhen)})`, async () => {
+            const { protocol, rows } = makeProtocol();
+
+            await expect(savePage(protocol, page(visibleWhen))).resolves.toMatchObject({ success: true });
+
+            expect(activePageRows(rows)).toHaveLength(1);
+            // Clean at the build too, not only at this door.
+            expect(buildErrors(page(visibleWhen))).toEqual([]);
+        });
+    }
+
+    it('(d) a stored page with such a predicate keeps loading and serving; its next save is refused until fixed', async () => {
+        const { engine, rows } = makeStubEngine();
+        const registered: Array<{ type: string; name: unknown }> = [];
+        engine.registry.registerItem = (type: string, item: { name?: unknown }) => {
+            registered.push({ type, name: item?.name });
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        // Stored before the crossing, seeded straight into the store because the
+        // save door now refuses this body.
+        const stored = bogusPage();
+        rows.set(keyOf({ type: 'page', name: 'pipeline_home', organization_id: null, state: 'active' }), {
+            id: 'r_seed', type: 'page', name: 'pipeline_home', organization_id: null, state: 'active',
+            metadata: JSON.stringify(stored),
+        });
+
+        // Loads: the boot path runs no authoring rule.
+        const result = await protocol.loadMetaFromDb();
+        expect(result).toMatchObject({ loaded: 1, errors: 0, invalid: 0 });
+        expect(registered).toContainEqual({ type: 'page', name: 'pipeline_home' });
+        // Serves: the read door hands the stored predicate back as stored.
+        const served: any = (await protocol.getMetaItem({ type: 'page', name: 'pipeline_home' })).item;
+        expect(served?.regions?.[0]?.components?.[0]?.visibleWhen).toEqual(stored.regions[0]!.components[0]!.visibleWhen);
+
+        // The next save of the same body is a write, and is judged.
+        const err = await savePage(protocol, stored).catch((e: any) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.issues.map((i: any) => i.rule)).toEqual([UNKNOWN_FUNCTION]);
+        // The stored row is untouched by the refusal.
+        expect(JSON.parse(activePageRows(rows)[0]!.metadata)).toEqual(stored);
+
+        // Fixed, then saved.
+        const fixed = page(ACCEPTED[0]);
+        await expect(savePage(protocol, fixed)).resolves.toMatchObject({ success: true });
+        expect(JSON.parse(activePageRows(rows)[0]!.metadata)).toEqual(fixed);
+    });
+});
+
 // A page component's `data` prop naming the retired view-level `api` provider,
 // at the runtime save door. `object-grid`, `object-map`, `object-gantt` and
 // `object-tree` take a view data source (`ViewDataSchema`) as `data`, so the
