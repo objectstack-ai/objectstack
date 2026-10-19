@@ -1941,27 +1941,39 @@ const LOCALIZATION_FAILURE_CACHE_TTL_MS = 30_000;
  *     older generation is dead on arrival.
  *     ⚠️ There is **no module called a "settings change bus"** — #11633's term
  *     for this seam maps to nothing in the tree. `subscribe()` is the seam.
- *  2. **Backstop — the engine write epoch** (#11968's substrate, declared in
- *     `objectql/src/write-epoch.ts`). Needed because this resolver's own
- *     fallback reads `sys_setting` DIRECTLY, so a seeder — or any other direct
- *     engine write — emits no settings event at all. Read STRUCTURALLY, never
- *     by import: `@objectstack/objectql` depends on this package, so the edge
- *     cannot be reversed, and the substrate declared `WriteEpochLike`
- *     separately for exactly this consumer.
- *  3. **TTL** — the residual bound, covering only what neither seam can see: a
- *     peer node's write, on a deployment with no `authz.invalidated` bridge
- *     attached. With a bridge, a peer's hint bumps the LOCAL epoch
- *     (`authz-invalidation-bridge.ts` calls `epoch.bump('remote')`), so the
- *     backstop narrows cross-node convergence for free.
+ *  2. **Backstop — writes to the objects this resolver reads, at the engine
+ *     middleware seam** ({@link LOCALIZATION_CACHE_WATCHED_OBJECTS}). Needed
+ *     because this resolver's own fallback reads `sys_setting` DIRECTLY, so a
+ *     seeder — or any other direct engine write — emits no settings event at
+ *     all. The bump lands AFTER the write settles, so a resolution in flight
+ *     across a write stamps the pre-write generation and is dead on arrival.
+ *     [#10757 leg 5] Until then this backstop was the engine write epoch,
+ *     which advances on a write to ANY object; on an idle stock boot two
+ *     outbox pollers write about every 30 s, and a local reading measured
+ *     the cache missing on 6 of 22 warm requests. Only a write to an object
+ *     the answer is read from can change it, so only such a write retires it
+ *     — the leg-B (`resolve-user-grants-cache.ts`) seam, with this
+ *     resolver's own watched set.
+ *  3. **Everything that seam cannot see — the epoch's non-`write` reasons,
+ *     wholesale.** `'remote'` (a peer node's `authz.invalidated` hint, which
+ *     carries no object: `authz-invalidation-bridge.ts` calls
+ *     `epoch.bump('remote')`, so cross-node convergence narrows for free),
+ *     `'metadata'` and `'manual'`. Read STRUCTURALLY, never by import:
+ *     `@objectstack/objectql` depends on this package, so the edge cannot be
+ *     reversed, and the substrate declared `WriteEpochLike` separately for
+ *     exactly this consumer.
+ *  4. **TTL** — the residual bound, covering only what none of the seams can
+ *     see: a peer node's write, on a deployment with no `authz.invalidated`
+ *     bridge attached.
  *
- * ⭐ **A success is cached ONLY when the engine exposes the write epoch.** That
- * is the load-bearing rule of this change. It is a rule about the CACHE, not
- * about the caller: a `ql` with no seam is a `ql` whose writes this cache
- * cannot see, and leg C's ruled requirement is that invalidation be
- * synchronous and in-process — "a TTL alone does not satisfy it". So instead of
- * degrading to the TTL-only shape that was already reverted once here, the
- * cache declines. Every existing test double takes that path and keeps its
- * exact query multiset; only a real engine caches.
+ * ⭐ **A success is cached ONLY when the engine exposes the write epoch AND the
+ * middleware seam.** That is the load-bearing rule of this change. It is a rule
+ * about the CACHE, not about the caller: a `ql` without them is a `ql` whose
+ * writes this cache cannot see, and leg C's ruled requirement is that
+ * invalidation be synchronous and in-process — "a TTL alone does not satisfy
+ * it". So instead of degrading to the TTL-only shape that was already reverted
+ * once here, the cache declines. A test double without both takes that path
+ * and keeps its exact query multiset; a real engine caches.
  *
  * ⛔ **Invalidation retires SUCCESS entries only.** Dropping failure entries on
  * a write would hand #10221 straight back: on the environment that memo exists
@@ -1998,6 +2010,107 @@ function localizationSuccessCacheTtlMs(
   const parsed = Number(raw.trim());
   if (!Number.isFinite(parsed) || parsed < 0) return 0;
   return Math.floor(parsed);
+}
+
+/**
+ * [#10757 leg 5] The objects whose rows the localization answer is read from —
+ * derived by reading the resolver, never guessed:
+ *
+ *  - `sys_setting` — the tenant and user rungs `SettingsService.getMany`
+ *    loads (`loadRows`), and the direct `$in` fallback below;
+ *  - `sys_platform_setting` — the global rung `getMany` loads ([ADR-0131] D7).
+ *
+ * The rest of the answer is not a row: the manifest defaults and the
+ * `OS_LOCALIZATION_*` env overrides are process state, and the tenancy posture
+ * `getMany` asks for the caller's organization reach is deployment config. A
+ * settings write through the service is seen first by its own change seam;
+ * this set is the backstop for a write that reaches these tables without it.
+ */
+const LOCALIZATION_CACHE_WATCHED_OBJECTS: ReadonlySet<string> = new Set(['sys_setting', 'sys_platform_setting']);
+
+/** The engine operations that read; every other operation on a watched object retires the bucket. */
+const LOCALIZATION_READ_OPERATIONS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
+
+/** Per-engine invalidation state for the localization success cache. */
+interface LocalizationWriteState {
+  /** Advanced after each watched write settles, and on every non-`write` epoch bump. Compared, never interpreted. */
+  gen: number;
+}
+
+/**
+ * `null` records an engine whose wiring THREW partway — poisoned, never cached
+ * behind, so a half-attached seam can never stand behind an entry.
+ */
+const localizationWriteStates = new WeakMap<object, LocalizationWriteState | null>();
+
+/**
+ * Fetch — and on first sight of an engine, wire — the localization cache's
+ * engine-side invalidation state: a middleware that bumps the generation after
+ * every write to {@link LOCALIZATION_CACHE_WATCHED_OBJECTS} settles (on a throw
+ * too: a partial write is a write), and an epoch subscription that bumps it on
+ * every non-`write` reason. Returns `undefined` for a `ql` without both seams,
+ * and for one whose wiring threw.
+ *
+ * Registered without an `object` filter on purpose: an object-keyed
+ * registration is what `hasObjectMiddleware` counts, and the analytics
+ * native-SQL strategy declines an object that has one — this observer must not
+ * change which strategy serves `sys_setting`.
+ *
+ * ⚠️ What it cannot see, stated exactly: the engine snapshots its middleware
+ * list when a write starts, so a write that STARTED before this registration
+ * never passes it. Registration happens in the first call that names the
+ * engine, before that call reads its generation, so every write that starts
+ * after any entry's reading is observed; a pre-registration write still in
+ * flight was invisible to the epoch reading this replaced as well (it had
+ * already bumped). The TTL bounds it.
+ *
+ * Only ever called with a non-zero TTL in hand: with the cache OFF this leaves
+ * no footprint on the engine, so `0` stays a real path.
+ */
+function localizationWriteState(ql: object): LocalizationWriteState | undefined {
+  const existing = localizationWriteStates.get(ql);
+  if (existing !== undefined) return existing ?? undefined;
+  const register = (ql as { registerMiddleware?: unknown }).registerMiddleware;
+  const epoch = (ql as { writeEpoch?: { subscribe?: unknown } }).writeEpoch;
+  if (readWriteEpoch(ql) === undefined || typeof register !== 'function' || typeof epoch?.subscribe !== 'function') {
+    // Not memoized: probing is cheap and a double's shape is static anyway.
+    return undefined;
+  }
+  const state: LocalizationWriteState = { gen: 0 };
+  try {
+    (register as (
+      fn: (ctx: { object?: unknown; operation?: unknown }, next: () => Promise<void>) => Promise<void>,
+    ) => void).call(ql, async (ctx, next) => {
+      const operation = ctx?.operation;
+      if (
+        typeof ctx?.object !== 'string'
+        || !LOCALIZATION_CACHE_WATCHED_OBJECTS.has(ctx.object)
+        || (typeof operation === 'string' && LOCALIZATION_READ_OPERATIONS.has(operation))
+      ) {
+        return next();
+      }
+      try {
+        await next();
+      } finally {
+        state.gen += 1;
+      }
+    });
+    // A local `write` bump is the middleware's to judge, with object precision;
+    // every other reason carries no object, and its only correct reading is
+    // "retire everything". Never disposed, like the settings subscription: one
+    // integer per engine, and the engine outlives this module's interest in it.
+    (epoch.subscribe as (listener: (epoch: number, reason: string) => void) => unknown).call(
+      epoch,
+      (_epoch, reason) => {
+        if (reason !== 'write') state.gen += 1;
+      },
+    );
+  } catch {
+    localizationWriteStates.set(ql, null);
+    return undefined;
+  }
+  localizationWriteStates.set(ql, state);
+  return state;
 }
 
 /**
@@ -2085,15 +2198,19 @@ function localizationSettingsState(settings: unknown): LocalizationSettingsState
  * docblocks above are why they must not collapse into a single rule:
  *
  *   `failure` — #10221/#11877. TTL only; no invalidation ever retires it.
- *   `success` — #11966 / #11633 leg C. Retired by the settings seam, by the
- *               engine write epoch, or by the TTL — whichever comes first.
+ *   `success` — #11966 / #11633 leg C. Retired by the settings seam, by a
+ *               watched-object write or a non-`write` epoch bump
+ *               ({@link localizationWriteState}), or by the TTL — whichever
+ *               comes first.
  */
 interface LocalizationCacheEntry {
   value: LocalizationResult;
   expiresAt: number;
   kind: 'failure' | 'success';
-  /** `success` only: the engine write epoch this value was read at. */
-  epoch?: number;
+  /** `success` only: the engine-side invalidation state this value was read under. */
+  writes?: LocalizationWriteState;
+  /** `success` only: that state's generation at read time. */
+  writesGen?: number;
   /** `success` only: the settings occupant this value was read through. */
   settings?: LocalizationSettingsState;
   /** `success` only: that occupant's generation at read time. */
@@ -2109,11 +2226,15 @@ const localizationCache = new WeakMap<object, Map<string, LocalizationCacheEntry
  */
 function localizationEntryIsLive(
   entry: LocalizationCacheEntry,
-  epoch: number | undefined,
+  writes: LocalizationWriteState | undefined,
   settings: LocalizationSettingsState,
 ): boolean {
   if (entry.kind === 'failure') return true;
-  return entry.epoch === epoch && entry.settings === settings && entry.settingsGen === settings.gen;
+  return writes !== undefined
+    && entry.writes === writes
+    && entry.writesGen === writes.gen
+    && entry.settings === settings
+    && entry.settingsGen === settings.gen;
 }
 
 function putLocalizationEntry(ql: object, key: string, entry: LocalizationCacheEntry): void {
@@ -2136,9 +2257,10 @@ function putLocalizationEntry(ql: object, key: string, entry: LocalizationCacheE
  * and never populates that memo (#11877).
  *
  * A SUCCESSFUL read is cached too, since #11966 (leg C of #11633) — but only
- * when the engine carries the write-epoch seam, and only until the first of:
- * a `localization` settings change, an engine write, or
- * `OS_LOCALIZATION_CACHE_TTL_MS`. Both invalidations are synchronous and
+ * when the engine carries the write-epoch and middleware seams, and only until
+ * the first of: a `localization` settings change, a write to a table the
+ * answer is read from (#10757 leg 5 — {@link LOCALIZATION_CACHE_WATCHED_OBJECTS}),
+ * a non-`write` epoch bump, or `OS_LOCALIZATION_CACHE_TTL_MS`. Both invalidations are synchronous and
  * in-process, which is what lets the success cache exist at all: the
  * dogfood analytics-bucketing test writes a new org timezone and reads it back
  * on the very next request, and it is kept unweakened as this leg's acceptance
@@ -2152,17 +2274,19 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
 
   // ⭐ Both invalidation readings are taken BEFORE the resolve, and it is these
   // pre-read values that get stored with the answer. A write landing WHILE this
-  // read is in flight therefore moves the epoch (or the generation) past what
-  // the entry records, so the entry is already dead when it is written — the
-  // safe direction. Reading them afterwards would stamp a pre-write value with
-  // a post-write epoch and make that staleness permanent: the
+  // read is in flight therefore moves a generation past what the entry
+  // records, so the entry is already dead when it is written — the safe
+  // direction. Reading them afterwards would stamp a pre-write value with a
+  // post-write generation and make that staleness permanent: the
   // clear-then-repopulate-from-a-stale-read failure #11633 §7 pin 2 names.
-  const epoch = cacheable ? readWriteEpoch(ql) : undefined;
+  const ttlMs = localizationSuccessCacheTtlMs();
+  const writes = cacheable && ttlMs > 0 ? localizationWriteState(ql) : undefined;
+  const writesGen = writes?.gen;
   const settingsState = localizationSettingsState(settings);
 
   if (cacheable) {
     const hit = localizationCache.get(ql)?.get(cacheKey);
-    if (hit && hit.expiresAt > Date.now() && localizationEntryIsLive(hit, epoch, settingsState)) {
+    if (hit && hit.expiresAt > Date.now() && localizationEntryIsLive(hit, writes, settingsState)) {
       return hit.value;
     }
   }
@@ -2179,13 +2303,13 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
     return value;
   }
 
-  const ttlMs = localizationSuccessCacheTtlMs();
-  if (epoch !== undefined && ttlMs > 0) {
+  if (writes !== undefined && ttlMs > 0) {
     putLocalizationEntry(ql, cacheKey, {
       value,
       expiresAt: Date.now() + ttlMs,
       kind: 'success',
-      epoch,
+      writes,
+      writesGen,
       settings: settingsState,
       settingsGen: settingsState.gen,
     });

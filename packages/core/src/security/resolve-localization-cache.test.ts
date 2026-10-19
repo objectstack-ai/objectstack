@@ -16,18 +16,32 @@
 //
 //   1. `SettingsService.subscribe('localization', ...)` — the primary. ⚠️ There
 //      is no module called a "settings change bus"; `subscribe()` IS the seam.
-//   2. The engine write epoch (#11968) — the backstop, for writes that reach
-//      `sys_setting` without passing through the settings service at all.
+//   2. Writes to the tables the answer is read from (`sys_setting`,
+//      `sys_platform_setting`), observed at the engine middleware seam — the
+//      backstop, for writes that reach them without passing through the
+//      settings service at all. [#10757 leg 5] Until then the backstop was the
+//      engine write epoch, which every write to ANY object advances; the pins
+//      in "a write to any OTHER object" hold it to its watched set.
+//   3. The epoch's non-`write` reasons (a peer's `remote` hint, `metadata`),
+//      which carry no object and retire everything.
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { resolveLocalizationContext } from './resolve-authz-context.js';
 
 const TTL_ENV = 'OS_LOCALIZATION_CACHE_TTL_MS';
 
-/** Rows the direct `$in` fallback reads, plus a per-object query counter. */
-function makeQl(rows: Array<Record<string, unknown>>, opts: { epoch?: boolean } = {}) {
-  const counts = { sys_setting: 0 };
+type Middleware = (ctx: { object: string; operation: string }, next: () => Promise<void>) => Promise<void>;
+
+/**
+ * The two engine seams the success cache requires, shaped as the engine's own:
+ * the write epoch (bumped with `'write'` when a write STARTS, ahead of every
+ * middleware — `objectql/src/engine.ts` `executeWithMiddleware`) and the
+ * middleware chain every operation runs through. `write(object, apply)` is one
+ * engine write: epoch first, then the chain, `apply` as its driver step.
+ */
+function engineSeams() {
   const listeners = new Set<(epoch: number, reason: string) => void>();
+  const middlewares: Middleware[] = [];
   let epoch = 0;
   const writeEpoch = {
     get current() {
@@ -43,8 +57,32 @@ function makeQl(rows: Array<Record<string, unknown>>, opts: { epoch?: boolean } 
       return () => listeners.delete(l);
     },
   };
+  return {
+    writeEpoch,
+    middlewares,
+    registerMiddleware(fn: Middleware) {
+      middlewares.push(fn);
+    },
+    async write(object: string, apply: () => void | Promise<void> = () => {}, operation = 'update') {
+      writeEpoch.bump('write');
+      const chain = [...middlewares];
+      let i = 0;
+      const next = async (): Promise<void> => {
+        if (i < chain.length) return chain[i++]({ object, operation }, next);
+        await apply();
+      };
+      await next();
+    },
+  };
+}
+
+/** Rows the direct `$in` fallback reads, plus a per-object query counter. */
+function makeQl(rows: Array<Record<string, unknown>>, opts: { epoch?: boolean; middleware?: boolean } = {}) {
+  const counts = { sys_setting: 0 };
+  const seams = engineSeams();
   const ql: Record<string, unknown> = {
     counts,
+    write: seams.write,
     async find(_object: string, o: any) {
       counts.sys_setting += 1;
       const where = o?.where ?? {};
@@ -65,10 +103,15 @@ function makeQl(rows: Array<Record<string, unknown>>, opts: { epoch?: boolean } 
       return typeof o?.limit === 'number' ? matched.slice(0, o.limit) : matched;
     },
   };
-  // The seam is opt-in per double on purpose: the guard under test is "no seam
+  // The seams are opt-in per double on purpose: the guard under test is "no seam
   // ⇒ no success cache", so a double without one is a fixture, not an oversight.
-  if (opts.epoch !== false) ql.writeEpoch = writeEpoch;
-  return ql as typeof ql & { counts: typeof counts; writeEpoch: typeof writeEpoch };
+  if (opts.epoch !== false) ql.writeEpoch = seams.writeEpoch;
+  if (opts.middleware !== false) ql.registerMiddleware = seams.registerMiddleware;
+  return ql as typeof ql & {
+    counts: typeof counts;
+    writeEpoch: typeof seams.writeEpoch;
+    write: typeof seams.write;
+  };
 }
 
 /** A settings occupant carrying the real `subscribe(ns, handler)` seam. */
@@ -159,11 +202,11 @@ describe('resolveLocalizationContext — the settings seam invalidates synchrono
     const settings = seamless as unknown as typeof full;
     const first = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
     expect(first.timezone).toBe('UTC');
-    // Still cached — the epoch backstop and the TTL are the remaining bounds.
+    // Still cached — the engine-side backstop and the TTL are the remaining bounds.
     await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
     expect(settings.counts.reads).toBe(1);
     // ...and the backstop still retires it.
-    ql.writeEpoch.bump('write');
+    await ql.write('sys_setting');
     await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
     expect(settings.counts.reads).toBe(2);
   });
@@ -177,7 +220,7 @@ describe('resolveLocalizationContext — the settings seam invalidates synchrono
   });
 });
 
-describe('resolveLocalizationContext — the engine write epoch is the backstop', () => {
+describe('resolveLocalizationContext — a write to a table the answer is read from is the backstop', () => {
   it('a DIRECT `sys_setting` write, bypassing the settings service entirely, is observed at once', async () => {
     // The case the backstop exists for: a seeder writes the row through the
     // engine, so no settings event is ever emitted.
@@ -187,11 +230,44 @@ describe('resolveLocalizationContext — the engine write epoch is the backstop'
     await resolveLocalizationContext({ ql, tenantId: 'o1' });
     expect(ql.counts.sys_setting).toBe(1);
 
-    rows[0].value = 'America/Los_Angeles';
-    ql.writeEpoch.bump('write');
+    await ql.write('sys_setting', () => {
+      rows[0].value = 'America/Los_Angeles';
+    });
 
     expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('America/Los_Angeles');
     expect(ql.counts.sys_setting).toBe(2);
+  });
+
+  it('a `sys_platform_setting` write — the global rung `getMany` reads — retires it too', async () => {
+    const ql = makeQl([]);
+    const settings = makeSettings({ timezone: 'UTC' });
+    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    expect(settings.counts.reads).toBe(1);
+    // A direct engine write of the global row: no settings event is emitted.
+    await ql.write('sys_platform_setting', () => {}, 'insert');
+    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    expect(settings.counts.reads).toBe(2);
+  });
+
+  it('the retirement lands AFTER the write settles — a read while the write is in flight is dead on arrival', async () => {
+    // The write has entered the chain (its epoch bump already happened) and its
+    // driver step is still running when the resolve reads the old row.
+    const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'UTC' }];
+    const ql = makeQl(rows);
+    await resolveLocalizationContext({ ql, tenantId: 'other' }); // first sight: wires the seam
+    let land!: () => void;
+    const landed = new Promise<void>((r) => {
+      land = r;
+    });
+    const inFlight = ql.write('sys_setting', async () => {
+      await landed;
+      rows[0].value = 'Asia/Tokyo';
+    });
+    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('UTC');
+    land();
+    await inFlight;
+    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
   });
 
   it('a peer node\'s hint (`remote`) retires the entry the same way a local write does', async () => {
@@ -204,6 +280,69 @@ describe('resolveLocalizationContext — the engine write epoch is the backstop'
     ql.writeEpoch.bump('remote');
     expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
   });
+
+  it('a `metadata` bump — no object to judge — retires it as well', async () => {
+    const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'UTC' }];
+    const ql = makeQl(rows);
+    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    rows[0].value = 'Asia/Tokyo';
+    ql.writeEpoch.bump('metadata');
+    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
+  });
+});
+
+// [#10757 leg 5] The measured defect: every engine write retired this cache, so
+// on an idle stock boot the two outbox pollers (claim UPDATEs on
+// `sys_http_delivery` and `sys_notification_delivery`, about every 30 s) made a
+// warm request pay the localization read again. Each pin pairs "not retired"
+// with the hit it protects: the reads stay at one.
+describe('resolveLocalizationContext — a write to any OTHER object does not retire it (#10757 leg 5)', () => {
+  it.each(['sys_http_delivery', 'sys_notification_delivery', 'showcase_task', 'sys_session'])(
+    'a `%s` write leaves the entry serving, with zero reads',
+    async (object) => {
+      const ql = makeQl([{ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'UTC' }]);
+      const settings = makeSettings({ timezone: 'Asia/Tokyo' });
+      expect((await resolveLocalizationContext({ ql, settings, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
+      await ql.write(object);
+      await ql.write(object, () => {}, 'insert');
+      await ql.write(object, () => {}, 'delete');
+      expect((await resolveLocalizationContext({ ql, settings, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
+      expect(settings.counts.reads).toBe(1);
+      expect(ql.counts.sys_setting).toBe(0);
+    },
+  );
+
+  it('a READ of a watched table retires nothing', async () => {
+    const ql = makeQl([]);
+    const settings = makeSettings({ timezone: 'UTC' });
+    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    await ql.write('sys_setting', () => {}, 'find');
+    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    expect(settings.counts.reads).toBe(1);
+  });
+
+  it('a bare `write` epoch bump is the middleware\'s to judge, and on its own retires nothing', async () => {
+    const ql = makeQl([]);
+    const settings = makeSettings({ timezone: 'UTC' });
+    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    ql.writeEpoch.bump('write');
+    await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    expect(settings.counts.reads).toBe(1);
+  });
+
+  it('the observer is registered once per engine, unkeyed (so `hasObjectMiddleware` is not moved)', async () => {
+    const ql = makeQl([]);
+    const register = ql.registerMiddleware as (fn: unknown, opts?: unknown) => void;
+    const seen: unknown[] = [];
+    (ql as Record<string, unknown>).registerMiddleware = (fn: unknown, opts?: unknown) => {
+      seen.push(opts);
+      register(fn, opts);
+    };
+    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    await resolveLocalizationContext({ ql, tenantId: 'o2' });
+    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    expect(seen).toEqual([undefined]);
+  });
 });
 
 describe('resolveLocalizationContext — no seam, no success cache', () => {
@@ -214,6 +353,15 @@ describe('resolveLocalizationContext — no seam, no success cache', () => {
     rows[0].value = 'Asia/Tokyo';
     const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
     expect(second.timezone).toBe('Asia/Tokyo');
+    expect(ql.counts.sys_setting).toBe(2);
+  });
+
+  it('a `ql` with the epoch but no middleware seam never caches a success either', async () => {
+    const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'UTC' }];
+    const ql = makeQl(rows, { middleware: false });
+    await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    rows[0].value = 'Asia/Tokyo';
+    expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('Asia/Tokyo');
     expect(ql.counts.sys_setting).toBe(2);
   });
 
@@ -241,11 +389,19 @@ describe('resolveLocalizationContext — the TTL is the residual bound (#11633 �
     process.env[TTL_ENV] = '0';
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'UTC' }];
     const ql = makeQl(rows);
+    const registered: unknown[] = [];
+    const register = ql.registerMiddleware as (fn: unknown) => void;
+    (ql as Record<string, unknown>).registerMiddleware = (fn: unknown) => {
+      registered.push(fn);
+      register(fn);
+    };
     await resolveLocalizationContext({ ql, tenantId: 'o1' });
     rows[0].value = 'Asia/Tokyo';
     const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
     expect(second.timezone).toBe('Asia/Tokyo');
     expect(ql.counts.sys_setting).toBe(2);
+    // OFF leaves no footprint on the engine: nothing is registered.
+    expect(registered).toHaveLength(0);
   });
 
   it('a MALFORMED value reads as off, never as the default — it must not widen the window', async () => {
@@ -286,21 +442,12 @@ describe('resolveLocalizationContext — the TTL is the residual bound (#11633 �
 describe('resolveLocalizationContext — the failure memo survives what retires a success', () => {
   function makeFailingQl() {
     const counts = { sys_setting: 0 };
-    let epoch = 0;
+    const seams = engineSeams();
     return {
       counts,
-      writeEpoch: {
-        get current() {
-          return epoch;
-        },
-        bump() {
-          epoch += 1;
-          return epoch;
-        },
-        subscribe() {
-          return () => {};
-        },
-      },
+      writeEpoch: seams.writeEpoch,
+      registerMiddleware: seams.registerMiddleware,
+      write: seams.write,
       async find() {
         counts.sys_setting += 1;
         throw new Error('no such table: sys_setting');
@@ -318,7 +465,8 @@ describe('resolveLocalizationContext — the failure memo survives what retires 
     });
     expect(ql.counts.sys_setting).toBe(1);
 
-    ql.writeEpoch.bump();
+    await ql.write('sys_setting');
+    ql.writeEpoch.bump('remote');
     settings.write('timezone', 'Asia/Tokyo');
 
     await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
@@ -346,21 +494,11 @@ describe('resolveLocalizationContext — the failure memo survives what retires 
     const rows: Array<Record<string, unknown>> = [];
     let broken = true;
     const counts = { sys_setting: 0 };
-    let epoch = 0;
+    const seams = engineSeams();
     const ql = {
       counts,
-      writeEpoch: {
-        get current() {
-          return epoch;
-        },
-        bump() {
-          epoch += 1;
-          return epoch;
-        },
-        subscribe() {
-          return () => {};
-        },
-      },
+      writeEpoch: seams.writeEpoch,
+      registerMiddleware: seams.registerMiddleware,
       async find() {
         counts.sys_setting += 1;
         if (broken) throw new Error('no such table: sys_setting');
@@ -389,37 +527,27 @@ describe('resolveLocalizationContext — the failure memo survives what retires 
     }
 
     // ...and that success is retired by a write, like any other.
-    rows[0].value = 'Europe/Paris';
-    ql.writeEpoch.bump();
+    await seams.write('sys_setting', () => {
+      rows[0].value = 'Europe/Paris';
+    });
     expect((await resolveLocalizationContext({ ql, tenantId: 'o1' })).timezone).toBe('Europe/Paris');
   });
 });
 
 describe('resolveLocalizationContext — a write DURING the read must not be swallowed', () => {
-  it('an entry is stamped with the PRE-read epoch, so an in-flight write kills it on arrival', async () => {
+  it('an entry is stamped with the PRE-read generation, so a write landing mid-read kills it on arrival', async () => {
     // The clear-then-repopulate-from-a-stale-read failure, at its sharpest: the
     // write lands after the query was issued and before the answer is stored.
     // Stamping the entry with the post-read epoch would make that staleness
     // permanent, invisible, and unbounded by any further event.
     const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'UTC' }];
     const counts = { sys_setting: 0 };
-    let epoch = 0;
-    const writeEpoch = {
-      get current() {
-        return epoch;
-      },
-      bump() {
-        epoch += 1;
-        return epoch;
-      },
-      subscribe() {
-        return () => {};
-      },
-    };
+    const seams = engineSeams();
     let raceOnce = true;
     const ql = {
       counts,
-      writeEpoch,
+      writeEpoch: seams.writeEpoch,
+      registerMiddleware: seams.registerMiddleware,
       async find() {
         counts.sys_setting += 1;
         const snapshot = rows.map((r) => ({ ...r }));
@@ -427,8 +555,9 @@ describe('resolveLocalizationContext — a write DURING the read must not be swa
           raceOnce = false;
           // The concurrent write, mid-flight: the row changes and the seam
           // advances AFTER this read's result was already determined.
-          rows[0].value = 'Asia/Tokyo';
-          writeEpoch.bump();
+          await seams.write('sys_setting', () => {
+            rows[0].value = 'Asia/Tokyo';
+          });
         }
         return snapshot;
       },
