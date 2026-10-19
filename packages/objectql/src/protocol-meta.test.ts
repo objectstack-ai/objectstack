@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from './registry.js';
 
 /**
@@ -1752,31 +1752,13 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             });
         });
 
-        it('accepts a spec-valid `sharing_rule` item (write door unchanged by the schema binding)', async () => {
+        // [ADR-0131 D6] `sharing_rule` is code-only (regime C): an organization
+        // authors its rules through the sharing door, so this door refuses a
+        // spec-valid body outright. The schema binding #6245 added still judges
+        // the body, behind the operator hatch.
+        it('refuses a spec-valid `sharing_rule` item with 403 NOT_CREATABLE (code-only, regime C)', async () => {
             mockEngine.findOne.mockResolvedValue(null);
 
-            const result = await scoped.saveMetaItem({
-                type: 'sharing_rule',
-                name: 'sales_records',
-                item: {
-                    name: 'sales_records',
-                    type: 'criteria',
-                    object: 'case',
-                    condition: "record.department == 'Sales'",
-                    sharedWith: { type: 'team', value: 'sales' },
-                },
-            });
-
-            expect(result.success).toBe(true);
-        });
-
-        it('refuses a spec-INVALID `sharing_rule` item with 422 instead of storing it unvalidated', async () => {
-            mockEngine.findOne.mockResolvedValue(null);
-
-            // No `condition` and no `object`: a criteria rule that names
-            // neither what it shares nor which records. Stored unvalidated this
-            // is the #3896 shape — a rule that binds to nothing, or worse
-            // compiles to the empty filter.
             await expect(
                 scoped.saveMetaItem({
                     type: 'sharing_rule',
@@ -1784,13 +1766,46 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     item: {
                         name: 'sales_records',
                         type: 'criteria',
+                        object: 'case',
+                        condition: "record.department == 'Sales'",
                         sharedWith: { type: 'team', value: 'sales' },
                     },
                 }),
             ).rejects.toMatchObject({
-                code: 'INVALID_METADATA',
-                status: 422,
+                code: 'NOT_CREATABLE',
+                status: 403,
             });
+        });
+
+        it('behind OS_METADATA_WRITABLE=sharing_rule, refuses a spec-INVALID item with 422 instead of storing it unvalidated', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+            process.env.OS_METADATA_WRITABLE = 'sharing_rule';
+            ObjectStackProtocolImplementation.resetEnvWritableCache();
+            resetEnvWritableMetadataTypes();
+            try {
+                // No `condition` and no `object`: a criteria rule that names
+                // neither what it shares nor which records. Stored unvalidated this
+                // is the #3896 shape — a rule that binds to nothing, or worse
+                // compiles to the empty filter.
+                await expect(
+                    scoped.saveMetaItem({
+                        type: 'sharing_rule',
+                        name: 'sales_records',
+                        item: {
+                            name: 'sales_records',
+                            type: 'criteria',
+                            sharedWith: { type: 'team', value: 'sales' },
+                        },
+                    }),
+                ).rejects.toMatchObject({
+                    code: 'INVALID_METADATA',
+                    status: 422,
+                });
+            } finally {
+                delete process.env.OS_METADATA_WRITABLE;
+                ObjectStackProtocolImplementation.resetEnvWritableCache();
+                resetEnvWritableMetadataTypes();
+            }
         });
 
         // ───────────────────────────────────────────────────────────────
