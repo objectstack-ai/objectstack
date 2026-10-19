@@ -814,6 +814,27 @@ sits beside them.
    under `single` for capability holders" is the accurate wording, and D3's "no Studio capability is
    required" is withdrawn by this ruling.
 
+**Release-scope note (2026-10-19, ruling records `6259608309` and `6259698357` on #15194).** Two ruling
+records of the maintainer (「同意」, twice) split the v18 line between 18.0 and later 18.x releases.
+⛔ Neither changes a decision of this record: the line, the fence above and §8's order stand, and this
+note sits beside them.
+
+1. **18.0 ships for fresh installs, on the `single` posture only.** A v17 database stays on 17.x
+   until the 18.x release that carries the upgrade path. In 18.0, `os migrate organization-ownership`
+   refuses to run, and the walled postures (`group`, `isolated`) are refused at the operator's boot
+   path. Both refusals name the 18.x release that will carry the missing piece.
+2. **Stage 8b ships in 18.0.** Every system insert is stamped or refused; under `single` it is stamped
+   with the Default Organization.
+3. **These ship in 18.x:**
+   - the v17 → v18 upgrade path, which is the ceremony's deferred fates and moves;
+   - the walled postures;
+   - C8 stages 8b-0d, 8b-0e and 8b-0g: the identity-mail and settings-audit siblings, the column-less
+     `sys_secret` and `sys_flow_credential`, and declared webhooks served from the registry (the D7
+     notes above);
+   - 8c, the organization-less read branches;
+   - 8d, `COALESCE` and `__global__`;
+   - 8e, the NOT NULL constraint.
+
 ---
 
 ## 3. Non-goals
