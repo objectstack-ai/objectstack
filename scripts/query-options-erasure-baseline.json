@@ -43,7 +43,6 @@
     "packages/plugins/plugin-auth/src/auth-manager.ts": 14,
     "packages/plugins/plugin-sharing/src/share-link-routes.ts": 3,
     "packages/plugins/plugin-sharing/src/share-link-service.ts": 5,
-    "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts": 1,
     "packages/runtime/src/action-execution.ts": 1,
     "packages/runtime/src/domains/share-links.ts": 3,
     "packages/runtime/src/http-dispatcher.ts": 1,
