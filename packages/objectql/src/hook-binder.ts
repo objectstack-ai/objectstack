@@ -21,7 +21,7 @@
  * metadata-aware behaviour lives in this binder + the wrapper module.
  */
 
-import type { Hook } from '@objectstack/spec/data';
+import type { Hook, HookContext } from '@objectstack/spec/data';
 import { normalizeFlowFunctionEntry, type FlowFunctionEntry } from '@objectstack/spec/automation';
 import type { ObjectQL, HookHandler } from './engine.js';
 import { wrapDeclarativeHook, type HookDiagnosticsLogger } from './hook-wrappers.js';
@@ -57,6 +57,22 @@ export interface BindHooksOptions {
    * with a clear error.
    */
   bodyRunner?: (hook: Hook) => HookHandler | undefined;
+
+  /**
+   * Optional wrap for each handler the hook runs IN-PROCESS: an inline
+   * `handler` function, and the function a string `handler` names (from
+   * `functions` or the package's registered functions). It is applied here,
+   * after the name is resolved, so both kinds take the one wrap; the handler
+   * `bodyRunner` builds from a `body` never does. Called once per hook, at bind.
+   *
+   * The runtime passes the wrap that hands an in-process handler the
+   * `ctx.title(field?)` a sandboxed `body` gets (#24289). Absent, every handler
+   * binds exactly as resolved.
+   */
+  wrapHandler?: (
+    handler: (context: HookContext) => unknown,
+    hook: Hook,
+  ) => (context: HookContext) => unknown;
 
   /**
    * When true, treat unresolved hooks (body present but no runner, or handler
@@ -392,6 +408,21 @@ function resolveHandler(
     return undefined;
   }
 
+  const fn = resolveInProcessHandler(engine, hook, opts);
+  if (!fn || typeof opts.wrapHandler !== 'function') return fn;
+  // The engine awaits a handler and discards its return value; so does this.
+  const wrapped = opts.wrapHandler(fn, hook);
+  return async (context) => {
+    await wrapped(context);
+  };
+}
+
+/** The in-process handler a hook with no `body` names: its inline function, or the function its string names. */
+function resolveInProcessHandler(
+  engine: ObjectQL,
+  hook: Hook,
+  opts: BindHooksOptions,
+): HookHandler | undefined {
   const h = hook.handler;
   if (typeof h === 'function') return h as HookHandler;
   if (typeof h === 'string' && h.length > 0) {

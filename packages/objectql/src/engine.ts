@@ -290,7 +290,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 // [#20331] The divergent view-container `name` refusal — the ONE judge this
 // registrar and `os validate` both call.
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
-import { bindHooksToEngine } from './hook-binder.js';
+import { bindHooksToEngine, type BindHooksOptions } from './hook-binder.js';
 import { declaredHookCondition } from './hook-wrappers.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
@@ -4866,6 +4866,8 @@ export class ObjectQL implements IObjectQLEngine {
     strict?: boolean;
     warnLegacyHandler?: boolean;
     metrics?: any;
+    /** Wraps each in-process handler after its name resolves — see {@link BindHooksOptions.wrapHandler}. */
+    wrapHandler?: BindHooksOptions['wrapHandler'];
   }): void {
     const merged = { ...(opts ?? {}), logger: this.logger } as any;
     if (!merged.bodyRunner && this._defaultBodyRunner) {
@@ -13305,10 +13307,19 @@ export class ObjectQL implements IObjectQLEngine {
    * that record — and hydrates when it allows. Every other id keeps the
    * refused marker. See {@link readParentDerivedFiles}.
    *
-   * Batched: at most one `sys_file` `id $in […]` read per call (no N+1) — and,
-   * on the refused arm only, one more system read plus one verdict call; zero
-   * reads when no field holds a string value (the blob-only case), so the step
-   * is free for objects that have not adopted references.
+   * ASKED BEFORE READ (#24335): the caller's `sys_file` read is issued only
+   * when the security service admits it — {@link callerMayReadSysFile}, the
+   * middleware's own object-level read gate. A caller it refuses goes
+   * straight to the refused arm, the answer that read's refusal produced, so
+   * the served value is the same and no access attempt is made: the security
+   * layer logs no denial for a read the reader never asked for. A direct
+   * `sys_file` read by that reader is refused, and logged, exactly as before.
+   *
+   * Batched: one admission ask and at most one `sys_file` `id $in […]` read
+   * per call (no N+1) — and, on the refused arm only, one more system read
+   * plus one verdict call; zero of each when no field holds a string value
+   * (the blob-only case), so the step is free for objects that have not
+   * adopted references.
    */
   private async resolveFileReferences(
     objectName: string,
@@ -13354,6 +13365,13 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const uniqueIds = [...new Set(candidateIds)];
     if (uniqueIds.length === 0) return records; // blob-only / empty → zero cost
+
+    // [#24335] Ask before reading: a caller the security service refuses
+    // `sys_file` read is served the refused arm without the read whose
+    // refusal would have produced it.
+    if (!(await this.callerMayReadSysFile(execCtx))) {
+      return this.serveRefusedFileHydration(objectName, records, fileFields, uniqueIds, execCtx);
+    }
 
     // One batched sys_file read. `__expandRead` mirrors the lookup-expansion
     // sub-read (a system-built marker, never from client input). Metadata only —
@@ -13408,37 +13426,12 @@ export class ObjectQL implements IObjectQLEngine {
       // them. The marker stays on everything else: an id another record owns
       // (copied in), an attachment-only or unclaimed file, an id with no row,
       // and every id when the verdict is unwired or cannot be asked.
+      //
+      // [#24335] A caller the security service's admission already refused
+      // never reaches this read (see {@link callerMayReadSysFile}); this arm
+      // still serves a refusal the admission did not foresee, the same way.
       if (isReadRefusal(error)) {
-        const owned = await this.readParentDerivedFiles(objectName, records, uniqueIds, execCtx);
-        this.logger.debug('sys_file read refused for this caller; file fields carry the refused marker', {
-          object: objectName,
-          fields: fileFields,
-          refusedIds: uniqueIds.length,
-          parentDerivedIds: owned.size,
-        });
-        const refused = (id: string): FileRefusedValue => ({ id, metadataRefused: true });
-        // Judged per ELEMENT and per RECORD: the verdict covers a file only on
-        // the record whose field owns it, so the same id copied into a second
-        // record is still refused there. An owned, allowed id with no servable
-        // row reads as the bare id — what a `sys_file` reader gets for it.
-        const valueFor = (record: any, v: unknown): unknown => {
-          if (!isFileIdToken(v)) return v;
-          const hit = owned.get(v);
-          if (!hit || record?.id == null || hit.ownerId !== String(record.id)) return refused(v);
-          return hit.row ? toFileValue(hit.row) : v;
-        };
-        for (const record of records) {
-          for (const fieldName of fileFields) {
-            const val = record[fieldName];
-            if (val == null) continue;
-            if (Array.isArray(val)) {
-              record[fieldName] = val.map((v: unknown) => valueFor(record, v));
-            } else {
-              record[fieldName] = valueFor(record, val);
-            }
-          }
-        }
-        return records;
+        return this.serveRefusedFileHydration(objectName, records, fileFields, uniqueIds, execCtx);
       }
       // Everything else (connection drop, timeout, a database-level permission
       // fault, query error) means the rows may well exist and simply were not
@@ -13479,6 +13472,87 @@ export class ObjectQL implements IObjectQLEngine {
             typeof v === 'string' && fileMap.has(v) ? toFileValue(fileMap.get(v)) : v);
         } else if (typeof val === 'string' && fileMap.has(val)) {
           record[fieldName] = toFileValue(fileMap.get(val));
+        }
+      }
+    }
+    return records;
+  }
+
+  /**
+   * [#24335] May this caller read `sys_file` at all? Asked of the registered
+   * security service's `canReadObject` BEFORE {@link resolveFileReferences}
+   * issues the caller's own `sys_file` read, as the parent-record read gate
+   * asks before it reads a parent object ("A skipped object is not an access
+   * attempt", plugin-audit). `canReadObject` is the security middleware's own
+   * object-level read gate, arm for arm, and answers without logging or
+   * throwing; the read it spares is one that gate would refuse, and
+   * plugin-security logs every refusal at WARN — a line on every ordinary
+   * record read by a reader without `sys_file` read, burying the real denials.
+   *
+   * Asked with the caller's envelope minus its operation-private `__` keys
+   * (`withoutOperationPrivateKeys`, as {@link readParentDerivedFiles} asks its
+   * verdict): no second derivation of authority, and no muting of the
+   * middleware's log — the reader's own `sys_file` read still logs its denial.
+   *
+   * It only ever NARROWS what is read: `true` still reads as the caller, and
+   * that read still decides. Unasked ⇒ `true`, the read goes to the middleware
+   * as it did before: no usable security service, one whose contract omits the
+   * optional `canReadObject`, or an ask that throws. Any other answer than
+   * `true` ⇒ the refused arm, which is what that read's refusal served.
+   */
+  private async callerMayReadSysFile(execCtx?: ExecutionContext): Promise<boolean> {
+    const security = this.resolveReadableIdsSecurity();
+    if (security.kind !== 'usable' || typeof security.svc.canReadObject !== 'function') return true;
+    const caller = withoutOperationPrivateKeys((execCtx ?? {}) as Record<string, unknown>);
+    try {
+      return (await security.svc.canReadObject('sys_file', caller as ExecutionContext)) === true;
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * The refused arm of {@link resolveFileReferences}: this caller may not read
+   * `sys_file`, whether its admission said so up front (#24335) or its read was
+   * refused. Each id a record of this result owns is put to the field-owned
+   * verdict ({@link readParentDerivedFiles}, #22637) and hydrates when it
+   * allows; every other id becomes `{ id, metadataRefused: true }`
+   * (`FileRefusedValueSchema`). Logged at `debug`: the answer is handed to
+   * the caller in the value.
+   */
+  private async serveRefusedFileHydration(
+    objectName: string,
+    records: any[],
+    fileFields: string[],
+    uniqueIds: string[],
+    execCtx?: ExecutionContext,
+  ): Promise<any[]> {
+    const owned = await this.readParentDerivedFiles(objectName, records, uniqueIds, execCtx);
+    this.logger.debug('sys_file read refused for this caller; file fields carry the refused marker', {
+      object: objectName,
+      fields: fileFields,
+      refusedIds: uniqueIds.length,
+      parentDerivedIds: owned.size,
+    });
+    const refused = (id: string): FileRefusedValue => ({ id, metadataRefused: true });
+    // Judged per ELEMENT and per RECORD: the verdict covers a file only on
+    // the record whose field owns it, so the same id copied into a second
+    // record is still refused there. An owned, allowed id with no servable
+    // row reads as the bare id — what a `sys_file` reader gets for it.
+    const valueFor = (record: any, v: unknown): unknown => {
+      if (!isFileIdToken(v)) return v;
+      const hit = owned.get(v);
+      if (!hit || record?.id == null || hit.ownerId !== String(record.id)) return refused(v);
+      return hit.row ? toFileValue(hit.row) : v;
+    };
+    for (const record of records) {
+      for (const fieldName of fileFields) {
+        const val = record[fieldName];
+        if (val == null) continue;
+        if (Array.isArray(val)) {
+          record[fieldName] = val.map((v: unknown) => valueFor(record, v));
+        } else {
+          record[fieldName] = valueFor(record, val);
         }
       }
     }
