@@ -369,22 +369,26 @@ if [[ -f "${BUILD_ROOT}/.objectstack-sha" ]]; then
   fi
 
   # The pin script refuses (exit 1, reason on stderr) on a missing entry point,
-  # and when a packed manifest's dependency NAMES differ from what objectui's
-  # lockfile records: a frozen install would link the package without them and
-  # exit 0. This tree trips the second by itself, the first time it adds or drops
-  # a runtime dependency of one of these packages after objectui's pin.
+  # and on two dependency mismatches between these packages and objectui's pin:
+  # a packed manifest whose dependency NAMES differ from what objectui's lockfile
+  # records (a frozen install would link the package without them and exit 0),
+  # and an @objectstack/* dependency objectui's root package.json does not
+  # override. This tree trips either one by itself, the first time it adds or
+  # drops a runtime dependency of one of these packages after the objectstack
+  # commit objectui's `.objectstack-sha` names, and the fix lives in objectui.
   echo "→ Packing them into objectui's install from ${FRAMEWORK_ROOT} (OBJECTSTACK_ROOT)"
   if ! (cd "$BUILD_ROOT" && OBJECTSTACK_ROOT="$FRAMEWORK_ROOT" node scripts/objectstack-pin.mjs build); then
     echo "✗ objectui@${PINNED_SHA:0:12}'s scripts/objectstack-pin.mjs refused to stand this tree in for"
-    echo "  its pinned objectstack (the reason is above)."
-    echo "  If it says pnpm-lock.yaml does not record the dependencies the build declares: this"
-    echo "  tree added or dropped a runtime dependency of a package objectui installs from it,"
-    echo "  after the objectstack commit objectui's .objectstack-sha names. The remedy it prints"
-    echo "  (pnpm install, commit pnpm-lock.yaml) is objectui's to run, in objectui: ⛔ do not edit"
-    echo "  the lockfile in ${BUILD_ROOT} or make the install below non-frozen. Move objectui's"
-    echo "  .objectstack-sha to a commit that carries the change (its scripts/bump-objectstack.sh,"
-    echo "  then the lockfile its pnpm install rewrites), land that in objectui, then move"
-    echo "  .objectui-sha here to that objectui commit."
+    echo "  the objectstack commit its .objectstack-sha names (the reason is above)."
+    echo "  If the reason names a dependency (pnpm-lock.yaml does not record what the build"
+    echo "  declares, or an @objectstack/* package the root package.json does not override): this"
+    echo "  tree added or dropped a runtime dependency of a package objectui installs from it, after"
+    echo "  the objectstack commit objectui pins. objectui has to learn it first, in objectui: move"
+    echo "  its .objectstack-sha to an objectstack commit that carries the change"
+    echo "  (scripts/bump-objectstack.sh there), commit the pnpm-lock.yaml (and any override) that"
+    echo "  move needs, land it, then move .objectui-sha here to that objectui commit."
+    echo "  ⛔ Not here: editing ${BUILD_ROOT}/pnpm-lock.yaml or making the install below non-frozen"
+    echo "  builds a console against a dependency set no objectui commit records."
     if [[ -n "${OS_SKIP_DTS:-}" ]]; then
       echo "  OS_SKIP_DTS is set: the pin script requires every entry point, declarations included."
       echo "  Unset it and re-run."
@@ -463,6 +467,9 @@ fi
 # one-sided "is the new text present" probe pass even with no injection at all.
 # --objectui is the checkout just built: objectui's own registry mirrors spec
 # descriptions, so text its tracked source carries is not evidence of either spec.
+# On a pin that installs @objectstack/* from this tree (the OBJECTSTACK_ROOT block
+# above), --vendored IS this tree's spec, packed: the script then reports no
+# skew, because objectui's install no longer holds a published spec to leak.
 node "${FRAMEWORK_ROOT}/scripts/assert-console-spec-injection.mjs" \
   --injected "$SPEC_PKG" \
   --vendored "${BUILD_ROOT}/node_modules/@objectstack/spec" \
