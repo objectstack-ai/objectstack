@@ -134,9 +134,13 @@ describe('[18.x step 2] sys_secret, sys_flow_credential and the global audit run
   });
 
   it('A. the global setting\'s history row is in the sibling, unstamped; the tenant setting\'s stays in sys_setting_audit, stamped', () => {
+    // The boot's own global-rung writes (the auth plugin records its API-key
+    // policy start) land here too, so the operator's row is found by its key.
     const platform = tableRows(file, 'sys_platform_setting_audit');
-    expect(platform).toEqual([expect.objectContaining({ namespace: 'ai', key: 'gateway_api_key', scope: 'global', action: 'set' })]);
-    expect(Object.keys(platform[0]!)).not.toContain('organization_id');
+    expect(platform.filter((r) => r.namespace === 'ai')).toEqual([
+      expect.objectContaining({ key: 'gateway_api_key', scope: 'global', action: 'set' }),
+    ]);
+    for (const r of platform) expect(Object.keys(r), `sys_platform_setting_audit ${r.id}`).not.toContain('organization_id');
 
     const audit = tableRows(file, 'sys_setting_audit');
     expect(audit.filter((r) => r.scope === 'global')).toEqual([]);
