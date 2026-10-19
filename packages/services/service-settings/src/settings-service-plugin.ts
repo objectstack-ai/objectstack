@@ -254,7 +254,8 @@ export class SettingsServicePlugin implements Plugin {
         if (!registerSettingsReadDoor(engine, this.service!)) {
           ctx.logger?.warn?.(
             'SettingsServicePlugin: the objectql engine offers no middleware seam, so the data API ' +
-              'read of sys_setting / sys_setting_audit / sys_platform_setting is NOT gated by each ' +
+              'read of sys_setting / sys_setting_audit / sys_platform_setting / sys_platform_setting_audit ' +
+              'is NOT gated by each ' +
               "settings namespace's readPermission — only by the objects' own grants.",
           );
         }
@@ -548,10 +549,35 @@ export class SettingsServicePlugin implements Plugin {
   }
 }
 
+/** The settings audit trail's tenant and user rungs (organization NOT NULL). */
+export const SETTING_AUDIT_OBJECT = 'sys_setting_audit';
+
 /**
- * Phase 3: append-only writer for `sys_setting_audit`. Failures here
- * MUST NOT abort the settings write, so all calls are wrapped in a
- * try/catch and reported through the plugin logger.
+ * The settings audit trail's global rung, with no organization column
+ * (ADR-0131 D7, ruling record 6257510973 · Q4 A).
+ */
+export const PLATFORM_SETTING_AUDIT_OBJECT = 'sys_platform_setting_audit';
+
+/**
+ * Which table an audit row of this cascade rung goes to: the global rung's to
+ * the deployment-level sibling, the tenant and user rungs' to
+ * `sys_setting_audit` — the split `sys_setting` / `sys_platform_setting` makes
+ * for the values themselves.
+ *
+ * An 18.0 install wrote global-rung rows into `sys_setting_audit`; they stay
+ * there until the upgrade ceremony moves them, so a reader of the global rung's
+ * history reads both tables.
+ */
+export function settingAuditObjectFor(scope: string): string {
+  return scope === 'global' ? PLATFORM_SETTING_AUDIT_OBJECT : SETTING_AUDIT_OBJECT;
+}
+
+/**
+ * Phase 3: append-only writer for the settings audit trail — `sys_setting_audit`
+ * for the tenant and user rungs, `sys_platform_setting_audit` for the global
+ * rung ({@link settingAuditObjectFor}). Failures here MUST NOT abort the
+ * settings write, so all calls are wrapped in a try/catch and reported through
+ * the plugin logger.
  *
  * [#8145] The settings-SHAPED half of the dual write. Its sibling —
  * {@link buildConfigChangeAuditSink} — records the same event on the
@@ -588,16 +614,17 @@ export function buildSettingAuditWriter(
         // Under the opt-in below the engine no longer checks that `actor_id`
         // names a user, so the writer keeps that refusal; this `catch` reports
         // it exactly as it reported the engine's (see assertUserReferenceResolves).
+        const object = settingAuditObjectFor(entry.scope);
         await assertUserReferenceResolves(
           (id) => eng.findOne(USER_OBJECT, { where: { id }, fields: ['id'] }, { context: { isSystem: true } }),
           {
-            object: 'sys_setting_audit',
+            object,
             field: 'actor_id',
-            label: registeredLabel(eng, { object: 'sys_setting_audit', field: 'actor_id' }, 'Actor'),
+            label: registeredLabel(eng, { object, field: 'actor_id' }, 'Actor'),
           },
           entry.actorId ?? null,
         );
-        await eng.insert('sys_setting_audit', {
+        await eng.insert(object, {
           namespace: entry.namespace,
           key: entry.key,
           scope: entry.scope,
@@ -611,10 +638,11 @@ export function buildSettingAuditWriter(
           reason: entry.reason ?? null,
           created_at: new Date().toISOString(),
           // [ADR-0131 D3/D9] The organization whose value changed — the
-          // settings row's own owner. A global value names none.
-          ...(entry.organizationId ? { organization_id: entry.organizationId } : {}),
+          // settings row's own owner. A global value names none, and its row
+          // goes to the sibling that has no organization column (D7).
+          ...(object === SETTING_AUDIT_OBJECT && entry.organizationId ? { organization_id: entry.organizationId } : {}),
           // The explicit system opt-in, as the settings row write carries:
-          // `sys_setting_audit` is the platform's own ledger, written after
+          // the settings audit is the platform's own ledger, written after
           // the settings door already authorized the change, and not a
           // write that may rely on a missing principal to pass the security
           // middleware's principal-less hand-off (ADR-0096 D5).
@@ -630,7 +658,7 @@ export function buildSettingAuditWriter(
           reportedDurabilityLoss = true;
           report(
             cause +
-              ' — settings writes keep succeeding, but their sys_setting_audit history rows are NOT persisted ' +
+              ' — settings writes keep succeeding, but their settings audit history rows are NOT persisted ' +
               'and nothing retries them. Fix the cause named here (the actor must be a sys_user; the row must ' +
               'carry the organization its setting belongs to).',
           );

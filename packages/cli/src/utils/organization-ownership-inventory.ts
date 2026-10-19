@@ -619,9 +619,25 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     ],
   },
   { object: 'sys_setting_audit', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
-  { object: 'sys_secret', census: P1, fate: 'attribution', citation: `re-verification 6018712820: sys_secret is tenant-attributed by one producer (moved here from C6); ${D10_SINGLE}`, anchors: [] },
+  {
+    object: 'sys_platform_setting_audit',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation: `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the settings audit trail's global rung (ruling record 6257510973, Q4 A)`,
+  },
+  {
+    object: 'sys_secret',
+    census: P1,
+    fate: 'column-drop',
+    citation: `${D7}: a secret is owned by the row that references it (ruling record 6257510973, Q4 A); the 18.x expand step keeps the column declared and unread until this drop`,
+  },
   { object: 'sys_scim_connection_credential', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
-  { object: 'sys_flow_credential', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  {
+    object: 'sys_flow_credential',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation: `${D7}: a credential's ownership follows its flow, which is environment metadata (ruling record 6259141885, Q1 A); the 18.x expand step keeps the column declared and unread until this drop`,
+  },
   // Inbound mail (`@objectstack/service-mailbox`): every row is written by the
   // system with the mailbox's organization stamped (ADR-0131 D9), so a NULL
   // row has no producer today; the parents below are where one would take it.

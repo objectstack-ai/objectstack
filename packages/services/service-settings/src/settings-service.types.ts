@@ -242,13 +242,8 @@ export interface SettingsSecretStore {
     alg: string;
     version: number;
     ciphertext: string;
-    /**
-     * [ADR-0131 D3/D9] The organization that owns the secret — the owning
-     * `sys_setting` row's, for a tenant or user value. Absent for a global
-     * value: a deployment-level secret, whose fate in this tenant-column
-     * store is not settled yet.
-     */
-    organization_id?: string;
+    // [ADR-0131 D7, ruling record 6257510973 · Q4 A] No organization: a
+    // secret is deployment-level, owned by the row that holds its handle.
   }): Promise<{ id: string }>;
   /** Look up the latest ciphertext for a handle id; null when missing. */
   get(id: string): Promise<{
@@ -285,8 +280,10 @@ export interface SettingsSecretStore {
 }
 
 /**
- * Append-only writer for the `sys_setting_audit` object — Phase 3
- * audit trail. Distinct from {@link SettingsAuditSink} (which writes the
+ * Append-only writer for the settings audit trail — Phase 3. The tenant and
+ * user rungs' rows go to `sys_setting_audit`; the global rung's go to the
+ * deployment-level `sys_platform_setting_audit` (ADR-0131 D7), the way the
+ * values split between `sys_setting` and `sys_platform_setting`. Distinct from {@link SettingsAuditSink} (which writes the
  * generic `sys_audit_log` `config_change` row) so audit consumers can subscribe
  * to settings activity without scanning the firehose.
  *
@@ -387,7 +384,7 @@ export interface SettingsServiceOptions {
   secretStore?: SettingsSecretStore;
   /** Audit sink. When undefined, writes still succeed but are not logged. */
   audit?: SettingsAuditSink;
-  /** Phase 3 dedicated writer for `sys_setting_audit`. */
+  /** Phase 3 dedicated writer for the settings audit trail. */
   auditWriter?: SettingsAuditWriter;
   /**
    * `process.env`-like map. Defaults to `process.env`. Injected so

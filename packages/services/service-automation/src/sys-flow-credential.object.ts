@@ -33,6 +33,16 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Env-wide, like the engine's flow map, which keys flows by bare name: every
  * metadata row is env-wide (ADR-0131 D6), a flow's stored rows included.
  *
+ * Deployment-level (ADR-0131 D7, ruling record 6259141885 · Q1 A): a
+ * credential's ownership follows its flow, which is environment metadata, so
+ * nothing stamps or scopes this table by organization. In the 18.x expand step
+ * the 18.0 `organization_id` column stays DECLARED, nullable and unread, and
+ * `tenancy: { enabled: false }` takes the object out of the tenancy machinery.
+ * With `systemFields: { tenant: false }` and no declared column, the v18 boot
+ * guard would read the physical column an 18.0 install left here as the v17
+ * shape and refuse the boot. The upgrade ceremony drops the column; then this
+ * object declares `systemFields: { tenant: false }`.
+ *
  * Writers: the automation plugin's credential channel (the metadata save door,
  * the publish promotion, a delete, the one-time migration), under a system
  * context. Readers: the same channel and the engine's verification and `http`
@@ -51,6 +61,9 @@ export const SysFlowCredential = ObjectSchema.create({
   // wildcard grant. Everything reads and writes it through the engine under a
   // system context.
   access: { default: 'private' },
+  // [ADR-0131 D7] Deployment-level: no tenant scope, no stamp. See the header
+  // for why the 18.0 column is still declared below.
+  tenancy: { enabled: false },
   description:
     "Write-only store of flow credentials (an inbound hook's secret, an http node's signing secret), one encrypted row per credential position of a flow in one lifecycle state. The flow definition keeps no copy.",
   displayNameField: 'flow_name',
@@ -109,6 +122,19 @@ export const SysFlowCredential = ObjectSchema.create({
       required: true,
       defaultValue: 'NOW()',
       readonly: true,
+    }),
+
+    // The 18.0 organization column, kept until the upgrade ceremony drops it:
+    // never written, never read. Same physical shape as the column 18.0
+    // injected (a 255-wide string), so the schema sync sees no drift.
+    organization_id: Field.text({
+      label: 'Organization (18.0, retired)',
+      required: false,
+      readonly: true,
+      hidden: true,
+      maxLength: 255,
+      description:
+        'Retired: the organization an 18.0 install stamped on this row. Unread and never written; the upgrade ceremony drops the column.',
     }),
   },
 
