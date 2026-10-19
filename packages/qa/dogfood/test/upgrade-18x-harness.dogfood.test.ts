@@ -102,8 +102,8 @@ describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.s
   // seeder's rows stay until the ceremony. The fixture's mirror of
   // `showcase_task_changed` was activated in 18.0, which stamped it
   // `customized`, so it answers as itself and the declaration of the same name
-  // is withheld: one delivery per task change, from the row, never a second
-  // one from the declaration.
+  // is withheld even while the declaration is switched on: one delivery per
+  // task change, from the row, never a second one from the declaration.
   it('2b. the fixture\'s customized declared webhook dispatches exactly once on a task change', async () => {
     expect(stack).toBeDefined();
     const adminTok = await stack!.signIn(FIXTURE_PEOPLE.admin.email, FIXTURE_PEOPLE.admin.password);
@@ -111,6 +111,11 @@ describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.s
       .filter((h) => h?.name === FIXTURE_NAMES.webhook);
     expect(hooks, 'the 18.0 mirror row is still there').toHaveLength(1);
     expect(hooks[0].customized, 'the fixture activated it in 18.0, which marks it customized').toBe(true);
+    // Switch the declaration ON as well (the showcase ships it inactive), so a
+    // reader that served both the row and the declaration WOULD deliver twice:
+    // without this the case could not fail on the rule it pins.
+    const on = await stack!.apiAs(adminTok, 'POST', `/security/_activation/webhook/${FIXTURE_NAMES.webhook}`, { enabled: true });
+    expect(on.status, await on.clone().text()).toBe(200);
     const deliveries = async () => rowsOf(await (await stack!.apiAs(adminTok, 'GET', '/data/sys_http_delivery?limit=500')).json())
       .filter((d) => d?.source === 'webhook');
     const before = new Set((await deliveries()).map((d) => String(d.id)));
