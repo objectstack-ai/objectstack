@@ -41,7 +41,7 @@
  * declares `resumeAuthority: 'service'`, resumed with the
  * `RESUME_AUTHORITY_SERVICE` marker and `resumedBy` exactly as
  * `ApprovalService.decide` hands them over (that hand-off is pinned in
- * `plugin-approvals`' `decision-resume-decider.test.ts`).
+ * `plugin-approvals`' `restored-approval-continuation.test.ts`).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
