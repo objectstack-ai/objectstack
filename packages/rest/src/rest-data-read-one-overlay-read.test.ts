@@ -24,8 +24,12 @@
 //  2. ANSWERS — the gate still judges the object the read serves: a stored
 //     row's `enable` whitelist (stored under either spelling) still refuses a
 //     method, and a code object with no row is still served.
-//  3. FRESHNESS — nothing is kept between requests: a row written after one
-//     request is seen by the next.
+//  3. FRESHNESS — a row written after one request is seen by the next. This
+//     file's engine has no write-epoch seam, so the protocol's overlay cache
+//     declines and nothing is kept between requests here. On a real engine
+//     the served by-name read IS cached across requests, and a `sys_metadata`
+//     write through the engine retires it (`meta-overlay-cache.ts` in
+//     `@objectstack/metadata-protocol`, pinned there).
 //
 // ⛔ The count rows are the regression this file exists for: put the per-
 // spelling reads back and they go red while every answer row stays green —
