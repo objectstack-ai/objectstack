@@ -64,7 +64,22 @@
  * by-id update gets), whose `allow` and `not_applicable` admit and whose `deny`
  * and `unresolvable` refuse; a rejection propagates unchanged. A kernel whose
  * security service does not serve that member composes no master check, so the
- * abstention admits there, as the parent's own update would. ⛔ Never `canEdit`:
+ * abstention admits there, as the parent's own update would.
+ *
+ * [#24549] Whatever those steps admit (the degraded read included), the
+ * parent's own by-id UPDATE must admit too, and it decides last: the security
+ * service's judgement of that update, `ISecurityService.explain`'s
+ * record-grained verdict for `update` on the parent — `allowed` and
+ * `record.visible` both. That verdict is the write path's own composition (the
+ * parent object's grant, its row-level security, its record sharing and its
+ * master), so the moderation limb gives the answer a by-id update of the
+ * parent gets, and the gate keeps no copy of that judgement — the same step
+ * the attachment kit takes. Asked only for a caller the steps above admit, it
+ * adds refusals and never admits one; record sharing's `deny`, the master
+ * check's refusals, the owner-only edit DEPTH (the #7144 ruling below) and a
+ * rejection keep their answers. A kernel with no security service meets no
+ * such judgement on the parent's update either, and a security service that
+ * serves no `explain` is not asked it. ⛔ Never `canEdit`:
  * it folds `abstain` into `true`, and `effectiveSharingModel` maps every
  * `controlled_by_parent` parent to `public`, so that fold let any member holding
  * the `sys_comment` delete bit remove other people's comments from every
@@ -177,11 +192,16 @@ export interface CommentReadMiddlewareCtx {
 export type CommentSharingLike = Pick<ISharingService, 'checkEdit'>;
 
 /**
- * The single member of the security service's contract this gate consults: the
- * ADR-0055 master-detail write check, for a `controlled_by_parent` parent.
- * OPTIONAL on the contract, so the gate handles its absence by construction.
+ * The two members of the security service's contract this gate consults: the
+ * ADR-0055 master-detail write check, for a `controlled_by_parent` parent
+ * (OPTIONAL on the contract, so the gate handles its absence by construction),
+ * and `explain`, whose record-grained `update` verdict is the parent's own
+ * by-id update judgement (see "Parent EDIT" above). `explain` is
+ * feature-detected like every member here, so it is optional on this view of
+ * the contract.
  */
-export type CommentSecurityLike = Pick<ISecurityService, 'checkControlledByParentWrite'>;
+export type CommentSecurityLike = Pick<ISecurityService, 'checkControlledByParentWrite'> &
+  Partial<Pick<ISecurityService, 'explain'>>;
 
 export interface CommentAccessLogger {
   info(msg: string, meta?: unknown): void;
@@ -682,9 +702,53 @@ export function installCommentAccessHooks(
   getSecurity?: () => CommentSecurityLike | null | undefined,
 ): void {
   /** May the caller EDIT the parent record behind `target`? The composition
-   * "Parent EDIT" in the module header sets out; caller-scoped parent read
-   * visibility when no sharing service is present (degraded mode). */
+   * "Parent EDIT" in the module header sets out, in two steps: record sharing
+   * (or, with no sharing service, caller-scoped parent read visibility — the
+   * degraded mode) and the master check; then, only when that admits, the
+   * parent's own by-id update judgement. */
   const canEditParent = async (ctx: any, target: CommentThreadTarget, verb: string): Promise<boolean> => {
+    if (!(await sharingAndMasterAdmit(ctx, target, verb))) return false;
+    return parentUpdateAdmits(target, callerContext(ctx), verb);
+  };
+
+  /** [#24549] The parent's own by-id update judgement: the security service's
+   * record-grained `explain` verdict for `update` on the parent, which admits
+   * only when `allowed` and `record.visible` are both `true` — a decision that
+   * carries no record verdict did not judge the record, and refuses. See
+   * "Parent EDIT" in the module header. A rejection propagates unchanged. */
+  const parentUpdateAdmits = async (
+    target: CommentThreadTarget,
+    callerCtx: ExecutionContext,
+    verb: string,
+  ): Promise<boolean> => {
+    let security: CommentSecurityLike | null | undefined;
+    try {
+      security = getSecurity?.();
+    } catch {
+      security = undefined;
+    }
+    if (!security || typeof security.explain !== 'function') {
+      logger.debug?.(
+        `[audit] comment access: the security service judges no by-id update of ${target.object} here — ${verb} ` +
+          'decided by record sharing and the master-detail check alone',
+      );
+      return true;
+    }
+    const decision = await security.explain(
+      { object: target.object, operation: 'update', recordId: target.recordId },
+      callerCtx,
+    );
+    if (decision?.allowed === true && decision.record?.visible === true) return true;
+    logger.debug?.(
+      `[audit] comment access: ${verb} refused — a by-id update of ${target.object}/${target.recordId} is refused ` +
+        'to this caller',
+    );
+    return false;
+  };
+
+  /** The first step of {@link canEditParent}: record sharing (or the degraded
+   * read), then the master check. */
+  const sharingAndMasterAdmit = async (ctx: any, target: CommentThreadTarget, verb: string): Promise<boolean> => {
     const sharing = getSharing();
     if (!sharing || typeof sharing.checkEdit !== 'function') {
       logger.debug?.(

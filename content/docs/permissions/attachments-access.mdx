@@ -15,8 +15,9 @@ separates *file storage* from *where a file is attached*:
 
 The governing principle: **an attachment has no access model of its own — it
 inherits its parent record's.** A caller who can read a record can read its
-attachments; a caller who can edit a record can attach to and detach from it.
-Enforcement is layered, and every gate is fail-closed.
+attachments; a caller who may edit a record — a by-id update of it by that
+caller would be admitted — can attach to it, detach from it and re-point an
+attachment to it. Enforcement is layered, and every gate is fail-closed.
 
 `Field.file` / `Field.image` are a **separate** path — those store an opaque
 `sys_file` id in the record's own column (ADR-0104 D3; the
@@ -32,24 +33,45 @@ Attachments panel renders only for such objects. Any other target is rejected:
 
 | Code | Status | When |
 | --- | --- | --- |
-| `FILES_DISABLED` | 403 | Creating a `sys_attachment` whose `parent_object` does not declare `enable.files: true` |
+| `FILES_DISABLED` | 403 | Creating a `sys_attachment` whose `parent_object` is a registered object that does not declare `enable.files: true` |
 
 This is enforced by a `beforeInsert` hook on `sys_attachment` and is
 independent of the record-level checks below.
 
 ## Create — parent-edit access & provenance
 
-Creating a `sys_attachment` requires that the caller can **edit** the parent
-record — Salesforce edit-on-parent parity — verified with the sharing service's
-`canEdit`, so RLS / OWD / sharing of the parent object apply (public-model
-parents are editable by any member by design). When no sharing service is
-wired, the gate degrades to caller-scoped read visibility (a `findOne`).
-`uploaded_by` is **server-stamped** from the session; a client-supplied value
-is ignored.
+Creating a `sys_attachment` requires that the caller may **edit** the parent
+record — Salesforce edit-on-parent parity — and "may edit" has one meaning
+here: **a by-id update of that parent record, by the same caller, would be
+admitted.** The gate asks three questions in order and admits only when all
+three do:
+
+1. record sharing (`ISharingService.checkEdit`);
+2. the master-detail check, for a `controlled_by_parent` parent
+   (`ISecurityService.checkControlledByParentWrite`);
+3. the security service's judgement of that update — the record-grained verdict
+   `security.explain` reports for `update` on the parent record (`allowed` and
+   `record.visible` both).
+
+The same rule governs every check that asks about the parent: attaching,
+detaching or editing another user's attachment, re-pointing an attachment to
+another record (judged on the new parent), and the file-attachments service's
+caller-scoped `assertMayAttach`. It never admits more than the parent's update
+does, and it can refuse more: record sharing is asked at the narrowest edit
+depth for these gates (the ruling recorded on `ISharingService`, "Write DEPTH
+is an input the CALLER supplies").
+
+When no sharing service is wired, a caller-scoped read of the parent (a
+`findOne`) stands in for step 1. A kernel with no security service asks no
+update judgement, as the parent's own update meets none there. A store fault in
+step 2 or 3 keeps its own status (a `503` stays a `503`); it is never reported
+as a refusal. `uploaded_by` is **server-stamped** from the session; a
+client-supplied value is ignored.
 
 | Code | Status | When |
 | --- | --- | --- |
-| `ATTACHMENT_PARENT_ACCESS` | 403 | The caller cannot access the parent record they are attaching to |
+| `ATTACHMENT_PARENT_ACCESS` | 403 | The parent record does not exist, or a by-id update of it by the caller would not be admitted (on a re-point, the new parent) |
+| `OBJECT_NOT_FOUND` | 404 | The `parent_object` names an object the registry does not hold — the answer a by-id update of it gets |
 
 ## Read / list — inherited parent visibility
 
@@ -65,8 +87,9 @@ resolve the filter fails closed (deny-all).
 ## Delete — uploader or parent editor
 
 Deleting a `sys_attachment` is allowed when the caller is **the uploader** OR
-**can edit the parent record** (`sharing.canEdit` — public-model parents are
-editable by design). A multi-delete (`multi: true`) matches only attachments
+**may edit the parent record** — the parent-edit rule above: a by-id update of
+the parent by that caller would be admitted. The uploader keeps their own rows
+whatever the parent answers. A multi-delete (`multi: true`) matches only attachments
 the caller can read: an attachment whose parent is out of the caller's sight is
 not matched, not removed and not counted, so a predicate that reaches only such
 attachments answers exactly what a predicate that matches nothing answers. Every
@@ -81,7 +104,15 @@ matched row must then pass.
 An update of another user's attachment follows the same rule — the uploader or
 a parent editor — and a by-id update of an attachment the caller cannot read
 gets the same not-found answer. A multi-update matches only attachments the
-caller can read, as a multi-delete does.
+caller can read, as a multi-delete does. Re-pointing an attachment
+(`parent_object` / `parent_id`) to another record is an attach there: the new
+parent must pass the parent-edit rule too (`ATTACHMENT_PARENT_ACCESS`, 403).
+
+The comment thread's moderation gate (`sys_comment`, `@objectstack/plugin-audit`)
+asks the same parent-edit rule: editing or removing another person's comment
+requires that a by-id update of the thread's parent record would be admitted,
+and the author keeps their own comments. Posting a comment stays a read rule on
+the parent.
 
 The platform baseline also ships a parent-blind row-level delete floor
 (`owner_only_deletes`: you may delete only the rows you created, for members
@@ -181,7 +212,7 @@ can be shared across records). Reclamation is handled by the platform LifecycleS
 | Operation | Requirement | Deny code |
 | --- | --- | --- |
 | Attach (create) | parent object opts in (`enable.files`) | `FILES_DISABLED` (403) |
-| Attach (create) | can edit the parent record | `ATTACHMENT_PARENT_ACCESS` (403) |
+| Attach (create), re-point | a by-id update of the parent record by the caller would be admitted | `ATTACHMENT_PARENT_ACCESS` (403); `OBJECT_NOT_FOUND` (404) when the parent object is not registered |
 | List / read | inherits parent read visibility | *(filtered out)* |
 | Delete | uploader or parent editor (+ RBAC delete grant) | `ATTACHMENT_DELETE_DENIED` (403); `PERMISSION_DENIED` (403) when the parent is not readable or no delete grant is held |
 | Download | session + owner-or-parent-read (attachments scope); session only for a file with no parent; none for `acl: 'public_read'` | `AUTH_REQUIRED` (401) / `ATTACHMENT_DOWNLOAD_DENIED` (403) |
