@@ -23,10 +23,11 @@
  *      each user-context producer's real context:
  *      `service-automation/src/sys-user-default-row-scope.integration.test.ts`.
  *   4. The security plugin's collection applies a declared default where the
- *      caller's held sets carry no row policy for the object and operation, and
- *      the shipped sets keep their spreads: a deployment with the shipped
- *      baseline serves every persona the rows it served before the
- *      declarations, and the census names where a default is now collected.
+ *      caller's held sets carry no row policy for the object and operation —
+ *      never on a delegated principal's own leg — and the shipped sets keep
+ *      their spreads: a deployment with the shipped baseline serves every
+ *      persona, delegated agents included, the rows and the explain it served
+ *      before the declarations.
  */
 
 import { describe, it, expect, vi, afterAll } from 'vitest';
@@ -41,6 +42,7 @@ import { isObjectDefaultRowScopePolicy } from '../object-default-row-scope.js';
 import { SysPosition, SysPermissionSet, SysPositionPermissionSet } from '../__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './sys-user-position.object.js';
 import { SysUserPermissionSet } from './sys-user-permission-set.object.js';
+import { bindTestSecurityCatalog } from '../__tests__/security-catalog.testkit.js';
 
 type Policy = {
   name: string;
@@ -249,10 +251,13 @@ describe('sys_user\'s merged predicate admits the union of its two literals\' ro
  * Booted on the real `SecurityPlugin` + `ObjectQL` over a real `SqlDriver`,
  * with every declarer as this tree declares it ("after") and the same objects
  * with `defaultRowScope` dropped ("before"), the shipped sets, and the
- * platform baseline composed. Each persona reads every declarer, and is
- * explained for every operation, identically in both; the census then names
- * every persona, object and operation where the declared default is what the
- * collection now applies.
+ * platform baseline composed, and a catalog the grants resolve against. Each
+ * persona — the humans, and an MCP agent acting for each of four delegators —
+ * reads every declarer, and is explained, identically in both. The census
+ * reads the collection for all four operations: no baseline holder collects a
+ * default, and no delegated agent's own leg does either (ruling of record
+ * 6278784335 on #24341, letter B: a ceiling's silence is not Layer 1 silence,
+ * so a platform administrator's agent keeps every row its delegator reads).
  */
 
 type Persona = Record<string, unknown>;
@@ -289,6 +294,11 @@ const BASELINE_PERSONAS: Record<string, Persona> = {
     userId: 'u_x', tenantId: 'org_x', positions: [], permissions: ['mcp_agent_data_read'], principalKind: 'agent',
     onBehalfOf: { userId: 'u_x', principalKind: 'human' }, posture: 'MEMBER', org_user_ids: ORG_X_USERS,
     email: 'u_x@example.test',
+  },
+  'mcp agent for the viewer': {
+    userId: 'u_x2', tenantId: 'org_x', positions: [], permissions: ['mcp_agent_data_read'], principalKind: 'agent',
+    onBehalfOf: { userId: 'u_x2', principalKind: 'human' }, posture: 'MEMBER', org_user_ids: ORG_X_USERS,
+    email: 'u_x2@example.test',
   },
   'mcp agent for the organization admin': {
     userId: 'a_x', tenantId: 'org_x', positions: [], permissions: ['mcp_agent_data_read'], principalKind: 'agent',
@@ -384,17 +394,22 @@ async function bootBaseline(declared: boolean) {
   const plugin = new SecurityPlugin({ defaultPermissionSets });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
+  // The catalog the grants name their sets in (ADR-0131 D3/D4): the shipped
+  // sets, so a delegator's grant resolves to the set it names.
+  bindTestSecurityCatalog(engine, { permissions: defaultPermissionSets as never });
   vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
 
   const knex = (driver as unknown as { knex: (t: string) => { insert(rows: object[]): Promise<unknown> } }).knex;
   for (const schema of declarers) await knex(schema.name).insert(fixtureRowsFor(schema));
   // What an agent's delegator resolves from (ADR-0090 D10: the delegator leg is
-  // rebuilt from the store): the memberships, and the two administrators' grants.
+  // rebuilt from the store): the memberships, and the grants the viewer and the
+  // two administrators hold.
   const member = objects.get('sys_member')!;
   await knex('sys_member').insert([
     ['u_x', 'org_x', 'member'], ['u_x2', 'org_x', 'member'], ['a_x', 'org_x', 'admin'], ['u_y', 'org_y', 'member'],
   ].map(([user, org, role]) => rowOf(member, { id: `mem:${user}`, user_id: user, organization_id: org, role })));
   await knex('sys_user_permission_set').insert([
+    { id: 'ups:u_x2', user_id: 'u_x2', permission_set: 'viewer_readonly', organization_id: 'org_x' },
     { id: 'ups:a_x', user_id: 'a_x', permission_set: 'organization_admin', organization_id: 'org_x' },
     { id: 'ups:p_admin', user_id: 'p_admin', permission_set: 'admin_full_access', organization_id: null },
   ]);
@@ -417,9 +432,6 @@ describe('a deployment with the shipped baseline is byte-for-byte unchanged on t
   const EXPLAINED = ['read'] as const;
   const COLLECTED = ['select', 'insert', 'update', 'delete'] as const;
   const isAgent = (persona: string) => BASELINE_PERSONAS[persona].principalKind === 'agent';
-  /** What explain decided, without its prose and composed filter: `allowed` and each layer's verdict. */
-  const decided = (e: { allowed: boolean; layers: Array<{ layer: string; verdict: string }> }) =>
-    JSON.stringify({ allowed: e.allowed, layers: e.layers.map((l) => `${l.layer}:${l.verdict}`) });
 
   it('every persona reads every declarer exactly as without the declarations, and is explained the same', { timeout: 30_000 }, async () => {
     const after = await bootBaseline(true);
@@ -433,15 +445,9 @@ describe('a deployment with the shipped baseline is byte-for-byte unchanged on t
         const now = await after.served(object, context);
         if (JSON.stringify(now) !== JSON.stringify(was)) rowsMoved.push(`${label}: ${JSON.stringify(was)} -> ${JSON.stringify(now)}`);
         for (const operation of EXPLAINED) {
-          const e0 = await before.security.explain({ object, operation }, { ...context });
-          const e1 = await after.security.explain({ object, operation }, { ...context });
-          // A baseline holder's explain is byte-for-byte. A delegated agent's
-          // decision is the same, but its ceiling's leg now collects the object
-          // default, so the rls layer names it and the composed filter carries
-          // that leg's conjunct (the delegator's own scope, `userId` being the
-          // delegator's) beside the delegator's.
-          const same = isAgent(persona) ? decided(e1) === decided(e0) : JSON.stringify(e1) === JSON.stringify(e0);
-          if (!same) explainMoved.push(`${label} (${operation})`);
+          const e0 = JSON.stringify(await before.security.explain({ object, operation }, { ...context }));
+          const e1 = JSON.stringify(await after.security.explain({ object, operation }, { ...context }));
+          if (e1 !== e0) explainMoved.push(`${label} (${operation})`);
         }
       }
     }
@@ -452,39 +458,64 @@ describe('a deployment with the shipped baseline is byte-for-byte unchanged on t
     // reads them all.
     expect(await after.served('sys_user', BASELINE_PERSONAS.member)).toEqual(['u_x', 'u_x2']);
     expect(await after.served('sys_session', BASELINE_PERSONAS['user with no organisation'])).toEqual(['sys_session:u_loner']);
-    expect(await after.served('sys_session', BASELINE_PERSONAS['mcp agent for the member'])).toEqual(['sys_session:u_x']);
     expect(await after.served('sys_session', BASELINE_PERSONAS.platform_admin)).toHaveLength(BASELINE_USERS.length);
   });
 
-  it('census: the declared default is collected for no baseline holder, and on a delegated agent ceiling\'s leg', async () => {
+  it('each delegated agent reads its delegator\'s rows on both trees: the platform administrator\'s agent reads every row', { timeout: 30_000 }, async () => {
+    const after = await bootBaseline(true);
+    const before = await bootBaseline(false);
+    const everyUser = [...BASELINE_USERS].sort();
+    const expected: Record<string, { sys_user: string[]; sys_session: string[]; sys_scim_user: string[] }> = {
+      'mcp agent for the member': { sys_user: ['u_x', 'u_x2'], sys_session: ['sys_session:u_x'], sys_scim_user: ['sys_scim_user:u_x'] },
+      'mcp agent for the viewer': { sys_user: ['u_x', 'u_x2'], sys_session: ['sys_session:u_x2'], sys_scim_user: ['sys_scim_user:u_x2'] },
+      'mcp agent for the organization admin': {
+        sys_user: ['a_x', 'u_x', 'u_x2'], sys_session: ['sys_session:a_x'], sys_scim_user: ['sys_scim_user:a_x'],
+      },
+      // The delegator's leg skips Layer 1 (the superuser bypass on these
+      // objects), so the only bound a declared default could add is the
+      // ceiling's own leg — which collects none (letter B).
+      'mcp agent for the platform admin': {
+        sys_user: everyUser,
+        sys_session: everyUser.map((u) => `sys_session:${u}`),
+        sys_scim_user: everyUser.map((u) => `sys_scim_user:${u}`),
+      },
+    };
+    for (const [persona, objects] of Object.entries(expected)) {
+      for (const [object, ids] of Object.entries(objects)) {
+        expect(await before.served(object, BASELINE_PERSONAS[persona]), `${persona} on ${object}, before`).toEqual(ids);
+        expect(await after.served(object, BASELINE_PERSONAS[persona]), `${persona} on ${object}, after`).toEqual(ids);
+      }
+    }
+  });
+
+  it('census: no persona collects a declared default — the baseline carries a policy for each, and a delegated leg collects none', async () => {
     const { plugin } = await bootBaseline(true);
     const objects = await registeredObjects();
-    const applied: string[] = [];
+    const census = async (context: Persona): Promise<string[]> => {
+      const sets = await plugin.resolvePermissionSetsForContext({ ...context });
+      const applied: string[] = [];
+      for (const object of DECLARERS) {
+        for (const operation of COLLECTED) {
+          const collected = plugin.collectRLSPolicies(sets, object, operation, (context.positions ?? []) as string[], { ...context });
+          if (collected.some((p: object) => isObjectDefaultRowScopePolicy(p))) applied.push(`${object} ${operation}`);
+        }
+      }
+      return applied;
+    };
     for (const [persona, context] of Object.entries(BASELINE_PERSONAS)) {
       // The platform administrator's superuser bypass is decided before the collection.
       if (persona === 'platform_admin') continue;
-      const sets = await plugin.resolvePermissionSetsForContext({ ...context });
-      for (const object of DECLARERS) {
-        for (const operation of COLLECTED) {
-          const collected = plugin.collectRLSPolicies(sets, object, operation, (context.positions ?? []) as string[]);
-          if (collected.some((p: object) => isObjectDefaultRowScopePolicy(p))) applied.push(`${persona} ${object} ${operation}`);
-        }
-      }
+      expect(await census(context), persona).toEqual([]);
     }
-    // Every human holds `member_default` beside their own sets, and it carries
-    // a policy for every declarer on every operation (its literals, and its
-    // `'*'` write floor), so no baseline holder collects a default.
-    expect(applied.filter((line) => !line.startsWith('mcp agent'))).toEqual([]);
-    // The agent ceilings carry no row policy (ADR-0090 D10): an agent's own
-    // leg collects each declarer's default, on exactly the operations the
-    // declaration names.
-    const agents = Object.keys(BASELINE_PERSONAS).filter(isAgent);
-    const expected = agents.flatMap((persona) =>
-      DECLARERS.flatMap((object) => {
-        const scope = objects.get(object)!.defaultRowScope!;
-        return COLLECTED.filter((op) => scope.operation === 'all' || scope.operation === op).map((op) => `${persona} ${object} ${op}`);
-      }),
-    );
-    expect(applied.sort()).toEqual(expected.sort());
+    // CONTROL: the carve-out is the delegation, not the agent kind. The same
+    // ceiling with no delegator (a hand-built shape no producer emits) has a
+    // silent Layer 1, so it collects each declarer's default, on exactly the
+    // operations the declaration names (ruling E′ item 2, whole).
+    const { onBehalfOf: _delegator, ...undelegated } = BASELINE_PERSONAS['mcp agent for the member'];
+    const expected = DECLARERS.flatMap((object) => {
+      const scope = objects.get(object)!.defaultRowScope!;
+      return COLLECTED.filter((op) => scope.operation === 'all' || scope.operation === op).map((op) => `${object} ${op}`);
+    });
+    expect((await census(undelegated)).sort()).toEqual(expected.sort());
   });
 });

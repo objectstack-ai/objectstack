@@ -20,7 +20,7 @@ The security plugin's row-policy collection applies an object's declared default
 **Unchanged.**
 
 - A deployment with the platform baseline (`member_default`, the default) serves every human exactly what it served before, on every one of the 23 objects and every operation: each human holds the baseline, and the baseline carries a policy for each object and operation. Measured on a booted composition with a member, a viewer, an organisation admin, a user in no organisation and the platform administrator, before and after the declarations.
-- An MCP agent acting for a user reads the same rows as before. Its ceiling set carries no row policy, so the declared default now applies on the agent's own side of the intersection, evaluated as the delegating user (the agent's `userId` is the delegator's). The explain output for such an agent now names the object default on that side.
+- An MCP agent acting for a user reads the same rows, and gets the same explain output, as before. Its ceiling set carries no row policy, and the security plugin does not collect an object's declared default on a delegated principal's own side of the intersection (see the `@objectstack/plugin-security` entry), so the agent's rows stay bounded by its delegator's side alone. Measured on a booted composition, before and after the declarations, for the agents of a member, a viewer, an organisation admin and the platform administrator; the platform administrator's agent still reads every row.
 - The platform administrator's superuser bypass is decided before any row policy is collected.
 - No export, option or stored shape moves.
 
