@@ -594,7 +594,7 @@ export class CloudConnectionPlugin implements Plugin {
                 }
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
-                if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment to connect a cloud account.' } }, 401);
+                if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to connect a cloud account.' } }, 401);
                 // [#24148] Refused before any work, so a caller without the
                 // capability cannot learn whether a control plane is configured.
                 if (!(await holdsSetupAccess(c.req.raw, session))) return refuseWithoutSetupAccess(c);
@@ -656,7 +656,7 @@ export class CloudConnectionPlugin implements Plugin {
                 }
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
-                if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
+                if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in.' } }, 401);
                 // [#24148] This is the door that persists the binding.
                 if (!(await holdsSetupAccess(c.req.raw, session))) return refuseWithoutSetupAccess(c);
                 if (!cloudUrl) return c.json({ success: false, error: { code: 'CLOUD_UNCONFIGURED', message: 'No cloud control plane configured.' } }, 503);
@@ -758,7 +758,7 @@ export class CloudConnectionPlugin implements Plugin {
                 }
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
-                if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
+                if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in.' } }, 401);
                 // [#24148] Refused before the revoke and before the local clear.
                 if (!(await holdsSetupAccess(c.req.raw, session))) return refuseWithoutSetupAccess(c);
 
@@ -810,7 +810,7 @@ export class CloudConnectionPlugin implements Plugin {
                 const session = await resolveSession(environmentId, c.req.raw);
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) {
-                    return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment to install apps.' } }, 401);
+                    return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to install apps.' } }, 401);
                 }
 
                 if (!cloudUrl || !credential()) {
@@ -864,7 +864,7 @@ export class CloudConnectionPlugin implements Plugin {
                 const session = await resolveSession(environmentId, c.req.raw);
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) {
-                    return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
+                    return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in.' } }, 401);
                 }
 
                 let packageId = '';
@@ -927,7 +927,7 @@ export class CloudConnectionPlugin implements Plugin {
                 const session = await resolveSession(environmentId, c.req.raw);
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) {
-                    return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
+                    return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in.' } }, 401);
                 }
 
                 if (!cloudUrl || !credential()) {
@@ -965,7 +965,7 @@ export class CloudConnectionPlugin implements Plugin {
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) {
-                    return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
+                    return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in.' } }, 401);
                 }
 
                 if (!cloudUrl || !credential()) {
