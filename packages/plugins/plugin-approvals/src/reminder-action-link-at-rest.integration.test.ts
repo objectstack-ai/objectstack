@@ -201,9 +201,13 @@ async function boot(): Promise<Rig> {
   };
 }
 
-/** The digests of every live token, read as the engine reads them. */
+/**
+ * The digests of every live token, straight from storage — `token_hash` is
+ * `internal`, so the engine's generic read omits it (#21197).
+ */
 async function liveDigests(rig: Rig): Promise<Set<string>> {
-  const rows = (await rig.engine.find('sys_approval_token', { context: SYSTEM } as any)) as any[];
+  const rows = (await rig.driver.getKnex()('sys_approval_token').select('token_hash', 'consumed_at')) as any[];
+  expect(rows.every((r) => typeof r.token_hash === 'string' && r.token_hash.length === 64)).toBe(true);
   return new Set(rows.filter((r) => !r.consumed_at).map((r) => String(r.token_hash)));
 }
 
