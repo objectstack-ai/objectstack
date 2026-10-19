@@ -82,22 +82,30 @@ escalate to. Decide on **expressibility**; reuse/governance is Level B.
 
 Standardized answers to the recurring ambiguous cases:
 
-- **"Count of child tasks per project."** Base the dataset on the **child** (`task`)
-  and group by the parent lookup (`project`) — grain = child. A rollup onto the
-  **parent** grain ("on `project`, count related tasks") is a to-many rollup:
-  **not** dataset-expressible — use a **stored rollup field** on `project`.
-- **To-one enrichment** ("revenue by `account.industry`") is fine and does **not**
-  change grain — put `account` in `include`, add `account.industry` as a dimension.
-- **Computed column.** Formatting/currency → a measure's `format`/`currency`;
-  arithmetic over declared measures (`margin = difference(revenue, cost)`) → a
-  **derived measure**; CASE / bins / `revenue*0.8` / computed dimensions → **not** a
-  dataset.
-- **Filter by a parent's attribute** → model it as a **dimension** (guaranteed to
-  join); a lookup-path *filter* is not a reliable analytics-path construct.
-- **A dashboard filter driving several charts** (date/region) → **not** a dataset:
-  a dashboard variable + per-chart `filterBindings` broadcast into each chart's
-  WHERE. A dataset is implied only when a parameter **reshapes** the query
-  (grain/window/join) — and those are beyond the envelope anyway.
+- **Count of child tasks per project.** Base the dataset on the **child** (`task`)
+  and group by the `project` lookup — grain = child. A rollup onto the **parent**
+  grain is to-many: **not** a dataset — a **stored rollup field** on `project`.
+- **To-one enrichment** ("revenue by `account.industry`") keeps grain — `account`
+  in `include`, `account.industry` as a dimension.
+- **Computed column.** Format/currency → the measure's `format`/`currency`;
+  arithmetic over declared measures → a **derived measure**; CASE / bins /
+  `revenue*0.8` / computed dimensions → **not** a dataset.
+- **Total over a computed value.** `sum`/`avg`/`min`/`max` need a STORED numeric
+  or boolean field (`percent` not under `sum`; `min`/`max` also dates); a `formula`
+  has no column: refused whatever its `returnType` says. Store the number
+  (user-entered, a `summary` rollup, or hook-kept) or title the widget the `count`
+  it is. Leave days: `sum` over the `formula` `days_requested` (`end - start`) is
+  refused ⇒ a `number` a `beforeInsert`/`beforeUpdate` hook writes, then
+  `{ name: 'days_sum', aggregate: 'sum', field: 'days_requested' }`.
+- **Breakdown by a multi-value field.** `multiselect`/`checkboxes`/`tags` and
+  any `multiple: true` field is refused as a dataset or cube dimension and as
+  `groupBy` (`INVALID_FIELD`; no per-member buckets). One widget per member,
+  filtered `{ tags: { $contains: 'urgent' } }`, or a single-value axis.
+- **Filter by a parent's attribute** → a **dimension** (guaranteed to join); a
+  lookup-path *filter* is not a reliable analytics-path construct.
+- **A dashboard filter driving several charts** → **not** a dataset: `globalFilters`
+  + per-widget `filterBindings` (below); a parameter that **reshapes** the query
+  (grain/window/join) is beyond the envelope.
 
 **Level B — naming is governance, not expressibility.** An inline dataset draft
 (Studio Live Canvas) and a saved named dataset have **identical** expressibility;
@@ -106,9 +114,6 @@ labels/formats → `defineDataset`). Persisted widgets already require a named
 dataset, so Level B only surfaces in Studio previews and hand-coded react-page
 `<ObjectChart>` blocks (a single-object inline `aggregate`, no dataset binding).
 
-- Dataset-bound widgets need at least one `values` entry, and every
-  `dataset`/`dimensions`/`values` name must resolve to its `defineDataset` —
-  `os validate` fails on an unresolved name (an empty chart otherwise).
 - **The two paths key their result rows differently — this is the #1 way a
   chart renders blank.** A DATASET returns rows keyed by the declared measure
   NAME (`sum_amount`), because a measure has an author-chosen `name`. An
@@ -119,14 +124,6 @@ dataset, so Level B only surfaces in Studio previews and hand-coded react-page
   names — never to a `sum_`-style measure name, and never to a field the
   aggregate did not select. `os validate` checks both halves
   (`react-chart-field-unknown`, `react-chart-axis-unknown`).
-
-  ```jsx
-  <ObjectChart objectName="showcase_invoice" type="bar"
-    aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }}
-    xAxis={{ field: 'status' }} yAxis={[{ field: 'total', format: '$0,0' }]}
-    series={[{ name: 'total' }]} />
-  // rows: [{ status: 'open', total: 1200 }, …]  ← keyed by the raw field names
-  ```
 - **Charts speak the spec `ChartConfig` shape on every surface** — the same
   `type` / `xAxis` / `yAxis` / `series` you write on a dashboard widget or a
   report. Axis presentation rides on the axis (`format`, `min`/`max`,
