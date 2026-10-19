@@ -167,6 +167,13 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
     notes:
       'Package-declared authorization capabilities (`capabilities: allCapabilities` in objectstack.config.ts), served from the security catalog under the package (ADR-0131 D3). Code-only kind: runtime creation answers 403 not_creatable, which protocol.capability-write-door.test.ts pins.',
   },
+  // [ADR-0131 D6] `sharing_rule` joined the registry as a code-only kind (regime C).
+  sharing_rule: {
+    status: 'demonstrated',
+    files: ['src/security/sharing-rules.ts'],
+    notes:
+      'Regime C (ADR-0131 D6): package-declared rules (`sharingRules` in objectstack.config.ts), served from the registry and switched off through the activation ledger (POST /api/v1/security/_activation/sharing_rule/:name). Organizations author their own through POST /api/v1/sharing/rules. Code-only kind: PUT /meta/sharing_rule/:name answers 403 NOT_CREATABLE (NOT_OVERRIDABLE over a declared rule), which runtime meta-sharing-rule-door.test.ts pins.',
+  },
 
   // ── ai ──
   agent: {
