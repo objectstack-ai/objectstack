@@ -64,7 +64,8 @@ function engineSeams() {
       middlewares.push(fn);
     },
     async write(object: string, apply: () => void | Promise<void> = () => {}, operation = 'update') {
-      writeEpoch.bump('write');
+      // As the engine's `isWriteEpochOperation`: only a write verb advances the epoch.
+      if (operation === 'insert' || operation === 'update' || operation === 'delete') writeEpoch.bump('write');
       const chain = [...middlewares];
       let i = 0;
       const next = async (): Promise<void> => {
