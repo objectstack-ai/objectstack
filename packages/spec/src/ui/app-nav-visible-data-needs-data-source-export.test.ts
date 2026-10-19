@@ -23,13 +23,15 @@
  *     cannot be running an inline copy that merely agrees on this matrix.
  *  4. BARREL identity: `./index` (what `@objectstack/spec/ui` ships) exports
  *     the very same function object, with the `(value, ctx)` arity.
- *  5. INPUT CONTRACT: the card's own entry, written with the bare-string
- *     `visible`, is refused by the door, and the export raises the identical
- *     issue on that entry's PARSED `visible`, but nothing on the bare string
- *     itself. The check judges the spec's parsed entry; a mirror whose
- *     `visible` stays the authored string gets no refusal by attaching it as
- *     it is. That is the export's docblock, measured, so a later change to
- *     what the function reads flips this leg on purpose.
+ *  5. BOTH SPELLINGS: the export accepts `visible` as authored (the bare
+ *     string a mirror whose own `visible` stays the authored string hands it)
+ *     and as parsed (the envelope the spec's door hands it), and answers the
+ *     same on both. The card's own entry as written draws the door's identical
+ *     issue from a direct call, and so does its parsed `visible`. Over the leg-1
+ *     matrix rewritten with bare strings, the direct call and the door agree
+ *     issue for issue. The same bare string with a `dataSource` draws nothing,
+ *     and neither does a boolean or absent `visible`. So a mirror attaches the
+ *     export as it is, by identifier.
  *
  * What it does NOT prove: reference identity between the export and the
  * check object the schema holds. zod 4 wraps the function handed to
@@ -245,10 +247,19 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
 });
 
 // ---------------------------------------------------------------------------
-// Leg 5 — the input contract: the export judges the PARSED entry
+// Leg 5 — both spellings: the export reads `visible` as authored and as parsed
 // ---------------------------------------------------------------------------
 
-describe('the input contract — the export judges the entry after the spec\'s parse', () => {
+/** The leg-1 matrix with each envelope `visible` written back as the bare string an author writes. */
+const authoredFixtures: Fixture[] = fixtures
+  .filter((f) => f.value.visible !== undefined)
+  .map((f) => ({
+    ...f,
+    label: `${f.label}, \`visible\` written as the bare string`,
+    value: { ...f.value, visible: (f.value.visible as { source: string }).source },
+  }));
+
+describe('both spellings — the export reads `visible` as authored and as parsed, and answers the same', () => {
   const parsedVisible = EvaluatedExpressionInputSchema.parse(CARD_ENTRY.visible);
 
   it('the spec normalises the bare string to the envelope the check reads', () => {
@@ -265,13 +276,33 @@ describe('the input contract — the export judges the entry after the spec\'s p
     expect(runExport({ ...CARD_ENTRY, visible: parsedVisible })).toEqual(runParse(CARD_ENTRY));
   });
 
-  it('the export raises NOTHING on the bare-string spelling — a mirror must hand it the parsed entry', () => {
-    expect(runExport(CARD_ENTRY)).toEqual([]);
+  it('the export raises the door\'s identical issue (code, path and message) on the card\'s entry AS WRITTEN', () => {
+    const direct = runExport(CARD_ENTRY);
+    expect(direct).toHaveLength(1);
+    expect(direct).toEqual(runParse(CARD_ENTRY));
   });
 
-  it('the control — the same entry with a `dataSource` — is accepted by the door and by the export', () => {
+  it.each(authoredFixtures)('$label — the direct call refuses at exactly the declared paths, issue for issue with the door', ({ value, refusesAt }) => {
+    const direct = runExport(value);
+    expect(direct.map((i) => i.path).sort()).toEqual([...refusesAt].sort());
+    expect(runParse(value)).toEqual(direct);
+  });
+
+  it('the authored matrix has both kinds of path, so agreement is not vacuous', () => {
+    expect(authoredFixtures.filter((f) => f.refusesAt.length > 0).length).toBeGreaterThanOrEqual(4);
+    expect(authoredFixtures.filter((f) => f.refusesAt.length === 0).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('the control — the same bare string with a `dataSource` — draws nothing, from the door or the export', () => {
     const withSource = { ...CARD_ENTRY, dataSource: API_BINDING };
     expect(NavigationItemSchema.safeParse(withSource).success).toBe(true);
+    expect(runExport(withSource)).toEqual([]);
     expect(runExport({ ...withSource, visible: parsedVisible })).toEqual([]);
+  });
+
+  it('a boolean or absent `visible` judges nothing', () => {
+    expect(runExport({ ...CARD_ENTRY, visible: true })).toEqual([]);
+    expect(runExport({ ...CARD_ENTRY, visible: false })).toEqual([]);
+    expect(runExport({ id: CARD_ENTRY.id, type: CARD_ENTRY.type, objectName: CARD_ENTRY.objectName })).toEqual([]);
   });
 });
