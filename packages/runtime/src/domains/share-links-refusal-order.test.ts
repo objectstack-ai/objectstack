@@ -175,8 +175,9 @@ beforeAll(async () => {
   // [#24633] One scrypt verification per distinct (password, hash) pair, not
   // one per request. The production verifier derives a key at the account
   // parameters (scrypt N=16384, r=16) on every call, and `resolveToken` calls
-  // it for every password presented to a protected link, an `email` one
-  // included whatever email was sent. Counted at `eadea5720`: 70 calls, plus
+  // it for each password presented to a live protected link, once a
+  // `signed_in` link's caller is signed in, and on an `email` link whatever
+  // email was sent. Counted at `eadea5720`: 70 calls, plus
   // the 4 mints below, and they were the file's wall time. It read 34.84 s in
   // CI (run 39298888283, Test Core 6/6, attempt 2), and the loop case with
   // 10 calls timed out at vitest's 5000 ms default on attempt 1. The calls
@@ -189,18 +190,20 @@ beforeAll(async () => {
   // no row here is legacy). The memo wraps the instance's own verifier,
   // which is not exported. If that member moves, this throws rather than
   // leave the file paying for every call again.
+  type Verify = (plain: string, hash: string) => Promise<boolean>;
   const productionVerify: unknown = (svc as any).verifyPassword;
   if (typeof productionVerify !== 'function') {
     throw new Error('ShareLinkService no longer keeps its password verifier as `verifyPassword`; re-point the memo below');
   }
   const verdicts = new Map<string, Map<string, Promise<boolean>>>();
-  (svc as any).verifyPassword = (plain: string, hash: string): Promise<boolean> => {
+  const memoVerify: Verify = (plain, hash) => {
     let byPlain = verdicts.get(hash);
     if (!byPlain) verdicts.set(hash, (byPlain = new Map()));
     let verdict = byPlain.get(plain);
-    if (!verdict) byPlain.set(plain, (verdict = (productionVerify as (p: string, h: string) => Promise<boolean>)(plain, hash)));
+    if (!verdict) byPlain.set(plain, (verdict = (productionVerify as Verify)(plain, hash)));
     return verdict;
   };
+  (svc as any).verifyPassword = memoVerify;
   const creator = { isSystem: true, userId: 'usr_creator' } as any;
   const mint = async (audience: 'public' | 'signed_in' | 'email', password?: string) =>
     svc.createLink(
