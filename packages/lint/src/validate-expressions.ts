@@ -115,7 +115,7 @@ import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automatio
 // hand-written notion of "blank" here — that drift is what #15662 built the
 // shared refusal to prevent.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
-import { referenceCarrierOf, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
+import { referenceCarrierOf, referenceTargetOf, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 // [#22394] The acting user's declared members — the contract half of the option
 // verdict's member allowlist for `current_user` and its ADR-0068 aliases. Read
@@ -1769,6 +1769,20 @@ function storedMetadataBodyHopMessage(
 }
 
 /**
+ * [#24410] The refusal of a formula's one-hop read of a field the reference's
+ * target does not declare. It opens in the shared validator's `unknown field`
+ * words, so the two first-segment and second-segment verdicts read as one
+ * family, and names the read, the target and where the field would have to be
+ * declared — never on the object carrying the formula.
+ */
+function undeclaredHopFieldMessage(objectName: string, field: string, target: string, column: string): string {
+  return `unknown field \`${column}\` on \`${target}\`: this formula reads it through the reference `
+    + `${celMemberPath('record', field)}, and '${target}' declares no field '${column}', so the formula reads `
+    + `null on every row. Read a field '${target}' declares, or declare '${column}' on '${target}' — not on `
+    + `'${objectName}', the object carrying this formula.`;
+}
+
+/**
  * [#17495] Why a structural condition whose SHAPE is fine is still not
  * authorable: its source is blank. The author-time twin of the gate #17322 put
  * in `AutomationEngine.registerFlow`, spelled the same way against the same
@@ -1945,6 +1959,46 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         source,
         severity: 'error',
       });
+    }
+  };
+
+  /**
+   * [#24410] Refuse a formula's one-hop read of a field the reference's target
+   * does not declare (`record.book.name` where the book declares no `name`).
+   * ObjectQL's one-hop loader reads only declared columns of the target, so as
+   * written the formula reads null on every row; this says so where it is
+   * written, at the build and at the object save door alike.
+   *
+   * Judged against the target's field index — its declared fields and the
+   * system columns the platform injects on it, the set the registry carries —
+   * and the primary key, which no field map carries and the loader reads. A
+   * target outside the stack (or the door's snapshot, which carries the live
+   * registry's objects, another package's included) has no index here and is
+   * not judged; a hop into the stored-metadata-body family is refused by
+   * {@link refuseStoredMetadataBodyHop} and not judged twice.
+   */
+  const refuseUndeclaredHopField = (where: string, raw: unknown, objectName: string): void => {
+    const source = celSourceOf(raw);
+    if (!source) return;
+    const traversals = analyzeRelationshipTraversals(source, 'record')?.traversals;
+    if (!traversals || traversals.size === 0) return;
+    const own = objects.find((o) => o.name === objectName);
+    if (!own) return;
+    const defs = new Map(fieldEntries(own));
+    for (const [field, columns] of traversals) {
+      const target = referenceTargetOf(defs.get(field))?.trim();
+      if (!target || isStoredMetadataBodyObject(target)) continue;
+      const declared = fieldIndex.get(target);
+      if (!declared) continue;
+      for (const column of [...columns].sort()) {
+        if (column === 'id' || declared.includes(column)) continue;
+        issues.push({
+          where,
+          message: undeclaredHopFieldMessage(objectName, field, target, column),
+          source,
+          severity: 'error',
+        });
+      }
     }
   };
 
@@ -2848,6 +2902,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         for (const e of res.errors) issues.push({ where: fieldWhere, message: e.message, source: e.source, severity: 'error' });
         for (const w of res.warnings) issues.push({ where: fieldWhere, message: w.message, source: w.source, severity: 'warning' });
         if (objectName) refuseStoredMetadataBodyHop(fieldWhere, f.expression, objectName, 'formula');
+        // [#24410] And a hop to a field the target does not declare.
+        if (objectName) refuseUndeclaredHopField(fieldWhere, f.expression, objectName);
         // [#8116] Formulas read the same record binding the predicates do, so
         // a `record.<anchor>` read inside one degrades identically.
         warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
