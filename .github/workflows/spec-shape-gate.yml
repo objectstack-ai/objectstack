@@ -253,8 +253,10 @@ jobs:
         working-directory: objectui
         run: pnpm --version
 
-      # Packs every package built above into the directories objectui's
-      # overrides name; without it the frozen install dies on ENOENT there. It
+      # objectui's `objectstack:build` script (its pin script's `build`) packs
+      # every package built above into the directories its overrides name;
+      # without it the frozen install dies on ENOENT there. Called by objectui's
+      # script NAME: a path here would read as one in this repository. It
       # refuses (exit 1, its own `objectstack-pin` annotation) when a packed
       # manifest's dependency NAMES differ from what objectui's lockfile records:
       # the downstream owes a pin bump with its lockfile, and the report reads the
@@ -265,7 +267,7 @@ jobs:
         working-directory: objectui
         env:
           OBJECTSTACK_ROOT: ${{ github.workspace }}
-        run: node scripts/objectstack-pin.mjs build
+        run: pnpm run objectstack:build
 
       - name: Install objectui dependencies
         working-directory: objectui
