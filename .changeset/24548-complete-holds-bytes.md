@@ -12,7 +12,7 @@ Clause-②: no (narrowing)
 
 **What the commit door does now.** Before it commits, it asks the backend through two members every adapter implements: `exists(key)`, and `getInfo(key).size` compared with the size the upload declared. When the backend holds no bytes for the file, or holds a different number of bytes, the door answers `409` with the standard code `RESOURCE_CONFLICT`. The row stays `pending`, so nothing is served for it. This is the answer the chunked completion already gives an upload that does not hold its declared bytes.
 
-**What changes for you.** Nothing, if your client sends the bytes before it completes, as the SDK's `storage.upload` and the console's upload provider do. A client that completes first now receives the `409`: send the file to its upload URL (start a new upload if that URL has expired), then complete again. A backend fault while asking still answers `500`.
+**What changes for you.** Nothing, if your client sends the bytes before it completes, as the SDK's `storage.upload` and the console's upload provider do. A client that completes first now receives the `409`: send the file to its upload URL (start a new upload if that URL has expired), then complete again. If the storage adapter reports a fault while the door asks, the door answers `500`. The local adapter does not report an unreadable storage root as a fault: it reports it as holding no bytes, so on the local adapter the door answers `409`.
 
 The `eTag` a completion may carry is still stored as sent and not compared: no adapter reports the stored object's ETag.
 
