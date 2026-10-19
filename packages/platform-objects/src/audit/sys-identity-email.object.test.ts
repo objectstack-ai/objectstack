@@ -22,7 +22,9 @@ describe('sys_identity_email — the identity-mail sibling of sys_email', () => 
 
   it('opts out of the injected organization column; sys_email keeps it', () => {
     expect(SysIdentityEmail.systemFields).toEqual({ tenant: false });
-    expect(SysEmail.systemFields?.tenant).not.toBe(false);
+    // Non-vacuity: the tenant log does not opt out (neither `false` nor `{ tenant: false }`).
+    const tenantLog = SysEmail.systemFields;
+    expect(tenantLog === false || (typeof tenantLog === 'object' && tenantLog.tenant === false)).toBe(false);
     expect(Object.keys(SysIdentityEmail.fields)).not.toContain('organization_id');
   });
 
