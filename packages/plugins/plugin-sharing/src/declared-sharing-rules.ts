@@ -151,6 +151,13 @@ export interface DeclaredSharingRule {
   recipientId: string;
   accessLevel: ShareAccessLevel;
   active: boolean;
+  /**
+   * The package that ships the declaration (the registry item's `_packageId`),
+   * when it names one — the provenance an activation-ledger row records
+   * (`sys_metadata_activation.package_id`). Absent for a declaration no package
+   * names.
+   */
+  packageId?: string;
 }
 
 /** Why a declaration is not served: the compiler's own refusal, or a shape the runtime has no slot for. */
@@ -217,6 +224,7 @@ export function translateDeclaredSharingRule(
       recipientId: String(r.sharedWith.value),
       accessLevel: (r.accessLevel ?? 'read') as ShareAccessLevel,
       active: r.active !== false,
+      ...(typeof r._packageId === 'string' && r._packageId ? { packageId: r._packageId } : {}),
     },
   };
 }

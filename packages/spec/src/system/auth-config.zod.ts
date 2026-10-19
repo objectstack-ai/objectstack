@@ -342,7 +342,7 @@ export const EmailVerificationConfigSchema = lazySchema(() => z.object({
 
 /**
  * Audience posture — the ONE declaration answering "who may become a user of
- * an app built on this environment" (#11739 / epic #11723).
+ * an app built on this system" (#11739 / epic #11723).
  *
  * Before this existed, the answer was an emergent property of
  * `emailAndPassword.disableSignUp` + `emailVerification` + `ssoOnlyMode` +
@@ -398,7 +398,7 @@ const AUDIENCE_EMAIL_DOMAIN_SHAPE = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[
  */
 export const AudienceConfigSchema = lazySchema(() => z.object({
   /**
-   * Who may become a user of this environment's apps:
+   * Who may become a user of this system's apps:
    *
    * - `invite_only` (default): self-registration is CLOSED. A user comes into
    *   existence only through an operator-side act — a pending invitation
@@ -414,7 +414,7 @@ export const AudienceConfigSchema = lazySchema(() => z.object({
    *   console cannot turn it off.
    */
   posture: z.enum(AUDIENCE_POSTURES).default('invite_only').describe(
-    'Who may self-register into this environment: invite_only (default — operator acts only), ' +
+    'Who may self-register: invite_only (default — operator acts only), ' +
     'email_domain (allowlisted email domains), or open (anyone). ' +
     'email_domain forces email verification on; open forces it on unless the deployment explicitly ' +
     'sets emailAndPassword.requireEmailVerification to false.',
@@ -578,7 +578,7 @@ export const AuthConfigSchema = lazySchema(() => z.object({
   emailAndPassword: EmailAndPasswordConfigSchema,
   emailVerification: EmailVerificationConfigSchema,
   /**
-   * Audience posture (#11739) — who may become a user of this environment's
+   * Audience posture (#11739) — who may become a user of this system's
    * apps. Undeclared ⇒ `invite_only` (the safe default; maintainer ruling
    * 2026-08-24 on epic #11723 — no legacy/undeclared limbo).
    *
@@ -598,7 +598,7 @@ export const AuthConfigSchema = lazySchema(() => z.object({
    *   A `false` stored only through the settings console is still refused.
    */
   audience: AudienceConfigSchema.optional().describe(
-    'Audience posture: who may self-register into this environment ' +
+    'Audience posture: who may self-register ' +
     '(invite_only — the default — | email_domain | open). See AudienceConfigSchema.',
   ),
   advanced: AdvancedAuthConfigSchema,

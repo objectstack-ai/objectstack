@@ -20,7 +20,7 @@ export const entry: SemanticMigration = {
     + 'used to pass unjudged)',
   replacement: 'an inline action with `action:button`\'s keys, its executor spelled `type`: `{ name?, label?, '
     + 'icon?, type?, variant?, visible?, disabled?, tags?, params?, description?, target?, openIn?, method?, '
-    + 'bodyExtra?, bodyShape?, operation?, patch?, confirmText?, successMessage?, errorMessage?, refreshAfter?, '
+    + 'bodyExtra?, bodyShape?, operation?, confirmText?, successMessage?, errorMessage?, refreshAfter?, '
     + 'locations?, toast?, resultDialog?, onSuccess?, objectName? }`, plus `size?` on an `action:group` member. '
     + 'Write `actionType` as `type`, `endpoint` (and `url` / `path` / `href`) as `target`, `enabled` as `disabled` '
     + 'with the condition inverted, and `outcomeMessages` as one `successMessage`; drop a member `className`, '

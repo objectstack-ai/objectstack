@@ -2334,7 +2334,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       packageId: {
         label: "Package Id",
-        helpText: "The package that ships this set; a value naming any other package is refused. Leave empty for a set created in this environment."
+        helpText: "The package that ships this set; a value naming any other package is refused. Leave empty for a set authored in this system."
       },
       systemPermissions: {
         label: "System Permissions",
