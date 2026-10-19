@@ -67,7 +67,7 @@ const SEED_CONFIG = {
 } as any;
 const logger = { info() {}, warn() {}, error() {}, debug() {} };
 
-/** The loans come FIRST, so a real key resolves only through pass 2 — the card's path. */
+/** Authored loans-first; the loader orders the load by dependency, so books land first. */
 const BOOKS_SEED = {
   object: 'blank_ref_book', externalId: 'title', mode: 'upsert', env: ENV,
   records: [{ title: 'Dune' }, { title: 'Emma' }],
@@ -142,7 +142,7 @@ describe('a blank seed reference is no reference, on a REAL SqlDriver', () => {
     const loans: any[] = await e.find('blank_ref_loan', {});
     const byName = (n: string) => loans.find((l) => l.name === n)!;
 
-    // Control: a real natural key resolves (through pass 2 — loans load first).
+    // Control: a real natural key still resolves to the target row's id.
     expect(byName('loan-real').book).toBe(dune.id);
     // The card: the row lands and the blank field is empty — by the engine's
     // blank rule, not by a shape the loader picked: the value is left as
