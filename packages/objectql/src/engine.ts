@@ -5572,11 +5572,11 @@ export class ObjectQL implements IObjectQLEngine {
     const key = `${objectName}:${actionName}`;
     const replaced = this.actions.get(key);
     if (replaced !== undefined && replaced.package !== packageName) {
-      const owner = (name: string | undefined) => (name ? `package '${name}'` : 'a registration with no package');
+      const by = (name: string | undefined) => (name ? `by package '${name}'` : 'with no package');
       this.logger.warn(
-        `Action handler '${key}' registered by ${owner(packageName)} replaces the one ${owner(replaced.package)} `
-        + `registered: the action door now runs the handler of ${owner(packageName)}, whichever declaration `
-        + `object '${objectName}' lists, and withdrawing ${owner(packageName)} leaves the action with no handler. `
+        `Action handler '${key}' registered ${by(packageName)} replaces the one registered ${by(replaced.package)}: `
+        + `the action door now runs the handler registered ${by(packageName)}, whichever declaration object `
+        + `'${objectName}' lists${packageName ? `, and withdrawing package '${packageName}' leaves the action with no handler` : ''}. `
         + `Two owners share one handler key only when both declare action '${actionName}' on object `
         + `'${objectName}' — rename one of them.`,
         { objectName, actionName, package: packageName, replacedPackage: replaced.package },
