@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 240,
-    "droppedRefinementSites": 781,
+    "droppedRefinementSites": 812,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -62,6 +62,7 @@
     },
     "api/AppDefinitionResponse": {
       "sites": [
+        "data.navigation.element.lazy",
         "data.navigation.element.lazy.options[0]"
       ]
     },
@@ -93,6 +94,7 @@
         "manifest.hooks.element.object",
         "manifest.jobs.element",
         "manifest.jobs.element.schedule.options[0].timezone",
+        "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]",
         "manifest.objectExtensions.element",
         "manifest.objects.element",
@@ -154,11 +156,13 @@
     },
     "api/DisablePackageResponse": {
       "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/EnablePackageResponse": {
       "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
@@ -184,6 +188,7 @@
     },
     "api/GetInstalledPackageResponse": {
       "sites": [
+        "data.options[0].manifest.navigationContributions.element.items.element.lazy",
         "data.options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "data.options[1].manifest.actions.element.in",
         "data.options[1].manifest.actions.element.in.ai.outputSchema",
@@ -249,6 +254,7 @@
     },
     "api/GetPackageResponse": {
       "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
@@ -282,16 +288,19 @@
     },
     "api/InstallPackageRequest": {
       "sites": [
+        "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/InstallPackageResponse": {
       "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/InstalledPackageAtEitherStage": {
       "sites": [
+        "options[0].manifest.navigationContributions.element.items.element.lazy",
         "options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "options[1].manifest.actions.element.in",
         "options[1].manifest.actions.element.in.ai.outputSchema",
@@ -355,6 +364,7 @@
     },
     "api/ListInstalledPackagesResponse": {
       "sites": [
+        "data.packages.element.options[0].manifest.navigationContributions.element.items.element.lazy",
         "data.packages.element.options[0].manifest.navigationContributions.element.items.element.lazy.options[0]",
         "data.packages.element.options[1].manifest.actions.element.in",
         "data.packages.element.options[1].manifest.actions.element.in.ai.outputSchema",
@@ -413,6 +423,7 @@
     },
     "api/ListPackagesResponse": {
       "sites": [
+        "packages.element.manifest.navigationContributions.element.items.element.lazy",
         "packages.element.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
@@ -449,31 +460,37 @@
     },
     "api/PackageInstallBody": {
       "sites": [
+        "options[1].navigationContributions.element.items.element.lazy",
         "options[1].navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/PackageInstallManifest": {
       "sites": [
+        "navigationContributions.element.items.element.lazy",
         "navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/PackageInstallRequest": {
       "sites": [
+        "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/PackageInstallResponse": {
       "sites": [
+        "data.package.manifest.navigationContributions.element.items.element.lazy",
         "data.package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/PackageUpgradeRequest": {
       "sites": [
+        "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/ResolveDependenciesRequest": {
       "sites": [
+        "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
@@ -1022,41 +1039,49 @@
     },
     "kernel/DisablePackageResponse": {
       "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/EnablePackageResponse": {
       "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/GetPackageResponse": {
       "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/InstallPackageRequest": {
       "sites": [
+        "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/InstallPackageResponse": {
       "sites": [
+        "package.manifest.navigationContributions.element.items.element.lazy",
         "package.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/InstalledPackage": {
       "sites": [
+        "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/ListPackagesResponse": {
       "sites": [
+        "packages.element.manifest.navigationContributions.element.items.element.lazy",
         "packages.element.manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/Manifest": {
       "sites": [
+        "navigationContributions.element.items.element.lazy",
         "navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
@@ -1091,11 +1116,13 @@
     },
     "kernel/UpgradePackageRequest": {
       "sites": [
+        "manifest.navigationContributions.element.items.element.lazy",
         "manifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "kernel/UpgradeSnapshot": {
       "sites": [
+        "previousManifest.navigationContributions.element.items.element.lazy",
         "previousManifest.navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
@@ -1378,6 +1405,7 @@
     },
     "ui/App": {
       "sites": [
+        "navigation.element.lazy",
         "navigation.element.lazy.options[0]"
       ]
     },
@@ -1527,16 +1555,19 @@
     },
     "ui/NavigationArea": {
       "sites": [
+        "navigation.element.lazy",
         "navigation.element.lazy.options[0]"
       ]
     },
     "ui/NavigationContribution": {
       "sites": [
+        "items.element.lazy",
         "items.element.lazy.options[0]"
       ]
     },
     "ui/NavigationItem": {
       "sites": [
+        "lazy",
         "lazy.options[0]"
       ]
     },

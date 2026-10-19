@@ -364,9 +364,11 @@ const BaseNavItemSchema = z.object({
    * element's own reading of its API binding in its `visibleWhen`, one dialect
    * (CEL, the bare string normalised to `{ dialect: 'cel', source }`) and one
    * root name. PLANNED, not yet rendered: see that key. An entry with no
-   * `dataSource` has no `data` to read.
+   * `dataSource` has no `data` to read, and a `visible` that reads `data` on
+   * such an entry is REFUSED at parse, at this key, with the fix
+   * ({@link navItemVisibleDataNeedsDataSource}).
    */
-  visible: EvaluatedExpressionInputSchema.optional().describe('Visibility predicate (CEL). e.g. P`\'org_admin\' in current_user.positions`. An entry that declares `dataSource` reads that binding\'s selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read.'),
+  visible: EvaluatedExpressionInputSchema.optional().describe('Visibility predicate (CEL). e.g. P`\'org_admin\' in current_user.positions`. An entry that declares `dataSource` reads that binding\'s selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read, and a `visible` that reads `data` there is refused at parse: declare `dataSource` on the entry, or drop the `data.*` read.'),
 
   /**
    * One API data source for this entry — the page element's API binding,
@@ -892,6 +894,169 @@ export type NavigationItemInput =
   | (z.input<typeof GroupNavItemSchema> & { children: NavigationItemInput[] });
 
 /**
+ * The CEL comprehension macros (and `cel.bind`) whose FIRST argument binds a
+ * variable rather than reading one: in `xs.exists(data, data > 1)` the name
+ * `data` is the macro's own iteration variable. A predicate that binds `data`
+ * this way is not judged at all by {@link celReadsRootData} — the reader
+ * would have to track the binding's scope to tell a bound `data` from the
+ * root one, and an unsure reader must never refuse.
+ */
+const CEL_BINDING_MACROS: ReadonlySet<string> = new Set([
+  'all', 'exists', 'exists_one', 'existsOne', 'map', 'filter', 'bind',
+  'transformList', 'transformMap', 'transformMapEntry', 'sortBy',
+]);
+
+type CelToken = { kind: 'ident' | 'operand' | 'punct'; text: string };
+
+/**
+ * Lex a CEL source into the three token kinds the root reader needs: an
+ * identifier, an operand that is not an identifier (a string, bytes or number
+ * literal, a backquoted field name), and one punctuation character. String
+ * literals — single, double and triple quoted, with the `r` / `b` prefixes —
+ * and `//` comments are consumed whole, so a `data` inside a quoted string or
+ * a comment is never read as an identifier.
+ */
+function lexCel(source: string): CelToken[] {
+  const tokens: CelToken[] = [];
+  let i = 0;
+  const skipString = (start: number, raw: boolean): number => {
+    const quote = source[start];
+    const triple = source.startsWith(quote.repeat(3), start);
+    const close = triple ? quote.repeat(3) : quote;
+    let j = start + close.length;
+    while (j < source.length) {
+      if (!raw && source[j] === '\\') { j += 2; continue; }
+      if (source.startsWith(close, j)) return j + close.length;
+      if (!triple && source[j] === '\n') return j;
+      j += 1;
+    }
+    return j;
+  };
+  while (i < source.length) {
+    const ch = source[i];
+    if (/\s/.test(ch)) { i += 1; continue; }
+    if (source.startsWith('//', i)) {
+      const eol = source.indexOf('\n', i);
+      i = eol === -1 ? source.length : eol;
+      continue;
+    }
+    if (ch === '"' || ch === '\'') {
+      i = skipString(i, false);
+      tokens.push({ kind: 'operand', text: 'string' });
+      continue;
+    }
+    if (ch === '`') {
+      const end = source.indexOf('`', i + 1);
+      i = end === -1 ? source.length : end + 1;
+      tokens.push({ kind: 'operand', text: 'field' });
+      continue;
+    }
+    if (/[0-9]/.test(ch) || (ch === '.' && /[0-9]/.test(source[i + 1] ?? ''))) {
+      const m = /^(0[xX][0-9a-fA-F]+|[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?)[uU]?/.exec(source.slice(i));
+      i += m ? m[0].length : 1;
+      tokens.push({ kind: 'operand', text: 'number' });
+      continue;
+    }
+    if (/[A-Za-z_]/.test(ch)) {
+      const word = /^[A-Za-z_][A-Za-z0-9_]*/.exec(source.slice(i))![0];
+      const next = source[i + word.length];
+      if (/^(r|b|rb|br)$/i.test(word) && (next === '"' || next === '\'')) {
+        i = skipString(i + word.length, /r/i.test(word));
+        tokens.push({ kind: 'operand', text: 'string' });
+        continue;
+      }
+      tokens.push({ kind: 'ident', text: word });
+      i += word.length;
+      continue;
+    }
+    tokens.push({ kind: 'punct', text: ch });
+    i += 1;
+  }
+  return tokens;
+}
+
+/**
+ * Does this CEL source read the top-level identifier `data`?
+ *
+ * A reader of ONE fact, sound in the direction a refusal needs: it answers
+ * `true` only for an occurrence that can be nothing but a read of the root
+ * `data` — not a member selection (`x.data`), not a call named `data`, not a
+ * field or key name written before a `:` in a `{ … }` literal, not text inside
+ * a string or a comment — and it answers `false` for the whole predicate when
+ * a comprehension macro binds a variable named `data`
+ * ({@link CEL_BINDING_MACROS}). A leading-dot absolute name (`.data.total`)
+ * is a root read and answers `true`. It is a lexer, not a CEL parser: a
+ * syntactically broken predicate is not refused here (the evaluator owns that
+ * verdict), it is only asked whether it names the root.
+ *
+ * Not a runtime dependency on `@objectstack/formula` (Prime Directive #2:
+ * `packages/spec` imports no runtime package); the settings manifest's own
+ * `visible` grammar check in `system/settings-manifest.zod.ts` is the
+ * precedent for a predicate reader living beside the schema that refuses on it.
+ */
+function celReadsRootData(source: string): boolean {
+  const tokens = lexCel(source);
+  const isOperandEnd = (t: CelToken | undefined): boolean =>
+    !!t && (t.kind !== 'punct' || t.text === ')' || t.text === ']' || t.text === '}');
+  let reads = false;
+  for (let k = 0; k < tokens.length; k += 1) {
+    const t = tokens[k];
+    if (t.kind !== 'ident' || t.text !== 'data') continue;
+    const prev = tokens[k - 1];
+    const next = tokens[k + 1];
+    // A macro binding `data` as its iteration variable: `m(data, …)`.
+    if (prev?.text === '(' && next?.text === ',' && tokens[k - 2]?.kind === 'ident'
+      && CEL_BINDING_MACROS.has(tokens[k - 2].text)) {
+      return false;
+    }
+    if (prev?.text === '.' && isOperandEnd(tokens[k - 2])) continue; // `x.data` — a member selection
+    if (next?.text === '(') continue; // `data(…)` — a call, not a variable
+    if (next?.text === ':' && (prev?.text === '{' || prev?.text === ',')) continue; // a field / key name
+    reads = true;
+  }
+  return reads;
+}
+
+/**
+ * A navigation entry whose `visible` reads `data` must declare `dataSource` —
+ * the narrowing arm of #24332's ruling, question 2 (letter A).
+ *
+ * `data` is the value an entry's OWN `dataSource` binds; nothing else puts a
+ * `data` root in a navigation predicate's scope (the shell's ambient roots are
+ * `current_user`, `user`, `ctx.user`, `os.user` and `features`), and a group's
+ * binding is not published to its children. So an entry that reads `data`
+ * without declaring a source has nothing to read, and before this check it
+ * parsed, validated and shipped as an entry the console never shows, with the
+ * author told nothing. Refused at the entry's own `visible`, with the fix.
+ *
+ * Judged on the PARSED entry, where `visible` is always the `{ dialect, source }`
+ * envelope; only the `cel` dialect is read. Mounted once, on
+ * {@link NavigationItemSchema} itself, so it reaches every navigation door —
+ * `app.navigation`, `app.areas[].navigation`, every `children` array at any
+ * depth, and a navigation contribution's `items`. The exported per-branch
+ * schemas do not chain it, the same posture as
+ * {@link objectNavTargetExclusivity}. Its migration record is the ADR-0087 D3
+ * semantic entry `nav-item-visible-data-needs-data-source` (protocol 18).
+ */
+function navItemVisibleDataNeedsDataSource(item: unknown, ctx: z.RefinementCtx): void {
+  if (!item || typeof item !== 'object') return;
+  const entry = item as { visible?: unknown; dataSource?: unknown };
+  if (entry.dataSource !== undefined) return;
+  const visible = entry.visible as { dialect?: unknown; source?: unknown } | undefined;
+  if (!visible || visible.dialect !== 'cel' || typeof visible.source !== 'string') return;
+  if (!celReadsRootData(visible.source)) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ['visible'],
+    message:
+      'This navigation entry\'s `visible` reads `data`, but the entry declares no `dataSource`, so there is no '
+      + '`data` to read: `data` is the value an entry\'s own `dataSource` binds, and a group\'s binding is not '
+      + 'published to its children. Declare `dataSource` on this entry (`{ provider: \'api\', read: { url }, '
+      + 'path? }`), or drop the `data.*` read and gate on `current_user` or `features` instead.',
+  });
+}
+
+/**
  * Recursive Union of all navigation item types.
  * Allows constructing an unlimited-depth navigation tree.
  *
@@ -938,7 +1103,8 @@ export const NavigationItemSchema: z.ZodType<NavigationItem, NavigationItemInput
     // The members are lazySchema Proxies and a superRefine-wrapped variant, so
     // the array is widened for the discriminator-typed overload; runtime
     // discrimination works on all of them (asserted in app.test.ts).
-  ] as unknown as readonly [z.ZodObject<z.ZodRawShape>, ...z.ZodObject<z.ZodRawShape>[]]) as unknown as z.ZodType<NavigationItem, NavigationItemInput>
+  ] as unknown as readonly [z.ZodObject<z.ZodRawShape>, ...z.ZodObject<z.ZodRawShape>[]])
+    .superRefine(navItemVisibleDataNeedsDataSource) as unknown as z.ZodType<NavigationItem, NavigationItemInput>
 );
 
 /**

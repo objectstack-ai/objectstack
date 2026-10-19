@@ -117,6 +117,46 @@ describe('#22019 — the object door dispatches the build\'s expression rule', (
   });
 });
 
+describe('#24410 — the object door refuses a formula hop to a field the target does not declare', () => {
+  /** The lookup's target, delivered by ANOTHER package the written one depends on. */
+  const book = {
+    name: 'fx_book', label: 'Book', sharingModel: 'private', _packageId: 'com.example.library',
+    fields: { title: { type: 'text', label: 'Title' } },
+  };
+  const loan = (expression: string) => ({
+    name: 'fx_loan',
+    label: 'Loan',
+    sharingModel: 'private',
+    fields: {
+      book: { type: 'lookup', label: 'Book', reference: 'fx_book' },
+      summary: { type: 'formula', label: 'Summary', expression },
+    },
+  });
+  const gateLoan = (expression: string) => runRuntimeAuthoringRules({
+    type: 'object',
+    item: loan(expression),
+    context: { objects: [book] },
+    packageScope: { packageId: 'com.example.loans', dependencies: ['com.example.library'] },
+  });
+  const LOAN_WHERE = "object 'fx_loan' · field 'summary' expression";
+
+  it('⭐ LIT — the read is REFUSED under EXPRESSION_INVALID, naming the field and the target from the other package', () => {
+    const result = gateLoan('record.book.name');
+
+    const errs = expressionFindings(result.errors);
+    expect(errs, dump(result)).toHaveLength(1);
+    expect(errs[0]).toMatchObject({ severity: 'error', where: LOAN_WHERE, path: LOAN_WHERE });
+    expect(errs[0]!.message).toContain('unknown field `name` on `fx_book`');
+  });
+
+  it('⭐ CONTROL — a read of a field the target declares publishes clean', () => {
+    const result = gateLoan('record.book.title');
+
+    expect(expressionFindings(result.errors), dump(result)).toEqual([]);
+    expect(expressionFindings(result.advisories), dump(result)).toEqual([]);
+  });
+});
+
 describe('#22019 / #22032 — every pass over the object\'s body judges on this door, and no pass over another collection', () => {
   /**
    * One body carrying a fault in EVERY pass over the object's own body — the
