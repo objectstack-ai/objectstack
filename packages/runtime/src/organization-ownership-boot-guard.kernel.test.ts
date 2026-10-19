@@ -16,7 +16,8 @@
  *  3. a fresh database boots;
  *  4. a database the ceremony ran on to the end (no column left) whose marker
  *     is NOT verified — its post-check found rows still without their
- *     organization — is refused, naming the re-run;
+ *     organization — is refused, saying what 18.0 supports (it cannot re-run
+ *     the ceremony);
  *  5. ⭐ a refused boot writes nothing: the plugins that write rows in their
  *     own `start()` — `AppPlugin` (the inline seed) and plugin-auth's
  *     identity-objects plugin (the Default Organization, `AuthPlugin`'s twin
@@ -181,7 +182,7 @@ describe('the v18 boot refusal on a real kernel (ADR-0131 D10 item 5)', () => {
     await expect(engine.findOne('sys_migration', { where: { id: MARKER }, context: { isSystem: true } })).resolves.toBeNull();
   });
 
-  it('⭐ a ceremony that ran every step and did not verify (no v17 column left, marker unverified) is refused, naming the re-run', async () => {
+  it('⭐ a ceremony that ran every step and did not verify (no v17 column left, marker unverified) is refused, saying what 18.0 supports', async () => {
     const file = databaseFile();
     const db = new DatabaseSync(file);
     writeMarker(db, null, 602);
@@ -191,7 +192,10 @@ describe('the v18 boot refusal on a real kernel (ADR-0131 D10 item 5)', () => {
     expect(refusal?.code, String(error)).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
     expect(refusal?.tables).toEqual([]);
     expect(refusal?.message).toMatch(/^The organization-ownership ceremony has not finished on this database: its marker/);
-    expect(refusal?.message).toContain("os migrate organization-ownership --apply --plan-file PLAN --backup-taken");
+    // 18.0 cannot re-run the ceremony (its `os migrate organization-ownership` refuses on every
+    // database), so the refusal names no step of it and says what 18.0 supports instead.
+    expect(refusal?.message).toContain('18.0 supports fresh installs only and does not upgrade a v17 database');
+    expect(refusal?.message).not.toMatch(/os migrate organization-ownership|--plan-file|--out PLAN|--backup-taken/);
     expect(kernel.getState()).not.toBe('running');
   });
 
