@@ -2395,6 +2395,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     label: "Capability",
     description: "A permission a package defines; you grant it through permission sets"
   },
+  sharing_rule: {
+    label: "Sharing Rule",
+    description: "A rule a package declares to share records; organizations author their own in Setup"
+  },
   agent: {
     label: "AI Agent",
     sections: {

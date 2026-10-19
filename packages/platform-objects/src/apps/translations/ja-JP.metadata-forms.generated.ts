@@ -2395,6 +2395,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "ケイパビリティ",
     description: "パッケージが定義する権限。権限セットを通じて付与します"
   },
+  sharing_rule: {
+    label: "共有ルール",
+    description: "パッケージが宣言するレコード共有ルール。組織は自身のルールを設定で作成します"
+  },
   agent: {
     label: "AI エージェント",
     sections: {
