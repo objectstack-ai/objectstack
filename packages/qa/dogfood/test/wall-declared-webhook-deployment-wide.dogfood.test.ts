@@ -100,11 +100,13 @@ for (const posture of ['isolated', 'group'] as const) {
         const active = await stack.apiAs(tok, 'POST', '/auth/organization/set-active', { organizationSlug: slug });
         expect(active.status, await active.clone().text()).toBe(200);
       }
-      // Each organization's member may read the delivery table inside their
-      // own organization only (an organization-scoped grant), so the read
-      // below is judged by the wall, not refused by object permission.
+      // Each organization's member holds, inside their own organization only
+      // (an organization-scoped grant), read on the delivery table and
+      // `manage_metadata`: the read below is judged by the wall, not refused by
+      // object permission, and the activation door's `manage_metadata` gate
+      // admits them, so only the walled posture rule can refuse them there.
       const saved = await stack.apiAs(operator, 'PUT', `/meta/permission/${DELIVERY_READER}`, {
-        name: DELIVERY_READER, label: 'Delivery reader', systemPermissions: [],
+        name: DELIVERY_READER, label: 'Delivery reader', systemPermissions: ['manage_metadata'],
         objects: { sys_http_delivery: { allowRead: true } },
       });
       expect(saved.status, await saved.clone().text()).toBe(200);
@@ -133,6 +135,7 @@ for (const posture of ['isolated', 'group'] as const) {
     it('an organization administrator is refused at the activation door; the platform operator switches it on', async () => {
       const refused = await stack.apiAs(tokA, 'POST', '/security/_activation/webhook/wm_task_changed', { enabled: false });
       expect(refused.status, await refused.clone().text()).toBe(403);
+      expect(((await refused.json()) as any)?.error?.code).toBe('PERMISSION_DENIED');
       const ledger = await ql.find('sys_metadata_activation', { where: { metadata_type: 'webhook' }, context: SYS });
       expect(ledger).toEqual([]);
 
