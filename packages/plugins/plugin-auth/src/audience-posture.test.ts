@@ -122,6 +122,16 @@ const PASSWORD = 'S3cure!Passw0rd-4785';
 const bindRowCatalog = (engine: any) =>
   bindTestSecurityCatalog(engine, () => catalogFromTables({ sys_permission_set: engine.tables.get('sys_permission_set') }));
 
+/**
+ * [ADR-0131 D3] The self-registration grant is written WITH a membership. The
+ * end-of-chain cases that assert the grant lands at sign-up run `single`: the
+ * reconciler binds the Default Organization in the same `user.create.after`
+ * hook, and the grant is owned by it. The walled half (no membership yet, the
+ * grant held as a claim until the first one) is pinned in
+ * `self-registration-grant-first-membership.test.ts`.
+ */
+const SINGLE_TENANCY = () => ({ defaultOrgId: async () => 'org_default' });
+
 const makeManager = (engine: any, config: Record<string, unknown> = {}) =>
   new AuthManager({
     secret: SECRET,
@@ -731,6 +741,7 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     seedExistingUser(engine);
     seedPermissionSet(engine, 'portal_user');
     const manager = makeManager(engine, {
+      getTenancy: SINGLE_TENANCY,
       audience: {
         posture: 'email_domain',
         allowedEmailDomains: ['acme.com'],
@@ -747,6 +758,8 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
       expect(grants[0].permission_set).toBe('portal_user');
       const created = (engine.tables.get('sys_user') ?? []).find((u: any) => u.email === 'user+tag@acme.com');
       expect(grants[0].user_id).toBe(created?.id);
+      // ADR-0131 D3: owned by the membership it travels with.
+      expect(grants[0].organization_id).toBe('org_default');
     });
 
     const refused = await signUp(manager, 'user@mail.acme.com'); // subdomain: NOT implied
@@ -764,6 +777,7 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     const engine = createMemoryEngine();
     seedExistingUser(engine);
     const manager = makeManager(engine, {
+      getTenancy: SINGLE_TENANCY,
       audience: { posture: 'open', selfRegistrationPermissionSet: 'portal_user' },
     });
     bindTestSecurityCatalog(engine, { permissions: [{ name: 'portal_user' }] });
@@ -838,6 +852,7 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     seedExistingUser(engine);
     seedPermissionSet(engine, 'member_default', { active: false });
     const manager = makeManager(engine, {
+      getTenancy: SINGLE_TENANCY,
       audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' },
     });
     const res = await signUp(manager, 'anyone@anywhere.com');
@@ -852,6 +867,7 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     seedExistingUser(engine);
     seedPermissionSet(engine, 'member_default');
     const manager = makeManager(engine, {
+      getTenancy: SINGLE_TENANCY,
       audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' },
     });
     const res = await signUp(manager, 'anyone@anywhere.com');
