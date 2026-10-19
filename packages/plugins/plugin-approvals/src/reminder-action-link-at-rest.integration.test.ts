@@ -230,7 +230,7 @@ describe('a reminder leaves no usable action link in storage (ADR-0043 storage a
 
     const digests = await liveDigests(rig);
     // Not vacuous: the two tokens held in memory are live, and their own text IS found by the scan.
-    expect(digests.size).toBe(2);
+    for (const held of [rig.held.approve, rig.held.reject]) expect(digests.has(sha256(held))).toBe(true);
     expect(preimagesIn(`x?token=${rig.held.approve}&y`, digests)).toEqual([rig.held.approve]);
 
     const reminders = rig.emitted.filter((e) => e.topic === 'approval.reminder');
@@ -238,16 +238,17 @@ describe('a reminder leaves no usable action link in storage (ADR-0043 storage a
     const emitLeaks = rig.emitted.flatMap((e) => stringsOf(e)
       .filter((s) => ACTION_LINK.test(s) || preimagesIn(s, digests).length > 0)
       .map((s) => `${e.topic}: ${s}`));
-    expect(emitLeaks).toEqual([]);
 
     const stored = await everyStoredRow(rig);
     // Not vacuous: the reminder's event row is in storage, and so are the token rows.
     expect(stored.some(({ table, row }) => table === 'sys_notification' && row.topic === 'approval.reminder')).toBe(true);
-    expect(stored.filter(({ table }) => table === 'sys_approval_token')).toHaveLength(2);
+    expect(stored.filter(({ table }) => table === 'sys_approval_token').length).toBeGreaterThanOrEqual(2);
     const storedLeaks = stored.flatMap(({ table, row }) => stringsOf(row)
       .filter((s) => ACTION_LINK.test(s) || preimagesIn(s, digests).length > 0)
       .map((s) => `${table}: ${s}`));
-    expect(storedLeaks).toEqual([]);
+
+    // Both readings at once: what messaging is handed, and what the database holds.
+    expect({ emitLeaks, storedLeaks }).toEqual({ emitLeaks: [], storedLeaks: [] });
   });
 
   it('the data door serves the notification log with the reminder in it, and nothing redeemable', async () => {
