@@ -1052,8 +1052,9 @@ export class SharingRuleService implements ISharingRuleService {
       'while the row keeps answering as its own rule. Remedy: rename the stored rule, which makes it a clone of its ' +
       `own, and switch the declared rule off (POST /api/v1/security/_activation/sharing_rule/${rule.name} with ` +
       '{ "enabled": false }) if it must not grant.';
-    const log = this.logger?.error ?? this.logger?.warn;
-    log?.call(this.logger, message, { rule: rule.name, organization: scope });
+    const meta = { rule: rule.name, organization: scope };
+    if (this.logger?.error) this.logger.error(message, meta);
+    else this.logger?.warn?.(message, meta);
   }
 
   /**
