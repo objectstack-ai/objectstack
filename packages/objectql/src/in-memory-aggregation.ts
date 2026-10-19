@@ -108,7 +108,7 @@ import {
  * `fields` declares a `date` (`Field.date`, a timezone-naive calendar day under
  * ADR-0053, "never converted to an instant and never timezone-shifted") is
  * bucketed by its own calendar day under every `timezone`
- * ({@link bucketCalendarDay}) — the label the pushed-down SQL gives the same
+ * (`bucketCalendarDay` below) — the label the pushed-down SQL gives the same
  * column. A `datetime`, and a field the declaration cannot type (absent
  * `fields`, an undeclared field, a `formula`), keep the reference zone.
  *
