@@ -170,7 +170,7 @@ describe('a blank seed reference is no reference (isMissing)', () => {
   });
 
   it('drops a blank ELEMENT of a multi-value reference like a null hole; the rest resolve in order', async () => {
-    const { result, store } = await load([
+    const { result, store, engine } = await load([
       authorSeed([{ name: 'Alice' }, { name: 'Bob' }]),
       bookSeed([{ name: 'Refactoring', authors: ['Alice', '', null, '  ', 'Bob'] }]),
     ]);
@@ -180,6 +180,9 @@ describe('a blank seed reference is no reference (isMissing)', () => {
     const alice = store.author.find((r) => r.name === 'Alice')!;
     const bob = store.author.find((r) => r.name === 'Bob')!;
     expect(store.book[0].authors).toEqual([alice.id, bob.id]);
+    // Resolved in PASS 1: nothing deferred the array to a back-fill
+    // (where pass 2 would re-resolve it, blanks included).
+    expect((engine.update as any).mock.calls.filter(([o, d]: [string, any]) => o === 'book' && 'authors' in d)).toEqual([]);
   });
 
   it('drops a blank element in PASS 2 too, where the deferred value is the whole authored array', async () => {
@@ -205,20 +208,31 @@ describe('a blank seed reference is no reference (isMissing)', () => {
   });
 
   it('skips a whitespace-only pointer-pair id the way it skips an empty one', async () => {
-    const { result } = await load([
+    const { result, store } = await load([
       authorSeed([{ name: 'Alice' }]),
       {
         object: 'activity', externalId: 'summary', mode: 'upsert', env: ENV,
         records: [
           { summary: 'empty pointer', object_name: 'author', record_id: '' },
           { summary: 'whitespace pointer', object_name: 'author', record_id: '   ' },
+          // The pair's type half empty: an AUTHORED id here is refused as
+          // un-addressable; a blank one is no pointer, so there is nothing to
+          // address — the same answer `''` always got.
+          { summary: 'empty pointer, no type', record_id: '' },
+          { summary: 'whitespace pointer, no type', record_id: '   ' },
+          // Control: the pair is live on this object — a real key resolves.
+          { summary: 'real pointer', object_name: 'author', record_id: 'Alice' },
         ],
       },
     ]);
 
     expect(result.errors.map((e) => e.message)).toEqual([]);
     expect(result.success).toBe(true);
+    expect(result.summary.totalErrored).toBe(0);
     expect(result.summary.totalReferencesDeferred).toBe(0);
+    const alice = store.author.find((r) => r.name === 'Alice')!;
+    expect(store.activity.find((r) => r.summary === 'real pointer')!.record_id).toBe(alice.id);
+    expect(store.activity).toHaveLength(5);
   });
 
   it('control: a real natural key still resolves, and an unresolvable one still errors', async () => {
