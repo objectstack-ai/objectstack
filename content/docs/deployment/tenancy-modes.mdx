@@ -19,6 +19,11 @@ still apply — widened to the three postures.
 <Callout type="warn" title="18.0: single only">
 18.0 supports fresh `single` installs; upgrades and walled postures arrive in 18.x. In 18.0 `os serve` (and so `os dev` and `os start`) refuses `group` and
 `isolated` at boot with `NOT_IMPLEMENTED`, before it reads a config.
+A database an 18.0 install creates takes the same 18.x upgrade path as a v17 one.
+The refusal covers the `os` boot path only. The one-shot `os migrate`, `os verify`,
+`os secret` and `os storage` boots and embedded hosts (`createStandaloneStack`,
+`@objectstack/adapter-hono`) are not refused, and none of them is a supported
+walled deployment in 18.0.
 </Callout>
 
 <Callout type="info" title="Renamed, not re-configured">
@@ -38,7 +43,7 @@ fallback **input** to posture resolution. See
 | Layer 0 organization wall | none — the layer is inert | `organization_id IN accessible_org_ids` (union / MOAC) | `organization_id = <active organization>` |
 | Read reach | the whole dataset, subject to RBAC | every organization the caller currently holds a membership in | the active organization only |
 | Shape | one logical tenant; sub-units modelled as business units in one tree | organizations are membership / invitation boundaries over one shared dataset | legal-entity / sovereignty isolation — the hard wall |
-| `organization_id` filled in on write | no | yes | yes |
+| `organization_id` filled in on write | yes — the Default Organization | yes | yes |
 | Enterprise `@objectstack/organizations` | not needed | **required** | **required** |
 | Default organization | one bootstrapped "Default Organization" | owned by the enterprise runtime | owned by the enterprise runtime |
 | Org-management UI (create / switch org) | hidden | shown | shown |
@@ -98,6 +103,42 @@ an **absent** `organization_id` on write is the enterprise runtime's job;
 The installed runtime may narrow this further: the `org-scoping` service can
 declare `supportedPostures`, and the open core fails closed on any walled
 posture it does not list. A runtime that declares nothing entitles both.
+
+---
+
+## Who owns a row
+
+Ownership is the same under every posture; a posture changes only whether the
+wall is enforced (ADR-0131 D11). Three rules decide where a fact lives
+(ADR-0131 D1–D7):
+
+1. **A managed package's metadata is not in the database.** Its definitions
+   (objects, fields, views, positions, permission sets, capabilities, sharing
+   rules, templates, flows) are sealed code. What a customer changes is
+   environment-level state beside them: an overlay, an on/off switch, a clone
+   or an extension.
+2. **A row in a table with an organization column was written by that
+   organization.** Every such row carries its organization, and refers to a
+   declared item by its machine name. `NULL` is not an owner: no row is
+   "global" or platform-wide because its `organization_id` is empty.
+3. **A table with no organization column is deployment-level or code-level.**
+   Permissions protect it, not the wall.
+
+Under `single` a write into a table with an organization column takes the
+Default Organization, the only one there is. A system write that names no
+organization is stamped with it, or refused loudly when the deployment holds
+zero organizations or two or more. Nothing writes an organization-less row
+there.
+
+<Callout type="info" title="Platform tables with no organization">
+A platform table (logs, job runs, messaging, configuration) has one of the two
+shapes above, never a third. With no organization column, it is deployment-level
+by design, and its rows carry no organization on any posture. With one, every
+row belongs to an organization. A v17 install could leave organization-less rows
+in such a table. Those rows are what the 18.x upgrade ceremony resolves, table
+by table, before an 18.x server will serve that database (ADR-0131 D10). Until
+that release, keep the database on 17.x.
+</Callout>
 
 ---
 

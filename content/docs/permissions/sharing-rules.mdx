@@ -61,7 +61,7 @@ Two things the bits do **not** override, regardless of the OWD:
   `org_member`), so rank-and-file members stay owner-scoped on writes even
   under `public_read_write`. The super-user bits short-circuit RLS **only
   where the object's access posture permits it** — `access: { default:
-  'private' }`, `tenancy.enabled: false` (platform-global), or better-auth
+  'private' }`, `tenancy.enabled: false` (deployment-level: no organization column), or better-auth
   managed objects (ADR-0066 D2 ①). On an ordinary tenant business object,
   `modifyAllRecords` does *not* lift those policies
   (`plugin-security/src/security-plugin.ts` `computeLayeredRlsFilter`).
@@ -195,7 +195,7 @@ unaffected.
 **…and an organization to be scoped by.** `manage_sharing` is declared
 `scope: 'org'`, so the capability alone is not enough: the caller's session
 must also resolve an **active organization**, which is what scopes every rule
-read to "this organization ∪ the platform-global rows". A session that carries
+read to the rule rows that organization wrote. A session that carries
 none — a user who has not selected an organization, or whose active
 organization was cleared — is refused with the same `403 PERMISSION_DENIED`,
 naming the missing organization rather than answering with an empty list.

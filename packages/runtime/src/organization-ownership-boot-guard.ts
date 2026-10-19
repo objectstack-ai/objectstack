@@ -219,7 +219,9 @@ export async function findV17ShapeTables(engine: GuardEngine): Promise<string[]>
 
 /**
  * The refusal text: what was found, that the server refuses to start, the
- * command, and the 17.x way out. With no table left in the v17 shape (`tables`
+ * command, and the 17.x way out. On a v17-shaped database it says first that
+ * 18.0 does not upgrade it, because in 18.0 the command it names refuses too,
+ * so the operator does not reach that answer in two hops. With no table left in the v17 shape (`tables`
  * empty), the ceremony ran every step and its marker is not verified: the
  * text says so and names the re-run instead.
  */
@@ -249,7 +251,9 @@ export function organizationOwnershipRefusalMessage(
   return (
     `This database is still in the v17 organization-ownership shape: ${tables.join(', ')} still carr` +
     `${tables.length === 1 ? 'ies' : 'y'} a physical organization_id column, and ${state}. The server refuses to ` +
-    `start rather than serve v17 data with v18 semantics. Run '${ceremony} --out PLAN' to write and review its ` +
+    'start rather than serve v17 data with v18 semantics. 18.0 does not upgrade a v17 database: keep this one on a ' +
+    '17.x release until the 18.x release that carries the upgrade path, and run these steps there. ' +
+    `Run '${ceremony} --out PLAN' to write and review its ` +
     `plan, take a backup, then run '${ceremony} --apply --plan-file PLAN --backup-taken', and start again. ` +
     'To keep 17.x semantics, run a 17.x runtime.'
   );

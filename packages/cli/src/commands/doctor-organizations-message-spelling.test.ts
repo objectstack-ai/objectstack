@@ -168,7 +168,7 @@ describe('doctor — the posture description an operator reads names the declara
   it('leg (i) — the `isolated` fix-list bullet names it, with the spacing intact', () => {
     expect(renderIsolatedBullet()).toBe(
       `        • OS_TENANCY_POSTURE=isolated — organization wall + the ${PKG} runtime `
-      + "(the legacy spelling 'multi' is accepted and normalizes to this)",
+      + "(the legacy spelling 'multi' is accepted and normalizes to this); refused at boot in 18.0, which supports single only",
     );
   });
 
@@ -242,14 +242,14 @@ describe('#12464 CONTROL — these pins can say no', () => {
     // decorative. Anchored on the exact regression interpolation invites.
     const expected =
       `        • OS_TENANCY_POSTURE=isolated — organization wall + the ${PKG} runtime `
-      + "(the legacy spelling 'multi' is accepted and normalizes to this)";
+      + "(the legacy spelling 'multi' is accepted and normalizes to this); refused at boot in 18.0, which supports single only";
     expect(
       `        • OS_TENANCY_POSTURE=isolated — organization wall + the ${PKG} runtime`
-      + "(the legacy spelling 'multi' is accepted and normalizes to this)",
+      + "(the legacy spelling 'multi' is accepted and normalizes to this); refused at boot in 18.0, which supports single only",
     ).not.toBe(expected);
     expect(
       `      • OS_TENANCY_POSTURE=isolated — organization wall + the ${PKG} runtime `
-      + "(the legacy spelling 'multi' is accepted and normalizes to this)",
+      + "(the legacy spelling 'multi' is accepted and normalizes to this); refused at boot in 18.0, which supports single only",
     ).not.toBe(expected);
     // …and says yes to the real thing, so the two `not.toBe`s above are a
     // reading rather than a pair of vacuous truths.
