@@ -11,7 +11,7 @@ Twenty-three platform objects now declare `defaultRowScope`, each with the row p
 
 The security plugin's row-policy collection applies an object's declared default when the permission sets the caller holds carry no row policy for that object and operation. The shipped sets still carry the same policies, so a holder of them reads exactly what it read before.
 
-**BREAKING — what moves for consumers.** This narrows what a principal reads on these objects when its sets carry no row policy for them, shipped as `minor` under the launch-window convention for accept-set narrowings (`.changeset/pre.json` is open in `next` pre mode).
+**BREAKING — what moves for consumers.** This narrows what a principal reads on these objects when its sets carry no row policy for them, shipped as `minor` under the launch-window convention for accept-set narrowings.
 
 - FROM: a principal holding no platform baseline (a deployment that sets the security plugin's `fallbackPermissionSet: null`) whose sets grant read on an identity object and carry no row policy for it read every row of that object.
 - TO: it reads the object's declared default: its own rows (`user_id == current_user.id`); on `sys_user`, its own row plus the members of the organisation it acts in; on `sys_organization`, its own organisation; no row on `sys_verification`, `sys_jwks`, `sys_scim_group`, `sys_scim_group_member` and `sys_scim_connection_binding`; on `sys_audit_log`, its organisation's entries where organisation scoping is on (the platform's tenant policies, this one included, are stripped where it is off).

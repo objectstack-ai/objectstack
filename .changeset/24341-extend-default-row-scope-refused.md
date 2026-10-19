@@ -10,7 +10,7 @@ An object's default row scope is declared by the object's owner alone. `SchemaRe
 
 Every value is refused because no narrower line holds. Whether one row predicate admits more rows than another cannot be decided in general, so a "loosening" cannot be told from a "narrowing". And the extension merge never carried the key onto the object, so an accepted one restricted nothing while its author believed it did.
 
-**BREAKING — what moves for consumers.** This is an accept-set narrowing on the registry's `extend` door, shipped as `minor` under the launch-window convention for accept-set narrowings (`.changeset/pre.json` is open in `next` pre mode).
+**BREAKING — what moves for consumers.** This is an accept-set narrowing on the registry's `extend` door, shipped as `minor` under the launch-window convention for accept-set narrowings.
 
 - FROM: `registerObject(def, packageId, undefined, 'extend')` with `def.defaultRowScope` set registered the contribution and dropped the key.
 - TO: it throws `INVALID_METADATA` (`422`, `ExtensionDefaultRowScopeRefusedError`).
