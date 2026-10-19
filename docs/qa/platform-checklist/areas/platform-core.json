@@ -3048,7 +3048,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "acceptance[2] (clause, verify, evidence) and steps[0] re-worded — an assertion defect found by the 18.0 QA sweep (QA run #24556, platform-core.v18-boot-refusals acceptance[2]: FAIL, confirmed by an independent RUNNER rule 7 re-derivation; card #24567 row 1). The product is right and the clause was wrong: the guard judges in its own start(), after the engine (whose start() runs the additive schema sync the ceremony waits for) and ahead of every plugin that writes a row (packages/runtime/src/organization-ownership-boot-guard.ts), and ADR-0131 D10 item 5 says the refusing runtime never auto-migrates (the ceremony's fates); nothing in it forbids additive schema sync. So a refused boot legitimately adds tables, columns and indexes, and 'did not alter the database' (checksum before == after) failed on a correct product. The clause now asserts what the guard promises — no row written, no D10 step run — through a row-level SQLite diff that includes the `-wal` (the run's second boot left the main file's hash unchanged with its DDL in the `-wal`). steps[0] also stops passing `-d` to `os serve`, which declares no such flag (the same run's checklist-accuracy finding); `OS_DATABASE_URL` is what the run booted with. The other three clauses are unchanged",
-          "ref": "#24567"
+          "ref": "#24592"
         }
       ]
     },

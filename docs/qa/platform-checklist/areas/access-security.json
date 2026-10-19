@@ -3581,7 +3581,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "acceptance[1] (clause, verify, evidence) and the title's install-local parenthetical re-pointed — an assertion defect found by the 18.0 QA sweep (QA run #24558, access-security.security-catalog-one-holder-and-boot-report acceptance[1]: FAIL, confirmed by an independent RUNNER rule 7 re-derivation; card #24567 row 2, folded from #24568). The product is right and the clause was wrong: on an inline manifest the install-local door (packages/cloud-connection/src/marketplace-install-local-plugin.ts) answers its OWN registered 422 PLUGIN_REGISTER_FAILED and interpolates only the register error's message — that route's documented contract in packages/spec/src/api/error-code-ledger.zod.ts — so it never carried NAMESPACE_CONFLICT or a `conflicts[]`, and no pin in automated.ref asserts either at this door. The run measured the refusal twice: the names and their holders inside the message, nothing installed (27 packages before and after). The clause now asserts that; a structured `conflicts[]` on this door would be a separate enhancement decision, not taken here. The other four clauses are unchanged",
-          "ref": "#24567"
+          "ref": "#24592"
         }
       ]
     },

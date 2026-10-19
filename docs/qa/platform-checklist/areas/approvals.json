@@ -1619,7 +1619,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "acceptance[1] (clause, verify, evidence) and the title's PUT leg re-worded — an assertion defect found by the 18.0 QA sweep (QA run #24542, approvals.act-door-and-admin-rescue-slate clause 1: FAIL; card #24543). The product is right and the clause was wrong: on a stock `os dev` showcase boot `PUT /api/v1/approvals/act?token=…` answered 404 ENDPOINT_NOT_FOUND with no Allow header (twice; DELETE and PATCH the same), which is the design — the self-hosted mount registers only GET and POST (changeset 22578), the dispatcher domain claims only GET, HEAD and POST and lets every other method fall through (packages/runtime/src/domains/approvals.ts), and the item's own pin packages/runtime/src/domains/approvals-act.test.ts asserts that miss (404 ROUTE_NOT_FOUND) with the member never run. 405 with Allow: GET, POST belongs to the in-process member ApprovalService.handleActionPage alone (packages/plugins/plugin-approvals/src/action-page-member.integration.test.ts). The GET, POST and dead-token legs held and are unchanged, as are the other two clauses",
-          "ref": "#24543"
+          "ref": "#24592"
         }
       ]
     }
