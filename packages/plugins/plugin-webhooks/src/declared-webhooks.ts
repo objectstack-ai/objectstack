@@ -45,6 +45,17 @@
  * sharing-rule reader's rules: a composition with no ledger object issues no
  * read, and a read that fails switches nothing for this pass.
  *
+ * ## Every posture: deployment-wide
+ *
+ * A declared webhook is the deployment's under `single`, `group` and
+ * `isolated` alike (the epic's ruling A, record 6278609968 on #24580): switched
+ * on, it receives every organization's events, and each `sys_http_delivery`
+ * row is stamped with its event's organization, so delivery history is walled
+ * like any other organization-stamped row. There is one switch, the ledger row
+ * above — deployment-level, and the platform operator's under a wall (the
+ * activation door's ADR-0126 §5 posture rule); an organization administrator
+ * is refused there.
+ *
  * ## An 18.0 database: the dual read (expand first)
  *
  * The 18.0 seeder's rows stay where they are; deleting them, and re-sourcing
