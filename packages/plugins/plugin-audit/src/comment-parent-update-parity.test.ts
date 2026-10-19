@@ -92,11 +92,14 @@ function install(opts: {
       if (!hooks.has(event)) hooks.set(event, handler as any);
     },
     find: async (object, options: any) => {
-      if (object !== 'sys_comment') {
-        const ids: unknown[] = options?.where?.id?.$in ?? [];
-        return ids.map(String).filter((id) => readable.includes(`${object}/${id}`)).map((id) => ({ id }));
-      }
-      return (opts.comments ?? []).filter((r) => matches(r, options?.where ?? {}));
+      const rows =
+        object === 'sys_comment'
+          ? (opts.comments ?? []).filter((r) => matches(r, options?.where ?? {}))
+          : ((options?.where?.id?.$in ?? []) as unknown[])
+              .map(String)
+              .filter((id) => readable.includes(`${object}/${id}`))
+              .map((id) => ({ id }));
+      return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     findOne: async (_object, options: any) => (opts.comments ?? []).find((r) => matches(r, options?.where ?? {})) ?? null,
   };
