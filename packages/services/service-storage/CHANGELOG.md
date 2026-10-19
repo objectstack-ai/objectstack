@@ -1,5 +1,93 @@
 # @objectstack/service-storage
 
+## 18.0.0-next.4
+
+### Minor Changes
+
+- d8e11b5: fix(service-storage)!: the storage family gate and the route judge the same credential
+  
+  Clause-②: no (narrowing) — a session the ADR-0069 policy holds is refused on every storage route whatever else the request carries; no published schema, export or option moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at the storage route family mounted directly on the host server, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped, and a session the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which requests the family serves: a session whose user carries the ADR-0069 posture is now refused with the gate's 403 whatever else the request carries. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers these routes and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 holds a signed-in user out of every protected resource while their password has expired or while enforced MFA is not yet enrolled, until they remediate, and every route of the storage family is one. The family's gate and its routes now judge the same credential: the gate judges every credential a route of the family can serve.
+  
+  - **Refused now:** a session the policy holds gets `403` with the gate's own `code` (`PASSWORD_EXPIRED`, `PASSWORD_RESET_REQUIRED` or `MFA_REQUIRED`) and `message` on every storage route, whatever else the request carries, before the family does anything else. While a gate is active, a session that cannot be read is the family's declared `503` (`SERVICE_UNAVAILABLE`), whatever else the request carries.
+  - **Unchanged:** a session the policy does not hold is served exactly as before, apart from that outage answer; an API key whose owner holds an `account`-scope posture is refused with that posture, as before; and while no gate feature is active nothing changes.
+  
+  What changes for you. A user the policy holds must remediate (change the password, or enroll an authenticator) before any storage route answers them, whatever else their request carries. There is nothing to configure.
+
+### Patch Changes
+
+- 8d3dd6f: The storage download door resolves its caller through `@objectstack/core`'s `resolveRequestExecutionContext`, the one request-to-`ExecutionContext` composition
+  
+  Clause-②: no
+  
+  - The download authorizer that `StorageServicePlugin` and `mountStorageRoutes` bind for parent-governed files resolves the caller by calling `resolveRequestExecutionContext` with this door's differences as named parameters: `anonymous: 'fail-closed'`, `authGate: 'resolved'`, `credentials: 'api-key-and-session'`, `sessionApi: 'optional'`, `session: 'request'`, its own way to reach the `tenancy` service, `localization: 'withhold'`, no request locale, `accessToken: 'carry'`, and no OAuth provenance or admission channel. The auth-service lookup, the header normalisation, the tenancy wiring, the verdict reads and the fail-closed `catch` stay at the door. The family's ADR-0069 gate reader, which runs before every storage route, is unchanged.
+  - The answers are the ones the door gave before: an anonymous caller, an unrecognised cookie, a failed session read with no gate active and a refused API key get `401 AUTH_REQUIRED`; a session or an API key owner the authentication policy holds gets `403` with its code and message from the family's gate; an unreadable permission store or tenancy service gets `503 SERVICE_UNAVAILABLE`; and an API key its own lifecycle refuses gets its `403` and code. A one-off probe of 47 fault wirings through the download route read the same answer on both sides of the change.
+  - The context the door hands to the owner-record read and to a file-access delegate is now the assembled `ExecutionContext` envelope rather than the resolver's raw output: it also states `isSystem: false` and `principalKind: 'human'`, and no longer carries the internal `credential` marker, which no reader of that context consumes.
+  - Nothing to do for a consumer: no export, route, configuration key or response shape changed.
+- af284b0: feat(spec): the remaining `getSession` readers read `AuthSessionApi`'s declared result, and none reads a top-level `activeOrganizationId`
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec/contracts` — `AuthSessionApi.getSession`'s result gains three optional `user` members**, each declared for a named reader: `isPlatformAdmin` (`boolean`, the ADR-0068 D2 rung plugin-auth's `customSession` derives) and `role` (`string | null`, better-auth's `admin` plugin scalar), both read by `judgePlatformAdmin` in `@objectstack/plugin-auth`; and `name` (`string`), read by the runtime dispatcher's AI-route `req.user` resolver as the display name. Every member is optional, so every implementer and caller typechecks unchanged.
+  - **The readers read through the declared type instead of `any` or a cast** (types only, runtime behaviour unchanged): `judgePlatformAdmin` and the four platform-admin mounts in `@objectstack/plugin-auth` (better-auth's own session type now has to fit the declaration at those reads), the REST server's two session reads (`@objectstack/rest`), the dispatcher's posture read, `resolveSessionData` and both `HttpDispatcher` reads (`@objectstack/runtime`), the cloud-connection and install-local session reads (`@objectstack/cloud-connection`), the webhook redeliver door (`@objectstack/plugin-webhooks`), and the storage session bridge (`@objectstack/service-storage`).
+  - **Fix — the top-level `activeOrganizationId` fallback is removed** from the storage upload stamp (`@objectstack/service-storage`) and from install-local's `resolveActiveOrgId` (`@objectstack/cloud-connection`). The active organization is read from `session.activeOrganizationId` alone, where the contract declares it. No in-process producer answers a top-level `activeOrganizationId` (better-auth's read is `{ user, session }`), so for the shipped auth plugin nothing changes. An auth service that answered only the flattened shape now gets no organization: the upload is not stamped, and install-local reports no active organization. To fix it, answer the active organization on `session.activeOrganizationId`, as `AuthSessionApi` declares it.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/observability@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

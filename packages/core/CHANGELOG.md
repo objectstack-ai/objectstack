@@ -1,5 +1,126 @@
 # @objectstack/core
 
+## 18.0.0-next.4
+
+### Minor Changes
+
+- b2e7870: fix(security): under the `single` tenancy posture the first-user platform-admin grant is owned by the Default Organization, and every reader of platform standing reads that row
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, export, option, error code or stored shape is added, removed or renamed: the new resolver and guard helpers and the guard's organization standing-key list are module-private, and `bootstrapPlatformAdmin`'s `reason` was already a string. The only stored-shape move — an organization-less `admin_full_access` grant becoming the Default Organization's — is ADR-0131 D10's ceremony (`os migrate organization-ownership --apply`), so there is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no Zod schema in packages/spec changes (not runtime-interface-only or type-surface-only in the spec sense); and nothing exported is removed (not runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM** (`@objectstack/plugin-security`): a `single` deployment holding several organizations, none slugged `default`, promoted its first user with an organization-less `admin_full_access` grant. **TO:** it is not promoted; the bootstrap logs one `error` line, returns `reason: 'default_organization_unresolved'` and writes no grant row. **Fix:** give the intended organization the slug `default` (or keep one organization, or declare a walled posture); the next `kernel:ready` or sign-up pass promotes.
+  - **FROM** (`@objectstack/plugin-auth`): a `sys_organization` `slug` change or delete was never refused. **TO:** it is refused with `403 PERMISSION_DENIED` when that organization is the Default Organization whose `admin_full_access` grant is the last unbanned administrator's anchor. **Fix:** give another account administrator standing first, then make the change.
+  - **FROM** (`@objectstack/plugin-auth`): `ensureDefaultOrganization` under `single`, with a sole organization of another slug, created a second, `default`-slugged organization and bound the administrator there. **TO:** it reuses the sole organization; no second organization is created. **Fix:** none needed; an install that wants a `default`-slugged organization re-slugs its existing one or creates it explicitly.
+  - **Widening** (`@objectstack/core`): under `single` only an organization-less `admin_full_access` grant conferred `PLATFORM_ADMIN`. Now a grant owned by the Default Organization confers it too and applies in every organization; a pre-existing Default-Organization-scoped `admin_full_access` grant gains the rung on upgrade; and `sys_organization` becomes a standing-deriving table (the resolver reads it only under `single` for a holder of an organization-owned `admin_full_access` grant — one or two small reads per uncached request; the last-administrator guard adds three to six small reads per guarded write).
+  
+  - **The promotion writes the Default Organization (`@objectstack/plugin-security`).** A `single` deployment with no configuration still promotes its first user that can sign in. The `admin_full_access` grant row that promotion writes now carries the Default Organization as its `organization_id` (ADR-0131 D5), never NULL. The Default Organization is the one with `slug = 'default'`, else the only organization: the organization the auth plugin creates at boot. A deployment that names no Default Organization (several organizations, none with the slug `default`) is not promoted. The bootstrap logs one `error` line saying why and returns `reason: 'default_organization_unresolved'`. It writes no grant without an owner. `OS_PLATFORM_OWNER_EMAIL` is still the walled-posture channel and is not required under `single`.
+  - **The authorization resolver reads that row (`@objectstack/core`).** Under `single`, `PLATFORM_ADMIN` derives from an `admin_full_access` grant owned by the Default Organization, and still from the organization-less row an earlier release wrote. The anchoring grant applies in whichever organization the user acts in, as the organization-less row always did. A grant of the set owned by any other organization confers the set in that organization, never platform standing. Under a walled posture no grant anchors standing (unchanged). One predicate decides both postures, with the posture as its parameter. The resolver reads `sys_organization` only for a user who holds an organization-owned `admin_full_access` grant under `single`.
+  - **An upgraded database keeps its administrator.** `os migrate organization-ownership --apply` gives a `single` database's organization-less grants to the Default Organization, the platform admin's grant included. Before this change the resolver then stopped grading that admin `PLATFORM_ADMIN`, and every later boot found no organization-less holder and promoted again. The holder scan now reads the Default Organization's grant, so a migrated database keeps its admin and promotes nobody else. A user who holds both rows counts as one holder.
+  - **The last-administrator guard and the default-organization bootstrap read it too (`@objectstack/plugin-auth`).** The break-glass guard counts the holder of the Default Organization's grant as a platform admin and treats that grant as evidence that the environment once had one. It also judges the two organization writes that move the anchor off that grant: changing the Default Organization's `slug` while another organization exists, and deleting it. Either is refused when it would leave no administrator who can sign in. `ensureDefaultOrganization` finds the admin through the same grant. Under `single` it also reuses the Default Organization when that is a sole organization with another slug, where it used to create a second, `default`-slugged organization.
+- eebaf3b: feat(objectql,core): the driver's tenant read scope is the organization wall's verdict — one predicate for Layer 0 and every driver (ADR-0131 D8)
+  
+  Clause-②: yes (widening)
+  
+  - **What changed.** The engine no longer derives `DriverOptions.tenantId` / `tenantIds` beside the organization wall. `buildDriverOptions` projects the wall's own verdict onto them: the verdict plugin-security records on the operation (`OperationContext.tenantLayer0Verdict`) where its wall ran, and otherwise the same function over the engine's own facts (the posture in force, the context's organization and membership set). The function, `computeTenantLayer0Verdict` with its input type `TenantLayer0Input`, moves to `@objectstack/core` (new export); `@objectstack/plugin-security`'s `tenant-layer.ts` re-exports it and its Layer 0 is byte-identical.
+  - **FROM → TO, per posture, for a read, count, aggregate, update or delete on an object with an organization column:**
+  
+    | posture / caller | driver scope before | driver scope now |
+    |:--|:--|:--|
+    | `single`, any caller naming an organization | that organization (plus organization-less rows) | **none** |
+    | `isolated`, member | the active organization | unchanged |
+    | `group`, member | the membership set | unchanged |
+    | walled, exempt `PLATFORM_ADMIN` on a posture-permitting object, or the verified platform owner's read | the active organization | **none** — what Layer 0 already admitted |
+    | walled, system context naming an organization | that organization | unchanged |
+  
+  - **Not changed.** Inserts and upserts keep the active organization as `tenantId` in every posture: the row is stamped with it, its counter scopes by it, and an upsert that would merge into another organization's row is still refused. Both `orWhereNull` compatibility arms in `SqlDriver.applyTenantScope` stay (their retirement is a later stage of ADR-0131 D13).
+  - **Who notices.** A `single` deployment that holds more than one organization was kept apart by the driver only by accident; postures now differ only in enforcement (ADR-0131 D11), and `single` enforces no wall. To keep organizations apart, run the `isolated` or `group` posture. Code that relied on a context organization to narrow a read on `single` names the organization in its own `where`.
+  - **Migration.** ADR-0087 semantic entry `driver-read-scope-follows-tenant-wall`. A deployment's `platformGlobalObjects` carve-out already reaches the driver through the column plan (ADR-0131 D7): a declared object carries no organization column, so neither wall has anything to scope.
+- f5ef054: feat(core): export `resolveRequestExecutionContext`, the one composition that turns an inbound request into the caller's `ExecutionContext`
+  
+  Clause-②: yes (widening)
+  
+  - **New export from `@objectstack/core`'s `.` entry.** `resolveRequestExecutionContext(input)` reads the session through the auth service (the in-process rule: a request carrying a session cookie reads without renewal), classifies the tenancy posture with `classifyAdmissionTenancyPosture`, resolves the principal and its grants with `resolveAuthzContext`, resolves the reference localization, decides the ADR-0069 authentication-policy gate and assembles the envelope with `assembleExecutionContext` or `assembleExecutionContextOrGuest`. Its input type `RequestExecutionContextInput` and the types `RequestAuthService`, `EstablishedRequestSession` and `RequestAdmission` are exported with it.
+  - **Two choices, made once.** `anonymous: 'fail-closed'` yields no context for a request that resolves no principal (the door answers 401); `anonymous: 'guest'` serves it as the guest principal with the guest anchor's grants. `authGate: 'withhold' | 'resolved' | 'reread-when-active'` says whether the gate's posture rides the envelope, and how it is read.
+  - **Every other difference between doors is a named, required parameter:** `credentials`, `sessionApi`, `session`, `tenancy`, `localization`, `requestLocale`, `accessToken`, `oauth` and `onAdmission`. A door with no value passes `undefined` or the withholding literal, so no door can drop an input by omitting it.
+  - **First caller.** The runtime dispatcher's identity door (`@objectstack/runtime`'s `resolveExecutionContext`) now calls it. What that door answers is unchanged: the same guest envelope, the same 503 for a tenancy service that failed to build, the same OAuth agent principal on `/mcp`.
+  - **Faults propagate.** It catches nothing around the resolver: an unreadable permission store or tenancy service (`AuthzStoreUnavailableError`, 503) and an API key its own lifecycle refuses (`ApiKeyLifecycleRefusalError`, 403) reach the caller, which answers them at its own net.
+- 2ac0616: feat(core): export the emptiness rule a `required` declaration is judged by — `isEmptyForRequired(def, value)` and `isMissing(value)`
+  
+  Clause-②: yes (widening)
+  
+  - **New exports from `@objectstack/core`'s `.` entry.** `isMissing(value)` is `true` for `undefined`, `null`, and a string that is empty or only whitespace. `isEmptyForRequired(def, value)` is `isMissing`, plus an empty list `[]` on a field whose DECLARED value is a set (`@objectstack/spec/data`'s `isMultiValueField`: `tags`, `multiselect`, `checkboxes`, or a `select` / `radio` / `lookup` / `user` / `file` / `image` field flagged `multiple: true`). `def` is a `ValueShapeFieldDef` (`{ type, multiple? }`). A structured-JSON field's `[]` is a document, not an empty value.
+  - **Why it moved.** It was private to `@objectstack/objectql`'s record validator, where the object-level `required` check runs. `@objectstack/rest`'s anonymous public-form submit route now judges a FORM's `required` with it, and rest does not depend on the engine at runtime. So the one rule lives in the package both depend on, and the two doors call the same field missing.
+  - **Unchanged:** the rule itself, byte for byte — the engine's object-level `required` refusal answers exactly what it did.
+- 62e2b6d: fix(core)!: an API key whose `sys_api_key` read fails is answered as the store outage (`503 SERVICE_UNAVAILABLE`), never as "no key", so the request no longer falls on to a cookie sent beside the key
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes or stores moves: the change is the answer a request gets when the engine's read of `sys_api_key` throws. No spec key, export, option, object definition or stored row is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `resolveApiKeyAdmission` (and `resolveApiKeyPrincipal` and `resolveAuthzContext`, which call it) read the key's row in a bare `catch` that answered "this request carries no key", and logged nothing. Two wrong answers followed on every door that admits API keys:
+  
+  - **A key-only caller got `401 UNAUTHENTICATED`** during the outage, where a session caller got `503 SERVICE_UNAVAILABLE` for the same fault.
+  - **A cookie sent beside the key answered for the request.** "No key" sent the request on to the session arm, so a request that led with a key was served as the cookie's user. Measured on the REST data door and the runtime dispatcher (served as the cookie's user) and on the settings door (`200`).
+  
+  The read now raises the branded `AuthzStoreUnavailableError` (object `sys_api_key`, the driver's error kept as `cause`), the answer the same function already gave when its lifecycle-policy or owner-posture source failed. Every door relays it as `503 SERVICE_UNAVAILABLE`, and the session is never read in the key's place.
+  
+  - **Unchanged.** A `sys_api_key` table that was never provisioned is still "no key": no key can exist there. This is the boundary `resolveAuthzContext` already draws for its permission reads (the shared `isMissingTableError`). No key header, no engine, no matching row and a row with no `user_id` also still answer "no key".
+  
+  What to do. Nothing, unless a client treated `401` during a database outage as "the key is bad": it now sees `503` and should retry, not rotate the key.
+
+### Patch Changes
+
+- b036ac5: feat(spec): `AuthSessionApi.getSession`'s result declares the fields its in-process readers read
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec/contracts` — `AuthSessionApi.getSession`'s result gains five optional members**, each declared for a named reader and typed as that reader takes it: `user.email` and `session.id` / `session.token` (read by `resolveAuthzContext`'s session arm in `@objectstack/core`), `user.authGate` as `unknown` (the ADR-0069 posture, which `normalizeAuthGate` validates against the closed posture vocabulary), and `session.impersonatedBy` as `string | null` (read by the print door's `impersonatorOf` in `@objectstack/service-print`). Before this, those reads went through `any` or a cast, so a field better-auth dropped or renamed compiled and read `undefined`. For `impersonatedBy`, that would have silently turned off the impersonation refusal. Every member is optional, so every implementer and caller typechecks unchanged.
+  - **`@objectstack/core`**: `resolveAuthzContext`'s session arm reads the session through the declared type instead of `any`. `ResolveAuthzInput.getSession`'s own type is unchanged. Runtime behaviour is unchanged.
+  - **`@objectstack/service-print`**: `impersonatorOf` reads `session.impersonatedBy` through the declared type instead of a cast. Runtime behaviour is unchanged.
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [f573976]
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

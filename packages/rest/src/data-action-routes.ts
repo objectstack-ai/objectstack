@@ -70,7 +70,7 @@ import { importControlOptOutRefusal, prepareImportRequest } from './import-prepa
 import { readTemplateMode, templateFieldDefs } from './import-template.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
-import { handleRouteError } from './error-response.js';
+import { handleRouteError, logUnexpectedRouteError, mapDataError, nestedRefusalEnvelope } from './error-response.js';
 // [#24348] The shared ADR-0112 nested envelope for the import doors' control
 // opt-out refusal — the flat sibling-`code` dialect the doors' older answers
 // use is ratcheted down by `check:route-envelope`.
@@ -200,6 +200,68 @@ export interface DataActionRouteHost {
     resolveMessageTranslator: RestServer['resolveMessageTranslator'];
     resolveSecurityService: RestServer['resolveSecurityService'];
     answerImportTemplate: RestServer['answerImportTemplate'];
+}
+
+/**
+ * [#24380] The write context an import UNDO's reversal writes run under — the
+ * deletes of the records the job created and the restores of the fields it
+ * updated.
+ *
+ * Those writes are ordinary data changes on a live app, so they run under the
+ * object's declared controls: its metadata-bound hooks (an approval gate, a
+ * closed-record freeze), its record-change triggers and its `state_machine`
+ * rule. Only the system principal, `ExecutionContext.isSystem === true` (an
+ * in-process caller such as a migration job), takes them off, with
+ * `skipAutomations` and `skipStateMachine`: the predicate the import doors ask
+ * before they honour a control opt-out (`importControlOptOutRefusal`,
+ * `import-prepare.ts`), and the same rule — only the system principal may take
+ * an app's declared controls off a write; the undo door is not an exception.
+ * An HTTP request is assembled with `isSystem: false`, so every signed-in
+ * caller, administrators included, undoes under the controls. ⛔ No
+ * permission, capability or administrator standing is read here.
+ *
+ * A historical job (`treat_as_historical`) keeps `preserveAudit` for every
+ * caller, mirroring the import's own write context (#3549): restoring the
+ * captured snapshot re-writes its `updated_at` / `updated_by` and business
+ * `readonly` values verbatim instead of stamping or stripping them.
+ */
+function importUndoWriteContext(context: unknown, job: { treat_as_historical?: unknown }): Record<string, unknown> {
+    const systemPrincipal = (context as { isSystem?: unknown } | null | undefined)?.isSystem === true;
+    return {
+        ...((context ?? {}) as Record<string, unknown>),
+        ...(systemPrincipal ? { skipAutomations: true, skipStateMachine: true } : {}),
+        ...(job.treat_as_historical ? { preserveAudit: true } : {}),
+    };
+}
+
+/** One reversal an import undo did not make: the row stays unreverted. */
+interface ImportUndoFailure {
+    /** The record the reversal targeted. */
+    id: string;
+    /** `delete` for a record the job created, `restore` for one it updated. */
+    action: 'delete' | 'restore';
+    /** The ADR-0112 code the single-record write door answers the same failure with. */
+    code: string;
+    /** That door's sentence for it. */
+    error: string;
+}
+
+/**
+ * [#24380] A reversal write that threw, as the undo reports it per row. The
+ * classification is the one `PATCH` / `DELETE /data/:object/:id` answer the
+ * same thrown error with ({@link mapDataError}, which withholds a fault's
+ * driver text), so a refusal by the object's hook, state machine or record
+ * lock reads in the words the app wrote for it. The code is read off that
+ * classification as the nested ADR-0112 envelope reads it
+ * ({@link nestedRefusalEnvelope}): an undeclared hook refusal carries none,
+ * and the catalog's floor for its status fills it. A fault that is not a
+ * refusal is logged once here, as those doors log it.
+ */
+function importUndoFailure(id: string, action: ImportUndoFailure['action'], error: unknown, objectName: string): ImportUndoFailure {
+    const mapped = mapDataError(error, objectName);
+    logUnexpectedRouteError(error, mapped);
+    const answer = nestedRefusalEnvelope(mapped);
+    return { id, action, code: answer.code, error: answer.message };
 }
 
 /**
@@ -629,26 +691,18 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 }
                 const objectName = String(row.object_name ?? '');
                 const log = parseUndoLog(row.undo_log)!;
-                // Undo automations too: reversing writes shouldn't re-fire triggers.
-                // Skip the state machine as well (#3479): restoring a prior snapshot
-                // re-writes the row's earlier state, which need not be a legal
-                // transition from where it is now — an undo reinstates an established
-                // fact, it does not walk the FSM.
-                //
-                // For a historical import (#3493/#3549), the undo write must mirror
-                // the import's own write context: carry `preserveAudit` so restoring
-                // `u.before` re-writes the captured `updated_at`/`updated_by` (and any
-                // business `readonly` fields in the snapshot) verbatim, rather than
-                // stamping-now / stripping them. Without this, undoing a historical
-                // import would silently rewrite the audit timeline the import took
-                // pains to preserve. A normal import keeps the default (stamp/strip).
-                const writeCtx = {
-                    ...(context ?? {}),
-                    skipAutomations: true,
-                    skipStateMachine: true,
-                    ...(row.treat_as_historical ? { preserveAudit: true } : {}),
-                };
-                let deleted = 0, restored = 0, failed = 0;
+                // [#24380] The reversal writes run under the object's hooks,
+                // record-change triggers and state machine for every caller but
+                // the system principal, which keeps the skips; a historical job
+                // keeps `preserveAudit` (#3549). See `importUndoWriteContext`.
+                const writeCtx = importUndoWriteContext(context, row);
+                let deleted = 0, restored = 0;
+                // [#24380] Every reversal that did not happen, per row — a write
+                // a control refused (a hook, the state machine, a record lock) or
+                // one that failed otherwise. Never swallowed: each is reported in
+                // the answer and kept, with its row, in the job's undo log.
+                const failures: ImportUndoFailure[] = [];
+                const unreverted: { created: string[]; updated: typeof log.updated } = { created: [], updated: [] };
 
                 // Delete created records first (they didn't exist before).
                 for (const id of log.created) {
@@ -656,7 +710,10 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         const undoDeleteRequest: ServerScopedDataRequest<DeleteDataRequest> = { object: objectName, id, context: writeCtx, ...(environmentId ? { environmentId } : {}) };
                         await p.deleteData(undoDeleteRequest);
                         deleted++;
-                    } catch { failed++; }
+                    } catch (error: unknown) {
+                        failures.push(importUndoFailure(id, 'delete', error, objectName));
+                        unreverted.created.push(id);
+                    }
                 }
                 // Restore the touched fields on updated records.
                 for (const u of log.updated) {
@@ -664,17 +721,29 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         const undoRestoreRequest: ServerScopedDataRequest<UpdateDataRequest> = { object: objectName, id: u.id, data: u.before, context: writeCtx, ...(environmentId ? { environmentId } : {}) };
                         await p.updateData(undoRestoreRequest);
                         restored++;
-                    } catch { failed++; }
+                    } catch (error: unknown) {
+                        failures.push(importUndoFailure(u.id, 'restore', error, objectName));
+                        unreverted.updated.push(u);
+                    }
                 }
 
+                // [#24380] What the job's history records. `reverted_at` means
+                // EVERY row was reverted, so it is stamped only then. An undo that
+                // left rows unreverted stamps nothing: it rewrites the undo log to
+                // exactly those rows, each refusal beside them under `failures`,
+                // so the job stays undoable and undoing it again retries only
+                // what remains — never a row already reverted.
+                const reverted = failures.length === 0;
                 const undoStampRequest: ServerScopedDataRequest<UpdateDataRequest> = {
                     object: IMPORT_JOB_OBJECT, id: jobId,
-                    data: { reverted_at: new Date().toISOString() },
+                    data: reverted
+                        ? { reverted_at: new Date().toISOString() }
+                        : { undo_log: { ...unreverted, failures } },
                     context: { ...(context as any), isSystem: true }, // [ADR-0103] engine-owned
                     ...(environmentId ? { environmentId } : {}),
                 };
                 await p.updateData(undoStampRequest);
-                res.json({ success: true, jobId, object: objectName, deleted, restored, failed });
+                res.json({ success: reverted, jobId, object: objectName, deleted, restored, failed: failures.length, failures });
             } catch (error: any) {
                 handleRouteError(res, error, '');
             }

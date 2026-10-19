@@ -176,7 +176,7 @@ export const esES: TranslationData = {
     connect_agent: {
       label: 'Conectar un agente',
       subtitle:
-        'Concede a cualquier cliente de IA compatible con MCP acceso controlado a este entorno: '
+        'Concede a cualquier cliente de IA compatible con MCP acceso controlado a este sistema: '
         + 'cada llamada se ejecuta con los permisos propios de quien la realiza y con seguridad a nivel de fila.',
     },
 

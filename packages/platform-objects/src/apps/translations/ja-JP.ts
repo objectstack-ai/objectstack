@@ -175,7 +175,7 @@ export const jaJP: TranslationData = {
     connect_agent: {
       label: 'エージェントを接続',
       subtitle:
-        'MCP 対応の AI クライアントにこの環境への統制されたアクセスを許可します。すべての呼び出しは、呼び出し元自身の権限と行レベルセキュリティのもとで実行されます。',
+        'MCP 対応の AI クライアントにこのシステムへの統制されたアクセスを許可します。すべての呼び出しは、呼び出し元自身の権限と行レベルセキュリティのもとで実行されます。',
     },
 
     // Platform record pages (#15743) -- see `en.ts` for the key set.
