@@ -1137,7 +1137,7 @@ export const FlowSchema = lazySchema(() => strictObject(
   // decider may not perform is refused, loudly, and the run reports it; a flow
   // whose approval must write what the approver may not declares `system`.
   // `system` flows keep system privileges; after the decision their attribution
-  // user is the decider (`{ isSystem: true, userId: <decider> }`, the shape the
+  // user is the decider (`{ isSystem: true, userId: DECIDER }`, the shape the
   // approvals verdict mirror writes with), so their post-decision writes, and
   // `ctx.user` in the hooks those writes fire, name the decider too. A flow
   // with no human decision node runs as its trigger user throughout.
