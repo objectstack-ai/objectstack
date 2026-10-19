@@ -98,6 +98,42 @@ describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.s
     expect(titles).toContain(`${FIXTURE_NAMES.task} — edited`);
   });
 
+  // [#24529, step 1] Declared webhooks are read from the registry, and the 18.0
+  // seeder's rows stay until the ceremony. The fixture's mirror of
+  // `showcase_task_changed` was activated in 18.0, which stamped it
+  // `customized`, so it answers as itself and the declaration of the same name
+  // is withheld: one delivery per task change, from the row, never a second
+  // one from the declaration.
+  it('2b. the fixture\'s customized declared webhook dispatches exactly once on a task change', async () => {
+    expect(stack).toBeDefined();
+    const adminTok = await stack!.signIn(FIXTURE_PEOPLE.admin.email, FIXTURE_PEOPLE.admin.password);
+    const hooks = rowsOf(await (await stack!.apiAs(adminTok, 'GET', `/data/sys_webhook?name=${FIXTURE_NAMES.webhook}`)).json())
+      .filter((h) => h?.name === FIXTURE_NAMES.webhook);
+    expect(hooks, 'the 18.0 mirror row is still there').toHaveLength(1);
+    expect(hooks[0].customized, 'the fixture activated it in 18.0, which marks it customized').toBe(true);
+    const deliveries = async () => rowsOf(await (await stack!.apiAs(adminTok, 'GET', '/data/sys_http_delivery?limit=500')).json())
+      .filter((d) => d?.source === 'webhook');
+    const before = new Set((await deliveries()).map((d) => String(d.id)));
+
+    const projects = rowsOf(await (await stack!.apiAs(adminTok, 'GET', '/data/showcase_project')).json());
+    const created = await stack!.apiAs(adminTok, 'POST', '/data/showcase_task', {
+      title: 'Upgrade harness task (HEAD)',
+      project: projects[0]?.id,
+    });
+    expect(created.status, await created.clone().text()).toBeLessThan(300);
+
+    // The enqueue runs off the write path: wait for the first new row, then a
+    // settle window in which a second (double) delivery would land too.
+    let fresh: any[] = [];
+    for (let i = 0; i < 50 && fresh.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      fresh = (await deliveries()).filter((d) => !before.has(String(d.id)));
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+    fresh = (await deliveries()).filter((d) => !before.has(String(d.id)));
+    expect(fresh.map((d) => d.ref_id), 'one delivery, from the customized row').toEqual([hooks[0].id]);
+  });
+
   it('3. every reshaped table keeps every 18.0 row, with its key columns, once HEAD has stopped', async () => {
     await stack?.stop();
     stack = undefined;
