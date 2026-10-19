@@ -3754,19 +3754,40 @@ const actionOnSuccessBlock = () => ActionSchema.in.shape.onSuccess.unwrap();
 const actionOperation = () => ActionSchema.in.shape.operation.unwrap();
 
 /**
- * A page action row's `patch`: `ActionSchema`'s own record of static field
- * values, by reference, read off the object half of the action's pipe as
- * {@link actionOperation} reads `operation`. ⛔ No second shape.
+ * [#24394] A page action row's `patch` — REMOVED, a `retiredKey()` tombstone
+ * on `action:button`, `action:icon` and each `action:group` / `action:menu`
+ * member (ADR-0049 enforce-or-remove; ADR-0087 D2).
  *
- * Every row forwards `patch` to the runner beside `operation`, and the runner's
- * update merges it only when it is a plain object (`executeUpdateOperation`:
- * anything else becomes `{}`), as the platform
- * route's write bag does (`declarativeUpdateWrite`). Until this, the rows
- * declared `z.unknown()`, so a string, array or number `patch` parsed clean and
- * was dropped before the write; and the declarative-update judge reads a
- * present `patch` as something to write, which holds only for a record.
+ * Two implementations of one write disagreed, and the governed side wins. A
+ * row's `operation: 'update'` posts through the runner's server dispatch to the
+ * platform action route under the row's `name`. The route resolves THAT
+ * declaration by name (ADR-0110 D2, "resolve, then address: declaration
+ * first") and writes the declaration's own `patch`, merged under the request's
+ * params (`declarativeUpdateWrite`). It judges those params against the
+ * declaration (ADR-0104 D2). The row's `patch` reached no request. objectui's
+ * `executeUpdateOperation` posts the collected values alone ("⛔ never the
+ * request: the route applies `patch` from its declaration"), and
+ * `createServerActionHandler` posts `{ recordId, params }`; the row's `patch`
+ * fed the Undo snapshot only (objectui `0707b4ae37` and `main` `4b7ce47`). So
+ * the rows declared a write the platform never performs. Until this, a row
+ * took `ActionSchema`'s own `patch` record by reference.
+ *
+ * What a row writes now is the declared action it names, and the judge refuses
+ * a row with `operation: 'update'` and no `name` ({@link rowDeclarativeUpdate}).
+ * `ActionSchema.patch` itself is untouched. Census before the change: no page
+ * action row authors `patch` in this repository's examples or apps, and
+ * objectui (pin and `main`) authors none. Its page designer has no editor for
+ * an action row's keys, and its registry's `patch` input is an advertisement,
+ * not an authored instance. Stored and built pages are stripped by the D2
+ * conversion `page-action-row-patch-removed`.
  */
-const actionPatch = () => ActionSchema.in.shape.patch.unwrap();
+const rowPatchRetired = (owner: string) => retiredKey(
+  `${owner} \`patch\` was removed in @objectstack/spec 18 (ADR-0110 D2) — a page action row's `
+  + "`operation: 'update'` runs the declared action its `name` names, and the platform action route resolves "
+  + "that action by name and writes ITS `patch`, so the row's own `patch` was never sent and never written. "
+  + "Move the values into the `patch` of the action the row's `name` names, then delete the key. "
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+);
 
 /**
  * The console runner's built-in executors: `ActionType`'s six, the members its
@@ -3839,15 +3860,19 @@ function refuseRowOnSuccessBesideExecutor(executorKey: 'actionType' | 'type', ow
 /**
  * `ActionSchema`'s declarative-update rules on a page action row: the one judge
  * both read (`action-declarative-update.ts`), on the row's surface. ⛔ No
- * second copy of a rule or a text. Every row forwards `operation`, `patch`,
+ * second copy of a rule or a text. Every row forwards `operation`, `name`,
  * `params`, `target`, `method`, `bodyExtra`, `bodyShape`, `locations` and
  * `onSuccess` to the console's action runner (and `action:button` its
  * `recordIdField`), and the runner reads `operation` before any executor: the
- * write is posted through its `script` dispatch, so beside it the row's
- * executor and the keys that bind one are never read. So each rule lands on the
- * row at the same path, with the action's text:
+ * write is posted through its `script` dispatch to the platform action route
+ * under the row's `name`, so beside it the row's executor and the keys that
+ * bind one are never read. So each rule lands on the row at the same path,
+ * with the action's text, except the two the row's surface re-trues
+ * (`writesNamedAction`: the route writes the named declaration's `patch`):
  *
- * - `patch` without `operation: 'update'` — refused at `patch`;
+ * - a row has no `patch` of its own ({@link rowPatchRetired}): its tombstone
+ *   refuses one whatever `operation` says, so the action's "`patch` without
+ *   `operation: 'update'`" rule does not run here;
  * - beside it, an executor key other than `'script'` — refused at that key
  *   (`actionType` on a node, `type` on a member). The row's key has no default,
  *   so the text says it names that route or nothing; an empty key names
@@ -3856,11 +3881,18 @@ function refuseRowOnSuccessBesideExecutor(executorKey: 'actionType' | 'type', ow
  *   (`action:button` only) `recordIdField` — each refused at its own path. The
  *   table's other keys are not row keys, so the strict row refuses them as
  *   unknown before this runs;
- * - beside it, nothing to write — refused at `patch`. A node's non-empty
- *   OBJECT `params` counts: on `action:button` / `action:icon` it IS
- *   `properties.params`, whose static values the runner's update merges over
- *   `patch`. A member's does not (refused off `api` by
- *   {@link actionContainerMemberParamsFitType}, and never forwarded);
+ * - beside it, nothing to write — on a row that is no `name` (or an empty
+ *   one), refused at `name`. The row's write is the `patch` of the declared
+ *   action its `name` names. Without one the runner's server dispatch refuses
+ *   the row before any request, and the route has no declaration to resolve.
+ *   A row's `params` are no write of its own. An array is the input list. A
+ *   node's static object `params` (`properties.params` on `action:button` /
+ *   `action:icon`) ride the request as params, which the route writes only
+ *   where the named action declares them and otherwise refuses with a 400
+ *   (ADR-0104 D2). A member's object `params` is refused off `api` by
+ *   {@link actionContainerMemberParamsFitType}. Whether the named action
+ *   exists, is an `operation: 'update'` action and declares those params is a
+ *   cross-reference this row cannot see;
  * - beside it, a `list_toolbar` location — refused at `locations.N`.
  *
  * Applied first on each row, as the runner reads `operation` first: the row's
@@ -3874,7 +3906,7 @@ function rowDeclarativeUpdate(executorKey: 'actionType' | 'type', owner: string)
     executorKey,
     executorDefaultsToScript: false,
     onSuccessSubject: `${owner} \`onSuccess\` (\`operation: 'update'\`)`,
-    staticParams: executorKey === 'actionType',
+    writesNamedAction: true,
   });
 }
 
@@ -3922,6 +3954,9 @@ const ACTION_NODE_GUIDANCE = {
  *   `successMessage`, `errorMessage`, `refreshAfter`, `undoable`,
  *   `recordIdField`, `locations`, `toast`, `resultDialog`, `onSuccess`,
  *   `objectName` — and, since objectui#11344, `outcomeMessages`.
+ *   `patch` is forwarded and RETIRED here ({@link rowPatchRetired}): the
+ *   runner reads it for its Undo snapshot only, and the route writes the
+ *   `patch` of the declared action the row's `name` names.
  *
  * ⚠️ NOT a key of this row: objectui#11344 forwards `outcomeMessages`, the
  * success copy per handler outcome that `ActionSchema` declares, because an
@@ -3960,7 +3995,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   guidance: ACTION_NODE_GUIDANCE,
 }, {
   name: z.string().optional()
-    .describe('Action name, forwarded to the action runner. Optional: an inline page button is not a registered object action, and without a name the runner dispatches on `actionType` alone. With no `actionType`, or an empty one, the runner dispatches on the name instead, so a `name` of `url` or `navigation` runs the url navigator and its `target` is judged as a url target, and `onSuccess` is judged beside the executor the name names'),
+    .describe('Action name, forwarded to the action runner. Optional: an inline page button is not a registered object action, and without a name the runner dispatches on `actionType` alone. With no `actionType`, or an empty one, the runner dispatches on the name instead, so a `name` of `url` or `navigation` runs the url navigator and its `target` is judged as a url target, and `onSuccess` is judged beside the executor the name names. Beside `operation: \'update\'` it is required: it names the declared action the platform action route runs, whose `patch` is the write'),
   label: z.string().optional()
     .describe('Button text. A literal string, placed as-is — localize through the translation bundle entry for this component id, not an inline locale map'),
   icon: z.string().optional()
@@ -3976,7 +4011,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   disabled: actionCondition().optional()
     .describe('Disabled predicate — a boolean, a CEL string, or a `{ dialect, source }` envelope; the button is shown but cannot be pressed while it is TRUE. Omit for never-disabled'),
   params: z.unknown().optional()
-    .describe('Action parameters, forwarded to the runner: an array is the list of inputs to collect from the user before the action runs; an object is forwarded as the static parameter values'),
+    .describe('Action parameters, forwarded to the runner: an array is the list of inputs to collect from the user before the action runs; an object is forwarded as the static parameter values. Beside `operation: \'update\'` both ride the request as params: the route writes them only where the action the row\'s `name` names declares them, and refuses any other'),
   description: z.string().optional()
     .describe('Action description, forwarded to the runner — the parameter dialog shows it under its title'),
   target: z.string().optional()
@@ -3986,8 +4021,8 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-  operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape`, `recordIdField` and `onSuccess` are refused, a `patch` or `params` gives the values to write, and `list_toolbar` is not a location'),
-  patch: actionPatch().optional().describe('Static field values the declarative `operation: \'update\'` writes, forwarded to the runner: `ActionSchema`\'s own record of field values, merged UNDER the values `params` supplies. Refused on a row without `operation: \'update\'` (it would be silently dropped)'),
+  operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape`, `recordIdField` and `onSuccess` are refused, and `list_toolbar` is not a location'),
+  patch: rowPatchRetired("An `action:button`'s"),
   confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
   successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
   errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
@@ -4040,6 +4075,8 @@ export type ActionButtonPropsParsed = z.infer<typeof ActionButtonPropsSchema>;
  *   `bodyExtra`, `bodyShape`, `operation`, `patch`, `confirmText`,
  *   `successMessage`, `errorMessage`, `refreshAfter`, `locations`, `toast`,
  *   `resultDialog`, `onSuccess`, `objectName`.
+ * - `patch` is forwarded and RETIRED, for `action:button`'s reason
+ *   ({@link rowPatchRetired}).
  * - `outcomeMessages` is forwarded too since objectui#11344 and NOT declared,
  *   for `action:button`'s reason: it is an `ActionSchema` key that reaches this
  *   renderer on the `action:bar` member path, and objectui leaves its input
@@ -4060,7 +4097,7 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   },
 }, {
   name: z.string().optional()
-    .describe('Action name, forwarded to the action runner; also the `aria-label` when there is no `label`. Optional, as for `action:button`. With no `actionType`, or an empty one, the runner dispatches on the name instead, so a `name` of `url` or `navigation` runs the url navigator and its `target` is judged as a url target, and `onSuccess` is judged beside the executor the name names'),
+    .describe('Action name, forwarded to the action runner; also the `aria-label` when there is no `label`. Optional, as for `action:button`. With no `actionType`, or an empty one, the runner dispatches on the name instead, so a `name` of `url` or `navigation` runs the url navigator and its `target` is judged as a url target, and `onSuccess` is judged beside the executor the name names. Beside `operation: \'update\'` it is required: it names the declared action the platform action route runs, whose `patch` is the write'),
   label: z.string().optional()
     .describe('Accessible label and tooltip text (and its first letter stands in when no icon resolves). A literal string — localize through the translation bundle entry for this component id'),
   icon: z.string().optional()
@@ -4076,7 +4113,7 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   description: z.string().optional()
     .describe('Action description — the tooltip text when there is no `label`, and forwarded to the runner for the parameter dialog'),
   params: z.unknown().optional()
-    .describe('Action parameters, forwarded to the runner: an array is the list of inputs to collect from the user; an object is forwarded as the static parameter values'),
+    .describe('Action parameters, forwarded to the runner: an array is the list of inputs to collect from the user; an object is forwarded as the static parameter values. Beside `operation: \'update\'` both ride the request as params: the route writes them only where the action the row\'s `name` names declares them, and refuses any other'),
   target: z.string().optional()
     .describe('Executor target, forwarded to the runner: the URL, script name, flow name or API endpoint, per `actionType`. For the url navigator (`actionType: \'url\'`, or no or an empty `actionType` and a `name` of `url` or `navigation`): an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ — every other scheme and a protocol-relative //host are refused'),
   openIn: z.enum(['self', 'new-tab']).optional()
@@ -4084,8 +4121,8 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-  operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, a `patch` or `params` gives the values to write, and `list_toolbar` is not a location'),
-  patch: actionPatch().optional().describe('Static field values the declarative `operation: \'update\'` writes, forwarded to the runner: `ActionSchema`\'s own record of field values, merged UNDER the values `params` supplies. Refused on a row without `operation: \'update\'` (it would be silently dropped)'),
+  operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list_toolbar` is not a location'),
+  patch: rowPatchRetired("An `action:icon`'s"),
   confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
   successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
   errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
@@ -4164,6 +4201,9 @@ export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
  *
  * - `outcomeMessages` (forwarded since objectui#11344): undeclared on all four
  *   action blocks, as one decision, until an inline writer appears;
+ * - `patch` (forwarded): RETIRED on every page action row
+ *   ({@link rowPatchRetired}), since the route writes the named action's own
+ *   `patch`;
  * - a member `className` and the member's own `properties.params` bag of
  *   static values (`readMemberStaticParamValues`);
  * - `endpoint` (forwarded): read by no console `api` handler, refused onto
@@ -4205,7 +4245,7 @@ export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
 function actionContainerMemberShape() {
   return {
     name: z.string().optional()
-      .describe('Action name, forwarded to the action runner, and the item\'s text when there is no `label`. Optional: a member is not a registered object action, and the runner dispatches a nameless one on its `type`. With no `type`, or an empty one, the runner dispatches on the name instead, so a `name` of `url` or `navigation` runs the url navigator and its `target` is judged as a url target, and `onSuccess` is judged beside the executor the name names'),
+      .describe('Action name, forwarded to the action runner, and the item\'s text when there is no `label`. Optional: a member is not a registered object action, and the runner dispatches a nameless one on its `type`. With no `type`, or an empty one, the runner dispatches on the name instead, so a `name` of `url` or `navigation` runs the url navigator and its `target` is judged as a url target, and `onSuccess` is judged beside the executor the name names. Beside `operation: \'update\'` it is required: it names the declared action the platform action route runs, whose `patch` is the write'),
     label: z.string().optional()
       .describe('The item\'s text. A literal string, placed as-is — localize through the translation bundle entry for this component id'),
     icon: z.string().optional()
@@ -4231,8 +4271,8 @@ function actionContainerMemberShape() {
     method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
     bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
     bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-    operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, a `patch` or `params` gives the values to write, and `list_toolbar` is not a location'),
-    patch: actionPatch().optional().describe('Static field values the declarative `operation: \'update\'` writes, forwarded to the runner: `ActionSchema`\'s own record of field values, merged UNDER the values `params` supplies. Refused on a row without `operation: \'update\'` (it would be silently dropped)'),
+    operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list_toolbar` is not a location'),
+    patch: rowPatchRetired('An `action:group` or `action:menu` member\'s'),
     confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
     successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
     errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),

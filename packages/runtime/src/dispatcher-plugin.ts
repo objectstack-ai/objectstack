@@ -1992,8 +1992,8 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             };
 
             // ── Security catalog activation (ADR-0126 §3 regime C, ADR-0131 D3/D6) ──
-            // `POST /security/_activation/:type/:name` — switch a position or a
-            // permission set on/off for this deployment
+            // `POST /security/_activation/:type/:name` — switch a position, a
+            // permission set or a declared sharing rule on/off for this deployment
             // (`domains/catalog-activation.ts`). The rest of `/security` is the
             // REST server's on the wire; this one door is the dispatcher's,
             // because the activation gate and the two sibling activation doors

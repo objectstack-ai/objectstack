@@ -122,9 +122,13 @@ interface Harness {
     writes: Array<{ op: 'insert' | 'update'; data: Row }>;
 }
 
-function boot(posture: 'single' | 'group' | 'isolated' | null, opts: EngineOptions = {}): Harness {
+function boot(
+    posture: 'single' | 'group' | 'isolated' | null,
+    opts: EngineOptions = {},
+    extraServices: Record<string, unknown> = {},
+): Harness {
     const { engine, tables, writes } = makeEngine(opts);
-    const services: Record<string, unknown> = { objectql: engine, data: engine };
+    const services: Record<string, unknown> = { objectql: engine, data: engine, ...extraServices };
     if (posture) services.tenancy = { posture };
     const resolve = (name: string): unknown => services[name] ?? null;
     const kernel = {
@@ -577,5 +581,75 @@ describe('the catalog activation door — the resolver honours what it writes', 
         expect(viaPositionOff.positions).toContain(POSITION);
         expect(viaPositionOff.permissions).not.toContain(SET);
         expect(viaPositionOff.systemPermissions).not.toContain('cap_sales');
+    });
+});
+
+// [ADR-0131 D6 regime C] A DECLARED sharing rule is switched through the same
+// door and the same ledger: `:type` `sharing_rule`, the name resolved by the
+// sharing-rule service (`sharingRules`, plugin-sharing's `declaredRuleNamed`),
+// which serves no declaration the ledger switches off. The effect on grants is
+// pinned beside that service (`sharing-rule.test.ts`, "regime C").
+describe('the catalog activation door — a declared sharing rule', () => {
+    const RULE = 'share_red_projects';
+    const sharingRules = (declared: Record<string, { packageId?: string }> = { [RULE]: { packageId: 'crm' } }) => ({
+        sharingRules: {
+            async declaredRuleNamed(name: string) {
+                return declared[name] ? { name, ...declared[name] } : null;
+            },
+        },
+    });
+
+    it('`single`: a tenant admin holding `manage_metadata` switches it off — one ledger row, its package recorded', async () => {
+        const h = boot('single', {}, sharingRules());
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/sharing_rule/${RULE}`);
+        expect(statusOf(res)).toBe(200);
+        expect(res.response?.body?.data).toEqual({ type: 'sharing_rule', name: RULE, enabled: false });
+        expect(h.tables[LEDGER]).toEqual([
+            expect.objectContaining({ metadata_type: 'sharing_rule', name: RULE, package_id: 'crm', active: false }),
+        ]);
+    });
+
+    for (const posture of ['group', 'isolated'] as const) {
+        it(`\`${posture}\`: the switch is the platform operator's — a tenant admin is refused 403 and nothing is written`, async () => {
+            const h = boot(posture, {}, sharingRules());
+            const refused = await flip(h, TENANT_ADMIN(), `/_activation/sharing_rule/${RULE}`);
+            expect(statusOf(refused)).toBe(403);
+            expect(codeOf(refused)).toBe('PERMISSION_DENIED');
+            expect(messageOf(refused)).toContain('a declared sharing rule');
+            expect(h.writes).toEqual([]);
+
+            expect(statusOf(await flip(h, PLATFORM_OPERATOR(), `/_activation/sharing_rule/${RULE}`))).toBe(200);
+            expect(h.writes).toHaveLength(1);
+        });
+    }
+
+    it('a name no declaration holds is 404 and writes nothing — an organization\'s own rule has its own switch', async () => {
+        const h = boot('single', {}, sharingRules());
+        const res = await flip(h, TENANT_ADMIN(), '/_activation/sharing_rule/red_to_exec_ours');
+        expect(statusOf(res)).toBe(404);
+        expect(h.writes).toEqual([]);
+    });
+
+    it('no sharing-rule service is 503 SERVICE_UNAVAILABLE, never a write for an unconfirmed name', async () => {
+        const h = boot('single');
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/sharing_rule/${RULE}`);
+        expect(statusOf(res)).toBe(503);
+        expect(codeOf(res)).toBe('SERVICE_UNAVAILABLE');
+        expect(h.writes).toEqual([]);
+    });
+
+    it('a declared-rule read that fails is 503, never a write', async () => {
+        const h = boot('single', {}, {
+            sharingRules: { async declaredRuleNamed() { throw new Error('registry down'); } },
+        });
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/sharing_rule/${RULE}`);
+        expect(statusOf(res)).toBe(503);
+        expect(h.writes).toEqual([]);
+    });
+
+    it('a declaration no package names is switched too, its row carrying no package', async () => {
+        const h = boot('single', {}, sharingRules({ [RULE]: {} }));
+        expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/sharing_rule/${RULE}`))).toBe(200);
+        expect(h.tables[LEDGER][0].package_id ?? null).toBeNull();
     });
 });
