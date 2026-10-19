@@ -4,7 +4,7 @@
 
 fix(spec)!: `PUBLIC_AUTH_FEATURES.multiOrgEnabled.gatedInputs` no longer lists `sys_organization.actions.change_slug` (#24318)
 
-Clause-②: no (narrowing)
+Clause-②: no (narrowing) (a platform object stops declaring an action whose door exists only in cloud; owes a `CONTRACT_REVIEW_TIER` review on the narrowing face before the queue, and the `repo:cloud#2` seat's pointer before landing)
 
 `gatedInputs` is the census of platform-object inputs gated on a public auth feature, which the platform objects' completeness guard holds equal to their declarations in both directions. `sys_organization` no longer declares `change_slug` (its door is the cloud orchestrator's, and the composition that serves it declares the action), so its row leaves the census.
 

@@ -4,7 +4,7 @@
 
 fix(platform-objects)!: `sys_organization` no longer declares `change_slug`, whose door only the cloud orchestrator mounts (#24318)
 
-Clause-②: no (narrowing)
+Clause-②: no (narrowing) (a platform object stops declaring an action whose door exists only in cloud; owes a `CONTRACT_REVIEW_TIER` review on the narrowing face before the queue, and the `repo:cloud#2` seat's pointer before landing)
 
 `sys_organization` declared a `change_slug` action ("Change Slug") at `record_header`, gated on `multiOrgEnabled`, whose target, `/api/v1/cloud/organizations/{id}/change-slug`, no package in this repository serves. So on every open-source composition with multi-organization on, the organization record page offered Change Slug in its `⋯` overflow, and the click answered `404 ENDPOINT_NOT_FOUND`. Measured on a booted multi-organization showcase.
 
