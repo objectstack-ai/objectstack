@@ -46,9 +46,9 @@ const result = ActionNavItemSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 ### Nested Shape: `ActionNavItem.actionDef`
 
@@ -385,9 +385,9 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 
 ---
@@ -416,9 +416,9 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 
 ---
@@ -450,9 +450,9 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 
 ---
@@ -481,9 +481,9 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 
 ---
@@ -923,9 +923,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 ---
 
@@ -955,9 +955,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 ---
 
@@ -988,9 +988,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 ---
 
@@ -1021,9 +1021,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 ---
 
@@ -1053,9 +1053,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 ---
 
@@ -1085,9 +1085,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 ### Nested Shape: `NavigationItem[type='action'].actionDef`
 
@@ -1125,9 +1125,9 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 ---
 
@@ -1160,9 +1160,9 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 ---
 
@@ -1207,9 +1207,9 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 ---
 
@@ -1245,9 +1245,9 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 
 ---
@@ -1277,9 +1277,9 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 
 ---
@@ -1308,9 +1308,9 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 
 ---
@@ -1340,9 +1340,9 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **provider** | `'api'` | ✅ | Binds the element to one same-origin API endpoint instead of an object |
-| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the element binds |
-| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response |
+| **provider** | `'api'` | ✅ | Binds one same-origin API endpoint — the discriminator of an `api` data source |
+| **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the binding reads |
+| **path** | `string` | optional | Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response |
 
 
 ---

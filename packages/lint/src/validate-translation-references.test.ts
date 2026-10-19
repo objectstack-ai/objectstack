@@ -3738,6 +3738,143 @@ describe('validateTranslationReferences — keyed children of an action entry (#
   });
 });
 
+/**
+ * [#23566] The picklist face: `picklists.<name>` and
+ * `picklists.<name>.options.<value>` (`TranslationDataSchema.picklists`), read
+ * at runtime by `lookupPicklistOption` with the list's name and each served
+ * option's value. The two legs the card measured on HotCRM, each pinned at its
+ * field-level twin's severity, plus the controls that keep the face from
+ * over-stating: a lit key, an extension's added value, a sibling package's list
+ * and a list this stack only extends.
+ */
+describe('validateTranslationReferences — the picklist face (#23566)', () => {
+  const salutation = {
+    name: 'salutation',
+    label: 'Salutation',
+    options: [
+      { value: 'mr', label: 'Mr.' },
+      { value: 'ms', label: 'Ms.' },
+    ],
+  };
+  const run = (picklists: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    validateTranslationReferences({ picklists: [salutation], ...extra, translations: [{ 'zh-CN': { picklists } }] });
+
+  it('leg A: an option key that is not a value of the list is translation-option-key-unknown, at the field twin\'s warning', () => {
+    const findings = run({ salutation: { label: '称谓', options: { mr: '先生', mister: '先生' } } });
+    expect(findings.map((f) => [f.rule, f.severity, f.path, f.where])).toEqual([
+      [
+        TRANSLATION_OPTION_KEY_UNKNOWN,
+        'warning',
+        'translations[0]["zh-CN"].picklists.salutation.options.mister',
+        'locale "zh-CN" · picklist "salutation"',
+      ],
+    ]);
+    expect(findings[0].message).toBe(
+      'Option translation is keyed by "mister", which is not a value declared by picklist "salutation", so ' +
+        'the option renders untranslated.',
+    );
+    expect(findings[0].hint).toBe(
+      'Option keys are the stored `value` of the list or of a `picklistExtensions` entry for it, not the ' +
+        'label and not a variant spelling.',
+    );
+    // The field twin, same mistake, same rule and severity: the face is the twin's, not a stricter one.
+    const twin = validateTranslationReferences({
+      objects: [{ name: 'crm_contact', fields: { salutation: { type: 'select', options: salutation.options } } }],
+      translations: [{ 'zh-CN': { objects: { crm_contact: { fields: { salutation: { options: { mister: '先生' } } } } } } }],
+    });
+    expect(twin.map((f) => [f.rule, f.severity])).toEqual([[findings[0].rule, findings[0].severity]]);
+  });
+
+  it('names the nearest declared value, and a key spelled as the label gets the value to rename it to', () => {
+    expect(run({ salutation: { options: { mrs: 'x' } } }).map((f) => f.message)).toEqual([
+      'Option translation is keyed by "mrs", which is not a value declared by picklist "salutation", so the ' +
+        'option renders untranslated. Did you mean "mr"?',
+    ]);
+    expect(run({ salutation: { options: { 'Ms.': '女士' } } }).map((f) => [f.rule, f.message, f.hint])).toEqual([
+      [
+        TRANSLATION_OPTION_KEY_UNKNOWN,
+        'Option translation is keyed by the DISPLAY LABEL "Ms." instead of the stored value "ms", so the ' +
+          'resolver never finds it and the option renders untranslated.',
+        'Rename the key to "ms".',
+      ],
+    ]);
+  });
+
+  it('leg B: a list no package declares is translation-target-unknown, at the field twin\'s error', () => {
+    const findings = run({ not_a_list: { options: { mr: '先生' } }, salutaton: { label: '称谓', options: {} } });
+    expect(findings.map((f) => [f.rule, f.severity, f.path, f.where, f.message, f.hint])).toEqual([
+      [
+        TRANSLATION_TARGET_UNKNOWN,
+        'error',
+        'translations[0]["zh-CN"].picklists.not_a_list',
+        'locale "zh-CN" · picklist "not_a_list"',
+        'Translations are keyed to picklist "not_a_list", which no package in this stack declares, so every ' +
+          'option of it renders its source-locale label.',
+        "Match the key to a picklist's `name`, or drop it.",
+      ],
+      [
+        TRANSLATION_TARGET_UNKNOWN,
+        'error',
+        'translations[0]["zh-CN"].picklists.salutaton',
+        'locale "zh-CN" · picklist "salutaton"',
+        'Translations are keyed to picklist "salutaton", which no package in this stack declares, so every ' +
+          'option of it renders its source-locale label. Did you mean "salutation"?',
+        "Match the key to a picklist's `name`, or drop it.",
+      ],
+    ]);
+    // The field twin's orphan carries the same severity.
+    const twin = validateTranslationReferences({
+      objects: [{ name: 'crm_contact', fields: { salutation: { type: 'select', options: salutation.options } } }],
+      translations: [{ 'zh-CN': { objects: { crm_contact: { fields: { salutaton: { label: 'x' } } } } } }],
+    });
+    expect(twin.map((f) => [f.rule, f.severity])).toEqual([[TRANSLATION_TARGET_UNKNOWN, 'error']]);
+  });
+
+  it('lit control: every value of the list, and its label, resolve', () => {
+    expect(run({ salutation: { label: '称谓', options: { mr: '先生', ms: '女士' } } })).toEqual([]);
+  });
+
+  it('a value a `picklistExtensions` entry adds is a key of the list, a value nobody adds is not', () => {
+    const extensions = { picklistExtensions: [{ extend: 'salutation', options: [{ value: 'dr', label: 'Dr.' }] }] };
+    expect(run({ salutation: { options: { dr: '博士' } } }, extensions)).toEqual([]);
+    expect(run({ salutation: { options: { prof: '教授' } } }, extensions).map((f) => [f.rule, f.path])).toEqual([
+      [TRANSLATION_OPTION_KEY_UNKNOWN, 'translations[0]["zh-CN"].picklists.salutation.options.prof'],
+    ]);
+    // The extension's label is diagnosed like the list's own.
+    expect(run({ salutation: { options: { 'Dr.': '博士' } } }, extensions).map((f) => f.hint)).toEqual([
+      'Rename the key to "dr".',
+    ]);
+  });
+
+  it('a list a SIBLING package of the artifact declares resolves, and its options are judged', () => {
+    const stack = {
+      packages: [{ manifest: { id: 'com.example.core', picklists: [salutation] } }],
+      translations: [{ 'zh-CN': { picklists: { salutation: { options: { mr: '先生', mister: '先生' } } } } }],
+    };
+    expect(validateTranslationReferences(stack).map((f) => [f.rule, f.path])).toEqual([
+      [TRANSLATION_OPTION_KEY_UNKNOWN, 'translations[0]["zh-CN"].picklists.salutation.options.mister'],
+    ]);
+    // …and a sibling's extension adds its value too.
+    const extended = {
+      ...stack,
+      packages: [
+        ...stack.packages,
+        { manifest: { id: 'com.example.addon', picklistExtensions: [{ extend: 'salutation', options: [{ value: 'mister', label: 'Mister' }] }] } },
+      ],
+    };
+    expect(validateTranslationReferences(extended)).toEqual([]);
+  });
+
+  it('a list this stack only EXTENDS, declared by no package of it, is skipped wholly (rung 2b, for a list)', () => {
+    expect(
+      validateTranslationReferences({
+        picklistExtensions: [{ extend: 'industry', options: [{ value: 'healthcare', label: 'Healthcare' }] }],
+        translations: [{ 'zh-CN': { picklists: { industry: { options: { healthcare: '医疗', technology: '科技' } } } } }],
+      }),
+    ).toEqual([]);
+  });
+});
+
 describe('[#22161] one-line verdicts — translation-target-unknown, translation-option-key-unknown', () => {
   const CONVERTED = [TRANSLATION_TARGET_UNKNOWN, TRANSLATION_OPTION_KEY_UNKNOWN];
 
@@ -3776,6 +3913,7 @@ describe('[#22161] one-line verdicts — translation-target-unknown, translation
     'declares no `resultDialog`, so nothing reads this label',
     '`resultDialog.fields` does not declare',
     'declares no `fields` (it renders the whole response as JSON)',
+    'Translations are keyed to picklist "',
   ];
   const OPTION_ARMS = [
     'which declares no `options` at all (field type',
@@ -3785,6 +3923,7 @@ describe('[#22161] one-line verdicts — translation-target-unknown, translation
     'which is not a value declared by parameter "',
     'Option translations are keyed under screen field "',
     'which is not a value declared by screen field "',
+    'which is not a value declared by picklist "',
   ];
 
   it('refuses a result field under a dialog that declares no `fields` (the one arm no case above fires)', () => {
@@ -3861,6 +4000,8 @@ describe('[#22161] one-line verdicts — translation-target-unknown, translation
         '`objectExtensions[]`',
         'official plugin or cloud runtime object',
         '`metadataForms`',
+        '`picklists.LIST`',
+        'a picklist it only extends through `picklistExtensions[]`',
       ],
       [TRANSLATION_OPTION_KEY_UNKNOWN]: [
         'stored `value`',
@@ -3868,6 +4009,7 @@ describe('[#22161] one-line verdicts — translation-target-unknown, translation
         '`direct-mail`',
         'inline `options`',
         "screen field's own `options`",
+        'its `picklistExtensions[]` entries add',
         'a rename, not a deletion',
       ],
     };
@@ -3922,6 +4064,7 @@ describe('[#22161] one-line fixes — translation-target-unknown', () => {
     "Match the key to an outcome the action's `outcomeMessages` declares",
     'Move the `resultDialog` translations under the action',
     "Match the key to a declared field's literal `path`",
+    "Match the key to a picklist's `name`",
   ];
 
   it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {

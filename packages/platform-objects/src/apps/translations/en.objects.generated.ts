@@ -3076,6 +3076,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Metadata",
         help: "JSON-serialized metadata payload"
       },
+      draft_changes: {
+        label: "Draft Changes",
+        help: "JSON-serialized per-key provenance of a pending draft: which surface (copilot, studio, api), actor and time last changed each key path. Null on active rows."
+      },
       extends: {
         label: "Extends"
       },
