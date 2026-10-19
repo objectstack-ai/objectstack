@@ -111,7 +111,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "steps[4] corrected from QA run #24573 (18.0 sweep, 5b14b7f3; carried by #24612 at ba4afcc2), re-read at the console pin 4016370af3c9: the Studio widget inspector is a structured form with no free-key or JSON entry (DashboardWidgetInspector.tsx removed the legacy fields), so 'attempt the same stray-key widget through the inspector and capture the surfaced error' could not be executed. The step now asks the run to confirm the inspector offers no free-key path. The same record's second note, that a pending draft is unreadable until publish, does not hold and is not taken: GET /meta/dashboard/NAME?state=draft reads the draft (META_ITEM_READ_PARAMS includes `state`); only `?mode=draft`, a save-door parameter, is refused on the read. No clause changed. Wave anchor #24579 §3",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -447,7 +447,7 @@
           "revision": 6,
           "date": "2026-10-19",
           "change": "steps[5], acceptance[2].clause, acceptance[4].verify and fixtures.knownGaps[0] corrected from QA run #24573 (18.0 sweep, 5b14b7f3; carried by #24612), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. (1) The combo widget no longer authors series[]: chart-gallery.dashboard.ts drops it under the D3 entry dashboard-widget-chart-config-structure-refused, and the renderer picks each measure's mark (objectui AdvancedChartImpl.tsx: first measure bars, the rest lines, both value axes drawn). The run's combo read (2 bars + 1 line on dual axes) is exactly that default. (2) The single-value tiles are compared to the metric tile by value, not by look: the gallery's metric card carries its own title and placement. No clause substance changed. Wave anchor #24579 §3",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ],
       "enumSource": {
@@ -581,7 +581,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "negative[1] corrected from QA run #24612 (18.0 sweep round 2, ba4afcc2), re-read at objectstack f89d29e382: the dangling-binding guard is an author-time rule run at publish and on an active save, never on a draft (runtime-authoring-gate.ts D1), so a draft with a dangling dataset, measure or dimension answers 200 and its publish answers 422 with the named rule. The negative now names the publish door, so a draft 200 is not read as the blank-without-error FAIL. Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -815,7 +815,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "fixtures.requires[2] corrected from QA run #24573 (18.0 sweep, 5b14b7f3; carried by #24612), re-read at the console pin 4016370af3c9: the scratch package needs an app whose navigation points at the dashboard, because Studio's Interfaces pillar is the app navigation tree (StudioDesignSurface.tsx), and its create paths return early with no app. The recipe named only the package and the dashboard. No clause changed. Wave anchor #24579 §3",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -1315,7 +1315,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "steps[0], steps[3], acceptance[1].clause and acceptance[3].verify corrected from QA run #24558 (18.0 since:v18 sweep, 5b14b7f3), re-read at objectstack f89d29e382. (1) A configured cube over an apiEnabled:false object is refused at registration (api-exposure-door.ts, the registration face), so querying it answers 404 CUBE_NOT_FOUND, consistent with acceptance[2]; OBJECT_API_DISABLED is reached by a query that names the object itself, through its inferred cube (assertInferableCube admits a registered object) or an inline dataset. The run read CUBE_NOT_FOUND where the clause expected OBJECT_API_DISABLED. (2) sys_user_metrics declares no dimensions (system.datasets.ts), so 'dimension columns carry none' needs a dimensioned dataset; step 4 adds showcase_task_metrics by status. Wave anchor #24579 (round 3 named this item)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     }

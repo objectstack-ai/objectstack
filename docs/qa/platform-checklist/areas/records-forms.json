@@ -230,7 +230,7 @@
           "revision": 11,
           "date": "2026-10-19",
           "change": "steps[2], acceptance[0].verify, acceptance[6].verify, negative[2] and fixtures.provisioning.why corrected from QA run #24572 (18.0 sweep, 5b14b7f3) and the P0 run #24556, re-read at objectstack f89d29e382. (1) The New form submits select defaults the step never touches (sales_region:'amer', default:true in account.object.ts), so the payload diff expects that key. (2) acceptance[6]'s ownership half is unobservable when the admin clones its own row; the provisioned contributor member cloning a seeded showcase_field_zoo row (allowCreate there, permission-sets.ts) is a non-owner cloner, and the same clone shows the autonumber and formula re-derived. (3) negative[2] named `status`, which defaults on showcase_account; the required field with no default there is `name`. The round-2 Tier 1 note that this item's automated.ref over-claims does not hold and is not taken: the ref already scopes itself to 'acceptance[6]'s READONLY half ONLY … Every other clause still needs the run'. Wave anchor #24579 (round 3 named this item)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -405,7 +405,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "steps[2], acceptance[1] (clause, evidence) and fixtures.knownGaps[2] corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. (1) acceptance[1] asked for all 49 members on the Full edit form, which cannot hold: summary has no zoo carrier (knownGaps[0]) and autonumber is readonly by construction (field.zod.ts) and dropped from create and edit forms by plugin-form autoLayout.ts filterSystemFields; it is read on the detail page. (2) knownGaps[2] said f_secret writes fail closed on stock; the CLI wires a LocalCryptoProvider on every boot (serve.ts), and the run's PATCH answered 200 and read back masked. Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ],
       "enumSource": {
@@ -565,7 +565,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "steps[4], negative[0], negative[1] and automated.ref corrected from QA runs #24572 (5b14b7f3) and #24616 (ba4afcc2), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. (1) showcase_inquiry requires `message` (inquiry.object.ts), so the 55-row createMany needs it. (2) negative[1] was too broad: since the ADR-0047 amendment dropdown userFilters chips are allowed on an object list view and only `element: 'tabs'` (and quickFilters) are suppressed — objectui warnSuppressedListNav.ts; project.view.ts ships dropdown chips. (3) negative[0] had no stageable fixture on stock; the run's overlay with a non-boolean comparand stages one (the boolean comparand door refuses it 400 INVALID_FILTER — the run's note that the code is not INVALID_FILTER does not hold at source, boolean-comparand-declared-type-door.ts). (4) The framework dogfood ref is search-scoped and scores no list-view clause; the ref says so. The objectui live specs in the ref are §2's theme and untouched. Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -788,7 +788,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "fixtures.requires[0] and steps[7] corrected from QA run #24572 (18.0 sweep, 5b14b7f3), re-read at objectstack f89d29e382: the revert step named no door, and the run measured DELETE /api/v1/meta/view/NAME (the reset, which restores the artifact default byte-identically); and each named variant is served as its own view item, so its sections can be read before overlaying them. No clause changed. Wave anchor #24579 §3",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -1003,7 +1003,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "fixtures.requires[1] and steps[2] corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2), re-read at objectstack f89d29e382: a second INV-1002 line staged over the data API needs its `amount` too — amount is client-computed and stored as sent (invoice.object.ts), so without it the line carries amount null and the total ignores it. The negative[1] FAIL of that run stays a product defect (objectstack-ai/objectui#13062, fixed at objectui main after the pin; #24619 row (a), open) and no clause changes for it. Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -1338,7 +1338,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[0], steps[1], steps[2], steps[6], acceptance[0] (clause, verify) and negative[0] corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2 — the run that hand-drove this item to PASS), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. (1) The console sends top / skip / filter with no `$` (data-objectstack adapter), so the clauses' literal $top reads nothing on the wire. (2) Contacts is a section of the shared 'Related' tab — only relatedList: 'primary' children get their own tab (field.zod.ts). (3) knownGaps[0] said the read-gate personas are fixture-blocked on stock; the invite + sign-up + sys_user_position recipe mints both. The pin and its pass are untouched (the clause-free-pin theme is not this round's). Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -1786,7 +1786,7 @@
           "revision": 12,
           "date": "2026-10-19",
           "change": "steps[3] corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2), re-read at the console pin 4016370af3c9: a type 'form' action navigates to the routed form page /forms/:name (ActionRunner.ts), it does not open a dialog. The run's acceptance[2] / negative[2] FAIL stays the product defect objectstack-ai/objectui#13063 and no clause changes for it; the round's suggestion to name examples/app-showcase/test/record-action-location-hosts.test.ts in automated.ref is not taken here (the ref's objectui half is §2's clause-free-pin theme). Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ],
       "enumSource": {
@@ -1902,7 +1902,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "variants[0] and fixtures.requires[0] corrected from QA run #24572 (18.0 sweep, 5b14b7f3), re-read at objectstack f89d29e382: account_lifecycle binds `events: ['update']` only (examples/app-showcase/src/data/objects/account.object.ts), so the create-with-non-initial-status leg raises invalid_initial_state from project_status_flow alone (events insert + update, initialStates ['planned'], project.object.ts). The since:v18 run #24558's note that this item describes the advisory hit as server-log only is already on main (revision 3 reads the write answer's warnings) and is not repeated. No clause changed. Wave anchor #24579 §3",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -2012,7 +2012,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "steps[4] corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2): the veto step named no way to make the server reject a drag on stock; the run's recipe (a contributor member's task reassigned away server-side, then dragged → 404 → snap-back with the 'Save failed' toast) needs no lockField and scored acceptance[3] pass. No clause changed. Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -2330,7 +2330,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "steps[1], steps[2], steps[7], acceptance[0] (clause, verify), acceptance[1] (clause, verify) and negative[1] corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2 — the run that hand-drove this item to PASS), re-read at the console pin 4016370af3c9. (1) The console sends `filter=` and `sort=` with no `$` (data-objectstack adapter); the clauses named $filter / $orderby, which a wire read never finds — acceptance[2] already said so. (2) The suggested condition pair leaves one row on the stock seed, a single-datapoint for the row-order clause; the step now asks for ≥ 2 rows. (3) The userFilters negative carried the same over-broad scope as list-view-capabilities negative[1]: only tabs-element userFilters are suppressed on an object list (warnSuppressedListNav.ts), dropdown chips are allowed — corrected beside it so the two items agree. Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -2431,7 +2431,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "steps[3], steps[5] and acceptance[3] (clause, verify) corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2 — the run that hand-drove this item to PASS), re-read at the console pin 4016370af3c9. (1) A persona lacking edit gets draggable=false, so the failing-reschedule step produced no optimistic move; the run's recipe — a contributor member's task reassigned away server-side, then dragged → 404 → rollback + toast — is now the step. (2) On showcase_task the empty-day click hands off to the full create form with the date pre-filled (ObjectCalendar.tsx, objectui#12291: a required field quick-create cannot fill), not a quick-create dialog. The pin and its pass are untouched. Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -2705,7 +2705,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "steps[3], steps[6], acceptance[3].verify, acceptance[4] (clause, verify) and source[2] corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. The bell is server-backed: plugin-audit's audit-writers.ts writes a collab.mention sys_notification per mentioned user and the console bell reads it through useInboxBell.ts (GET /api/v1/notifications); objectui's useMentionNotifications, which the item cited as the bell, has no console consumer. And no feed refetch follows a post within ~6 s, so the reconcile step reloads. Clause substance unchanged. Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -2826,7 +2826,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "steps[1] and acceptance[1] (clause, verify) corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2 — the run that hand-drove this item to PASS), re-read at the console pin 4016370af3c9: the toolbar offers three densities, Compact / Comfortable / Spacious, stored as compact / medium / tall (normalize-list-view.ts), not the five modes the item listed — those are the spec's row heights, which the renderer narrows onto three. The pin and its pass are untouched. Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -3028,7 +3028,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "steps[5] and acceptance[2].clause corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2), re-read at the console pin 4016370af3c9: showcase_recalc_selection is an api-type action whose one request (POST /api/v1/apps/showcase/recalc) carries `_selectedIds` at the body's top level; params._selectedIds is the grid's hand-off to the action runner (ObjectGrid.tsx), not the wire spelling — list-view-capabilities already states the top-level form for the same action. Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -3328,7 +3328,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "steps[1], a new fixtures.knownGaps entry and the traps list corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2 — the run that hand-drove this item to PASS), re-read at the console pin 4016370af3c9: steps[1] repeated its poll/results clause twice; the run found a hand-driven console route that needs no gated spec, whose Undo is a native window.confirm (ImportWizard.tsx) that Playwright dismisses by default, so the automation-input trap is now listed. The pin and its pass are untouched. Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -3515,7 +3515,7 @@
           "revision": 6,
           "date": "2026-10-19",
           "change": "steps[0], negative[2], fixtures.requires[3], acceptance[8] (verify, evidence) and automated.ref corrected from wave anchor #24579 round 2 part 1 (6272032736) and QA runs #24598 / #24616 (ba4afcc2), re-read at objectstack f89d29e382. (1) The hook list route is GET /api/v1/meta/hook; /meta/types/hook answers 404. (2) acceptance[8]'s refusal answers 500 INTERNAL_ERROR with the class in the server log only; #24619 row (b) (open) tracks the coded refusal, so the clause states the shipped envelope and scores against #24619. (3) The ref named source files (hook-wrappers.ts, hook-binder.ts) no resolver can run; it now names four test files, each measured at base under os-verify-lock (83 passed), mapped to the clause whose mechanism it pins. (4) The run-proven scratch-hook recipe is recorded in requires[3]. Part 1's note on a `$select` in the steps does not hold: no step of this item spells `$select` (0 hits in records-forms.json)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -4389,7 +4389,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "negative[0] and acceptance[2].verify corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2), re-read at the console pin 4016370af3c9: the History tab reads sys_audit_log (RecordDetailView.tsx), a compliance audit that is not per-field-gated and correctly renders an untracked field's old → new; the per-field opt-in governs the sys_activity summary / Discussion timeline only, so negative[0] now names that surface. The task page has no tablist, so the absent tab is corroborated by the absent sys_audit_log fetch. Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -5010,7 +5010,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "fixtures.requires gains the member's grant on sys_comment and sys_comment_reaction, from QA run #24558 (18.0 since:v18 sweep, 5b14b7f3): a plain org member holds no object permission on either (403 PERMISSION_DENIED on both doors), so every member clause needs a runtime set the item never named; the run bound one (qa_comment_set). No clause changed. Wave anchor #24579 §3 (the record's continuation comment)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     },
@@ -5095,7 +5095,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "personas[1], fixtures.knownGaps[0], steps[0], steps[1] and acceptance[2].clause corrected from QA runs #24558 (5b14b7f3) and #24616 (ba4afcc2), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. (1) knownGaps[0] was stale: the pinned console builds and was served. (2) The meta read serves the authored view, so step 1 has no resolved pageSize / editInline to read (`pagination` is an optional block; its pageSize default materialises only inside one); the defaults show in the renderer. (3) The inline affordance is the Edit inline switch, and the edit mode is session state that starts off (ObjectView.tsx), so 'offered' does not mean editable cells on load. (4) The updater persona needs a contributor binding and assigned tasks. Wave anchor #24579 round 2 §3 (6272314386)",
-          "ref": "#PENDING-24579R4"
+          "ref": "#24671"
         }
       ]
     }
