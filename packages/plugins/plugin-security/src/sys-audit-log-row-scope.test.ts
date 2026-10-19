@@ -123,11 +123,17 @@ async function boot(opts: { posture: Posture; sets?: PermissionSet[]; ledger?: R
   await engine.syncSchemas();
   await engine.insert('sys_organization', [{ id: 'org_a', name: 'A' }, ...(single ? [] : [{ id: 'org_b', name: 'B' }])], SYS);
   const before = opts.ledger === LEDGER_BEFORE;
-  await engine.insert(LEDGER, [
+  const ledgerRows = [
     { id: 'a1', action: 'update', tenant_id: 'org_a', ...(before ? { organization_id: 'org_a' } : {}) },
     ...(single ? [] : [{ id: 'b1', action: 'update', tenant_id: 'org_b', ...(before ? { organization_id: 'org_b' } : {}) }]),
     { id: 'd1', action: 'platform_admin_standing_change', tenant_id: null },
-  ], SYS);
+  ];
+  // [C8 stage 8b] The pre-change ledger carried an organization column, and its
+  // deployment-level row none: that row is residue, landed beneath the engine,
+  // which now stamps or refuses an organization-less platform insert under
+  // `single` (ADR-0131 D9). The current ledger has no such column.
+  if (before) for (const row of ledgerRows) await (engine as any).getDriver(LEDGER).create(LEDGER, row);
+  else await engine.insert(LEDGER, ledgerRows, SYS);
 
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },

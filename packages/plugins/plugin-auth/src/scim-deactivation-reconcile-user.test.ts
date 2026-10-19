@@ -407,13 +407,18 @@ async function makePlatformAdmin(h: Harness, userId: string): Promise<void> {
     { where: { id: PS_ADMIN }, fields: ['id'] },
     SYSTEM,
   );
+  // [C8 stage 8b] The legacy organization-less catalogue row and the unscoped
+  // platform-admin grant go in beneath the engine: under `single` the engine
+  // refuses an organization-less platform insert while the install holds no
+  // organization (ADR-0131 D9), and the engine pool keeps none.
+  const residue = (object: string, row: Record<string, unknown>) =>
+    (h.engine as any).getDriver(object).create(object, row);
   if (!existing) {
-    await h.engine.insert('sys_permission_set', { id: PS_ADMIN, name: ADMIN_FULL_ACCESS }, SYSTEM);
+    await residue('sys_permission_set', { id: PS_ADMIN, name: ADMIN_FULL_ACCESS });
   }
-  await h.engine.insert(
+  await residue(
     'sys_user_permission_set',
     { id: `ups_${userId}`, user_id: userId, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS },
-    SYSTEM,
   );
 }
 
