@@ -5737,12 +5737,11 @@ export class AuthManager {
     });
     if (existing.length > 0) return;
     const id = `ups_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-    await sys.insert('sys_user_permission_set', {
-      id,
-      user_id: userId,
-      [GRANT_SET_NAME_FIELD]: setName,
-      organization_id: organizationId,
-    });
+    await sys.insert(
+      'sys_user_permission_set',
+      { id, user_id: userId, [GRANT_SET_NAME_FIELD]: setName, organization_id: organizationId },
+      { context: { isSystem: true } },
+    );
     this.config.logger?.info?.('[audience] granted the declared self-registration permission set', {
       userId,
       permissionSet: setName,
@@ -5792,12 +5791,16 @@ export class AuthManager {
       return;
     }
     const sys = withSystemReadContext(engine as never) as any;
-    await sys.insert('sys_verification', {
-      id: `ver_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
-      identifier: `${AuthManager.SELF_REG_GRANT_CLAIM_PREFIX}${userId}`,
-      value: setName,
-      expires_at: new Date(Date.now() + AuthManager.SELF_REG_GRANT_CLAIM_TTL_MS),
-    });
+    await sys.insert(
+      'sys_verification',
+      {
+        id: `ver_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
+        identifier: `${AuthManager.SELF_REG_GRANT_CLAIM_PREFIX}${userId}`,
+        value: setName,
+        expires_at: new Date(Date.now() + AuthManager.SELF_REG_GRANT_CLAIM_TTL_MS),
+      },
+      { context: { isSystem: true } },
+    );
     this.config.logger?.info?.(
       '[audience] the self-registrant belongs to no organization yet — the declared permission set is granted ' +
         'with their first membership',
@@ -5872,7 +5875,7 @@ export class AuthManager {
       // `value` is `internal: true`: the engine's read path strips it, so it is
       // recovered through the privileged accessor (`internal-field-readback.ts`).
       await recoverInternalFieldsForSystemRead(engine as never, 'sys_verification', claim, ['value']);
-      await sys.delete('sys_verification', { where: { id: claim.id } });
+      await sys.delete('sys_verification', { where: { id: claim.id }, context: { isSystem: true } });
       setName = typeof claim.value === 'string' && claim.value ? claim.value : undefined;
       if (!setName) {
         this.reportUngrantedSelfRegistrant(userId, '(unreadable)', 'the pending grant claim carries no set name');
