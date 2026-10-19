@@ -223,6 +223,8 @@ describe('Storage routes: a metadata write that never landed is not a 200 (#5216
     const engine = createFakeEngine();
     const store = mount(engine);
     await store.createFile({ id: 'f1', key: 'user/f1.txt', name: 'f1.txt', status: 'pending' });
+    // The backend holds the bytes, so the commit reaches its write (#24548).
+    await adapter.upload('user/f1.txt', Buffer.from('f1'));
     engine._setFailing('update', true);
 
     const handler = httpServer._getHandler('POST', '/api/v1/storage/upload/complete')!;
@@ -428,6 +430,12 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
       headers,
       rawBody: async () => Buffer.from('chunk-0'),
     });
+  /**
+   * [#24548] The seeded file's bytes in the backend, so a commit gets past the
+   * door's own check that the backend holds them and reaches the write the
+   * pins below are about.
+   */
+  const holdTheFileBytes = (key = 'user/f1.bin') => adapter.upload(key, Buffer.from('file-bytes'));
 
   beforeEach(async () => {
     rootDir = join(tmpdir(), `os-22175-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -459,6 +467,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
     it('CONTROL — same organization: commits as before, and logs nothing', async () => {
       const engine = createFakeEngine();
       await seed(mount(engine));
+      await holdTheFileBytes();
       const res = await drive('POST', COMMIT, 'alice@a', { body: { fileId: 'f1', eTag: 'etag-a' } });
       expect(res._status).toBe(200);
       expect(res._json.data.fileId).toBe('f1');
@@ -469,6 +478,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
     it('CONTROL — a real engine failure on a same-organization row still answers 500 with the outage text', async () => {
       const engine = createFakeEngine();
       await seed(mount(engine));
+      await holdTheFileBytes();
       engine._setFailing('update', true);
       const res = await drive('POST', COMMIT, 'alice@a', { body: { fileId: 'f1', eTag: 'etag-a' } });
       expect(res._status).toBe(500);
@@ -480,6 +490,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
     it('UNCHANGED — no active organization: the write carries no scope, and commits as before', async () => {
       const engine = createFakeEngine();
       await seed(mount(engine));
+      await holdTheFileBytes();
       expect((await drive('POST', COMMIT, 'alice@none', { body: { fileId: 'f1' } }))._status).toBe(200);
       expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'committed' });
     });
@@ -488,6 +499,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
       const engine = createFakeEngine();
       const store = mount(engine);
       await store.createFile({ id: 'f0', key: 'user/f0.txt', name: 'f0.txt', status: 'pending', owner_id: 'u_alice' });
+      await holdTheFileBytes('user/f0.txt');
       expect((await drive('POST', COMMIT, 'alice@b', { body: { fileId: 'f0' } }))._status).toBe(200);
       expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'committed' });
     });
@@ -743,6 +755,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
     it('the engine-absent stand-in does not scope, so both doors finish the upload from any organization as before', async () => {
       const store = mount(null);
       await seed(store, 'org_a', true);
+      await holdTheFileBytes();
       expect((await drive('POST', COMMIT, 'alice@b', { body: { fileId: 'f1' } }))._status).toBe(200);
       expect((await store.getFile('f1'))?.status).toBe('committed');
       const chunked = await drive('POST', CHUNKED_COMPLETE, 'alice@b', { params: { uploadId }, body: { parts: [] } });

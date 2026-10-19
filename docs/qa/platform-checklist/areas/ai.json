@@ -9,7 +9,7 @@
       "title": "agent / tool / skill metadata kinds author, persist and list over the meta surface — retired keys reject with prescriptions, the closed agent kind has no runtime write door",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin"],
@@ -37,7 +37,7 @@
       ],
       "steps": [
         "read the three Zod shapes FIRST and pin the requireds: AgentSchema needs name/label/role/instructions (packages/spec/src/ai/agent.zod.ts), ToolSchema needs name/label/description/parameters and is .strict() (tool.zod.ts), SkillSchema needs name/label/tools (skill.zod.ts) — if these have drifted, revise this item before running",
-        "author one valid item per kind in the writable package: defineAgent({ name: 'qa_probe_agent', label, role, instructions, skills: ['qa_probe_skill'] }), defineTool({ name: 'qa_probe_tool', label, description, parameters: { type: 'object', properties: {} } }), defineSkill({ name: 'qa_probe_skill', label, tools: ['qa_probe_tool'], instructions: 'probe instructions' }); build",
+        "author one valid item per kind in the writable package: defineAgent({ name: 'qa_probe_agent', label, role, instructions, skills: ['qa_probe_skill'] }), defineTool({ name: 'qa_probe_tool', label, description, parameters: { type: 'object', properties: {} } }), defineSkill({ name: 'qa_probe_skill', label, tools: ['qa_probe_tool'], instructions: 'probe instructions' }); build — the build WARNS agent-authoring-withdrawn on the agent (ADR-0063 §2: the runtime filters a non-platform agent out of the agent catalog and refuses to load it), which is expected and no build failure. The agent still lists and reads over /api/v1/meta/agent with _provenance 'package': a meta listing is not the agent catalog",
         "author the tombstone probes from `variants` (one broken copy per retired key, e.g. tool with `permissions: []`, agent with `tools: [{...}]`, skill with `triggerPhrases: ['x']`); capture each build/parse error text verbatim",
         "boot; sign in as admin; GET /api/v1/meta (meta.getTypes) and GET /api/v1/meta/types — capture which kinds are registered",
         "GET /api/v1/meta/agent, /api/v1/meta/tool, /api/v1/meta/skill (route ledger: meta.getItems) and locate the three authored probes",
@@ -68,7 +68,7 @@
         {
           "clause": "the runtime write door matches the declared registry posture — ALL sides: PUT ?mode=draft succeeds for a RUNTIME-CREATED skill (and tool) name — one no package ships (allowRuntimeCreate:true); the same PUT against a PACKAGE-SHIPPED skill/tool is refused 403 NOT_OVERRIDABLE (allowEnvironmentOverlay:false, ee58392e1 — ADR-0005 ai row); and the agent kind has NO governed runtime write path (allowRuntimeCreate:false; 'for agents, the code is the record', metadata-plugin.zod.ts — migrateStoredMetadata reports agent rows 'skipped' by design)",
           "oracle": "api",
-          "verify": "the runtime-created skill draft PUT (qa_runtime_skill) returns 200 and the draft is readable via GET /api/v1/meta/skill/qa_runtime_skill?state=draft — ⚠️ the READ parameter is ?state=draft, not ?mode=draft: rest-server.ts keys the draft projection on req.query.state, while ?mode=draft is the WRITE-side parameter, and a GET carrying ?mode=draft answers 400 VALIDATION_ERROR ('The \"mode\" query parameter is not supported by this endpoint') — the read door refuses a parameter it does not understand instead of serving the active item. The draft PUT against the package-shipped qa_probe_skill answers 403 code NOT_OVERRIDABLE (sys-metadata-repository.ts assertAllowed, override-artifact intent) — CORRECT, not a bug: a 200 there would be a per-org overlay the registry row forbids. The agent runtime save is refused/unsupported (capture the actual status), and that refusal is recorded as CORRECT, not filed as a bug",
+          "verify": "the runtime-created skill draft PUT (qa_runtime_skill) returns 200 and the draft is readable via GET /api/v1/meta/skill/qa_runtime_skill?state=draft — ⚠️ the READ parameter is ?state=draft, not ?mode=draft: rest-server.ts keys the draft projection on req.query.state, while ?mode=draft is the WRITE-side parameter, and a GET carrying ?mode=draft answers 400 VALIDATION_ERROR ('The \"mode\" query parameter is not supported by this endpoint') — the read door refuses a parameter it does not understand instead of serving the active item. The draft PUT against the package-shipped qa_probe_skill answers 403 code NOT_OVERRIDABLE (sys-metadata-repository.ts assertAllowed, override-artifact intent) — CORRECT, not a bug: a 200 there would be a per-org overlay the registry row forbids. The agent runtime save is refused 403 in both of the code-only shapes — NOT_CREATABLE for a name no package ships, NOT_OVERRIDABLE for the package-shipped qa_probe_agent (metadata-protocol codeOnlyCreateError / codeOnlyOverrideError) — and that refusal is recorded as CORRECT, not filed as a bug",
           "evidence": "the three PUT responses (runtime-created skill 200 + its ?state=draft read, package-shipped skill 403, agent refusal)"
         },
         {
@@ -113,6 +113,12 @@
           "date": "2026-10-16",
           "change": "clause 4's verify said a GET with ?mode=draft serves the active item or 404s (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6: PUT /meta/skill/qa_runtime_skill_24036?mode=draft → 200 state draft; GET ?state=draft → 200 with the draft; GET ?mode=draft → 400 VALIDATION_ERROR naming the unsupported mode parameter; the bare GET → 404 (no active item). The agent runtime save answers 403 NOT_CREATABLE (code-only type). The read-parameter warning keeps its point with the current answer",
           "ref": "#24036"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-19",
+          "change": "steps[1] and acceptance[3].verify corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24540, ai.agent-tool-skill-metadata-roundtrip; wave anchor #24579 §3). Compiling an app-package agent now warns agent-authoring-withdrawn (packages/lint/src/validate-ai-agent-authoring.ts, warning tier) while the meta door still serves it, and the package-shipped agent PUT answers NOT_OVERRIDABLE where revision 5's history cited only the runtime-name NOT_CREATABLE. Re-derived at base 9a7838edf5. No clause changed",
+          "ref": "#24649"
         }
       ]
     },
@@ -121,7 +127,7 @@
       "title": "MCP HTTP transport (/mcp) and the public /mcp/skill endpoint gate exactly as documented: 404 when opted out, 501 when unimplemented, 401 anonymous, 403 scopeless-OAuth, full tool list when keyed",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -132,7 +138,7 @@
         ]
       },
       "variants": [
-        "OAuth scope data:read → read-family tools: list_objects, describe_object, query_records, get_record (packages/spec/src/ai/mcp.zod.ts MCP_OAUTH_SCOPE_DATA_READ)",
+        "OAuth scope data:read → read-family tools: list_objects, describe_object, validate_expression, query_records, get_record, and aggregate_records where the bridge implements aggregate (packages/mcp/src/mcp-http-tools.ts canRead block; packages/spec/src/ai/mcp.zod.ts MCP_OAUTH_SCOPE_DATA_READ)",
         "OAuth scope data:write → write-family tools: create_record, update_record, delete_record",
         "OAuth scope actions:execute → list_actions, run_action"
       ],
@@ -142,7 +148,7 @@
         "POST /api/v1/mcp/skill (wrong method); capture the 405 and its Allow header",
         "POST /api/v1/mcp with NO credentials (an MCP initialize body); capture the 401 body and any WWW-Authenticate header",
         "open an MCP Streamable HTTP session against /api/v1/mcp with the osk_ key: initialize, then tools/list; record the full tool-name set",
-        "if the OAuth track is live in the environment, request /mcp with an OAuth token carrying NONE of the three MCP scopes; capture the 403 + WWW-Authenticate error=\"insufficient_scope\"",
+        "if the OAuth track is live in the environment, request /mcp with an OAuth token (to mint one locally, register the client with application_type: 'native' — dynamic client registration refuses a web client whose redirect is http or a loopback host, 'web clients require https redirect URIs on non-loopback hosts', @better-auth/oauth-provider) carrying NONE of the three MCP scopes; capture the 403 + WWW-Authenticate error=\"insufficient_scope\"",
         "capture the dispatcher-vs-hono distinction: the disabled boot's 404 comes from the gate (surface not advertised), never a hang or 500"
       ],
       "acceptance": [
@@ -201,7 +207,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — the #3358 sweep could not drive MCP because the config was off; both sides are now explicit", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-10-16", "change": "clause 5's tool list omitted resume_run (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 with an admin osk_ key: tools/list returns twelve tools, resume_run among them; mcp-http-tools.ts registers it only when the bridge exposes resumeRun, the same optional shape as aggregate_records, so the verify now names that degradation too", "ref": "#24036" }
+        { "revision": 3, "date": "2026-10-16", "change": "clause 5's tool list omitted resume_run (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 with an admin osk_ key: tools/list returns twelve tools, resume_run among them; mcp-http-tools.ts registers it only when the bridge exposes resumeRun, the same optional shape as aggregate_records, so the verify now names that degradation too", "ref": "#24036" },
+        { "revision": 4, "date": "2026-10-19", "change": "variants[0] and steps[5] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24540, ai.mcp-http-surface; wave anchor #24579 §3). The data:read family also serves aggregate_records and validate_expression (both read-only), and a local OAuth leg needs a native client. Re-derived at base 9a7838edf5 (mcp-http-tools.ts registers validate_expression and, when the bridge exposes aggregate, aggregate_records inside the canRead gate; the oauth-provider DCR rule in the installed @better-auth/oauth-provider 1.7.3). No clause changed", "ref": "#24649" }
       ]
     },
     {
@@ -336,7 +343,7 @@
       "title": "MCP run_action requires ai.exposed (fail-closed with the prescription), filters list_actions to exposed+permitted, refuses system objects, and logs the trusted-elevation audit line",
       "since": "v15.1",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -382,7 +389,7 @@
           "evidence": "the log excerpt"
         },
         {
-          "clause": "system objects are refused wholesale: run_action against a sys_* object errors with the system-object guard ('… is on a system object and is not exposed via MCP'), never executes",
+          "clause": "system objects are refused wholesale: run_action against a sys_* object errors with the system-object guard in either of its two spellings — with objectName the MCP tool layer answers 'Object \"sys_x\" is a system object and its actions are not exposed via MCP' (mcp-http-tools.ts); without it the runtime guard answers \"Action '<n>' is on a system object and is not exposed via MCP\" (action-execution.ts) — and never executes",
           "oracle": "api",
           "verify": "the refusal text + absence of any side effect",
           "evidence": "the refusal"
@@ -402,7 +409,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from the 15.1 plan §A9", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-10-16", "change": "step 1 called list_actions with objectName: 'showcase_task' as a second form (#23878 checklist-accuracy finding). list_actions takes no arguments: re-measured on main c91af8ed6 the objectName call answers isError with MCP error -32602 'Unrecognized key(s) … objectName', while the no-argument call returns [showcase_portfolio_snapshot]. Re-run of the item's clauses on that boot: showcase_mark_done refused with the actionAiExposureError prescription and the task unchanged; showcase_portfolio_snapshot returns accounts 14 / projects 5 / invoices 12, equal to the REST totals; the [action-audit] MCP run_action line names the caller; a sys_* object is refused", "ref": "#24036" }
+        { "revision": 3, "date": "2026-10-16", "change": "step 1 called list_actions with objectName: 'showcase_task' as a second form (#23878 checklist-accuracy finding). list_actions takes no arguments: re-measured on main c91af8ed6 the objectName call answers isError with MCP error -32602 'Unrecognized key(s) … objectName', while the no-argument call returns [showcase_portfolio_snapshot]. Re-run of the item's clauses on that boot: showcase_mark_done refused with the actionAiExposureError prescription and the task unchanged; showcase_portfolio_snapshot returns accounts 14 / projects 5 / invoices 12, equal to the REST totals; the [action-audit] MCP run_action line names the caller; a sys_* object is refused", "ref": "#24036" },
+        { "revision": 4, "date": "2026-10-19", "change": "acceptance[4].clause quotes both live spellings of the guard — checklist-accuracy finding of the 18.0 QA sweep (QA run #24540, ai.mcp-run-action-exposure-gate clause 4; wave anchor #24579 §3): the clause's quote matched only the runtime guard's. Re-derived at base 9a7838edf5 (packages/mcp/src/mcp-http-tools.ts and packages/runtime/src/action-execution.ts)", "ref": "#24649" }
       ]
     },
     {
@@ -480,13 +488,13 @@
       "title": "Authored skill instructions project onto the MCP prompts primitive (#3905) — listed with identity, fetchable by name, and NOT projected when instruction-less or inactive",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
         "app": "any",
         "requires": [
-          "three authored skills in a writable package: qa_prompt_full (instructions + label + description), qa_prompt_bare (tools only, NO instructions), qa_prompt_off (instructions but active:false) — or the same three authored at runtime with PUT /api/v1/meta/skill/NAME on stock showcase (admin; 200), which the projection serves at once",
+          "three authored skills in a writable package: qa_prompt_full (instructions + label + description), qa_prompt_bare (tools only, NO instructions), qa_prompt_off (instructions but active:false) — or the same three authored at runtime with PUT /api/v1/meta/skill/NAME on stock showcase (admin; 200) — every body carries `tools` (SkillSchema requires it: `tools: []` for qa_prompt_full and qa_prompt_off, else 422 INVALID_METADATA 'tools: expected array, received undefined') — which the projection serves at once",
           "MCP HTTP reachable with an osk_ key (see ai.mcp-http-surface)"
         ],
         "knownGaps": [
@@ -547,7 +555,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: the open framework's one live skill consumer (#3905) had no checklist coverage", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-10-17", "change": "steps[5] said 'reload metadata' without naming what makes a source edit live (checklist-accuracy finding, #23878 close-out): os dev serves the built dist, so a bare restart re-serves the old definition at /meta while the MCP projection follows the source. The step now names the rebuild routes (the watcher's rebuild + restart, objectstack build, --compile), the stale-boot warning, the runtime PUT route, and a /meta active:true check before re-listing; the fixture names the runtime-authored route. Re-run on main c91af8ed6. Runtime route on stock showcase: three skills PUT (200 each); initialize declares the prompts capability; prompts/list carries qa_prompt_full with title and description, not qa_prompt_bare or qa_prompt_off; prompts/get qa_prompt_full returns the authored instructions verbatim; prompts/get qa_prompt_bare and an unknown name answer -32602; PUT qa_prompt_off active:true and the next list carries it. File route on a scratch copy of the showcase under os dev: list carried only qa_prompt_full; saving active:true rebuilt and restarted the server and the list then carried qa_prompt_off (/meta active true); flipping it back to false with the server stopped and restarting without a build printed the stale-dist warning, and on that boot prompts/list omitted qa_prompt_off while GET /api/v1/meta/skill/qa_prompt_off still read active true. Clause 4: packages/mcp src/skill-prompts.test.ts 12 passed", "ref": "#24036" }
+        { "revision": 2, "date": "2026-10-17", "change": "steps[5] said 'reload metadata' without naming what makes a source edit live (checklist-accuracy finding, #23878 close-out): os dev serves the built dist, so a bare restart re-serves the old definition at /meta while the MCP projection follows the source. The step now names the rebuild routes (the watcher's rebuild + restart, objectstack build, --compile), the stale-boot warning, the runtime PUT route, and a /meta active:true check before re-listing; the fixture names the runtime-authored route. Re-run on main c91af8ed6. Runtime route on stock showcase: three skills PUT (200 each); initialize declares the prompts capability; prompts/list carries qa_prompt_full with title and description, not qa_prompt_bare or qa_prompt_off; prompts/get qa_prompt_full returns the authored instructions verbatim; prompts/get qa_prompt_bare and an unknown name answer -32602; PUT qa_prompt_off active:true and the next list carries it. File route on a scratch copy of the showcase under os dev: list carried only qa_prompt_full; saving active:true rebuilt and restarted the server and the list then carried qa_prompt_off (/meta active true); flipping it back to false with the server stopped and restarting without a build printed the stale-dist warning, and on that boot prompts/list omitted qa_prompt_off while GET /api/v1/meta/skill/qa_prompt_off still read active true. Clause 4: packages/mcp src/skill-prompts.test.ts 12 passed", "ref": "#24036" },
+        { "revision": 3, "date": "2026-10-19", "change": "fixtures.requires[0] gives the runtime-authored skill body the shape the door accepts — checklist-accuracy finding of the 18.0 QA sweep (QA run #24540, ai.skill-instructions-mcp-prompts fixtures.requires; wave anchor #24579 §3). Re-derived at base 9a7838edf5 (packages/spec/src/ai/skill.zod.ts: `tools` is a required array). No clause changed", "ref": "#24649" }
       ]
     },
     {
@@ -824,7 +833,7 @@
       "title": "MCP on v18: a coded refusal on the data tools, list_actions and the record resource renders {error:{code,message,status}} (not the bare message), both MCP doors honour a runtime-authored object's apiEnabled:false including after a restart, and run_action withholds PERMISSION_DENIED details",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -835,11 +844,11 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "MCP enabled on the boot (ai.mcp-http-surface names the switch)",
-          "a runtime-authored scratch object (PUT /api/v1/meta/object on a scratch boot) with apiEnabled:false"
+          "a runtime-authored scratch object (PUT /api/v1/meta/object/NAME on a scratch boot) with enable: { apiEnabled: false } — the key lives under `enable` (a top-level apiEnabled is refused 422 unrecognized key) — and a sharingModel (security-owd-unset refuses an object without one, 422)"
         ]
       },
       "steps": [
-        "call the MCP get_record tool for a missing id; call query_records on the apiEnabled:false object",
+        "call the MCP get_record tool for a missing id — its arguments are { objectName, recordId } (an `id` argument is refused -32602 with a did-you-mean naming recordId); call query_records on the enable.apiEnabled: false object",
         "restart the boot (same file DB) and repeat",
         "call run_action on an action the caller may not run"
       ],
@@ -884,6 +893,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "fixtures.requires[2] and steps[0] name the spellings the doors accept — checklist-accuracy findings of the 18.0 QA sweep (QA runs #24540 and #24558, ai.mcp-coded-refusals-and-runtime-exposure; wave anchor #24579 §3). Re-derived at base 9a7838edf5: get_record takes recordId (packages/mcp/src/mcp-http-tools.ts aliases id → recordId), apiEnabled sits under ObjectSchema.enable, and a runtime object needs a sharingModel (packages/lint security-owd-unset, error tier). No clause changed; step 3's missing PERMISSION_DENIED subject is a fixture gap left for §4",
+          "ref": "#24649"
         }
       ]
     }

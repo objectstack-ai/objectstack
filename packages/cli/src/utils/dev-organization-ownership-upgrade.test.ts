@@ -86,6 +86,8 @@ describe('os dev — the in-place upgrade of a v17-shape development database', 
     expect(result.lines[0]).toContain('✗ Refused (sys_mystery)');
     expect(result.lines.at(-1)).toContain('nothing was changed');
     expect(result.lines.at(-1)).toContain(BACKUP());
+    expect(result.lines.at(-1)).toContain('17.x release');
+    expect(result.lines.at(-1)).not.toContain('--plan-file');
   });
 
   it('a blocked step boots nothing: each blocker is printed, and how to resume', () => {
@@ -118,12 +120,15 @@ describe('os dev — the in-place upgrade of a v17-shape development database', 
     expect(result.lines.at(-1)).toContain(`--apply --plan-file ${join(BACKUP(), 'plan.json')} --backup-taken`);
   });
 
-  it('a database that is not a local SQLite file is not upgraded in place: the ceremony is named instead', () => {
+  it('a database that is not a local SQLite file is not upgraded in place: 18.0\'s position is named instead', () => {
     const result = upgradeDevelopmentDatabase(input(fakeRun({}), { sqliteFile: null, databaseUrl: 'postgres://db/app' }));
     expect(result.ok).toBe(false);
     expect(calls).toEqual([]);
     expect(existsSync(join(dir, 'backups'))).toBe(false);
-    expect(result.lines[0]).toContain('os migrate organization-ownership --dev');
+    expect(result.lines[0]).toContain('17.x release');
+    // 18.0 refuses `os migrate organization-ownership` on every database: the way on names no step of it.
+    expect(result.lines[0]).not.toContain('os migrate organization-ownership');
+    expect(result.lines[0]).not.toContain('--plan-file');
   });
 
   it('the IPC message is recognised by its type alone', () => {

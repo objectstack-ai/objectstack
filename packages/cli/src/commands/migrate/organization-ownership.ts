@@ -327,7 +327,7 @@ export class OrganizationOwnershipCeremony extends Command {
     'verified id-to-name rewrite, mirror deletion and column drops, in that order, ' +
     'resumable from a recorded checkpoint, then the post-check.';
 
-  static override examples = [
+  static override examples: Command.Example[] = [
     '$ os migrate organization-ownership',
     '$ os migrate organization-ownership --out plans/v18-ownership.json',
     '$ os migrate organization-ownership --database-url postgres://… --json',
@@ -1124,6 +1124,25 @@ export default class MigrateOrganizationOwnership extends OrganizationOwnershipC
   static override description =
     'Refused in 18.0, which supports fresh installs only: the v17 → v18 upgrade path ships in an 18.x release. ' +
     OrganizationOwnershipCeremony.description;
+
+  /**
+   * The ceremony's own examples show a plan and an apply, which 18.0 refuses on
+   * every database, fresh or not, so `--help` shows what an invocation answers
+   * in this release instead. The ceremony class keeps its examples for the 18.x
+   * release that registers it.
+   */
+  static override examples: Command.Example[] = [
+    {
+      description:
+        'Refused in 18.0, plan and apply alike: exit 1 with NOT_IMPLEMENTED, nothing read or written. Keep a v17 ' +
+        'database on a 17.x release until the 18.x release that carries the upgrade path',
+      command: '<%= config.bin %> migrate organization-ownership',
+    },
+    {
+      description: 'The same refusal as JSON: error, reason upgrade-unavailable, code NOT_IMPLEMENTED, and the detail',
+      command: '<%= config.bin %> migrate organization-ownership --json',
+    },
+  ];
 
   override async run(): Promise<void> {
     const { flags } = await this.parse(MigrateOrganizationOwnership);

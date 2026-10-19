@@ -1,9 +1,8 @@
 /**
  * ObjectStack standard CEL function library.
  *
- * Registered into the per-evaluation `Environment` by the CEL engine. All
- * functions are pure given a pinned `now` and the pinned data this module is
- * handed — that determinism is what makes `objectstack build` artifacts
+ * Registered into an `Environment` by the CEL engine. All functions are pure
+ * given a pinned `now` and the pinned data this module is handed — that determinism is what makes `objectstack build` artifacts
  * byte-stable across runs. ⛔ Nothing registered here may be handed a resolver,
  * a lazy getter or any other callback into the host: a function that reaches
  * outside its arguments and the data pinned at registration makes the same
@@ -137,7 +136,7 @@ function addMonthsUtc(d: Date, n: number): Date {
  * What `current_user.can(object, verb)` is answered from: the acting subject
  * this evaluation bound, and that subject's effective object permissions.
  *
- * Both halves are DATA, pinned when the environment is built. `subject` is the
+ * Both halves are DATA, pinned for the one evaluation they answer. `subject` is the
  * very object {@link buildScope} mounted under `current_user` (and its `user` /
  * `ctx.user` / `os.user` aliases), carried here so the binding can tell a call
  * ON the acting subject from a call on something else that happens to sit to
@@ -200,9 +199,21 @@ export function registerPermissionPredicate(
   env: Environment,
   binding: PermissionBinding | undefined,
 ): Environment {
+  return bindPermissionPredicate(env, () => binding);
+}
+
+/**
+ * {@link registerPermissionPredicate}, answered from whatever binding `read`
+ * returns at the moment of the call rather than from one fixed at registration.
+ */
+function bindPermissionPredicate(
+  env: Environment,
+  read: () => PermissionBinding | undefined,
+): Environment {
   return env.registerFunction(
     'dyn.can(dyn, dyn): bool',
     (receiver: unknown, object: unknown, verb: unknown): boolean => {
+      const binding = read();
       if (typeof object !== 'string' || object.length === 0) {
         throw new Error(
           'can(object, verb): `object` must be an object NAME (a non-empty string), e.g. ' +
@@ -285,9 +296,21 @@ export function registerCapabilityPredicate(
   env: Environment,
   binding: PermissionBinding | undefined,
 ): Environment {
+  return bindCapabilityPredicate(env, () => binding);
+}
+
+/**
+ * {@link registerCapabilityPredicate}, answered from whatever binding `read`
+ * returns at the moment of the call rather than from one fixed at registration.
+ */
+function bindCapabilityPredicate(
+  env: Environment,
+  read: () => PermissionBinding | undefined,
+): Environment {
   return env.registerFunction(
     'dyn.hasCapability(dyn): bool',
     (receiver: unknown, name: unknown): boolean => {
+      const binding = read();
       if (typeof name !== 'string' || name.length === 0) {
         throw new Error(
           'hasCapability(name): `name` must be a system capability NAME (a non-empty string), ' +
@@ -346,8 +369,44 @@ export function registerStdLib(
   timezone = 'UTC',
   permissionBinding?: PermissionBinding,
 ): Environment {
-  registerPermissionPredicate(env, permissionBinding);
-  registerCapabilityPredicate(env, permissionBinding);
+  const pinned: StdLibBinding = { now, timezone, permissionBinding };
+  return registerBoundStdLib(env, () => pinned);
+}
+
+/**
+ * Everything a stdlib function reads that is not one of its arguments: the
+ * clock, the reference timezone and the permission binding.
+ *
+ * Package-internal (NOT re-exported from `index.ts`).
+ */
+export interface StdLibBinding {
+  readonly now: () => Date;
+  readonly timezone: string;
+  readonly permissionBinding: PermissionBinding | undefined;
+}
+
+/**
+ * {@link registerStdLib}, with every function reading its {@link StdLibBinding}
+ * through `read` at the moment it is CALLED rather than from values fixed when
+ * it was registered.
+ *
+ * This is what lets the engine build the stdlib once and reuse that
+ * environment for every evaluation: it points `read` at a per-evaluation slot
+ * and sets the slot around each `evaluate` (see `celEngine.evaluate`).
+ * {@link registerStdLib} is this function with a `read` that always answers
+ * the same pinned values, so both register the same names with the same
+ * implementations.
+ *
+ * Package-internal (NOT re-exported from `index.ts`).
+ */
+export function registerBoundStdLib(env: Environment, read: () => StdLibBinding): Environment {
+  bindPermissionPredicate(env, () => read().permissionBinding);
+  bindCapabilityPredicate(env, () => read().permissionBinding);
+  const now = (): Date => read().now();
+  const today = (): Date => {
+    const binding = read();
+    return calendarDayUtc(binding.now(), binding.timezone);
+  };
   // `today()` / `daysFromNow()` / `daysAgo()` are calendar-day functions: they
   // resolve to the reference-tz calendar day expressed as a UTC-midnight Date
   // (ADR-0053 Phase 2 D1), never an instant carrying wall-clock time. For a
@@ -356,15 +415,15 @@ export function registerStdLib(
     .registerFunction('now(): google.protobuf.Timestamp', () => now())
     .registerFunction(
       'today(): google.protobuf.Timestamp',
-      () => calendarDayUtc(now(), timezone),
+      () => today(),
     )
     .registerFunction(
       'daysFromNow(int): google.protobuf.Timestamp',
-      (n: bigint | number) => addDaysUtc(calendarDayUtc(now(), timezone), Number(n)),
+      (n: bigint | number) => addDaysUtc(today(), Number(n)),
     )
     .registerFunction(
       'daysAgo(int): google.protobuf.Timestamp',
-      (n: bigint | number) => addDaysUtc(calendarDayUtc(now(), timezone), -Number(n)),
+      (n: bigint | number) => addDaysUtc(today(), -Number(n)),
     )
     // Returns true when `value` is null, undefined, empty string, or empty list.
     // Matches the intent of legacy `ISBLANK()` while staying CEL-idiomatic.

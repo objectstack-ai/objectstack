@@ -571,10 +571,19 @@ export default class MigrateApply extends Command {
         );
         const marker = await readOrganizationOwnershipMarker(engine as never);
         if (!marker.verified) {
+          // 18.0 supports fresh installs only, and its `os migrate
+          // organization-ownership` refuses on every database, plan and apply
+          // alike (`ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE`, ruling record
+          // 6259608309 on the v18 epic, item 1). So neither the `detail` nor the
+          // refusal names a step of that command: they say what 18.0 supports
+          // for a v17 database, in the boot refusal's terms
+          // (`organizationOwnershipRefusalMessage`, `@objectstack/runtime`).
+          // The 18.x release that registers the ceremony names its steps here
+          // again.
           const detail = marker.flag
-            ? `The last run of "os migrate organization-ownership --apply --plan-file FILE" (${marker.flag.last_run_at}) is not verified `
-              + `(${marker.flag.blocking} blocking item(s)).`
-            : 'No run of "os migrate organization-ownership --apply --plan-file FILE" is recorded on this database.';
+            ? `The last run of the organization-ownership ceremony recorded on this database (${marker.flag.last_run_at}) `
+              + `is not verified (${marker.flag.blocking} blocking item(s)).`
+            : 'No run of the organization-ownership ceremony is recorded on this database.';
           if (flags.json) {
             await emitJson({
               ...target, created: [], applied: [], skipped: drift, pending,
@@ -585,9 +594,9 @@ export default class MigrateApply extends Command {
           printError(
             `Refusing this --allow-destructive run: it would drop organization_id from ${organizationDrops.join(', ')}, a drop the organization-ownership ceremony `
             + `owns, and the ceremony has not verified on this database. ${detail} Dropping the column first would turn `
-            + 'every legacy organization row into an environment row without the ceremony\'s promotion or report. Run '
-            + '"os migrate organization-ownership --out PLAN" to write and review its plan, then '
-            + '"os migrate organization-ownership --apply --plan-file PLAN"; it drops these columns itself, in its '
+            + 'every legacy organization row into an environment row without the ceremony\'s promotion or report. 18.0 '
+            + 'supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release '
+            + 'until the 18.x release that carries the upgrade path, whose ceremony drops these columns itself, in its '
             + 'column-drops step, before it records the run verified. Nothing in this run was applied.',
           );
           this.exit(1);
