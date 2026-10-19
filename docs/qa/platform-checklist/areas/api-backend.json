@@ -255,7 +255,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "steps[1] names a slot the $-operator predicate can be stored on — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.enforce-or-remove-authoring-gates step 2; wave anchor #24579 §3): a view filter is the array shape [{field, operator, value}], not a FilterCondition. Re-derived at base 9a7838edf5: ViewFilterRuleSchema (packages/spec/src/ui/view.zod.ts) is a strict rule object, while the widget filter is FilterConditionSchema (ui/dashboard.zod.ts). No clause changed",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -505,7 +505,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "steps[4] states the projection the build serves — checklist-accuracy finding of the 18.0 QA sweep (QA run #24556, api-backend.query-contract-matrix step 5; wave anchor #24579 §3): $select narrows to exactly the requested keys and adds no identity key. Re-derived at base 9a7838edf5 (objectql engine.ts: SqlDriver emits builder.select(query.fields) verbatim). No clause changed",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -628,7 +628,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "acceptance[3] (clause, verify) names the oracle it can be judged by — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.error-envelope-ledger acceptance[3]; wave anchor #24579 §3): HttpStatusErrorCodeMap is a status → floor-code map (400 → VALIDATION_ERROR, 404 → RESOURCE_NOT_FOUND, …), and OBJECT_NOT_FOUND / RECORD_NOT_FOUND / VALIDATION_FAILED have no entry in it. Re-derived at base 9a7838edf5 (packages/spec/src/api/errors.zod.ts: HttpStatusErrorCodeMap, standardErrorCodeForHttpStatus, ErrorHttpStatusMap)",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -738,7 +738,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "steps[3] and acceptance[2].verify send the two ids so each gets an answer — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.bulk-write-contract step 4 / acceptance[2]): updateMany stops at the first failed row by default, so one batch [nonexistent, foreign] reports the foreign id NOT_ATTEMPTED. Re-derived at base 9a7838edf5: BatchOptions continueOnError defaults false (packages/spec/src/api/batch.zod.ts). No clause changed",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -1520,7 +1520,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "steps[4] says what manifest.loading's runtime door is — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.retired-def-refusal step 5; wave anchor #24579 §3): the carrier's type has no runtime write door. Re-derived at base 9a7838edf5: DEFAULT_METADATA_TYPE_REGISTRY (packages/spec/src/kernel/metadata-plugin.zod.ts) has no manifest, package or plugin entry, and the meta door answers an unregistered type 'is not a metadata type' (metadata-protocol protocol.ts). No clause changed",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -1657,7 +1657,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "steps[5] names the MCP argument — checklist-accuracy finding of the 18.0 QA sweep (QA run #24556, api-backend.packaged-action-disabled-dispatch step 6; wave anchor #24579 §3). Re-derived at base 9a7838edf5 (packages/mcp/src/mcp-http-tools.ts run_action input: actionName, objectName, recordId). No clause changed",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -1789,7 +1789,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "knownGaps and acceptance[4].verify record the one arm nothing covers — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.action-activation-door-contract acceptance[4]; wave anchor #24579 §3): the metadata-plane-degraded 503 arm is named in the clause but is neither stock-reachable nor pinned by any file in automated.ref. Re-derived at base 9a7838edf5: the arm is actions.ts's declaration.degraded branch; action-activation-posture-gate.test.ts pins the non-durable store 503 instead, and the metadata-plane 503 pin that exists (http-dispatcher.actions-type-dispatch.test.ts) drives the dispatch door. No clause changed",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -1922,7 +1922,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "steps[3], steps[5], knownGaps[1] and negative[2] name the doors that answer — checklist-accuracy findings of the 18.0 QA sweep (QA run #24541 step 6, and QA run #24595 knownGaps[1] / step 4 / negative[2], api-backend.aggregate-contract-matrix; wave anchor #24579 §3, comment 6272314386). On POST /data/:object/query a non-array aggregations is refused by the request schema before the protocol's worked example, and that door carries no timezone; the lever is POST /api/v1/analytics/query on cube showcase_delivery / due_date. negative[2] now says a date dimension's labels are zone-independent; that row's FAIL was the product defect #24618, which PR #24642 (787939130c) fixed on main after this round's base; the clause is unchanged. Re-derived at base 9a7838edf5 (protocol.ts assertAggregationFieldsExist, objectql engine.ts ENGINE_AGGREGATE_OPTION_KEYS, spec data/analytics.zod.ts timezone, examples/app-showcase/src/data/analytics/showcase.cube.ts)",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -2033,7 +2033,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "steps[2] says which half of the coalesce edge an expression can reach — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.formula-stdlib-matrix acceptance[2] / step 3; wave anchor #24579 §3): undefined is not observable through CEL. Re-derived at base 9a7838edf5: coalesce treats null and undefined alike (packages/formula/src/stdlib.ts), and a missing record key faults 'No such key' first. No clause changed",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -2159,7 +2159,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "fixtures.requires[1], steps[6] and acceptance[2].verify corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24541, api-backend.api-methods-verb-gate fixtures and step 7; wave anchor #24579 §3). A scratch object needs a sharingModel (security-owd-unset, error tier); the cross-object /batch refusal names `bulk` (batch-routes.ts checks bulk with the row verb as its child); and a non-array apiMethods is refused by Zod at PUT (\"only producible by a raw/out-of-band metadata write\", api-derivation.ts), so its fail-closed arm is pinned, not live — api-derivation.test.ts measured at base 9a7838edf5 under os-verify-lock (32 passed). Re-derived at base 9a7838edf5. Left alone from the same finding: the OS_METADATA_WRITABLE=object half (object declares allowRuntimeCreate: true, so a NEW object needs no hatch; QA run #24558 authored scratch objects without one)",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -2281,7 +2281,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "knownGaps[1], automated.ref and acceptance[2] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24541, api-backend.rest-crud-config-contract knownGaps[1] + automated.ref and acceptance[2]; wave anchor #24579 §3). \"The MOUNT half has no permanent pin\" is stale: rest-config-mount-table.pin.test.ts (#15544) pins every crud.operations.* radius, measured at base 9a7838edf5 under os-verify-lock (24 passed). acceptance[2] was an api clause no stock boot can observe (knownGaps[0] makes every non-default clause harness-scored) and its dispatcher-vs-hono-route trap is not discharged by a RestServer-only table, since the dispatcher's data domain also serves /data; it now reads oracle test and says so. Re-derived at base 9a7838edf5; FOLLOW-UPS.md is not edited here",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -2410,7 +2410,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "knownGaps[1] and automated.ref corrected — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.rest-batch-config-contract knownGaps[1] + automated.ref; wave anchor #24579 §3): the mount half has a permanent pin, rest-config-mount-table.pin.test.ts (#15544), covering batch.enableBatchEndpoint, operations.*Many and the protocol-member conjunct — measured at base 9a7838edf5 under os-verify-lock (24 passed). No clause changed; FOLLOW-UPS.md is not edited here",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -2552,7 +2552,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "steps[8], acceptance[4] (clause, verify) and personas[1] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24541, api-backend.rest-metadata-config-contract acceptance[4] / step 9 and personas[1]; wave anchor #24579 §3). The enableCache carve-outs are SEVEN: a ?member= read also bypasses getMetaItemCached (packages/rest/src/meta-item-read-routes.ts, memberScoped, #22877, at base 9a7838edf5); and personas[1] still named showcase_account, which revision 4 moved to showcase_project / client_liaison everywhere else in the item",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -2734,7 +2734,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "steps[0], steps[1] and acceptance[1].clause corrected — checklist-accuracy findings of the 18.0 QA sweep (QA runs #24541 and #24558, api-backend.second-object-exposure-and-internal-fields; wave anchor #24579 §3). The dotted filter path is refused INVALID_FIELD before the exposure gate, the by-id door takes `expand` not `$expand`, and the refusal locates the condition at filter.t_ref. Re-derived at base 9a7838edf5: protocol.ts refuseInternalInFilter passes the position 'filter' for where and filter alike and refuseUnservedRelationTarget names `${param}.${field}`; DATA_RECORD_READ_PARAMS = ['select', 'expand'] (packages/rest/src/rest-server.ts)",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -2824,7 +2824,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "steps[4] names a row the member really cannot read — checklist-accuracy finding of the 18.0 QA sweep (QA run #24558, api-backend.data-request-shape-and-query-arity step 5; wave anchor #24579 §3): showcase_task is public_read_write. Re-derived at base 9a7838edf5 (examples/app-showcase/src/data/objects: task.object.ts sharingModel public_read_write, private-note.object.ts private). No clause changed",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -2911,7 +2911,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "fixtures.requires[1], steps[4] and acceptance[4] (clause, verify) corrected — checklist-accuracy findings of the 18.0 QA sweep (QA runs #24541 and #24558, api-backend.meta-read-doors-v18 step 5 / acceptance[4] and fixtures; wave anchor #24579 §3). The FLS step named showcase_task, which declares no FLS; the restricted field is showcase_project.budget for a client_liaison-bound member. The pin's contract is that the unreadable field is absent from sortability, not marked unsortable. Only the en-US email member ships, and PUT takes no ?member= (META_ITEM_SAVE_PARAMS: force, package, mode, surface — packages/rest/src/meta-item-read-gate.ts at base 9a7838edf5), so the zh-CN member is authored with a body locale",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -2993,7 +2993,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "fixtures.requires[2], steps[0], steps[2] and acceptance[1] (clause, verify) corrected — checklist-accuracy findings of the 18.0 QA sweep (QA runs #24541 and #24558, api-backend.error-sentences-and-unique-violation-wire-code fixtures / step 1 / acceptance[1] / step 3; wave anchor #24579 §3). A package hook on sys_sharing_rule is refused at compile (packages/spec/src/stack.zod.ts hook → object reference check, at base 9a7838edf5); the /data door answers a hook refusal 400 with no code by pinned design, and VALIDATION_ERROR is the hand-built rows' re-dress (REFUSED_400 in the ledger pin). The live leg moves to a /data door. acceptance[1]'s product defect #24561 closed with PR #24631 (4ff18d3f0b, a batch row answers the hook's words), which this re-derivation includes; acceptance[2] (round 1's re-point) is unchanged",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     }

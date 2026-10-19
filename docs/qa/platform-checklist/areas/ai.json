@@ -118,7 +118,7 @@
           "revision": 6,
           "date": "2026-10-19",
           "change": "steps[1] and acceptance[3].verify corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24540, ai.agent-tool-skill-metadata-roundtrip; wave anchor #24579 §3). Compiling an app-package agent now warns agent-authoring-withdrawn (packages/lint/src/validate-ai-agent-authoring.ts, warning tier) while the meta door still serves it, and the package-shipped agent PUT answers NOT_OVERRIDABLE where revision 5's history cited only the runtime-name NOT_CREATABLE. Re-derived at base 9a7838edf5. No clause changed",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -208,7 +208,7 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial — the #3358 sweep could not drive MCP because the config was off; both sides are now explicit", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-10-16", "change": "clause 5's tool list omitted resume_run (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 with an admin osk_ key: tools/list returns twelve tools, resume_run among them; mcp-http-tools.ts registers it only when the bridge exposes resumeRun, the same optional shape as aggregate_records, so the verify now names that degradation too", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-19", "change": "variants[0] and steps[5] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24540, ai.mcp-http-surface; wave anchor #24579 §3). The data:read family also serves aggregate_records and validate_expression (both read-only), and a local OAuth leg needs a native client. Re-derived at base 9a7838edf5 (mcp-http-tools.ts registers validate_expression and, when the bridge exposes aggregate, aggregate_records inside the canRead gate; the oauth-provider DCR rule in the installed @better-auth/oauth-provider 1.7.3). No clause changed", "ref": "#PENDING-24579R3" }
+        { "revision": 4, "date": "2026-10-19", "change": "variants[0] and steps[5] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24540, ai.mcp-http-surface; wave anchor #24579 §3). The data:read family also serves aggregate_records and validate_expression (both read-only), and a local OAuth leg needs a native client. Re-derived at base 9a7838edf5 (mcp-http-tools.ts registers validate_expression and, when the bridge exposes aggregate, aggregate_records inside the canRead gate; the oauth-provider DCR rule in the installed @better-auth/oauth-provider 1.7.3). No clause changed", "ref": "#24649" }
       ]
     },
     {
@@ -410,7 +410,7 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial import from the 15.1 plan §A9", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-10-16", "change": "step 1 called list_actions with objectName: 'showcase_task' as a second form (#23878 checklist-accuracy finding). list_actions takes no arguments: re-measured on main c91af8ed6 the objectName call answers isError with MCP error -32602 'Unrecognized key(s) … objectName', while the no-argument call returns [showcase_portfolio_snapshot]. Re-run of the item's clauses on that boot: showcase_mark_done refused with the actionAiExposureError prescription and the task unchanged; showcase_portfolio_snapshot returns accounts 14 / projects 5 / invoices 12, equal to the REST totals; the [action-audit] MCP run_action line names the caller; a sys_* object is refused", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-19", "change": "acceptance[4].clause quotes both live spellings of the guard — checklist-accuracy finding of the 18.0 QA sweep (QA run #24540, ai.mcp-run-action-exposure-gate clause 4; wave anchor #24579 §3): the clause's quote matched only the runtime guard's. Re-derived at base 9a7838edf5 (packages/mcp/src/mcp-http-tools.ts and packages/runtime/src/action-execution.ts)", "ref": "#PENDING-24579R3" }
+        { "revision": 4, "date": "2026-10-19", "change": "acceptance[4].clause quotes both live spellings of the guard — checklist-accuracy finding of the 18.0 QA sweep (QA run #24540, ai.mcp-run-action-exposure-gate clause 4; wave anchor #24579 §3): the clause's quote matched only the runtime guard's. Re-derived at base 9a7838edf5 (packages/mcp/src/mcp-http-tools.ts and packages/runtime/src/action-execution.ts)", "ref": "#24649" }
       ]
     },
     {
@@ -556,7 +556,7 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: the open framework's one live skill consumer (#3905) had no checklist coverage", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-10-17", "change": "steps[5] said 'reload metadata' without naming what makes a source edit live (checklist-accuracy finding, #23878 close-out): os dev serves the built dist, so a bare restart re-serves the old definition at /meta while the MCP projection follows the source. The step now names the rebuild routes (the watcher's rebuild + restart, objectstack build, --compile), the stale-boot warning, the runtime PUT route, and a /meta active:true check before re-listing; the fixture names the runtime-authored route. Re-run on main c91af8ed6. Runtime route on stock showcase: three skills PUT (200 each); initialize declares the prompts capability; prompts/list carries qa_prompt_full with title and description, not qa_prompt_bare or qa_prompt_off; prompts/get qa_prompt_full returns the authored instructions verbatim; prompts/get qa_prompt_bare and an unknown name answer -32602; PUT qa_prompt_off active:true and the next list carries it. File route on a scratch copy of the showcase under os dev: list carried only qa_prompt_full; saving active:true rebuilt and restarted the server and the list then carried qa_prompt_off (/meta active true); flipping it back to false with the server stopped and restarting without a build printed the stale-dist warning, and on that boot prompts/list omitted qa_prompt_off while GET /api/v1/meta/skill/qa_prompt_off still read active true. Clause 4: packages/mcp src/skill-prompts.test.ts 12 passed", "ref": "#24036" },
-        { "revision": 3, "date": "2026-10-19", "change": "fixtures.requires[0] gives the runtime-authored skill body the shape the door accepts — checklist-accuracy finding of the 18.0 QA sweep (QA run #24540, ai.skill-instructions-mcp-prompts fixtures.requires; wave anchor #24579 §3). Re-derived at base 9a7838edf5 (packages/spec/src/ai/skill.zod.ts: `tools` is a required array). No clause changed", "ref": "#PENDING-24579R3" }
+        { "revision": 3, "date": "2026-10-19", "change": "fixtures.requires[0] gives the runtime-authored skill body the shape the door accepts — checklist-accuracy finding of the 18.0 QA sweep (QA run #24540, ai.skill-instructions-mcp-prompts fixtures.requires; wave anchor #24579 §3). Re-derived at base 9a7838edf5 (packages/spec/src/ai/skill.zod.ts: `tools` is a required array). No clause changed", "ref": "#24649" }
       ]
     },
     {
@@ -898,7 +898,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "fixtures.requires[2] and steps[0] name the spellings the doors accept — checklist-accuracy findings of the 18.0 QA sweep (QA runs #24540 and #24558, ai.mcp-coded-refusals-and-runtime-exposure; wave anchor #24579 §3). Re-derived at base 9a7838edf5: get_record takes recordId (packages/mcp/src/mcp-http-tools.ts aliases id → recordId), apiEnabled sits under ObjectSchema.enable, and a runtime object needs a sharingModel (packages/lint security-owd-unset, error tier). No clause changed; step 3's missing PERMISSION_DENIED subject is a fixture gap left for §4",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     }

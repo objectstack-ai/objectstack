@@ -128,7 +128,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "knownGaps[1], steps[3] and steps[4] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24570, ux-conventions.write-feedback; wave anchor #24579 §3). The Studio Discard row no longer reproduces as an expected FAIL: objectstack-ai/objectui#12690 is closed (objectui PR #12830, merge 0f42aaf8, an ancestor of the console pin 4016370a and of objectui main, measured by merge-base --is-ancestor exit 0), and the run read the label. showcase_task carries no create-time validation rule (examples/app-showcase/src/data/objects/task.object.ts: one state_machine on update), and the stock member cannot update or delete tasks (security/permission-sets.ts at base 9a7838edf5). No clause changed",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -224,7 +224,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "knownGaps[1]'s two expected FAILs re-pointed to regression rows — checklist-accuracy finding of the 18.0 QA sweep (QA run #24570, ux-conventions.disabled-control-reason knownGaps[1]; wave anchor #24579 §3): objectstack-ai/objectui#12303 and #12691 no longer reproduce at 4016370a. Read on objectui: both issues are closed completed, by PR #12324 (merge b64fda3f) and PR #12833 (merge d0a00d79); each merge is an ancestor of the console pin 4016370a and of objectui main (merge-base --is-ancestor exit 0), and the wrapper code is present on main. No clause changed",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     },
@@ -333,7 +333,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "knownGaps[0]'s expected FAILs (a) and (b) re-pointed to regression rows — checklist-accuracy finding of the 18.0 QA sweep (QA run #24570, ux-conventions.labels-over-machine-names knownGaps[0]; wave anchor #24579 §3): objectstack-ai/objectui#12693 (a) and (b) no longer reproduce at 4016370a. Read on objectui: the issue is closed completed by PR #12834 (merge cda4076b), an ancestor of the console pin 4016370a and of objectui main (merge-base --is-ancestor exit 0). The run's new acceptance[0] rows are the product defect it extracted (objectstack-ai/objectui#13056) and stay out of this ledger edit. No clause changed",
-          "ref": "#PENDING-24579R3"
+          "ref": "#24649"
         }
       ]
     }
