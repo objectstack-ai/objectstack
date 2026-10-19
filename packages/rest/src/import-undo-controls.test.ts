@@ -36,6 +36,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { SysImportJob } from '@objectstack/platform-objects/audit';
+import { UndoImportJobResponseSchema } from '@objectstack/spec/api';
 import { RestServer } from './rest-server';
 
 function makeSqliteDriver() {
@@ -283,6 +284,8 @@ describe('[#24380] an import undo runs under the object\'s declared controls for
     expect(res._json.failures).toEqual([
       { id: 't_closed', action: 'restore', code: 'VALIDATION_FAILED', error: 'A closed ticket stays closed.' },
     ]);
+    // The answer is the published contract's, field for field.
+    expect(UndoImportJobResponseSchema.strict().safeParse(res._json).success).toBe(true);
     expect(await ctx.record('ou_ticket', 't_closed')).toMatchObject({ status: 'closed' });
     expect(await ctx.record('ou_ticket', 't_renamed')).toMatchObject({ title: 'old name' });
 
