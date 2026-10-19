@@ -227,15 +227,22 @@ export const SysMember = ObjectSchema.create({
       successMessage: 'Member removed',
       refreshAfter: true,
     },
-    // Transfer ownership is modeled as `update-member-role` with role=owner
-    // (better-auth's organization plugin auto-demotes the previous owner
-    // to admin). Kept as a separate action so the row menu can present a
-    // distinct destructive-style affordance with the right confirm copy —
-    // mixing it into `update_member_role` would hide the ownership-handoff
-    // semantics behind a generic role dropdown.
+    // Make Owner is `update-member-role` with role=owner, and better-auth's
+    // `updateMemberRole` writes the TARGET's role and nothing else: the caller
+    // stays an owner, so the organization ends with two. The copy promises
+    // exactly that. Stepping down is the caller's own Change Role
+    // (`update_member_role`) on their own row, which the confirm names; the
+    // vendor refuses it only while the caller is the last owner
+    // (`YOU_CANNOT_LEAVE_THE_ORGANIZATION_WITHOUT_AN_OWNER`). Measured on a
+    // booted stack: `member-transfer-ownership-step-down.dogfood.test.ts`.
+    // Kept as a separate action so the row menu can present a distinct
+    // danger-variant affordance with its own confirm — granting the creator
+    // role hidden in `update_member_role`'s generic role dropdown would be
+    // easy to miss. The `name` stays `transfer_ownership`: it is the action's
+    // id and its MEMBERSHIP_REACH row's key, which consumers name.
     {
       name: 'transfer_ownership',
-      label: 'Transfer Ownership',
+      label: 'Make Owner',
       icon: 'crown',
       variant: 'danger',
       mode: 'custom',
@@ -256,8 +263,8 @@ export const SysMember = ObjectSchema.create({
       visible: "has(record.role) && record.role != 'owner'",
       requiresFeature: 'organization',
       requiresMembershipReach: 'transfer_ownership',
-      confirmText: 'Transfer ownership of this organization to the selected member? You will be demoted to admin and lose owner-only privileges.',
-      successMessage: 'Ownership transferred',
+      confirmText: 'Make the selected member an owner of this organization? They get every owner privilege, including deleting the organization. You stay an owner too; to step down, use Change Role on your own membership.',
+      successMessage: 'Member is now an owner',
       refreshAfter: true,
     },
   ],
