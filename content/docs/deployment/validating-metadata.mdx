@@ -709,8 +709,11 @@ findings the item **added** (#4463). Its package dimension narrows that context 
 the written item's **package closure** — the written package, its declared
 dependencies, and unconditionally both platform/system objects and rows carrying
 no package provenance (#9612); a provenance it cannot read narrows nothing at all.
-That changes what a rule can **resolve**, never what it judges, and nothing at
-this door walks `packages[]`. So "runs per package" names one thing at the three
+That changes what a rule can **resolve**, never which rules run, and nothing at
+this door walks `packages[]`. One rule is told the closure is in force: a list
+view bound to an object outside it draws the advisory
+`list-view-object-outside-closure` instead of having its field references
+skipped (#24563). So "runs per package" names one thing at the three
 CLI doors and another one here, and the `runtime publish` column says neither.
 
 A clean run walks the registry and reports timing:
