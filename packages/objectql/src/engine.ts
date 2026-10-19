@@ -17433,20 +17433,31 @@ export class ObjectQL implements IObjectQLEngine {
            // permanently true here: it states the invariant, and the invariant
            // outlives this call site.
            if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any) as any;
+           // [#24619] The stored computed fields over the stored row merged
+           // with the caller's patch, BEFORE the beforeUpdate hooks, so a hook
+           // sees the expression's value over the PRE-strip row. That is not
+           // always the stored value: an input the `readonlyWhen` strip takes
+           // back out below still feeds this pass. Pass 2, after the hooks and
+           // both strips, is the value stored.
+           //
+           // Written onto the RAW payload (`opCtx.data`, the recording's
+           // target), never through `hookWrites.payload`: this pass runs
+           // inside the recording window, and an ENGINE write must not be
+           // recorded as a HOOK write (the rule at the hide pass above). And
+           // never onto a key the hide pass withheld: for those the read-only
+           // strips judge the caller's submission, reporting and, under
+           // `strictReadonlyWrites`, refusing it as they always have.
+           if (storedExpressionPlan.length > 0 && opCtx.data && typeof opCtx.data === 'object') {
+               const raw = opCtx.data as Record<string, unknown>;
+               const [computed] = await computeStoredExpressions(storedExpressionPlan, [{ ...priorRecord, ...raw }], opCtx.context, storedExpressionServing);
+               for (const name of Object.keys(readonlyHiddenFromHooks ?? {})) delete computed[name];
+               applyStoredExpressionsToPatch(raw, computed, priorRecord);
+           }
            // [commit 706ad0fcc] All three `beforeUpdate` dispatch sites inside the hide
            // window share one wrapper, so a hook that faults reaching THROUGH a
            // key this pass withheld names that key instead of surfacing the
            // platform's own contract enforcement as the author's crash. It
            // rethrows the original error untouched on every other path.
-           // [#24619] The stored computed fields over the stored row merged
-           // with the patch, BEFORE the beforeUpdate hooks, so a hook is handed
-           // the value the write stores (#16344's ruling). Computed again over
-           // the final payload below, after the hooks and both strips.
-           if (storedExpressionPlan.length > 0 && hookContext.input.data && typeof hookContext.input.data === 'object') {
-               const patch = hookContext.input.data as Record<string, unknown>;
-               const [computed] = await computeStoredExpressions(storedExpressionPlan, [{ ...priorRecord, ...patch }], opCtx.context, storedExpressionServing);
-               applyStoredExpressionsToPatch(patch, computed, priorRecord);
-           }
            await dispatchHooksExplainingWithheldReadonly(readonlyHiddenFromHooks, 'beforeUpdate',
              () => this.triggerHooks('beforeUpdate', hookContext));
            // The retired lever, refused. Everything above — `previous`, and

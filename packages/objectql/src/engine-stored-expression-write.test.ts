@@ -20,6 +20,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
+import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 
 function makeDriver() {
   const stores = new Map<string, Map<string, any>>();
@@ -205,6 +206,44 @@ describe('a stored field\'s declared expression is computed on write (#24619)', 
       await engine.update('showcase_invoice_line', { id: 'line_draft', quantity: 5, amount: 1 });
       expect(seen).toEqual([50]);
       expect(line('line_draft')).toMatchObject({ quantity: 9, amount: 90 });
+    });
+  });
+
+  describe('a stored expression field that is also `readonly`, updated by id with its value and a moved input', () => {
+    // The pre-hook pass runs inside the hook-write recording window. Were it
+    // to write through the recording, the engine's value would read as a
+    // HOOK write and the static strip would keep it: no `readonly` report,
+    // no strict refusal. The strips judge the caller's submission instead.
+    beforeEach(() => {
+      engine.registry.registerObject({
+        name: 'qa_locked_line',
+        fields: {
+          quantity: { type: 'number' },
+          unit_price: { type: 'currency' },
+          amount: { type: 'currency', readonly: true, expression: { dialect: 'cel', source: 'record.quantity * record.unit_price' } },
+        },
+      } as any);
+      storeFor('qa_locked_line').set('ll_1', { id: 'll_1', quantity: 3, unit_price: 10, amount: 30 });
+    });
+
+    it('reports the caller\'s value as a `readonly` drop and stores the expression\'s', async () => {
+      const events: any[] = [];
+      await engine.update(
+        'qa_locked_line',
+        { id: 'll_1', quantity: 4, amount: 5 },
+        { onFieldsDropped: (e: any) => events.push(e) } as any,
+      );
+      expect(events).toContainEqual({ object: 'qa_locked_line', fields: ['amount'], reason: 'readonly' });
+      expect(storeFor('qa_locked_line').get('ll_1')).toMatchObject({ quantity: 4, amount: 40 });
+    });
+
+    it('is refused under `strictReadonlyWrites`, writing nothing', async () => {
+      const err: any = await engine
+        .update('qa_locked_line', { id: 'll_1', quantity: 4, amount: 5 }, { strictReadonlyWrites: true } as any)
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ReadonlyFieldRejectedError);
+      expect(err.fields).toContain('amount');
+      expect(storeFor('qa_locked_line').get('ll_1')).toMatchObject({ quantity: 3, amount: 30 });
     });
   });
 
