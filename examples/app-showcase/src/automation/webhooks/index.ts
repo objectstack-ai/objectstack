@@ -3,7 +3,9 @@
 import { defineWebhook } from '@objectstack/spec/automation';
 
 /**
- * Outbound webhook — fans out task changes to an external endpoint.
+ * Outbound webhook — fans out task lifecycle events (create/update/delete)
+ * to an external endpoint. No `label` / `description`: a declared webhook has
+ * no Setup row to show them on, and the liveness ledger marks both dead.
  * Authored via `defineStack({ webhooks })`; the webhooks plugin's dispatcher
  * reads this declaration from the registry (ADR-0131 D2) — no `sys_webhook`
  * row is written for it.
@@ -18,13 +20,11 @@ import { defineWebhook } from '@objectstack/spec/automation';
  */
 export const TaskChangedWebhook = defineWebhook({
   name: 'showcase_task_changed',
-  label: 'Task Changed → External',
   object: 'showcase_task',
   triggers: ['create', 'update', 'delete'],
   url: 'https://hooks.example/showcase/task',
   method: 'POST',
   isActive: false,
-  description: 'Sends task lifecycle events to an external system. Activate in Setup and point at a real endpoint.',
 });
 
 export const allWebhooks = [TaskChangedWebhook];

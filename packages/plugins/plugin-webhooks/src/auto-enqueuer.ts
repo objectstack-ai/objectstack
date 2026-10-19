@@ -1409,11 +1409,17 @@ export class AutoEnqueuer {
      * webhook — accepted, and said once so the subscription is not dead while
      * looking armed.
      *
-     * **`none` × `absent` — deliver.** A `single`-posture deployment stamps
-     * nothing on either side (`postureStampsOrganization` is false there), so
-     * this cell is every event on every non-walled install; on a walled one
-     * it is an environment-wide subscription taking an environment-wide
-     * event. No organization is named anywhere, so there is no wall to cross.
+     * **`none` × `absent` — deliver.** An environment-wide subscription taking
+     * an environment-wide event: no organization is named anywhere, so there is
+     * no wall to cross. ⚠ It is NOT every event on a `single` install: since
+     * ADR-0131 D9 every record there is stamped with the Default Organization,
+     * so a `single` event names that organization like a walled one does.
+     *
+     * **A deployment-wide declared webhook — deliver, whatever the event names.**
+     * Checked first ({@link CachedSubscription.deploymentWide}): a declared
+     * webhook on a posture with no wall belongs to the deployment, so every
+     * organization's event is its own. Without it the `none` × `org A` row
+     * above would refuse every event on a `single` install.
      *
      * Both refusals are said ONCE per subscription (the #8022 say-once rule,
      * ledger {@link organizationRefusalReported}): the first refused event is

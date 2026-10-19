@@ -11,7 +11,8 @@
     "label": {
       "status": "dead",
       "note": "Display-only — surfaced in Studio, never sent on the wire.  2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) — see the file `_note` for what the re-closure found across this ledger; re-closed by hand against c459da6bc, DATED for the first time.  2026-10-19: DEAD since ADR-0131 D2 retired the boot seeder `bootstrapDeclaredWebhooks`, which was its only reader — it copied this value into the declared webhook's `sys_webhook` row, where the Setup list showed it. A declared webhook has no row any more, and nothing displays a declaration: the dispatcher reads only what it delivers on (`auto-enqueuer.ts#projectDeclared`), the activation door only the name. Display-only, so the loss is a label nobody sees, never a delivery that changes. Enforce-or-remove (ADR-0049) is owed: a Setup surface that lists declared webhooks (the declared-sharing-rule Disable and Clone surface is the pattern) makes it live again, otherwise it retires.",
-      "verifiedAt": "2026-10-19"
+      "verifiedAt": "2026-10-19",
+      "authorHint": "A declared webhook's `label` is shown nowhere: declared webhooks are read from the registry and have no Setup row. Remove it — it changes no delivery. A webhook your organization authors in Setup keeps its label."
     },
     "object": {
       "status": "live",
@@ -65,7 +66,8 @@
     "description": {
       "status": "dead",
       "note": "Display-only — surfaced/editable in Studio, inert in dispatch.  2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) — see the file `_note` for what the re-closure found across this ledger; re-closed by hand against c459da6bc, DATED for the first time.  2026-10-19: DEAD since ADR-0131 D2 retired the boot seeder `bootstrapDeclaredWebhooks`, which was its only reader — it copied this value into the declared webhook's `sys_webhook` row, where the Setup list showed it. A declared webhook has no row any more, and nothing displays a declaration: the dispatcher reads only what it delivers on (`auto-enqueuer.ts#projectDeclared`), the activation door only the name. Display-only, so the loss is a label nobody sees, never a delivery that changes. Enforce-or-remove (ADR-0049) is owed: a Setup surface that lists declared webhooks (the declared-sharing-rule Disable and Clone surface is the pattern) makes it live again, otherwise it retires.",
-      "verifiedAt": "2026-10-19"
+      "verifiedAt": "2026-10-19",
+      "authorHint": "A declared webhook's `description` is shown nowhere: declared webhooks are read from the registry and have no Setup row. Remove it — it changes no delivery; keep the explanation as a code comment instead."
     }
   }
 }
