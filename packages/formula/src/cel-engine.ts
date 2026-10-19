@@ -61,10 +61,11 @@ export const CEL_ENV_OPTIONS = {
  * the authoritative environment through the same constructor the engine uses.
  *
  * `permissionBinding` is the acting subject plus its effective object
- * permissions, pinned for this one evaluation (see `PermissionBinding`). Every
- * caller that is not evaluating — `compile()`, the drift pin, the
- * function-existence oracle — omits it, and that is exactly right: it changes
- * what `can` ANSWERS, never whether `can` EXISTS, so the set of registered
+ * permissions and held system capabilities, pinned for this one evaluation
+ * (see `PermissionBinding`). Every caller that is not evaluating —
+ * `compile()`, the drift pin, the function-existence oracle — omits it, and
+ * that is exactly right: it changes what `can` / `hasCapability` ANSWER, never
+ * whether they EXIST, so the set of registered
  * names is identical with and without it and a publish-time verdict can never
  * disagree with the runtime about which names resolve.
  */
@@ -1805,6 +1806,7 @@ export const celEngine: DialectEngine = {
       const env = buildEnv(now, ctx.timezone ?? 'UTC', {
         subject: scope.current_user,
         permissions: ctx.permissions,
+        systemPermissions: ctx.systemPermissions,
       });
       // #3183 — coerce a date-field operand compared with `==`/`!=` against a
       // temporal function (`date(record.d) == today()`), so a `Field.date` string
