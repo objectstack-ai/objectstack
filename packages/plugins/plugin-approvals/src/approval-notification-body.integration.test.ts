@@ -111,8 +111,11 @@ const ORG_A = 'org_battery_a';
 const ORG_B = 'org_battery_b';
 const orgOfDeal = (key: string): string => (key.startsWith('sla_') ? ORG_B : ORG_A);
 
-/** The fields `notify()` declares for a notification's payload. */
-const PAYLOAD_FIELDS = new Set(['title', 'body', 'actionUrl', 'actions']);
+/**
+ * The fields `notify()` declares for a notification's payload. [#24564] No
+ * `actions`: an ADR-0043 action link never rides a payload messaging stores.
+ */
+const PAYLOAD_FIELDS = new Set(['title', 'body', 'actionUrl']);
 
 const sysUser = {
   name: 'sys_user',
@@ -230,7 +233,7 @@ describe('every approval notification carries its text in body', () => {
     expect(thread.pending_approvers).toEqual(['position:legal', 'u_alice']);
     await svc.comment(ids.thread, { actorId: 'u_sub', comment: COMMENT }, asUser('u_sub'));
     await svc.requestInfo(ids.thread, { actorId: 'u_alice', comment: QUESTION }, asUser('u_alice'));
-    // A remind reaches the person with their own action links.
+    // A remind reaches the person — with no action link (#24564).
     await svc.remind(ids.thread, { actorId: 'u_sub' }, asUser('u_sub'));
     await svc.reassign(ids.thread, { actorId: 'u_alice', to: 'u_bob' }, asUser('u_alice'));
 
@@ -298,8 +301,8 @@ describe('every approval notification carries its text in body', () => {
       'approval.returned@revise',
       'approval.returned@rework',
       'approval.reassigned@thread',
-      'approval.reminder@thread+links',
-      'approval.reminder@bare+links',
+      'approval.reminder@thread',
+      'approval.reminder@bare',
       'approval.request_info@thread',
       'approval.comment@thread',
       'approval.escalated@sla_reassign',
@@ -328,7 +331,7 @@ describe('every approval notification carries its text in body', () => {
     // name in each body, not the rest of the sentence around it.
     const NAMED: Record<string, string> = {
       'approval.requested@thread': 'Deal D_thread',
-      'approval.reminder@thread+links': 'Deal D_thread',
+      'approval.reminder@thread': 'Deal D_thread',
       'approval.sla_breached@sla_notify': 'Deal D_sla_notify',
       'approval.sla_breached@sla_notify>submitter': 'Deal D_sla_notify',
       'approval.escalated@sla_reassign': 'Deal D_sla_reassign',
@@ -339,7 +342,7 @@ describe('every approval notification carries its text in body', () => {
       'approval.ooo_skipped@ooo': 'Deal D_ooo',
       // The control: the object's schema has no label, so the record is named
       // by the object's API name and the id.
-      'approval.reminder@bare+links': 'crm_memo D_bare',
+      'approval.reminder@bare': 'crm_memo D_bare',
     };
     const offenders = Object.entries(NAMED).flatMap(([site, name]) => {
       const bodies = emits.filter((e) => siteOf(e) === site).map((e) => String(e.payload?.body));

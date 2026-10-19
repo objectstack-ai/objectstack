@@ -54,10 +54,27 @@
 // Real better-auth pipeline throughout (the #3585 EdDSA / #4785 session-of-record
 // precedent: patch the real thing, never stub our own code).
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import { createTenancyService, type TenancyService, type TenancyPosture } from './tenancy-service';
+// [#23184] better-auth's first module load is paid HERE, at module load, and
+// not inside the first clocked case: clocked windows measure behaviour, never
+// loading (AGENTS.md, Build & Test). `AuthManager` reaches these vendor modules
+// through a lazy `await import()`, so without these lines the first case paid
+// about 0.8 s of vendor module evaluation on a dev container. The module cache
+// hands `AuthManager` these same instances, and better-auth's one load-time
+// read (`NODE_ENV`, kept by its env module when first evaluated) already
+// happened at the `./auth-manager` import above, through
+// `better-auth/adapters`, so nothing a case runs is different.
+import 'better-auth';
+import 'better-auth/api';
+import 'better-auth/plugins';
+import 'better-auth/plugins/bearer';
+import 'better-auth/plugins/custom-session';
+import 'better-auth/plugins/organization';
+import 'better-auth/plugins/organization/access';
+import '@better-auth/oauth-provider';
 
 /**
  * In-memory IDataEngine — same shape as the #4785 harness (`fields` really
@@ -195,9 +212,44 @@ interface Scenario {
 }
 
 /**
- * Boot a manager under a scenario and run the whole guided path: sign up, then
- * ask for a workspace. Returns the real HTTP answer plus the `/auth/config`
- * flag the console would have rendered its button from.
+ * [#23184] The founder's sign-up, made ONCE per file through the real
+ * `/sign-up/email` route, on an engine and a manager of its own.
+ *
+ * The sign-up is the costly step of a guided run (one production-parameter
+ * scrypt derivation under a fresh salt, most of each case's wall), and no case
+ * is about it: each case is about what `organization/create` and
+ * `/auth/config` answer for a signed-in founder under a scenario. So
+ * {@link runGuidedWorkspaceCreation} starts each case from a deep copy of the
+ * tables this sign-up wrote, on the case's own engine, with the case's own
+ * manager built under the case's own scenario, and presents the session cookie
+ * this sign-up answered. Both knobs are unset while it runs. Measured across
+ * every scenario in this file, a sign-up run under the scenario itself writes
+ * the same rows (ids, tokens, hashes and timestamps aside) and the case then
+ * answers the same status, body, flags and organization rows. The copy is
+ * `structuredClone`, so no case's write reaches the template or another case.
+ * The two cases that sign up inline below still do, under their own env.
+ */
+let signedUp: { tables: Map<string, any[]>; cookie: string } | undefined;
+beforeAll(async () => {
+  delete process.env.OS_TENANCY_POSTURE;
+  delete process.env.OS_MULTI_ORG_ENABLED;
+  try {
+    const template = createMemoryEngine();
+    const cookie = cookieFrom(await signUp(makeManager(template), 'founder@example.com'));
+    signedUp = { tables: template.tables, cookie };
+  } finally {
+    if (OLD_POSTURE === undefined) delete process.env.OS_TENANCY_POSTURE;
+    else process.env.OS_TENANCY_POSTURE = OLD_POSTURE;
+    if (OLD_LEGACY === undefined) delete process.env.OS_MULTI_ORG_ENABLED;
+    else process.env.OS_MULTI_ORG_ENABLED = OLD_LEGACY;
+  }
+});
+
+/**
+ * Boot a manager under a scenario and run the guided path from a signed-in
+ * founder (the sign-up above): ask for a workspace. Returns the real HTTP
+ * answer plus the `/auth/config` flag the console would have rendered its
+ * button from.
  */
 const runGuidedWorkspaceCreation = async (scenario: Scenario, slug = 'acme') => {
   if (scenario.posture === undefined) delete process.env.OS_TENANCY_POSTURE;
@@ -206,11 +258,12 @@ const runGuidedWorkspaceCreation = async (scenario: Scenario, slug = 'acme') => 
   else process.env.OS_MULTI_ORG_ENABLED = scenario.legacy;
 
   const engine = createMemoryEngine();
+  for (const [name, rows] of signedUp!.tables) engine.tables.set(name, structuredClone(rows));
   const manager = makeManager(
     engine,
     scenario.tenancy ? { getTenancy: () => scenario.tenancy } : {},
   );
-  const cookie = cookieFrom(await signUp(manager, `founder-${slug}@example.com`));
+  const cookie = signedUp!.cookie;
   expect(cookie).not.toBe('');
 
   const response = await createOrganization(manager, cookie, slug);

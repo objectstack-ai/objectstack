@@ -4,14 +4,16 @@ import { describe, it, expect } from 'vitest';
 import { settingsObjects } from './manifest.js';
 
 describe('service-settings manifest objects (#4270)', () => {
-  it('owns exactly the K/V store, its global rung and its audit trail', () => {
+  it('owns exactly the K/V store, its global rung and its audit trail, split the same way', () => {
     // [ADR-0131 D7] `sys_platform_setting` is the cascade's global rung. It
     // registers WITH `sys_setting` because the resolver reads both on every
-    // resolution.
+    // resolution. The audit trail splits the same way (ruling record
+    // 6257510973, Q4 A): `sys_platform_setting_audit` is its global rung.
     expect(settingsObjects.map((o: any) => o.name)).toEqual([
       'sys_setting',
       'sys_platform_setting',
       'sys_setting_audit',
+      'sys_platform_setting_audit',
     ]);
   });
 

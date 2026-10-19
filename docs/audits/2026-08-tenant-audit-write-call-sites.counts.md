@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 229 |
-| Object name statically decidable | 155 |
+| Write call sites | 230 |
+| Object name statically decidable | 156 |
 | Object name chosen at run time | 74 |
-| Against a tenancy-enabled object | 154 |
+| Against a tenancy-enabled object | 155 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 171 |
+| Threading a tenant context | 172 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 50 |
 | …and decidably tenancy-enabled | 29 |
-| Threading a decidably elevated context | 128 |
+| Threading a decidably elevated context | 129 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 93 |
 
@@ -90,13 +90,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-19 at `9bce0aafa`.
+Measured on 2026-10-19 at `fa6a837e7`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
 | tracked non-test sources scanned | 672 |
 | engine-shaped types recognised | 79 |
-| declared objects in the registry | 117 |
+| declared objects in the registry | 118 |
 | same-named calls subtracted as non-engine | 166 |
 
 ## Every site
@@ -227,6 +227,7 @@ Measured on 2026-10-19 at `9bce0aafa`.
 | `packages/services/service-settings/src/config-change-audit.ts` | `insert` | `sys_audit_log` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `update` | `objectName` | undecidable | options unreadable | 2 |
+| `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_platform_setting_audit` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `delete` | `sys_secret` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_secret` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `update` | `sys_secret` | enabled | elevated | 1 |
