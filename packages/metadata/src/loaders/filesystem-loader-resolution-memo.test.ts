@@ -189,7 +189,7 @@ describe('#24537 — repeated resolutions of one name probe the filesystem once'
   it('a name no file holds: one probe per extension on the first resolution, none after', async () => {
     const catalog = makeCatalog(makeManager());
 
-    // On main @ 2667e2402 this read [5, 5, 5, 5, 5].
+    // On main @ 2667e2402: 5 probes on every resolution (measured over four).
     expect(await probesPerResolution(catalog, 'miss_set')).toEqual([PLUGIN_EXTENSIONS.length, 0, 0, 0, 0]);
     expect(await catalog.resolve('permission', 'miss_set')).toBeUndefined();
   });
@@ -198,7 +198,7 @@ describe('#24537 — repeated resolutions of one name probe the filesystem once'
     await writeSetFile('hit_set');
     const catalog = makeCatalog(makeManager());
 
-    // On main @ 2667e2402 this read [2, 2, 2, 2, 2].
+    // On main @ 2667e2402: 2 probes on every resolution (measured over four).
     expect(await probesPerResolution(catalog, 'hit_set')).toEqual([1, 0, 0, 0, 0]);
     expect(await catalog.resolve('permission', 'hit_set')).toMatchObject({
       name: 'hit_set',
