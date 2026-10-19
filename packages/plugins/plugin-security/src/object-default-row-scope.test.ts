@@ -176,7 +176,9 @@ interface Shape {
 }
 
 async function boot(shape: Shape) {
-  const identity = [SysUser, SysSession, SysScimUser].map((schema) =>
+  // The identity objects declare their own defaults now (#24341): the
+  // undeclared shape drops the key, the declared one gives the fixture's.
+  const identity = [SysUser, SysSession, SysScimUser].map(({ defaultRowScope: _declared, ...schema }) =>
     shape.declared ? { ...schema, defaultRowScope: IDENTITY_DEFAULTS[schema.name] } : schema,
   );
   const notes = [
