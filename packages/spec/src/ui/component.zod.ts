@@ -1707,7 +1707,8 @@ export const RecordRelatedListProps = strictObject({
    *    as "this record has no related records", a wrong fact in the silent
    *    direction. The API arm of `dataSource` is not admitted: the card fixes
    *    the shape as the object binding's (object, view, filter, sort, limit),
-   *    the one the sibling blocks read, and that arm is still unrendered.
+   *    the one the sibling blocks read and the one objectui's parent read
+   *    takes (`isElementDataSourceConfig` asks the binding for an `object`).
    *
    * Absent, the parent is the record page's record context, as it always was
    * (objectui `RecordRelatedListBody` reads `useRecordContext()`'s `recordId`
@@ -1734,17 +1735,26 @@ export const RecordRelatedListProps = strictObject({
    * ⛔ No `os validate` consistency finding against a sibling `record:details`
    * binding: the ruling's own exclusion (a new gate defaults to no).
    *
-   * PLANNED, not yet read: no renderer reads this key (measured on objectui;
-   * recorded in the `liveness/page.json` `_note`).
-   * Its reader is the related-list leg of objectui#12294, which lands once a
-   * spec release carrying the key is installable. The liveness record is the
-   * `liveness/page.json` `_note` (a component-level key carries no ledger row:
-   * the walk stops at the undrilled `page/regions` container) and the
-   * `[PLANNED — not yet rendered]` marker the describe opens with; when that
-   * leg lands, the marker leaves and the `_note` sentence is rewritten.
+   * RENDERED by the console. The block hands this key to its parent read
+   * (objectui: packages/plugin-detail/src/renderers/record-related-list.tsx,
+   * whose `RecordRelatedListRenderer` passes `schema.parentDataSource` to
+   * `ParentRecordBinding`; the read itself is
+   * objectui: packages/plugin-detail/src/renderers/recordBinding.tsx). Its
+   * `BoundRecordProvider` asks the page's own adapter, so under the caller's
+   * identity, for one row (`$top: 1`) by the binding's `sort`, and provides
+   * that row as the record context the list body reads. No row, or a read the
+   * server refuses as forbidden, draws the block's loud absence in its place
+   * (`NoParentRecord`), and no child rows are queried. Unbound, the list is
+   * left as it is, so the record page's record stays the parent. Measured at
+   * the console pin (`.objectui-sha` `4016370af3`), which carries the reader
+   * (objectui `d81e46043`, objectui#12407, the related-list leg of
+   * objectui#12294). The liveness record is the `liveness/page.json` `_note`
+   * (a component-level key carries no ledger row: the walk stops at the
+   * undrilled `page/regions` container); the describe carries no liveness
+   * marker.
    */
   parentDataSource: ElementDataSourceSchema.optional().describe(
-    '[PLANNED — not yet rendered] The PARENT record this related list hangs off, bound by a query of its own: an object binding `{ object, view?, filter?, sort?, limit? }`, the shape `dataSource` takes. Read by the single-record rule: the FIRST row of the bound set by its `sort` is the parent (declare `limit: 1` to say one row is meant), and when no row answers, the block renders a loud absence, never an empty list, which would read as "this record has no related records". `relationshipValueField` is read on that row. When this key is absent, the record page\'s record context remains the parent. The node-level `dataSource` on this block keeps its published meaning, the CHILD rows the list draws (it fills `objectName`, `columns`, `filter`, `sort` and `limit`), and is never read as the parent.',
+    'The PARENT record this related list hangs off, bound by a query of its own: an object binding `{ object, view?, filter?, sort?, limit? }`, the shape `dataSource` takes. Read by the single-record rule: the FIRST row of the bound set by its `sort` is the parent (declare `limit: 1` to say one row is meant), and when no row answers, the block renders a loud absence, never an empty list, which would read as "this record has no related records". `relationshipValueField` is read on that row. When this key is absent, the record page\'s record context remains the parent. The node-level `dataSource` on this block keeps its published meaning, the CHILD rows the list draws (it fills `objectName`, `columns`, `filter`, `sort` and `limit`), and is never read as the parent.',
   ),
   /**
    * [#18639] The SAME union `listViews[].columns` declares (`view.zod.ts`) —

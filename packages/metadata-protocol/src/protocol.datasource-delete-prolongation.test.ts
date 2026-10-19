@@ -372,14 +372,71 @@ function makeReplica(store: ReturnType<typeof makeSharedStore>, environmentId?: 
 
     // The write-epoch seam, per replica. Any write advances it; a PEER's write
     // does not — which is the whole reason the overlay cache has a TTL at all.
+    const epochListeners: Array<(epoch: number, reason: string) => void> = [];
     const writeEpoch = {
         current: 0,
-        bump() { this.current += 1; },
-        subscribe: () => () => {},
+        bump(reason = 'write') {
+            this.current += 1;
+            for (const l of epochListeners) l(this.current, reason);
+        },
+        subscribe: (l: (epoch: number, reason: string) => void) => {
+            epochListeners.push(l);
+            return () => {};
+        },
+    };
+    // [#10757 leg 6] The engine middleware seam, which the overlay cache
+    // requires (it retires on a `sys_metadata` write observed here). Without it
+    // the cache declines and this file's prolongation arms would pass on an
+    // engine that never caches.
+    const middlewares: Array<(ctx: { object: string; operation: string }, next: () => Promise<void>) => Promise<void>> = [];
+    const throughChain = async <T>(object: string, operation: string, body: () => T): Promise<T> => {
+        writeEpoch.bump('write');
+        const chain = [...middlewares];
+        let i = 0;
+        let out!: T;
+        const next = async (): Promise<void> => {
+            if (i < chain.length) return chain[i++]!({ object, operation }, next);
+            out = body();
+        };
+        await next();
+        return out;
+    };
+
+    // The store's own effects, run as each write's driver step (`throughChain`).
+    const insertRow = (table: string, data: Record<string, unknown>) => {
+        if (table === 'sys_metadata_audit') return { id: 'audit_skip' };
+        if (table === 'sys_metadata_history') {
+            nextId.value += 1;
+            const h = { ...(data as unknown as HistoryRow), id: `h_${nextId.value}` };
+            historyRows.push(h);
+            return { id: h.id };
+        }
+        if (table !== 'sys_metadata') return { id: 'side_effect_skip' };
+        nextId.value += 1;
+        const row = { ...(data as unknown as Row), id: `r_${nextId.value}` };
+        rows.set(keyOf(data), row);
+        return { id: row.id };
+    };
+    const updateRow = (data: Record<string, unknown>, opts: { where: Record<string, unknown> }) => {
+        const found = findRow(opts.where);
+        if (!found) return { id: null };
+        const merged = { ...found.row, ...(data as unknown as Row) };
+        rows.delete(found.key);
+        rows.set(keyOf(merged), merged);
+        return { id: found.row.id };
+    };
+    const deleteRow = (opts: { where: Record<string, unknown> }) => {
+        const found = findRow(opts.where);
+        if (!found) return { deleted: 0 };
+        rows.delete(found.key);
+        return { deleted: 1 };
     };
 
     const engine: any = {
         writeEpoch,
+        registerMiddleware(fn: (ctx: { object: string; operation: string }, next: () => Promise<void>) => Promise<void>) {
+            middlewares.push(fn);
+        },
         async findOne(table: string, opts: { where: Record<string, unknown> }) {
             assertEngineFindOnePredicate(table, opts);
             if (table === 'sys_metadata_history') {
@@ -400,37 +457,15 @@ function makeReplica(store: ReturnType<typeof makeSharedStore>, environmentId?: 
             return bound(Array.from(rows.values()).filter((r) => matchesWhere(r, opts?.where ?? {})));
         },
         async insert(table: string, data: Record<string, unknown>) {
-            if (table === 'sys_metadata_audit') return { id: 'audit_skip' };
-            if (table === 'sys_metadata_history') {
-                nextId.value += 1;
-                const h = { ...(data as unknown as HistoryRow), id: `h_${nextId.value}` };
-                historyRows.push(h);
-                return { id: h.id };
-            }
-            if (table !== 'sys_metadata') return { id: 'side_effect_skip' };
-            nextId.value += 1;
-            const row = { ...(data as unknown as Row), id: `r_${nextId.value}` };
-            rows.set(keyOf(data), row);
-            writeEpoch.bump();
-            return { id: row.id };
+            return throughChain(table, 'insert', () => insertRow(table, data));
         },
-        async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
+        async update(t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
             assertEngineUpdateDispatch(data, opts);
-            const found = findRow(opts.where);
-            if (!found) return { id: null };
-            const merged = { ...found.row, ...(data as unknown as Row) };
-            rows.delete(found.key);
-            rows.set(keyOf(merged), merged);
-            writeEpoch.bump();
-            return { id: found.row.id };
+            return throughChain(t, 'update', () => updateRow(data, opts));
         },
-        async delete(_t: string, opts: { where: Record<string, unknown> }) {
+        async delete(t: string, opts: { where: Record<string, unknown> }) {
             assertEngineDeleteDispatch(opts);
-            const found = findRow(opts.where);
-            if (!found) return { deleted: 0 };
-            rows.delete(found.key);
-            writeEpoch.bump();
-            return { deleted: 1 };
+            return throughChain(t, 'delete', () => deleteRow(opts));
         },
         async count() { return 0; },
         async transaction<T>(cb: (ctx: unknown, info: { owned: boolean }) => Promise<T>): Promise<T> {
