@@ -1,8 +1,9 @@
 name: Spec Shape Gate
 
 # Compile the downstream consumer -- objectstack-ai/objectui at `main` -- against
-# `@objectstack/spec` built from THIS commit, and name the objectui file, the
-# objectstack commit and the owning lane when it does not compile.
+# `@objectstack/spec` (and every other `@objectstack/*` package it installs)
+# built from THIS commit, and name the objectui file, the objectstack commit and
+# the owning lane when it does not compile.
 #
 # ## The ruling this executes
 #
@@ -205,16 +206,30 @@ jobs:
       - name: Self-test the gate script
         run: pnpm check:spec-shape-gate
 
-      # ── Build the spec from THIS commit, and PACK it ──────────────────────
-      # `--filter @objectstack/spec...` installs the spec and its dependencies
-      # only; `inject` later reads the dependencies this install resolved
+      # ── Build what objectui installs, from THIS commit, and PACK the spec ──
+      # objectui consumes every `@objectstack/*` package BY COMMIT: its root
+      # `package.json` overrides each to `file:node_modules/.cache/objectstack/
+      # <name>`, which its `scripts/objectstack-pin.mjs build` fills (below, with
+      # OBJECTSTACK_ROOT naming this checkout). The names are read from those
+      # overrides, the list the pin script packs; `--filter-prod` keeps the
+      # closure to runtime edges as that script's own build does (`...` alone
+      # would pull in the client's dev closure). The install brings the root's
+      # toolchain too, and `inject` later reads the dependencies it resolved
       # (`packages/spec/node_modules`) to re-point a store sibling the packed
       # manifest's range refuses.
-      - name: Install the spec's dependency closure
-        run: pnpm install --frozen-lockfile --filter @objectstack/spec...
+      - name: Install the closure of the @objectstack/* packages objectui installs by commit
+        run: |
+          set -euo pipefail
+          filters=$(node -e '
+            const m = JSON.parse(require("fs").readFileSync("objectui/package.json", "utf8"));
+            const names = Object.keys(m.pnpm?.overrides ?? {}).filter((n) => n.startsWith("@objectstack/")).sort();
+            if (names.length === 0) { console.error("objectui/package.json overrides no @objectstack/* package"); process.exit(2); }
+            process.stdout.write(names.map((n) => `--filter-prod=${n}...`).join(" "));')
+          echo "PINNED_FILTERS=$filters" >> "$GITHUB_ENV"
+          pnpm install --frozen-lockfile $filters
 
-      - name: Build @objectstack/spec from this commit
-        run: pnpm --filter @objectstack/spec build
+      - name: Build them from this commit
+        run: pnpm $PINNED_FILTERS run build
 
       # What gets injected is what a RELEASE from this commit would ship -- the
       # `files` field's file set, not a working tree. `--ignore-scripts`
@@ -238,6 +253,20 @@ jobs:
         working-directory: objectui
         run: pnpm --version
 
+      # Packs every package built above into the directories objectui's
+      # overrides name; without it the frozen install dies on ENOENT there. It
+      # refuses (exit 1, its own `objectstack-pin` annotation) when a packed
+      # manifest's dependency NAMES differ from what objectui's lockfile records:
+      # the downstream owes a pin bump with its lockfile, and the report reads the
+      # missing compile as exit 2. A changed peer, engines or dependency range is
+      # not refused there -- a frozen install links it and exits 0 -- and the
+      # spec's ranges stay `inject`'s to judge.
+      - name: Pack this commit's @objectstack/* into objectui's pinned-build directories
+        working-directory: objectui
+        env:
+          OBJECTSTACK_ROOT: ${{ github.workspace }}
+        run: node scripts/objectstack-pin.mjs build
+
       - name: Install objectui dependencies
         working-directory: objectui
         run: pnpm install --frozen-lockfile
@@ -254,7 +283,10 @@ jobs:
       # re-points a store sibling the packed manifest's range refuses at the
       # copy this tree's spec build resolved, and proves every workspace
       # consumer resolves the injected copy before returning. Nothing tracked
-      # by git is touched in either checkout.
+      # by git is touched in either checkout. The pinned build above already
+      # installed this commit's spec (the same declaration files); what this
+      # step still adds is that range judgement and the consumer proof, which
+      # the pin script does not make (it compares dependency names only).
       - name: Inject the source-built spec into objectui's install
         env:
           UPSTREAM_SHA: ${{ steps.subjects.outputs.upstream }}
