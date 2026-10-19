@@ -2395,6 +2395,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     label: "Capacidad",
     description: "Permiso que define un paquete; se concede mediante conjuntos de permisos"
   },
+  sharing_rule: {
+    label: "Regla de Compartición",
+    description: "Una regla que un paquete declara para compartir registros; las organizaciones crean las suyas en Configuración"
+  },
   agent: {
     label: "Agente de IA",
     sections: {

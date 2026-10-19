@@ -72,6 +72,12 @@ const BODIES: Record<string, Record<string, unknown>> = {
     permission: { name: NAME, label: 'Probe', objects: {} },
     position: { name: NAME, label: 'Probe' },
     capability: { name: NAME, label: 'Probe' },
+    // [ADR-0131 D6] `sharing_rule` joined as a code-only `security` kind.
+    sharing_rule: {
+        type: 'criteria', name: NAME, label: 'Probe', object: 'probe_object',
+        condition: "record.status == 'open'", accessLevel: 'read',
+        sharedWith: { type: 'position', value: 'probe_position' },
+    },
 };
 
 /** The overlayable control: `allowEnvironmentOverlay: true`, declared through a stack collection. */

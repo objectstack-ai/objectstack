@@ -387,7 +387,8 @@ describe('the envelope invariant also covers UNREGISTERED_KIND_SCHEMAS', () => {
 const STACK_COLLECTION_OF: Record<string, string> = {
   webhook: 'webhooks',
   connector: 'connectors',
-  sharing_rule: 'sharingRules',
+  // sharing_rule: 'sharingRules' — a registered kind since ADR-0131 D6; its
+  // stack-parity pin is the case after the mapping-table one below.
   // theme: 'themes' — retired by commit 35ad101bc (ADR-0049).
   analytics_cube: 'analyticsCubes',
 };
@@ -422,6 +423,17 @@ function arrayElementOf(schema: unknown, depth = 0): unknown {
 describe('each bound entry IS its stack collection\'s schema', () => {
   it('the mapping table covers exactly the bound set', () => {
     expect(Object.keys(STACK_COLLECTION_OF).sort()).toEqual(listUnregisteredKindSchemaTypes());
+  });
+
+  it('`sharing_rule`, promoted to a kind, still binds the schema its stack collection validates', () => {
+    // [ADR-0131 D6] It left this map for BUILTIN_METADATA_TYPE_SCHEMAS; the
+    // parity this block pins for the map's members must not leave with it.
+    const element = objectShapes(ObjectStackSchema)
+      .map((shape) => shape.sharingRules)
+      .map((collection) => (collection === undefined ? undefined : arrayElementOf(collection)))
+      .find((v) => v !== undefined);
+    expect(element, 'stack.zod.ts declares a `sharingRules` collection').toBeDefined();
+    expect(getMetadataTypeSchema('sharing_rule')).toBe(element);
   });
 
   it.each(Object.entries(STACK_COLLECTION_OF))(
@@ -637,7 +649,11 @@ describe('registered-type closure is derived, not tallied', () => {
     //
     // 26 → 27 on 2026-09-30: `picklist` JOINED the registry, closed (a
     // `strictObject` authoring surface), so the closed count moves with it.
-    expect(closed.length).toBe(26);
-    expect(types.length).toBe(27);
+    //
+    // 27 → 28 on 2026-10-19: `sharing_rule` JOINED the registry (ADR-0131 D6,
+    // regime C), closed — `SharingRuleSchema` is `.strict()` and an authoring
+    // surface only — so the closed count moves with it.
+    expect(closed.length).toBe(27);
+    expect(types.length).toBe(28);
   });
 });

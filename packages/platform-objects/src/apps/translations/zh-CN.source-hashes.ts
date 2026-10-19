@@ -94,6 +94,7 @@ export const zhCNSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.nav_capabilities.label': '0b59005e10add41f',
   'apps.setup.navigation.nav_permission_sets.label': '4addfe2b8b28b78a',
   'apps.setup.navigation.nav_sharing_rules.label': 'ceaa66fa5f1df4ad',
+  'apps.setup.navigation.nav_declared_sharing_rules.label': 'a3371ec9975d5b0f',
   'apps.setup.navigation.nav_record_shares.label': 'e261d340ceb25b9a',
   'apps.setup.navigation.nav_sso_providers.label': '7b06b6a6abf53ba4',
   'apps.setup.navigation.nav_api_keys.label': '8cda9851248b0490',

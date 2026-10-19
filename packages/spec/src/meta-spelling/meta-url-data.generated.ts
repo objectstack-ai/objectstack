@@ -52,6 +52,7 @@ export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = Object.fre
   "externalCatalogs": "external_catalog",
   "translations": "translation",
   "email_templates": "email_template",
+  "sharing_rules": "sharing_rule",
 });
 
 /**
@@ -84,6 +85,7 @@ export const REGISTRY_DECLARED_META_TYPES: ReadonlyArray<string> = Object.freeze
   "permission",
   "position",
   "capability",
+  "sharing_rule",
   "agent",
   "tool",
   "skill",

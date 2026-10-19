@@ -68,7 +68,7 @@ import {
     unboundItemDraftAddress,
     type SysMetadataEngine,
 } from './sys-metadata-repository.js';
-import { isOriginGatedType, managedItemSealedSentence } from './packaged-base-regime.js';
+import { isOriginGatedType, managedItemSealedSentence, packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import {
     resolveArtifactLockLayer,
     resolveItemLock,
@@ -8900,8 +8900,8 @@ export class ObjectStackProtocolImplementation implements
      *    the one that actually carries the plugin-registered family: manifests
      *    register through the `manifest` service during kernel Phase 1
      *    (`ql.registerApp`), so by Phase 2 it holds `theme`, `connector`,
-     *    `webhook`, `sharing_rule`, `analytics_cube`, … — none of which have a
-     *    registry entry.
+     *    `webhook`, `analytics_cube`, … — none of which have a registry entry
+     *    (and `sharing_rule`, which has had one since ADR-0131 D6).
      *  - the `metadata` service's `getRegisteredTypes()` — types the
      *    MetadataManager knows. Its `typeRegistry` is seeded with
      *    `DEFAULT_METADATA_TYPE_REGISTRY` in the manager's constructor, so
@@ -9019,11 +9019,14 @@ export class ObjectStackProtocolImplementation implements
             // ({@link unrecognisedMetaTypeRefusal}) instead of two
             // independently-maintained rules that drifted apart.
             //
-            // What this keeps, and it is the whole point: the six legitimate
-            // plugin kinds with no static registry entry — `theme`, `webhook`,
-            // `connector`, `sharing_rule`, `analytics_cube`, `rag_pipeline` —
-            // are IN the static spelling contract (limb 1 of the URL map), so
-            // the predicate accepts them and they stay advertised as creatable.
+            // What this keeps, and it is the whole point: the legitimate
+            // plugin kinds with no static registry entry — `webhook`,
+            // `connector`, `analytics_cube`, `rag_pipeline` — are IN the static
+            // spelling contract (limb 1 of the URL map), so the predicate
+            // accepts them and they stay advertised as creatable. (`theme` and
+            // `sharing_rule` were two more: `theme` left the contract with its
+            // carrier, and ADR-0131 D6 gave `sharing_rule` a code-only registry
+            // entry, so it takes the registry arm above.)
             // `PUT /meta/theme/dark` is the operation the plugin path exists to
             // serve and this change must not touch it.
             //
@@ -17723,11 +17726,21 @@ export class ObjectStackProtocolImplementation implements
      * Keyed by type rather than branched inline so a second fragment type, if
      * one is ever declared, states its own remedy instead of inheriting an
      * unrelated one.
+     *
+     * [ADR-0131 D6] `sharing_rule` is the second type whose remedy is not its
+     * glob, for a different reason: it is regime C, and a regime-C item is
+     * customized at runtime — an organization authors its own rule through the
+     * sharing door, and a declared rule is cloned there and switched off through
+     * the activation ledger. "Declare it in source and redeploy" names only the
+     * package author's route, which is not the one a runtime caller has.
      */
-    private static readonly NESTED_TYPE_REMEDY: Readonly<Record<string, string>> = {
+    private static readonly CODE_ONLY_TYPE_REMEDY: Readonly<Record<string, string>> = {
         field: ' Fields are not standalone artifacts: author it inside its object and write the whole '
             + 'object instead (PUT /api/v1/meta/object/:object with the new field in `fields`), or declare '
             + 'it in the object source (**/*.object.ts) and redeploy.',
+        sharing_rule: ' Author an organization rule instead (POST /api/v1/sharing/rules), or clone a declared rule '
+            + 'there under a new name and switch the declared one off '
+            + '(POST /api/v1/security/_activation/sharing_rule/:name, body {enabled: false}).',
     };
 
     /**
@@ -17735,12 +17748,12 @@ export class ObjectStackProtocolImplementation implements
      * is supposed to declare this item instead. Read from the type's own
      * registry entry (`filePatterns`), so a newly-flagged type carries an
      * accurate hint the day it is flagged — nothing here to keep in sync,
-     * except the fragment types {@link NESTED_TYPE_REMEDY} names explicitly.
+     * except the types {@link CODE_ONLY_TYPE_REMEDY} names explicitly.
      */
     private static codeOnlySourceHint(type: string): string {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        const nested = ObjectStackProtocolImplementation.NESTED_TYPE_REMEDY[singular];
-        if (nested) return nested;
+        const named = ObjectStackProtocolImplementation.CODE_ONLY_TYPE_REMEDY[singular];
+        if (named) return named;
         const entry = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === singular);
         const pattern = entry?.filePatterns?.[0];
         return pattern ? ` Declare it in source (${pattern}) and redeploy.` : '';
@@ -17762,8 +17775,16 @@ export class ObjectStackProtocolImplementation implements
             + `allowRuntimeCreate=false and allowEnvironmentOverlay=false, so it cannot be created through the `
             + `runtime metadata API (PUT /api/v1/meta/${type}/:name) on any kernel.`
             + ObjectStackProtocolImplementation.codeOnlySourceHint(type)
-            + ` An operator may set OS_METADATA_WRITABLE=${PLURAL_TO_SINGULAR[type] ?? type} to grant a runtime escape hatch. `
-            + `See docs/adr/0005-metadata-customization-overlay.md.`
+            // [ADR-0131 D6] A Regime C type's refusal names its sanctioned paths and
+            // never the hatch, as its regime sentence does (`packaged-base-regime.ts`):
+            // the hatch would re-open the very source the regime closes. It still
+            // opens the type for an operator — the residue repair the delete door
+            // keeps — it is only not prescribed. Under the REST door's 500-character
+            // bound either way (`sharing_rule`: 473).
+            + (packagedBaseRegimeRow(type)?.regime === 'C'
+                ? ''
+                : ` An operator may set OS_METADATA_WRITABLE=${PLURAL_TO_SINGULAR[type] ?? type} to grant a runtime escape hatch. `
+                    + `See docs/adr/0005-metadata-customization-overlay.md.`)
         );
         (err as any).code = 'NOT_CREATABLE';
         (err as any).status = 403;
@@ -17782,7 +17803,11 @@ export class ObjectStackProtocolImplementation implements
      * opens. The source remedy stays: it is where a code-only item is declared.
      */
     private static codeOnlyOverrideError(type: string, name: string): Error {
+        // [ADR-0131 D6, ADR-0126 §2] A Regime C type's declared item reads its
+        // regime sentence — the one the package door and the repository speak for
+        // the same item — so the refusal names the clone and the switch.
         const err = new Error(
+            (packagedBaseRegimeRow(type)?.regime === 'C' ? packagedBaseRegimeSentence(type, name, 'save') : undefined) ??
             `Metadata item '${type}/${name}' is provided by a managed package and its type is `
             + `code-only (allowRuntimeCreate=false, allowEnvironmentOverlay=false), so it is sealed against `
             + `runtime edits on any kernel, and OS_METADATA_WRITABLE does not open a managed item.`

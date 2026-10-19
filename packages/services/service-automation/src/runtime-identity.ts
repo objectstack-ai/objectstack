@@ -53,6 +53,16 @@ export interface RunIdentityContext {
    * `runAs:'system'` run, whose `isSystem` short-circuit precedes every policy.
    */
   org_user_ids?: string[];
+  /**
+   * The acting user's unique email: the value RLS reads as
+   * `current_user.email` (an owner policy such as
+   * `assignee == current_user.email`). Present on a `runAs:'user'` run whose
+   * context carries it ({@link AutomationContext.email}, seeded at run setup);
+   * a policy that reads it drops out without it, so the run would be refused
+   * on every row only such a policy admits. Never set on a `runAs:'system'`
+   * run, whose `isSystem` short-circuit precedes every policy.
+   */
+  email?: string;
   /** Acting user's tenant/org id. */
   tenantId?: string;
   /**
@@ -200,14 +210,17 @@ export function runOrgUserIds(context: AutomationContext | undefined): string[] 
  *    `flowRunId` are its provenance, and ADR-0118 D1 forbids inventing a
  *    sentinel or pseudo-user in its place.
  *  - `runAs:'user'` (default) → the triggering user's identity
- *    (`{ userId, positions, permissions, org_user_ids?, tenantId? }`), so the
+ *    (`{ userId, positions, permissions, org_user_ids?, email?, tenantId? }`), so the
  *    security middleware enforces that user's row-level security. The run can
  *    never exceed the triggering user's grants. Empty `positions` falls back to
  *    the platform's baseline permission set, exactly like a fresh member's own
  *    REST request. `org_user_ids` is the peer list run setup seeded
  *    ({@link SeededRunContext}): with it, `sys_user` answers the acting user and
  *    their organization's members, as the same user's request does; without
- *    it, every policy that reads it drops out.
+ *    it, every policy that reads it drops out. `email` is the user's, run setup
+ *    seeded or the trigger carried ({@link AutomationContext.email}): with it,
+ *    an owner policy on `current_user.email` admits the rows it admits for the
+ *    same user's request; without it, that policy drops out.
  *  - neither (an effective `runAs:'user'` run with no trigger user) → **throws**
  *    {@link UnscopedRunDataAccessError} (#3760). This used to return a
  *    provenance-only envelope and let the run proceed UNSCOPED — the #1888
@@ -299,6 +312,7 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
   };
   const orgUserIds = runOrgUserIds(context);
   if (orgUserIds) out.org_user_ids = orgUserIds;
+  if (context.email) out.email = context.email;
   if (context.tenantId) out.tenantId = context.tenantId;
   if (flowRunId) out.flowRunId = flowRunId;
   return out;

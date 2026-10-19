@@ -184,6 +184,14 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   // `capability` like every other kind, and the registry entry next to it
   // (`allowRuntimeCreate: false`) closes the runtime write door outright.
   capability: CapabilityDeclarationSchema,
+  // [ADR-0131 D6] `sharing_rule` moved here from `UNREGISTERED_KIND_SCHEMAS`
+  // when regime C made it a code-only kind (its registry entry carries
+  // `allowRuntimeCreate: false` + `allowEnvironmentOverlay: false`). The binding is
+  // the one its stack collection is validated against (`stack.zod.ts`:
+  // `sharingRules: z.array(SharingRuleSchema)`), `.strict()` and declaring the
+  // ADR-0010 envelope. It is an AUTHOR-shape check applied where author shapes
+  // are submitted, never a filter on rows already in `sys_sharing_rule`.
+  sharing_rule: SharingRuleSchema,
 
   // AI Protocol
   agent: AgentSchema,
@@ -204,6 +212,7 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
  * `PUT /api/v1/meta/webhook/:name` accepted ANY JSON and returned
  * `success: true`. Enforced but undeclared — the mirror of declared-but-
  * unenforced, and the same hole, three more doors.
+ * (`sharing_rule` has since left this map: ADR-0131 D6 made it a code-only kind.)
  *
  * [commit 2306a765c, the same shape again] `theme` and `analytics_cube` sat in the very
  * position this docblock describes — declared, authorable stack collections
@@ -255,15 +264,9 @@ const UNREGISTERED_KIND_SCHEMAS: Record<string, z.ZodType> = {
   // so catalog descriptors are unaffected.
   connector: DeclarativeConnectorEntrySchema as unknown as z.ZodType,
 
-  // `stack.zod.ts`: `sharingRules: z.array(SharingRuleSchema)`.
-  //
-  // This shape is `.strict()` with no stored/stamped envelope, so it is an
-  // AUTHOR-shape check and is applied only where author shapes are submitted:
-  // the write door. It is not a filter on rows already in `sys_sharing_rule`.
-  // Nothing re-parses stored rows through this registry — the read path only
-  // DECORATES a document with `_diagnostics` (`computeMetadataDiagnostics`) and
-  // never refuses one. Same treatment #5271/#5312 gave their strict surfaces.
-  sharing_rule: SharingRuleSchema,
+  // `sharing_rule` was bound here (#6245) until ADR-0131 D6 charted it under
+  // regime C and it became a code-only KIND — see its entry in
+  // `BUILTIN_METADATA_TYPE_SCHEMAS` above.
 
   // [commit 2306a765c → 35ad101bc] `theme: ThemeSchema` was bound here when `themes` was a
   // stack collection; commit 35ad101bc retired that carrier and the schema whole
@@ -328,7 +331,7 @@ export function getMetadataTypeSchema(type: string): z.ZodType | undefined {
  * a kind enters the live set as a side effect of registering an ITEM of that
  * kind (`SchemaRegistry.registerItem` during app/manifest registration, or
  * `MetadataManager.register` at runtime), which is what #6245's schema-only
- * bindings for `webhook` / `connector` / `sharing_rule` rely on.
+ * bindings for `webhook` / `connector` rely on.
  */
 export function registerMetadataTypeSchema(type: string, schema: z.ZodType): void {
   EXTRA_METADATA_TYPE_SCHEMAS.set(type, schema);
@@ -353,8 +356,9 @@ export function listMetadataTypeSchemaTypes(): string[] {
 
 /**
  * Snapshot of the non-KIND stack collections bound in
- * `UNREGISTERED_KIND_SCHEMAS` — today `webhook` / `connector` / `sharing_rule`
- * / `theme` / `analytics_cube` (#6245 the first three, commit 2306a765c the last two).
+ * `UNREGISTERED_KIND_SCHEMAS` — today `webhook` / `connector` / `theme` /
+ * `analytics_cube` (#6245 the first two, commit 2306a765c the last two; #6245's
+ * third, `sharing_rule`, became a kind under ADR-0131 D6).
  *
  * [#6931] This exists so a check can ENUMERATE that map, and for nothing else.
  * The exclusion documented directly above is about {@link
