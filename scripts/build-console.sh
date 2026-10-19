@@ -353,7 +353,8 @@ if [[ -f "${BUILD_ROOT}/.objectstack-sha" ]]; then
   # Unguarded on purpose: the pin script packs whatever dist/ is on disk, so a
   # stale one would install without a word, while turbo judges freshness by
   # content hash. Every workflow that runs this script has just built that
-  # closure, so there this is a cache hit.
+  # closure, so there this is a cache hit; `new-only` keeps a hit from replaying
+  # thousands of cached log lines, and still prints every task that really runs.
   OBJECTSTACK_PINNED_NAMES="$(node -e '
     const manifest = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     const names = Object.keys(manifest.pnpm?.overrides ?? {}).filter((n) => n.startsWith("@objectstack/"));
@@ -365,7 +366,7 @@ if [[ -f "${BUILD_ROOT}/.objectstack-sha" ]]; then
   done
   if (( ${#OBJECTSTACK_TURBO_FILTERS[@]} > 0 )); then
     echo "→ objectui@${PINNED_SHA:0:12} installs ${OBJECTSTACK_PINNED_NAMES} by commit — building them here..."
-    (cd "$FRAMEWORK_ROOT" && pnpm exec turbo run build "${OBJECTSTACK_TURBO_FILTERS[@]}")
+    (cd "$FRAMEWORK_ROOT" && pnpm exec turbo run build "${OBJECTSTACK_TURBO_FILTERS[@]}" --output-logs=new-only)
   fi
 
   # The pin script refuses (exit 1, reason on stderr) on a missing entry point,
