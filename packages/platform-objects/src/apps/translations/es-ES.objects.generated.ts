@@ -688,9 +688,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Miembro eliminado"
       },
       transfer_ownership: {
-        label: "Transferir propiedad",
-        confirmText: "¿Transferir la propiedad de esta organización al miembro seleccionado? Pasarás a ser administrador y perderás los privilegios exclusivos del propietario.",
-        successMessage: "Propiedad transferida"
+        label: "Hacer propietario",
+        confirmText: "¿Hacer propietario de esta organización al miembro seleccionado? Obtendrá todos los privilegios de propietario, incluido eliminar la organización. Tú sigues siendo propietario; para dejar de serlo, usa «Cambiar rol» en tu propia membresía.",
+        successMessage: "El miembro ahora es propietario"
       }
     }
   },
