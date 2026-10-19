@@ -1491,7 +1491,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "すべて",
         emptyState: {
           title: "まだ OAuth アプリケーションがありません",
-          message: "アプリケーションを登録すると、そのクライアントがこの環境でユーザーをサインインさせられるようになります。"
+          message: "アプリケーションを登録すると、そのクライアントがこのシステムでユーザーをサインインさせられるようになります。"
         }
       },
       mine: {
@@ -1894,7 +1894,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_sso_provider: {
     label: "SSO プロバイダー",
     pluralLabel: "SSO プロバイダー",
-    description: "この環境がログインをフェデレーションする外部 SSO ID プロバイダー（OIDC / SAML）",
+    description: "このシステムがログインをフェデレーションする外部 SSO ID プロバイダー（OIDC / SAML）",
     fields: {
       id: {
         label: "ID"
@@ -1965,7 +1965,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           },
           clientId: {
             label: "クライアント ID",
-            helpText: "この環境向けに IdP が発行した OAuth クライアント ID。"
+            helpText: "このシステム向けに IdP が発行した OAuth クライアント ID。"
           },
           clientSecret: {
             label: "クライアントシークレット",

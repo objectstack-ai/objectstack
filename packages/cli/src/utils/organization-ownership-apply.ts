@@ -28,6 +28,7 @@ import {
   predicateSql,
   PRIMARY_DATABASE,
   Sql,
+  underivableDepartureOf,
   type AttributionSink,
   type MetadataConflict,
   type MetadataKeyRow,
@@ -117,7 +118,11 @@ import type { DeclaredSharingRuleSkip } from '@objectstack/plugin-sharing';
  *     C3 stage 9): every grant naming a mirror row is renamed to the rule's
  *     NAME, which the registry must resolve, and only then is the mirror
  *     deleted ({@link runDeclaredRuleMirrorDeletion}). It runs again on a
- *     checkpointed run while a mirror stands.
+ *     checkpointed run while a mirror stands. Before them, a fate-3 table's
+ *     `underivableDeparture` (`sys_activity`, ruling record 6257510973 item
+ *     3): the NULL rows no anchor attributes once attribution is done are
+ *     deleted — never under `single`, where the Default Organization takes
+ *     them ({@link runUnderivableDeletion}).
  *  4h. `history-renumber` — seat answer Q2 A: `sys_metadata_history`'s
  *     `event_seq` and every `(type, name, version)` unique environment-wide
  *     before the column goes. Every lineage still tagged to an organization
@@ -184,7 +189,7 @@ import type { DeclaredSharingRuleSkip } from '@objectstack/plugin-sharing';
  *
  * ## What it never does
  *
- * ⛔ Delete a row outside fate 2. ⛔ Give an unattributable row an owner:
+ * ⛔ Delete a row outside fate 2 and a declared `underivableDeparture`. ⛔ Give an unattributable row an owner:
  * owners come only from the plan's anchors and, under `single`, the Default
  * Organization. ⛔ Create any organization but the Default Organization, and
  * that one only under `single` on a database that holds none. ⛔ Run at boot:
@@ -2526,6 +2531,11 @@ async function runMirrorDeletion(run: Run): Promise<StepReport> {
     const kept = Math.max(0, table.rows!.total - (run.deleted.get(table.object) ?? 0));
     if (kept > 0) notes.push(`${table.object}: ${kept} row(s) are not mirrors (a named category or their non-seeded provenance claims them) and stay.`);
   }
+  const underivable = await runUnderivableDeletion(run);
+  total += underivable.deleted;
+  if (underivable.blockers.length) {
+    return { step: 'mirror-deletion', status: 'blocked', summary: { deleted: total }, blockers: underivable.blockers, notes };
+  }
   const declared = await runDeclaredRuleMirrorDeletion(run);
   if (declared.status !== 'done') return { ...declared, summary: { ...declared.summary, deleted: total }, notes: [...notes, ...declared.notes] };
   return {
@@ -2535,6 +2545,65 @@ async function runMirrorDeletion(run: Run): Promise<StepReport> {
     blockers: [],
     notes: [...notes, ...declared.notes],
   };
+}
+
+// ── Step 4, continued: the rows no anchor attributes (ruling record 6257510973 item 3) ─
+
+/**
+ * The NULL rows of a fate-3 table that declares an `underivableDeparture`
+ * (`sys_activity`: activity is never a NULL row, and the existing ones are
+ * deleted): once attribution has written every owner it derives, every row
+ * still NULL is one of them. Read from a fresh plan, so the delete takes
+ * exactly what that plan classifies: a table on which it still derives an
+ * owner, or reports a row, blocks with nothing deleted. Never under `single`
+ * ({@link underivableDepartureOf}).
+ */
+/** Whether the plan this run started from counts a row an `underivableDeparture` deletes. */
+function underivableRowsDue(run: Run): boolean {
+  return run.plan.tables.some((t) => {
+    const entry = mirrorEntry(run, t.object);
+    const id = entry ? underivableDepartureOf(entry, run.opts.posture)?.id : undefined;
+    return id !== undefined && t.departures.some((d) => d.id === id && d.rows > 0);
+  });
+}
+
+async function runUnderivableDeletion(run: Run): Promise<{ deleted: number; blockers: string[] }> {
+  const declares = (object: string): string | undefined => {
+    const entry = mirrorEntry(run, object);
+    return entry ? underivableDepartureOf(entry, run.opts.posture)?.id : undefined;
+  };
+  if (!run.plan.tables.some((t) => t.physical === 'present' && declares(t.object))) return { deleted: 0, blockers: [] };
+  const plan = await planFor(run);
+  let deleted = 0;
+  const blockers: string[] = [];
+  for (const table of plan.tables) {
+    const id = declares(table.object);
+    const leaving = id ? table.departures.find((d) => d.id === id) : undefined;
+    if (!leaving || leaving.rows === 0 || table.physical !== 'present') continue;
+    const deriving = Number(table.fateCounts.rowsToAttribute ?? 0);
+    if (deriving > 0 || table.unattributable.length > 0 || leaving.rows !== table.rows!.organizationNull) {
+      blockers.push(
+        `${table.object}: ${leaving.rows} row(s) no anchor attributes are due for deletion, but the table still holds ` +
+          `${table.rows!.organizationNull} NULL row(s) (${deriving} an anchor attributes, ${table.unattributable.length} ` +
+          'reported), so nothing was deleted. Re-run --apply: the attribution step runs again first.',
+      );
+      continue;
+    }
+    for (const physical of table.tables) {
+      const { sql } = databaseFor(run, physical);
+      const where = `${sql.q(ORG, physical)} IS NULL`;
+      const count = (): Promise<number> => sql.count(physical, `SELECT COUNT(*) AS n FROM ${sql.q(physical, physical)} WHERE ${where}`);
+      const before = await count();
+      if (before === 0) continue;
+      await execute(run, physical, `DELETE FROM ${sql.q(physical, physical)} WHERE ${where}`, []);
+      const left = await count();
+      if (left !== 0) throw new Error(`The delete on ${physical} left ${left} organization-less row(s) behind; nothing past this table was deleted.`);
+      run.deleted.set(table.object, (run.deleted.get(table.object) ?? 0) + before);
+      deleted += before;
+      run.opts.onProgress?.(`mirror deletion: ${before} organization-less row(s) of ${physical} no anchor attributes`);
+    }
+  }
+  return { deleted, blockers };
 }
 
 // ── Step 4, continued: the declared sharing-rule mirrors (ADR-0131 C3 stage 9) ─
@@ -3097,6 +3166,23 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     // checkpointed run while one stands: a database whose ceremony completed on
     // a release whose boot still seeded them carries them (advisory then), and
     // the step that deletes them is this release's.
+    // So are the rows no anchor attributes, while one stands: a row written
+    // NULL since the run that finished the step is one too.
+    if (done && step === 'mirror-deletion' && underivableRowsDue(run)) {
+      const again = await runUnderivableDeletion(run);
+      const report: StepReport = again.blockers.length
+        ? { step, status: 'blocked', summary: { deleted: again.deleted }, blockers: again.blockers, notes: [] }
+        : { step, status: 'done', summary: { deleted: again.deleted }, blockers: [], notes: [] };
+      steps.push(report);
+      if (report.status !== 'done') {
+        stopped = true;
+        continue;
+      }
+      checkpoint.completed[step] = { at: now().toISOString(), summary: report.summary };
+      await opts.ledger.write(checkpoint, { complete: false, blocking: 0, advisory: 0 });
+      run.columns.clear();
+      if (!(await declaredRuleMirrorsDue(run))) continue;
+    }
     if (done && step === 'mirror-deletion' && (await declaredRuleMirrorsDue(run))) {
       const again = await runDeclaredRuleMirrorDeletion(run);
       steps.push(again);

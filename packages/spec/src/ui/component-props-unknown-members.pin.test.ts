@@ -244,8 +244,8 @@ const on = (types: readonly string[], paths: readonly string[], reason: Reason):
 // post-success block, and `operation` when they took the action's own
 // `operation` enum (`component-action-row-on-success-executor.test.ts`);
 // `patch` left it when they took the action's own record of field values,
-// whose values are a `records` line below
-// (`component-action-row-declarative-update.test.ts`).
+// and has since retired from every row outright
+// (`component-action-row-patch-retirement.test.ts`).
 const ACTION_RUNNER_PATHS = ['params', 'bodyExtra', 'bodyShape', 'toast', 'resultDialog'];
 // [#22444] `list-view` is the list view itself, so its `data` member is the
 // same view data source by reference.
@@ -296,10 +296,9 @@ on(['object-kanban', 'object-timeline'], ['data[]'], RECORDS);
 on(['object-calendar'], ['data[]', 'staticData[]'], RECORDS);
 on(['object-form', 'object-master-detail-form'], ['initialValues{}', 'initialData{}'], RECORDS);
 on(['object-grid', 'list-view'], ['bulkActionDefs[].patch{}', 'bulkActionDefs[].params[].default'], RECORDS);
-// A page action row's `patch` is `ActionSchema`'s record of static field
-// values, by reference: each value is one field's.
-on(['action:button', 'action:icon'], ['patch{}'], RECORDS);
-on(['action:group', 'action:menu'], ['actions[].patch{}'], RECORDS);
+// A page action row's `patch` has no line: it is a `retiredKey()` tombstone
+// (the route writes the named action's own `patch`), so the row holds no
+// record of field values to list (`component-action-row-patch-retirement.test.ts`).
 // A static board's card is a record row: `id` and `title` are typed, the rest
 // is the row's own values (the kanban's lane bucketing keeps them verbatim).
 on(['object-kanban'], ['columns[].cards[].*'], RECORDS);

@@ -1491,7 +1491,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Todas",
         emptyState: {
           title: "Aún no hay aplicaciones OAuth",
-          message: "Registra una aplicación para que sus clientes puedan iniciar la sesión de los usuarios con este entorno."
+          message: "Registra una aplicación para que sus clientes puedan iniciar la sesión de los usuarios con este sistema."
         }
       },
       mine: {
@@ -1894,7 +1894,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_sso_provider: {
     label: "Proveedor SSO",
     pluralLabel: "Proveedores SSO",
-    description: "Proveedores de identidad SSO externos (OIDC / SAML) a los que este entorno federa el inicio de sesión",
+    description: "Proveedores de identidad SSO externos (OIDC / SAML) a los que este sistema federa el inicio de sesión",
     fields: {
       id: {
         label: "ID"
@@ -1965,7 +1965,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           },
           clientId: {
             label: "ID de cliente",
-            helpText: "ID de cliente OAuth emitido por el IdP para este entorno."
+            helpText: "ID de cliente OAuth emitido por el IdP para este sistema."
           },
           clientSecret: {
             label: "Secreto de cliente",

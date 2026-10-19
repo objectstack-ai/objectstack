@@ -1,5 +1,83 @@
 # @objectstack/plugin-mcp-server
 
+## 18.0.0-next.4
+
+### Patch Changes
+
+- 3a734e0: feat(spec)!: a page region named `main` takes only `width: 'full'` — `'small'`, `'medium'` and `'large'` there are refused at publish (#24326)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered page-main-region-width-refused, page-main-region-width-removed -->
+  
+  **BREAKING** — an accept-set narrowing on a published authoring surface, shipped as `minor` under the repo's launch-window convention.
+  
+  `PageRegionSchema.width` is one enum shared by every region, so a `main` region accepted `'small'`, `'medium'` and `'large'`. The console never read them: every layout draws `main` at the width the layout leaves it (the flexible column beside `sidebar` and `aside`; one grid cell on `dashboard`), and the only reader of `main.width` is the page itself, for `'full'`, which lifts the page's max-width cap. A three-column page that asked for a `large` main got the space the two rails left, and every door reported success.
+  
+  - `PageSchema` now refuses `width: 'small' | 'medium' | 'large'` on a region named `main` (matched case-insensitively, as the console matches it), at `regions.N.width`, on every page kind and template. The message names the region and `'full'` as the one width it takes. The doors are `definePage`, `defineStack` (so `os validate` and `os build`, `STACK_SCHEMA_INVALID` 422) and the metadata save door (422 `INVALID_METADATA`).
+  - `'full'` on `main` is unchanged, with its page-wide meaning. Every other region accepts the same widths as before.
+  - The check is exported as `checkPageMainRegionWidth` from `@objectstack/spec/ui`, so a mirror built from `PageSchema.shape` can attach the same rule.
+  - Data at rest keeps loading: the retired ADR-0087 conversion `page-main-region-width-removed` deletes those widths on read: a stored page row, a compiled artifact inside the window its declared protocol range opens, and a package body registered with its declared range. The page renders exactly as before.
+  - `@objectstack/mcp` (the Connect an Agent page) and `@objectstack/cloud-connection` (the Cloud Connection page) drop `width: 'large'` from their `main` region. Both render the same.
+  
+  ### Migration: FROM → TO
+  
+  | Wrote | Write instead |
+  | :--- | :--- |
+  | `width: 'small' \| 'medium' \| 'large'` on a region named `main` | drop it; `'full'` stays |
+  
+  Deleting the key changes nothing on screen. Write `width: 'full'` only when you want a full-bleed page, which drops the page's max-width cap.
+- 71fa166: Clause-②: no
+  
+  fix(mcp): the known-partial listing warning and the Connect-an-Agent bundle description say "this system"
+  
+  - **What changed.** Inside the running system, user-facing copy names the system the caller is in as "this system". The warning an MCP client receives with a known-partial object listing (the `objectstack://objects` resource and the `list_objects` tool) now says "this system declares at least that many objects, possibly more", and the Connect-an-Agent UI bundle's description ends "for connecting MCP clients to this system".
+  - **Unchanged.** The `SERVICE_UNAVAILABLE` code that marks a partial listing, every payload shape, the portable `SKILL.md` (which names the deployment an outside agent connects to), and server log lines.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Patch Changes
