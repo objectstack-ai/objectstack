@@ -7,7 +7,7 @@
 
 feat(spec,metadata-protocol)!: the `/meta` door no longer authors sharing rules — `sharing_rule` is a code-only metadata type; Setup lists declared sharing rules
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: registered sharing-rule-runtime-create-withdrawn -->
 
@@ -22,7 +22,7 @@ A sharing rule has two sources: a package declares it (the stack's `sharingRules
 
 Also in this change:
 
-- **`@objectstack/spec`.** `MetadataTypeSchema` and `DEFAULT_METADATA_TYPE_REGISTRY` gain `sharing_rule`. Its schema binding (`SharingRuleSchema`) moves from the non-kind collections into the kind map. `META_URL_TO_SINGULAR` gains the `sharing_rules` spelling.
+- **`@objectstack/spec`.** `MetadataTypeSchema` (so the `MetadataType` union) and `DEFAULT_METADATA_TYPE_REGISTRY` gain `sharing_rule`. Its schema binding (`SharingRuleSchema`) moves from the non-kind collections into the kind map. `META_URL_TO_SINGULAR` gains the `sharing_rules` spelling, so `/api/v1/meta/sharing_rules` now folds to `sharing_rule`; before, that plural was not a recognised spelling.
 - **`@objectstack/metadata-protocol`.** The refusal names the two sanctioned paths, not a source glob. `sharing_rule` gains its ADR-0126 Regime C row (clone, and the ledger switch).
 - **`@objectstack/plugin-sharing`.** Setup's Access Control group gains **Declared Sharing Rules** (`nav_declared_sharing_rules`). It opens `/apps/setup/metadata/sharing_rule?scope=environment` beside **Sharing Rules**, which lists the organization's own rules.
 - **`@objectstack/platform-objects`.** That entry's label, in `en`, `zh-CN`, `ja-JP` and `es-ES`.
