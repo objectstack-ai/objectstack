@@ -1830,12 +1830,14 @@ export const FieldSchema = lazySchema(() => {
 
   /**
    * Calculation — CEL formula. Plain string accepted for back-compat; build emits canonical envelope.
-   * On a `formula` field it is computed on read and has no column. On any other (stored) field it is
-   * computed by the engine on every insert and update, from the row the write stores (the stored row
-   * merged with the patch), and the result is stored — a client-sent value never stands — so a
-   * `summary` can roll the column up.
+   * On a `formula` field it is computed on read and has no column. On any other (stored) field the
+   * engine computes it from the row the write stores and stores the result, so a `summary` can roll
+   * the column up and a client-sent value never stands: on every insert and every update by id (the
+   * stored row merged with the patch), and on a predicate update only when the patch moves one of the
+   * expression's inputs — the one value is stored when it is the same on every matched row, and the
+   * update is refused when it would differ between rows.
    */
-  expression: EvaluatedExpressionInputSchema.optional().describe('CEL expression the field\'s value is computed from, e.g. F`record.amount * 0.1`. On a `formula` field: computed on read, no column. On any other (stored) field: computed by the engine on every insert and update from the row the write stores (the stored row merged with the patch) and stored, so a client-sent value never stands and a `summary` can roll the column up.'),
+  expression: EvaluatedExpressionInputSchema.optional().describe('CEL expression the field\'s value is computed from, e.g. F`record.amount * 0.1`. On a `formula` field: computed on read, no column. On any other (stored) field: computed by the engine from the row the write stores and stored, so a client-sent value never stands and a `summary` can roll the column up — on every insert and every update by id (the stored row merged with the patch), and on a predicate update only when the patch moves an input (one value for every matched row, else the update is refused).'),
   /**
    * The value type a `formula` field computes, declared at authoring (the way
    * Salesforce/Airtable carry a formula's result type). Lets consumers — dataset
