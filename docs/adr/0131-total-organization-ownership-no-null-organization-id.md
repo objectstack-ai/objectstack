@@ -533,6 +533,26 @@ column (NOT NULL, D3); an object no writer attributes is deployment-level and lo
 inventory records the verdict per object with the writer fact as its citation — this record names only
 the objects whose verdict the tree already states.
 
+> **Note (2026-10-19, ruling of record `6257510973` on #24377, letter Q2 A) — identity mail is
+> deployment-level.** Some mail goes to a person before any organization is theirs to stamp: verify,
+> reset, magic link, email change, and an account invitation to a person with no organization. That
+> mail is written to a sibling of `sys_email` that has no organization column and the same row shape.
+> The same outbox, status and attachment pipeline serves it. Tenant mail stays in `sys_email` with
+> its organization NOT NULL, and #11303 decision 2 keeps it stamped at its producers. ⛔ Neither a
+> nullable column nor unpersisted mail. This is a ruled decision that a C8 stage builds; it has not
+> shipped.
+
+> **Note (2026-10-19, ruling of record `6257510973` on #24377, letter Q4 A) — `sys_secret` has no
+> organization column.** A secret's ownership follows the row that references it: `sys_setting` /
+> `sys_platform_setting`, the webhook, the flow credential, the field's record, or the datasource.
+> Every read stays by id under privilege. This is a ruled decision that a C8 stage builds; it has not
+> shipped.
+
+> **Note (2026-10-19, ruling of record `6257510973` on #24377, letter Q4 A) — `sys_setting_audit`'s
+> global rung moves to a deployment-level sibling.** This is the same departure `sys_setting`'s global
+> rung already makes. The settings audit's tenant and user rows stay in `sys_setting_audit` with the
+> organization NOT NULL. This is a ruled decision that a C8 stage builds; it has not shipped.
+
 The #12699 deployment declaration becomes **total**: an object a deployment declares platform-global
 gets **no organization column on that deployment** (the injected-columns plan reads the declaration),
 so Layer 0 and the driver agree by having nothing to scope. This is how the cloud control plane
