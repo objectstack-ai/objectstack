@@ -182,7 +182,9 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
     }, { logger: silentLogger });
     await wrapped(ctx);
 
-    const context = engine.seen[0]!.context as ExecutionContext;
+    // The hook's own write, not the grants resolution the pin now issues
+    // first (#24497, pinned in its own block below).
+    const context = engine.seen.find((e: { method: string }) => e.method === 'update')!.context as ExecutionContext;
     expect(context.isSystem).toBe(false);
     expect(context.userId).toBe('usr_operator');
   });
@@ -278,6 +280,107 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       // …and the detached handler still wrote elevated.
       expect(engine.seen).toHaveLength(1);
       expect((engine.seen[0]!.context as ExecutionContext).isSystem).toBe(true);
+    });
+  });
+
+  describe("[#24497] a 'user' pin carries the user's grants and peer list, through the request path's resolver", () => {
+    /**
+     * A recording engine that also answers the reads `resolveUserAuthzGrants`
+     * issues: organisation `org_1` holds `usr_operator` and `usr_peer`.
+     * `failReads` makes every read throw, as an unreadable permission store does.
+     */
+    function grantsEngine(opts: { failReads?: boolean } = {}) {
+      const engine = recordingEngine();
+      engine.find = async (object: string, query: any) => {
+        engine.seen.push({ method: 'find', context: query?.context, object, where: query?.where });
+        if (opts.failReads) throw new Error('permission store unreachable');
+        if (object === 'sys_member' && query?.where?.organization_id === 'org_1') {
+          return [
+            { id: 'm1', user_id: 'usr_operator', organization_id: 'org_1', role: 'member' },
+            { id: 'm2', user_id: 'usr_peer', organization_id: 'org_1', role: 'member' },
+          ];
+        }
+        return [];
+      };
+      return engine;
+    }
+
+    async function hookWrite(execCtx: ExecutionContext, engine: any, runAs = 'user', logger: any = silentLogger) {
+      const wrapped = wrapDeclarativeHook(hookOf(runAs), async (c) => {
+        await (c.api as any).object('account').update({ id: 'acct_1', current_grade: 'A' });
+      }, { logger });
+      await wrapped(makeCtx(execCtx, engine));
+      return engine.seen.find((e: { method: string }) => e.method === 'update')!.context as ExecutionContext;
+    }
+
+    const reads = (engine: any) => engine.seen.filter((e: { method: string }) => e.method === 'find');
+
+    it('a hand-built { isSystem: true, userId, tenantId } trigger: the pin carries the organisation\'s peers, the user included, and nothing beyond', async () => {
+      const engine = grantsEngine();
+      const context = await hookWrite({ isSystem: true, userId: 'usr_operator', tenantId: 'org_1' } as ExecutionContext, engine);
+      expect(context.isSystem).toBe(false);
+      expect([...(context.org_user_ids ?? [])].sort()).toEqual(['usr_operator', 'usr_peer']);
+      // Carried no permissions, so it takes the resolved ones (an array, as on a request).
+      expect(Array.isArray(context.permissions)).toBe(true);
+      expect(Array.isArray(context.positions)).toBe(true);
+      // The peer read is scoped to the context's organisation.
+      expect(reads(engine).some((r: any) => r.object === 'sys_member' && r.where?.organization_id === 'org_1')).toBe(true);
+    });
+
+    it('positions and permission sets already on the context stay VERBATIM; only the peer list is taken', async () => {
+      // The approvals writes' shape: `{ isSystem: true, positions: [], permissions: [], userId }` —
+      // and a narrowed ceiling a door forwarded is the same case: never re-broadened.
+      const engine = grantsEngine();
+      const context = await hookWrite({
+        isSystem: true, userId: 'usr_operator', tenantId: 'org_1', positions: ['narrow'], permissions: ['ceiling_only'],
+      } as ExecutionContext, engine);
+      expect(context.positions).toEqual(['narrow']);
+      expect(context.permissions).toEqual(['ceiling_only']);
+      expect([...(context.org_user_ids ?? [])].sort()).toEqual(['usr_operator', 'usr_peer']);
+    });
+
+    it('a context that already carries a peer list (a request-resolved one) resolves NOTHING and keeps its envelope', async () => {
+      const engine = grantsEngine();
+      const context = await hookWrite({ ...OPERATOR, org_user_ids: ['usr_operator', 'usr_x'] } as ExecutionContext, engine);
+      expect(reads(engine)).toEqual([]);
+      expect(context.org_user_ids).toEqual(['usr_operator', 'usr_x']);
+      expect(context.positions).toEqual(OPERATOR.positions);
+      expect(context.permissions).toEqual(OPERATOR.permissions);
+    });
+
+    it('a trigger with no organisation: the peer list is the user alone, as an organisation-less request\'s is', async () => {
+      const engine = grantsEngine();
+      const context = await hookWrite({ isSystem: true, userId: 'usr_operator' } as ExecutionContext, engine);
+      expect(context.org_user_ids).toEqual(['usr_operator']);
+    });
+
+    it("'system' and 'inherit' resolve nothing, and the user-less refusal does not move", async () => {
+      const sys = grantsEngine();
+      expect((await hookWrite({ isSystem: true, userId: 'usr_operator', tenantId: 'org_1' } as ExecutionContext, sys, 'system')).isSystem).toBe(true);
+      expect(reads(sys)).toEqual([]);
+
+      const inherit = grantsEngine();
+      await hookWrite(OPERATOR, inherit, 'inherit');
+      expect(reads(inherit)).toEqual([]);
+
+      const userless = grantsEngine();
+      const ctx = makeCtx(USERLESS, userless);
+      const wrapped = wrapDeclarativeHook(hookOf('user'), async (c) => {
+        await (c.api as any).object('account').update({ id: 'acct_1', current_grade: 'A' });
+      }, { logger: silentLogger });
+      await expect(wrapped(ctx)).rejects.toMatchObject({ code: HOOK_UNSCOPED_DATA_ACCESS_CODE, status: HOOK_UNSCOPED_DATA_ACCESS_STATUS });
+      expect(userless.seen).toEqual([]);
+    });
+
+    it('a resolver failure keeps the UNSEEDED pin — narrower, never elevated — and says so once at warn', async () => {
+      const engine = grantsEngine({ failReads: true });
+      const warns: unknown[][] = [];
+      const logger = { ...silentLogger, warn: (...a: unknown[]) => { warns.push(a); } };
+      const context = await hookWrite({ isSystem: true, userId: 'usr_operator', tenantId: 'org_1' } as ExecutionContext, engine, 'user', logger);
+      expect(context.isSystem).toBe(false);
+      expect(context.org_user_ids).toBeUndefined();
+      expect(warns).toHaveLength(1);
+      expect(String(warns[0]![0])).toMatch(/current_user\.org_user_ids drops out/);
     });
   });
 

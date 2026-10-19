@@ -146,6 +146,9 @@ import {
   // [ADR-0131 D8] The ONE tenant read predicate, shared with plugin-security's
   // Layer 0 — see {@link buildDriverOptions}.
   computeTenantLayer0Verdict,
+  // [#24497] The ONE grants resolver, the one the request path seeds a
+  // context's grants and peer list through — see `ScopedContext.withUserGrantsSeeded`.
+  resolveUserAuthzGrants,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
@@ -21772,6 +21775,54 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     if (!this.executionContext.userId) return new UnscopedHookApi(ref);
     return new ScopedContext(
       { ...this.executionContext, isSystem: false },
+      this.engine
+    );
+  }
+
+  /**
+   * [#24497] The second half of a hook's `runAs: 'user'` derivation: the
+   * user's grants and peer list, seeded through the one resolver the request
+   * path seeds them through (`resolveUserAuthzGrants`, `@objectstack/core`).
+   * The hook wrapper awaits it on the api {@link withRunAs} derived; it stays
+   * a separate, async step so `withRunAs` keeps its synchronous contract.
+   *
+   * A hook fired from a hand-built `{ isSystem: true, userId }` context (the
+   * approvals writes) was pinned with no `org_user_ids`, so every row policy
+   * reading `current_user.org_user_ids` compiled `unresolved-variable` and
+   * dropped out: the hook saw its own `sys_user` row only, while the same
+   * user's request saw their organisation's members too. Ruling A′ puts the
+   * contract on the producer: every user context carries `org_user_ids`.
+   *
+   * The same rule as a `runAs: 'user'` flow's run setup (service-automation
+   * `resolveRunContext`):
+   *  - positions and permission sets the context already carries stay
+   *    verbatim, so a narrowed ceiling is never re-broadened; only a context
+   *    with no `permissions` takes the resolved ones;
+   *  - a context that already carries a peer list keeps it;
+   *  - a context that needs neither resolves nothing and is returned as is.
+   *
+   * The peer list is the members of the context's `tenantId`, the user
+   * included; a context with no `tenantId` gets the user alone, as an
+   * organisation-less request does. A resolver failure (an unreadable
+   * permission store) is thrown to the caller, which keeps the unseeded api.
+   */
+  async withUserGrantsSeeded(): Promise<ScopedContext> {
+    const ctx = this.executionContext;
+    if (ctx.isSystem || !ctx.userId) return this;
+    const needsGrants = !Array.isArray(ctx.permissions);
+    const needsPeers = !Array.isArray(ctx.org_user_ids);
+    if (!needsGrants && !needsPeers) return this;
+    const grants = await resolveUserAuthzGrants(
+      this.engine,
+      ctx.userId,
+      ctx.tenantId ? { tenantId: ctx.tenantId } : {},
+    );
+    return new ScopedContext(
+      {
+        ...ctx,
+        ...(needsGrants ? { positions: grants.positions, permissions: grants.permissions } : {}),
+        ...(needsPeers ? { org_user_ids: grants.org_user_ids } : {}),
+      },
       this.engine
     );
   }

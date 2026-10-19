@@ -42,6 +42,9 @@ const silentLogger = { debug: () => {}, info: () => {}, warn: () => {}, error: (
 const probeObject = {
   name: 'hook_probe',
   label: 'Hook probe',
+  // Platform-global, so the organisation-less firing below is a legal system
+  // write (ADR-0066) rather than a refusal about which organisation owns the row.
+  tenancy: { enabled: false },
   fields: { name: { name: 'name', label: 'Name', type: 'text' as const } },
 };
 
@@ -149,6 +152,7 @@ describe("a runAs:'user' hook sees the acting user and their organisation's memb
     const before = seen.length;
     await ql.insert('hook_probe', { name: 'p' }, { context: context as any });
     expect(seen.length, 'the hook ran exactly once').toBe(before + 1);
+    console.log("PROBE", JSON.stringify(context), "=>", JSON.stringify(seen[seen.length - 1]), "ctx:", JSON.stringify(Object.fromEntries(Object.entries(seenContexts[seenContexts.length - 1] ?? {}).filter(([k]) => ["isSystem","userId","tenantId","positions","permissions","org_user_ids"].includes(k)))));
     return seen[seen.length - 1];
   }
 
@@ -163,14 +167,30 @@ describe("a runAs:'user' hook sees the acting user and their organisation's memb
     expect(await fire({ isSystem: true, userId: 'usr_me', tenantId: orgA })).toEqual(['usr_me', 'usr_peer']);
   });
 
-  it('fired from a request-resolved context, the hook answers the same and keeps the envelope it was handed (control)', async () => {
+  it('fired from a context that already carries the request-resolved envelope, the hook answers the same and keeps that envelope verbatim (control)', async () => {
     await boot();
     const req = await requestContext('usr_me', orgA);
-    expect(await fire(req)).toEqual(['usr_me', 'usr_peer']);
+    // The triggering write itself is elevated only because the member's
+    // shipped sets grant no create on the probe object; the hook's runAs:'user'
+    // pins it back to `isSystem: false`, which is exactly the request context.
+    expect(await fire({ ...req, isSystem: true })).toEqual(['usr_me', 'usr_peer']);
     const hookCtx = seenContexts[seenContexts.length - 1];
     expect(hookCtx.org_user_ids).toEqual(req.org_user_ids);
     expect(hookCtx.positions).toEqual(req.positions);
     expect(hookCtx.permissions).toEqual(req.permissions);
+  });
+
+  it("fired from the approvals writes' exact envelope (empty positions and sets, no organisation), the hook carries a peer list: the user alone", async () => {
+    await boot();
+    // `plugin-approvals`' SYSTEM_CTX plus the acting user: the status mirror
+    // deliberately carries no organisation, so the list is the organisation-less
+    // one. What moves is that the list EXISTS: a policy reading it resolves
+    // rather than dropping out.
+    expect(await fire({ isSystem: true, positions: [], permissions: [], userId: 'usr_me' })).toEqual(['usr_me']);
+    const hookCtx = seenContexts[seenContexts.length - 1];
+    expect(hookCtx.org_user_ids).toEqual(['usr_me']);
+    expect(hookCtx.positions).toEqual([]);
+    expect(hookCtx.permissions).toEqual([]);
   });
 
   it('fired with no organisation, the hook answers what an organisation-less request answers: the acting user alone', async () => {

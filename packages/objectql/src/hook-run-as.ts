@@ -205,3 +205,26 @@ export function deriveHookApi(api: unknown, runAs: HookRunAs, ref: HookRunAsRef)
   }
   return derivable.withRunAs(runAs, ref);
 }
+
+/**
+ * What the api a `runAs: 'user'` derivation produced must offer for the
+ * user's grants and peer list to be seeded onto it (#24497). The engine's
+ * `ScopedContext` implements it (`engine.ts` `withUserGrantsSeeded`); the
+ * refusing {@link UnscopedHookApi} does not, and needs nothing seeded.
+ */
+interface UserGrantsSeedableApi {
+  withUserGrantsSeeded(): Promise<IScopedContext>;
+}
+
+/**
+ * Seed the user's grants and peer list onto the api a `runAs: 'user'`
+ * derivation produced, through the core resolver the request path uses
+ * (#24497). Async, so it is a step of its own after {@link deriveHookApi}
+ * rather than a change to that function's synchronous contract. An api that
+ * cannot seed (the refusing {@link UnscopedHookApi}) is returned as is.
+ */
+export async function seedHookUserGrants(api: unknown): Promise<unknown> {
+  const seedable = api as Partial<UserGrantsSeedableApi> | undefined;
+  if (!seedable || typeof seedable.withUserGrantsSeeded !== 'function') return api;
+  return seedable.withUserGrantsSeeded();
+}
