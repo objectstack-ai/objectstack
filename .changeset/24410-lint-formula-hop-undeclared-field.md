@@ -16,4 +16,4 @@ The field-formula pass judges the field a formula reads one hop through a refere
 - `record.book.title`, where the target declares `title`, passes as before.
 - A target the stack does not carry is not judged. At the save door the stack carries the live registry's objects in the written package's closure, so a target from a package it depends on is judged.
 
-What to do. Read a field the target declares, or declare the field on the target object. Do not declare it on the object that carries the formula.
+What to do. Read a field the target declares, or declare the field on the target object. Do not declare it on the object that carries the formula. At `os build` and `os validate` this pass does not see a target field that an `objectExtensions` entry contributes, while the save door judges the merged object.

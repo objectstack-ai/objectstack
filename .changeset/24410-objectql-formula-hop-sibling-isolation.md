@@ -4,7 +4,7 @@
 
 fix(objectql): a formula reading a field its reference's target does not declare no longer makes the other formulas reading through the same reference read null
 
-Clause-②: no (narrowing)
+Clause-②: no
 
 <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes, and nothing stored, is added, removed or renamed. A valid formula that read null beside a misspelt sibling now reads its value; no spec key, export, option, object definition or stored shape changes, so there is nothing for `objectstack migrate meta` to rewrite. -->
 
