@@ -10,17 +10,20 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Studio UI without code changes. The canonical Zod schema for the
  * `definition_json` envelope lives at `@objectstack/spec/automation/webhook`.
  *
- * ## Two authoring doors, one row
- * Rows land here two ways, distinguished by the `managed_by` provenance column:
+ * ## Rows are the webhooks an organization authors (ADR-0131 D2)
+ * `managed_by` tells two kinds of row apart:
  *   - **admin** — created/edited directly through this object's CRUD UI.
- *   - **package** — declared in code (`defineStack({ webhooks })` /
- *     `defineWebhook()`) and materialized on boot by
- *     `bootstrapDeclaredWebhooks` (#3461). Re-seeded every boot, but an admin
- *     edit stamps `customized: true` and freezes the row (seed-not-clobber,
- *     mirrors `sys_sharing_rule` #2909).
+ *   - **package** — a copy of a webhook declared in code (`defineStack({
+ *     webhooks })` / `defineWebhook()`), written by the 18.0 boot seeder
+ *     `bootstrapDeclaredWebhooks`. That seeder is retired: a declared webhook
+ *     is read from the registry (`declared-webhooks.ts`) and no boot writes
+ *     such a row any more. The rows an 18.0 install left stay until the
+ *     ownership ceremony deletes them; meanwhile a pristine one is ignored in
+ *     favour of its declaration, and one an administrator edited (`customized:
+ *     true`) answers as itself.
  *
- * One row per `name`. This plugin's {@link AutoEnqueuer} loads active rows on
- * boot + on `sys_webhook:changed` events, and turns matching `data.record.*`
+ * One row per `name`. This plugin's {@link AutoEnqueuer} loads active rows,
+ * and the declared webhooks, on boot + on `sys_webhook:changed` events, and turns matching `data.record.*`
  * events into deliveries on the shared `service-messaging` HTTP outbox
  * (ADR-0018 M3 — `sys_http_delivery`, drained by the messaging dispatcher).
  *
@@ -262,10 +265,10 @@ export const SysWebhook = ObjectSchema.create({
     // ── Provenance (#3461 — record-authoritative seed-not-clobber) ──
     // Mirrors sys_sharing_rule (#2909). Both columns are `readonly`: the
     // engine strips them from non-system payloads (forge/clear-proof), while
-    // bootstrapDeclaredWebhooks and the provenance stamp hook write with
-    // isSystem. Deliberately NOT a write gate: webhooks are a first-class admin
-    // authoring/tuning surface — admins may edit or deactivate a package row;
-    // the seeder simply stops overwriting it once `customized` is stamped.
+    // the provenance stamp hook writes with isSystem (as the retired 18.0 seeder
+    // did). Deliberately NOT a write gate: webhooks are a first-class admin
+    // authoring/tuning surface — admins may edit or deactivate a package row,
+    // which then answers as itself rather than for its declaration.
     managed_by: Field.select(
       ['platform', 'package', 'admin'],
       {
@@ -335,7 +338,7 @@ export const SysWebhook = ObjectSchema.create({
    * |:---|:---|:---|
    * | Setup/Studio console — `nav_webhooks` (`webhook-outbox-plugin.ts`), the four list views above, `userActions` create/edit/delete | REST `/api/v1/data/sys_webhook` — the gated data API | `get` `list` `create` `update` `delete` |
    * | Operator predicate write — "deactivate every webhook on an object" (#4639, for which `AutoEnqueuer.handleSelfHealEvent` carries a `data.records.*` branch built expressly for this gesture) | REST `updateMany` / `deleteMany`, both gated on the `bulk` primitive | `bulk` |
-   * | `AutoEnqueuer` cache refresh, `bootstrapDeclaredWebhooks`, `stampWebhookProvenance`, `redeliver-guard`, `migrateLegacyWebhookSecrets`, the `headers_secret` write gate | `engine.find/findOne/insert/update` and lifecycle hooks — ObjectQL directly, which never consults `enable.apiMethods` | ungated: unaffected by anything declared here |
+   * | `AutoEnqueuer` cache refresh, `stampWebhookProvenance`, `redeliver-guard`, `migrateLegacyWebhookSecrets`, the `headers_secret` write gate | `engine.find/findOne/insert/update` and lifecycle hooks — ObjectQL directly, which never consults `enable.apiMethods` | ungated: unaffected by anything declared here |
    *
    * ⇒ every primitive is required by a real, measured consumer, so the set is
    * all six. No consumer outside the admin/operator surface was found.

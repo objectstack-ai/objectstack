@@ -19,8 +19,9 @@
  *   POST /security/suggested-bindings/:id/confirm          → accept it for the deployment
  *   POST /security/suggested-bindings/:id/dismiss          → decline it, or revoke an acceptance
  *   POST /security/_activation/:type/:name                 → switch a position (`position`), a
- *                                                            permission set (`permission`) or a declared
- *                                                            sharing rule (`sharing_rule`) on/off
+ *                                                            permission set (`permission`), a declared
+ *                                                            sharing rule (`sharing_rule`) or a declared
+ *                                                            webhook (`webhook`) on/off
  *                                                            for this deployment (`./catalog-activation.ts`)
  *   POST /security/permission-sets/:name/clone            → copy a permission set's whole definition
  *                                                            under a new name (`./permission-set-clone.ts`)

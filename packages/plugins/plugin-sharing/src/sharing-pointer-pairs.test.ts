@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { SysRecordShare } from './objects/sys-record-share.object.js';
 import { SysShareLink } from './objects/sys-share-link.object.js';
+import * as SharingObjects from './objects/index.js';
 
 /**
  * The two sharing tables declare the ActivityPointer pair — #11386 (ADR-0052
@@ -76,5 +77,54 @@ describe('sys_share_link — declared pointer pair (#11386)', () => {
   it('does NOT declare token as a pointer half — a capability secret is not a record address', () => {
     expect(fields.token).toBeDefined();
     expect(fields.token.referenceVia).toBeUndefined();
+  });
+});
+
+/**
+ * [#24501] A list names the shared record with the id half alone. The console
+ * draws a `referenceVia` column as the target record (its object's icon and
+ * name) and fetches the type half for that cell without a column
+ * (objectui#13036); a type-half column draws the stored API name as text.
+ * Enumerated over every object this package ships (`objects/index.ts`), so a
+ * view added later is judged without anyone listing it here.
+ */
+describe('sharing list views — a pointer shows as its id half, never its type half (#24501)', () => {
+  type PointerObject = {
+    name: string;
+    fields: Record<string, { referenceVia?: unknown } | undefined>;
+    listViews?: Record<string, { columns?: ReadonlyArray<string | { field: string }> }>;
+  };
+
+  /** `object.view: column` for each shown id half, and for each type half shown beside one. */
+  function pointerColumns(objects: readonly PointerObject[]): { idHalves: string[]; typeHalves: string[] } {
+    const idHalves: string[] = [];
+    const typeHalves: string[] = [];
+    for (const object of objects) {
+      for (const [view, def] of Object.entries(object.listViews ?? {})) {
+        const shown = new Set((def.columns ?? []).map((c) => (typeof c === 'string' ? c : c.field)));
+        for (const column of shown) {
+          const via = object.fields[column]?.referenceVia;
+          if (typeof via !== 'string') continue;
+          idHalves.push(`${object.name}.${view}: ${column}`);
+          if (shown.has(via)) typeHalves.push(`${object.name}.${view}: ${via}`);
+        }
+      }
+    }
+    return { idHalves, typeHalves };
+  }
+
+  const objects = Object.values(SharingObjects) as unknown as PointerObject[];
+
+  it('no list view shows a referenceVia sibling beside its id half', () => {
+    expect(pointerColumns(objects).typeHalves).toEqual([]);
+  });
+
+  it('the share and link lists still show the id half, so the Record column names the target', () => {
+    const shareViews = ['all_shares', 'granted_to_me', 'granted_by_me', 'by_object', 'manual_grants', 'rule_grants'];
+    const linkViews = ['active_links', 'by_me', 'revoked', 'all_links'];
+    expect(pointerColumns(objects).idHalves).toEqual(expect.arrayContaining([
+      ...shareViews.map((v) => `sys_record_share.${v}: record_id`),
+      ...linkViews.map((v) => `sys_share_link.${v}: record_id`),
+    ]));
   });
 });

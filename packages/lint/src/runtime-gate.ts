@@ -416,7 +416,7 @@ export function narrowObjectsToPackageClosure(
   objects: readonly unknown[],
   scope: RuntimePackageScope | undefined,
 ): readonly unknown[] {
-  if (!scope || typeof scope.packageId !== 'string' || scope.packageId === '') return objects;
+  if (!packageScopeInForce(scope)) return objects;
   const reachable = new Set<string>([scope.packageId, ...scope.dependencies]);
   return objects.filter((entry) => {
     if (!entry || typeof entry !== 'object') return true;
@@ -431,6 +431,19 @@ export function narrowObjectsToPackageClosure(
     // the weakest: it is the one limb with no escape.
     return isSystemObject(entry as AnyRec);
   });
+}
+
+/**
+ * Whether `scope` narrows anything (#9612): a stated, non-empty package id.
+ *
+ * ONE predicate for both readers — {@link narrowObjectsToPackageClosure}, and
+ * {@link runRuntimeAuthoringRules} when it tells the rules a closure is in
+ * force (`AuthoringRuleContext.packageScope`, #24563) — so a rule can never be
+ * told "judged under a closure" about a snapshot that was not narrowed, or the
+ * reverse.
+ */
+function packageScopeInForce(scope: RuntimePackageScope | undefined): scope is RuntimePackageScope {
+  return !!scope && typeof scope.packageId === 'string' && scope.packageId !== '';
 }
 
 /**
@@ -1101,6 +1114,11 @@ export function runRuntimeAuthoringRules(args: {
     sduiManifest: args.sduiManifest,
     runtimeWriteType: args.type,
     judgeFilter: args.judgeFilter,
+    // [#24563] The closure the snapshots' `objects` were narrowed to, stated
+    // exactly when the builder above narrowed them (the same predicate), so a
+    // rule can tell an object outside the package's declared reach from one
+    // a whole-collection snapshot merely does not carry.
+    ...(packageScopeInForce(args.packageScope) ? { packageScope: args.packageScope } : {}),
     // [#20611] Spelled against the CANDIDATE, the one snapshot that holds the
     // written item. The baseline pass shares the set and cannot match it: the
     // item is not in the baseline, and every other entry sits at an index the

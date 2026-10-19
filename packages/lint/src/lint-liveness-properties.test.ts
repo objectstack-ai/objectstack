@@ -247,24 +247,49 @@ describe('lintLivenessProperties', () => {
     expect(findings).toEqual([]);
   });
 
-  // ── webhook (#3461 bridge landed → #3490; #3494 prune) ────────────────────
-  // Two things closed the old "entire surface is dead" state: #3494 PRUNED the
-  // aspirational dead props (body/payloadFields/includeSession/retryPolicy/tags/
-  // authentication) from the schema, and the #3489 materializer bridge makes
-  // every REMAINING prop live (object/isActive/url/triggers/method/name/headers/
-  // secret/timeoutMs/label/description). So a webhook has no misleading dead
-  // surface left — authoring one is silent. Runs against the REAL webhook.json.
+  // ── webhook (#3461 bridge landed → #3490; #3494 prune; ADR-0131 D2) ─────
+  // #3494 PRUNED the aspirational dead props from the schema and the #3489
+  // materializer bridge made every remaining prop live. ADR-0131 D2 then
+  // retired that bridge: a declared webhook is read from the registry and has
+  // no Setup row, so the two display-only props, `label` and `description`,
+  // lost their only reader and the ledger marks them dead. Every delivery-
+  // bearing prop stays silent. Runs against the REAL webhook.json, so a ledger
+  // flip that is not carried to authors fails here.
 
-  it('does not warn on an authored webhook — all remaining props are live (#3490)', () => {
+  it('warns on a declared webhook\'s label and description only — every delivery-bearing prop is live', () => {
     const findings = lintLivenessProperties({
       webhooks: [{
         name: 'showcase_task_changed',
+        label: 'Task Changed',
         object: 'showcase_task',
         triggers: ['create', 'update', 'delete'],
         url: 'https://hooks.example/showcase/task',
         method: 'POST',
+        headers: { 'X-Team': 'crm' },
+        secret: 'whsec_x',
+        timeoutMs: 5000,
         isActive: true,
         description: 'Sends task lifecycle events to an external system.',
+      }],
+    });
+    expect(findings.map((f) => [f.rule, f.message.match(/`(\w+)`/)?.[1]])).toEqual([
+      ['liveness-dead-property', 'label'],
+      ['liveness-dead-property', 'description'],
+    ]);
+    for (const f of findings) {
+      expect(f.where).toBe("webhook 'showcase_task_changed'");
+      expect(f.hint).toContain('no Setup row');
+    }
+  });
+
+  it('stays silent on a declared webhook that authors only what is delivered on', () => {
+    const findings = lintLivenessProperties({
+      webhooks: [{
+        name: 'showcase_task_changed',
+        object: 'showcase_task',
+        triggers: ['create'],
+        url: 'https://hooks.example/showcase/task',
+        isActive: false,
       }],
     });
     expect(findings).toEqual([]);

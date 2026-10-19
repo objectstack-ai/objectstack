@@ -138,9 +138,16 @@ describe('dogfood: a bare-list container on another package\'s object leaves its
     // 1. Baseline.
     await expectDefaultUnchangedOnBothDoors();
 
-    // 2. A Studio-created package to author into.
+    // 2. A Studio-created package to author into. It DECLARES the showcase as a
+    // dependency (#24563): the save door judges a package's view against the
+    // package's closure and refuses a binding outside it
+    // (`list-view-object-outside-closure`), so a container for an object
+    // another package ships is authored from a package that may reach it.
     const created = await stack.apiAs(token, 'POST', '/packages', {
-      manifest: { id: REPAIR, name: 'Repair assets', version: '0.1.0', type: 'app', namespace: 'repair' },
+      manifest: {
+        id: REPAIR, name: 'Repair assets', version: '0.1.0', type: 'app', namespace: 'repair',
+        dependencies: { [SHOWCASE]: '*' },
+      },
     });
     expect(created.status).toBe(201);
 

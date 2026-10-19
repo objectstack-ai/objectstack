@@ -378,7 +378,8 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'POST /security/_activation/:type/:name', domain: '/security', disposition: 'server-only',
     note: 'ADR-0126 §3 regime C, as ADR-0131 D6 amends it — switch ONE position (`:type` = `position`), permission set '
       + '(`:type` = `permission`) or declared sharing rule (`:type` = `sharing_rule`, resolved by the `sharingRules` service; '
-      + 'its grants reconcile on the ledger write) on/off for this deployment. Writes one `sys_metadata_activation` row through the engine and '
+      + 'its grants reconcile on the ledger write) or declared webhook (`:type` = `webhook`, resolved by the `declaredWebhooks` '
+      + 'reader; the webhook dispatcher refreshes its subscriptions on the ledger write) on/off for this deployment. Writes one `sys_metadata_activation` row through the engine and '
       + 'nothing else (⛔ no definition write, ⛔ no catalog row `active`: ADR-0131 D3 moved the switch into the ledger, and '
       + '`resolveUserAuthzGrants` reads only the ledger for these two types). Body `{ enabled?: boolean }`, the same reader as '
       + 'the action door. The same two authority tiers as `POST /automation/:name/toggle` and `POST /actions/_activation/:object/:action`: '

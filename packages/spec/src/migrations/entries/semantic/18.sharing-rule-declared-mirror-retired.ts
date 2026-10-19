@@ -9,7 +9,7 @@ export const entry: SemanticMigration = {
     + 'the declared-rule seeder (`bootstrapDeclaredSharingRules`, @objectstack/plugin-sharing) is '
     + 'retired. FROM one `managed_by: package` row per declared rule TO none: the sharing-rule '
     + 'service reads each declared rule from the registry, its id is its name, and its grants carry '
-    + 'that name as `sys_record_share.source_id`; the organization-ownership ceremony renames the '
+    + 'that name as `sys_record_share.source_id`; the 18.x organization-ownership ceremony renames the '
     + 'grants of the rows the seeder wrote, then deletes those rows, and Setup\'s Sharing Rules object '
     + 'list (which lists rows) no longer shows declared rules. `DELETE /api/v1/sharing/rules/:idOrName` '
     + 'on a declared rule: FROM 204 with the seeded row deleted (and written again by the next boot) '
@@ -17,8 +17,8 @@ export const entry: SemanticMigration = {
   replacement:
     'change or remove the rule in its declaration in the package (the stack\'s `sharingRules`); '
     + 'read declared rules through `GET /api/v1/sharing/rules`, which lists them beside the rules an '
-    + 'organization authors. An organization\'s own rule is deleted as before. On an upgraded '
-    + 'database run `os migrate organization-ownership --apply` with a fresh plan: its mirror-deletion '
+    + 'organization authors. An organization\'s own rule is deleted as before. Existing databases: 18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path. '
+    + 'In that 18.x release, run `os migrate organization-ownership --apply` on the upgraded database with a fresh plan: its mirror-deletion '
     + 'step removes the seeded copies',
   reason:
     'ADR-0131 D2 retires the seeders: declared metadata is code, served from the registry, and a '
@@ -34,6 +34,6 @@ export const entry: SemanticMigration = {
   acceptanceCriteria:
     'A fresh boot in every posture writes no `sys_sharing_rule` row for a declared rule and the rule '
     + 'still grants; removing the declaration stops its grant; no consumer deletes a declared rule '
-    + 'through the sharing-rule API or expects it as a `sys_sharing_rule` row; an upgraded database '
-    + 'certifies only after the ceremony has deleted the seeded copies.',
+    + 'through the sharing-rule API or expects it as a `sys_sharing_rule` row. 18.0 upgrades no v17 database; in the '
+    + '18.x release that carries the upgrade path, an upgraded database certifies only after its ceremony has deleted the seeded copies.',
 };

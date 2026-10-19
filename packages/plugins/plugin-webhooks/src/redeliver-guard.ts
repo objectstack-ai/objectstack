@@ -61,9 +61,26 @@
  * own presence check because the refusal REASON it returns is written from the
  * subscription row, and keeps its behaviour byte for byte: an unresolvable key
  * is refused with the text below, and anything else still propagates.
+ *
+ * ## A declared webhook's deliveries (ADR-0131 D2/D6)
+ * A declared webhook has no `sys_webhook` row: its deliveries carry
+ * `ref_id = declared:<name>` (`declaredWebhookRefId`), and the guard asks the
+ * same questions of the declaration, through the reader the dispatcher uses.
+ * Not declared any more is case 1, switched off (the activation ledger, or a
+ * declared `isActive: false` no ledger row overrides) is case 2. Case 3 cannot
+ * arise: the signing key is code, held with the declaration. A pristine 18.0
+ * mirror row (`classifyDeclaredNameHolder`) whose name is still declared is
+ * judged by its declaration too, because the dispatcher reads the declaration
+ * in its place: replaying one of its old deliveries must answer to the switch
+ * that now governs the webhook, not to a row nothing reads.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import {
+    classifyDeclaredNameHolder,
+    declaredWebhookNameOfRefId,
+    type DeclaredWebhookReader,
+} from './declared-webhooks.js';
 import {
     WEBHOOK_OBJECT,
     WEBHOOK_SECRET_FIELD,
@@ -99,9 +116,13 @@ export interface RedeliverGuardRow {
 export function createWebhookRedeliverGuard(
     engine: IDataEngine,
     subscriptionsObject: string = WEBHOOK_OBJECT,
+    declared?: DeclaredWebhookReader,
 ): (row: RedeliverGuardRow) => Promise<string | undefined> {
     return async (row) => {
         if (row.source !== 'webhook') return undefined;
+
+        const declaredName = declaredWebhookNameOfRefId(row.refId);
+        if (declaredName !== undefined) return judgeDeclared(declared, declaredName);
 
         const subscription = (await engine.findOne(
             subscriptionsObject,
@@ -117,6 +138,11 @@ export function createWebhookRedeliverGuard(
                 + 'endpoint should keep receiving events; '
                 + 'new events are then delivered signed.'
             );
+        }
+
+        if (declared && classifyDeclaredNameHolder(subscription) === 'mirror' && typeof subscription.name === 'string') {
+            const declaration = await declared.declaredWebhookNamed(subscription.name);
+            if (declaration) return judgeDeclared(declared, subscription.name, declaration);
         }
 
         // [#22804] Case 2: the off switch. `=== true` is the dispatcher's own
@@ -164,4 +190,32 @@ export function createWebhookRedeliverGuard(
             + 'the secret was written under and make sure the sys_secret row is reachable.'
         );
     };
+}
+
+/**
+ * The guard's answer for a delivery a declared webhook produced, or a pristine
+ * 18.0 mirror the declaration now answers for (see the module doc). A lookup
+ * that throws propagates: "we could not check" never reads as "allowed".
+ */
+async function judgeDeclared(
+    declared: DeclaredWebhookReader | undefined,
+    name: string,
+    known?: Awaited<ReturnType<DeclaredWebhookReader['declaredWebhookNamed']>>,
+): Promise<string | undefined> {
+    const declaration = known ?? (declared ? await declared.declaredWebhookNamed(name) : null);
+    if (!declaration) {
+        return (
+            `the declared webhook '${name}' this delivery belongs to is no longer declared by the application, so `
+            + 'there is nothing left to say whether it may still be signed and sent, and it is refused. Declare the '
+            + 'webhook again if the endpoint should keep receiving events.'
+        );
+    }
+    if (!declaration.active) {
+        return (
+            `declared webhook '${name}' is switched off, and a switched-off webhook is skipped by the dispatcher, `
+            + 'so this delivery is refused rather than sent to an endpoint that was switched off. Fix: switch it on '
+            + `(POST /api/v1/security/_activation/webhook/${name} with { "enabled": true }), then redeliver.`
+        );
+    }
+    return undefined;
 }
