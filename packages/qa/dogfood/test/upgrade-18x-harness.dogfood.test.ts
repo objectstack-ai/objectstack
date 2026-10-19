@@ -44,12 +44,9 @@
 // ⛔ Additive change passes: a row HEAD's boot ADDS (an activity shard, a
 // seeder's row) is not a failure, so counts are compared as "at least", and
 // every fixture row is looked up by id.
-import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isOrganizationOwnershipBootRefusal } from '@objectstack/runtime';
@@ -58,12 +55,10 @@ import type { VerifyStack } from '@objectstack/verify';
 import { columnsOf, type FixtureManifest } from './upgrade-harness/fixture-manifest.js';
 import { FIXTURE_NAMES, FIXTURE_PEOPLE, bootFixture } from './upgrade-harness/populate-fixture.js';
 import { loadSqlIntoSqlite } from './upgrade-harness/sqlite-text-dump.js';
+import { OWNERSHIP_MARKER, runOwnershipCeremony } from './upgrade-harness/ceremony.js';
 
 const FIXTURE = new URL('./upgrade-harness/fixture-18.0/', import.meta.url);
-const SHOWCASE_DIR = fileURLToPath(new URL('../../../../examples/app-showcase/', import.meta.url));
-const CLI_ROOT = dirname(createRequire(import.meta.url).resolve('@objectstack/cli/package.json'));
-const CLI_BIN = join(CLI_ROOT, 'bin', 'run.js');
-const MARKER = 'adr-0131-organization-ownership';
+const MARKER = OWNERSHIP_MARKER;
 const manifest = JSON.parse(readFileSync(new URL('manifest.json', FIXTURE), 'utf8')) as FixtureManifest;
 const fixtureSql = readFileSync(new URL('database.sql', FIXTURE), 'utf8');
 
@@ -84,22 +79,9 @@ async function tryBoot(file: string): Promise<{ stack?: VerifyStack; error?: unk
   }
 }
 
-/**
- * The ceremony on `file`, as an operator runs it: the plan, then the apply of
- * that reviewed plan file — the real binary, in the showcase's directory, so it
- * composes what the deployment serves. The apply report.
- */
+/** The ceremony on `file`, as an operator runs it (`runOwnershipCeremony`). */
 function ceremony(dir: string, file: string, tag: string): Record<string, unknown> {
-  const run = (args: string[]) => spawnSync(process.execPath, [
-    CLI_BIN, 'migrate', 'organization-ownership', '--database-url', `file:${file}`, ...args,
-  ], { cwd: SHOWCASE_DIR, encoding: 'utf8', timeout: 300_000, env: { ...process.env, NO_COLOR: '1' } });
-  const planFile = join(dir, `${tag}-plan.json`);
-  const plan = run(['--out', planFile]);
-  expect(plan.status, `the plan: ${plan.stdout}\n${plan.stderr}`).toBe(0);
-  const reportFile = join(dir, `${tag}-apply.json`);
-  const apply = run(['--apply', '--plan-file', planFile, '--backup-taken', '--out', reportFile, '--json']);
-  expect(apply.status, `the apply: ${apply.stdout}\n${apply.stderr}`).toBe(0);
-  return JSON.parse(readFileSync(reportFile, 'utf8')) as Record<string, unknown>;
+  return runOwnershipCeremony(dir, file, tag);
 }
 
 /** The ceremony's marker on `file`: verified, blocking 0, at this release's generation. */
