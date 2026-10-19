@@ -60,8 +60,9 @@ const STORED_DAY_LABELS: Readonly<Record<string, Readonly<Record<Granularity, st
 const EMPTY = '‹empty bucket›';
 
 /**
- * The card's ten deliveries (six in October, four in November — the month and
- * quarter counts the door measured), plus a year-edge row and an unset day.
+ * Ten deliveries in the shape of the door's fixture (six in October, four in
+ * November, so the stored month and quarter counts are the door's expected
+ * ones), plus a year-edge row and an unset day.
  */
 const DUE_DATES: ReadonlyArray<string | null> = [
   '2026-10-01', '2026-10-05', '2026-10-13', '2026-10-21', '2026-10-21', '2026-10-31',
@@ -122,7 +123,7 @@ describe('(a) the rows path buckets a declared `date` by its stored day under ev
     }
   }
 
-  it('the door\'s month and quarter counts, under America/New_York', () => {
+  it('the door\'s expected month and quarter counts, under America/New_York', () => {
     const month = labelCounts(
       applyInMemoryAggregation(ROWS.slice(0, 10), bucketAst('due_date', 'month'), 'America/New_York', FIELDS),
       'due_date',
