@@ -5563,9 +5563,28 @@ export class ObjectQL implements IObjectQLEngine {
    *   action's declared param contract at dispatch before the handler runs.
    *   The seam itself stays untyped so existing untyped handlers keep working.
    * @param packageName Optional package owner (for cleanup)
+   *
+   * [#24472] A key another package already holds is still replaced — the last
+   * registration runs, as before — but no longer silently: the replacement is
+   * warned, naming both owners. The same owner re-registering (a re-bind, a
+   * reload, the authored-action resync, which tears its set down first) is
+   * not. A registration with no `packageName` is its own owner here, so it
+   * replacing a package's handler, or the reverse, is warned too.
    */
   registerAction(objectName: string, actionName: string, handler: (ctx: any) => Promise<any> | any, packageName?: string): void {
     const key = `${objectName}:${actionName}`;
+    const replaced = this.actions.get(key);
+    if (replaced !== undefined && replaced.package !== packageName) {
+      const by = (name: string | undefined) => (name ? `by package '${name}'` : 'with no package');
+      this.logger.warn(
+        `Action handler '${key}' registered ${by(packageName)} replaces the one registered ${by(replaced.package)}: `
+        + `the action door now runs the handler registered ${by(packageName)}, whichever declaration object `
+        + `'${objectName}' lists${packageName ? `, and withdrawing package '${packageName}' leaves the action with no handler` : ''}. `
+        + `Two owners share one handler key only when both declare action '${actionName}' on object `
+        + `'${objectName}' — rename one of them.`,
+        { objectName, actionName, package: packageName, replacedPackage: replaced.package },
+      );
+    }
     this.actions.set(key, { handler, package: packageName });
     this.logger.debug('Registered action', { objectName, actionName, package: packageName });
   }
