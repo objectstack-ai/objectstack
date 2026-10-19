@@ -149,9 +149,44 @@ const PROPERTY_KEY = /^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/;
  * A `const` binding — the alias-registration shape of mechanism B. Matched at
  * ANY indentation: a factory-local `const cond = z.union([…])` inside
  * `lazySchema(() => { … })` hides a roster schema exactly as well as a
- * module-scope one, and both are file-local.
+ * module-scope one, and both are file-local. Only a binding that REFERENCES a
+ * roster member reaches it: one whose initializer merely calls a parse method
+ * on it binds a value and is screened out first (`parseCallsOf`).
  */
 const LOCAL_BINDING = /^\s*(?:export\s+)?const\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::[^=]*)?=/;
+
+/**
+ * The schema methods whose CALL turns a roster name into a VALUE (#24645).
+ *
+ * `const parsed = EvaluatedExpressionInputSchema.safeParse(source);` names a
+ * roster member, but `parsed` is the parse RESULT, not a schema: no slot can
+ * be typed with it. Registered as an alias anyway (`LOCAL_BINDING` matches any
+ * `const`), it turned every later line that merely contains the word `parsed`
+ * into a declaring position, and the multi-line branch then chained the
+ * enclosing helper, its caller and `NavigationItemSchema` onto the alias
+ * table: nine keys, none an expression surface.
+ */
+const PARSE_METHODS = ['parse', 'safeParse', 'parseAsync', 'safeParseAsync'];
+
+/**
+ * Every occurrence of `names` as the RECEIVER of a parse call — `X.safeParse(`.
+ *
+ * `scanSource` blanks these out of a line BEFORE asking whether the line
+ * references a roster (or alias) name, so one rule covers every place a hit
+ * is acted on: a parse call registers no alias through `LOCAL_BINDING`, none
+ * through the multi-line branch (`return X.safeParse(v).data;` inside a
+ * top-level function), and declares no slot. An occurrence that is NOT the
+ * receiver — `z.union([X, …]).parse(v)`, or a second mention elsewhere on the
+ * line — still counts, so the narrowing errs toward registering: a false alias
+ * is a loud UNCLASSIFIED, a missed one is silent. A receiver split from its
+ * `.parse(` across lines is not recognised and still registers, the loud way.
+ */
+function parseCallsOf(names: readonly string[]): RegExp {
+  return new RegExp(
+    String.raw`(?<![A-Za-z0-9_$])(?:${names.join('|')})\s*\.\s*(?:${PARSE_METHODS.join('|')})\s*\(`,
+    'g',
+  );
+}
 
 /**
  * Lines that carry a roster name but declare no slot. Structural categories,
@@ -269,8 +304,16 @@ const TOP_LEVEL_DECL = /^(?:export\s+)?(?:const|function|class)\s+([A-Za-z_][A-Z
  * as the hit is its sibling, never the slot it mounts.
  */
 function scanFile(abs: string, file: string): FileScan {
+  return scanSource(readFileSync(abs, 'utf8'), file);
+}
+
+/**
+ * `scanFile` over source TEXT — the whole scan, so a spelling control in
+ * `SCAN_CONTROLS` runs exactly the code the spec walk runs.
+ */
+function scanSource(text: string, file: string): FileScan {
   const out: FileScan = { declarations: [], aliases: [], unattributed: [] };
-  const lines = readFileSync(abs, 'utf8').split('\n');
+  const lines = text.split('\n');
   /** File-local aliases of a roster member, in declaration order (mechanism B). */
   const aliases: string[] = [];
   let schema = '(top-level)';
@@ -287,8 +330,13 @@ function scanFile(abs: string, file: string): FileScan {
       continue;
     }
     if (NON_DECLARING_LINE.some((re) => re.test(line))) continue;
-    const isRoster = identityOf(EXPRESSION_INPUT_SCHEMAS).test(line);
-    const isAlias = aliases.length > 0 && identityOf(aliases).test(line);
+    // A roster (or alias) name that only RECEIVES a parse call is a value, not
+    // a reference to the schema — see `parseCallsOf`. Blanked here, once, so
+    // the binding branch, the field attribution and the multi-line branch
+    // below all read the same line.
+    const referencing = line.replace(parseCallsOf([...EXPRESSION_INPUT_SCHEMAS, ...aliases]), ' ');
+    const isRoster = identityOf(EXPRESSION_INPUT_SCHEMAS).test(referencing);
+    const isAlias = aliases.length > 0 && identityOf(aliases).test(referencing);
     if (!isRoster && !isAlias) continue;
 
     const binding = line.match(LOCAL_BINDING);
@@ -309,7 +357,7 @@ function scanFile(abs: string, file: string): FileScan {
 
     const field = attributeToField(lines, i, schemaStart);
     if (field) {
-      const via = DECLARES_EXPRESSION.test(line) ? 'head' : isAlias ? 'alias' : 'inline';
+      const via = DECLARES_EXPRESSION.test(referencing) ? 'head' : isAlias ? 'alias' : 'inline';
       out.declarations.push({ key: `${file}:${schema}.${field}`, file, schema, field, line: i + 1, via });
       continue;
     }
@@ -402,8 +450,25 @@ function discoverSurfaces(): Set<string> {
  * again: green, over a population five positions smaller, with no diff left to
  * read. That is this card's own defect wearing a new face, and this floor is
  * what refuses it — by MECHANISM, naming which one went missing.
+ *
+ * ## Spelling controls (#24645)
+ *
+ * A floor sees discovery reach too LITTLE, never too far. The other entries
+ * run one exact spelling through `scanSource` on its own and pin the alias
+ * table it produces, in both directions: a value bound from a parse call
+ * registers nothing, and a real alias, single-line and multi-line, still
+ * registers. The real spellings are copied from the spec rather than invented,
+ * so a narrowing that loses one is measured on the shape the spec writes.
  */
-const SCAN_CONTROLS: ReadonlyArray<{ via: Declaration['via']; min: number; mechanism: string }> = [
+interface MechanismFloor { via: Declaration['via']; min: number; mechanism: string }
+interface SpellingControl {
+  /** Source text, scanned as if it were a whole `.zod.ts` file. */
+  spelling: string;
+  /** The alias names it must register, in order — `name` or `name (multi-line)`. */
+  aliases: readonly string[];
+  mechanism: string;
+}
+const SCAN_CONTROLS: ReadonlyArray<MechanismFloor | SpellingControl> = [
   { via: 'head', min: 37, mechanism: 'a roster name immediately after `field:` (the pre-#17630 scan)' },
   // [#18118] Lowered 3 → 1 in the commit that deleted the `cel-declared-unwired-observability`
   // ledger row. The two positions that went away are named rather than subtracted:
@@ -415,6 +480,49 @@ const SCAN_CONTROLS: ReadonlyArray<{ via: Declaration['via']; min: number; mecha
   // would stop measuring the mechanism instead of measuring less of it.
   { via: 'inline', min: 1, mechanism: 'mechanism A — a roster name used as a UNION MEMBER, not at the head of the declaration' },
   { via: 'alias', min: 2, mechanism: 'mechanism B — a slot typed with a file-local alias const of a roster member' },
+  // [#24645] The exact spelling of `ui/app.zod.ts`'s `authoredVisibleEnvelope` (#24628),
+  // the helper that put nine non-expression keys and one collision into the ratchet.
+  {
+    spelling: [
+      'function authoredVisibleEnvelope(source: string): unknown {',
+      '  const parsed = EvaluatedExpressionInputSchema.safeParse(source);',
+      '  return parsed.success ? parsed.data : undefined;',
+      '}',
+    ].join('\n'),
+    aliases: [],
+    mechanism: 'a const bound from a parse CALL on a roster member is a value, not a schema',
+  },
+  // The same helper without the local: the hit lands in the multi-line branch,
+  // which must apply the same rule rather than register the function.
+  {
+    spelling: [
+      'function authoredVisibleEnvelope(source: string): unknown {',
+      '  return EvaluatedExpressionInputSchema.safeParse(source).data;',
+      '}',
+    ].join('\n'),
+    aliases: [],
+    mechanism: 'a parse CALL inside a top-level function registers no multi-line alias',
+  },
+  // Real aliases, as `ui/action.zod.ts` and `ui/component.zod.ts` spell them.
+  {
+    spelling: [
+      'const ActionConditionInputSchema = z.union([z.boolean(), EvaluatedExpressionInputSchema], {',
+      '  error: (issue) => evaluatedExpressionUnionRefusal(issue.input),',
+      '});',
+    ].join('\n'),
+    aliases: ['ActionConditionInputSchema'],
+    mechanism: 'mechanism B — a const whose initializer references a roster member still registers',
+  },
+  {
+    spelling: [
+      'const actionCondition = () =>',
+      '  z.union([z.boolean(), EvaluatedExpressionInputSchema], {',
+      '    error: (issue) => evaluatedExpressionUnionRefusal(issue.input),',
+      '  });',
+    ].join('\n'),
+    aliases: ['actionCondition (multi-line)'],
+    mechanism: 'mechanism B, multi-line — a top-level const whose initializer spans lines still registers',
+  },
 ];
 
 describe('ADR-0058 D7 — expression surface conformance ledger', () => {
@@ -452,7 +560,9 @@ describe('ADR-0058 D7 — expression surface conformance ledger', () => {
   // positions for as long as it did.
   it('discovery still reaches every mechanism it was widened for', () => {
     const declarations = discoverDeclarations();
-    for (const { via, min, mechanism } of SCAN_CONTROLS) {
+    const floors = SCAN_CONTROLS.filter((c): c is MechanismFloor => 'via' in c);
+    expect(floors.length, 'SCAN_CONTROLS declares no mechanism floor, so nothing below runs').toBeGreaterThan(0);
+    for (const { via, min, mechanism } of floors) {
       const hits = declarations.filter((d) => d.via === via);
       expect(
         hits.length,
@@ -461,6 +571,25 @@ describe('ADR-0058 D7 — expression surface conformance ledger', () => {
         + 'retired, lower the floor in SCAN_CONTROLS in the same commit that deletes its ledger row, '
         + 'and say which position went away; ⛔ do not lower it to make a re-narrowed scan pass.',
       ).toBeGreaterThanOrEqual(min);
+    }
+  });
+
+  // The other half of SCAN_CONTROLS (#24645). A floor cannot see alias
+  // registration reaching too FAR: an alias that is not one adds declaring
+  // positions, and the floors only ever ask for at least N.
+  it('alias registration tells a schema from a value parsed by one', () => {
+    const spellings = SCAN_CONTROLS.filter((c): c is SpellingControl => 'spelling' in c);
+    expect(spellings.length, 'SCAN_CONTROLS declares no spelling control, so nothing below runs').toBeGreaterThan(0);
+    for (const { spelling, aliases, mechanism } of spellings) {
+      const scan = scanSource(spelling, 'control');
+      const registered = scan.aliases.map((entry) => entry.slice(entry.indexOf(' ') + 1));
+      expect(
+        registered,
+        `${mechanism}: the scan registered [${registered.join(', ')}] where [${aliases.join(', ')}] was expected, for:\n${spelling}\n`
+        + 'A name registered here turns every later line containing it into a declaring position; a name '
+        + 'missed here drops every slot typed with it out of discovery.',
+      ).toEqual(aliases);
+      expect(scan.unattributed, `${mechanism}: the control left a roster hit unattributed`).toEqual([]);
     }
   });
 
