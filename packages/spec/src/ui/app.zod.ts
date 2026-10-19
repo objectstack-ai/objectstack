@@ -1037,8 +1037,25 @@ function celReadsRootData(source: string): boolean {
  * schemas do not chain it, the same posture as
  * {@link objectNavTargetExclusivity}. Its migration record is the ADR-0087 D3
  * semantic entry `nav-item-visible-data-needs-data-source` (protocol 18).
+ *
+ * EXPORTED, one function per refinement, the same posture as
+ * {@link objectNavTargetExclusivity} and the `check*` exports of #16489
+ * (`checkPageRegionPlacement`, `checkPageMainRegionWidth`): a hand-written
+ * mirror of the navigation item attaches this very function instead of
+ * restating the rule from prose, because a restatement is what drifts.
+ * Exporting it moves no accept set, and its issue (`custom` at `visible`, the
+ * message above) is the same at every door that runs it.
+ *
+ * ⚠️ What it reads is the entry AFTER the spec's parse: `visible` as the
+ * `{ dialect, source }` envelope {@link EvaluatedExpressionInputSchema} turns
+ * either authored spelling into. A bare-string `visible` (the authored
+ * shorthand, before that normalisation) is not read and raises nothing, so a
+ * mirror whose own `visible` stays the authored string refuses nothing by
+ * attaching this as it is. The mount, the export, the barrel identity and that
+ * input contract are pinned by
+ * `app-nav-visible-data-needs-data-source-export.test.ts`.
  */
-function navItemVisibleDataNeedsDataSource(item: unknown, ctx: z.RefinementCtx): void {
+export function navItemVisibleDataNeedsDataSource(item: unknown, ctx: z.RefinementCtx): void {
   if (!item || typeof item !== 'object') return;
   const entry = item as { visible?: unknown; dataSource?: unknown };
   if (entry.dataSource !== undefined) return;
