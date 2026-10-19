@@ -210,6 +210,20 @@ describe('a bound top-level action reaches another package\'s object as served',
         expect(attached).toMatchObject({ requiredPermissions: ['org_admin'], _packageId: 'com.test.binder' });
     });
 
+    it('the object\'s own actions keep their served order; attached ones follow, ordered by `order`', async () => {
+        const owner = structuredClone(OWNER) as any;
+        owner.objects[0].actions = [
+            { name: 'second', label: 'Second', type: 'url', target: 'https://example.com/2', order: 20 },
+            { name: 'first', label: 'First', type: 'url', target: 'https://example.com/1', order: 10 },
+        ];
+        const binder = {
+            id: 'com.test.binder', name: 'binder',
+            actions: [{ ...BOUND, name: 'late', order: 5 }, { ...BOUND, name: 'early', order: 1 }],
+        };
+        const { engine } = await hostWith([owner, binder]);
+        expect(actionNames(engine.registry.getObject('ba_org'))).toEqual(['second', 'first', 'early', 'late']);
+    });
+
     it('control: an object nothing binds to is served as declared', async () => {
         const { protocol } = await hostWith([OWNER, BINDER, CONTROL]);
         const served: any = await protocol.getMetaItem({ type: 'object', name: 'ba_control' } as any);

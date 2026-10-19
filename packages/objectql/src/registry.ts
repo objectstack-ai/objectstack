@@ -197,7 +197,7 @@ export function collectManifestObjectNames(manifest: any): string[] {
  * Stable sort by `order` (unset reads as `0`), by reference when no action
  * sets one — the rule `defineStack()` applies to each object's merged actions
  * (`sortActionsByOrder` in `@objectstack/spec`'s stack builder, which is
- * internal there), so an attached action sorts exactly as a same-stack one.
+ * internal there), applied here to the attached actions among themselves.
  */
 function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
   if (!actions.some((a) => a?.order !== undefined)) return actions;
@@ -3506,6 +3506,11 @@ export class SchemaRegistry {
    * before rung 2). A target no package registers is refused at boot, not
    * here — see {@link findUnboundActionTargets}.
    *
+   * The object's own `actions` keep their order exactly — re-sorting them by
+   * `order` here would reorder an object no package bound anything to the
+   * moment one did. The attached actions follow, stable-sorted among
+   * themselves by `order`.
+   *
    * Returns `body` by reference when nothing attaches.
    */
   private attachBoundActions<T>(body: T): T {
@@ -3524,7 +3529,9 @@ export class SchemaRegistry {
       fresh.push(action);
     }
     if (fresh.length === 0) return body;
-    return { ...body, actions: sortActionsByOrder([...base, ...fresh]) };
+    // The object's own actions keep their served order, untouched; the
+    // attached ones follow, ordered among themselves by `order`.
+    return { ...body, actions: [...base, ...sortActionsByOrder(fresh)] };
   }
 
   /**
