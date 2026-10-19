@@ -6,8 +6,8 @@ import type { SqlDriverLike } from './schema-migrate.js';
 type DriftEntry = Parameters<SqlDriverLike['applyMigrationEntries']>[0][number];
 
 export interface NotNullTarget {
-  /** The driver whose database holds `table` (the primary, or the `telemetry` sibling). */
-  driverFor(table: string): Pick<SqlDriverLike, 'applyMigrationEntries' | 'driftApplyLimit'> | undefined;
+  /** The driver of the database the plan placed the table in (`database` absent: the primary). */
+  driverFor(database: string | undefined): Pick<SqlDriverLike, 'applyMigrationEntries' | 'driftApplyLimit'> | undefined;
   /** Whether the booted composition declares an object for this table (a rotation shard judged by its base). */
   isDeclared(table: string): boolean;
 }
@@ -27,14 +27,14 @@ export interface NotNullTarget {
  */
 export async function applyNotNullThroughDrift(target: NotNullTarget, columns: readonly NotNullColumn[]): Promise<NotNullOutcome[]> {
   const outcomes: NotNullOutcome[] = [];
-  for (const { table, column } of columns) {
+  for (const { table, column, database } of columns) {
     if (!target.isDeclared(table)) {
       outcomes.push({ table, column, outcome: 'not-declared' });
       continue;
     }
-    const driver = target.driverFor(table);
+    const driver = target.driverFor(database);
     if (!driver) {
-      outcomes.push({ table, column, outcome: 'failed', detail: 'no driver holds the table' });
+      outcomes.push({ table, column, outcome: 'failed', detail: `no driver serves the database ${database ?? 'primary'} the table is in` });
       continue;
     }
     const limit = driver.driftApplyLimit?.('tighten_not_null') ?? null;

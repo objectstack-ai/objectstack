@@ -3681,6 +3681,8 @@ async function runDeclaredRuleCopies(run: Run): Promise<StepReport> {
 export interface NotNullColumn {
   table: string;
   column: string;
+  /** The database beside the primary that holds the table (`ApplySibling.name`); absent for the primary. */
+  database?: string;
 }
 
 /** One NOT NULL, as the schema door answered it. */
@@ -3730,7 +3732,7 @@ async function runNotNull(run: Run): Promise<StepReport> {
     if (table.fate !== 'attribution' && table.fate !== 'report') continue;
     if (table.physical !== 'present' || table.organizationColumn !== 'present' || !table.rows) continue;
     if (!table.notNull.willReceive || table.rows.organizationNull !== 0) continue;
-    due.push(...table.tables.map((t) => ({ table: t, column: ORG })));
+    due.push(...table.tables.map((t) => ({ table: t, column: ORG, ...(table.database ? { database: table.database } : {}) })));
   }
   summary.due = due.length;
   if (due.length === 0) return { step, status: 'done', summary, blockers, notes };

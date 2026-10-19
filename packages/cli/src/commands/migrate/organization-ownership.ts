@@ -874,10 +874,12 @@ export default class OrganizationOwnershipCeremony extends Command {
             return applyNotNullThroughDrift(
               {
                 isDeclared: (table) => declared.has(rotationBaseOf(table) ?? table),
-                driverFor: (table) =>
-                  (homeOf(rotationBaseOf(table) ?? table) === TELEMETRY_DATASOURCE && liveStack.telemetryDatabase
-                    ? liveStack.drivers[1]
-                    : liveStack.driver) as never,
+                driverFor: (database) =>
+                  (database === undefined
+                    ? liveStack.driver
+                    : database === TELEMETRY_DATASOURCE && liveStack.telemetryDatabase
+                      ? liveStack.drivers[1]
+                      : undefined) as never,
               },
               columns,
             );
