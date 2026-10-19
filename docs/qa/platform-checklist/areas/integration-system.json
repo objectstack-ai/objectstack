@@ -519,17 +519,17 @@
     },
     {
       "id": "integration-system.webhook-lifecycle",
-      "title": "Outbound webhooks materialize (spec object→object_name, isActive→active), fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, redeliver terminal rows tenant-scoped via POST /api/v1/webhooks/redeliver, reject retired trigger kinds, and never clobber admin edits",
+      "title": "Outbound webhooks are read from the registry (spec object→object_name, no sys_webhook row) and switched through the activation ledger, fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, redeliver terminal rows tenant-scoped via POST /api/v1/webhooks/redeliver, and reject retired trigger kinds",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a reachable webhook receiver (local echo server on the run's own port range) and a SCRATCH webhook authored INSIDE the showcase organization that points at it — Setup → Integrations → Webhooks → New as the signed-in admin, or POST /api/v1/data/sys_webhook under that session, so the row carries the organization. ⚠ The shipped showcase_task_changed cannot carry the per-record or bulk delivery legs: it materializes ORG-LESS (a declared webhook belongs to no organization), and the auto-enqueuer hands an organization-walled event only to a subscription of that organization (packages/plugins/plugin-webhooks/src/auto-enqueuer.ts, AutoEnqueuer.admitsOrganization). On the org-walled showcase it therefore never fans out, while Setup reads it active:true (QA run #23166)",
-          "the shipped fixture: showcase_task_changed (object showcase_task, triggers create/update/delete, isActive:false ON PURPOSE — flipping it active in Setup is part of the test, examples/app-showcase/src/automation/webhooks/index.ts)",
+          "a reachable webhook receiver (local echo server on the run's own port range) and a SCRATCH webhook authored INSIDE the showcase organization that points at it — Setup → Integrations → Webhooks → New as the signed-in admin, or POST /api/v1/data/sys_webhook under that session, so the row carries the organization. ⚠ The shipped showcase_task_changed cannot carry the per-record or bulk delivery legs: it is read ORG-LESS from the registry (a declared webhook belongs to no organization), and the auto-enqueuer hands an organization-walled event only to a subscription of that organization (packages/plugins/plugin-webhooks/src/auto-enqueuer.ts, AutoEnqueuer.admitsOrganization). On the org-walled showcase it therefore never fans out, while Setup reads it active:true (QA run #23166)",
+          "the shipped fixture: showcase_task_changed (object showcase_task, triggers create/update/delete, isActive:false ON PURPOSE — switching it on through the activation door is part of the test, examples/app-showcase/src/automation/webhooks/index.ts)",
           "a predicate multi-write path for the bulk variants (update/delete with multi:true on showcase_task) — NOT reachable over REST, see the knownGap below: author a flow with an `update_record` / `delete_record` node carrying multi:true and fire it through the api trigger"
         ],
         "knownGaps": [
@@ -547,21 +547,21 @@
         "retired: api (manual fire) — no fire path exists (#3196); parse-rejected"
       ],
       "steps": [
-        "boot the showcase; verify the materializer bridge: read sys_webhook over /api/v1/data and locate showcase_task_changed with object_name:'showcase_task', active:false, managed_by:'package', and the envelope in definition_json",
-        "in Setup → Integrations → Webhooks flip the shipped showcase_task_changed row active and point its url at the local receiver (an admin edit — it must stamp customized). This edit is the subject of the seed-not-clobber clause (acceptance[6]) ONLY: the row stays org-less, so it delivers nothing on the org-walled showcase (fixtures.requires[0]). Author the in-organization scratch webhook beside it for the delivery legs",
+        "boot the showcase on a fresh database; verify the declared webhook is NOT materialized (ADR-0131 D2 retired the boot seeder): read sys_webhook over /api/v1/data and find NO showcase_task_changed row — the dispatcher reads the declaration from the registry",
+        "switch the shipped declared showcase_task_changed on as the admin: POST /api/v1/security/_activation/webhook/showcase_task_changed with { enabled: true } — 200 { type: 'webhook', name, enabled: true }, and one sys_metadata_activation row of metadata_type 'webhook'; an undeclared name answers 404. A declared webhook is read-only: pointing it at the receiver means a copy under a new name (the scratch webhook below). This switch is the subject of acceptance[6] ONLY: the declaration stays org-less, so it delivers nothing on the org-walled showcase (fixtures.requires[0]). Author the in-organization scratch webhook beside it for the delivery legs",
         "with the in-organization scratch webhook (fixtures.requires[0]) active and pointed at the receiver, create, update, then delete a showcase_task; capture the three deliveries at the receiver (headers incl. the HMAC signature when a secret is set, body incl. recordId). The create needs showcase_task's required `project` lookup — pass an existing showcase_project id, or the create answers 400 VALIDATION_FAILED 'Project is required' and no create event fires",
         "run a predicate multi-update and multi-delete (multi:true) matching several rows — through a FLOW node, not REST: author update_record / delete_record nodes with multi:true and fire them via the api trigger (the REST batch routes strip options.multi, #3897 — see the knownGap); capture the bulk deliveries and their { object, matched } shape",
         "read sys_http_delivery over /api/v1/data: one row per delivery with status/attempts/lastStatusCode",
         "kill the receiver and mutate again; re-read the delivery row through its retry/failure states",
         "restore the receiver, let the failing row reach a terminal status (failed/dead), then POST /api/v1/webhooks/redeliver with { deliveryId: <that row's id> } as an authenticated user: capture the 200 { id, status } and the receiver's re-hit — compare the replayed X-Objectstack-Signature byte-for-byte against the original delivery's; re-read the row; then probe the refusals: anonymous POST (401), non-JSON body (400 INVALID_REQUEST), body without deliveryId (400 MISSING_REQUIRED_FIELD), a garbage/unknown deliveryId (404), a row still pending/in_flight (409 DELIVERY_NOT_ELIGIBLE)",
-        "redeploy/reboot and confirm the admin-edited row survived re-seed (customized rows are never clobbered)"
+        "redeploy/reboot and confirm the activation switch survived: the sys_metadata_activation row is still there and the declaration still reads switched on (the switch is deployment state; the declaration is code)"
       ],
       "acceptance": [
         {
-          "clause": "authoring is LIVE, not a no-op: the declared webhook materializes into the sys_webhook row the dispatcher reads, with the two documented remaps (object→object_name, isActive→active) and the envelope in definition_json (#3461/#3489)",
+          "clause": "authoring is LIVE, not a no-op: the declared webhook is read from the registry by the dispatcher (ADR-0131 D2) — NO sys_webhook row is written for it — and the activation door finds it by name",
           "oracle": "api",
-          "verify": "the sys_webhook row fields against bootstrap-declared-webhooks mapWebhookToRow",
-          "evidence": "the row read"
+          "verify": "zero sys_webhook rows named showcase_task_changed on a fresh boot; the activation door answers 200 for it and 404 for an undeclared name (declared-webhooks.ts DeclaredWebhookSource, the projection in auto-enqueuer.ts projectDeclared)",
+          "evidence": "the row read + the two door responses"
         },
         {
           "clause": "each per-record trigger variant delivers exactly its event: create/update/delete each produce one receiver hit whose payload names the event and carries the recordId — verified per-variant, none inferred",
@@ -594,9 +594,9 @@
           "evidence": "the two build errors"
         },
         {
-          "clause": "seed-not-clobber: the admin-edited row (customized:true) survives redeploys — the deactivation/receiver-URL edit is still there after reboot",
+          "clause": "the activation switch survives redeploys: the sys_metadata_activation row (metadata_type webhook) the door wrote is still in force after reboot — a declared webhook's on/off lives in the ledger, never in a row (ADR-0131 D6 regime C)",
           "oracle": "api",
-          "verify": "post-reboot sys_webhook row keeps the admin's values (bootstrap-declared-webhooks.ts)",
+          "verify": "post-reboot sys_metadata_activation row, and the declaration still reads switched on (declared-webhooks.ts readWebhookActivation)",
           "evidence": "before/after row reads"
         }
       ],
@@ -615,8 +615,8 @@
       },
       "source": [
         "packages/spec/src/automation/webhook.zod.ts#WebhookTriggerType (WebhookTriggerType enum + why undelete/api are absent; materialization contract; strict shape #4001)",
-        "packages/spec/liveness/webhook.json (all 11 props live via the #3489 bridge; per-prop line refs)",
-        "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts + auto-enqueuer.ts (remaps; trigger→event mapping incl. the #4639 bulk pair; #3196 unknown-trigger warn; seed-not-clobber)",
+        "packages/spec/liveness/webhook.json (9 props live on the registry read; label/description dead since the boot seeder retired)",
+        "packages/plugins/plugin-webhooks/src/declared-webhooks.ts + auto-enqueuer.ts (the registry read and its remaps; trigger→event mapping incl. the #4639 bulk pair; #3196 unknown-trigger warn; the activation-ledger switch; an 18.0 database's seeded rows read beside the declaration)",
         "packages/services/service-messaging/src/http-outbox.ts#HttpRedeliverError (delivery statuses, attempts; HttpRedeliverError + assertHttpRedeliverable/assertRedeliverAllowed — terminal-only, the attempts===0 parked-row refusal, the fail-closed guard) + packages/services/service-messaging/src/http-signature-at-rest.integration.test.ts (redelivery replays the stored signature byte-for-byte)",
         "packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts#session (POST /api/v1/webhooks/redeliver — session auth with NO capability gate by design ('every authenticated user counts'), #10740 activeOrganizationId threading, the 401/400/404/409/500 arms) + (the #8069 redeliver-guard install; its ABSENCE is an error-level log, not a silent pass)",
         "packages/rest/src/rest-server.ts#deleteMany (#3897 — the batch routes parse against the spec contract and Zod STRIPS unknown keys, so options.multi/options.where cannot ride in; deleteMany deletes per id. This is why the bulk clause must be driven from a flow node, not REST)",
@@ -665,6 +665,12 @@
           "date": "2026-10-16",
           "change": "steps[2] names the create body the delivery leg needs (checklist-accuracy finding of QA run #23922, wave #23878): a showcase_task create over REST requires its `project` lookup and answers 400 VALIDATION_FAILED 'Project is required' without one, so the create variant never fires. The clauses are unchanged",
           "ref": "#24036"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-19",
+          "change": "ADR-0131 D2/D6: the declared-webhook boot seeder retired, so a declared webhook is read from the registry and writes no sys_webhook row, and is switched through POST /api/v1/security/_activation/webhook/:name (regime C). steps[0], steps[1] and the reboot step, acceptance[0] and acceptance[6], fixtures.requires[0]/[1] and the source list now say so; the delivery, bulk, redeliver and retired-trigger clauses are unchanged",
+          "ref": "#24529"
         }
       ],
       "enumSource": {
