@@ -18,8 +18,8 @@ organization ownership is total — no NULL `organization_id`; declared metadata
 stays in code; a row exists only when an organization authored it. Its changes
 reshape stored data and narrow what the runtime accepts, so the ADR stages them
 in one major (its D14) instead of spreading them across 17.x minors. While the
-line is open, every other breaking change that lands on `main` ships on it too,
-under the same rules.
+line was open, every other breaking change that landed on `main` shipped on it
+too, under the same rules.
 
 ## How a breaking stage lands on this line
 
