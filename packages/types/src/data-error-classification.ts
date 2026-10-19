@@ -35,6 +35,7 @@ import {
     declaredRefusalMessage,
 } from './thrown-http-error.js';
 import { isNativeErrorName } from './native-error-name.js';
+import { unevaluableHookConditionRefusal } from './hook-condition-refusal.js';
 
 /**
  * How many characters of a domain error's OWN message reach the client.
@@ -1187,6 +1188,37 @@ function structuredCodeAnswer(
                 error: armSentence(error) ?? 'Validation failed',
                 code: 'VALIDATION_FAILED',
                 fields: Array.isArray(error?.fields) ? error.fields : [],
+                ...(object ? { object } : {}),
+            },
+        };
+    }
+    // [#24662] An authored hook `condition` that compiled and then faulted on
+    // the record it judged → 400 `VALIDATION_ERROR`. The write is refused
+    // fail-closed (#4775) and nothing is stored; until this arm the refusal
+    // matched nothing here and left through `UNCLASSIFIED_FAULT` as
+    // `500 INTERNAL_ERROR` with a `[REST] Unhandled error` line. The status,
+    // the code, the `unevaluable`-only scope and why neither is new are
+    // stated once, in `hook-condition-refusal.ts`; the runtime doors read the
+    // same recogniser through `resolveThrownHttpError`.
+    //
+    // Beside the arm above because that is its precedent: the validation
+    // predicate's unevaluable refusal (#4649), whose sentence comes out of the
+    // same `cel-fault.ts`. So the message is the producer's, relayed as that
+    // arm relays its own: it names the hook, the CEL fault in one line and,
+    // when known, the key the condition read — never the condition source
+    // (only the `uncompilable` message quotes that, and this arm declines it)
+    // and never a record value. `object` is the route's, as above.
+    //
+    // The log verdict needs no list entry: `isDeclaredClientRefusal`
+    // (`@objectstack/rest`) reads the declaration off `resolveThrownHttpError`,
+    // which reports this shape's status and code, so the refusal is quiet.
+    const hookCondition = unevaluableHookConditionRefusal(error);
+    if (hookCondition !== undefined) {
+        return {
+            status: hookCondition.status,
+            body: {
+                error: armSentence(error) ?? 'A hook condition could not be evaluated for this record',
+                code: hookCondition.code,
                 ...(object ? { object } : {}),
             },
         };
