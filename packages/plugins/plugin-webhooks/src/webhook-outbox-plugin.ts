@@ -19,7 +19,11 @@ import { AutoEnqueuer, type AutoEnqueuerOptions } from './auto-enqueuer.js';
 /** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 import { SysWebhook } from './sys-webhook.object.js';
-import { DeclaredWebhookSource } from './declared-webhooks.js';
+import {
+    DeclaredWebhookSource,
+    DECLARED_WEBHOOK_NAME_GUARD_PACKAGE,
+    bindDeclaredWebhookNameGuard,
+} from './declared-webhooks.js';
 import { normalizeTenancyPosture, postureEnforcesWall } from '@objectstack/spec/security';
 import { migrateLegacyWebhookSecrets } from './migrate-webhook-secrets.js';
 import { createWebhookRedeliverGuard } from './redeliver-guard.js';
@@ -275,6 +279,7 @@ export class WebhookOutboxPlugin implements Plugin {
             try { unbindWebhookProvenanceStamp(this.boundEngine); } catch { /* best effort */ }
             try { unbindWebhookHeadersShapeGate(this.boundEngine); } catch { /* best effort */ }
             try { unbindWebhookLegacyCleartextGate(this.boundEngine); } catch { /* best effort */ }
+            try { (this.boundEngine as any).unregisterHooksByPackage?.(DECLARED_WEBHOOK_NAME_GUARD_PACKAGE); } catch { /* best effort */ }
             this.boundEngine = undefined;
         }
     }
@@ -339,6 +344,10 @@ export class WebhookOutboxPlugin implements Plugin {
         try { metadataService = ctx.getService<IMetadataService>('metadata'); } catch { /* optional */ }
         this.declaredSource = new DeclaredWebhookSource(engine, metadataService, ctx.logger as any);
         ctx.registerService(DECLARED_WEBHOOKS_SLOT, this.declaredSource);
+        // And the declared-name guard: a row that took a declared name would
+        // withhold the declaration for the whole deployment, so no non-system
+        // write may take one (409 `RESOURCE_CONFLICT`).
+        bindDeclaredWebhookNameGuard(engine as any, this.declaredSource);
         // [#7799] Then heal the rows that still hold a key in cleartext: the
         // ones an administrator authored or edited, and any 18.0 seeded row the
         // seeder had not yet rewritten.
