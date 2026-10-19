@@ -342,14 +342,20 @@ describe("a page action row's `onSuccess` stays open beside `api`, `script` and 
 // 4. operation — ActionSchema's own enum, and its `onSuccess` rule
 // ===========================================================================
 
-/** A declarative update row: `operation: 'update'` with a static `patch`. */
-const UPDATE = { operation: 'update', patch: { status: 'done' } } as const;
+/**
+ * A declarative update row: `operation: 'update'` naming the declared action
+ * whose `patch` the platform action route writes. A row has no `patch` of its
+ * own (`component-action-row-patch-retirement.test.ts`).
+ */
+const UPDATE = { operation: 'update', name: 'close_task' } as const;
+/** The same write on `ActionSchema`, which IS the declaration and carries its own `patch`. */
+const ACTION_UPDATE = { operation: 'update', patch: { status: 'done' } } as const;
 
 /** `ActionSchema`'s refusal of `onSuccess` beside `operation: 'update'`, and the subject it opens with. */
 const ACTION_UPDATE_SUBJECT = "An `operation: 'update'` action's `onSuccess`";
 const actionUpdateOnSuccessMessage = (): string => {
   const issues = issuesOf(ActionSchema.safeParse({
-    name: 'close_task', label: 'Close', ...UPDATE, onSuccess: HOP,
+    name: 'close_task', label: 'Close', ...ACTION_UPDATE, onSuccess: HOP,
   }));
   expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', ['onSuccess']]]);
   expect(issues[0].message.startsWith(ACTION_UPDATE_SUBJECT)).toBe(true);
@@ -369,7 +375,7 @@ describe("a page action row's `operation` is `ActionSchema`'s own enum", () => {
   });
 
   it.each(ROWS)("REFUSAL: $name with `operation: 'delete'` is refused at `operation` with the action's own text", (row) => {
-    const issues = issuesOf(row.parse({ operation: 'delete', patch: { status: 'done' } }));
+    const issues = issuesOf(row.parse({ operation: 'delete', name: 'close_task' }));
     expect(issues.map((i) => i.path)).toEqual([[...row.at, 'operation']]);
     const action = issuesOf(ActionSchema.safeParse({ name: 'x', label: 'X', operation: 'delete', patch: { status: 'done' } }))
       .find((i) => i.path.join('.') === 'operation');
@@ -378,11 +384,11 @@ describe("a page action row's `operation` is `ActionSchema`'s own enum", () => {
   });
 
   it.each(ROWS)("REFUSAL: $name with `operation: 'create'` (no member) is refused at `operation`", (row) => {
-    const issues = issuesOf(row.parse({ operation: 'create', patch: { status: 'done' } }));
+    const issues = issuesOf(row.parse({ operation: 'create', name: 'close_task' }));
     expect(issues.map((i) => [i.code, i.path])).toEqual([['invalid_value', [...row.at, 'operation']]]);
   });
 
-  it.each(ROWS)("ACCEPTED CONTROL: $name with `operation: 'update'` and a `patch` parses unchanged", (row) => {
+  it.each(ROWS)("ACCEPTED CONTROL: $name with `operation: 'update'` and a `name` parses unchanged", (row) => {
     const r = row.parse({ ...UPDATE });
     expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
     expect(row.parsed(r.data).operation).toBe('update');
