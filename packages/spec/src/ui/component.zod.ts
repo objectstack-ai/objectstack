@@ -955,7 +955,11 @@ export const PageTabsProps = strictObject({
      * behaviour, NOT contract-guaranteed:
      *
      *   * **`data` is the record ROW here**; the component-node evaluator
-     *     mounts no `data` root at all (see `PageComponentSchema.visibleWhen`).
+     *     mounts no `data` root save on an element an `api` data source
+     *     binds, where `data` is the value that binding selects (see
+     *     `PageComponentSchema.visibleWhen`). Inside such an element `data`
+     *     stays the row on this surface: the item evaluator writes `data`
+     *     after the ambient scope.
      *   * **The row's bare fields are spread flat**, so `status` resolves as
      *     well as `record.status`. The ambient scope is spread AFTER the row,
      *     so an ambient root (`features`, `user`, …) wins over a record

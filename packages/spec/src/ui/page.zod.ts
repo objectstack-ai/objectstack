@@ -421,7 +421,7 @@ const ELEMENT_API_URL_CLASSES: ReadonlyArray<{ test: (url: string) => boolean; w
 ];
 
 /**
- * The refusal an element `api` data source's `read.url` raises — the rule, the
+ * The refusal an `api` data source's `read.url` raises — the rule, the
  * class the value fell in, and the fix. ⛔ The value itself is never echoed: a
  * URL an author pasted may carry a credential in its user-info or query.
  */
@@ -431,14 +431,14 @@ function elementApiReadUrlRefusal(input: unknown): string | undefined {
   const why = ELEMENT_API_URL_CLASSES.find((c) => c.test(input))?.why
     ?? 'This value does not open with `/`, so it is a relative path: it resolves against the page\'s '
       + 'own address, never the API.';
-  return '`read.url` of a page element\'s `api` data source must be a same-origin API path — one that '
+  return '`read.url` of an `api` data source must be a same-origin API path — one that '
     + 'opens with a single `/`, such as `/api/v1/cloud/home`. ' + why + ' Write the endpoint\'s path '
     + 'on this deployment\'s own origin. The console reads it with its own signed-in fetch, so a host, '
     + 'a scheme or a credential is never written in metadata.';
 }
 
 /**
- * The dotted path an element `api` data source selects from the response —
+ * The dotted path an `api` data source selects from the response —
  * `data.environments` in a `{ success, data }` envelope. Segments of letters,
  * digits, `_` and `-`, joined by single dots: no brackets, no leading `$`, no
  * slashes, so a JSONPath or a URL path written here is refused rather than
@@ -446,7 +446,7 @@ function elementApiReadUrlRefusal(input: unknown): string | undefined {
  */
 const ELEMENT_API_RESPONSE_PATH_RE = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
 
-/** What an author who reached for a credential on an element `api` binding is told. */
+/** What an author who reached for a credential on an `api` data source is told. */
 const ELEMENT_API_NO_CREDENTIALS =
   'No credential is written in metadata: the console reads the endpoint with its own signed-in '
   + 'fetch, so the request already carries the user\'s session. Delete this key.';
@@ -480,16 +480,29 @@ const ELEMENT_API_NO_CREDENTIALS =
  * overrides the request config's own, so any other value here would declare a
  * method the renderer never sends.
  *
- * ## Planned, not yet rendered
+ * ## Rendered by the console, on a page element
  *
- * No renderer reads this binding yet: the page-element
- * data-source hook (`useElementDataSource`, `@object-ui/react`) admits only a
- * binding with a string `object` (`isElementDataSourceConfig`), so an `api`
- * binding reaches no block yet. The generic blocks that read it — stat, usage
- * bar, checklist — are objectui#12197, re-scoped by the same ruling and
- * sequenced after this shape lands. The liveness record is the
- * `liveness/page.json` `_note`: the ledger's walk stops at the undrilled
- * `page/regions` container, so no component-level key can carry a row.
+ * The console reads this binding on every page element, whatever its type
+ * (objectui: packages/react/src/SchemaRenderer.tsx, which calls
+ * `useElementApiDataSource` for each node it renders; the read itself is
+ * objectui: packages/react/src/element-data-source/useElementApiDataSource.ts).
+ * It parses the binding with this schema before anything else, so a binding
+ * refused here is refused there with the same message and nothing is read.
+ * Otherwise it sends one `GET` to `read.url` through the console's signed-in
+ * fetch and selects `path` from the JSON answer. The selected value is the
+ * element's `data`: in its expression holes (`${data.used}`), in its
+ * `visibleWhen`, and in every element nested inside it, to which it is
+ * published through the predicate scope. While the read is in flight the
+ * element draws a loading panel; a refused binding or a failed read (a non-2xx
+ * answer, a body that is not JSON, a `path` that selects nothing) draws an
+ * error panel naming which. The element's `visibleWhen` is decided only once
+ * the value is in. The console's generic `stat`, `usage-bar` and `checklist`
+ * blocks (objectui: packages/app-shell/src/console/blocks/productBlocks.tsx)
+ * are built to take it as their `dataSource`. Measured at the console pin
+ * (`.objectui-sha` `0707b4ae37`), which carries the renderer
+ * (objectui#12197). The liveness record is the `liveness/page.json` `_note`:
+ * the ledger's walk stops at the undrilled `page/regions` container, so no
+ * component-level key can carry a row.
  *
  * ## Why `ElementDataSourceSchema` is unchanged
  *
@@ -503,16 +516,17 @@ const ELEMENT_API_NO_CREDENTIALS =
  * the shared union-branch policy renders.
  */
 export const ElementApiDataSourceSchema = lazySchema(() => strictObject({
-  surface: 'this element `api` data source',
-  history: 'A key an element `api` data source does not declare would otherwise be dropped in silence, '
-    + 'and the element would read without the setting.',
+  surface: 'this `api` data source',
+  history: 'A key an `api` data source does not declare would otherwise be dropped in silence, '
+    + 'and the endpoint would be read without the setting.',
   aliases: { response: 'path', select: 'path', dataPath: 'path', responsePath: 'path', fetch: 'read', request: 'read' },
   guidance: {
     url: 'Set the URL inside the read block: `read: { url }`.',
     method: 'Set the method inside the read block: `read: { url, method }`.',
-    write: 'A page element only reads: an `api` data source declares `read` and no `write`.',
-    object: 'An `api` data source reads an API endpoint, not an object. To bind an object, drop '
-      + '`provider` and `read` and keep `object`; to read an endpoint, drop `object`.',
+    write: 'An `api` data source only reads: it declares `read` and no `write`.',
+    object: 'An `api` data source reads an API endpoint, not an object: to read the endpoint, drop '
+      + '`object`. Where the `dataSource` also takes the object binding (a page element\'s does), bind '
+      + 'the object with that instead: drop `provider` and `read` and keep `object`.',
     headers: ELEMENT_API_NO_CREDENTIALS,
     credentials: ELEMENT_API_NO_CREDENTIALS,
     auth: ELEMENT_API_NO_CREDENTIALS,
@@ -521,11 +535,11 @@ export const ElementApiDataSourceSchema = lazySchema(() => strictObject({
     apiKey: ELEMENT_API_NO_CREDENTIALS,
   },
 }, {
-  provider: z.literal('api').describe('Binds the element to one same-origin API endpoint instead of an object'),
+  provider: z.literal('api').describe('Binds one same-origin API endpoint — the discriminator of an `api` data source'),
   read: strictObject({
-    surface: 'the `read` request of this element `api` data source',
+    surface: 'the `read` request of this `api` data source',
     history: 'A key this read request does not declare would otherwise be dropped in silence, and the '
-      + 'element would read without the setting.',
+      + 'endpoint would be read without the setting.',
     aliases: { href: 'url', endpoint: 'url', path: 'url', verb: 'method' },
     guidance: {
       headers: ELEMENT_API_NO_CREDENTIALS,
@@ -535,26 +549,26 @@ export const ElementApiDataSourceSchema = lazySchema(() => strictObject({
       token: ELEMENT_API_NO_CREDENTIALS,
       apiKey: ELEMENT_API_NO_CREDENTIALS,
       params: 'Write query parameters into the path itself: `read: { url: \'/api/v1/x?limit=5\' }`.',
-      body: 'A page element\'s read is a `GET` and sends no body.',
+      body: 'The read of an `api` data source is a `GET` and sends no body.',
     },
   }, {
     url: z.string()
       .regex(SAME_ORIGIN_API_PATH_RE, { error: (issue) => elementApiReadUrlRefusal(issue.input) })
-      .describe('Same-origin API path the element reads — it opens with a single `/`, e.g. `/api/v1/cloud/home`. An absolute URL of any scheme, a protocol-relative `//host`, a backslash read as a slash, a space or control character, and a relative path are refused at parse. No credential is written here: the console reads the endpoint with its own signed-in fetch.'),
+      .describe('Same-origin API path the binding reads — it opens with a single `/`, e.g. `/api/v1/cloud/home`. An absolute URL of any scheme, a protocol-relative `//host`, a backslash read as a slash, a space or control character, and a relative path are refused at parse. No credential is written here: the console reads the endpoint with its own signed-in fetch.'),
     method: z.literal('GET', {
-      error: () => 'A page element\'s `api` read is sent as `GET`: the console issues every read with '
+      error: () => 'The read of an `api` data source is sent as `GET`: the console issues every read with '
         + '`GET`, whatever the request declares, so no other method is honoured. Omit `method` or write `\'GET\'`.',
-    }).optional().describe('HTTP method of the read — `GET`, the only method a page element\'s read is sent with'),
-  }).describe('The read request — the same-origin endpoint the element binds'),
+    }).optional().describe('HTTP method of the read — `GET`, the only method the read of an `api` data source is sent with'),
+  }).describe('The read request — the same-origin endpoint the binding reads'),
   path: z.string()
     .regex(ELEMENT_API_RESPONSE_PATH_RE, {
-      error: () => '`path` of a page element\'s `api` data source is a dotted path into the response, '
+      error: () => '`path` of an `api` data source is a dotted path into the response, '
         + 'such as `data.environments`: segments of letters, digits, `_` or `-` joined by single dots — '
         + 'no brackets, no leading `$`, no slashes.',
     })
     .optional()
-    .describe('Dotted path selecting the sub-tree of the response the element binds, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the element binds the whole response'),
-}).describe('[PLANNED — not yet rendered] API binding of a page element: `{ provider: \'api\', read: { url }, path? }` reads one same-origin endpoint with the console\'s signed-in fetch and binds the selected value, which the element reads as `data` in its expression holes and its `visibleWhen`. The console\'s generic stat, usage-bar and checklist blocks are the planned readers; until they ship, the binding parses and no block reads it.'));
+    .describe('Dotted path selecting the sub-tree of the response the binding takes, e.g. `data.environments` in a `{ success, data }` envelope; omitted, the binding takes the whole response'),
+}).describe('API binding of a page element: `{ provider: \'api\', read: { url }, path? }` reads one same-origin endpoint with the console\'s signed-in fetch and binds the selected value, which the element reads as `data` in its expression holes and its `visibleWhen`. The console renders it on every page element: the value is `data` on that element and on every element nested inside it, the element\'s `visibleWhen` is decided once the read answers, and while the read is in flight, or when the binding is refused or the read fails, the element draws a loading or error panel instead. The console\'s generic `stat`, `usage-bar` and `checklist` blocks are built to take it.'));
 
 /**
  * Page Component Schema
@@ -716,25 +730,32 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * `current_user`, `user`, `ctx.user`, `os.user`, `features`, and nothing
    * else; `configEvaluationScope` composes this surface's evaluator from it,
    * adding `record` (only when the page has a row — on an app page, once the
-   * renderer mounts the page's `record` binding) and `page`.
+   * renderer mounts the page's `record` binding) and `page`. The one root
+   * added beside those is the `api` data source's `data`, below.
    *
-   * ## No `data` root on this surface
+   * ## `data` — only where an `api` data source binds it
    *
-   * The shipping renderer mounts NO `data` root here. objectui#9308 (ruling
-   * B, 2026-09-13) removed `data` as a runtime expression root:
-   * `SchemaRenderer` stopped publishing its injected data source under that
-   * name, and a data scope reaches a predicate
-   * only through the predicate-scope channel (`PredicateScopeProvider`),
-   * whose one shipping feeder, `ExpressionProvider`, publishes no `data`. So a
-   * `data.*` read here faults, and a faulting `visibleWhen` renders the
-   * component: `data.total > 0` and `data.total == 0` both show it, a gate
-   * that never gates. The row the page is about is `record`.
+   * The shipping renderer mounts NO `data` root on an element that no `api`
+   * data source binds. objectui#9308 (ruling B, 2026-09-13) removed `data` as
+   * a runtime expression root: `SchemaRenderer` stopped publishing its
+   * injected data source under that name, and a data scope reaches a
+   * predicate only through the predicate-scope channel
+   * (`PredicateScopeProvider`), whose ambient feeder, `ExpressionProvider`,
+   * publishes no `data`. So on such an element a `data.*` read faults, and a
+   * faulting `visibleWhen` renders the component: `data.total > 0` and
+   * `data.total == 0` both show it, a gate that never gates. The row the page
+   * is about is `record`.
    *
-   * The one `data` this surface declares is the PLANNED API binding's (see
-   * {@link ElementApiDataSourceSchema}): an element whose `dataSource` is
-   * `{ provider: 'api', … }` reads its bound value as `data` once that
-   * binding's renderer ships. No renderer reads that binding yet, so no
-   * element has a `data` to read today.
+   * The one `data` this surface has is the API binding's (see
+   * {@link ElementApiDataSourceSchema}): on an element whose `dataSource` is
+   * `{ provider: 'api', … }`, `data` is the value the binding selects, in
+   * that element's own `visibleWhen` and in every element nested inside it
+   * (objectui: packages/react/src/SchemaRenderer.tsx, which calls
+   * `useElementApiDataSource` for the node and publishes the value to its
+   * subtree through `PredicateScopeProvider`). So `data.used < data.limit`
+   * gates there. That `visibleWhen` is decided once the read has answered:
+   * while it is in flight, or when the binding is refused or the read fails,
+   * the element draws the binding's loading or error panel instead.
    *
    * ## ⚠️ A `page:tabs` item is a different evaluator
    *
@@ -744,7 +765,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * this surface does not have. See that key's own describe in
    * `component.zod.ts` rather than assuming either environment carries over.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root here: a `data.*` read faults and a faulting predicate renders the component, so such a gate never gates; the page's row is `record` — the record a record page opens, or the row an app page's `record` binding reads (none without one; a block's own `dataSource` binds no `record` for its siblings). A count or a plan is a field on that row (a `summary` roll-up: `record.environment_count > 1`; `record.plan != 'free'`), never `features.*`, which are the deployment's public auth flags, the same for every organisation. `data` is declared only for an element whose `dataSource` is the PLANNED API binding (`provider: 'api'`), which reads its bound value as `data` once that binding's renderer ships. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. \"page.selectedProjectId != ''\""),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root on an element that no `api` data source binds: there a `data.*` read faults and a faulting predicate renders the component, so such a gate never gates; the page's row is `record` — the record a record page opens, or the row an app page's `record` binding reads (none without one; a block's own `dataSource` binds no `record` for its siblings). A count or a plan is a field on that row (a `summary` roll-up: `record.environment_count > 1`; `record.plan != 'free'`), never `features.*`, which are the deployment's public auth flags, the same for every organisation. `data` is mounted only on an element whose `dataSource` is an `api` data source (`provider: 'api'`): there, and on every element nested inside it, `data` is the value the binding selects, and the element's `visibleWhen` is decided once the read answers. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. \"page.selectedProjectId != ''\""),
   // `visibility` REMOVED at 18 (#23543 F4, ADR-0089 D2): through 17 it was the
   // page component's deprecated spelling of `visibleWhen`, folded onto it at
   // parse by a `.transform` that went with the key. The tombstone carries the
@@ -767,7 +788,8 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    *   so one page can query several objects;
    * - the API binding ({@link ElementApiDataSourceSchema}) `{ provider: 'api',
    *   read: { url }, path? }`, which reads one same-origin endpoint with the
-   *   console's signed-in fetch (planned in the renderer — see its docblock).
+   *   console's signed-in fetch and binds the value as the element's `data`
+   *   (rendered by the console — see its docblock).
    *
    * A plain `z.union`, object arm first: the API arm is told apart by its
    * required `provider: 'api'`, and the object arm keeps its def byte-identical
