@@ -368,7 +368,7 @@ function targetGate(
         path: at('type'),
         message:
             `${named} declares \`type: '${endpoint.type}'\`, which this runtime does not execute. `
-            + "Only 'object_operation' and 'flow' endpoints execute in 17.x. `script` is refused because "
+            + "This runtime executes only 'object_operation' and 'flow' endpoints. `script` is refused because "
             + 'no path in this repo verifies that a script target is reachable through the automation '
             + 'service — express the logic as a flow (`type: \'flow\'`) whose script node runs your '
             + 'registered function. `proxy` is refused because forwarding to an arbitrary outbound URL is '

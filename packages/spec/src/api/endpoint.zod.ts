@@ -14,7 +14,7 @@ import { retiredKey } from '../shared/retired-key';
 export const ApiMappingSchema = lazySchema(() => z.object({
   source: z.string().describe('Source field/path'),
   target: z.string().describe('Target field/path'),
-  transform: z.string().optional().describe('Transformation function name — NOT EXECUTED in 17.x, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object)'),
+  transform: z.string().optional().describe('Transformation function name — NOT EXECUTED by this runtime, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object)'),
 }));
 export type ApiMapping = z.input<typeof ApiMappingSchema>;
 
@@ -171,8 +171,8 @@ export const ApiEndpointSchema = strictObject({
   description: z.string().optional(),
 
   /** Execution Logic */
-  type: z.enum(['flow', 'script', 'object_operation', 'proxy']).describe("Implementation type — only 'object_operation' and 'flow' EXECUTE in 17.x. 'script' and 'proxy' stay in the frozen vocabulary and are rejected at publish, not parsed and ignored: express script logic as a flow whose script node runs your registered function, and an outbound call as a flow using a declared connector"),
-  target: z.string().optional().describe("Target Flow ID, per `type` — REQUIRED at publish for `type: 'flow'` (the gate refuses a flow endpoint that names no target flow) and UNREAD for `type: 'object_operation'`, so do not write it there: that endpoint is addressed by `objectParams.object` / `.operation`, and a `target` beside them is a dead string nothing checks against `objectParams.object` (made the key optional for exactly that reason). The vocabulary's other spellings — a Script Name or Proxy URL — stay unreachable in 17.x, since publish rejects `type: 'script'` and `type: 'proxy'`"),
+  type: z.enum(['flow', 'script', 'object_operation', 'proxy']).describe("Implementation type — this runtime EXECUTES only 'object_operation' and 'flow'. 'script' and 'proxy' stay in the frozen vocabulary and are rejected at publish, not parsed and ignored: express script logic as a flow whose script node runs your registered function, and an outbound call as a flow using a declared connector"),
+  target: z.string().optional().describe("Target Flow ID, per `type` — REQUIRED at publish for `type: 'flow'` (the gate refuses a flow endpoint that names no target flow) and UNREAD for `type: 'object_operation'`, so do not write it there: that endpoint is addressed by `objectParams.object` / `.operation`, and a `target` beside them is a dead string nothing checks against `objectParams.object` (made the key optional for exactly that reason). The vocabulary's other spellings — a Script Name or Proxy URL — stay unreachable on this runtime, since publish rejects `type: 'script'` and `type: 'proxy'`"),
 
   /** Logic Config */
   objectParams: z.object({
