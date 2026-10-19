@@ -769,8 +769,14 @@ export class ShareLinkService implements IShareLinkService {
     );
   }
 
-  /** The install's organization ids, capped at two — only "0 / 1 / several" decides. */
+  /**
+   * The install's organization ids, capped at two — only "0 / 1 / several"
+   * decides. A composition that registers no organization object answers `[]`
+   * without a read, as the engine's own probe does: the data door refuses an
+   * unregistered name.
+   */
   private async probeOrganizations(): Promise<readonly string[]> {
+    if (!this.engine.getSchema?.(ORGANIZATION_OBJECT)) return [];
     const rows = await this.engine.find(ORGANIZATION_OBJECT, {
       fields: ['id'],
       limit: 2,
