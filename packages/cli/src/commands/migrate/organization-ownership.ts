@@ -328,7 +328,7 @@ export default class OrganizationOwnershipCeremony extends Command {
     'of declared sharing rules\' stored copies, the verified id-to-name rewrite, mirror deletion, column drops and ' +
     'NOT NULL on organization_id, in that order, resumable from a recorded checkpoint, then the post-check.';
 
-  static override examples = [
+  static override examples: Command.Example[] = [
     '$ os migrate organization-ownership',
     '$ os migrate organization-ownership --out plans/v18-ownership.json',
     '$ os migrate organization-ownership --database-url postgres://… --json',

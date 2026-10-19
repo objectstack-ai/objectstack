@@ -72,7 +72,7 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
             description: 'Handler region run when the try region fails',
             properties: { nodes: { type: 'array' }, edges: { type: 'array' } },
           },
-          errorVariable: { type: 'string', description: 'Variable holding the caught error in the catch region — a `TryCatchErrorValue`: `nodeId`, `message`, and `iteration` / `item` when the failure happened inside a loop body' },
+          errorVariable: { type: 'string', description: 'Variable holding the caught error in the catch region (default `$error`, read as `{{ $error.message }}`). It carries the id of this Try / Catch node (`nodeId`), the failure message, which normally names the step that failed (`message`), the platform error code when that step reported one (`code`), and, when the failure happened inside a loop, the zero-based pass number (`iteration`) and the item being processed (`item`)' },
           retry: {
             type: 'object',
             properties: {

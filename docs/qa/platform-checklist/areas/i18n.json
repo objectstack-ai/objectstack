@@ -177,7 +177,7 @@
       "title": "Every translatable surface localizes on a zh-CN session — one pass over the full translation-group vocabulary, plus the runtime i18n routes it resolves through",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": ["admin on a zh-CN session"],
@@ -231,7 +231,7 @@
         {
           "clause": "fallback is honest: an untranslated declared string renders its SOURCE-language label — never a raw dotted key path, never an empty cell",
           "oracle": "screenshot",
-          "verify": "spot-check at least two known-untranslated keys (from the coverage baseline debt); each shows the en label, no 'objects.x.fields.y.label' literals anywhere in the session",
+          "verify": "spot-check at least two known-untranslated keys — derive them as keys the showcase declares but the served zh tree lacks: scripts/i18n-coverage-baseline.json records only a COUNT per config (414 for examples/app-showcase at base 9a7838edf5), never a key list; each shows the en label, no 'objects.x.fields.y.label' literals anywhere in the session",
           "evidence": "the fallback screenshots"
         },
         {
@@ -331,7 +331,8 @@
         { "revision": 5, "date": "2026-10-05", "change": "the switch step now names HOW to switch: through the avatar-menu language switcher, which writes the user's locale. Seeding browser storage alone is not a language switch. The 17.7 console run held the relative-dates variant of acceptance[0] as a FAIL, and its re-run on #21782 settled it as a harness gap: the first lane had set the UI language only in browser storage, so the user's stored locale stayed empty and dates followed the browser. Through the switcher the variant passed, so the clauses themselves are unchanged (card #21851 entry 11, filed with the follow-up run #21845)", "ref": "#21782" },
         { "revision": 6, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 8). A6's confirm half was blocked(fixture): no zh confirmText. Measured: no showcase action declares a confirmText at all, so there is no live specimen. Disposition: pin. The objectui tests page-header-action-i18n and record-quick-actions.actionText-i18n prove that the confirm dialog body resolves from the `_actions` zh-CN entry through the real ActionRunner. `automated` names them for that half only, and a knownGap records why the half is pin-only on stock", "ref": "#22017" },
         { "revision": 7, "date": "2026-10-13", "change": "knownGaps[2], steps[7], variants[6] and the showcase source note re-pointed (knownGap stale, #23163; parked on #23121, carried by #23169). task-detail.page.ts's record:details block has named its sections overview / schedule / details since #22036, so the task record page renders them translated; QA run #23163 read zh headings on the New form, the task record page and the contact form under zh-CN. The step used to name the tabbed / wizard / split formViews, but those are reachable from no console door, and `…/view/tabbed` renders the grid. The negative that keeps a nameless section out of resolver FAILs stands", "ref": "#23169" },
-        { "revision": 8, "date": "2026-10-16", "change": "variants[5], acceptance[7].clause, steps[8] and [9], source[0] and automated.ref corrected (checklist-accuracy note 4 and the fixture gaps of QA run #23951, wave #23878). variants[5] still marked the view-empty-state variant blocked(fixture), contradicting knownGaps[1] and steps[6] — it ran and passed. acceptance[7] counted the served tree as an eleven-group platform face over a ten-group per-app one; the spec declares eleven per-app groups (appTranslationDataShape, picklists included — source[0]'s list had dropped it) and twelve platform groups (plus settings). The dashboard and page steps now name a translated specimen each, because no showcase page carries a translated title (the run scored pages on platform page connect_agent). automated.ref's revision note moves to the current pin. Wording and specimen names only: no request or oracle changed", "ref": "#24036" }
+        { "revision": 8, "date": "2026-10-16", "change": "variants[5], acceptance[7].clause, steps[8] and [9], source[0] and automated.ref corrected (checklist-accuracy note 4 and the fixture gaps of QA run #23951, wave #23878). variants[5] still marked the view-empty-state variant blocked(fixture), contradicting knownGaps[1] and steps[6] — it ran and passed. acceptance[7] counted the served tree as an eleven-group platform face over a ten-group per-app one; the spec declares eleven per-app groups (appTranslationDataShape, picklists included — source[0]'s list had dropped it) and twelve platform groups (plus settings). The dashboard and page steps now name a translated specimen each, because no showcase page carries a translated title (the run scored pages on platform page connect_agent). automated.ref's revision note moves to the current pin. Wording and specimen names only: no request or oracle changed", "ref": "#24036" },
+        { "revision": 9, "date": "2026-10-19", "change": "acceptance[2].verify says how to find an untranslated key — checklist-accuracy finding of the 18.0 QA sweep (QA run #24553, i18n.surface-matrix; wave anchor #24579 §3): the coverage baseline debt is a count, not a key list. Re-derived at base 9a7838edf5 (scripts/i18n-coverage-baseline.json maps each config path to a number). No clause changed", "ref": "#24649" }
       ]
     },
     {
@@ -500,7 +501,7 @@
       "title": "Flow copy is translatable on v18: a flow refusal message and a paused screen's title/description resolve in the caller's Accept-Language with holes filled, `os i18n extract` scaffolds the refusal / screen / option keys, a translated screen title is judged by the {{ }} text-slot rule, and a host translation bundle overrides a platform key in either load order",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -512,13 +513,13 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
-          "a showcase (or scratch) flow with an end-node refusal message and a screen, plus a zh-CN translation bundle carrying their keys"
+          "a SCRATCH flow with an end-node refusal message and a screen with an authored title, plus a zh-CN translation bundle carrying their keys — the showcase carries neither specimen: no showcase flow ends on a refusing end node, and showcase_reassign_wizard's zh screen title exists in its bundle while the authored screen has no title (QA runs #24553 and #24558)"
         ]
       },
       "steps": [
         "POST /api/v1/automation/FLOW/trigger with Accept-Language: zh-CN and read the refusal message",
         "start the screen flow with Accept-Language: zh-CN and read the paused screen title",
-        "in the scratch app run `os i18n extract` and inspect the scaffolded keys; add a translated screen title \"Hi {name}\" and run `os validate`",
+        "in the scratch app run `os i18n extract --no-objects-only` and inspect the scaffolded keys — the default `--objects-only` emits only the objects/globalActions subtree, so a bare `os i18n extract` writes NO flow key and clause 2 would read as missing scaffolding; add a translated screen title \"Hi {name}\" and run `os validate`",
         "in the scratch app give the host bundle a key the platform also ships (e.g. a sys_user label) and boot; GET /api/v1/meta/object/sys_user with Accept-Language for that locale"
       ],
       "acceptance": [
@@ -549,7 +550,7 @@
         {
           "clause": "the host bundle's value wins for the overlapping platform key",
           "oracle": "api",
-          "verify": "label in the served definition",
+          "verify": "label in the served definition. One boot exercises ONE load order: the title's 'either load order' is scored live for the order the boot took and from packages/platform-objects/src/plugin.translations.test.ts for both ('a host bundle loaded BEFORE the platform bundles serves the host label' / 'a host bundle loaded AFTER kernel:ready also serves the host label', passing at base 9a7838edf5)",
           "evidence": "the excerpt"
         }
       ],
@@ -569,6 +570,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "fixtures.requires[2], steps[2] and acceptance[4].verify corrected — checklist-accuracy findings of the 18.0 QA sweep (QA runs #24553 and #24558, i18n.flow-copy-translation-and-host-override; wave anchor #24579 §3). `os i18n extract` defaults to --objects-only and emits no flow keys (packages/cli/src/commands/i18n/extract.ts, objects-only default true, at base 9a7838edf5); the showcase ships no refusing end node and no titled screen, so both specimens are scratch; and one boot cannot drive both load orders, which the platform-objects pin covers — measured at base 9a7838edf5 under os-verify-lock (10 passed). No clause changed",
+          "ref": "#24649"
         }
       ]
     }

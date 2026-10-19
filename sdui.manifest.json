@@ -230,19 +230,208 @@
         },
         {
           "name": "columns",
-          "type": "array"
+          "type": "array",
+          "description": "The fields the list shows, in order: field names (`[\"name\", \"stage\"]`) or the spec's `ListColumn` objects. They are also the query's `$select`. Optional on a page node: a node bound to a saved view through `dataSource.view` draws that view's columns."
         },
         {
           "name": "filter",
-          "type": "array"
+          "type": "array",
+          "description": "The base query filter, the spec's `ViewFilterRule` array `[{ field, operator, value }]`, lowered to `$filter`."
         },
         {
           "name": "sort",
-          "type": "array"
+          "type": "array",
+          "description": "The initial sort order, `[{ field, order }]`, lowered to `$orderby` in the order written."
+        },
+        {
+          "name": "pagination",
+          "type": "object",
+          "description": "The spec's pagination config, `{ pageSize, pageSizeOptions }`: `pageSize` caps each query (`$top`), and `pageSizeOptions` offers those sizes to the user."
+        },
+        {
+          "name": "searchableFields",
+          "type": "array",
+          "of": "string",
+          "description": "The field names the toolbar search box searches. A term typed into the box is sent with these fields only."
+        },
+        {
+          "name": "label",
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "The list's label: it names the exported file and heads the record-detail overlay. A plain string, or an inline per-locale map (`{ en: \"Open tasks\", \"zh-CN\": \"未完成任务\" }`) resolved against the display locale."
+        },
+        {
+          "name": "description",
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "One line about the list, drawn as the toolbar's info control (its tooltip and accessible name). A plain string, or an inline per-locale map resolved against the display locale. `appearance.showDescription: false` hides it."
+        },
+        {
+          "name": "userFilters",
+          "type": "object",
+          "description": "The quick-filter bar above the list, the spec's `UserFilters` config: `{ element: \"dropdown\" | \"toggle\" | \"tabs\", fields | tabs }`. Each filter narrows the query."
+        },
+        {
+          "name": "userActions",
+          "type": "object",
+          "description": "Which toolbar controls the user gets, the spec's `UserActionsConfig` of per-control toggles: a control set to `false` (for example `sort: false`) is taken off the toolbar, and the controls it does not name stay."
+        },
+        {
+          "name": "compactToolbar",
+          "type": "boolean",
+          "description": "Gather the grouping, row colour, density and hide-fields controls into one Display form. On by default; `false` draws one toolbar button per control."
+        },
+        {
+          "name": "appearance",
+          "type": "object",
+          "description": "The spec's appearance config, `{ showDescription, allowedVisualizations }`. `showDescription: false` hides the description. `allowedVisualizations` narrows the kinds a view switcher offers, and a page node draws no switcher, so on a page it changes nothing: the node's `type` is the kind drawn."
+        },
+        {
+          "name": "exportOptions",
+          "type": "object",
+          "description": "The export menu, `{ formats, maxRecords, includeHeaders, fileNamePrefix, streaming }`. Declaring it offers the export on the toolbar, in the listed formats; `fileNamePrefix` names the file."
+        },
+        {
+          "name": "allowPrinting",
+          "type": "boolean",
+          "description": "Draw a Print button that opens the browser's print dialog for the list."
+        },
+        {
+          "name": "showRecordCount",
+          "type": "boolean",
+          "description": "The record count in the list's footer. On by default; `false` takes it off."
+        },
+        {
+          "name": "emptyState",
+          "type": "object",
+          "description": "What the list draws when no record comes back, the spec's `EmptyState`: `{ title, message, icon, link }`. `title`, `message` and the link's `label` each take a plain string or an inline per-locale map."
+        },
+        {
+          "name": "hiddenFields",
+          "type": "array",
+          "of": "string",
+          "description": "Field names taken out of `columns`. A name `columns` does not show takes nothing out."
+        },
+        {
+          "name": "fieldOrder",
+          "type": "array",
+          "of": "string",
+          "description": "Field names that order the columns left after `hiddenFields`. A column not listed comes after every listed one; a listed name that is not a column orders nothing."
+        },
+        {
+          "name": "rowHeight",
+          "type": "enum",
+          "enum": [
+            "compact",
+            "short",
+            "medium",
+            "tall",
+            "extra_tall"
+          ],
+          "description": "Row density. Absent, rows are `compact`."
+        },
+        {
+          "name": "resizable",
+          "type": "boolean",
+          "description": "Let users drag column borders to resize the grid's columns."
+        },
+        {
+          "name": "selection",
+          "type": "object",
+          "description": "Row selection, `{ type: \"none\" | \"single\" | \"multiple\" }`."
+        },
+        {
+          "name": "navigation",
+          "type": "object",
+          "description": "What clicking a row does, the spec's `NavigationConfig`: `{ mode: \"page\" | \"drawer\" | \"modal\" | \"split\" | \"popover\" | \"new_window\" | \"none\", … }`. An overlay mode opens the record over the list, headed by the list's `label`."
+        },
+        {
+          "name": "grouping",
+          "type": "object",
+          "description": "Group the rows, `{ fields: [{ field, order, collapsed }] }`. The groups and their header counts come from the server."
+        },
+        {
+          "name": "rowColor",
+          "type": "object",
+          "description": "Colour whole rows by a field's value, `{ field, colors: { VALUE: COLOR } }`."
+        },
+        {
+          "name": "conditionalFormatting",
+          "type": "array",
+          "of": "object",
+          "description": "Row style rules, each `{ condition, style }`: a CEL `condition` over the row's `record.*` and a CSS `style` map. The first rule that matches styles the row."
+        },
+        {
+          "name": "inlineEdit",
+          "type": "boolean",
+          "description": "Open the grid in inline-edit mode, for users who may update the object."
+        },
+        {
+          "name": "rowActions",
+          "type": "array",
+          "of": "string",
+          "description": "Names of the actions offered on each row's menu."
+        },
+        {
+          "name": "bulkActions",
+          "type": "array",
+          "of": "string",
+          "description": "Names of the actions offered once rows are selected. Needs a multi-row `selection`."
+        },
+        {
+          "name": "bulkActionDefs",
+          "type": "array",
+          "of": "object",
+          "description": "Full bulk-action definitions, the spec's `BulkActionDef`: a mass update (`operation: \"update\"` with a `patch`) or delete, or a named action run once for the whole selection."
         },
         {
           "name": "options",
-          "type": "object"
+          "type": "object",
+          "description": "Per-kind settings, `{ kanban, calendar, gantt, gallery, timeline, map, tree, chart }`, each judged by that kind's own block. The top-level block of the same name is the canonical spelling."
+        },
+        {
+          "name": "kanban",
+          "type": "object",
+          "description": "The board, the spec's kanban block: `{ groupByField, columns, titleField, summarizeField }`. `groupByField` is the lane field and `columns` the fields on each card."
+        },
+        {
+          "name": "calendar",
+          "type": "object",
+          "description": "The calendar, `{ startDateField, endDateField, titleField, colorField, allDayField }`."
+        },
+        {
+          "name": "gantt",
+          "type": "object",
+          "description": "The gantt chart, `{ startDateField, endDateField, titleField, progressField, dependenciesField }`. Both date fields are needed to draw it."
+        },
+        {
+          "name": "gallery",
+          "type": "object",
+          "description": "The gallery, `{ coverField, titleField, visibleFields, cardSize, … }`."
+        },
+        {
+          "name": "timeline",
+          "type": "object",
+          "description": "The timeline, `{ startDateField, endDateField, titleField, groupByField, colorField, scale }`."
+        },
+        {
+          "name": "map",
+          "type": "object",
+          "description": "The map, `{ locationField }` or `{ latitudeField, longitudeField }`, with `titleField`, `zoom` and `center`."
+        },
+        {
+          "name": "tree",
+          "type": "object",
+          "description": "The tree, `{ parentField, labelField, fields, defaultExpandedDepth }`."
+        },
+        {
+          "name": "chart",
+          "type": "object",
+          "description": "The chart a `type: \"chart\"` list draws, bound to an ADR-0021 dataset: `{ dataset, values, dimensions, chartType }`. There is no default binding."
         },
         {
           "name": "dataSource",
@@ -1445,6 +1634,11 @@
           "description": "[ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open."
         },
         {
+          "name": "emptyState",
+          "type": "object",
+          "description": "What this block draws in its place when its `dataSource` binding answers no row, `{ title, message, icon, link }` — the list view's own empty-state shape: a Lucide `icon` name, a `title` (default: \"Record not found\"), a `message` (default: none) and one `link: { label, url }` the user follows (default: none), opened as a `url` action opens it. `title`, `message` and the link's `label` each accept a plain string or an inline per-locale map, resolved against the display locale. Drawn then and only then — never on a block with no `dataSource` (it reads the record page's record instead), never while the bound read is loading, and never in place of the error a failed read shows; a read the server refuses as forbidden reads as no row, so it is drawn for that too. Leave it out and a binding with no row keeps the block's own placeholder."
+        },
+        {
           "name": "dataSource",
           "type": "object",
           "binding": "object",
@@ -1487,6 +1681,11 @@
           "type": "array",
           "of": "string",
           "description": "[ADR-0066] Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions: `read` or `update` here is an ordinary capability name, not the object's read or edit permission. When the client has resolved the user's capabilities and any of these is missing, this block does not render its content; wherever it would otherwise render, an insufficient-permissions notice takes its place. Presentation only: it authorises nothing, and the data API still serves the same data to the same user. A client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open."
+        },
+        {
+          "name": "emptyState",
+          "type": "object",
+          "description": "What this block draws in its place when its `dataSource` binding answers no row, `{ title, message, icon, link }` — the list view's own empty-state shape: a Lucide `icon` name, a `title` (default: \"Record not found\"), a `message` (default: none) and one `link: { label, url }` the user follows (default: none), opened as a `url` action opens it. `title`, `message` and the link's `label` each accept a plain string or an inline per-locale map, resolved against the display locale. Drawn then and only then — never on a block with no `dataSource` (it reads the record page's record instead), never while the bound read is loading, and never in place of the error a failed read shows; a read the server refuses as forbidden reads as no row, so it is drawn for that too. Leave it out and a binding with no row keeps the block's own placeholder."
         },
         {
           "name": "dataSource",
@@ -1871,6 +2070,11 @@
           "name": "size",
           "type": "string",
           "description": "Passed to the Button primitive; a per-action size overrides it"
+        },
+        {
+          "name": "emptyState",
+          "type": "object",
+          "description": "What this block draws in its place when its `dataSource` binding answers no row, `{ title, message, icon, link }` — the list view's own empty-state shape: a Lucide `icon` name, a `title` (default: \"Record not found\"), a `message` (default: none) and one `link: { label, url }` the user follows (default: none), opened as a `url` action opens it. `title`, `message` and the link's `label` each accept a plain string or an inline per-locale map, resolved against the display locale. Drawn then and only then — never on a block with no `dataSource` (it reads the record page's record instead), never while the bound read is loading, and never in place of the error a failed read shows; a read the server refuses as forbidden reads as no row, so it is drawn for that too. Leave it out and a binding with no row keeps the block's own placeholder."
         },
         {
           "name": "dataSource",
@@ -2405,12 +2609,7 @@
           "enum": [
             "update"
           ],
-          "description": "`update` declares a single-record field write: the runner dispatches it to the platform action route with `patch` merged under the collected values"
-        },
-        {
-          "name": "patch",
-          "type": "object",
-          "description": "For `operation: update`: the field values written, merged UNDER the values the user supplies, so a collected value of the same name wins"
+          "description": "`update` declares a single-record field write: the row runs the declared action its `name` names, so it needs a `name`. The runner posts the collected values to the platform action route under that name, and the route writes that action's own `patch`"
         },
         {
           "name": "confirmText",
@@ -2709,12 +2908,7 @@
           "enum": [
             "update"
           ],
-          "description": "`update` declares a single-record field write: the runner dispatches it to the platform action route with `patch` merged under the collected values"
-        },
-        {
-          "name": "patch",
-          "type": "object",
-          "description": "For `operation: update`: the field values written, merged UNDER the values the user supplies, so a collected value of the same name wins"
+          "description": "`update` declares a single-record field write: the row runs the declared action its `name` names, so it needs a `name`. The runner posts the collected values to the platform action route under that name, and the route writes that action's own `patch`"
         },
         {
           "name": "confirmText",

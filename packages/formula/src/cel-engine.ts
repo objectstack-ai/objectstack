@@ -17,8 +17,8 @@ import { Environment, EvaluationError, ParseError, serialize } from '@marcbachma
 import type { ASTNode } from '@marcbachmann/cel-js';
 import type { Expression } from '@objectstack/spec';
 
-import { buildScope, registerNumericCoercions, registerStdLib } from './stdlib';
-import type { PermissionBinding } from './stdlib';
+import { buildScope, registerBoundStdLib, registerNumericCoercions, registerStdLib } from './stdlib';
+import type { PermissionBinding, StdLibBinding } from './stdlib';
 import type { DialectEngine, EvalContext, EvalResult } from './types';
 import type { CelRootsRefusalCode, ExpressionRefusal } from './expression-refusal';
 
@@ -58,7 +58,8 @@ export const CEL_ENV_OPTIONS = {
  * {@link registerStdLib} and {@link registerNumericCoercions}.
  *
  * Exported (package-internal; NOT in `index.ts`) so the stdlib drift pin reads
- * the authoritative environment through the same constructor the engine uses.
+ * the authoritative environment through the same constructor the engine uses
+ * ({@link buildEnvReading}, which also builds the shared evaluation environment).
  *
  * `permissionBinding` is the acting subject plus its effective object
  * permissions and held system capabilities, pinned for this one evaluation
@@ -74,8 +75,125 @@ export function buildEnv(
   timezone = 'UTC',
   permissionBinding?: PermissionBinding,
 ): Environment {
+  const pinned: StdLibBinding = { now, timezone, permissionBinding };
+  return buildEnvReading(() => pinned);
+}
+
+/**
+ * The one constructor behind {@link buildEnv} and the shared evaluation
+ * environment: the same options and the same registrations, with the stdlib
+ * reading its `now`, timezone and permission binding through `read`.
+ */
+function buildEnvReading(read: () => StdLibBinding): Environment {
   const env = new Environment(CEL_ENV_OPTIONS);
-  return registerNumericCoercions(registerStdLib(env, now, timezone, permissionBinding));
+  return registerNumericCoercions(registerBoundStdLib(env, read));
+}
+
+/**
+ * What the shared evaluation environment's stdlib answers from outside any
+ * evaluation: no permission binding, so `can` / `hasCapability` refuse exactly
+ * as an environment built without one does. No function of that environment
+ * runs outside `celEngine.evaluate`, which always sets its own binding.
+ */
+const UNBOUND: StdLibBinding = { now: () => new Date(), timezone: 'UTC', permissionBinding: undefined };
+
+/**
+ * The binding of the evaluation now running on {@link evaluationEnv}, or
+ * {@link UNBOUND} when none is.
+ *
+ * `celEngine.evaluate` saves it, sets its own and restores the saved one in a
+ * `finally`, so a nested evaluation and a thrown one both leave the outer
+ * binding exactly as it was, and no binding outlives its evaluation.
+ *
+ * Every evaluation runs to completion inside `evaluate`: cel-js goes
+ * asynchronous only for a function registered as async, and this environment
+ * registers none. A Promise-valued scope value is refused (`Unsupported type:
+ * Promise`, a `runtime` fault), so no continuation ever reads the slot later.
+ */
+let activeBinding: StdLibBinding = UNBOUND;
+
+/**
+ * The evaluation environment, built once and reused by every
+ * `celEngine.evaluate` (#24536). Building the stdlib per evaluation was most
+ * of an evaluation's cost.
+ *
+ * Sharing it is sound because a cel-js `Environment` keeps no per-evaluation
+ * state: each evaluation gets its own `RootContext`, the parser resets its
+ * input and limit counters at the start of every parse, and what the registry
+ * caches (type declarations, overload resolution) is keyed on types, never on
+ * values. What did vary per evaluation, the stdlib's `now`, timezone and
+ * permission binding, is read from {@link activeBinding}.
+ */
+let evaluationEnv: Environment | undefined;
+
+/**
+ * Programs parsed on {@link evaluationEnv}, keyed on the source `env.parse` was
+ * handed (#24536).
+ *
+ * With the environment built once, parsing and type-checking were most of what
+ * an evaluation still cost, and one source is evaluated once per row. A cel-js
+ * program is the parse-once, evaluate-many form of `env.evaluate`.
+ *
+ * ⚠️ A program is NOT free of evaluation state. cel-js keeps per-run state on
+ * the AST itself:
+ *  - a comprehension (`exists`, `all`, `exists_one`, `map`, `filter`) keeps
+ *    its iteration context on the AST (`args.iterCtx`), and `cel.bind` keeps
+ *    its binding context there too (`bindCtx`). Each run re-parents that
+ *    overlay to its own scope (`OverlayContext.reuse`), and every variable the
+ *    step reads goes through that parent;
+ *  - a function call writes its arguments' RUNTIME types into the AST's
+ *    `argTypes` on every call, and then reads them back to pick an overload.
+ *
+ * In sequential use each of these is overwritten before it is read, so a
+ * cached program answers exactly as a fresh parse would. Two runs of ONE AST
+ * at once do not: a run re-entered from inside its own comprehension (a scope
+ * getter that evaluates the same source for another subject) would re-parent
+ * the outer run's overlay, and the outer run would read the inner run's
+ * `current_user` and `record`. So a program serves one run at a time
+ * ({@link runningPrograms}). A cached program also keeps its last
+ * evaluation's scope (the `RootContext` its overlays point at, and their
+ * `iterValue` / `accuValue`) reachable until the next evaluation of that
+ * source, bounded by the cache's size.
+ *
+ * The key is the source AFTER the rewrites (`rewriteTemporalEquality`,
+ * `rewriteNullableTernary`, the overload retry's `rewriteFaultedOperands`), so a
+ * rewrite that depends on the row's values is part of the key, never applied
+ * from another row. Nothing invalidates an entry: every entry belongs to the
+ * one environment, whose registrations never change after it is built. Bounded
+ * like `temporalRewriteCache`, oldest entry out first. A source that does
+ * not parse is never stored; it is reparsed, and refused, every time.
+ */
+const evaluationPrograms = new Map<string, ReturnType<Environment['parse']>>();
+const EVALUATION_PROGRAM_CACHE_MAX = 500;
+
+/**
+ * The programs with a run in progress. A run that finds its source's cached
+ * program here, which is a nested evaluation of the same source, parses a
+ * private one instead, so no AST is ever run twice at once. Runs are
+ * synchronous (see {@link activeBinding}), so a run is over when the program
+ * returns or throws.
+ */
+const runningPrograms = new Set<ReturnType<Environment['parse']>>();
+
+/** Evaluate `source` on {@link evaluationEnv} through its cached program. */
+function runProgram(env: Environment, source: string, scope: Record<string, unknown>): unknown {
+  let program = evaluationPrograms.get(source);
+  if (program === undefined) {
+    program = env.parse(source);
+    if (evaluationPrograms.size >= EVALUATION_PROGRAM_CACHE_MAX) {
+      const first = evaluationPrograms.keys().next().value;
+      if (first !== undefined) evaluationPrograms.delete(first);
+    }
+    evaluationPrograms.set(source, program);
+  } else if (runningPrograms.has(program)) {
+    return env.parse(source)(scope);
+  }
+  runningPrograms.add(program);
+  try {
+    return program(scope);
+  } finally {
+    runningPrograms.delete(program);
+  }
 }
 
 /**
@@ -391,10 +509,9 @@ export type CelRootIdentifiersResult =
 export type CelAstNode = ASTNode;
 
 /**
- * The canonical parse env. Identical in configuration to the one
- * {@link celEngine.compile} builds per call — same `unlistedVariablesAreDyn`,
- * same `enableOptionalTypes`, same {@link DEFAULT_LIMITS}, same stdlib — and
- * built once because `parse` neither mutates the environment nor depends on the
+ * The canonical parse env, shared with {@link celEngine.compile} (#24536) —
+ * {@link buildEnv}'s `unlistedVariablesAreDyn`, `enableOptionalTypes`,
+ * {@link DEFAULT_LIMITS} and stdlib — and built once because `parse` neither mutates the environment nor depends on the
  * `now()` it was given (the same reasoning `recordScopeEnv` already relies on).
  * The parity suite pins the equivalence against a freshly-built env, so this
  * memo cannot silently drift away from `compile`.
@@ -1747,9 +1864,9 @@ export const celEngine: DialectEngine = {
 
   compile(source: string): EvalResult<unknown> {
     try {
-      // We use a wall-clock now() here purely for parse-time stdlib
-      // type-checking; the function is never actually called.
-      const env = buildEnv(() => new Date(0));
+      // The canonical parse env (#24536): parsing and checking neither mutate
+      // it nor call the stdlib, so one environment serves every compile.
+      const env = (canonicalParseEnv ??= buildEnv(() => new Date(0)));
       // #3306 — accept the null-guard idiom `cond ? <value> : null`, which cel-js's
       // ternary unifier otherwise rejects (`int`/`double`/`string` ≠ `null`). Same
       // rewrite the runtime uses, so build and eval agree on what is valid.
@@ -1799,54 +1916,64 @@ export const celEngine: DialectEngine = {
     try {
       // Scope FIRST: `can` is answered about the acting subject by IDENTITY, and
       // the subject is the canonical `EvalUser` object `buildScope` mints. The
-      // environment therefore has to be built from the scope, not beside it —
+      // binding therefore has to be made from the scope, not beside it —
       // rebuilding a lookalike user here would give `current_user.can(…)` a
       // receiver that is equal to the bound one and not the same as it.
       const scope = buildScope(ctx);
-      const env = buildEnv(now, ctx.timezone ?? 'UTC', {
-        subject: scope.current_user,
-        permissions: ctx.permissions,
-        systemPermissions: ctx.systemPermissions,
-      });
-      // #3183 — coerce a date-field operand compared with `==`/`!=` against a
-      // temporal function (`date(record.d) == today()`), so a `Field.date` string
-      // matches the Timestamp instead of silently never equalling it. No-op (and
-      // no reserialize) for any source without such a comparison.
-      // #7168 — `scope` extends that to a Date-valued BINDING counterpart
-      // (`record.due == previous.due`, `previous` hydrated by the driver): the
-      // runtime type of a binding is not in the AST, so this arm is decided per
-      // row against the values in hand. Non-date operands are untouched.
-      // #3306 — then relax the null-guard idiom `cond ? <value> : null` so a
-      // nullable numeric/string formula evaluates instead of faulting cel-js's
-      // ternary unifier. All rewrites are no-ops for sources that don't need them.
-      const evalSource = rewriteNullableTernary(rewriteTemporalEquality(source, scope));
+      const env = (evaluationEnv ??= buildEnvReading(() => activeBinding));
+      const outer = activeBinding;
+      activeBinding = {
+        now,
+        timezone: ctx.timezone ?? 'UTC',
+        permissionBinding: {
+          subject: scope.current_user,
+          permissions: ctx.permissions,
+          systemPermissions: ctx.systemPermissions,
+        },
+      };
       try {
-        const raw = env.evaluate(evalSource, scope);
-        return { ok: true, value: coerce(raw) as T };
-      } catch (err) {
-        // ADR-0032 §1c — string-serialized fields make CEL raise
-        // `no such overload`: numeric fields (`rating` → `"5.0"`,
-        // `amount` → `"250000.00"`) on `record.rating >= 4` (#1534), and
-        // date/datetime fields (`end_date` → `"2026-06-20"`) on
-        // `record.end_date <= daysFromNow(60)` (#1530), since cel-js compares the
-        // raw string against the `google.protobuf.Timestamp` from `today()` etc.
-        // Coerce those operands — and ONLY those — and retry ONCE. #7098: the
-        // coercion is per operand POSITION, not scope-wide, so a comparison that
-        // already evaluated cleanly is never re-interpreted; the scope itself is
-        // never rewritten, so a numeric-looking string RETURNED by the expression
-        // keeps its type too. When no operand provably faulted, or the retry still
-        // cannot type-check, the original loud error is reported.
-        if (!isNumericOverloadError(err)) throw err;
-        const coercedSource = rewriteFaultedOperands(evalSource, scope);
-        if (coercedSource === null) throw err;
+        // #3183 — coerce a date-field operand compared with `==`/`!=` against a
+        // temporal function (`date(record.d) == today()`), so a `Field.date` string
+        // matches the Timestamp instead of silently never equalling it. No-op (and
+        // no reserialize) for any source without such a comparison.
+        // #7168 — `scope` extends that to a Date-valued BINDING counterpart
+        // (`record.due == previous.due`, `previous` hydrated by the driver): the
+        // runtime type of a binding is not in the AST, so this arm is decided per
+        // row against the values in hand. Non-date operands are untouched.
+        // #3306 — then relax the null-guard idiom `cond ? <value> : null` so a
+        // nullable numeric/string formula evaluates instead of faulting cel-js's
+        // ternary unifier. All rewrites are no-ops for sources that don't need them.
+        const evalSource = rewriteNullableTernary(rewriteTemporalEquality(source, scope));
         try {
-          const raw = env.evaluate(coercedSource, scope);
+          const raw = runProgram(env, evalSource, scope);
           return { ok: true, value: coerce(raw) as T };
-        } catch {
-          // Hydration did not resolve it — surface the original fault, not the
-          // retry's, so the message reflects what the author actually wrote.
-          throw err;
+        } catch (err) {
+          // ADR-0032 §1c — string-serialized fields make CEL raise
+          // `no such overload`: numeric fields (`rating` → `"5.0"`,
+          // `amount` → `"250000.00"`) on `record.rating >= 4` (#1534), and
+          // date/datetime fields (`end_date` → `"2026-06-20"`) on
+          // `record.end_date <= daysFromNow(60)` (#1530), since cel-js compares the
+          // raw string against the `google.protobuf.Timestamp` from `today()` etc.
+          // Coerce those operands — and ONLY those — and retry ONCE. #7098: the
+          // coercion is per operand POSITION, not scope-wide, so a comparison that
+          // already evaluated cleanly is never re-interpreted; the scope itself is
+          // never rewritten, so a numeric-looking string RETURNED by the expression
+          // keeps its type too. When no operand provably faulted, or the retry still
+          // cannot type-check, the original loud error is reported.
+          if (!isNumericOverloadError(err)) throw err;
+          const coercedSource = rewriteFaultedOperands(evalSource, scope);
+          if (coercedSource === null) throw err;
+          try {
+            const raw = runProgram(env, coercedSource, scope);
+            return { ok: true, value: coerce(raw) as T };
+          } catch {
+            // Hydration did not resolve it — surface the original fault, not the
+            // retry's, so the message reflects what the author actually wrote.
+            throw err;
+          }
         }
+      } finally {
+        activeBinding = outer;
       }
     } catch (err) {
       return classifyError(err);

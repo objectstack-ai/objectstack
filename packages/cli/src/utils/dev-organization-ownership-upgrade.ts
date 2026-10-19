@@ -118,6 +118,8 @@ function refusalLines(logFile: string): string[] {
  * Synchronous on purpose — nothing else may open the files while it runs.
  */
 export function upgradeDevelopmentDatabase(input: DevelopmentUpgradeInput): DevelopmentUpgradeResult {
+  // The way on, when os dev does not upgrade the database itself: the ceremony,
+  // run by hand (18.x step 6 opened it).
   const manual =
     'Run `os migrate organization-ownership --dev` (review its plan), then the same command with --apply ' +
     '--plan-file FILE --backup-taken, and start os dev again.';

@@ -86,6 +86,9 @@ describe('os dev — the in-place upgrade of a v17-shape development database', 
     expect(result.lines[0]).toContain('✗ Refused (sys_mystery)');
     expect(result.lines.at(-1)).toContain('nothing was changed');
     expect(result.lines.at(-1)).toContain(BACKUP());
+    // The ceremony is open (18.x step 6): the way on is running it by hand.
+    expect(result.lines.at(-1)).toContain('os migrate organization-ownership --dev');
+    expect(result.lines.at(-1)).not.toContain('17.x');
   });
 
   it('a blocked step boots nothing: each blocker is printed, and how to resume', () => {
@@ -124,6 +127,7 @@ describe('os dev — the in-place upgrade of a v17-shape development database', 
     expect(calls).toEqual([]);
     expect(existsSync(join(dir, 'backups'))).toBe(false);
     expect(result.lines[0]).toContain('os migrate organization-ownership --dev');
+    expect(result.lines[0]).not.toContain('17.x');
   });
 
   it('the IPC message is recognised by its type alone', () => {

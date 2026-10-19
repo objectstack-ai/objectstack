@@ -104,6 +104,7 @@ function caseDb(columns: readonly string[]): string {
 
 const dropArgv = (file: string) => ['--database-url', `file:${file}`, '--allow-destructive', '--yes', '--json'];
 
+
 beforeAll(async () => {
   for (const key of [...OVERRIDING_ENV, 'NODE_ENV'] as const) savedEnv[key] = process.env[key];
   for (const key of OVERRIDING_ENV) delete process.env[key];
@@ -151,7 +152,7 @@ describe('os migrate apply --allow-destructive waits for the organization-owners
       created: [],
       marker: null,
     });
-    expect(payload.detail).toMatch(/os migrate organization-ownership --apply/);
+    expect(payload.detail).toMatch(/organization-ownership ceremony/);
     expect(columnsOf(file, 'sys_platform_setting')).toContain('organization_id');
   }, CASE_TIMEOUT_MS);
 
