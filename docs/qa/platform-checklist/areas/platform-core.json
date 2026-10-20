@@ -1407,7 +1407,7 @@
       "title": "The package manifest is enforced at the install boundary: an incompatible `engines` range is refused before the registry write, the namespace gate holds ownership, and a namespace-less runtime package has one derived",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1428,7 +1428,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; sign in as admin. Read the runtime's protocol version from the running server (the boot banner / GET /api/v1/meta), take its leading major as RT, and derive every range below from RT — never from a literal",
+        "boot the showcase on its own port and DB; sign in as admin. Read the runtime's protocol version from the running server (the boot banner / GET /api/v1/meta), take its leading major as RT, and derive every range below from RT — never from a literal",
         "BASELINE: POST /api/v1/packages with { manifest: { id: 'com.example.qa-manifest-probe-a', name: 'Manifest Probe A', version: '1.0.0', scope: 'project', type: 'app', namespace: 'qa_mfp', engines: { protocol: '^RT' } } }; capture status + body and GET it back — this is the compatible control every refusal below is judged against. Every probe manifest below carries the same scope 'project' (the manifest's scope enum is cloud | system | project, default project — packages/spec/src/kernel/manifest.zod.ts; a scope such as 'custom' is refused 400 VALIDATION_ERROR before any gate this item scores is reached)",
         "INCOMPATIBLE: POST id 'com.example.qa-manifest-probe-old' with engines: { protocol: '^(RT-1)' }; capture the refusal IN FULL (status, code, message, rangeSource, targetMajor, migrateCommand). Then GET /api/v1/packages/com.example.qa-manifest-probe-old and GET /api/v1/packages and confirm NO row exists for that id",
         "PRECEDENCE, both directions: POST 'com.example.qa-manifest-probe-prec-ok' with engines: { protocol: '^RT', platform: '^(RT-1)' } → expect install (protocol is consulted first, so the incompatible platform range is never reached); POST 'com.example.qa-manifest-probe-prec-no' with engines: { protocol: '^(RT-1)', platform: '^RT' } → expect refusal whose diagnostic names `engines.protocol` as the range source",
@@ -1521,6 +1521,12 @@
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[3] and negative[2] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.manifest-install-contract; wave anchor #24579 §3): both said NamespaceConflictError has no `code`, so its wire mapping was unpinned. Since commit df657d9df the class carries code NAMESPACE_CONFLICT and status 422 (packages/objectql/src/registry.ts), and the run observed 422 NAMESPACE_CONFLICT on POST /api/v1/packages. knownGaps[3] is now marked CLOSED with that reading, and negative[2] scores a 5xx as a FAIL instead of a finding to record. No acceptance clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
