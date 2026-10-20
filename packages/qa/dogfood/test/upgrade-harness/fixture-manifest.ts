@@ -27,6 +27,12 @@ export interface ReshapedTable {
    * no boot rewrites: never `updated_at`, never a delivery's `status`.
    */
   keyColumns: readonly string[];
+  /**
+   * The table becomes deployment-level and loses `organization_id`. A database
+   * born at 18.0.0 never had the column, so the census projects the key
+   * columns without it there.
+   */
+  dropsOrganization?: true;
 }
 
 /**
@@ -37,10 +43,10 @@ export interface ReshapedTable {
 export const RESHAPED_TABLES: readonly ReshapedTable[] = [
   { table: 'sys_webhook', steps: [1, 5], why: 'the declared webhook mirror rows the registry read replaces; the ceremony deletes them (D10 fate 2)', keyColumns: ['id', 'name', 'organization_id', 'active'] },
   { table: 'sys_http_delivery', steps: [1, 5], why: 'the mirror rows\' delivery tails, re-sourced by the ceremony', keyColumns: ['id', 'ref_id', 'organization_id'] },
-  { table: 'sys_secret', steps: [2, 5], why: 'loses its organization column; ownership follows the referencing row', keyColumns: ['id', 'organization_id'] },
+  { table: 'sys_secret', steps: [2, 5], dropsOrganization: true, why: 'loses its organization column; ownership follows the referencing row', keyColumns: ['id', 'organization_id'] },
   { table: 'sys_setting', steps: [2], why: 'the referencing row a secret\'s ownership follows', keyColumns: ['id', 'organization_id'] },
   { table: 'sys_setting_audit', steps: [2, 5], why: 'its global rung moves to a deployment-level sibling', keyColumns: ['id', 'organization_id'] },
-  { table: 'sys_flow_credential', steps: [2, 5], why: 'becomes deployment-level (no organization column)', keyColumns: ['id', 'organization_id'] },
+  { table: 'sys_flow_credential', steps: [2, 5], dropsOrganization: true, why: 'becomes deployment-level (no organization column)', keyColumns: ['id', 'organization_id'] },
   { table: 'sys_email', steps: [3, 5], why: 'identity mail moves to a deployment-level sibling', keyColumns: ['id', 'organization_id'] },
   { table: 'sys_invitation', steps: [3], why: 'the invitation whose mail is identity mail', keyColumns: ['id', 'organization_id', 'email'] },
   { table: 'sys_sharing_rule', steps: [5], why: '9c: the same-name guard and the sharing-rule copy migration', keyColumns: ['id', 'name', 'organization_id'] },
@@ -98,7 +104,9 @@ export function keyRowsOf(db: DatabaseSync, physical: readonly string[], keyColu
 
 /**
  * The census the populator writes into the manifest. Throws when a reshaped
- * table is missing or empty, or names a key column the table does not carry.
+ * table is missing or empty, or names a key column the table does not carry
+ * (`organization_id` on a `dropsOrganization` table excepted: it is left out
+ * of that table's key columns).
  */
 export function takeCensus(file: string, ref: string, sha: string): FixtureManifest {
   const db = new DatabaseSync(file, { readOnly: true });
@@ -114,14 +122,16 @@ export function takeCensus(file: string, ref: string, sha: string): FixtureManif
         problems.push(`${entry.table}: no such table`);
         continue;
       }
-      const missing = entry.keyColumns.filter((c) => physical.some((t) => !columnsOf(db, t).includes(c)));
+      const absent = entry.keyColumns.filter((c) => physical.some((t) => !columnsOf(db, t).includes(c)));
+      const missing = absent.filter((c) => !(c === 'organization_id' && entry.dropsOrganization === true));
       if (missing.length > 0) {
         problems.push(`${entry.table}: no column ${missing.join(', ')}`);
         continue;
       }
-      const rows = keyRowsOf(db, physical, entry.keyColumns);
+      const keyColumns = entry.keyColumns.filter((c) => !absent.includes(c));
+      const rows = keyRowsOf(db, physical, keyColumns);
       if (rows.length === 0) problems.push(`${entry.table}: empty — the populator did not reach it`);
-      reshaped.push({ table: entry.table, physical, steps: entry.steps, keyColumns: [...entry.keyColumns], count: rows.length, rows });
+      reshaped.push({ table: entry.table, physical, steps: entry.steps, keyColumns, count: rows.length, rows });
     }
     if (problems.length > 0) throw new Error(`the fixture does not cover what steps 1–7 reshape:\n  - ${problems.join('\n  - ')}`);
     return { ref, sha, generatedAt: new Date().toISOString(), tables, reshaped };
