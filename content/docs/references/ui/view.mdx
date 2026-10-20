@@ -76,10 +76,10 @@ Add record entry point configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | optional (default: `true`) | Show the add record entry point |
-| **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"bottom"`) | Position of the add record button |
-| **mode** | `Enum<'inline' \| 'form' \| 'modal'>` | optional (default: `"inline"`) | How to add a new record |
-| **formView** | `string` | optional | Named form view to use when mode is "form" or "modal" |
+| **enabled** | `boolean` | ✅ | Show the add record entry point — REQUIRED: `true` draws the Add button, `false` declares it off |
+| **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"top"`) | Position of the add record button: `top` (the toolbar, the default), `bottom` (under the list) or `both` |
+| **mode** | `never` | optional | [REMOVED] `addRecord.mode` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button always opens the create form, never an inline row or a mode of its own choosing. Delete the key; the create form opens the way the object list's New opens it. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **formView** | `never` | optional | [REMOVED] `addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button opens the create form chosen by convention, never a named form. Delete the key, and to give the Add button its own form declare it as `formViews.create` on the object's view container (without one, the default form is used). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 
 ---
@@ -806,7 +806,7 @@ Map view configuration
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
 | **tabs** | `never` | optional | [REMOVED] `view.list.tabs` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no renderer ever mounted a tab bar for it, so authoring it drew nothing: the tab strip above an object's records is the saved-view switcher (ViewTabBar), which renders one tab per named list view and never read this key. Delete the key, and move each tab you want to a named list view under the object's `listViews` instead: the tab's `name` becomes the entry's key, its `label` the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every `listViews` entry renders as a tab in the switcher. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **addRecord** | `{ enabled: boolean; position?: Enum<'top' \| 'bottom' \| 'both'> }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
@@ -1090,10 +1090,10 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | optional (default: `true`) | Show the add record entry point |
-| **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"bottom"`) | Position of the add record button |
-| **mode** | `Enum<'inline' \| 'form' \| 'modal'>` | optional (default: `"inline"`) | How to add a new record |
-| **formView** | `string` | optional | Named form view to use when mode is "form" or "modal" |
+| **enabled** | `boolean` | ✅ | Show the add record entry point — REQUIRED: `true` draws the Add button, `false` declares it off |
+| **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"top"`) | Position of the add record button: `top` (the toolbar, the default), `bottom` (under the list) or `both` |
+| **mode** | `never` | optional | [REMOVED] `addRecord.mode` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button always opens the create form, never an inline row or a mode of its own choosing. Delete the key; the create form opens the way the object list's New opens it. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **formView** | `never` | optional | [REMOVED] `addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button opens the create form chosen by convention, never a named form. Delete the key, and to give the Add button its own form declare it as `formViews.create` on the object's view container (without one, the default form is used). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 ### Nested Shape: `ListView.emptyState`
 
@@ -1192,7 +1192,7 @@ View filter rule
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
 | **tabs** | `never` | optional | [REMOVED] `view.list.tabs` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no renderer ever mounted a tab bar for it, so authoring it drew nothing: the tab strip above an object's records is the saved-view switcher (ViewTabBar), which renders one tab per named list view and never read this key. Delete the key, and move each tab you want to a named list view under the object's `listViews` instead: the tab's `name` becomes the entry's key, its `label` the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every `listViews` entry renders as a tab in the switcher. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **addRecord** | `{ enabled: boolean; position?: Enum<'top' \| 'bottom' \| 'both'> }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
@@ -1467,10 +1467,10 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | optional (default: `true`) | Show the add record entry point |
-| **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"bottom"`) | Position of the add record button |
-| **mode** | `Enum<'inline' \| 'form' \| 'modal'>` | optional (default: `"inline"`) | How to add a new record |
-| **formView** | `string` | optional | Named form view to use when mode is "form" or "modal" |
+| **enabled** | `boolean` | ✅ | Show the add record entry point — REQUIRED: `true` draws the Add button, `false` declares it off |
+| **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"top"`) | Position of the add record button: `top` (the toolbar, the default), `bottom` (under the list) or `both` |
+| **mode** | `never` | optional | [REMOVED] `addRecord.mode` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button always opens the create form, never an inline row or a mode of its own choosing. Delete the key; the create form opens the way the object list's New opens it. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **formView** | `never` | optional | [REMOVED] `addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button opens the create form chosen by convention, never a named form. Delete the key, and to give the Add button its own form declare it as `formViews.create` on the object's view container (without one, the default form is used). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 ### Nested Shape: `ObjectListView.emptyState`
 
@@ -1769,7 +1769,7 @@ Tab configuration for multi-tab view interface
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
 | **tabs** | `never` | optional | [REMOVED] `view.list.tabs` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no renderer ever mounted a tab bar for it, so authoring it drew nothing: the tab strip above an object's records is the saved-view switcher (ViewTabBar), which renders one tab per named list view and never read this key. Delete the key, and move each tab you want to a named list view under the object's `listViews` instead: the tab's `name` becomes the entry's key, its `label` the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every `listViews` entry renders as a tab in the switcher. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **addRecord** | `{ enabled: boolean; position?: Enum<'top' \| 'bottom' \| 'both'> }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
@@ -1855,7 +1855,7 @@ Tab configuration for multi-tab view interface
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
 | **tabs** | `never` | optional | [REMOVED] `view.list.tabs` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no renderer ever mounted a tab bar for it, so authoring it drew nothing: the tab strip above an object's records is the saved-view switcher (ViewTabBar), which renders one tab per named list view and never read this key. Delete the key, and move each tab you want to a named list view under the object's `listViews` instead: the tab's `name` becomes the entry's key, its `label` the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every `listViews` entry renders as a tab in the switcher. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **addRecord** | `{ enabled: boolean; position?: Enum<'top' \| 'bottom' \| 'both'> }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
@@ -2065,7 +2065,7 @@ This schema accepts one of the following structures:
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
 | **tabs** | `never` | optional | [REMOVED] `view.list.tabs` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no renderer ever mounted a tab bar for it, so authoring it drew nothing: the tab strip above an object's records is the saved-view switcher (ViewTabBar), which renders one tab per named list view and never read this key. Delete the key, and move each tab you want to a named list view under the object's `listViews` instead: the tab's `name` becomes the entry's key, its `label` the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every `listViews` entry renders as a tab in the switcher. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **addRecord** | `{ enabled: boolean; position?: Enum<'top' \| 'bottom' \| 'both'> }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |
@@ -2244,7 +2244,7 @@ This schema accepts one of the following structures:
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles for the view toolbar |
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
 | **tabs** | `never` | optional | [REMOVED] `view.list.tabs` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — no renderer ever mounted a tab bar for it, so authoring it drew nothing: the tab strip above an object's records is the saved-view switcher (ViewTabBar), which renders one tab per named list view and never read this key. Delete the key, and move each tab you want to a named list view under the object's `listViews` instead: the tab's `name` becomes the entry's key, its `label` the entry's `label`, and its `filter` rules join the view's own `filter` on that entry (copy the view's `columns` too); a tab whose `view` already named a list view needs nothing more. Every `listViews` entry renders as a tab in the switcher. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **addRecord** | `{ enabled: boolean; position?: Enum<'top' \| 'bottom' \| 'both'> }` | optional | Add record entry point configuration |
 | **showRecordCount** | `boolean` | optional | Show record count at the bottom of the list |
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | Empty state configuration when no records found |

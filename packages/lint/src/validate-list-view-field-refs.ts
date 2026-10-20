@@ -202,10 +202,10 @@
  *    owned by `validateActionNameRefs`.
  *  - **`conditionalFormatting[].condition`** — a CEL predicate, owned by the
  *    expression rules.
- *  - **`addRecord.formView`** — a view name, owned by `lintViewRefs`.
  *    (`pageName` was here too until #17063 retired the `type: 'page'` view
- *    mount, and `tabs[].view` until the list view's own `tabs` was retired; a
- *    list view carries neither reference now.)
+ *    mount, `tabs[].view` until the list view's own `tabs` was retired, and
+ *    `addRecord.formView` until #24692 retired it; a list view carries none of
+ *    those references now.)
  *  - **The `data.object` binding itself** — `validateObjectReferences` owns
  *    object-name reference sites, with the curated cross-package severity
  *    ladder a local "not in this stack ⇒ error" would not have. When the bound
