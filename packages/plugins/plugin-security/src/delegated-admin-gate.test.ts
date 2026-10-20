@@ -1412,8 +1412,10 @@ function makeOwnNameHarness() {
     ],
     sys_user_position: [
       { id: 'held_rep', user_id: 'u_east_1', position: 'rep_pos', business_unit_id: 'bu_es' },
-      { id: 'boss_duty', user_id: 'u_boss', position: 'duty_pos' },
-      { id: 'boss_plain', user_id: 'u_boss', position: 'duty_plain' },
+      // A holding takes effect only in its own organization, so the delegator's
+      // holdings are stamped with the one the delegation below runs in.
+      { id: 'boss_duty', user_id: 'u_boss', position: 'duty_pos', organization_id: DELEGATION_ORG },
+      { id: 'boss_plain', user_id: 'u_boss', position: 'duty_plain', organization_id: DELEGATION_ORG },
     ],
     sys_business_unit_member: [{ id: 'm1', business_unit_id: 'bu_es', user_id: 'u_east_1' }],
     sys_user: [{ id: 'u_east_1' }, { id: 'u_boss' }, { id: 'u_deleg' }],
@@ -1523,7 +1525,7 @@ describe("DelegatedAdminGate — a delegate is judged on the permission set of t
 
   it('a delegatable position whose own-name set carries an adminScope cannot be self-delegated', async () => {
     const delegation = (position: string) => n.gate.assert({
-      object: 'sys_user_position', operation: 'insert', context: { userId: 'u_boss', positions: [], principal: 'member' },
+      object: 'sys_user_position', operation: 'insert', context: { userId: 'u_boss', positions: [], principal: 'member', organizationId: DELEGATION_ORG },
       data: { user_id: 'u_deleg', position, delegated_from: 'u_boss', valid_until: iso(T0 + 5 * DAY), reason: 'cover' },
     });
     const err = await deniedOf(() => delegation('duty_pos'));
