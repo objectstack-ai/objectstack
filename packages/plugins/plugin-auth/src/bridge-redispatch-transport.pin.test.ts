@@ -287,9 +287,9 @@ async function through(
 }
 
 /** What a caller sends with no trusted proxy declared: forwarding headers naming another address. */
-const CLAIMED_FORWARDING = { 'x-forwarded-for': CLAIMED, 'x-real-ip': CLAIMED };
+const CLAIMED_FORWARDING: Record<string, string> = { 'x-forwarded-for': CLAIMED, 'x-real-ip': CLAIMED };
 /** What a declared trusted proxy forwards, in each of the two spellings the rule reads. */
-const PROXY_FORWARDING = [
+const PROXY_FORWARDING: Record<string, string>[] = [
   { 'x-forwarded-for': `${FORWARDED_CLIENT}, ${PROXY_HOP}` },
   { 'x-real-ip': FORWARDED_CLIENT },
 ];
