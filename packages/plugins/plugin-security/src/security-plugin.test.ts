@@ -3481,6 +3481,13 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
 describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
   const AGENT = 'user_agent';
   const DELEGATOR = 'user_delegator';
+  /**
+   * The organization every request below runs in, and the owner of every
+   * delegator holding: a holding takes effect only in its own organization
+   * (`grantAppliesInTenant`), so an organization-less one would leave the
+   * delegator holding nothing and every deny below passing for want of a grant.
+   */
+  const D10_ORG = 'org-1';
 
   // task carries every field the RLS/FLS policies below target, so no policy is
   // dropped as a fail-closed "missing field" deny.
@@ -3510,7 +3517,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     if (opts.delegatorPositions !== null) {
       tables.sys_user.push({ id: DELEGATOR, email: 'delegator@x' });
       for (const p of opts.delegatorPositions) {
-        tables.sys_user_position.push({ user_id: DELEGATOR, position: p });
+        tables.sys_user_position.push({ user_id: DELEGATOR, position: p, organization_id: D10_ORG });
       }
     }
     const matches = (row: any, where: any): boolean =>
@@ -3576,7 +3583,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
   };
 
   const agentCtx = (extra?: Record<string, any>) => ({
-    userId: AGENT, tenantId: 'org-1', positions: ['agent_set'], permissions: [],
+    userId: AGENT, tenantId: D10_ORG, positions: ['agent_set'], permissions: [],
     onBehalfOf: { userId: DELEGATOR, principalKind: 'human' }, principalKind: 'agent',
     ...(extra ?? {}),
   });
@@ -3643,7 +3650,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
       agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
     });
     // Same context, but WITHOUT onBehalfOf.
-    const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, context: { userId: AGENT, tenantId: 'org-1', positions: ['agent_set'], permissions: [] } };
+    const opCtx: any = { object: 'task', operation: 'find', ast: { where: undefined }, context: { userId: AGENT, tenantId: D10_ORG, positions: ['agent_set'], permissions: [] } };
     await h.run(opCtx);
     expect(opCtx.ast.where).toEqual({ owner_id: AGENT });
   });
@@ -3854,7 +3861,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
         sets: [silentCeiling('agent_set'), viewAllDelegator('del_set')],
         agentPositions: ['agent_set'], delegatorPositions: ['del_set'],
       });
-      const humanCtx = { userId: DELEGATOR, tenantId: 'org-1', positions: ['del_set'], permissions: [] };
+      const humanCtx = { userId: DELEGATOR, tenantId: D10_ORG, positions: ['del_set'], permissions: [] };
       expect(await h.security().describeDelegationNarrowing('task', humanCtx)).toEqual({ narrowed: false });
     });
 

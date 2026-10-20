@@ -9,7 +9,7 @@
  * how that standing is obtained. Which routes to it exist is decided in ONE
  * place, `resolveUserAuthzGrants` in `@objectstack/core`, and it answers per
  * REQUESTED tenancy posture: the declared administrator list
- * (`OS_PLATFORM_OWNER_EMAIL`) on every posture, the unscoped
+ * (`OS_PLATFORM_OWNER_EMAIL`) on every posture, the Default Organization's
  * `admin_full_access` grant under `single` only. The sentence used to name the
  * grant everywhere, so on a walled deployment it sent the operator to do a
  * thing that then failed silently at the permission layer.
@@ -128,12 +128,15 @@ const REMEDIES: readonly Remedy[] = [
         }),
     },
     {
-        label: `the unscoped ${ADMIN_FULL_ACCESS} grant`,
+        label: `the Default Organization's ${ADMIN_FULL_ACCESS} grant`,
         named: (message) => message.includes(ADMIN_FULL_ACCESS),
         arrange: () => {
             const tables = userOnly('usr_granted', 'legacy@corp.example');
+            // The grant that anchors platform standing is the one the Default
+            // Organization owns; an organization-less one anchors nothing.
+            tables.sys_organization = [{ id: 'org_default', slug: 'default' }];
             tables.sys_user_permission_set = [
-                { id: 'ups_1', user_id: 'usr_granted', permission_set_id: 'pst_1', permission_set: ADMIN_FULL_ACCESS, organization_id: null },
+                { id: 'ups_1', user_id: 'usr_granted', permission_set_id: 'pst_1', permission_set: ADMIN_FULL_ACCESS, organization_id: 'org_default' },
             ];
             tables.sys_permission_set = [{ id: 'pst_1', name: ADMIN_FULL_ACCESS, active: true }];
             return { userId: 'usr_granted', email: 'legacy@corp.example', tables, declared: undefined };

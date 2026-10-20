@@ -53,7 +53,7 @@ import { tmpdir } from 'node:os';
 // (the clocked-window rule, `scripts/check-test-source-alias.mjs`).
 import '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
-import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
+import { declareInstallerPlatformOwner, installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 
 type Handler = (c: any) => Promise<any>;
@@ -135,12 +135,17 @@ const EXPECTED_IDS = ['material:field:code', 'material:index:external_id'];
 
 let dir: string;
 let posture: string | undefined;
+let restoreOwner: () => void;
 
 beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'mil-d5e-'));
     posture = process.env.OS_TENANCY_POSTURE;
+    // The request carries no organization, and most of these run walled: the
+    // installer is the deployment's declared platform owner.
+    restoreOwner = declareInstallerPlatformOwner('usr_installer');
 });
 afterEach(() => {
+    restoreOwner();
     rmSync(dir, { recursive: true, force: true });
     if (posture === undefined) delete process.env.OS_TENANCY_POSTURE;
     else process.env.OS_TENANCY_POSTURE = posture;

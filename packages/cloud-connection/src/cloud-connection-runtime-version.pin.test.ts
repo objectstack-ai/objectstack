@@ -35,10 +35,11 @@ const CC = '/api/v1/cloud-connection';
 const ORIGIN = 'https://env.example.test';
 const CLOUD = 'http://cloud.test';
 
-/** Holds `setup.access`, which the two bind doors demand. */
+/** Holds `setup.access`, which the two bind doors demand — in {@link ORG}, the organization the session acts in. */
 const ADMIN = 'u_admin';
+const ORG = 'o1';
 const GRANTS: Record<string, any[]> = {
-    sys_user_permission_set: [{ id: 'ups_1', user_id: ADMIN, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: null }],
+    sys_user_permission_set: [{ id: 'ups_1', user_id: ADMIN, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: ORG }],
     sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
 };
 
@@ -95,7 +96,7 @@ async function mount(mode: Mode, discovery: Discovery) {
         post: (p: string, h: Handler) => routes.set(`POST ${p}`, h),
     };
     const hooks = new Map<string, any>();
-    const auth = { api: { getSession: async () => ({ user: { id: ADMIN }, session: { id: 'sess_admin' } }) } };
+    const auth = { api: { getSession: async () => ({ user: { id: ADMIN }, session: { id: 'sess_admin', activeOrganizationId: ORG } }) } };
     const objectql = bindCatalogFromTables({ find: async (object: string) => GRANTS[object] ?? [] }, GRANTS);
     const protocol = discovery === 'real'
         ? discoveryProducer()

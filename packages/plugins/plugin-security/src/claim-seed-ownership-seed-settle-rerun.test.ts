@@ -307,11 +307,17 @@ describe('seed-ownership claim — the one-shot pass and the seed it races', () 
       user_id: ADMIN,
       permission_set_id: 'ps_admin_full_access',
       permission_set: 'admin_full_access',
-      organization_id: null,
+      // [ADR-0131 D5] Owned by the Default Organization — the only grant the
+      // holder scan reads (an organization-less one is never a holder).
+      organization_id: 'org_default',
     });
     rig.tables.sys_permission_set.push({ id: 'ps_admin_full_access', name: 'admin_full_access' });
 
     await rig.fire('kernel:ready');
+    // The promotion DID short-circuit: no second grant was minted. Without this
+    // a pass that ignored the existing grant and promoted the same (only) human
+    // would satisfy the claim assertion below for the wrong reason.
+    expect(rig.tables.sys_user_permission_set.map((r) => r.id)).toEqual(['ups_existing']);
     rig.landSeedRows('crm_contract', seedRow('con_late'));
     rig.settlement.settleOne();
     await rig.fire('app:seeded', { appId: 'com.example.crm', overBudget: true });

@@ -11,15 +11,16 @@
  * `injectTenantOnInsert` with a `tenantId` to stamp from. It wrote nothing to
  * existing rows, and on a WALLED deployment that asymmetry is not cosmetic:
  *
- *   - the SQL driver's own tenant predicate is NULL-TOLERANT —
+ *   - the SQL driver's own tenant predicate was then NULL-TOLERANT —
  *     `(organization_id = :tenantId OR organization_id IS NULL)` — so an
  *     unstamped row stayed readable by everyone;
  *   - but Layer 0 (`plugin-security`'s `computeTenantLayer0Filter`) AND-composes
- *     a STRICT `organization_id = <active org>` above it, and
- *     `bootstrap-declared-permissions.ts` states the consequence in terms:
- *     "Layer 0's strict `organization_id = :tenant` AND-composes over the
- *     driver's compatibility arm and the conjunction is the strict equality
- *     alone."
+ *     a STRICT `organization_id = <active org>` above it, and the conjunction
+ *     was the strict equality alone.
+ *
+ * (ADR-0131 D8 has since retired the driver's NULL arm: both layers now
+ * compile the equality alone, so an unstamped row is unreachable by every
+ * tenant-scoped read — the split this backfill exists to prevent.)
  *
  * ⇒ forward-only stamping would split the table in two: new files org-walled,
  * every existing NULL-org file invisible to EVERY principal. The backfill is

@@ -34,9 +34,15 @@
  *     get the capability refusal — all on the same wiring.
  *  2. **The RBAC grant is SYMMETRIC across all three key principals.** One
  *     shared permission set carries `manage_platform_settings` for the member,
- *     the ex-member and the organization-less caller alike. If they held
- *     different capabilities, RBAC could be what separates the arms; with one
- *     shared grant, only the tenancy posture can be.
+ *     the ex-member and the organization-less caller alike, each row owned by
+ *     `org_alpha`. If they held different capabilities, RBAC could be what
+ *     separates the arms; with one shared grant, only the tenancy posture can
+ *     be. A stored grant applies only in its own organization, so the
+ *     organization-less key — which resolves with NO active organization —
+ *     holds nothing wherever the posture lets it through: it is ADMITTED
+ *     (authenticated, no refusal line) and then answered the capability `403`,
+ *     never the posture `401`. That `401`-versus-`403` split is how every arm
+ *     below reads "did the posture refuse it".
  *  3. **A REAL `ObjectKernel` carries the wiring fact.** The classification
  *     under measurement is the REGISTRY's — the branded "never registered"
  *     rejection versus the unbranded "registered and failed to construct" one
@@ -124,13 +130,15 @@ function makeQl() {
       { id: 'u_orgless', email: 'u_orgless@example.com' },
       { id: 'u_plain', email: 'u_plain@example.com' },
     ],
-    // The grant, SYMMETRIC across the three subject principals (note 2).
-    // `u_plain` is deliberately absent: it is the capability control, the one
-    // caller separated by RBAC rather than by posture.
+    // The grant, SYMMETRIC across the three subject principals (note 2), and
+    // owned by the organization the stamped keys name: an organization-less
+    // grant row applies in no organization, so it would confer nothing to
+    // anyone. `u_plain` is deliberately absent: it is the capability control,
+    // the one caller separated by RBAC rather than by posture.
     sys_user_permission_set: [
-      { user_id: 'u_member', permission_set_id: SHARED_SET, permission_set: 'datasource_operator', organization_id: null },
-      { user_id: 'u_exmember', permission_set_id: SHARED_SET, permission_set: 'datasource_operator', organization_id: null },
-      { user_id: 'u_orgless', permission_set_id: SHARED_SET, permission_set: 'datasource_operator', organization_id: null },
+      { user_id: 'u_member', permission_set_id: SHARED_SET, permission_set: 'datasource_operator', organization_id: ORG_ALPHA },
+      { user_id: 'u_exmember', permission_set_id: SHARED_SET, permission_set: 'datasource_operator', organization_id: ORG_ALPHA },
+      { user_id: 'u_orgless', permission_set_id: SHARED_SET, permission_set: 'datasource_operator', organization_id: ORG_ALPHA },
     ],
     sys_permission_set: [
       {
@@ -487,10 +495,16 @@ describe('[#15350] §4 — ablation: with no kernel to read the posture from, th
     expect(h.store().filter((r) => r.name === 'pg')).toHaveLength(0);
   });
 
-  it('the organization-less key is admitted again too', async () => {
+  it('the organization-less key is admitted again too — the capability 403, not the posture 401', async () => {
+    // Authenticated again (no `organization_required`), and then served what a
+    // principal with NO active organization holds: no stored grant applies
+    // outside its own organization, so the shared `org_alpha` grant confers
+    // nothing and the capability gate answers. The member control in this
+    // block proves the same grant does serve inside its organization.
     const h = mount(ABLATED);
     const res = await listOf(h, RAW_ORGLESS_KEY);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    expect(res.body?.error?.code).toBe('PERMISSION_DENIED');
   });
 
   it('and NOTHING is said about any of it — no refusal line, because no refusal was decided', async () => {
@@ -523,7 +537,9 @@ describe('[#15350] §5 — a `tenancy` service that was NEVER REGISTERED resolve
   it('and it runs NO posture-conditional refusal — behaviour is exactly what it was', async () => {
     const h = mount(UNREGISTERED);
     expect((await listOf(h, RAW_EXMEMBER_KEY)).status).toBe(200);
-    expect((await listOf(h, RAW_ORGLESS_KEY)).status).toBe(200);
+    // Admitted (the capability 403, not the posture 401): with no active
+    // organization its owner's organization-owned grant applies nowhere.
+    expect((await listOf(h, RAW_ORGLESS_KEY)).status).toBe(403);
     expect(h.warnings().filter((l) => l.includes('API key refused'))).toHaveLength(0);
   });
 });
@@ -593,11 +609,21 @@ describe('[#15350] §6 — the `group` posture, measured on the READ and the WRI
     // reads the union of its owner\'s organizations, so refusing it would break
     // working deployments for no security gain. Pinned so the asymmetry with
     // §3 is a recorded decision rather than an accident.
+    //
+    // Admitted is not entitled: the key resolves with no active organization,
+    // where no stored grant applies, so the shared `org_alpha` grant confers
+    // nothing and the CAPABILITY gate answers — `403`, never §3's posture
+    // `401`, and no refusal line. The member control below is the same grant
+    // serving inside its organization.
     const h = mount(GROUP);
-    expect((await listOf(h, RAW_ORGLESS_KEY)).status).toBe(200);
+    const list = await listOf(h, RAW_ORGLESS_KEY);
+    expect(list.status).toBe(403);
+    expect(list.body?.error?.code).toBe('PERMISSION_DENIED');
     const post = await createOf(h, RAW_ORGLESS_KEY, 'ds_group_orgless');
-    expect(post.status).toBe(201);
-    expect(h.store().filter((r) => r.name === 'ds_group_orgless')).toHaveLength(1);
+    expect(post.status).toBe(403);
+    expect(h.store().filter((r) => r.name === 'ds_group_orgless')).toHaveLength(0);
+    expect(h.service.createDatasource).not.toHaveBeenCalled();
+    expect(h.warnings().filter((l) => l.includes('API key refused'))).toHaveLength(0);
   });
 
   it('the member control is unchanged under `group`', async () => {
@@ -613,11 +639,13 @@ describe('[#15350] §6 — the `group` posture, measured on the READ and the WRI
 describe('[#15350] §7 — under `single` nothing changes', () => {
   const SINGLE: Wiring = { kind: 'posture', posture: 'single' };
 
-  it('every entitled key is admitted, stamped or not', async () => {
+  it('every key is admitted, stamped or not', async () => {
     const h = mount(SINGLE);
     expect((await listOf(h, RAW_MEMBER_KEY)).status).toBe(200);
     expect((await listOf(h, RAW_EXMEMBER_KEY)).status).toBe(200);
-    expect((await listOf(h, RAW_ORGLESS_KEY)).status).toBe(200);
+    // Admitted (the capability 403, not a posture 401): with no active
+    // organization the `org_alpha` grant applies nowhere.
+    expect((await listOf(h, RAW_ORGLESS_KEY)).status).toBe(403);
     expect(h.warnings().filter((l) => l.includes('API key refused'))).toHaveLength(0);
   });
 

@@ -333,6 +333,61 @@ writes no artifact, which makes it the fast inner loop while you work through
 the to-dos. Full command reference in the [CLI
 documentation](/docs/deployment/cli).
 
+## Upgrading to 18.0
+
+18.0 refuses to serve an existing database until an operator step has run on
+it. [ADR-0131](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0131-total-organization-ownership-no-null-organization-id.md)
+makes organization ownership total, and the rows a 17.x database holds have to
+be given their owners before an 18.0 server serves them. That is the
+**organization-ownership ceremony**, `os migrate organization-ownership`.
+
+**Which databases need it.** A database 17.x created, or one an 18.0
+pre-release (`18.0.0-next.*`) created. The first boot that creates a datastore
+from empty writes a **birth marker**, so a fresh 18.0 install never needs the
+ceremony, under any tenancy posture. A v18 server serves a database it created
+itself or one the ceremony certified, and refuses any other at boot, naming the
+command.
+
+**The sequence:**
+
+1. Start 18.0 against the database once (`os serve` / `os start`). The boot is
+   refused, but its schema sync has already created the tables 18.0 adds, which
+   the ceremony moves rows into.
+2. Take a backup. The platform takes none.
+3. Write the plan: `os migrate organization-ownership --out plan.json`. It reads
+   only.
+4. Review the plan.
+5. Apply exactly that plan:
+   `os migrate organization-ownership --apply --plan-file plan.json --backup-taken`.
+6. Start the server again.
+
+```bash
+os migrate organization-ownership --out plan.json
+os migrate organization-ownership --apply --plan-file plan.json --backup-taken
+```
+
+**A development boot passes `--dev` to both commands.** A deployment served
+with `--dev` (`os dev`, `os serve --dev`), for example a local one with no
+`OS_AUTH_SECRET`, composes as a development boot, and the ceremony has to boot
+the same way to see the same database. The refusal `os serve --dev` prints names
+the command with `--dev`. `os dev` runs the whole sequence itself for a local
+SQLite development database.
+
+**Walled postures upgrade too.** `OS_TENANCY_POSTURE=group` and `isolated` boot
+in 18.0 on a fresh install and on a database the ceremony upgraded. On a walled
+database, a customized copy of a declared webhook or sharing rule blocks its
+step and names the row.
+
+**A production `os serve` deployment needs an auth secret.** A production
+`os serve` whose stack enables auth and which resolves no `OS_AUTH_SECRET` is
+refused before any plugin starts, so set the secret before you start such a
+deployment on 18.0. `os start` is not affected: it generates an auth secret on
+its first run and persists it to `<home>/auth-secret`.
+
+What the plan lists, how a blocked row is resolved, and every flag are in the
+command's reference:
+[`os migrate organization-ownership`](/docs/deployment/cli#os-migrate-organization-ownership).
+
 ## Per-release specifics
 
 Everything above is the mechanism. The *contents* of a given release — which keys
@@ -349,6 +404,7 @@ have no other channel to reach you than the page below.
 
 | Release | Where its upgrade notes live |
 | :--- | :--- |
+| v18.0.0 | [Upgrading to 18.0](#upgrading-to-180) (the ownership ceremony) · [v18](/docs/releases/v18) |
 | v17.4.0 | [17.4.0](/docs/releases/v17/17-4) — ⛔ checklist not written; machine-draft notes only |
 | v17.3.0 | [Upgrade checklist — 17.3.0](/docs/releases/v17/17-3#upgrade-checklist) |
 | v17.2.0 | [Upgrade checklist — 17.2.0](/docs/releases/v17/17-2#upgrade-checklist) |

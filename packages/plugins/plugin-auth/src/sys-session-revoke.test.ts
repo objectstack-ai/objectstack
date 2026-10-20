@@ -87,7 +87,19 @@ const userIdFor = (engine: any, email: string): string => {
   return String(row.id);
 };
 
-/** ADR-0068 D2 standing — the unscoped `admin_full_access` grant, never the legacy `role` scalar. */
+/** The Default Organization (the `sys_organization` row slugged `default`), staged when the engine holds none. */
+const defaultOrganizationIdOf = async (engine: any): Promise<string> => {
+  const existing = (engine.tables.get('sys_organization') ?? []).find((r: any) => r.slug === 'default');
+  if (existing) return String(existing.id);
+  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' });
+  return 'org_default';
+};
+
+/**
+ * ADR-0068 D2 standing — the Default Organization's `admin_full_access` grant
+ * (ADR-0131 D5), never the legacy `role` scalar. An organization-less grant
+ * anchors nothing.
+ */
 const grantPlatformAdmin = async (engine: any, userId: string) => {
   if (!(engine.tables.get('sys_permission_set') ?? []).some((r: any) => r.id === PS_ADMIN)) {
     await engine.insert('sys_permission_set', { id: PS_ADMIN, name: ADMIN_FULL_ACCESS });
@@ -96,7 +108,7 @@ const grantPlatformAdmin = async (engine: any, userId: string) => {
     user_id: userId,
     permission_set_id: PS_ADMIN,
     permission_set: 'admin_full_access',
-    organization_id: null,
+    organization_id: await defaultOrganizationIdOf(engine),
   });
 };
 

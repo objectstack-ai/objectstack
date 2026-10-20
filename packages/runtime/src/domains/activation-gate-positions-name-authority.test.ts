@@ -32,8 +32,9 @@
 // automation toggle door, for a tenant org admin who already holds
 // `manage_metadata` — so the tier-above gate passes and THIS gate is the only
 // thing left. Three shapes: a D4 row spelling the built-in name with no
-// capability grant (`name-only`), a genuine unscoped `admin_full_access` grant
-// (`genuine`), and a plain tenant admin (`plain`, the floor). All three
+// capability grant (`name-only`), a genuine `admin_full_access` grant owned by
+// the Default Organization (`genuine`), and a plain tenant admin (`plain`, the
+// floor). All three
 // contexts are produced by inserting rows and resolving them through the REAL
 // `resolveUserAuthzGrants`, so `positions` / `posture` come from the shipping
 // resolver rather than being hand-asserted.
@@ -56,6 +57,8 @@ const FLOW = 'vendor_lead_router';
 const DEFINITION = { name: FLOW, label: 'Vendor Lead Router', type: 'autolaunched', nodes: [], edges: [] };
 
 const TENANT_ORG = 'org_northwind';
+/** The Default Organization: the owner of the one `admin_full_access` grant that anchors platform standing. */
+const DEFAULT_ORG = 'org_default';
 const ACTOR = 'usr_tenant_admin';
 const PS_ADMIN = 'ps_admin_full_access';
 const PS_METADATA = 'ps_metadata_author';
@@ -116,17 +119,19 @@ function authzTables(shape: Shape) {
         { user_id: ACTOR, permission_set_id: PS_METADATA, permission_set: 'metadata_author', organization_id: TENANT_ORG },
     ];
     if (shape === 'genuine') {
-        userSets.push({ user_id: ACTOR, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS, organization_id: null });
+        userSets.push({ user_id: ACTOR, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS, organization_id: DEFAULT_ORG });
     }
     return {
         sys_user: [{ id: ACTOR, email: 'tenant-admin@example.com', email_verified: true }],
         sys_member: [{ organization_id: TENANT_ORG, user_id: ACTOR, role: 'owner' }],
+        sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }, { id: TENANT_ORG, slug: 'northwind' }],
         sys_user_position:
             shape === 'name-only'
                 ? [
                       // Exactly what a tenant admin can write through the
-                      // `apiEnabled` `sys_user_position` surface.
-                      { user_id: ACTOR, position: BUILTIN_IDENTITY_PLATFORM_ADMIN, organization_id: null },
+                      // `apiEnabled` `sys_user_position` surface, in their own
+                      // organization — the one the resolution runs in.
+                      { user_id: ACTOR, position: BUILTIN_IDENTITY_PLATFORM_ADMIN, organization_id: TENANT_ORG },
                   ]
                 : [],
         // An ACTIVE catalogue row, so ADR-0049's deactivated-position filter is
@@ -240,7 +245,7 @@ for (const posture of ['group', 'isolated'] as const) {
             expect(hName.toggleFlow).not.toHaveBeenCalled();
         });
 
-        it('CONTROL — a genuine unscoped admin_full_access grant still flips the switch', async () => {
+        it('CONTROL — a genuine admin_full_access grant owned by the Default Organization still flips the switch', async () => {
             const { context, rung } = await resolve('genuine');
             const h = boot(posture);
             const ec = (context as any).executionContext;

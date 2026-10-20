@@ -59,7 +59,6 @@ import { buildAttSecret, buildAttReadonly, attFixtureBaselineSet, attachmentMana
 import { buildCmtPrivate, buildCmtReadonly, commentManagerSet } from './fixtures/comments-fixture.js';
 import { armedWhen, assertArmed, leaveOrganization, principalArmed, resolveAuthzFor } from './armed.js';
 import { catalogPermissionSet } from './catalog-permission-set.js';
-import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -132,22 +131,33 @@ async function boot(inside: boolean, email: string): Promise<Booted> {
   const ql = await stack.kernel.getServiceAsync<any>('objectql');
   const adminId = (await ql.findOne('sys_user', { where: { email: 'admin@objectos.ai' }, context: SYS }))?.id;
   const userId = (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
+  // The grants are owned by the Default Organization, the organization both
+  // principals' sessions are active in: a grant applies only in its own
+  // organization, so an organization-less row would confer nothing on either.
+  const defaultOrg = await ql.findOne('sys_organization', { where: { slug: 'default' }, context: SYS });
+  expect(defaultOrg?.id, 'the `single` boot names a Default Organization').toBeTruthy();
+  const orgId = String(defaultOrg.id);
   for (const name of GRANTS) {
     const set = await catalogPermissionSet(ql, name);
     expect(set, `fixture permission set ${name} served by the security catalog`).toBeTruthy();
-    // [C8 stage 8b] A GLOBAL grant, which the outside principal (no membership, no
-    // active organization) must still hold: under `single` the engine now stamps an
-    // organization-less system insert with the Default Organization (ADR-0131 D9),
-    // so the global row is landed beneath the engine, as the residue an older
-    // release left. The readers still apply it until C8's NULL-reader stages.
-    // That residue lives only on a store built before 18.x, whose tenant column is
-    // nullable (ADR-0131 D1 makes a fresh one NOT NULL): the table is that store's.
-    await relaxTenantColumns(ql as any, ['sys_user_permission_set']);
-    await ql.getDriver('sys_user_permission_set').create('sys_user_permission_set', {
-      id: `ups_${userId}_${set.name}`, user_id: userId, permission_set: set.name, organization_id: null,
-    });
+    await ql.insert('sys_user_permission_set', {
+      id: `ups_${userId}_${set.name}`, user_id: userId, permission_set: set.name, organization_id: orgId,
+    }, { context: SYS });
   }
-  if (!inside) token = await leaveOrganization(stack, email);
+  if (!inside) {
+    token = await leaveOrganization(stack, email);
+    // The OUTSIDE principal holds no `sys_member` row — so no `org_member` —
+    // while its session keeps the Default Organization as its active one: under
+    // `single` a session's organization claim is kept without a membership row
+    // (`vetOrganizationClaim`), which is the state a session that selected the
+    // organization before its user was removed is left in. That claim is what
+    // lets the grants above apply to a principal outside the floor's domain;
+    // with no active organization no stored grant applies at all.
+    const sessions = await ql.find('sys_session', { where: { user_id: userId }, limit: 20, context: SYS });
+    for (const s of Array.isArray(sessions) ? sessions : sessions?.records ?? []) {
+      await ql.update('sys_session', { id: s.id, active_organization_id: orgId }, { context: SYS });
+    }
+  }
   return { stack, rootDir, ql, adminId, token };
 }
 

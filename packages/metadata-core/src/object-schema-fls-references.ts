@@ -716,7 +716,10 @@ const LIST_VIEW_NAME_LISTS: Readonly<Record<string, Scrub>> = {
     hiddenFields: names,
     fieldOrder: names,
     searchableFields: names,
-    filterableFields: names,
+    // `filterableFields` is not classified: @objectstack/spec 18 retired it, the
+    // object door refuses it, and no list view reads it. A body that still
+    // carries one goes the unclassified way (fail closed): a denied field it
+    // names drops the whole list view.
 };
 
 /**

@@ -60,7 +60,8 @@ export const DriverOptionsSchema = lazySchema(() => z.object({
    *
    * Semantics for drivers that implement native scoping:
    * - non-empty array → scope reads/updates/deletes/aggregates with `IN`,
-   *   keeping any NULL-tenant global-row carve-out the equality path has;
+   *   and nothing else — no NULL arm, exactly as the equality path
+   *   (ADR-0131 D8);
    * - absent or empty → fall back to `tenantId` equality (fail toward
    *   isolation, never toward exposure);
    * - insert-side tenant injection ALWAYS uses `tenantId` (the active

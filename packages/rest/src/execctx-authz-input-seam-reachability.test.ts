@@ -436,7 +436,9 @@ function matchesWhere(row: any, where: any): boolean {
  * `sys_api_key`, memberships in `sys_member`, capabilities through
  * `sys_user_permission_set` → `sys_permission_set`. Every read filters
  * through the one refusing matcher above, and the caller's `limit` bound is
- * held BY PRESENCE (check:objectql-double-limit).
+ * held BY PRESENCE (check:objectql-double-limit). Every grant is owned by
+ * `org_A`, the organization the stamped keys act in — a grant applies only in
+ * its own organization.
  */
 function qlWith(opts: { memberships: Array<{ user_id: string; organization_id: string }> }) {
   const tables: Record<string, any[]> = {
@@ -453,9 +455,9 @@ function qlWith(opts: { memberships: Array<{ user_id: string; organization_id: s
       { id: 'u_gated', email: 'u_gated@example.com' },
     ],
     sys_user_permission_set: [
-      { user_id: 'u_member', permission_set_id: 'ps_pkg', permission_set: 'pkg_admin' },
-      { user_id: 'u_exmember', permission_set_id: 'ps_pkg', permission_set: 'pkg_admin' },
-      { user_id: 'u_orgless', permission_set_id: 'ps_pkg', permission_set: 'pkg_admin' },
+      { user_id: 'u_member', permission_set_id: 'ps_pkg', permission_set: 'pkg_admin', organization_id: 'org_A' },
+      { user_id: 'u_exmember', permission_set_id: 'ps_pkg', permission_set: 'pkg_admin', organization_id: 'org_A' },
+      { user_id: 'u_orgless', permission_set_id: 'ps_pkg', permission_set: 'pkg_admin', organization_id: 'org_A' },
     ],
     sys_permission_set: [
       { id: 'ps_pkg', name: 'pkg_admin', system_permissions: ['manage_metadata', 'studio.access'] },

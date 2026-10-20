@@ -47,6 +47,12 @@ import {
 } from '@objectstack/spec/ui';
 import { VALID_AST_OPERATORS } from '@objectstack/spec/data';
 import {
+  LIST_VIEW_RETIRED_KEYS_REPORTED,
+  listViewRetiredKeyPrescription,
+  retiredKeyVerdictHead,
+} from './validate-list-view-field-refs.js';
+import { retiredKeyRemedy } from './validate-retired-permission-residue.js';
+import {
   checkSearchableFieldList,
   indexObjectSearchTargets,
 } from './validate-searchable-fields.js';
@@ -142,6 +148,16 @@ interface BlockSpec {
    * the old key, which is exactly how a retired spelling would keep shipping.
    */
   retired: Map<string, { replacedBy: string; note: string }>;
+  /**
+   * Props of the block's SPEC schema that the spec has RETIRED with no
+   * replacement: prop name → the `retiredKey()` tombstone's own prescription.
+   * Today `<ListView>` alone, over `LIST_VIEW_RETIRED_KEYS_REPORTED`. A react
+   * page's `source` is parsed against no list-view schema, so without this the
+   * prop would pass as an unknown prop and become a silent no-op the day the
+   * renderer stops reading it. Writing one is an error carrying the
+   * prescription, the same verdict `os lint` gives the key on a list view.
+   */
+  retiredSchemaProps: Map<string, string>;
   /** The contract's own description per required binding — the hint when one is missing. */
   requiredDescriptions: Map<string, string>;
 }
@@ -160,6 +176,14 @@ const BLOCKS: Map<string, BlockSpec> = new Map(
         b.interactions.filter((i) => i.deprecated).map((i) => [i.name, i.deprecated!]),
       ),
       retired: new Map(Object.entries(REACT_RETIRED_OVERLAY_PROPS[b.tag] ?? {})),
+      retiredSchemaProps: new Map(
+        b.tag === 'ListView'
+          ? LIST_VIEW_RETIRED_KEYS_REPORTED.flatMap((key) => {
+              const prescription = listViewRetiredKeyPrescription(key);
+              return prescription === null ? [] : [[key, prescription] as [string, string]];
+            })
+          : [],
+      ),
       requiredDescriptions: new Map(
         b.interactions.filter((i) => i.required).map((i) => [i.name, i.description]),
       ),
@@ -767,10 +791,11 @@ const REACT_FIELD_SPECS: Readonly<Record<string, ReactFieldSpec>> = {
   ListView: {
     // `fields` is the React overlay's "limit/order the columns"; `columns` the
     // spec ListView prop. Both name columns on the bound object, and a page may
-    // write either. `hiddenFields`/`fieldOrder`/`filterableFields` are schema
-    // props outside the curated contract — unadvertised but honored by the
-    // renderer, so a stale name there is drift just the same.
-    fields: ['fields', 'columns', 'hiddenFields', 'fieldOrder', 'filterableFields'],
+    // write either. `hiddenFields`/`fieldOrder` are schema props outside the
+    // curated contract — unadvertised but honored by the renderer, so a stale
+    // name there is drift just the same. `filterableFields` is not a field
+    // position: the spec retired it, and the prop is refused by name above.
+    fields: ['fields', 'columns', 'hiddenFields', 'fieldOrder'],
     sorts: ['sort'],
     nestedFields: ['userFilters', 'grouping'],
     filterArrays: ['filters'],
@@ -1259,6 +1284,19 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
                 // (#14791 — the id stays here, out of the string authors read.)
                 message: `<${tag}> prop "${u}" is retired — the contract's only spelling is "${ret.replacedBy}".`,
                 hint: ret.note,
+              });
+              continue;
+            }
+            // A retired SPEC-schema prop with no replacement: refused by name,
+            // with the tombstone's own prescription, never passed as unknown.
+            const retiredPrescription = block.retiredSchemaProps.get(u);
+            if (retiredPrescription !== undefined) {
+              findings.push({
+                severity: 'error',
+                rule: REACT_PROP_RETIRED,
+                where, path,
+                message: `<${tag}> prop "${u}" is retired and no prop replaces it: ${retiredKeyVerdictHead(retiredPrescription)}.`,
+                hint: retiredKeyRemedy(retiredPrescription),
               });
               continue;
             }

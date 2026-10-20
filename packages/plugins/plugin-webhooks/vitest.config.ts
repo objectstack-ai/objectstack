@@ -54,6 +54,12 @@ export default defineConfig({
             // session-read rule). Same reason and the same anchoring as the
             // `core` entry above.
             { find: /^@objectstack\/types$/, replacement: path.resolve(__dirname, '../../types/src/index.ts') },
+            // [#24835] `webhook-delivery-real-sql-driver.test.ts` takes a VALUE
+            // import on `@objectstack/driver-sql` (a real `SqlDriver` under the
+            // engine), so the delivery verdict is about the driver source in the
+            // checkout, not `driver-sql/dist`. Same reason and anchoring as the
+            // `core` entry above.
+            { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
         ],
     },
 });

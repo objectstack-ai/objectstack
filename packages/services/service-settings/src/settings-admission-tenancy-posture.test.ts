@@ -164,8 +164,10 @@ function matchesWhere(row: any, where: any): boolean {
 
 /**
  * The permission store in the SHIPPED aggregation shapes. All four principals
- * hold `setup.access` + `setup.write`, so a refusal below can only be the
- * tenancy wall — never a missing capability.
+ * hold `setup.access` + `setup.write` in `org_A` — the organization every
+ * stamped key and session names (a grant row with no organization applies in
+ * none) — so a refusal below can only be the tenancy wall — never a missing
+ * capability.
  *
  * `u_exmember`'s key still carries `active_organization_id: 'org_A'`; the row
  * that made that stamp true is simply gone from `sys_member`. That is the whole
@@ -190,10 +192,10 @@ const PERMISSION_TABLES: Record<string, any[]> = {
   sys_position: [],
   sys_position_permission_set: [],
   sys_user_permission_set: [
-    { id: 'ups_member', user_id: 'u_member', permission_set_id: 'ps_settings', permission_set: 'settings_admin', organization_id: null },
-    { id: 'ups_exmember', user_id: 'u_exmember', permission_set_id: 'ps_settings', permission_set: 'settings_admin', organization_id: null },
-    { id: 'ups_orgless', user_id: 'u_orgless', permission_set_id: 'ps_settings', permission_set: 'settings_admin', organization_id: null },
-    { id: 'ups_session', user_id: 'u_session_exmember', permission_set_id: 'ps_settings', permission_set: 'settings_admin', organization_id: null },
+    { id: 'ups_member', user_id: 'u_member', permission_set_id: 'ps_settings', permission_set: 'settings_admin', organization_id: 'org_A' },
+    { id: 'ups_exmember', user_id: 'u_exmember', permission_set_id: 'ps_settings', permission_set: 'settings_admin', organization_id: 'org_A' },
+    { id: 'ups_orgless', user_id: 'u_orgless', permission_set_id: 'ps_settings', permission_set: 'settings_admin', organization_id: 'org_A' },
+    { id: 'ups_session', user_id: 'u_session_exmember', permission_set_id: 'ps_settings', permission_set: 'settings_admin', organization_id: 'org_A' },
   ],
   sys_permission_set: [
     { id: 'ps_settings', name: 'settings_admin', system_permissions: ['setup.access', 'setup.write'] },

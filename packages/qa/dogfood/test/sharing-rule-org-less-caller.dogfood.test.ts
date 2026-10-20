@@ -42,13 +42,20 @@
 // was filed, `resolveUserAuthzGrants` kept an ORGANIZATION-scoped grant for a
 // caller with no active organization (`!(org && tenantId && org !== tenantId)`
 // read "no tenant" as "every organization"), so an org-scoped `manage_sharing`
-// reached `adminOrgScope`. It no longer does: with no active organization only
-// GLOBAL grants apply. So the two faces are pinned separately below —
-//   - the EXPOSED persona holds `manage_sharing` through a GLOBAL grant, the one
-//     way an org-less caller still holds it, and keeps pinning `adminOrgScope`
-//     (#8158's defence in depth: capability held, no organization to use it in);
+// reached `adminOrgScope`. It no longer does: a grant applies only in its own
+// organization, so with no active organization no stored grant applies — and a
+// grant that carries NO organization applies nowhere. So the two faces are
+// pinned separately below —
+//   - the EXPOSED persona holds `manage_sharing` through an ORGANIZATION-LESS
+//     grant, the spelling that once applied everywhere, and is now refused at
+//     the ADR-0111 D6 capability gate: the row confers nothing;
 //   - the ORG-SCOPED persona holds the very grant #8158 was filed with, scoped
-//     to tenant A, and is now refused at the ADR-0111 D6 capability gate.
+//     to tenant A, and is refused at the same gate.
+// Neither reaches `assertResolvableAdminScope` (#8158's defence in depth:
+// capability held, no organization to use it in) any more: the one grant that
+// still applies with no active organization is the Default Organization's
+// `admin_full_access`, and its holder is a platform operator, which that guard
+// lets through by design.
 //
 // ## Anti-vacuity
 //
@@ -91,13 +98,13 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
   /**
-   * A platform operator with no active organization: `admin_full_access` held
-   * globally, and no membership. [ADR-0131 D3] The harness admin can no longer
+   * A platform operator with no active organization: the Default
+   * Organization's `admin_full_access` grant, and no membership. [ADR-0131 D3] The harness admin can no longer
    * play this part — every `single` boot makes them the Default Organization's
    * owner, so their session carries it.
    */
   let platform: string;
-  /** The exposed persona: GLOBAL `manage_sharing`, no membership, no active org. */
+  /** The exposed persona: `manage_sharing` through an organization-less grant, no membership, no active org. */
   let orgLess: string;
   /** [#20515] The #8158 grant as filed — scoped to tenant A — with no membership and no active org. */
   let orgScopedOrgLess: string;
@@ -158,20 +165,19 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     orgBoundUserId = await uid(ORG_BOUND_EMAIL);
     orgScopedOrgLessUserId = await uid(ORG_SCOPED_ORG_LESS_EMAIL);
 
-    // [#20515] The exposed persona holds the set GLOBALLY (no organization):
-    // with no active organization only global grants apply, so this is the one
-    // spelling under which it still carries `manage_sharing` and still reaches
-    // `adminOrgScope`.
-    // [C8 stage 8b] A global grant is legacy residue in 18.0: the engine now stamps
-    // or refuses an organization-less system insert under `single` (ADR-0131 D9),
-    // so it is landed beneath the engine. The readers still apply it until C8's
-    // NULL-reader stages.
-    const globalGrant = (row: Record<string, unknown>) =>
-      ql.getDriver('sys_user_permission_set').create('sys_user_permission_set', { ...row, organization_id: null });
+    // [#20515] The exposed persona holds the set with NO organization — the
+    // spelling an older release read as "applies everywhere", and so the one
+    // under which an org-less caller once carried `manage_sharing` into
+    // `adminOrgScope`. It is invalid state in 18.0: the engine stamps or refuses
+    // an organization-less system insert (ADR-0131 D9), so the row is landed
+    // beneath the engine, as the residue an older release left. It applies
+    // nowhere now.
     // That residue lives only on a store built before 18.x, whose tenant column is
     // nullable (ADR-0131 D1 makes a fresh one NOT NULL): the table is that store's.
     await relaxTenantColumns(ql as any, ['sys_user_permission_set']);
-    await globalGrant({ id: 'ups_8158_org_less', user_id: orgLessUserId, permission_set: 'sharing_admin_8158' });
+    await ql.getDriver('sys_user_permission_set').create('sys_user_permission_set', {
+      id: 'ups_8158_org_less', user_id: orgLessUserId, permission_set: 'sharing_admin_8158', organization_id: null,
+    });
     // The #8158 grant as filed — scoped to tenant A — for the control (which
     // has tenant A active) and for the org-scoped persona (which has none).
     for (const userId of [orgBoundUserId, orgScopedOrgLessUserId]) {
@@ -193,12 +199,19 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
       id: 'mem_8158_bound', organization_id: ORG_A, user_id: orgBoundUserId, role: 'member',
     }, { context: SYS });
 
-    // A platform operator outside the organization: `admin_full_access` held
-    // globally, the grant a platform administrator holds under `single`.
+    // A platform operator outside the organization: `admin_full_access` owned
+    // by the Default Organization, the one grant that anchors platform standing
+    // under `single` — and that anchors it whatever the active organization,
+    // none included.
     await stack.signUp(OPERATOR_EMAIL, PASSWORD);
     const adminSet = await catalogPermissionSet(ql, 'admin_full_access');
     expect(adminSet, 'admin_full_access is served by the security catalog').toBeTruthy();
-    await globalGrant({ id: 'ups_8158_operator', user_id: await uid(OPERATOR_EMAIL), permission_set: adminSet.name });
+    const defaultOrg = await ql.findOne('sys_organization', { where: { slug: 'default' }, context: SYS });
+    expect(defaultOrg?.id, 'the `single` boot names a Default Organization').toBeTruthy();
+    await ql.insert('sys_user_permission_set', {
+      id: 'ups_8158_operator', user_id: await uid(OPERATOR_EMAIL), permission_set: adminSet.name,
+      organization_id: defaultOrg.id,
+    }, { context: SYS });
 
     // Sign in AFTER the grants, so every session is minted by the same path
     // with the membership state above already in place. The org-less personas
@@ -271,8 +284,9 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
   // ── the measurement ──────────────────────────────────────────────────
 
   it('THE REPORTED CASE: listing is refused 403, not answered with every tenant’s rules', async () => {
-    // The exposed persona holds `manage_sharing` GLOBALLY (#20515 — see the
-    // header), so this is `adminOrgScope` refusing, as the next case proves.
+    // The exposed persona's `manage_sharing` grant carries no organization
+    // (#20515 — see the header), so it confers nothing: this is the capability
+    // gate refusing, as the next case proves.
     const res = await stack.apiAs(orgLess, 'GET', RULES);
     const payload = res.status === 200
       ? ((await res.json()) as { data: RuleRow[] }).data.map((r) => `${r.name}@${r.organization_id}`)
@@ -287,17 +301,18 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     ).toBe(403);
   });
 
-  it('the refusal names the ORGANIZATION, which is also how we know the capability gate was cleared', async () => {
+  it('the refusal is the CAPABILITY gate’s: an organization-less grant confers no manage_sharing', async () => {
     // Both refusals on this surface are `PERMISSION_DENIED`; only the message
     // separates "you lack manage_sharing" from "you have it and no org to use
-    // it in". Reading the second proves the persona really did carry the
-    // capability — i.e. that this fixture measures the fall-open and not the
-    // older ADR-0111 D6 gate.
+    // it in". Reading the first proves the organization-less row conferred
+    // nothing — the persona never carried the capability as far as the
+    // active-organization guard. The org-BOUND control below holds the same set
+    // through a grant that carries an organization, and is served.
     const res = await stack.apiAs(orgLess, 'GET', RULES);
     const body = (await res.json()) as { code?: string; error?: string };
     expect(body.code).toBe('PERMISSION_DENIED');
-    expect(body.error ?? '').toMatch(/active organization/);
-    expect(body.error ?? '').not.toMatch(/requires the manage_sharing capability/);
+    expect(body.error ?? '').toMatch(/requires the manage_sharing capability/);
+    expect(body.error ?? '').not.toMatch(/active organization/);
   });
 
   it('by-NAME GET of the OTHER tenant’s rule is refused', async () => {
@@ -358,7 +373,7 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
   });
 
   it('an ORG-scoped manage_sharing grant with no active organization is refused 403 at the CAPABILITY gate', async () => {
-    // With no active organization only global grants apply, so the tenant-A
+    // With no active organization no stored grant applies, so the tenant-A
     // grant confers nothing here: the ADR-0111 D6 gate refuses before
     // `adminOrgScope` is ever asked — and no tenant's rule is read.
     const res = await stack.apiAs(orgScopedOrgLess, 'GET', RULES);

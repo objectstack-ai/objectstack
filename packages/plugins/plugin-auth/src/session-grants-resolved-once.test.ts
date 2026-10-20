@@ -195,10 +195,12 @@ const arrange = async (config: Record<string, unknown> = {}) => {
   await engine.insert('sys_user_position', { user_id: memberId, position: 'reviewer', organization_id: ORG });
   await engine.insert('sys_user_position', { user_id: leaverId, position: 'reviewer', organization_id: ORG });
 
-  // The platform operator: an UNSCOPED admin_full_access user grant (the
-  // single-posture anchor; no tenancy posture is configured here).
+  // The platform operator: an admin_full_access user grant owned by the Default
+  // Organization (the single-posture anchor; no tenancy posture is configured
+  // here). The Default Organization is a third organization nobody is a member of.
+  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' });
   await engine.insert('sys_permission_set', { id: 'ps_admin', name: 'admin_full_access' });
-  await engine.insert('sys_user_permission_set', { user_id: operatorId, permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null });
+  await engine.insert('sys_user_permission_set', { user_id: operatorId, permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: 'org_default' });
 
   const bearers = {
     owner: bearerFrom(await signIn(manager, 'owner@example.com')),

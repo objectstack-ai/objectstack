@@ -2,9 +2,12 @@
 
 /**
  * Organization scoping for the RBAC catalog's per-organization passes: the
- * system context one pass runs under and the one read that tells an
- * organization's own row apart from organization-less residue (the sweep and
- * the reap guard retired with their one caller, the seeder; #15204 stage 6b-2).
+ * system context one pass runs under and the one read that picks an
+ * organization's own row out of a scoped read (the sweep and the reap guard
+ * retired with their one caller, the seeder; #15204 stage 6b-2 — and the
+ * organization-less residue it reported retired with the 18.0 ownership
+ * ceremony, ADR-0131 D10, which attributes every such row before an upgraded
+ * database boots).
  *
  * ## Why the catalog is materialized per organization
  *
@@ -17,9 +20,9 @@
  *
  * Under a walled posture that row is invalid state. It was measured to be
  * unreadable by anyone: plugin-security's Layer 0 composes a STRICT
- * `organization_id = :tenant` and the middleware ANDs it over the driver's
- * `(organization_id = :tenant OR organization_id IS NULL)`, and the conjunction
- * of the two is the strict equality alone — so on a walled deployment every
+ * `organization_id = :tenant` and the middleware ANDed it over the driver's
+ * v17 predicate `(organization_id = :tenant OR organization_id IS NULL)`, and
+ * the conjunction of the two is the strict equality alone — so on a walled deployment every
  * principal, at every rung, listed ZERO positions, permission sets and sharing
  * rules while the tables held rows.
  *
@@ -30,52 +33,19 @@
  *
  * ## The doctrine this file implements
  *
- * An organization-less row is INVALID STATE under a walled posture — refuse or
- * warn loudly, never treat it as a platform-wide default. The older reading, in
- * which a NULL organization marked a platform row visible to every tenant,
- * survives only as DRIVER-LEVEL COMPATIBILITY BEHAVIOUR: `applyTenantScope`
- * still emits the `OR organization_id IS NULL` arm, and this module depends on
- * that arm being there — it is precisely how a per-organization pass can still
- * SEE a pre-fix organization-less row and therefore say something about it.
- *
- * ## What replaces a reap
- *
- * #8617 reaped its pre-fix organization-less rows. This catalog does not, and
- * the difference is deliberate rather than an omission:
- *
- * - a fresh walled deployment never mints an organization-less catalog row
- *   FROM THESE FOUR SEEDERS once they run per organization, so there is nothing
- *   of theirs to migrate. It does NOT follow that a fresh walled deployment
- *   holds none, and this file used to claim it did (#11532).
- *   `bootstrapPlatformAdmin` is a FIFTH seeder, outside the four converted
- *   here, and it writes one organization-less `sys_permission_set` row per
- *   `defaultPermissionSets` entry on EVERY boot — before any organization
- *   exists (measured on a fresh walled rig: 8 rows, 1.3 s ahead of the first
- *   `sys_organization`). That is the RULED outcome rather than a leak: the
- *   2026-08-20 maintainer ruling on #10103 keeps that platform bucket
- *   "unreaped and loudly warned about under walled posture", and PLATFORM_ADMIN
- *   is derived from an unscoped grant pointing at its `admin_full_access` row
- *   BY ROW ID, so a reap would silently demote every platform admin. The guard
- *   below therefore has to tell the two classes apart;
- * - a `single`-posture deployment is where organization-less rows are the
- *   CORRECT shape, and the carve-out below leaves it byte-for-byte unchanged;
- * - the rows a reap would delete are grant TARGETS — `sys_user_position`,
- *   `sys_position_permission_set` and `sys_user_permission_set` all point at
- *   them by row id — so deleting them revokes standing access with no signal at
- *   the moment of loss. #8617's reap could promise "NO grant changes" precisely
- *   because it never touched a junction table; here the junctions ARE the
- *   grants.
- *
- * So the pass said so instead. Its guard (retired with the seeder) named the
- * rows and named the remedy, and — this is the load-bearing half — the pass
- * still CREATES the organization's own copy. The failure shape it exists to
- * prevent is the silent no-op: a tenant-threaded pass sees the pre-fix
- * organization-less row through the driver's compatibility arm, reads the name
- * as already represented, takes the update branch and creates nothing, leaving
- * the deployment exactly as broken as before while reporting success.
- * {@link resolveOwnOrganizationRow} is the one read that distinguishes "this
- * organization has its row" from "somebody's organization-less row is visible
- * here", and every seeder in this catalog routes through it.
+ * An organization-less row is INVALID STATE — never a platform-wide default.
+ * The older reading, in which a NULL organization marked a platform row visible
+ * to every tenant, is retired at every layer: ADR-0131 D8 removed the driver's
+ * `OR organization_id IS NULL` arm from `applyTenantScope` (and
+ * `check-tenant-chokepoint` refuses it), so a per-organization pass no longer
+ * sees an organization-less row at all; the 18.0 ownership ceremony (ADR-0131
+ * D10) attributes every one an earlier release wrote before an upgraded
+ * database boots, and makes the column NOT NULL; and a fresh install that
+ * registers the organization object never writes one (ADR-0131 D9: a system
+ * write with no organization of its own is stamped with the derivable one, or
+ * refused). So {@link resolveOwnOrganizationRow} answers one question — which
+ * row is this organization's own — and a row of any other shape that a read
+ * happens to return never answers for the organization.
  */
 
 /**
@@ -109,31 +79,21 @@ export function rowOrganizationId(row: any): string | null {
 
 /**
  * Resolve THIS organization's own row for a name, out of what a tenant-scoped
- * read returned.
+ * read returned: the row stamped with `organizationId`, or `null`.
  *
- * A scoped read passes through `applyTenantScope`, whose compatibility arm
- * returns the caller's rows AND any organization-less ones. Those two are not
- * interchangeable and the seeders must never treat them as such:
+ * A scoped read passes through `applyTenantScope`, which since ADR-0131 D8
+ * returns the caller's rows only — the driver's NULL arm is retired. Any other
+ * row a read can still return — another organization's or an organization-less
+ * one, from a driver with no native tenant scoping or from an unscoped read —
+ * is never the organization's own and never answers for it. An
+ * organization-less row is invalid state after the ownership ceremony
+ * (ADR-0131 D10), so it is not reported either: there is no residue to report.
  *
- * - a row stamped with `organizationId` is this organization's — update it;
- * - an organization-less row is a PRE-FIX residue that merely happens to be
- *   visible here. Reading it as "already seeded" is the silent no-op this
- *   catalog exists to prevent, so it is reported separately and never returned
- *   as the organization's own row.
- *
- * Under a `single`-posture pass (`organizationId` undefined) the
- * organization-less row IS the row, which is the carve-out, so it is returned
- * as `own` and nothing is flagged.
+ * Under a pass with no organization (`organizationId` undefined) there is
+ * nothing to tell apart, and the first row is the row.
  */
-export function resolveOwnOrganizationRow(
-  rows: any[],
-  organizationId?: string,
-): { own: any | null; organizationLessResidue: any | null } {
+export function resolveOwnOrganizationRow(rows: any[], organizationId?: string): { own: any | null } {
   const list = Array.isArray(rows) ? rows : [];
-  if (!organizationId) {
-    return { own: list[0] ?? null, organizationLessResidue: null };
-  }
-  const own = list.find((r) => rowOrganizationId(r) === organizationId) ?? null;
-  const residue = list.find((r) => rowOrganizationId(r) === null) ?? null;
-  return { own, organizationLessResidue: residue };
+  if (!organizationId) return { own: list[0] ?? null };
+  return { own: list.find((r) => rowOrganizationId(r) === organizationId) ?? null };
 }

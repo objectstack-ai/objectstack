@@ -29,12 +29,15 @@
  * ## The rule pinned here
  *
  * A row scoped to an organization applies only while that organization is
- * active; an organization-less row applies everywhere — the rule
- * `resolveUserAuthzGrants` already applies to grant rows. So the negative
- * pins below are paired with preservation pins: the global grants an
- * organization-less principal really holds (a global position folded onto a
- * global same-named set, a global user grant) keep resolving, and an
- * organization's own set still reaches its own members while it is active.
+ * active — the rule `resolveUserAuthzGrants` applies to grant rows
+ * (`grantAppliesInTenant`). An organization-less grant row applies nowhere:
+ * the 18.0 ownership ceremony (ADR-0131 D10) attributes every such row before
+ * an upgraded database boots, so one is invalid state, not a "global" grant.
+ * So the negative pins below are paired with preservation pins: the grants a
+ * principal holds in its own organization (a position folded onto the
+ * catalog's same-named set, a user grant) resolve while that organization is
+ * active and confer nothing with none active, and a legacy organization-less
+ * grant row confers nothing either way.
  *
  * ## The rig
  *
@@ -69,8 +72,10 @@ const ORG_OTHER = 'org_other';
 const ORG_HOME = 'org_home';
 /** A member of `ORG_HOME` only. */
 const USER_HOME = 'usr_home_member';
-/** A member of `ORG_HOME` only, holding two GLOBAL grants. */
+/** A member of `ORG_HOME` only, holding two grants owned by `ORG_HOME`. */
 const USER_GLOBAL = 'usr_home_global';
+/** A member of `ORG_HOME` only, holding the same two grants as organization-less legacy rows. */
+const USER_LEGACY = 'usr_home_legacy';
 /** A member of `ORG_OTHER` — the control that the authored set resolves at all. */
 const USER_OTHER = 'usr_other_member';
 
@@ -97,11 +102,10 @@ afterEach(async () => {
 });
 
 /**
- * [C8 stage 8b] An organization-less GLOBAL row is legacy residue: under
- * `single` the engine stamps or refuses an organization-less platform insert
- * (ADR-0131 D9), so a row with `organization_id` NULL is landed straight
- * through the driver, as an older release left it. The readers this file pins
- * still read it until C8's NULL-reader stages (18.x).
+ * [C8 stage 8b] An organization-less row is legacy residue: under `single` the
+ * engine stamps or refuses an organization-less platform insert (ADR-0131 D9),
+ * so a row with `organization_id` NULL is landed straight through the driver,
+ * as an older release left it. The grant readers no longer honour one.
  */
 function write(e: any, object: string, row: Record<string, unknown>) {
   return row.organization_id === null
@@ -150,24 +154,25 @@ async function boot(): Promise<ObjectQL> {
   const e = engine as any;
   await e.insert('sys_organization', { id: ORG_OTHER, name: ORG_OTHER, slug: 'other' }, SYS);
   await e.insert('sys_organization', { id: ORG_HOME, name: ORG_HOME, slug: 'home' }, SYS);
-  for (const id of [USER_HOME, USER_GLOBAL, USER_OTHER]) {
+  for (const id of [USER_HOME, USER_GLOBAL, USER_LEGACY, USER_OTHER]) {
     await e.insert('sys_user', { id, name: id, email: `${id}@example.test` }, SYS);
   }
   await e.insert('sys_member', { id: 'mem_home', user_id: USER_HOME, organization_id: ORG_HOME, role: 'member' }, SYS);
   await e.insert('sys_member', { id: 'mem_global', user_id: USER_GLOBAL, organization_id: ORG_HOME, role: 'member' }, SYS);
+  await e.insert('sys_member', { id: 'mem_legacy', user_id: USER_LEGACY, organization_id: ORG_HOME, role: 'member' }, SYS);
   await e.insert('sys_member', { id: 'mem_other', user_id: USER_OTHER, organization_id: ORG_OTHER, role: 'member' }, SYS);
 
   // ORG_OTHER authors sets named after what every member holds as a position.
   await insertSet(e, 'ps_other_org_member', 'org_member', ORG_OTHER, ['manage_metadata', 'probe.other_org_member']);
   await insertSet(e, 'ps_other_everyone', 'everyone', ORG_OTHER, ['manage_metadata', 'probe.other_everyone']);
 
-  // USER_GLOBAL's GLOBAL grants — what an organization-less principal really holds:
-  //  (1) a global position assignment, folded onto a global same-named set;
+  // USER_GLOBAL's grants, owned by ORG_HOME:
+  //  (1) a position assignment, folded onto a global same-named set;
   await write(e, 'sys_user_position', {
-    id: 'up_global_ops_lead', user_id: USER_GLOBAL, position: 'ops_lead', organization_id: null,
+    id: 'up_global_ops_lead', user_id: USER_GLOBAL, position: 'ops_lead', organization_id: ORG_HOME,
   });
   await insertSet(e, 'ps_global_ops_lead', 'ops_lead', null, ['probe.global_ops_lead']);
-  //  (2) a global user grant to a global set, beside ORG_OTHER's same-named
+  //  (2) a user grant to a global set, beside ORG_OTHER's same-named
   //      copy. The copy's id SORTS FIRST (`ps_0_…` before `ps_1_…`) and the
   //      SQL driver's read comes back ordered by id, so an unscoped read meets
   //      the copy first. With the ids the other way round this pin stays green
@@ -177,6 +182,15 @@ async function boot(): Promise<ObjectQL> {
   await insertSet(e, 'ps_1_global_platform_ops', 'platform_ops', null, ['probe.global_platform_ops']);
   await write(e, 'sys_user_permission_set', {
     id: 'ups_global_platform_ops', user_id: USER_GLOBAL,
+    permission_set: 'platform_ops', organization_id: ORG_HOME,
+  });
+  // USER_LEGACY holds the same two as organization-less rows — the shape an
+  // older release left, which confers nothing anywhere.
+  await write(e, 'sys_user_position', {
+    id: 'up_legacy_ops_lead', user_id: USER_LEGACY, position: 'ops_lead', organization_id: null,
+  });
+  await write(e, 'sys_user_permission_set', {
+    id: 'ups_legacy_platform_ops', user_id: USER_LEGACY,
     permission_set: 'platform_ops', organization_id: null,
   });
   // [ADR-0131 D3/D4] The two GLOBAL sets are declared in the catalog, which is
@@ -300,34 +314,59 @@ describe('[#20555] with no active organization, another organization\'s set name
     expect(orgless.ledger).toBeNull();
   }, 120_000);
 
-  it('a GLOBAL grant resolves the global row it names, not another organization\'s same-named copy', async () => {
+  it('an owned grant confers nothing with no organization active — neither the set it names nor another organization\'s copy', async () => {
     const r = await rig();
     const orgless = await resolve(r, USER_GLOBAL);
-    expect(orgless.permissions).toContain('platform_ops');
-    expect(orgless.byName.get('platform_ops')?.systemPermissions).toEqual(['probe.global_platform_ops']);
+    expect(orgless.permissions).not.toContain('platform_ops');
+    expect(orgless.byName.get('platform_ops')).toBeUndefined();
+    // Control: with its owner active the same grant resolves the global set it
+    // names, not ORG_OTHER's same-named copy (whose id sorts first).
+    const home = await resolve(r, USER_GLOBAL, ORG_HOME);
+    expect(home.permissions).toContain('platform_ops');
+    expect(home.byName.get('platform_ops')?.systemPermissions).toEqual(['probe.global_platform_ops']);
   }, 120_000);
 
   it('…and the same-named copy\'s systemPermissions do not reach that principal', async () => {
     const r = await rig();
     const orgless = await resolve(r, USER_GLOBAL);
     expect([...orgless.capabilities].filter((c) => c.startsWith('probe.other_'))).toEqual([]);
+    // Nor with the grant's owner active, where the grant does confer (the
+    // control that keeps the leg above from passing for want of a grant).
+    const home = await resolve(r, USER_GLOBAL, ORG_HOME);
+    expect(home.capabilities.has('probe.global_platform_ops')).toBe(true);
+    expect([...home.capabilities].filter((c) => c.startsWith('probe.other_'))).toEqual([]);
   }, 120_000);
 });
 
 describe('[#20555] what the rule keeps', () => {
-  it('a global position folded onto a global same-named set still resolves with no active organization', async () => {
+  it('a position folded onto a global same-named set resolves while its owner is active, and not with none active', async () => {
     const r = await rig();
+    const home = await resolve(r, USER_GLOBAL, ORG_HOME);
+    expect(home.positions).toContain('ops_lead');
+    expect(home.byName.get('ops_lead')?.systemPermissions).toEqual(['probe.global_ops_lead']);
     const orgless = await resolve(r, USER_GLOBAL);
-    expect(orgless.positions).toContain('ops_lead');
-    expect(orgless.byName.get('ops_lead')?.systemPermissions).toEqual(['probe.global_ops_lead']);
+    expect(orgless.positions).not.toContain('ops_lead');
+    expect(orgless.byName.get('ops_lead')).toBeUndefined();
   }, 120_000);
 
-  it('the global grants resolve identically with the principal\'s own organization active', async () => {
+  it('the owned grants resolve with the principal\'s own organization active', async () => {
     const r = await rig();
     const home = await resolve(r, USER_GLOBAL, ORG_HOME);
     expect(home.byName.get('ops_lead')?.systemPermissions).toEqual(['probe.global_ops_lead']);
     expect(home.byName.get('platform_ops')?.systemPermissions).toEqual(['probe.global_platform_ops']);
     expect(home.setNames).not.toContain('org_member');
+  }, 120_000);
+
+  it('an organization-less grant row confers nothing — with no organization active, or with the holder\'s own', async () => {
+    const r = await rig();
+    for (const organizationId of [undefined, ORG_HOME]) {
+      const legacy = await resolve(r, USER_LEGACY, organizationId);
+      expect(legacy.positions).not.toContain('ops_lead');
+      expect(legacy.permissions).not.toContain('platform_ops');
+      expect(legacy.byName.get('ops_lead')).toBeUndefined();
+      expect(legacy.byName.get('platform_ops')).toBeUndefined();
+      expect([...legacy.capabilities].filter((c) => c.startsWith('probe.'))).toEqual([]);
+    }
   }, 120_000);
 
   // [ADR-0131 D3/D4, #15196 Q3 = A] REVERSED: the plugin no longer reads

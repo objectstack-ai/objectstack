@@ -92,6 +92,14 @@ const SYS = { isSystem: true } as const;
 const ADMIN = { userId: 'u_admin', positions: [], permissions: ['qa_admin'] };
 const ORG_ADMIN_LIKE = { userId: 'u_org_admin', positions: [], permissions: ['qa_org_admin_like'] };
 const PLAIN_MEMBER = { userId: 'u_member', positions: [], permissions: [] };
+/**
+ * The organization the grant-resolving legs below run in. A grant row takes
+ * effect only in the organization that owns it (`grantAppliesInTenant`), so a
+ * leg that reads what an assignment grants writes it from inside `org_a` and
+ * resolves it there.
+ */
+const GRANT_ORG = 'org_a';
+const ADMIN_IN_GRANT_ORG = { ...ADMIN, tenantId: GRANT_ORG };
 
 /** A position record id — the spelling the measured authors wrote where the position's NAME belongs. */
 const AUDITOR_POSITION_ID = 'position_mtur8hz5jp7ptm3r';
@@ -205,9 +213,9 @@ async function addMember(h: Harness, userId: string, organizationId: string): Pr
     { context: { isSystem: true, tenantId: organizationId } } as any);
 }
 
-/** What an account reads of `qa_inquiry`, through the real resolver and the real middleware. */
+/** What an account reads of `qa_inquiry` in {@link GRANT_ORG}, through the real resolver and the real middleware. */
 async function rowsReadBy(h: Harness, userId: string): Promise<number> {
-  const g = await resolveUserAuthzGrants(h.engine, userId);
+  const g = await resolveUserAuthzGrants(h.engine, userId, { tenantId: GRANT_ORG });
   try {
     const rows = await h.engine.find('qa_inquiry', {
       context: { userId, positions: g.positions, permissions: g.permissions },
@@ -248,8 +256,9 @@ async function assignmentsOf(h: Harness, userId: string): Promise<any[]> {
 describe('a position spelled as a record id is refused, and the account is provably fine', () => {
   it('refuses 400 VALIDATION_FAILED, reference_not_found at position, naming the value and the remedy', async () => {
     const h = await boot();
+    await addMember(h, 'u_holder', GRANT_ORG);
     const err = await refusalOf(() => h.engine.insert(
-      'sys_user_position', { user_id: 'u_holder', position: AUDITOR_POSITION_ID }, { context: ADMIN } as any,
+      'sys_user_position', { user_id: 'u_holder', position: AUDITOR_POSITION_ID }, { context: ADMIN_IN_GRANT_ORG } as any,
     ));
     const env = envelopeOf(err);
     expect(env.code).toBe('VALIDATION_FAILED');
@@ -272,7 +281,7 @@ describe('a position spelled as a record id is refused, and the account is prova
     // distributes reads rows at once, so the account, the set and the object
     // are fine — the refused edge was the whole difference.
     await h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_holder', permission_set: 'qa_auditor_set' }, { context: ADMIN } as any,
+      'sys_user_permission_set', { user_id: 'u_holder', permission_set: 'qa_auditor_set' }, { context: ADMIN_IN_GRANT_ORG } as any,
     );
     expect(await rowsReadBy(h, 'u_holder')).toBe(3);
   });
@@ -305,19 +314,21 @@ describe('the accepted half — a catalog NAME, active or deactivated', () => {
 
   it('a catalog name is accepted and resolves: the holder reads rows', async () => {
     const h = await boot();
+    await addMember(h, 'u_named', GRANT_ORG);
     const created = await h.engine.insert(
-      'sys_user_position', { user_id: 'u_named', position: 'qa_auditor' }, { context: ADMIN } as any,
+      'sys_user_position', { user_id: 'u_named', position: 'qa_auditor' }, { context: ADMIN_IN_GRANT_ORG } as any,
     );
-    expect(created).toMatchObject({ user_id: 'u_named', position: 'qa_auditor' });
+    expect(created).toMatchObject({ user_id: 'u_named', position: 'qa_auditor', organization_id: GRANT_ORG });
     expect(await rowsReadBy(h, 'u_named')).toBe(3);
   });
 
   it('ADR-0049 shape E: a DEACTIVATED position is still a position — accepted, stored, and grants nothing', async () => {
     const h = await boot();
+    await addMember(h, 'u_retired', GRANT_ORG);
     const created = await h.engine.insert(
-      'sys_user_position', { user_id: 'u_retired', position: 'qa_retired' }, { context: ADMIN } as any,
+      'sys_user_position', { user_id: 'u_retired', position: 'qa_retired' }, { context: ADMIN_IN_GRANT_ORG } as any,
     );
-    expect(created).toMatchObject({ position: 'qa_retired' });
+    expect(created).toMatchObject({ position: 'qa_retired', organization_id: GRANT_ORG });
     expect(await assignmentsOf(h, 'u_retired')).toHaveLength(1);
     // It stops granting (the resolver drops the deactivated name) — it is not refused.
     expect(await rowsReadBy(h, 'u_retired')).toBe(0);

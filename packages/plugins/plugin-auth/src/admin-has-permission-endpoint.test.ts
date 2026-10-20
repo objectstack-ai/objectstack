@@ -24,8 +24,8 @@
 //
 // ── Why the admin is granted, never scalared ────────────────────────────────
 //
-// ⛔ The subject is made a platform admin the ADR-0068 D2 way — an unscoped
-// `admin_full_access` grant — and the fixture ASSERTS the legacy scalar is
+// ⛔ The subject is made a platform admin the ADR-0068 D2 way — the Default
+// Organization's `admin_full_access` grant — and the fixture ASSERTS the legacy scalar is
 // absent. A `role = 'admin'` fixture would be answered `true` by the UNSHADED
 // vendor too: it passes with or without this card's change and measures
 // nothing (the `admin-impersonate-endpoint.test.ts` discipline).
@@ -126,14 +126,16 @@ async function stage() {
   const users = (engine.tables.get('sys_user') ?? []) as any[];
   const adminId = String(users.find((r) => r.email === 'admin.11900@example.com')!.id);
 
-  // The ADR-0068 D2 grant — an ORG-LESS `admin_full_access` link. ⛔ NOT the
-  // legacy scalar (see header).
+  // The ADR-0068 D2 grant — an `admin_full_access` link owned by the Default
+  // Organization, the only owner whose grant anchors platform standing. ⛔ NOT
+  // the legacy scalar (see header).
+  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' });
   await engine.insert('sys_permission_set', { id: PS_ADMIN, name: ADMIN_FULL_ACCESS });
   await engine.insert('sys_user_permission_set', {
     user_id: adminId,
     permission_set_id: PS_ADMIN,
     permission_set: 'admin_full_access',
-    organization_id: null,
+    organization_id: 'org_default',
   });
 
   const bearerFor = async (email: string) => {

@@ -461,7 +461,7 @@
       "title": "Dataset-only authoring works end to end: layout-less designer drafts save/publish, and every ReportType renders from the same semantic datasets",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -550,7 +550,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "packages/qa/dogfood/test/dashboard-designer-roundtrip.dogfood.test.ts"
+        "ref": "packages/qa/dogfood/test/dashboard-designer-roundtrip.dogfood.test.ts — acceptance[0] ONLY, at the HTTP door (the showcase booted in-process): the layout-less draft PUT /meta/dashboard/NAME?mode=draft answers 200, and its POST …/publish answers 200. Its read-back asserts three widgets and no layout, but not acceptance[1]'s dataset + values form or the absence of the legacy inline-analytics keys. acceptance[1]–[7] and the negatives need the run"
       },
       "traps": [
         "hydration-race",
@@ -582,6 +582,12 @@
           "date": "2026-10-19",
           "change": "negative[1] corrected from QA run #24612 (18.0 sweep round 2, ba4afcc2), re-read at objectstack f89d29e382: the dangling-binding guard is an author-time rule run at publish and on an active save, never on a draft (runtime-authoring-gate.ts D1), so a draft with a dangling dataset, measure or dimension answers 200 and its publish answers 422 with the named rule. The negative now names the publish door, so a draft 200 is not read as the blank-without-error FAIL. Wave anchor #24579 round 2 §3 (6272314386)",
           "ref": "#24671"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: a bare ref over-implies coverage), round 15 of wave anchor #24579. The dogfood pin drives the draft-save and publish doors (acceptance[0]), and reads the dashboard back for its widget count and missing layout only. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ]
     },
@@ -590,7 +596,7 @@
       "title": "Empty results, NULL group buckets and single datapoints degrade honestly — designed empty states, consistent bucket labels, no one-bar collapse",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -656,7 +662,7 @@
       ],
       "automated": {
         "kind": "conformance",
-        "ref": "packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts"
+        "ref": "packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts (acceptance[3]) + packages/qa/dogfood/test/empty-group-bucket-parity.test.ts (acceptance[4]: on driver-sql over better-sqlite3 and on driver-sqlite-wasm, a plain and a date-bucketed groupBy over NULL rows key the empty bucket as a real null, with the same keys, key types and totals on the pushed-down path and the in-memory path)"
       },
       "traps": [
         "single-datapoint",
@@ -674,6 +680,12 @@
           "date": "2026-08-07",
           "change": "new item: boundary behavior (empty window, NULL bucket, single datapoint) pinned to the two bucket-parity conformance suites",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "automated.ref adds empty-group-bucket-parity.test.ts for acceptance[4] — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: a ref that misses its own pin), round 15 of wave anchor #24579. acceptance[4].verify names that suite and the ref did not. Read at base b1676441ba: it drives two real drivers and applyInMemoryAggregation over the same rows and asserts the same keys, key types and totals on both paths, which is acceptance[4]'s test oracle. No clause changed",
+          "ref": "#24891"
         }
       ]
     },

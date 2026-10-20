@@ -132,18 +132,39 @@ type SeamQl = ReturnType<typeof makeSeamQl>;
 /** Fixed clock. Injected everywhere, so no pin sleeps and no pin races. */
 const T = Date.UTC(2026, 5, 1);
 
-/** A principal whose PLATFORM_ADMIN standing hangs on one revocable row. */
+/**
+ * A principal whose PLATFORM_ADMIN standing hangs on one revocable row: the
+ * Default Organization's `admin_full_access` grant, the `single` posture's anchor.
+ */
 function adminTables(): Record<string, any[]> {
   return {
     sys_user: [{ id: 'u1', email: 'u1@x.com' }],
+    sys_organization: [{ id: 'org_default', slug: 'default' }, { id: 'org_a', slug: 'org-a' }],
     sys_member: [{ user_id: 'u1', organization_id: 'org_a', role: 'member' }],
     sys_user_position: [],
     sys_user_permission_set: [
-      { user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
+      { user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: 'org_default' },
     ],
     sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access' }],
     sys_position: [],
     sys_position_permission_set: [],
+  };
+}
+
+/**
+ * A principal holding one ordinary `org_a` grant and no `admin_full_access`.
+ * Pin 7 measures THIS module's footprint, so its principal must not reach the
+ * Default Organization read: that answer has its own per-engine memo (#24523),
+ * which wires its own write observer onto a seamful engine and serves the
+ * second resolution's `sys_organization` read — not the grants cache's doing.
+ */
+function memberTables(): Record<string, any[]> {
+  return {
+    ...adminTables(),
+    sys_user_permission_set: [
+      { user_id: 'u1', permission_set_id: 'ps_tools', permission_set: 'org_tools', organization_id: 'org_a' },
+    ],
+    sys_permission_set: [{ id: 'ps_tools', name: 'org_tools', system_permissions: ['export_reports'] }],
   };
 }
 
@@ -184,8 +205,10 @@ async function resolveExpectingZeroReads(ql: SeamQl, userId: string, opts: Resol
 
 describe('pin 7 — TTL 0 (the shipped default) is a real off path', () => {
   it('default config: resolves twice with the SAME query multiset, and wires NOTHING onto the engine', async () => {
-    const ql = makeSeamQl(adminTables());
+    const ql = makeSeamQl(memberTables());
     const first = await resolveUserAuthzGrants(ql, 'u1', OPTS);
+    // Not vacuous: the grant really resolved.
+    expect(first.permissions).toContain('org_tools');
     const afterFirst = ql.calls.length;
     const second = await resolveUserAuthzGrants(ql, 'u1', OPTS);
 
@@ -203,7 +226,7 @@ describe('pin 7 — TTL 0 (the shipped default) is a real off path', () => {
 
   it('explicit OS_AUTHZ_GRANTS_CACHE_TTL_MS=0 takes the same off path', async () => {
     process.env[TTL_ENV] = '0';
-    const ql = makeSeamQl(adminTables());
+    const ql = makeSeamQl(memberTables());
     await resolveUserAuthzGrants(ql, 'u1', OPTS);
     const afterFirst = ql.calls.length;
     await resolveUserAuthzGrants(ql, 'u1', OPTS);
@@ -287,7 +310,7 @@ describe('pin 2 — read-after-write on the writing node (invalidation, not TTL)
     expect(before.permissions).not.toContain('admin_full_access');
 
     await ql.insert('sys_user_permission_set', {
-      user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null,
+      user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: 'org_default',
     });
 
     const after = await resolveUserAuthzGrants(ql, 'u1', OPTS);
@@ -550,7 +573,7 @@ describe('pin 9 — two nodes over one database', () => {
 // ── [#20515] the no-tenant rule holds with the cache ON ─────────────────────
 
 describe('[#20515] with the cache on, a no-tenant resolution never serves an organization\'s grants', () => {
-  /** One grant scoped to `org_a`, one global. */
+  /** One grant scoped to `org_a`, one organization-less (which applies nowhere). */
   function scopedTables(): Record<string, any[]> {
     return {
       sys_user: [{ id: 'u1', email: 'u1@x.com' }],
@@ -558,11 +581,11 @@ describe('[#20515] with the cache on, a no-tenant resolution never serves an org
       sys_user_position: [],
       sys_user_permission_set: [
         { user_id: 'u1', permission_set_id: 'ps_org', permission_set: 'org_a_editors', organization_id: 'org_a' },
-        { user_id: 'u1', permission_set_id: 'ps_global', permission_set: 'everyone_readers', organization_id: null },
+        { user_id: 'u1', permission_set_id: 'ps_orgless', permission_set: 'orgless_readers', organization_id: null },
       ],
       sys_permission_set: [
         { id: 'ps_org', name: 'org_a_editors', system_permissions: ['manage_metadata'] },
-        { id: 'ps_global', name: 'everyone_readers' },
+        { id: 'ps_orgless', name: 'orgless_readers' },
       ],
       sys_position: [],
       sys_position_permission_set: [],
@@ -575,8 +598,11 @@ describe('[#20515] with the cache on, a no-tenant resolution never serves an org
 
     const inOrg = await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'org_a', nowMs: T });
     expect(inOrg.systemPermissions).toContain('manage_metadata');
+    // The organization-less row applies in no organization, the active one included.
+    expect(inOrg.permissions).toEqual(['org_a_editors']);
     const orgless = await resolveUserAuthzGrants(ql, 'u1', { nowMs: T });
-    expect(orgless.permissions).toEqual(['everyone_readers']);
+    // With no tenant, no stored grant applies — the organization-less row neither.
+    expect(orgless.permissions).toEqual([]);
     expect(orgless.systemPermissions).not.toContain('manage_metadata');
 
     // Both entries are now cached, each under its own tenant — and each hit

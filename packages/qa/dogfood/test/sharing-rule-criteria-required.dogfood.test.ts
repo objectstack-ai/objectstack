@@ -134,16 +134,26 @@ describe('#3896 — a sharing rule POSTed without criteria is rejected, never ma
     // defense-in-depth the flip bought. A true legacy row predates all of it:
     // write it at the DRIVER seam, the same level a pre-gate deployment's
     // storage actually holds it.
+    //
+    // The row carries the organization the admin acts in. That is the shape a
+    // pre-gate row has once the organization-ownership upgrade ceremony has
+    // attributed it (ADR-0131 D10), and the only shape a certified deployment
+    // holds. A row with no organization is one no admin read resolves any more
+    // (ADR-0131 D1/D8: the caller's own organization only), so `evaluate`
+    // would answer 404 before the criteria guard this case pins is reached.
+    // The organization is read off the admin's own session, the field the
+    // request context of the `evaluate` call below is resolved from.
+    const me = await stack.apiAs(admin, 'GET', '/auth/get-session');
+    expect(me.status, 'get-session answers for the admin').toBe(200);
+    const organizationId = ((await me.json()) as { session?: { activeOrganizationId?: string | null } })
+      .session?.activeOrganizationId;
+    expect(organizationId, 'the admin acts in an organization').toMatch(/^\S+$/);
+
     const id = 'srule_3896_legacy';
     const driver = (ql as any).getDriverForObject('sys_sharing_rule');
     expect(driver, 'sys_sharing_rule driver must be resolvable').toBeTruthy();
-    // The legacy row belongs to the install's organization, as every row does
-    // since the ownership ceremony (ADR-0131 D1): its missing criteria is the
-    // subject here, not its owner.
-    const [organization] = (await ql.find('sys_organization', { context: SYS })) as Array<{ id: string }>;
     await driver.create('sys_sharing_rule', {
       id,
-      organization_id: organization.id,
       name: 'legacy_match_all_3896',
       label: 'Legacy match-all',
       object_name: OBJECT,
@@ -152,6 +162,7 @@ describe('#3896 — a sharing rule POSTed without criteria is rejected, never ma
       recipient_id: 'sales_rep',
       access_level: 'read',
       active: true,
+      organization_id: organizationId,
     });
 
     const res = await stack.apiAs(admin, 'POST', `${RULES}/${id}/evaluate`, {});

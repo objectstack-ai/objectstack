@@ -249,13 +249,15 @@ describe('#10349 — through AuthManager.handleRequest on the real vendor pipeli
     const adminId = idFor('padmin.10349@example.com');
     const targetId = idFor('target.10349@example.com');
 
-    // ADR-0068 D2 grant — deliberately NOT the legacy `role` scalar.
+    // ADR-0068 D2 grant — deliberately NOT the legacy `role` scalar — owned by
+    // the Default Organization, the only owner whose grant anchors standing.
+    await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' });
     await engine.insert('sys_permission_set', { id: PS_ADMIN, name: ADMIN_FULL_ACCESS });
     await engine.insert('sys_user_permission_set', {
       user_id: adminId,
       permission_set_id: PS_ADMIN,
       permission_set: 'admin_full_access',
-      organization_id: null,
+      organization_id: 'org_default',
     });
 
     const signIn = await post(manager, '/sign-in/email', {

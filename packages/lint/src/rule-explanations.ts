@@ -2695,8 +2695,9 @@ const UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION: RuleExplanation = {
       'predates the scope vocabulary (ADR-0120 S6). It reads as "unique per organization" but ' +
       'materializes as a plain composite, and SQL UNIQUE is NULL-distinct: it enforces nothing on a ' +
       'row whose organization column is NULL — every row a 17.x single-organization deployment ' +
-      'wrote. Since ADR-0131 D9 a new row carries its organization, so what the gap still admits is ' +
-      'that residue.',
+      'wrote. Since ADR-0131 D9 a new row carries its organization wherever the organization object ' +
+      'is registered, so what the gap still admits there is that residue; a composition that ' +
+      'registers no organization object still writes rows whose organization column is NULL.',
     'Respelled `unique: \'organization\'`, the NULL rows become one bucket ' +
       '(`COALESCE(organization_id, \'__global__\')`) that is unique among themselves, which is what ' +
       'closes the hole. The respelling keeps `fields` exactly as they are: the driver makes the listed ' +
@@ -3122,7 +3123,7 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
   paragraphs: [
     // The positions are held to `listViewWalkedPositions()` by the rule's test.
     'Every field a list view names must be a field of its bound object: its `columns` (and a ' +
-      'column\'s `summary` and `prefix`), `filterableFields`, `hiddenFields`, `fieldOrder`, ' +
+      'column\'s `summary` and `prefix`), `hiddenFields`, `fieldOrder`, ' +
       '`grouping`, `rowColor` and `userFilters`, the keys of its `filter` and of each ' +
       '`userFilters.tabs[].filter`, and every binding inside a `kanban`, `calendar`, `gantt`, ' +
       '`timeline`, `gallery`, `map` or `tree` block. Nothing resolves the name at render time: the ' +
@@ -3159,7 +3160,7 @@ const LIST_VIEW_FIELD_DOTTED_EXPLANATION: RuleExplanation = {
       'dotted entry whatever its head (`assertProjectionHasNoDottedPaths` on the engine boundary, ' +
       '`assertProjectionFieldsExist` at the REST ingress, both `400 INVALID_FIELD`), so the view\'s ' +
       'FIRST fetch is refused, not rendered.',
-    'Filter: the view\'s `filter`, its `userFilters.tabs[].filter`, `filterableFields` and ' +
+    'Filter: the view\'s `filter`, its `userFilters.tabs[].filter` and ' +
       '`userFilters.fields` are judged by the head\'s class, through the classifier the door ' +
       'itself uses (`classifyDottedFilterHead`). A relation head stores the related record\'s id, ' +
       'not an embedded document; a virtual head is computed on read, so no driver materialises a ' +

@@ -124,9 +124,12 @@ function callerOrganizationId(context: any): string | undefined {
  * Does a `sys_user_position` row take effect in `organizationId`?
  *
  * The runtime resolver's own answer (`resolveAuthzContext` step 4, in
- * `@objectstack/core`): a holding stamped with a DIFFERENT organization grants
- * nothing there; an organization-less holding grants in every organization;
- * `organizationId` undefined (a context carrying no organization) drops nothing.
+ * `@objectstack/core`, `grantAppliesInTenant`): a holding takes effect only in
+ * its OWN organization. A holding stamped with a different organization grants
+ * nothing here; an organization-less holding grants nowhere — the 18.0
+ * ownership ceremony (ADR-0131 D10) attributes every such row before an
+ * upgraded database boots, so one is invalid state, not a "global" holding;
+ * and a context carrying no organization holds nothing.
  *
  * Every holding the gate reasons about goes through this, because
  * `sys_user_position.position` is a position NAME, the same string in every
@@ -134,13 +137,12 @@ function callerOrganizationId(context: any): string | undefined {
  * a walled posture another organization's holding of the position is the same
  * string. The
  * gate must count exactly the holdings the runtime grants: counting another
- * organization's lets a user self-delegate a position they do not hold there;
- * dropping organization-less ones refuses holdings the runtime honours.
+ * organization's, or one the runtime reads as belonging to none, lets a user
+ * self-delegate a position they do not hold there.
  */
 function holdingTakesEffectIn(row: any, organizationId?: string): boolean {
-  if (!organizationId) return true;
   const org = rowOrganizationId(row);
-  return !org || org === organizationId;
+  return !!organizationId && !!org && org === organizationId;
 }
 
 /** Coerce a stored timestamp to epoch ms; undefined = absent, NaN = unparseable. */
@@ -716,9 +718,8 @@ export class DelegatedAdminGate {
    * `sys_user_permission_set` rows of the caller's own organization: an insert,
    * or a delete of one row by id. A row inserted with no organization is
    * stamped with the caller's here, once admitted, so the right never mints an
-   * organization-less grant (one that applies in every organization); a row
-   * naming another organization, or a removal of an organization-less or
-   * foreign row, is refused. That the row's user is a member of the
+   * organization-less grant; a row naming another organization, or a removal
+   * of a row that is not the caller's organization's, is refused. That the row's user is a member of the
    * organization is judged for every writer by the grant-holder membership
    * hooks (`grant-holder-membership-refusal.ts`), not again here.
    *
@@ -756,7 +757,7 @@ export class DelegatedAdminGate {
         return {
           reason: rowOrg
             ? `the row belongs to organization '${rowOrg}', not the one you administer`
-            : 'the existing row carries no organization — it applies in every organization, so only a platform administrator may remove it',
+            : 'the row carries no organization, so it is not one of the organization you administer',
           meta: { organizationId: rowOrg },
         };
       }
@@ -1296,12 +1297,12 @@ export class DelegatedAdminGate {
    *    `{ isSystem: true }`;
    * 2. the candidates that come back are reduced to the caller's OWN row by
    *    {@link resolveOwnOrganizationRow}. That arm is load-bearing on its own:
-   *    the driver's compatibility arm deliberately also returns
-   *    organization-less rows, and a driver with no tenant scoping at all
-   *    returns every organization's. Under a walled posture an
+   *    a driver with no native tenant scoping returns every organization's
+   *    rows, organization-less ones included (the SQL driver's NULL arm, which
+   *    also returned organization-less rows, is retired — ADR-0131 D8), and an
    *    organization-less business unit is invalid state
-   *    (`organization-scope.ts`), so neither class may answer a
-   *    delegation boundary.
+   *    (`organization-scope.ts`), so neither class may answer a delegation
+   *    boundary.
    *
    * Fail closed on both axes: a name that resolves to no row of the caller's
    * own organization approves nothing, exactly as a misconfigured scope does.

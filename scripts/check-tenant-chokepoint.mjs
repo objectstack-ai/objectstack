@@ -8,17 +8,27 @@
  *
  * `SqlDriver.applyTenantScope()` is the single chokepoint for read-side tenant
  * isolation in the SQL driver: it owns the `tenantId` early-out, the
- * "object has no tenant field" early-out, the NULL-org platform-row rule
- * (#2734) and the ADR-0105 D2 union posture (#3623). A read door that builds
- * its own query and never arrives there is not "inconsistent" — it returns
- * other tenants' data to a caller that asked to be scoped.
+ * "object has no tenant field" early-out, the one tenant predicate
+ * (`tenant_column = :tenant`, ADR-0131 D8) and the ADR-0105 D2 union posture
+ * (`tenant_column IN (:tenants)`). A read door that builds its own query and
+ * never arrives there is not "inconsistent" — it returns other tenants' data
+ * to a caller that asked to be scoped.
  *
- * So: **a method that builds through `this.getBuilder(object, options)` and
- * lets that builder escape as a READ must call `this.applyTenantScope()` on
- * it.** Write builders are exempt and the exemption is structural, not a
- * name list — insert-side tenancy is a different mechanism
- * (`injectTenantOnInsert` stamps the column), so a builder whose only escape
- * is `.insert(...)` is correct without this call.
+ * So, two rules:
+ *
+ *   1. **A method that builds through `this.getBuilder(object, options)` and
+ *      lets that builder escape as a READ must call `this.applyTenantScope()`
+ *      on it.** Write builders are exempt and the exemption is structural, not
+ *      a name list — insert-side tenancy is a different mechanism
+ *      (`injectTenantOnInsert` stamps the column), so a builder whose only
+ *      escape is `.insert(...)` is correct without this call.
+ *   2. **No `IS NULL` arm on a tenant column (ADR-0131 D8).** NULL is not an
+ *      owner (D1): an organization-less row is no tenant's, so no tenant
+ *      predicate may reach it. The v17 predicate carried an
+ *      `OR tenant_column IS NULL` arm under which such a row stood for
+ *      platform state; ADR-0131 retired that reading, and this rule keeps the
+ *      arm from coming back — in `applyTenantScope` or anywhere else in the
+ *      three driver files. See "The D8 null-arm rule" below.
  *
  * ## Why the gate exists, and what it already caught
  *
@@ -103,9 +113,44 @@
  *     there; only the fixture proves it works.** Neither is redundant, and a
  *     change that keeps this green must still keep that file green.
  *
+ * ## The D8 null-arm rule
+ *
+ * ADR-0131 D8: "`check-tenant-chokepoint` refuses an `IS NULL` arm on a tenant
+ * column." A TENANT COLUMN REFERENCE, inside any class member of the scanned
+ * files, is one of:
+ *
+ *   - a local bound to `this.resolveTenantField(…)`, `this.computeTenantField(…)`
+ *     or `this.computeAndRecordTenantField(…)` (how `applyTenantScope` spells
+ *     it: `const field = this.resolveTenantField(object)`);
+ *   - anything NAMED `tenantField` — a local, a parameter, or a member such as
+ *     `reservation.tenantField` (the sequence-counter paths);
+ *   - the literal `'organization_id'`, the canonical tenant column.
+ *
+ * An ARM on it is refused in each spelling Knex compiles to `IS NULL`:
+ * `whereNull` / `orWhereNull` / `andWhereNull`; a `where` / `orWhere` /
+ * `andWhere` with a `null` comparand (`where(field, null)`,
+ * `where(field, 'is', null)`); an object-form `where({ [field]: null })`; and
+ * a raw fragment (`whereRaw`, `orWhereRaw`, `andWhereRaw`, `havingRaw`, `raw`)
+ * whose own literal text says `IS NULL` and that names the column — as a
+ * template substitution, as a binding in its bindings array, or literally.
+ * `IS NOT NULL` is not an arm and is never refused.
+ *
+ * Exemptions: none (`NULL_ARM_EXEMPT` is empty), and the rule needs none on
+ * `main`. One NULL disjunct survives in the platform BY DESIGN and is outside
+ * this rule on purpose: the `sys_audit_log.tenant_id` attribution partition
+ * read by `LifecycleService`. That column is an ADR-0131 D7 attribution
+ * field, not a D8 tenant column, and it lives outside the driver files this
+ * gate scans.
+ *
+ * What it does NOT see, named: a raw SQL string assembled into a variable
+ * first and passed by name, and a tenant column reached under a name not
+ * listed above. The gate refuses the spellings the driver actually uses;
+ * `sql-driver-tenant-scope-read-doors.test.ts` proves the compiled predicate.
+ *
  *   node scripts/check-tenant-chokepoint.mjs [--self-test]
  *
- * Exit codes: 0 clean · 1 an unscoped read door · 2 the scan could not run
+ * Exit codes: 0 clean · 1 an unscoped read door, or an `IS NULL` arm on a
+ * tenant column · 2 the scan could not run
  * (no class found, a builder it cannot classify, or a DISCOVERED floor missed).
  */
 
@@ -165,6 +210,14 @@ const DECLARED_WATCH_HINTS = [
  * ordinary edits do not trip it, and high enough that a broken matcher does.
  */
 const DISCOVERED_FLOOR = 15;
+
+/**
+ * The same floor for the D8 null-arm rule: tenant-column predicates it must
+ * RECOGNISE (`where` / `whereIn` on a tenant column reference — 4 on `main`,
+ * `applyTenantScope`'s two among them). Below today's count, above zero: a
+ * rule that stops recognising the tenant column refuses nothing.
+ */
+const TENANT_PREDICATE_FLOOR = 3;
 
 /**
  * `'<file>::<method>::<binding>'` -> reason a reader can check.
@@ -239,6 +292,201 @@ function isScoped(body, name) {
   };
   walk(body);
   return found;
+}
+
+// ── The D8 null-arm rule ────────────────────────────────────────────────────
+
+/** The calls that answer "which column is this object's tenant column". */
+const TENANT_FIELD_RESOLVERS = new Set(['resolveTenantField', 'computeTenantField', 'computeAndRecordTenantField']);
+/** A name that IS a tenant column wherever it appears — local, parameter or member. */
+const TENANT_FIELD_NAME = 'tenantField';
+/** The canonical tenant column, written as a literal. */
+const TENANT_COLUMN_LITERAL = 'organization_id';
+
+const NULL_CALLS = new Set(['whereNull', 'orWhereNull', 'andWhereNull']);
+const WHERE_CALLS = new Set(['where', 'orWhere', 'andWhere']);
+const RAW_CALLS = new Set(['whereRaw', 'orWhereRaw', 'andWhereRaw', 'havingRaw', 'raw']);
+/** The calls a tenant predicate is written with — counted for the floor, never refused. */
+const TENANT_PREDICATE_CALLS = new Set(['where', 'whereIn']);
+/** `IS NULL`, never `IS NOT NULL` — the latter is not an arm. */
+const IS_NULL_TEXT = /\bis\s+null\b/i;
+
+/**
+ * `'<file>::<method>'` -> reason a reader can check. Empty by design: the rule
+ * needs no exemption on `main`, and an entry is a decision against ADR-0131
+ * D8 that a superseding ADR has to make first.
+ */
+const NULL_ARM_EXEMPT = Object.create(null);
+
+function isNullLiteral(node) {
+  return node && node.kind === ts.SyntaxKind.NullKeyword;
+}
+
+/** Locals in `body` bound to a tenant-field resolver call. */
+function tenantBindings(body) {
+  const names = new Set();
+  const callsResolver = (node) => {
+    let hit = false;
+    const walk = (n) => {
+      if (hit) return;
+      if (
+        ts.isCallExpression(n) &&
+        ts.isPropertyAccessExpression(n.expression) &&
+        n.expression.expression.kind === ts.SyntaxKind.ThisKeyword &&
+        TENANT_FIELD_RESOLVERS.has(n.expression.name.text)
+      ) {
+        hit = true;
+        return;
+      }
+      ts.forEachChild(n, walk);
+    };
+    walk(node);
+    return hit;
+  };
+  const walk = (node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && callsResolver(node.initializer)) {
+      names.add(node.name.text);
+    }
+    ts.forEachChild(node, walk);
+  };
+  walk(body);
+  return names;
+}
+
+/** Is `node` a tenant column reference, as the header defines one? */
+function isTenantRef(node, bindings) {
+  if (!node) return false;
+  if (ts.isParenthesizedExpression(node) || ts.isNonNullExpression(node) || ts.isAsExpression(node)) {
+    return isTenantRef(node.expression, bindings);
+  }
+  if (ts.isIdentifier(node)) return node.text === TENANT_FIELD_NAME || bindings.has(node.text);
+  if (ts.isPropertyAccessExpression(node)) return node.name.text === TENANT_FIELD_NAME;
+  if (ts.isStringLiteralLike(node)) return node.text === TENANT_COLUMN_LITERAL;
+  // `String(field)` — the driver threads values through `String()` elsewhere.
+  if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'String') {
+    return isTenantRef(node.arguments[0], bindings);
+  }
+  return false;
+}
+
+/** The literal text of a raw fragment, and the expressions substituted into it. */
+function rawParts(node) {
+  if (!node) return null;
+  if (ts.isStringLiteralLike(node)) return { text: node.text, spans: [] };
+  if (ts.isTemplateExpression(node)) {
+    return {
+      text: node.head.text + node.templateSpans.map((s) => ` ${s.literal.text}`).join(''),
+      spans: node.templateSpans.map((s) => s.expression),
+    };
+  }
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const l = rawParts(node.left) ?? { text: '', spans: [node.left] };
+    const r = rawParts(node.right) ?? { text: '', spans: [node.right] };
+    return { text: `${l.text} ${r.text}`, spans: [...l.spans, ...r.spans] };
+  }
+  return null;
+}
+
+/** The spelling of a refused arm, or null when `call` is not one. */
+function nullArmOf(call, bindings) {
+  if (!ts.isPropertyAccessExpression(call.expression)) return null;
+  const verb = call.expression.name.text;
+  const args = call.arguments;
+  if (NULL_CALLS.has(verb) && isTenantRef(args[0], bindings)) return `${verb}(<tenant column>)`;
+  if (WHERE_CALLS.has(verb)) {
+    if (args.length >= 2 && isTenantRef(args[0], bindings) && isNullLiteral(args[args.length - 1])) {
+      return `${verb}(<tenant column>, …null)`;
+    }
+    const obj = args[0];
+    if (args.length === 1 && obj && ts.isObjectLiteralExpression(obj)) {
+      for (const p of obj.properties) {
+        if (!ts.isPropertyAssignment(p) || !isNullLiteral(p.initializer)) continue;
+        const key = ts.isComputedPropertyName(p.name)
+          ? isTenantRef(p.name.expression, bindings)
+          : (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) && p.name.text === TENANT_COLUMN_LITERAL;
+        if (key) return `${verb}({ <tenant column>: null })`;
+      }
+    }
+  }
+  if (RAW_CALLS.has(verb)) {
+    const parts = rawParts(args[0]);
+    if (parts && IS_NULL_TEXT.test(parts.text)) {
+      const bound = args[1] && ts.isArrayLiteralExpression(args[1]) && args[1].elements.some((e) => isTenantRef(e, bindings));
+      const named =
+        parts.spans.some((e) => isTenantRef(e, bindings)) ||
+        new RegExp(`\\b${TENANT_COLUMN_LITERAL}\\b`).test(parts.text);
+      if (bound || named) return `${verb}('… <tenant column> IS NULL …')`;
+    }
+  }
+  return null;
+}
+
+/** The name an outermost container (method, accessor, function, property) is reported under. */
+function containerName(node) {
+  if (ts.isConstructorDeclaration(node)) return 'constructor';
+  if (
+    (ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node) ||
+      ts.isFunctionDeclaration(node) || (ts.isPropertyDeclaration(node) && node.initializer)) &&
+    node.name
+  ) {
+    return ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name) ? node.name.text : node.name.getText();
+  }
+  if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer &&
+      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) {
+    return node.name.text;
+  }
+  return null;
+}
+
+/**
+ * Every refused arm in one source file — every class member AND every
+ * module-level function, so a helper outside the class is no hiding place.
+ * Tenant bindings are scoped to the outermost container they are declared in:
+ * a `field` that is the tenant column in `applyTenantScope` is not the tenant
+ * column in the filter compiler that also names a local `field`.
+ */
+export function nullArmsOf(fileName, text) {
+  const sf = parseSourceFile(fileName, text);
+  const arms = [];
+  // Tenant-column predicates the rule SAW (`where` / `whereIn` on a tenant
+  // column reference). The floor in main() reads this: a matcher that stops
+  // recognising the tenant column refuses nothing and still reports clean.
+  let predicates = 0;
+  const walk = (node, ctx) => {
+    let here = ctx;
+    if (!ctx) {
+      const name = containerName(node);
+      if (name) here = { name, bindings: tenantBindings(node) };
+    }
+    if (ts.isCallExpression(node)) {
+      const bindings = here?.bindings ?? new Set();
+      if (
+        ts.isPropertyAccessExpression(node.expression) &&
+        TENANT_PREDICATE_CALLS.has(node.expression.name.text) &&
+        isTenantRef(node.arguments[0], bindings)
+      ) {
+        predicates += 1;
+      }
+      const shape = nullArmOf(node, bindings);
+      if (shape) {
+        arms.push({
+          method: here?.name ?? '(module scope)',
+          line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+          shape,
+        });
+      }
+    }
+    ts.forEachChild(node, (child) => walk(child, here));
+  };
+  walk(sf, null);
+  return { arms, predicates };
+}
+
+/** The D8 verdict as a pure function of the arms found. Self-testable. */
+export function nullArmViolationsOf(file, arms, exempt = NULL_ARM_EXEMPT) {
+  return arms
+    .filter((a) => !exempt[`${file}::${a.method}`])
+    .map((a) => ({ fatal: false, nullArm: true, text: `${file}:${a.line}  ${a.method}() — ${a.shape}` }));
 }
 
 /**
@@ -381,11 +629,12 @@ const SELF_TEST_VERDICT = 'check-tenant-chokepoint self-test reached its verdict
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'check-tenant-chokepoint self-test': 17,
+  'D8 null-arm rule': 22,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 1;
+const SELF_TEST_BATTERY_FLOOR = 2;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -556,7 +805,144 @@ function selfTest() {
     assert(builders.length === 0, 'the empty fixture must discover no builders');
   }
 
+  // ── the D8 null-arm rule: every spelling reports, its counterpart stays silent
+  battery('D8 null-arm rule');
+  const arms = (src) => nullArmsOf('t.ts', wrap(src)).arms;
+  const nullArmReports = [
+    [
+      'the retired v17 arm itself, inside the chokepoint',
+      `applyTenantScope(builder, object, options) {
+         const field = this.resolveTenantField(object);
+         if (!field) return builder;
+         return builder.where((qb) => qb.where(field, String(options.tenantId)).orWhereNull(field));
+       }`,
+    ],
+    [
+      'whereNull on a parameter named tenantField',
+      `nextValue(table, tenantField, tenantId) { return this.knex(table).whereNull(tenantField); }`,
+    ],
+    [
+      'andWhereNull on a member named tenantField',
+      `reserve(reservation) { return this.knex(reservation.table).andWhereNull(reservation.tenantField); }`,
+    ],
+    [
+      'the literal tenant column',
+      `scan(table) { return this.knex(table).orWhereNull('organization_id'); }`,
+    ],
+    [
+      'a null comparand — Knex compiles where(col, null) to IS NULL',
+      `scope(builder, object) {
+         const f = this.resolveTenantField(object);
+         return builder.orWhere(f, null);
+       }`,
+    ],
+    [
+      "the three-argument form, where(col, 'is', null)",
+      `scope(builder, object) {
+         const f = this.computeTenantField(object);
+         return builder.orWhere(f, 'is', null);
+       }`,
+    ],
+    [
+      'the object form with a computed tenant key',
+      `scope(builder, object) {
+         const f = this.resolveTenantField(object);
+         return builder.orWhere({ [f]: null });
+       }`,
+    ],
+    [
+      'a raw fragment substituting the tenant column',
+      'scope(builder, object) { const f = this.resolveTenantField(object); return builder.orWhereRaw(`${f} is null`); }',
+    ],
+    [
+      'a raw fragment binding the tenant column',
+      `scope(builder, object) {
+         const f = this.resolveTenantField(object);
+         return builder.whereRaw('(?? = ? OR ?? IS NULL)', [f, 'org', f]);
+       }`,
+    ],
+    [
+      'a raw fragment naming the literal tenant column',
+      `census(table) { return this.knex.raw('select * from ?? where organization_id is null', [table]); }`,
+    ],
+    [
+      'a module-level helper outside the class is no hiding place',
+      `x() {}
+       }
+       function widen(qb, tenantField) { return qb.orWhereNull(tenantField); }
+       class Tail {`,
+    ],
+  ];
+  for (const [name, src] of nullArmReports) {
+    assert(arms(src).length >= 1, `D8: expected an IS NULL arm report for: ${name}`);
+  }
+
+  const nullArmSilent = [
+    [
+      'the one predicate, as applyTenantScope spells it today',
+      `applyTenantScope(builder, object, options) {
+         const field = this.resolveTenantField(object);
+         if (!field) return builder;
+         return builder.where(field, String(options.tenantId));
+       }`,
+    ],
+    [
+      'IS NOT NULL on the tenant column is not an arm',
+      `scope(builder, object) {
+         const field = this.resolveTenantField(object);
+         return builder.whereNotNull(field).whereRaw('?? is not null', [field]);
+       }`,
+    ],
+    [
+      'whereNull on an ordinary column (the filter compiler)',
+      `compile(qb, field) { return qb.whereNull(field).orWhere(field, ''); }`,
+    ],
+    [
+      'a tenant binding does not leak into a sibling method that reuses the name',
+      `scope(builder, object) { const field = this.resolveTenantField(object); return builder.where(field, 'o'); }
+       compile(qb, field) { return qb.orWhereNull(field); }`,
+    ],
+    [
+      'a raw IS NULL over a non-tenant expression',
+      'negate(qb, expr, testSql) { return qb.whereRaw(`(${expr.sql} IS NULL OR ${testSql})`, expr.bindings); }',
+    ],
+    [
+      'a null comparand on an ordinary column',
+      `clear(qb) { return qb.where('deleted_at', null); }`,
+    ],
+  ];
+  for (const [name, src] of nullArmSilent) {
+    const found = arms(src);
+    assert(found.length === 0, `D8: expected NO arm report for: ${name} (got ${found.map((a) => a.shape).join('; ')})`);
+  }
+
+  // The predicate counter the floor reads must see the real predicate, and not
+  // count an ordinary column.
+  assert(
+    nullArmsOf('t.ts', wrap(nullArmSilent[0][1])).predicates === 1,
+    'D8: the one predicate must be counted for the TENANT_PREDICATE_FLOOR',
+  );
+  assert(
+    nullArmsOf('t.ts', wrap(nullArmSilent[5][1])).predicates === 0,
+    'D8: a predicate on an ordinary column must not be counted',
+  );
+
+  // The exemption channel is keyed to one file::method, and empty on main.
+  {
+    const found = arms(nullArmReports[0][1]);
+    assert(nullArmViolationsOf('t.ts', found).length === 1, 'D8: an arm reports without an exemption');
+    assert(
+      nullArmViolationsOf('t.ts', found, { 't.ts::applyTenantScope': 'because' }).length === 0,
+      'D8: a NULL_ARM_EXEMPT entry silences exactly its own method',
+    );
+    assert(
+      nullArmViolationsOf('t.ts', found, { 't.ts::other': 'because' }).length === 1,
+      'D8: an entry for another method must NOT silence this one',
+    );
+  }
+
   // ── the dispatch-gates population declaration ────────────────────────────
+  battery('check-tenant-chokepoint self-test');
   const scannedPosix = SCAN_FILES.map((f) => f.split(sep).join('/'));
   assert(
     scannedPosix.every((f) => DECLARED_WATCH_HINTS.includes(f)),
@@ -625,7 +1011,8 @@ function selfTest() {
   }
   console.log(
     `✓ check:tenant-chokepoint self-test: ${reports.length} reporting shape(s), ` +
-    `${silent.length} silent counterpart(s), fatal/exemption/floor channels proved in both directions.`,
+    `${silent.length} silent counterpart(s), fatal/exemption/floor channels proved in both directions; ` +
+    `D8 null-arm rule: ${nullArmReports.length} refused spelling(s), ${nullArmSilent.length} silent counterpart(s).`,
   );
 
   return SELF_TEST_VERDICT;
@@ -636,6 +1023,8 @@ function selfTest() {
 
 function main() {
   const problems = [];
+  const nullArms = [];
+  let tenantPredicates = 0;
   let discovered = 0;
   let scannedFiles = 0;
 
@@ -650,9 +1039,14 @@ function main() {
       process.exit(2);
     }
     scannedFiles += 1;
-    const analysis = analyzeSource(rel, readFileSync(abs, 'utf8'));
+    const text = readFileSync(abs, 'utf8');
+    const analysis = analyzeSource(rel, text);
     discovered += analysis.builders.length;
-    problems.push(...violationsOf(relative(ROOT, abs).replace(/\\/g, '/'), analysis));
+    const posix = relative(ROOT, abs).replace(/\\/g, '/');
+    problems.push(...violationsOf(posix, analysis));
+    const d8 = nullArmsOf(rel, text);
+    tenantPredicates += d8.predicates;
+    nullArms.push(...nullArmViolationsOf(posix, d8.arms));
   }
 
   if (discovered < DISCOVERED_FLOOR) {
@@ -662,6 +1056,17 @@ function main() {
       'A scan that stops matching reports "clean" while reading nothing (#4690). Either the\n' +
       'driver was refactored away from getBuilder() — in which case this gate needs rewriting\n' +
       'against the new constructor — or the matcher is broken. Both are errors, not passes.',
+    );
+    process.exit(2);
+  }
+
+  if (tenantPredicates < TENANT_PREDICATE_FLOOR) {
+    console.error(
+      `check:tenant-chokepoint: the D8 null-arm rule recognised only ${tenantPredicates} tenant-column ` +
+      `predicate(s) across ${scannedFiles} file(s), below the floor of ${TENANT_PREDICATE_FLOOR}.\n` +
+      'A rule that no longer recognises the tenant column refuses nothing and reports clean. Either\n' +
+      'the driver now names its tenant column some other way — teach isTenantRef() that spelling —\n' +
+      'or the matcher is broken. Both are errors, not passes.',
     );
     process.exit(2);
   }
@@ -683,28 +1088,50 @@ function main() {
     for (const p of problems) console.error(`  • ${p.text}`);
     console.error(`
 \`applyTenantScope\` is the single chokepoint for read-side tenant isolation: it owns
-the tenantId early-out, the no-tenant-field early-out, the NULL-org platform-row rule
-(#2734) and the ADR-0105 D2 union posture (#3623). A read door that skips it returns
-OTHER TENANTS' data to a caller that asked to be scoped — measured, not theoretical
-(#6792: three doors, one of them documented with a runnable example).
+the tenantId early-out, the no-tenant-field early-out, the one tenant predicate
+(tenant_column = :tenant, ADR-0131 D8) and the ADR-0105 D2 union posture
+(tenant_column IN (:tenants)). A read door that skips it returns OTHER TENANTS' data
+to a caller that asked to be scoped — measured, not theoretical: three such doors
+were found, one of them documented with a runnable example.
 
 Add the call beside the getBuilder() line, as every other door does:
 
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
 
-Do not re-derive the predicate locally — a bare equality silently drops NULL-org
-platform rows (#2734) and collapses the group posture to active-org reach (#3623).
+Do not re-derive the predicate locally — a local copy drifts from the one computed
+predicate, and an equality written where the group posture is in force collapses
+its union to active-org reach.
 
 If a door genuinely must build unscoped, add it to EXEMPT in
 scripts/check-tenant-chokepoint.mjs with a reason a reader can check. "The layer
 above catches it" is not one: this asserts the chokepoint's own contract.`);
-    process.exit(1);
   }
+
+  if (nullArms.length > 0) {
+    console.error(`✗ check:tenant-chokepoint: ${nullArms.length} IS NULL arm(s) on a tenant column\n`);
+    for (const p of nullArms) console.error(`  • ${p.text}`);
+    console.error(`
+ADR-0131 D8: no layer has a NULL arm. NULL is not an owner (D1) — an
+organization-less row belongs to no tenant, so no tenant predicate may reach it.
+The tenant predicate is \`tenant_column = :tenant\` (or \`IN (:tenants)\` under the
+group posture), and nothing else: an \`OR tenant_column IS NULL\` arm hands every
+tenant the rows no organization owns.
+
+Remove the arm. A row that should be readable by a tenant carries that tenant's
+organization; deployment-level state lives on an object with no tenant column (D7).
+Reading organization-less rows on purpose (a census, a repair) is not a tenant
+predicate: do it outside the driver's tenant scope, or record the exemption in
+NULL_ARM_EXEMPT in scripts/check-tenant-chokepoint.mjs — which reverses an ADR
+decision and needs a superseding ADR first.`);
+  }
+
+  if (problems.length > 0 || nullArms.length > 0) process.exit(1);
 
   console.log(
     `✓ check:tenant-chokepoint: ${discovered} ${BUILDER_FACTORY}() binding(s) across ${scannedFiles} ` +
-    'file(s); every read builder routes through applyTenantScope(), every unscoped one is an insert.',
+    'file(s); every read builder routes through applyTenantScope(), every unscoped one is an insert; ' +
+    'no IS NULL arm on a tenant column (ADR-0131 D8).',
   );
 }
 

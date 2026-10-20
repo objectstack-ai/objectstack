@@ -417,7 +417,7 @@
       "title": "Every approval action executes its REST route and produces the expected state transition plus a timeline entry",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["dev admin (pending approver on the seeded requests; submitter of the invoice request)"],
@@ -428,7 +428,8 @@
           "showcase_budget_approval's manager step declares the ADR-0044 revise loop (maxRevisions: 2) and lockRecord: false; its exec step (budget > 500000) declares NO revise edge and lockRecord: true — both sides of two gates in one flow"
         ],
         "knownGaps": [
-          "the ORG-LESS request the READ_BACK_FAILED clause needs arises only from schedule / time-relative / api-trigger runs, which open their requests with organization_id null by construction (#10131; #9132 pinned that behaviour rather than repairing it) — no seeded showcase flow opens one on demand, so that clause cannot be provisioned on stock seeds. QA run #21784 tried the api-trigger route and found even an api-hook approval org-stamped, so that candidate is refuted (parked on #22017 row 19). A schedule-triggered approval flow (scheduled work needs OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true) is the one untried candidate, not run-proven. The behaviour itself is unit-pinned (packages/plugins/plugin-approvals/src/approval-service.test.ts, the #12769 org-filtered read-back describe), and that pin is how acceptance[9] is scored. It proves the clause's verdict: the mutation lands, and the read-back throws READ_BACK_FAILED naming the request instead of a success with request:null, on recall, decide and comment alike, with org-less and org-matched controls. Only the wire envelope (the generic 500 APPROVAL_*_FAILED carrying that text) stays unobserved on stock: record it blocked(fixture) beside the pin's pass"
+          "the ORG-LESS request the READ_BACK_FAILED clause needs arises only from schedule / time-relative / api-trigger runs, which open their requests with organization_id null by construction (#10131; #9132 pinned that behaviour rather than repairing it) — no seeded showcase flow opens one on demand, so that clause cannot be provisioned on stock seeds. QA run #21784 tried the api-trigger route and found even an api-hook approval org-stamped, so that candidate is refuted (parked on #22017 row 19). A schedule-triggered approval flow (scheduled work needs OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true) is the one untried candidate, not run-proven. So on stock acceptance[9] is recorded blocked(fixture), citing this gap. Two pins sit beside that verdict as lower-layer evidence, never its pass (RUNNER rule 6, a pin scores only the layer it drives). packages/plugins/plugin-approvals/src/approval-service.test.ts's 'ApprovalService — org-filtered read-back refuses loudly (#12769)' describe drives the service over a fake engine: the mutation lands, and the read-back throws READ_BACK_FAILED naming the request instead of a success with request:null, on recall, decide and comment alike, with org-less and org-matched controls. packages/rest/src/rest-approvals-wire-codes.test.ts's 'an org-filtered read-back on approve answers 500 READ_BACK_FAILED — named, not the template fallback' drives the approve route handler over a mocked service",
+          "no pin scores a full clause of this item at its layer (RUNNER rule 6, a pin scores only the layer it drives), so the item carries no automated ref (acceptance[9]: knownGaps[0]). negative[1]'s throttle is pinned below the remind door only. approval-service.test.ts's 'remind: notifies pending approvers, audits, and throttles repeats' and 'remind: cool-down measures from the NEWEST reminder, not the first' assert that ApprovalService.remind throws THROTTLED on the second call, over a fake engine. packages/rest/src/rest-approvals-wire-codes.test.ts's 'remind inside the cool-down answers 429 THROTTLED — the contract-documented rejection' maps a mocked rejection to 429 THROTTLED at the route handler. 'A silent second success' is the remind POST's answer on a booted server, which neither drives, so the negative is driven by hand. automated may return when a pin drives a decision route, or the remind door, on a booted stack"
         ]
       },
       "variants": ["approve", "reject", "reassign", "revise (send-back)", "resubmit", "recall", "remind", "request-info", "comment"],
@@ -504,7 +505,7 @@
         {
           "clause": "the org-scope read-back gate (#12769, landed #13181): deciding a request whose row is invisible inside the caller's organization narrowing answers a LOUD named refusal — the decision IS recorded, only the echo is refused — never a well-formed 200 whose declared-non-null `request` is null on the wire",
           "oracle": "api",
-          "verify": "decide an ORG-LESS request (organization_id null — the shape every schedule / time-relative / api-trigger run mints, #10131) as an org-scoped caller the override gate admits (isOverrideActor: 'a null-org request is global and any admin may release it'): the wire answer is the 500 APPROVAL_<action>_FAILED envelope whose error text leads with READ_BACK_FAILED and names the remedy ('read the request back with a system or matching-organization context'); a follow-up re-read under a system/matching-org context shows the decision landed — status moved, the action row present, nothing rolled back. READ_BACK_FAILED is deliberately NOT in handleApprovalError's prefix map, so the generic 500 envelope carrying the named text is the designed shape, not a bug to file",
+          "verify": "decide an ORG-LESS request (organization_id null — the shape every schedule / time-relative / api-trigger run mints, #10131) as an org-scoped caller the override gate admits (isOverrideActor: 'a null-org request is global and any admin may release it'): the wire answer is 500 with code READ_BACK_FAILED and an error text, its prefix stripped, saying the write was recorded and naming the remedy ('read the request back with a system or matching-organization context'); a follow-up re-read under a system/matching-org context shows the decision landed — status moved, the action row present, nothing rolled back. READ_BACK_FAILED is a named 500 row of handleApprovalError's prefix map since 5b3ff63cc (packages/rest/src/approvals-routes.ts), beside RESUME_FAILED: the 500 is the designed status, not a bug to file",
           "evidence": "the refused decision response + the system-context re-read showing the recorded write"
         }
       ],
@@ -514,10 +515,6 @@
         "any action POST accepted from an actor the service should deny (wrong relationship to the request) is a FAIL even when the state happens to end up plausible"
       ],
       "traps": ["automation-input", "wrong-persona"],
-      "automated": {
-        "kind": "test",
-        "ref": "acceptance[9] (the READ_BACK_FAILED clause) ONLY: packages/plugins/plugin-approvals/src/approval-service.test.ts, describe 'ApprovalService — org-filtered read-back refuses loudly (#12769)'. The other clauses still need the run"
-      },
       "source": [
         "#3358 §1 (the action-table evidence this matrix grounds in)",
         "packages/rest/src/rest-route-ledger.ts (approve/reject/recall/revise/resubmit/reassign/remind/request-info/comment + GET /:id/actions)",
@@ -539,6 +536,12 @@
           "date": "2026-10-19",
           "change": "steps[7] and acceptance[1].verify corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24542, approvals.decision-action-matrix; wave anchor #24579 §3). steps[7] reminded 'the admin-submitted invoice request', which a shared boot's approvals.decision-only-via-service has already decided; any admin-submitted pending request serves, and the run used a budget request. acceptance[1] asked for 'the approve/reject edge taken', but end nodes log no step, so the run evidenced the reject by the absence of the approve edge's successor, the needs_exec decision node (examples/app-showcase/src/automation/flows/index.ts). The verify now names that discriminator. Clause text unchanged",
           "ref": "#24632"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "automated removed; fixtures.knownGaps[0] rewritten and fixtures.knownGaps[1] added; acceptance[9].verify's envelope corrected — QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: the sweep-wide rule-6 contradiction at approvals acceptance[9], and 'the pin also asserts negative[1]'), round 15 of wave anchor #24579. (1) The ref claimed acceptance[9] from approval-service.test.ts's #12769 describe, and knownGaps[0] said that pin is how acceptance[9] is scored. The pin drives ApprovalService over a fake engine, and the clause scores the wire answer, so by RUNNER rule 6 (a pin scores only the layer it drives) it is evidence beside a blocked(fixture) verdict. (2) Its throttle cases assert negative[1] at the service, and rest-approvals-wire-codes.test.ts maps THROTTLED to 429 over a mocked service; neither drives the remind door, so negative[1] joins no ref. (3) No full clause is pinned, so automated is dropped (theme-B rule). (4) Located while rewriting knownGaps[0]: acceptance[9].verify said READ_BACK_FAILED rides the generic template-generated 500 and is deliberately absent from handleApprovalError's prefix map. It has been a named 500 row there since 5b3ff63cc (packages/rest/src/approvals-routes.ts), pinned by rest-approvals-wire-codes.test.ts. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ]
     },

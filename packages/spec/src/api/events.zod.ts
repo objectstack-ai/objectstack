@@ -262,13 +262,15 @@ export const DataEventSchema = lazySchema(() => z.object({
    *    `@objectstack/spec/security`): there is no organization wall and
    *    nothing stamps the column, so EVERY event is organization-less;
    *  - a row that carries no organization under a walled posture (`group` /
-   *    `isolated`): an environment-wide row (`organization_id IS NULL`), or a
-   *    row of an object that stands outside the wall — `tenancy.enabled:
-   *    false` by declaration, or no `organization_id` column at all (the
-   *    identity tables).
+   *    `isolated`): a row of an object that stands outside the wall —
+   *    `tenancy.enabled: false` by declaration, or no `organization_id`
+   *    column at all (the identity tables, and the deployment-level state of
+   *    ADR-0131 D7). An organization-less row on a tenant table is not a
+   *    third case: ADR-0131 D1 makes it invalid state, and no tenant-scoped
+   *    read reaches it (D8).
    * In both, a consumer may read absence as "not behind any organization
-   * wall" — the reading it already gives an `organization_id IS NULL` row on
-   * the read path. It may NOT read absence as "unknown, resolve it yourself":
+   * wall" — the reading the read path gives a row of an object with no
+   * tenant column. It may NOT read absence as "unknown, resolve it yourself":
    * either the producer had the organization in hand or the record has none,
    * and a per-event lookup on the fan-out path is exactly the hot-path read
    * this member exists to make unnecessary.
