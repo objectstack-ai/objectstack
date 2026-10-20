@@ -3257,6 +3257,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-email/src/mail-test-recipient.pin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-email/src/mail-test-recipient.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-email/src/plugin-shutdown-detaches-template-bridge.test.ts",
       "verb": "update",
       "pinned": 1

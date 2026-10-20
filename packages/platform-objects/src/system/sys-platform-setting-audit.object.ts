@@ -12,8 +12,8 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Tenant and user rows stay in `sys_setting_audit`, each stamped with the
  * organization whose value changed.
  *
- * Same row shape as `sys_setting_audit`, so one reader reads both tables the
- * same way; `scope` is always `global` here.
+ * Same row shape as `sys_setting_audit`, so one reader reads either table the
+ * same way; `scope` is always `global` here, and never `global` there.
  *
  * ## No organization column, governed by object permission
  *
@@ -27,8 +27,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * ## The 18.0 rows
  *
  * An 18.0 install wrote its global-rung audit rows into `sys_setting_audit`,
- * stamped with the Default Organization. They stay there until the upgrade
- * ceremony moves them here; a reader of the global rung's history reads both.
+ * stamped with the Default Organization. The upgrade ceremony moves them here,
+ * id for id, before the database is certified (18.x step 5b), and the v18 boot
+ * guard refuses a database it has not certified — so the global rung's history
+ * is this table alone.
  *
  * Append-only: the settings audit writer is the only writer, and the generic
  * data API offers reads only.

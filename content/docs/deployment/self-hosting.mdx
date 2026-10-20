@@ -411,9 +411,16 @@ and keep three things in sync with the public origin:
 
 ```bash
 OS_AUTH_URL=https://app.example.com          # auth callbacks / cookie origin
-OS_TRUSTED_ORIGINS=https://app.example.com   # CORS allow-list
+OS_TRUSTED_ORIGINS=https://app.example.com   # auth callback / CSRF allow-list
 OS_PORT=8080                                 # must match the proxy upstream
 ```
+
+CORS needs no entry here: the Console and the API share the public origin,
+and with no `OS_CORS_ORIGIN` the server admits no cross-origin caller. Only a
+front-end served from **another** origin needs one, listed explicitly
+(`OS_CORS_ORIGIN=https://portal.example.com`, comma-separated for several) —
+never `*`, which the server refuses at boot while credentials are on. See
+[Environment variables → CORS](/docs/deployment/environment-variables#cors).
 
 ```text title="Caddyfile"
 app.example.com {
