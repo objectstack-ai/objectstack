@@ -38,7 +38,7 @@
             "edges": []
           },
           "expect": "2xx. The definition is deliberately AUTHORABLE-but-unexecutable: FlowSchema declares `nodes: z.array(FlowNodeSchema)` with no `.min(1)` and no refinement requiring a `start` member (packages/spec/src/automation/flow.zod.ts), and nothing rejects a start-less flow at publish, so this lands. It is the engine that refuses it at DISPATCH — `flow.nodes.find(n => n.type === 'start')` misses and execute() returns { success:false, code:'FLOW_NO_START_NODE' } (packages/services/service-automation/src/engine.ts). ⚠️ If a publish-time structural check lands later this step will start 4xx-ing — that is a FINDING about where the refusal moved, not a rotted recipe.",
-          "source": "flow is NOT in the org-overlay-allowed set (RUNNER.md's overlay fact — view/dashboard/report/translation/email_template only), so the `?package=` route is required exactly as qa-scratch-authz uses it for objects; `?package=` is read as query.package and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts,319)"
+          "source": "flow is NOT in the org-overlay-allowed set (RUNNER.md's overlay fact — view/dashboard/report/translation/email_template only), so the `?package=` route is required exactly as qa-scratch-authz uses it for objects; `?package=` is read as query.package and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts#handleMetadataRequest, its PUT /metadata/:type/:name save branch, through packages/rest/src/rest-server.ts#metaItemPackageBinding)"
         },
         {
           "step": 3,
@@ -1642,7 +1642,7 @@
       "title": "Disabling a packaged flow that packaged callers invoke as a subflow is refused 409 DELETE_RESTRICTED naming every caller; the refused attempt writes no ledger row; enabling the subflow itself is never guarded",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1713,7 +1713,7 @@
         "packages/services/service-automation/src/engine.ts#packagedSubflowCallers (packagedSubflowCallers — definition scan at disable time, subflow AND map via config.flowName, non-packaged and self skipped), (the guard, before the durable write; the thrown {code:'DELETE_RESTRICTED', status:409, subflowCallers})",
         "packages/spec/src/api/errors.zod.ts#DELETE_RESTRICTED (DELETE_RESTRICTED — standard 409 catalog member, no new code minted; its DELETE_ prefix fits per the #10243 ruling quoted at the throw site)",
         "packages/services/service-automation/src/flow-activation-ledger.test.ts#engine (the engine-level pins: names every caller, map counts, non-packaged and self do not guard, enable never guarded, no-callers lands)",
-        "examples/app-showcase/src/automation/flows/index.ts,707,795,816,1322,1339 (the three stock caller→child pairs)",
+        "examples/app-showcase/src/automation/flows/index.ts#TaskDoneNotifyOwnerFlow + examples/app-showcase/src/automation/flows/index.ts#ProjectClosureFlow + examples/app-showcase/src/automation/flows/index.ts#ReleaseSignoffFlow (the three stock caller→child pairs: each caller's subflow or map node names its child by config.flowName — showcase_notify_owner, showcase_closure_signoff and showcase_one_task_signoff)",
         "#12438 (sweep) · Epic #12150",
         "cross-ref: automation.packaged-flow-disable-durable (what a disable that LANDS must do); automation.setup-packaged-automation-board (the refusal rendered in the UI)"
       ],
@@ -1726,7 +1726,8 @@
         },
         { "revision": 2, "date": "2026-10-02", "change": "retired clause 5's expected-fail note and re-ordered step 6. The remedy sequence now holds (36d043b #20724, 0d9349f #20759): on 17.6.0 the caller's disable then the child's retry both answer 200 and the ledger reads active=false. Step 6's caller-first enable is refused by design since 679f95e (#20711, 409 RESOURCE_CONFLICT naming the disabled subflow), so the step enables the child first and clause 4 is scoped to a child's enable. Measured by the 17.6.0 release-verification run", "ref": "#21330" },
         { "revision": 3, "date": "2026-10-16", "change": "the 'still armed' probe patched a showcase_task to done without saying how to get there (#23878 automation slice finding 2, re-measured on main c91af8ed6): showcase_task requires `project` (a create without it answers 400 VALIDATION_FAILED 'Project is required'), and task_status_flow allows status→done only from in_review (a PATCH from the default backlog answers 400 invalid_transition). A create with project and status 'in_review' answers 201 (create is not transition-checked) and the PATCH to done answers 200, firing the record-change flows. Step 4 now creates the task with project and status 'in_review' first; on that path showcase_task_done_notify_owner ran and completed", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-19", "change": "acceptance[0].clause quotes the remedy the engine writes — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.packaged-flow-subflow-disable-refusal acceptance[0]; wave anchor #24579 §3): the remedy names the calling flow, so a substring match on the generic quote fails although the meaning is identical. Re-derived at base 9a7838edf5 (packages/services/service-automation/src/engine.ts, the subflow-caller refusal: 'disable the calling flow 'NAME' first' … ' — or leave this one armed.')", "ref": "#24649" }
+        { "revision": 4, "date": "2026-10-19", "change": "acceptance[0].clause quotes the remedy the engine writes — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.packaged-flow-subflow-disable-refusal acceptance[0]; wave anchor #24579 §3): the remedy names the calling flow, so a substring match on the generic quote fails although the meaning is identical. Re-derived at base 9a7838edf5 (packages/services/service-automation/src/engine.ts, the subflow-caller refusal: 'disable the calling flow 'NAME' first' … ' — or leave this one armed.')", "ref": "#24649" },
+        { "revision": 5, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[4] cited lines 707, 795, 816, 1322 and 1339 of the showcase flows index.ts in the comma-range spelling (authored in e0abc386a4 as the list 678 to 1339). At that commit those lines were the names and child flowName values of the three stock caller flows; at this base all of them have moved. source[4] now anchors the three callers, index.ts#TaskDoneNotifyOwnerFlow, #ProjectClosureFlow and #ReleaseSignoffFlow, and names each child in prose. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#PENDING-24579R9" }
       ]
     },
     {
@@ -1734,7 +1735,7 @@
       "title": "POST /automation/:name/clone: whole-definition copy mutating exactly name/label/status, protection envelope dropped, no ancestry, draft-but-armed (double-fire notice verbatim), 409/404/400 refusal arms — and the honest clause: the clone must survive a restart and reach Studio",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1780,7 +1781,7 @@
         {
           "clause": "the refusal arms answer their own status+code: same/taken name → 409 RESOURCE_CONFLICT with the shadow-rationale message suggesting a free name; unknown source → 404 RESOURCE_NOT_FOUND; an illegal machine name → 400 (the definition goes through registerFlow's own validation, one policy not two)",
           "oracle": "api",
-          "verify": "step 2's remaining arms: the 409 message explains WHY same-name clones are refused (engine keys flows by bare name — silent order-dependent shadowing, flowCloneNameTakenMessage flow-clone.ts) and suggests '<name>_copy'; 404 for the unknown source; 400 for 'Bad-Name!' (FlowSchema name regex ^[a-z_][a-z0-9_]*$, flow.zod.ts). Codes pinned at automation-flow-clone.test.ts,439",
+          "verify": "step 2's remaining arms: the 409 message explains WHY same-name clones are refused (engine keys flows by bare name — silent order-dependent shadowing, flowCloneNameTakenMessage flow-clone.ts) and suggests '<name>_copy'; 404 for the unknown source; 400 for 'Bad-Name!' (FlowSchema name regex ^[a-z_][a-z0-9_]*$, flow.zod.ts). Codes pinned in packages/runtime/src/domains/automation-flow-clone.test.ts#RESOURCE_CONFLICT and packages/runtime/src/domains/automation-flow-clone.test.ts#RESOURCE_NOT_FOUND (its same-name 409 cases and its unknown-source 404 case)",
           "evidence": "the three bodies (status + code + message)"
         },
         {
@@ -1832,7 +1833,8 @@
         },
         { "revision": 2, "date": "2026-10-02", "change": "clause 7's expected-fail note now names only the reachability half. The durability half was fixed by cb4c31d (#20907, with #20761): on 17.6.0 the clone survives a cold restart, reads back with its edited label and still fires (release-verification run). The reachability half still fails — no Studio surface lists a package-less flow — and is now filed as #21332 instead of resting on the #12438 sweep", "ref": "#21330" },
         { "revision": 3, "date": "2026-10-17", "change": "clause 6's reachability EXPECTED FAIL is stale (checklist-accuracy finding, automation slice report on #23878): objectui#11553 gave Studio an org scope whose Automations rail lists package-less flows, and #21332 closed as a duplicate. The verify now asserts the clone is listed and opens at /_console/studio/~org/automations, steps[7] drives it after the restart, and the objectui source line names the org scope and its pin. Re-run on main c91af8ed6 with the console at objectui f8267df93aba, file DB: POST …/showcase_urgent_task_alert/clone {name qa_urgent_alert_clone, label} → 200 status draft; the Organization flows rail listed 'QA urgent alert clone' and opened it (Trigger: Record created or updated · showcase_task, Enabled, no lock banner); after a cold restart over the same DB the GET answered 200, the rail listed and opened it again, and one urgent task create added one run to the clone (0 → 1) and one to the base (1 → 2); teardown DELETE → deleted true", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-19", "change": "acceptance[1] (clause, verify) counts the dropped keys the clone really drops — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.packaged-flow-clone-contract acceptance[1]; wave anchor #24579 §3): FLOW_CLONE_DROPPED_KEYS is 10, not 9, since packages/runtime/src/flow-clone.ts appends 'protection' (#23120, ADR-0010 §3.5) to the 2 read decorations and 7 protection fields. Re-derived at base 9a7838edf5", "ref": "#24649" }
+        { "revision": 4, "date": "2026-10-19", "change": "acceptance[1] (clause, verify) counts the dropped keys the clone really drops — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.packaged-flow-clone-contract acceptance[1]; wave anchor #24579 §3): FLOW_CLONE_DROPPED_KEYS is 10, not 9, since packages/runtime/src/flow-clone.ts appends 'protection' (#23120, ADR-0010 §3.5) to the 2 read decorations and 7 protection fields. Re-derived at base 9a7838edf5", "ref": "#24649" },
+        { "revision": 5, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[3].verify cited line 439 of automation-flow-clone.test.ts in the comma-range spelling (authored in e0abc386a4 as the list 368-401 and 439). Those lines are unchanged at this base: the same-name 409 cases and the unknown-source 404 assertion. The verify now anchors the two codes those cases assert, automation-flow-clone.test.ts#RESOURCE_CONFLICT and #RESOURCE_NOT_FOUND. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#PENDING-24579R9" }
       ]
     },
     {
@@ -1840,7 +1842,7 @@
       "title": "The Setup packaged-automation page: reachable from Setup nav, lists packaged flows + packaged actions, toggle persists, clone on flow rows only, no lineage surface, server refusals verbatim in role=alert",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1911,7 +1913,7 @@
         {
           "clause": "the clone dialog requires BOTH machine name and label before submit is possible, and a server-refused name surfaces legibly: the illegal-name 400 renders in the dialog's alert — record exactly what text arrives, because the per-field details[] are dropped client-side",
           "oracle": "dom",
-          "verify": "the submit control is disabled until both fields are non-empty (cloneNameValid, PackagedAutomationPage.tsx,529 — so the 'required' 400s of the API item are unreachable from this dialog); submitting 'Bad-Name!' round-trips the server 400 and the dialog alert (role=alert) shows the message actionErrorDetail extracted — details[] never reach the DOM, so if the rendered sentence does not state the ^[a-z_][a-z0-9_]*$ constraint legibly, record what DID render as the finding rather than inventing a pass. A legal clone then shows the server's post-clone notice verbatim",
+          "verify": "the submit control is disabled until both fields are non-empty (cloneNameValid, which disables the clone dialog's submit button in objectui PackagedAutomationPage.tsx — so the 'required' 400s of the API item are unreachable from this dialog); submitting 'Bad-Name!' round-trips the server 400 and the dialog alert (role=alert) shows the message actionErrorDetail extracted — details[] never reach the DOM, so if the rendered sentence does not state the ^[a-z_][a-z0-9_]*$ constraint legibly, record what DID render as the finding rather than inventing a pass. A legal clone then shows the server's post-clone notice verbatim",
           "evidence": "dialog screenshots: disabled submit, the 400 alert text, the post-clone notice"
         },
         {
@@ -1938,7 +1940,7 @@
       },
       "source": [
         "docs/adr/0126-packaged-metadata-customization-model.md §7.4 (the Setup surface: on/off + clone, authoring stays in Studio; ⛔ no drift/ancestry surface)",
-        "objectui packages/app-shell/src/views/setup/PackagedAutomationPage.tsx (529 clone-dialog validation,516 role=alert refusal rendering) + PackagedActionsSection.tsx (header: ⛔ no clone on actions) + packagedFlows.ts (isPackagedFlowItem + runtime-spine join)",
+        "objectui packages/app-shell/src/views/setup/PackagedAutomationPage.tsx (the clone dialog's validation — cloneNameValid, which disables its submit button — and its role=alert rendering of clone.refusal) + PackagedActionsSection.tsx (header: ⛔ no clone on actions) + packagedFlows.ts (isPackagedFlowItem + runtime-spine join)",
         "objectui packages/app-shell/src/services/builtinComponents.tsx (registerAppComponent ref 'automation:packaged') + views/ComponentNavView.tsx (ref resolution, no gate) + views/setup/PackagedAutomationPage.navContribution.test.tsx (ref→URL resolution — the mocked half of the nav clause)",
         "objectui packages/core/src/actions/actionErrorDetail.ts (error → error.message → message; details[] dropped)",
         "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_packaged_automation (nav_packaged_automation → componentRef 'automation:packaged', landed by #12457; the entry's comment records why it lives in platform-objects, not service-automation) + setup-packaged-automation-nav.test.ts (the framework-half pin)",
@@ -1972,6 +1974,12 @@
           "date": "2026-10-19",
           "change": "steps[2], steps[3] and acceptance[1].clause corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24545, automation.setup-packaged-automation-board steps[1] and acceptance[1] / steps[3]; wave anchor #24579 §3). The fallback URL was spelled with the app name where the sidebar lands on the package-id path, and \"every switch reads On\" did not exempt showcase_approver_bindings, authored status 'obsolete'. Re-derived at base 9a7838edf5: the engine reports a flow enabled: false when its status is obsolete (getFlowRuntimeStates, service-automation engine.ts)",
           "ref": "#24649"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[6].verify and source[1] cited objectui PackagedAutomationPage.tsx by the lines 529 and 516 in the comma-range spelling (authored in e0abc386a4; source[1]'s list also left a bare 529). At objectui 9602dc820450, the file's latest commit when the item was authored, 529 was the clone dialog's submit button disabled by cloneNameValid and 516 its role=alert rendering of clone.refusal; at the shipped pin 12dc7b47c340 both have moved. Each now names that code of the PackagedAutomationPage component. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#PENDING-24579R9"
         }
       ]
     },
