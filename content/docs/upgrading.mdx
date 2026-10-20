@@ -335,8 +335,8 @@ documentation](/docs/deployment/cli).
 
 ## Upgrading to 18.0
 
-18.0 is the first release that requires an operator step on an existing
-database. [ADR-0131](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0131-total-organization-ownership-no-null-organization-id.md)
+18.0 refuses to serve an existing database until an operator step has run on
+it. [ADR-0131](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0131-total-organization-ownership-no-null-organization-id.md)
 makes organization ownership total, and the rows a 17.x database holds have to
 be given their owners before an 18.0 server serves them. That is the
 **organization-ownership ceremony**, `os migrate organization-ownership`.
@@ -378,9 +378,11 @@ in 18.0 on a fresh install and on a database the ceremony upgraded. On a walled
 database, a customized copy of a declared webhook or sharing rule blocks its
 step and names the row.
 
-**A production boot needs an auth secret.** A production `os serve` / `os start`
-whose stack enables auth and which resolves no `OS_AUTH_SECRET` is refused before
-any plugin starts, so set the secret before you start 18.0.
+**A production `os serve` deployment needs an auth secret.** A production
+`os serve` whose stack enables auth and which resolves no `OS_AUTH_SECRET` is
+refused before any plugin starts, so set the secret before you start such a
+deployment on 18.0. `os start` is not affected: it generates an auth secret on
+its first run and persists it to `<home>/auth-secret`.
 
 What the plan lists, how a blocked row is resolved, and every flag are in the
 command's reference:

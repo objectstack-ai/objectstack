@@ -170,7 +170,7 @@
   - **`os migrate organization-ownership` runs** and upgrades a database 17.x or an 18.0 pre-release (`18.0.0-next.*`) created (12d1476 above). A v18 server refuses such a database at boot and names the command. Start 18.0.0 against it once (the boot is refused), take a backup, run `os migrate organization-ownership --out plan.json`, review the plan, run `os migrate organization-ownership --apply --plan-file plan.json --backup-taken`, then start the server again. A deployment served as a development boot (`os dev`, `os serve --dev`, for example a local one with no `OS_AUTH_SECRET`) passes `--dev` to both commands, as the refusal `os serve --dev` prints names it. `os dev` runs the ceremony itself for a local SQLite development database.
   - **`os serve` (and so `os dev` and `os start`) boots `OS_TENANCY_POSTURE=group` or `isolated`, and `OS_MULTI_ORG_ENABLED=true`** (fc34d00 above), on a fresh install and on a database the ceremony upgraded.
   
-  **What stays as it was.** A fresh install boots under every tenancy posture and writes its birth marker, so it never needs the ceremony. Kernel-level boots (`@objectstack/verify`'s `bootStack`, embedded hosts) still accept every posture.
+  **What else holds.** A fresh install boots under every tenancy posture and writes its birth marker, so it never needs the ceremony. Kernel-level boots (`@objectstack/verify`'s `bootStack`, embedded hosts) still accept every posture.
 - 78652c0: feat(cli,plugin-sharing)!: in the 17 → 18 ownership ceremony, a row whose owner cannot be derived blocks certification, and a declared-rule mirror's grants are renamed only onto a rule plugin-sharing serves
   
   Clause-②: yes (narrowing)

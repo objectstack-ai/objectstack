@@ -49,12 +49,14 @@ ceremony**, `os migrate organization-ownership` (ADR-0131 D10).
   ceremony upgraded, under the same prerequisites as 17.x: the enterprise
   `@objectstack/organizations` runtime and `OS_PLATFORM_OWNER_EMAIL`. The
   18.0 pre-releases refused them; 18.0.0 does not.
-- **A production server needs an auth secret.** A production `os serve` /
-  `os start` whose stack enables auth and which resolves no `OS_AUTH_SECRET` is
-  refused before any plugin starts: with no AuthPlugin, no caller can
+- **A production `os serve` needs an auth secret.** A production `os serve`
+  whose stack enables auth and which resolves no `OS_AUTH_SECRET` is refused
+  before any plugin starts: with no AuthPlugin, no caller can
   authenticate and every row the boot wrote would have no owner. Set the
   secret, or serve without the data API (`--no-server`). `os dev` and
-  `os serve --dev` use a development fallback and need none.
+  `os serve --dev` use a development fallback and need none, and `os start`
+  generates an auth secret on its first run and persists it to
+  `<home>/auth-secret`.
 
 The step-by-step is [Upgrading to 18.0](/docs/upgrading#upgrading-to-180), and
 every flag is in
