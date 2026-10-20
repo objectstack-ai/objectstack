@@ -4923,7 +4923,7 @@ export function selfTest() {
     // The stderr line: ONE, naming the count, on BOTH output shapes, whatever the verdict.
     const NOTE = referenceExpansionNote(X.readBack);
     t('⭐ the stderr line names the count and the prefix', typeof NOTE === 'string' && NOTE.includes('2 bare reference(s)') && NOTE.includes(`\`${OWN}#N\``) && NOTE.includes('\n') === false, NOTE);
-    t('…and carries the one prescription that matters: ⛔ never write that read back as it reads', NOTE.includes('⛔ Never write a body read on this path back as it reads'));
+    t('…and carries the one prescription that matters: ⛔ never write that read back as it reads', typeof NOTE === 'string' && NOTE.includes('⛔ Never write a body read on this path back as it reads'));
     t('…said for a MUTATED read that carried an expansion too, and for no read that carried none',
       referenceExpansionNote(C.readBack) !== null && referenceExpansionNote(rb({ sent: SENT, stored: SENT }).readBack) === null && referenceExpansionNote(rb({ sent: SENT, stored: undefined }).readBack) === null);
     const ownSource = readFileSync(SELF_PATH, 'utf8');
