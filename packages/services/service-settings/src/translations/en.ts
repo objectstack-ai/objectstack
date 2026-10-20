@@ -154,7 +154,10 @@ export const en: PlatformTranslationData = {
       },
       keys: {
         email_password_enabled: { label: 'Enable email/password login' },
-        signup_enabled: { label: 'Allow self-service registration' },
+        signup_enabled: {
+          label: 'Allow email sign-up',
+          help: 'Opens the email-and-password sign-up form. Who it admits is decided by the Self-registration audience below: under invite_only, only an address holding a pending invitation; under email_domain, the allowlisted domains and invited addresses; under open, anyone. Off closes the form under every audience, invitations included.',
+        },
         require_email_verification: { label: 'Require email verification' },
         membership_policy: {
           label: 'New user membership',
@@ -187,7 +190,7 @@ export const en: PlatformTranslationData = {
         session_refresh_days: { label: 'Refresh threshold (days)', help: 'An active session is extended when it is older than this.' },
         google_enabled: {
           label: 'Enable Google login',
-          help: 'Requires a Google OAuth client ID and secret from Google Cloud Console.',
+          help: 'Offers Google sign-in once a client ID and a client secret both resolve: saved below, or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server, which win over saved values. Until both resolve, the login page shows no Google button, even while this is on. Off withdraws Google sign-in even when the server sets both. Create the OAuth client in Google Cloud Console.',
         },
         google_client_id: {
           label: 'Google client ID',

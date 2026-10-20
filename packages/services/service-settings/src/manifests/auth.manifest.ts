@@ -30,12 +30,22 @@ const manifest = {
       required: false,
       default: true,
     },
+    // The email/password sign-up route's own switch (`emailAndPassword.
+    // disableSignUp`), a door of its own beside the audience posture below:
+    // the route admits a registrant only when BOTH say yes. So it is not
+    // hidden under `invite_only` — there it still decides whether an invited
+    // address may register through the form — and its default stays `true`,
+    // the runtime's own default (`disableSignUp` unset ⇒ open). The help text
+    // states the conjunction, so ON beside "Invitation only" reads as what it
+    // is rather than as a contradiction.
     {
       type: 'toggle',
       key: 'signup_enabled',
-      label: 'Allow self-service registration',
+      label: 'Allow email sign-up',
       required: false,
       default: true,
+      description:
+        'Opens the email-and-password sign-up form. Who it admits is decided by the Self-registration audience below: under invite_only, only an address holding a pending invitation; under email_domain, the allowlisted domains and invited addresses; under open, anyone. Off closes the form under every audience, invitations included.',
       visible: "${data.email_password_enabled !== false}",
     },
     {
@@ -426,6 +436,12 @@ const manifest = {
       description:
         'Configure the built-in Google sign-in provider. Deployment env vars still win.',
     },
+    // Google is offered only when this is on AND a client ID and secret both
+    // resolve (saved here, or GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET, which
+    // the settings service cannot see). The default stays `true` because that
+    // is the runtime's own default for an undeclared toggle, and a deployment
+    // signing in with env credentials relies on it; the help text carries the
+    // conjunction, so ON beside two empty fields reads as "not offered yet".
     {
       type: 'toggle',
       key: 'google_enabled',
@@ -433,7 +449,7 @@ const manifest = {
       required: false,
       default: true,
       description:
-        'Requires a Google OAuth client ID and secret from Google Cloud Console.',
+        'Offers Google sign-in once a client ID and a client secret both resolve: saved below, or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server, which win over saved values. Until both resolve, the login page shows no Google button, even while this is on. Off withdraws Google sign-in even when the server sets both. Create the OAuth client in Google Cloud Console.',
     },
     {
       type: 'text',

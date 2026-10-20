@@ -20,6 +20,12 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *  - The schema here carries settings-specific fields (`scope`,
  *    `cascade_source`) that don't make sense on a generic row.
  *
+ * Tenant and user rungs only (ADR-0131 D7, ruling record 6257510973 · Q4 A):
+ * a global-rung change is deployment-level, and its row lives in
+ * `sys_platform_setting_audit`. The upgrade ceremony moved every global-rung
+ * row an 18.0 install wrote here, so `scope` declares no `global` option and a
+ * row claiming it is refused.
+ *
  * Append-only contract: enforced at the application layer (the only
  * writer is SettingsService). Operators MUST NOT delete rows; instead
  * use lifecycle policies to archive cold rows to a separate bucket.
@@ -71,7 +77,6 @@ export const SysSettingAudit = ObjectSchema.create({
 
     scope: Field.select(
       [
-        { label: 'Global', value: 'global' },
         { label: 'Tenant', value: 'tenant' },
         { label: 'User',   value: 'user' },
       ],
