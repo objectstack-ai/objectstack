@@ -122,13 +122,22 @@ function makeAuthzQl(tables: Record<string, Array<Record<string, unknown>>>) {
   }, tables);
 }
 
+/**
+ * Both shapes' grant rows are owned by `HOME_ORG`, which is also the Default
+ * Organization: a grant applies only in its own organization (an
+ * organization-less row confers nothing), and platform standing is anchored
+ * only by the Default Organization's `admin_full_access` grant. The principal
+ * is resolved in `HOME_ORG` ({@link buildInHome}), so the name-only position
+ * row applies and reaches the array the panel prints.
+ */
 function authzTables(shape: 'name-only' | 'genuine') {
   return {
+    sys_organization: [{ id: HOME_ORG, slug: 'default' }],
     sys_user: [{ id: USER, email: 'subject@example.com', email_verified: true }],
     sys_member: [{ organization_id: HOME_ORG, user_id: USER, role: 'member' }],
     sys_user_position:
       shape === 'name-only'
-        ? [{ user_id: USER, position: BUILTIN_IDENTITY_PLATFORM_ADMIN, organization_id: null }]
+        ? [{ user_id: USER, position: BUILTIN_IDENTITY_PLATFORM_ADMIN, organization_id: HOME_ORG }]
         : [],
     sys_position:
       shape === 'name-only'
@@ -137,16 +146,19 @@ function authzTables(shape: 'name-only' | 'genuine') {
     sys_position_permission_set: [],
     sys_user_permission_set:
       shape === 'genuine'
-        ? [{ user_id: USER, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS, organization_id: null }]
+        ? [{ user_id: USER, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS, organization_id: HOME_ORG }]
         : [],
     sys_permission_set: [{ id: PS_ADMIN, name: ADMIN_FULL_ACCESS, active: true }],
   };
 }
 
+/** The real principal builder, resolving the user in `HOME_ORG`. */
+const buildInHome = (ql: unknown) => buildContextForUser(ql as any, USER, Date.now(), HOME_ORG);
+
 describe('[#15981] the SHIPPING explain path was already gated — a regression guard, not a repair', () => {
   it('a D4 row spelling the built-in name is REPORTED as MEMBER, and the rung agrees', async () => {
     const ql = makeAuthzQl(authzTables('name-only'));
-    const context = await buildContextForUser(ql as any, USER);
+    const context = await buildInHome(ql);
 
     // The premise: the name really is on the array the panel prints.
     expect(context.positions, JSON.stringify(context.positions)).toContain(
@@ -159,9 +171,9 @@ describe('[#15981] the SHIPPING explain path was already gated — a regression 
     expect(await postureOf(context)).toBe('MEMBER');
   });
 
-  it('CONTROL — a genuine unscoped admin_full_access grant is still reported as PLATFORM_ADMIN', async () => {
+  it('CONTROL — a genuine Default Organization admin_full_access grant is still reported as PLATFORM_ADMIN', async () => {
     const ql = makeAuthzQl(authzTables('genuine'));
-    const context = await buildContextForUser(ql as any, USER);
+    const context = await buildInHome(ql);
 
     expect(context.positions).toContain(BUILTIN_IDENTITY_PLATFORM_ADMIN);
     expect(context.hasPlatformAdminGrant).toBe(true);
@@ -169,11 +181,23 @@ describe('[#15981] the SHIPPING explain path was already gated — a regression 
     expect(await postureOf(context)).toBe('PLATFORM_ADMIN');
   });
 
+  it('the same admin_full_access grant with NO organization anchors nothing, and is reported as MEMBER', async () => {
+    const tables = authzTables('genuine');
+    tables.sys_user_permission_set = tables.sys_user_permission_set.map((r) => ({ ...r, organization_id: null })) as never;
+    const ql = makeAuthzQl(tables);
+    const context = await buildInHome(ql);
+
+    expect(context.positions).not.toContain(BUILTIN_IDENTITY_PLATFORM_ADMIN);
+    expect(context.hasPlatformAdminGrant).toBe(false);
+    expect(await hasPlatformAdminStanding(ql as any, USER)).toBe(false);
+    expect(await postureOf(context)).toBe('MEMBER');
+  });
+
   it('the two shapes are INDISTINGUISHABLE by name and separable only by the rung', async () => {
     const nameOnly = makeAuthzQl(authzTables('name-only'));
     const genuine = makeAuthzQl(authzTables('genuine'));
-    const a = await buildContextForUser(nameOnly as any, USER);
-    const b = await buildContextForUser(genuine as any, USER);
+    const a = await buildInHome(nameOnly);
+    const b = await buildInHome(genuine);
 
     expect(a.positions).toContain(BUILTIN_IDENTITY_PLATFORM_ADMIN);
     expect(b.positions).toContain(BUILTIN_IDENTITY_PLATFORM_ADMIN);
@@ -200,7 +224,7 @@ describe('[#15981] the FALLBACK branch — reachable on a posture-less context, 
     });
   });
 
-  it('the unscoped-grant flag alone STILL yields PLATFORM_ADMIN — the evidence that survives', async () => {
+  it('the platform-grant flag alone STILL yields PLATFORM_ADMIN — the evidence that survives', async () => {
     // `buildContextForUser` sets this from `grants.posture === 'PLATFORM_ADMIN'`,
     // so the fallback's remaining input is the rung itself.
     expect(

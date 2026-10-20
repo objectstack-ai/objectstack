@@ -15,7 +15,8 @@
  * - the body is the catalog definition, whichever organization's row carries
  *   the name — and a name only a row carries (no definition) confers nothing;
  * - a grant that names nothing confers nothing, platform standing included;
- * - platform standing stands on an organization-less grant only;
+ * - platform standing stands on the Default Organization's grant only, and an
+ *   organization-less grant confers nothing at all;
  * - deactivation: a ledger row switches a name off in every organization, and
  *   a catalog row's `active` column is not read;
  * - position-bound sets are the ones the position's definition names, and the
@@ -31,6 +32,9 @@ import { bindStaticSecurityCatalog } from './__tests__/security-catalog.testkit.
 
 const ORG_A = 'org_a';
 const ORG_B = 'org_b';
+const DEFAULT_ORG = 'org_default';
+/** The organizations a platform-standing fixture names: the Default Organization and ORG_B. */
+const ORGANIZATIONS = { sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }, { id: ORG_B, slug: 'b' }] };
 
 const OWNER_ENV = 'OS_PLATFORM_OWNER_EMAIL';
 const POSTURE_ENV = 'OS_TENANCY_POSTURE';
@@ -109,22 +113,32 @@ async function resolve(
 
 describe('[ADR-0131 D3/D4] a grant names its set; the catalog says what the set is', () => {
   it('the body is the definition, whichever organization\'s row carries the name', async () => {
-    for (const [grantOrg, tenantId] of [[ORG_A, ORG_A], [null, ORG_A], [ORG_B, ORG_B], [null, undefined]] as const) {
+    for (const [grantOrg, tenantId] of [[ORG_A, ORG_A], [ORG_B, ORG_B]] as const) {
       const { out } = await resolve([{ permission_set_id: 'ps_tools_a', permission_set: 'tools', organization_id: grantOrg }], tenantId);
       expect(out.permissions, `${grantOrg} in ${tenantId}`).toEqual(['tools']);
       expect(out.systemPermissions, `${grantOrg} in ${tenantId}`).toEqual(['cap_tools']);
     }
   });
 
+  it('⛔ an ORGANIZATION-LESS grant of the same name confers nothing — in an organization or with none', async () => {
+    // The CONTROL is the arm above: the same name, owned by the active
+    // organization, resolves its body on the same catalog.
+    for (const tenantId of [ORG_A, ORG_B, undefined]) {
+      const { out } = await resolve([{ permission_set_id: 'ps_tools', permission_set: 'tools', organization_id: null }], tenantId);
+      expect(out.permissions, String(tenantId)).toEqual([]);
+      expect(out.systemPermissions, String(tenantId)).toEqual([]);
+    }
+  });
+
   it('a name only a ROW carries — no definition — confers nothing, in its organization or out of it', async () => {
-    for (const [grantOrg, tenantId] of [[ORG_B, ORG_B], [null, ORG_B], [null, undefined]] as const) {
+    for (const [grantOrg, tenantId] of [[ORG_B, ORG_B], [ORG_A, ORG_A]] as const) {
       const { out } = await resolve([{ permission_set_id: 'ps_row_only', permission_set: 'row_only', organization_id: grantOrg }], tenantId);
       expect(out.permissions, `${grantOrg} in ${tenantId}`).toEqual([]);
     }
   });
 
   it('CONTROL — a definition with no row at all confers its body: no row carries no flag to read', async () => {
-    const { out } = await resolve([{ permission_set: 'no_row', organization_id: null }], ORG_A);
+    const { out } = await resolve([{ permission_set: 'no_row', organization_id: ORG_A }], ORG_A);
     expect(out.permissions).toEqual(['no_row']);
     expect(out.systemPermissions).toEqual(['cap_no_row']);
   });
@@ -144,24 +158,33 @@ describe('[ADR-0131 D3/D4] a grant names its set; the catalog says what the set 
   });
 });
 
-describe('[ADR-0068 D2] platform standing stands on an organization-less grant only', () => {
-  it('an organization-less grant named admin_full_access holds platform standing', async () => {
-    const { out } = await resolve([{ permission_set_id: 'ps_admin_b', permission_set: ADMIN_FULL_ACCESS, organization_id: null }], ORG_B);
+describe('[ADR-0068 D2] platform standing stands on the Default Organization\'s grant only', () => {
+  it('the Default Organization\'s grant named admin_full_access holds platform standing, in another organization too', async () => {
+    const { out } = await resolve([{ permission_set_id: 'ps_admin_b', permission_set: ADMIN_FULL_ACCESS, organization_id: DEFAULT_ORG }], ORG_B, ORGANIZATIONS);
     expect(out.posture).toBe('PLATFORM_ADMIN');
     expect(out.positions[0]).toBe('platform_admin');
   });
 
+  it('⛔ an ORGANIZATION-LESS grant named admin_full_access holds no platform standing, and not the set either', async () => {
+    for (const tenantId of [ORG_B, DEFAULT_ORG, undefined]) {
+      const { out } = await resolve([{ permission_set_id: 'ps_admin', permission_set: ADMIN_FULL_ACCESS, organization_id: null }], tenantId, ORGANIZATIONS);
+      expect(out.posture, String(tenantId)).not.toBe('PLATFORM_ADMIN');
+      expect(out.positions, String(tenantId)).not.toContain('platform_admin');
+      expect(out.permissions, String(tenantId)).toEqual([]);
+    }
+  });
+
   it('an ORGANIZATION’s admin_full_access grant carries the set, never platform standing', async () => {
-    const { out } = await resolve([{ permission_set_id: 'ps_admin_b', permission_set: ADMIN_FULL_ACCESS, organization_id: ORG_B }], ORG_B);
+    const { out } = await resolve([{ permission_set_id: 'ps_admin_b', permission_set: ADMIN_FULL_ACCESS, organization_id: ORG_B }], ORG_B, ORGANIZATIONS);
     expect(out.permissions).toContain(ADMIN_FULL_ACCESS);
     expect(out.posture).not.toBe('PLATFORM_ADMIN');
   });
 
   it('with no admin_full_access definition in the catalog, the grant confers nothing at all', async () => {
     const { out } = await resolve(
-      [{ permission_set_id: 'ps_admin', permission_set: ADMIN_FULL_ACCESS, organization_id: null }],
+      [{ permission_set_id: 'ps_admin', permission_set: ADMIN_FULL_ACCESS, organization_id: DEFAULT_ORG }],
       undefined,
-      undefined,
+      ORGANIZATIONS,
       { ...definitions, permissions: definitions.permissions.filter((d) => d.name !== ADMIN_FULL_ACCESS) },
     );
     expect(out.posture).not.toBe('PLATFORM_ADMIN');
@@ -170,9 +193,9 @@ describe('[ADR-0068 D2] platform standing stands on an organization-less grant o
 
   it('admin_full_access switched off in the activation ledger takes the standing away', async () => {
     const { out } = await resolve(
-      [{ permission_set_id: 'ps_admin', permission_set: ADMIN_FULL_ACCESS, organization_id: null }],
+      [{ permission_set_id: 'ps_admin', permission_set: ADMIN_FULL_ACCESS, organization_id: DEFAULT_ORG }],
       undefined,
-      { sys_metadata_activation: [off('permission', ADMIN_FULL_ACCESS)] },
+      { ...ORGANIZATIONS, sys_metadata_activation: [off('permission', ADMIN_FULL_ACCESS)] },
     );
     expect(out.posture).not.toBe('PLATFORM_ADMIN');
     expect(out.permissions).toEqual([]);
@@ -181,7 +204,7 @@ describe('[ADR-0068 D2] platform standing stands on an organization-less grant o
 
 describe('[ADR-0049, ADR-0131 D3] the activation ledger switches a set off', () => {
   it('a ledger row switches the name off in every organization: no set, no capability', async () => {
-    for (const [grantOrg, tenantId] of [[ORG_A, ORG_A], [null, ORG_A], [null, undefined]] as const) {
+    for (const [grantOrg, tenantId] of [[ORG_A, ORG_A], [ORG_B, ORG_B]] as const) {
       const { out } = await resolve(
         [{ permission_set_id: 'ps_off_a', permission_set: 'switched', organization_id: grantOrg }],
         tenantId,
@@ -218,8 +241,8 @@ describe('[ADR-0131 D4] a grant that names nothing confers nothing', () => {
     }
   });
 
-  it('an unnamed UNSCOPED grant on the platform admin_full_access row: no platform standing', async () => {
-    const { out } = await resolve([{ permission_set_id: 'ps_admin', organization_id: null }], undefined);
+  it('an unnamed grant owned by the Default Organization, on the platform admin_full_access row: no platform standing', async () => {
+    const { out } = await resolve([{ permission_set_id: 'ps_admin', organization_id: DEFAULT_ORG }], undefined, ORGANIZATIONS);
     expect(out.posture).not.toBe('PLATFORM_ADMIN');
     expect(out.positions).not.toContain('platform_admin');
     expect(out.permissions).not.toContain(ADMIN_FULL_ACCESS);

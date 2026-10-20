@@ -792,11 +792,11 @@ export interface UserAuthzGrants {
 
 export interface ResolveUserAuthzGrantsOptions {
   /**
-   * Active org/tenant id — scopes org-bound grants (a null-org row is global).
-   * Omitted ⇒ NO active organization, so only the global grants apply: an
-   * organization-scoped position or permission-set row applies only while its
-   * organization is this tenant ({@link grantAppliesInTenant}). There is no
-   * "every organization" reading of an omitted tenant.
+   * Active org/tenant id — the organization whose grants apply. A position or
+   * permission-set row applies only while its organization is this tenant
+   * ({@link grantAppliesInTenant}). Omitted ⇒ NO active organization, so no
+   * stored grant row applies (the platform-standing anchor aside, §6b). There
+   * is no "every organization" reading of an omitted tenant.
    */
   tenantId?: string;
   /** Clock injection for grant validity windows (tests). */
@@ -832,12 +832,20 @@ export interface ResolveUserAuthzGrantsOptions {
 }
 
 /**
- * The ONE organization rule for a stored grant row — `sys_user_position` (§4),
- * `sys_user_permission_set` (§6) and the `sys_position` rows whose bindings
- * §6a collects all ask it, so none of them can disagree: a row with no
- * `organization_id` is GLOBAL and applies in every resolution; a row scoped to
- * an organization applies only when that organization is the ACTIVE tenant.
- * With no active tenant, an organization-scoped row does not apply at all.
+ * The ONE organization rule for a stored grant row — `sys_user_position` (§4)
+ * and `sys_user_permission_set` (§6) both ask it, so neither can disagree: a
+ * row applies only when its organization is the ACTIVE tenant. With no active
+ * tenant, no row applies.
+ *
+ * `organizationId` is the row's organization as {@link grantOrganizationOf}
+ * normalizes it. A row with none (`null`) applies NOWHERE: the 18.0 ownership
+ * ceremony (ADR-0131 D10) attributes every organization-less row before an
+ * upgraded database boots, and makes the column NOT NULL, so an
+ * organization-less grant is invalid state rather than a "global" one. The
+ * reading that let such a row apply in every resolution retired with it. The
+ * grant that stands for the whole deployment is the Default Organization's
+ * `admin_full_access` anchor, which §6 reads through
+ * {@link grantAnchorsPlatformStanding}, not through this rule.
  *
  * The spelling both sites carried before, `org && tenantId && org !== tenantId`
  * as the SKIP condition, read "no tenant" as "every organization": it was false
@@ -850,7 +858,7 @@ export interface ResolveUserAuthzGrantsOptions {
  *
  * ⛔ There is no "every organization" mode: no option selects one and nothing
  * falls back to one. A caller that has an organization passes it; a caller
- * that has none gets the global grants and nothing else.
+ * that has none gets no stored grant at all.
  *
  * ⚠️ Not applied to §3's `sys_member` role projection, which reads the user's
  * OWN current memberships rather than a grant row. With no active organization
@@ -858,8 +866,8 @@ export interface ResolveUserAuthzGrantsOptions {
  * CONFER arrives through §6a's per-organization position rows and §6's
  * organization-scoped grants, and both answer to this rule.
  */
-function grantAppliesInTenant(organizationId: unknown, tenantId: string | undefined): boolean {
-  return !organizationId || organizationId === tenantId;
+function grantAppliesInTenant(organizationId: string | null, tenantId: string | undefined): boolean {
+  return organizationId !== null && organizationId === tenantId;
 }
 
 /**
@@ -883,9 +891,10 @@ function grantSetNameOf(row: unknown): string | undefined {
 }
 
 /**
- * The organization a stored grant or catalog row belongs to, or `null` for one
- * that belongs to none — a blank value is the legacy organization-less
- * spelling, read as {@link grantAppliesInTenant} reads it.
+ * The organization a stored grant row belongs to, or `null` for one that names
+ * none — `NULL`, absent or blank. `null` confers nothing: neither
+ * {@link grantAppliesInTenant} nor {@link grantAnchorsPlatformStanding} ever
+ * answers yes for it.
  */
 function grantOrganizationOf(row: unknown): string | null {
   if (!row || typeof row !== 'object') return null;
@@ -904,19 +913,19 @@ function grantOrganizationOf(row: unknown): string | null {
  *    config-derived (`OS_PLATFORM_OWNER_EMAIL`, §6b-config) and nothing else
  *    (#11663 L5);
  *  - `single`: the grant the first-user promotion writes, which is owned by the
- *    Default Organization ({@link readDefaultOrganizationId}), and the
- *    organization-less row that promotion wrote before it was.
+ *    Default Organization ({@link readDefaultOrganizationId}).
  *
- * Any other organization's grant of the set confers the set, never standing.
+ * Any other organization's grant of the set confers the set, never standing. An
+ * organization-less grant anchors nothing: the ownership ceremony (ADR-0131
+ * D10) attributes the one an earlier release's promotion wrote to the Default
+ * Organization, so the reading that took it as the anchor retired with it.
  */
 function grantAnchorsPlatformStanding(
   grant: unknown,
   anchor: { walled: boolean; defaultOrganizationId: string | undefined },
 ): boolean {
-  if (anchor.walled) return false;
-  const organizationId = grantOrganizationOf(grant);
-  return organizationId === null
-    || (anchor.defaultOrganizationId !== undefined && organizationId === anchor.defaultOrganizationId);
+  if (anchor.walled || anchor.defaultOrganizationId === undefined) return false;
+  return grantOrganizationOf(grant) === anchor.defaultOrganizationId;
 }
 
 /**
@@ -1528,12 +1537,12 @@ export async function resolveUserAuthzGrants(
   }
 
   // 4. [ADR-0057 D4] Platform-owned RBAC role assignments (sys_user_position) — the
-  //    source of truth for custom roles, decoupled from sys_member.role.
-  //    `organization_id = null` = global (cross-tenant); else match active org —
-  //    so with no active org, only the global rows ({@link grantAppliesInTenant}).
+  //    source of truth for custom roles, decoupled from sys_member.role. A row
+  //    applies only in its own organization, so with no active org none does
+  //    ({@link grantAppliesInTenant}).
   // (read in Leg 1 above)
   for (const ur of userPositionRows) {
-    if (!grantAppliesInTenant(ur.organization_id, tenantId)) continue;
+    if (!grantAppliesInTenant(grantOrganizationOf(ur), tenantId)) continue;
     if (!isGrantActive(ur, nowMs)) continue;
     const r = ur.position;
     if (typeof r === 'string' && r && !grants.positions.includes(r)) grants.positions.push(r);
@@ -1551,8 +1560,9 @@ export async function resolveUserAuthzGrants(
     grants.org_user_ids = Array.from(ids);
   }
 
-  // 6. Permission sets — user-scoped grants (null org = global, else active org;
-  //    with no active org, only the global rows — {@link grantAppliesInTenant}).
+  // 6. Permission sets — user-scoped grants, each applying only in its own
+  //    organization; with no active org, none does ({@link grantAppliesInTenant}),
+  //    the platform-standing anchor below aside.
   //    Rows outside their validity window are dropped BEFORE any derivation, so
   //    an expired admin_full_access grant cannot yield platform_admin either.
   //
@@ -1578,10 +1588,9 @@ export async function resolveUserAuthzGrants(
   //    resolves to: the `admin_full_access` grant `bootstrapPlatformAdmin` mints for
   //    the first human user, which D5 has OWNED BY THE DEFAULT ORGANIZATION (#11979;
   //    maintainer ruling A on #18707 keeps the zero-config promotion and moves only the
-  //    row's owner), and the organization-less row that promotion wrote before it was —
-  //    the row D10's ceremony attributes to that same organization. ⛔ Reading only the
-  //    organization-less row would leave every promoted `single` rig with NO platform
-  //    administrator once its grant is the Default Organization's.
+  //    row's owner). The organization-less row an earlier release's promotion wrote is
+  //    not read: D10's ceremony attributes it to that same organization before an
+  //    upgraded database boots.
   //
   // The REQUESTED posture is the input, not the effective one — the same source and the
   // same fail-stricter direction the boot side reads: a deployment that ASKED for a wall
@@ -1614,8 +1623,8 @@ export async function resolveUserAuthzGrants(
   // grants, and a held name of either type was already in the question. So
   // every envelope is unchanged, and so is every read's predicate: the ledger's
   // and the organization's filters, `grantAppliesInTenant` and
-  // `grantAnchorsPlatformStanding` (the organization-less readings) are called
-  // as they were, never edited. Pinned in
+  // `grantAnchorsPlatformStanding` are called exactly as the envelope-building
+  // pass below calls them. Pinned in
   // `resolve-authz-context.request-rounds.test.ts`.
   const mayApply = (r: unknown): boolean =>
     grantAppliesInTenant(grantOrganizationOf(r), tenantId)
@@ -1670,9 +1679,8 @@ export async function resolveUserAuthzGrants(
   const platformAnchor = { walled, defaultOrganizationId };
   const anchorsPlatformStanding = (grant: unknown): boolean =>
     grantSetNameOf(grant) === ADMIN_FULL_ACCESS && grantAnchorsPlatformStanding(grant, platformAnchor);
-  // An anchoring grant applies in whichever organization the principal acts in, as the
-  // organization-less row it replaces always did: platform standing is the deployment's,
-  // never one tenant's.
+  // An anchoring grant applies in whichever organization the principal acts in, and with
+  // none active: platform standing is the deployment's, never one tenant's.
   const applyingGrants = upsRows.filter(
     (r) => grantAppliesInTenant(grantOrganizationOf(r), tenantId) || anchorsPlatformStanding(r),
   );

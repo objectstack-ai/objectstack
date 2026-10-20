@@ -49,7 +49,7 @@ import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { LocalManifestSource, type InstalledManifestEntry } from './local-manifest-source.js';
-import { installerGrantRows, INSTALLER_USER_ID, INSTALLER_SET } from './install-local-principal.fixtures.js';
+import { answerDefaultOrganizationRead, installerGrantRows, INSTALLER_USER_ID, INSTALLER_SET } from './install-local-principal.fixtures.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 type Handler = (c: any) => Promise<any>;
@@ -138,7 +138,7 @@ async function restartWith(
         async find(object: string, query?: any): Promise<unknown[]> {
             const granted = installerGrantRows();
             if (Object.prototype.hasOwnProperty.call(granted, object)) return granted[object]!;
-            if (object === 'sys_organization') return [];
+            if (object === 'sys_organization') return answerDefaultOrganizationRead(object, query, []) ?? [];
             const where: Record<string, unknown> = query?.where ?? {};
             const rows = known(object).filter((row) => Object.entries(where).every(([k, v]) => {
                 // Scalar equality only; anything else is refused, never guessed.

@@ -358,6 +358,9 @@ describe('tree-scoped absence: no list-view payload inside the declared radius s
     'packages/spec/src/ui/view.zod.ts',
     // This pin authors the key at every door to assert the refusal.
     THIS_FILE,
+    // The `os lint` twin of that pin: `os lint` never parses, so the lint
+    // rule reports the key by name, and this file authors it to assert that.
+    'packages/lint/src/list-view-filterable-fields-retired.test.ts',
   ]);
   const EXCLUDED_PREFIXES = [
     // The D2 conversion's fixture authors the pre-retirement payload on purpose.
@@ -369,23 +372,16 @@ describe('tree-scoped absence: no list-view payload inside the declared radius s
     'packages/spec/liveness/',
   ];
   /**
-   * RESIDUE, declared and self-expiring — not exempted. Outside this
-   * retirement's file surface, and reported as its follow-up: the author-time
-   * reference walks that still classify the key off RAW input — the lint
-   * list-view field-ref rule (its severity and role maps, and its fixtures),
-   * the ADR-0106 field-security scrub's list-view name lists in
-   * `@objectstack/metadata-core`, and the fixtures of
-   * `computeViewReferenceDiagnostics` (`@objectstack/metadata-protocol`) in
-   * `@objectstack/objectql`. Each entry is asserted to STILL hold an offender,
-   * so the day the follow-up deletes a key this set goes red and the entry
-   * leaves with it.
+   * RESIDUE, declared and self-expiring — not exempted. Empty: the follow-up
+   * deleted every author-time reference walk that still classified the key
+   * off RAW input (the lint list-view field-ref rule's severity and role maps
+   * and its fixtures, the ADR-0106 field-security scrub's list-view name
+   * lists in `@objectstack/metadata-core`, and the fixtures of
+   * `computeViewReferenceDiagnostics` in `@objectstack/objectql`), and `os
+   * lint` now reports the key by name. An entry added here is asserted to
+   * STILL hold an offender, so it leaves the day its key does.
    */
-  const RESIDUE = new Set([
-    'packages/lint/src/validate-list-view-field-refs.test.ts',
-    'packages/lint/src/validate-list-view-field-refs.ts',
-    'packages/metadata-core/src/object-schema-fls-references.ts',
-    'packages/objectql/src/metadata-diagnostics.test.ts',
-  ]);
+  const RESIDUE = new Set<string>([]);
   /** tsup's own bundle of `tsup.config.ts`, written and deleted mid-build. */
   const TSUP_BUNDLED_CONFIG = /\.bundled_[^./]+\.mjs$/;
 

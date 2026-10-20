@@ -208,7 +208,7 @@ async function bootFederation(
     api: {
       getSession: async ({ headers }: { headers: Headers }) =>
         headers?.get?.('authorization') === `Bearer ${SESSION}`
-          ? { user: { id: 'u_federation' }, session: { userId: 'u_federation' } }
+          ? { user: { id: 'u_federation' }, session: { userId: 'u_federation', activeOrganizationId: 'o1' } }
           : null,
     },
   };
@@ -229,6 +229,10 @@ async function bootFederation(
    * `manage_platform_settings` among six other capabilities, so a gate keyed on
    * platform-admin posture rather than on the named capability would pass here
    * unnoticed — the same reason the twin-equivalence fixture builds its own.
+   *
+   * The grant is stamped with `o1`, and both credentials act in `o1` (the
+   * session's active organization, the key's stamped one): a grant applies
+   * only in its own organization.
    */
   const grants = opts.grants ?? FULL_GRANT;
   const GRANT_SET_ID = 'ps_federation_caller';
@@ -236,12 +240,12 @@ async function bootFederation(
     find: async (object: string, query: any) => {
       if (object === 'sys_api_key') {
         return query?.where?.key === hashApiKey(API_KEY)
-          ? [{ id: 'key_1', key: hashApiKey(API_KEY), user_id: 'u_federation', revoked: false }]
+          ? [{ id: 'key_1', key: hashApiKey(API_KEY), user_id: 'u_federation', revoked: false, active_organization_id: 'o1' }]
           : [];
       }
       if (object === 'sys_user_permission_set') {
         return query?.where?.user_id === 'u_federation' && grants.length > 0
-          ? [{ id: 'ups_1', user_id: 'u_federation', permission_set_id: GRANT_SET_ID, permission_set: 'federation_caller', organization_id: null }]
+          ? [{ id: 'ups_1', user_id: 'u_federation', permission_set_id: GRANT_SET_ID, permission_set: 'federation_caller', organization_id: 'o1' }]
           : [];
       }
       if (object === 'sys_permission_set') {

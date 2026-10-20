@@ -72,6 +72,14 @@ const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_defa
 
 const BOARD = 'qa_ag_board';
 const MEMBER = 'usr_ag_member';
+/**
+ * The organization the rig runs in. A grant applies only in its own
+ * organization, so the member's grant rows are this organization's and every
+ * asker acts in it: the explained member is resolved in the asker's
+ * organization (#20515), and under `single` the claim stands without a
+ * membership row.
+ */
+const ORG = 'org_ag';
 
 /**
  * The member's grant: every verb on the board; a READ policy that admits only
@@ -98,17 +106,17 @@ const USER_ADMIN_SET = PermissionSetSchema.parse({
 /** `manage_users` alone: no data grant at all (it is not a data-read grant). */
 const USERS_ONLY_SET = PermissionSetSchema.parse({ name: 'qa_ag_users_only', objects: {}, systemPermissions: ['manage_users'] });
 
-const SELF = { userId: MEMBER, positions: [] as string[], permissions: [MEMBER_SET.name] };
-const ADMIN = { userId: 'usr_ag_admin', positions: [] as string[], permissions: [USER_ADMIN_SET.name] };
+const SELF = { userId: MEMBER, tenantId: ORG, positions: [] as string[], permissions: [MEMBER_SET.name] };
+const ADMIN = { userId: 'usr_ag_admin', tenantId: ORG, positions: [] as string[], permissions: [USER_ADMIN_SET.name] };
 /** A user administrator held to the member's read policy. */
-const BLIND_ADMIN = { userId: 'usr_ag_blind', positions: [] as string[], permissions: [MEMBER_SET.name, USERS_ONLY_SET.name] };
+const BLIND_ADMIN = { userId: 'usr_ag_blind', tenantId: ORG, positions: [] as string[], permissions: [MEMBER_SET.name, USERS_ONLY_SET.name] };
 /** A delegated administrator (D12, no `manage_users`) held to the member's read policy. */
-const DELEGATE = { userId: 'usr_ag_delegate', positions: [] as string[], permissions: [MEMBER_SET.name] };
-const SYSTEM = { isSystem: true };
+const DELEGATE = { userId: 'usr_ag_delegate', tenantId: ORG, positions: [] as string[], permissions: [MEMBER_SET.name] };
+const SYSTEM = { isSystem: true, tenantId: ORG };
 /** [#22851] A user administrator with no read grant on the object: its own read of every row is REFUSED. */
-const REFUSED_ADMIN = { userId: 'usr_ag_refused_admin', positions: [] as string[], permissions: [USERS_ONLY_SET.name] };
+const REFUSED_ADMIN = { userId: 'usr_ag_refused_admin', tenantId: ORG, positions: [] as string[], permissions: [USERS_ONLY_SET.name] };
 /** [#22851] A delegated administrator (D12) with no read grant on the object: its own read is refused too. */
-const REFUSED_DELEGATE = { userId: 'usr_ag_refused_delegate', positions: [] as string[], permissions: [] as string[] };
+const REFUSED_DELEGATE = { userId: 'usr_ag_refused_delegate', tenantId: ORG, positions: [] as string[], permissions: [] as string[] };
 /**
  * [#22851] Edits, deletes and transfers boards, and may not read them: the
  * principal whose self-explanation keeps the write path's notion under ruling
@@ -119,7 +127,7 @@ const EDIT_ONLY_SET = PermissionSetSchema.parse({
   objects: { [BOARD]: { allowEdit: true, allowDelete: true, allowTransfer: true } },
 });
 const EDIT_ONLY_USER = 'usr_ag_edit_only';
-const EDIT_ONLY = { userId: EDIT_ONLY_USER, positions: [] as string[], permissions: [EDIT_ONLY_SET.name] };
+const EDIT_ONLY = { userId: EDIT_ONLY_USER, tenantId: ORG, positions: [] as string[], permissions: [EDIT_ONLY_SET.name] };
 /** Per write verb, a board the edit-only principal's own door writes, so a door that lands changes no other case's row. */
 const editOnlyRowOf = (verb: ExplainOperation) => `b_edit_only_${verb}`;
 
@@ -169,10 +177,10 @@ beforeAll(async () => {
   for (const id of [MEMBER, ADMIN.userId, BLIND_ADMIN.userId, DELEGATE.userId, REFUSED_ADMIN.userId, REFUSED_DELEGATE.userId, EDIT_ONLY_USER]) {
     await e.insert('sys_user', { id, name: id, email: `${id}@example.test` }, SYS);
   }
-  // [C8 stage 8b] The grant-side rows below carry no organization: under `single`
-  // the engine stamps or refuses such a platform insert (ADR-0131 D9), and this rig
-  // holds no organization, so they are landed straight through the driver, as the
-  // residue an older release left. The explainer reads them as before.
+  // [C8 stage 8b] The catalogue rows below carry no organization: under `single`
+  // the engine stamps or refuses such a platform insert (ADR-0131 D9), so the
+  // grant-side rows are landed straight through the driver. The user grants are
+  // owned by the rig's organization: an organization-less grant applies nowhere.
   const residue = (o: string, row: Record<string, unknown>) => (engine as any).getDriver(o).create(o, row);
   // The explained member's grant, as the explainer resolves it: a grant row
   // pointing at a catalogue row; what the set confers is declared in metadata.
@@ -181,14 +189,14 @@ beforeAll(async () => {
     active: true, object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
   });
   await residue('sys_user_permission_set', {
-    id: 'ups_ag_member', user_id: MEMBER, permission_set: MEMBER_SET.name,
+    id: 'ups_ag_member', user_id: MEMBER, permission_set: MEMBER_SET.name, organization_id: ORG,
   });
   await residue('sys_permission_set', {
     id: 'ps_ag_edit_only', name: EDIT_ONLY_SET.name, label: EDIT_ONLY_SET.name, organization_id: null, managed_by: 'admin',
     active: true, object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
   });
   await residue('sys_user_permission_set', {
-    id: 'ups_ag_edit_only', user_id: EDIT_ONLY_USER, permission_set: EDIT_ONLY_SET.name,
+    id: 'ups_ag_edit_only', user_id: EDIT_ONLY_USER, permission_set: EDIT_ONLY_SET.name, organization_id: ORG,
   });
   await e.insert(BOARD, [
     { id: HIDDEN, name: 'hidden', owner_id: 'usr_ag_owner' },

@@ -20,16 +20,18 @@ import type { PluginContext } from '@objectstack/core';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
 
 /**
- * Fake data engine: an UNSCOPED `admin_full_access` grant for `admin1` (the
- * seeded platform admin) vs. a `member_default` grant for `member1`, plus the
- * `widget` rows the data route returns. Every other read resolves empty.
+ * Fake data engine: an `admin_full_access` grant owned by the Default
+ * Organization for `admin1` (the seeded platform admin — the only grant that
+ * anchors platform standing) vs. a `member_default` grant for `member1`, plus
+ * the Default Organization row and the `widget` rows the data route returns.
+ * Every other read resolves empty.
  */
 const makeQl = () => bindTestSecurityCatalog({
     find: async (object: string, opts: any) => {
         const where = opts?.where ?? {};
         if (object === 'sys_user_permission_set') {
-            if (where.user_id === 'admin1') return [{ permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null }];
-            if (where.user_id === 'member1') return [{ permission_set_id: 'ps_member', permission_set: 'member_default', organization_id: null }];
+            if (where.user_id === 'admin1') return [{ permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: 'org_default' }];
+            if (where.user_id === 'member1') return [{ permission_set_id: 'ps_member', permission_set: 'member_default', organization_id: 'org_default' }];
             return [];
         }
         if (object === 'sys_permission_set') {
@@ -41,6 +43,8 @@ const makeQl = () => bindTestSecurityCatalog({
                 ids.includes('ps_member') || names.includes('member_default') ? { id: 'ps_member', name: 'member_default' } : null,
             ].filter(Boolean);
         }
+        // The Default Organization — by slug, or as the only organization.
+        if (object === 'sys_organization') return [{ id: 'org_default', slug: 'default' }];
         if (object === 'widget') return [{ id: '1', name: 'w' }];
         // sys_member, sys_user — nothing to contribute.
         return [];

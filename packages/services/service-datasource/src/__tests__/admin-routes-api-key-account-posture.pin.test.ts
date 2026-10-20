@@ -25,7 +25,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { hashApiKey } from '@objectstack/core';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
-import { ENTITLED_USER, createSessionAuthService, createGrantsEngine } from './entitled-caller.fixture.js';
+import { ENTITLED_ORGANIZATION, ENTITLED_USER, createSessionAuthService, createGrantsEngine } from './entitled-caller.fixture.js';
 
 const KEY = 'osk_datasource_account_posture_pin';
 
@@ -54,13 +54,15 @@ function mountFamily() {
     ...createSessionAuthService(),
     resolveUserAuthGates: async (userId: string) => postures[userId] ?? [],
   };
-  // The fixture's grants engine, taught the one key the entitled operator owns.
+  // The fixture's grants engine, taught the one key the entitled operator owns —
+  // stamped with the organization the operator's grant belongs to, since a key
+  // resolves its owner's grants in the key's own organization.
   const engine: { find: (object: string, opts: any) => Promise<unknown[]> } = createGrantsEngine();
   const grantsFind = engine.find;
   const keyHash = hashApiKey(KEY);
   engine.find = async (object: string, opts: any) => (
     object === 'sys_api_key'
-      ? (opts?.where?.key === keyHash ? [{ id: 'key_1', key: keyHash, user_id: ENTITLED_USER, revoked: false, scopes: '[]' }] : [])
+      ? (opts?.where?.key === keyHash ? [{ id: 'key_1', key: keyHash, user_id: ENTITLED_USER, active_organization_id: ENTITLED_ORGANIZATION, revoked: false, scopes: '[]' }] : [])
       : grantsFind(object, opts)
   );
   const ctx = {

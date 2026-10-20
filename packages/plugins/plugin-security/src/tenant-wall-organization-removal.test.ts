@@ -15,8 +15,9 @@
  * judged at all — neither as the payload was sent nor on the stored row. On an
  * ordinary tenant object such a row drops out of every reader's scope; on the
  * organization-scoped grant tables (`sys_user_position`,
- * `sys_user_permission_set`) an organization-less row is read as a grant that
- * applies in every organization (`@objectstack/core`, `grantAppliesInTenant`).
+ * `sys_user_permission_set`) an organization-less row is invalid state — a
+ * grant that applies nowhere (`@objectstack/core`, `grantAppliesInTenant`), so
+ * emptying the column silently revokes it from its own organization.
  *
  * The wall now judges the stored organization on every non-system update
  * path: an empty organization, sent or written by a hook, is refused with the
