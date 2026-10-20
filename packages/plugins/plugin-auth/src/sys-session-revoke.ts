@@ -70,7 +70,7 @@
 import { SystemObjectName } from '@objectstack/spec/system';
 import type { AuthSessionApi } from '@objectstack/spec/contracts';
 import { inProcessSessionReadInput } from '@objectstack/types';
-import { FORWARDED_CLIENT_ADDRESS_HEADERS } from './client-address.js';
+import { carryForwardedClientAddress } from './client-address-forwarding.js';
 import { inProcessRedispatchUrl } from './in-process-redispatch.js';
 import {
   PLATFORM_ADMIN_REFUSAL_MESSAGES,
@@ -207,21 +207,6 @@ export function sysSessionRevokeDepsFor(manager: SysSessionRevokeManager, basePa
     handle: (request) => manager.handleRequest(request),
     basePath,
   };
-}
-
-/**
- * [#24877] Carry the forwarding facts the client-address trust rule reads
- * (`FORWARDED_CLIENT_ADDRESS_HEADERS`) from the request this route serves onto
- * the request the owner lane re-dispatches, as the incoming request had them,
- * so `AuthManager.handleRequest` judges both on the same facts: the forwarded
- * client address behind a declared `server.trustProxy`, the connection peer
- * otherwise.
- */
-function carryForwardedClientAddress(from: Headers, to: Headers): void {
-  for (const name of FORWARDED_CLIENT_ADDRESS_HEADERS) {
-    const value = from.get(name);
-    if (value !== null) to.set(name, value);
-  }
 }
 
 /**

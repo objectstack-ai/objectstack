@@ -38,19 +38,15 @@
  * `./client-address` subpath entry, like `./rate-limit-storage`, so the runtime
  * reaches it without loading the better-auth family (see `tsup.config.ts`).
  * ⛔ Keep this module free of imports: a value import here becomes a load-time
- * dependency of every consumer of the entry.
+ * dependency of every consumer of the entry. The one exception is the list of
+ * forwarded headers the rule reads, from `./client-address-forwarding.ts`,
+ * which is internal and itself import-free (#24877).
  */
 
-/**
- * The forwarded headers the rule reads, in the order it believes them, and
- * only when the deployment declares `server.trustProxy`: `X-Forwarded-For`
- * (its leftmost entry), then `X-Real-IP`. Lower-cased, as every adapter
- * delivers them. {@link resolveClientAddress} reads exactly this list, so a
- * seam that builds a request of its own from one it was handed — an
- * in-process re-dispatch — carries the facts the rule reads by iterating it,
- * never a hand-copied set of names (#24877).
- */
-export const FORWARDED_CLIENT_ADDRESS_HEADERS: readonly string[] = Object.freeze(['x-forwarded-for', 'x-real-ip']);
+// [#24877] The forwarded headers this rule reads, in the order it believes
+// them. The list lives in an internal module so the in-process re-dispatches
+// carry exactly these facts without the list being published on this entry.
+import { FORWARDED_CLIENT_ADDRESS_HEADERS } from './client-address-forwarding.js';
 
 /** The three facts the rule decides from. */
 export interface ClientAddressInput {

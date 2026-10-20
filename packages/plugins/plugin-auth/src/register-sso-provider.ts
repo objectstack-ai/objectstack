@@ -22,7 +22,7 @@
  * (per-environment runtime) — mirroring `runSetInitialPassword`.
  */
 
-import { FORWARDED_CLIENT_ADDRESS_HEADERS } from './client-address.js';
+import { carryForwardedClientAddress } from './client-address-forwarding.js';
 import { inProcessRedispatchUrl } from './in-process-redispatch.js';
 import { readJsonRequestBody } from './request-json-body.js';
 
@@ -419,22 +419,6 @@ function rewriteSsoAdminUrl(request: Request, fromSuffix: RegExp, toPath: string
     return { origin: url.origin, innerUrl: `${url.origin}${url.pathname.replace(fromSuffix, toPath)}` };
   } catch {
     return null;
-  }
-}
-
-/**
- * [#24877] Carry the forwarding facts the client-address trust rule reads
- * (`FORWARDED_CLIENT_ADDRESS_HEADERS`) from the request a bridge serves onto
- * the request it re-dispatches, as the incoming request had them.
- * `AuthManager.handleRequest` judges the re-dispatched request by that rule,
- * so behind a declared `server.trustProxy` it reads the forwarded client
- * address the incoming request carried; without one the rule ignores these
- * headers and judges on the connection peer.
- */
-function carryForwardedClientAddress(from: Headers, to: Headers): void {
-  for (const name of FORWARDED_CLIENT_ADDRESS_HEADERS) {
-    const value = from.get(name);
-    if (value !== null) to.set(name, value);
   }
 }
 
