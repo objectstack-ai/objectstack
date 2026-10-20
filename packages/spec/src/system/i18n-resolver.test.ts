@@ -2524,7 +2524,7 @@ describe('walkAddressedPageComponents — the one addressed-component walk, shar
             ...component.properties,
             // The visitor relabels each panel and drops its children; the walk
             // owns the descent, so the authored children come back visited.
-            items: component.properties.items.map((item: any) => ({ label: `relabelled:${item.value}`, value: item.value })),
+            items: (component.properties?.items as any[]).map((item: any) => ({ label: `relabelled:${item.value}`, value: item.value })),
           },
         })) as any;
     const items = regions[0].components[0].properties.items;
