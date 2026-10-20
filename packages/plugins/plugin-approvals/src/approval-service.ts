@@ -2582,8 +2582,8 @@ export class ApprovalService implements IApprovalService {
    *       ⇒ the tenancy fact is ABSENT ⇒ leave routing exactly as it was.
    *
    * The `organization_id = null` limb is not timidity — it is the reading
-   * {@link businessUnitOrgScope} settled on one screen below, for the identical
-   * shape: null on a platform object means "owned by no organization", which is
+   * {@link businessUnitOrgScope} held for the identical shape until ADR-0131
+   * D8 retired its NULL arm: null on a platform object meant "owned by no organization", which is
    * what a seed writes because a seed cannot know the organization id the
    * runtime mints at boot. Treating null as "not mine" would delete every
    * seeded team approver at once — a larger behaviour change than the hole
@@ -2734,43 +2734,39 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
-   * Tenant scope for a `sys_business_unit` read that may legitimately be
-   * env-wide (#3807).
+   * Tenant scope for a `sys_business_unit` read: the request's organization,
+   * a STRICT equality.
    *
-   * `organization_id = null` on a platform object means "owned by no
-   * organization" — a row written by a seed, the file layer, or bootstrap,
-   * i.e. before (or outside) any org exists. A strict
-   * `organization_id = <request org>` equality made every such row invisible:
-   * the seed check below found nothing, the whole expansion returned `[]`, and
-   * the approver fell back to the dead `department:<id>` literal that routes to
-   * nobody. That is not an edge case — an app's org tree is normally seeded
-   * (a seed cannot know the org id the runtime mints at boot) while the
-   * approval request always carries one, so EVERY department approver a
-   * designer could pick resolved to nobody.
+   * [ADR-0131 D1/D8] This was "this org ∪ env-wide" (#3807): an `$or` with an
+   * `organization_id = null` arm, because an app's org tree was seeded before
+   * the runtime minted the organization id, so every seeded unit carried no
+   * organization and a strict equality resolved every department approver to
+   * nobody. The organization-ownership ceremony attributes `sys_business_unit`
+   * before a deployment is certified (D10), and from then on a write with no
+   * organization is stamped with the derivable one or refused (D9) — a fresh
+   * install's seed included. No layer keeps a NULL arm (D8), so the unit
+   * screen is the same equality as the member screen below.
    *
-   * Widen to "this org ∪ env-wide", the same predicate `sys_metadata`'s
-   * pending-draft listing settled on for the identical reason. Another org's
-   * unit still fails the match, so the wall between two organizations is
-   * unchanged — only rows belonging to no org at all become visible.
+   * No `organizationId` (a request with no directory organization) keeps the
+   * unfiltered read: there is no organization to screen by.
    */
   private businessUnitOrgScope(
     filter: Record<string, unknown>,
     organizationId?: string | null,
   ): Record<string, unknown> {
     if (!organizationId) return filter;
-    return { ...filter, $or: [{ organization_id: organizationId }, { organization_id: null }] };
+    return { ...filter, organization_id: organizationId };
   }
 
   /**
-   * Tenant scope for the `sys_business_unit_member` read — a STRICT equality,
-   * deliberately NOT {@link businessUnitOrgScope} (#14946).
+   * Tenant scope for the `sys_business_unit_member` read — a STRICT equality
+   * (#14946).
    *
-   * The two screens answer different questions. The UNIT is the anchor the
-   * approver NAMES, and a seeded unit carries `organization_id = null` by
-   * construction (a seed cannot know the id the runtime mints at boot), so
-   * #3807 admits the null there on purpose. The MEMBER rows are the SET BEING
-   * ROUTED TO — enumerated by the platform, never named by anyone — and a
-   * seeded unit id exists identically in every tenant. Before this screen the
+   * The two screens answer different questions, and both are strict now. The
+   * UNIT is the anchor the approver NAMES ({@link businessUnitOrgScope}, which
+   * admitted a NULL organization until ADR-0131 retired that arm). The MEMBER
+   * rows are the SET BEING ROUTED TO — enumerated by the platform, never named
+   * by anyone — and a seeded unit id exists identically in every tenant. Before this screen the
    * member read carried no organization predicate at all, under
    * {@link SYSTEM_CTX} which carries no tenant either, so tenant A's request
    * resolved the shared unit and then collected EVERY tenant's membership rows
@@ -2794,9 +2790,9 @@ export class ApprovalService implements IApprovalService {
    * see. That is not silent — the graph-type fallback in `expandApprover`
    * warns `expanded to nobody` (#3807) and `onEmptyApprovers` governs the
    * request as for any unstaffed target — and the repair is to stamp the
-   * membership rows, never to widen this screen. ⛔ Do not "unify" the two
-   * screens: one method serving both re-opens whichever half it does not
-   * implement.
+   * membership rows, never to widen this screen. ⛔ Keep the two screens two
+   * methods: they guard different reads, and a change to one must not
+   * silently move the other.
    */
   private businessUnitMemberScope(
     filter: Record<string, unknown>,
@@ -2809,9 +2805,8 @@ export class ApprovalService implements IApprovalService {
   /**
    * Recursive department — walks `sys_business_unit.parent_business_unit_id`.
    *
-   * Two tenant screens, and they are different on purpose: the UNIT rows
-   * (seed check and descent) go through the null-inclusive
-   * {@link businessUnitOrgScope}; the MEMBER read goes through the strict
+   * Two tenant screens, both strict: the UNIT rows (seed check and descent)
+   * go through {@link businessUnitOrgScope}; the MEMBER read goes through
    * {@link businessUnitMemberScope}. `organizationId` is the DIRECTORY
    * organization the approver resolves in (ADR-0105 D9), for both.
    */
@@ -2851,7 +2846,7 @@ export class ApprovalService implements IApprovalService {
       rows = await this.engine.find('sys_business_unit_member', {
         // #14946: tenant-screened — {@link businessUnitMemberScope} is STRICT
         // on purpose and is not {@link businessUnitOrgScope}. The units above
-        // proved their tenancy (or are seeded); these rows have not, and the
+        // proved their tenancy; these rows have not, and the
         // shared seeded unit id is exactly where other tenants' rows sit.
         where: this.businessUnitMemberScope({ business_unit_id: { $in: Array.from(seen) } }, organizationId),
         fields: ['user_id'],
@@ -5482,9 +5477,19 @@ export class ApprovalService implements IApprovalService {
     // approver: a reminder names no channel, messaging's default materializes
     // it in the in-app inbox, and the inbox row carries the title, the body and
     // the deep link below, never links. The deep link is the approver's way in.
+    //
+    // [#24751] Each address once — the opening's rule (`openedOn`). A slate
+    // lists a person once per group they resolved into (per_group tagging), and
+    // `pending_approvers` keeps every one of those slots until the first vote,
+    // so one id can stand there twice. Messaging delivers that person ONE
+    // reminder (both emits carry the same dedup key), so counting per slot
+    // answered a `notified` the inbox contradicts. `notified` is the number of
+    // reminders handed over: one per distinct address. A user id and the same
+    // account's email are two addresses here, exactly as at the opening — two
+    // slots the person takes separately, and two reminders delivered.
     const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
     let notified = 0;
-    const concrete = pending.filter(a => a && !a.includes(':'));
+    const concrete = new Set(pending.filter(a => a && !a.includes(':')));
     const literals = pending.filter(a => a && a.includes(':'));
     for (const approver of concrete) {
       notified += await this.notify({

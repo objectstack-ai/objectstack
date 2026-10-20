@@ -29,6 +29,14 @@ export {
   UnsupportedDialectEmissionError,
   renderDialectEmissionRefusal,
 } from './dialect-emission-refusal.js';
+// [ADR-0131 D9] The autonumber counter's refusal of an organization-less row on
+// a tenant table — exported for the same reason: a caller recognises it by `code`.
+export {
+  ORGANIZATIONLESS_COUNTER_REFUSAL_CODE,
+  ORGANIZATIONLESS_COUNTER_REFUSAL_STATUS,
+  OrganizationlessCounterRefusal,
+  renderOrganizationlessCounterRefusal,
+} from './organizationless-counter-refusal.js';
 export type {
   SqlDriverConfig,
   SqliteJournalMode,
