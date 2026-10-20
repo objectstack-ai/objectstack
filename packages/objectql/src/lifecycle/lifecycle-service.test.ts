@@ -1210,10 +1210,12 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
    * Null handling is the platform's settled answer, not a JS accident: a
    * value that is not there satisfies no positive comparison (#5298/#5299,
    * every backend's `nullValueSatisfiesOperator` ends `default: return
-   * false`). That is exactly why the global pass needs the explicit
-   * `{ organization_id: null }` branch beside its `$nin` — a bare `$nin`
-   * skips NULL-org rows — and modelling it here is what makes that branch
-   * load-bearing in the tenant test rather than decorative.
+   * false`). That is exactly why the global pass on an ATTRIBUTION field
+   * keeps an explicit `{ [field]: null }` branch beside its `$nin` — a bare
+   * `$nin` skips the rows about no organization — and modelling it here is
+   * what makes that branch load-bearing rather than decorative. On
+   * `organization_id` the branch is retired (ADR-0131 D1, D14): a bare `$nin`
+   * there is the rule, not an omission.
    */
   const matchesWhere = (row: Record<string, unknown>, where: Record<string, any>): boolean =>
     Object.entries(where).every(([key, cond]) => {
@@ -1536,9 +1538,11 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
         // makes the tenant leg falsifiable rather than merely unobserved.
         { id: 'reg-200d', created_at: at(-200 * DAY), organization_id: 'org_reg' },
         { id: 'plain-200d', created_at: at(-200 * DAY), organization_id: 'org_plain' },
-        // NULL org: covered by the global pass's explicit null branch, never
-        // by a bare `$nin`.
-        { id: 'no-org-200d', created_at: at(-200 * DAY), organization_id: null },
+        // An organization with no override of its own: the global pass's
+        // `$nin` covers it. [ADR-0131 D1, D14] No NULL-org row is seeded: after
+        // the upgrade ceremony a tenant-scoped table holds none, and the
+        // global pass on `organization_id` carries no NULL arm.
+        { id: 'other-200d', created_at: at(-200 * DAY), organization_id: 'org_other' },
       ],
     });
     const { engine } = captureEngine([AUDIT_OBJ], {
@@ -1557,13 +1561,13 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
       { created_at: { $lt: isoCutoff('2y') }, organization_id: 'org_reg' },
       {
         created_at: { $lt: isoCutoff('90d') },
-        $or: [{ organization_id: { $nin: ['org_reg'] } }, { organization_id: null }],
+        organization_id: { $nin: ['org_reg'] },
       },
     ]);
-    expect(stores.archivedFrom('sys_audit_log')).toEqual(['reg-800d', 'plain-200d', 'no-org-200d']);
+    expect(stores.archivedFrom('sys_audit_log')).toEqual(['reg-800d', 'plain-200d', 'other-200d']);
     expect(stores.bulkDeleted).toEqual([
       { object: 'sys_audit_log', ids: ['reg-800d'] },
-      { object: 'sys_audit_log', ids: ['plain-200d', 'no-org-200d'] },
+      { object: 'sys_audit_log', ids: ['plain-200d', 'other-200d'] },
     ]);
     expect(stores.remaining('sys_audit_log')).toEqual(['reg-200d']);
 
@@ -1810,10 +1814,11 @@ describe('LifecycleService.sweep — governance (P4)', () => {
       created_at: { $lt: isoCutoff('2y') },
       organization_id: 'org_reg',
     });
-    // …then the global 30d pass excluding it but INCLUDING NULL-org rows.
+    // …then the global 30d pass excluding it. [ADR-0131 D1, D14] No NULL arm
+    // on `organization_id`: no NULL-org row exists after the ceremony.
     expect(reaps[1].where).toEqual({
       created_at: { $lt: isoCutoff('30d') },
-      $or: [{ organization_id: { $nin: ['org_reg'] } }, { organization_id: null }],
+      organization_id: { $nin: ['org_reg'] },
     });
     expect(reaps).toHaveLength(2);
     expect(deletes.map((d) => d.where)).toEqual([{ id: 'tenant_row' }, { id: 'global_row' }]);
@@ -1857,7 +1862,7 @@ describe('LifecycleService.sweep — governance (P4)', () => {
     });
     expect(reaps[1].where).toEqual({
       created_at: { $lt: isoCutoff('30d') },
-      $or: [{ organization_id: { $nin: ['org_reg'] } }, { organization_id: null }],
+      organization_id: { $nin: ['org_reg'] },
       ...predicate,
     });
     expect(reaps).toHaveLength(2);
@@ -1985,7 +1990,7 @@ describe('LifecycleService.sweep — governance (P4)', () => {
         { expires_at: { $lt: isoCutoff('2y') }, organization_id: 'org_reg' },
         {
           expires_at: { $lt: isoCutoff('1d') },
-          $or: [{ organization_id: { $nin: ['org_reg'] } }, { organization_id: null }],
+          organization_id: { $nin: ['org_reg'] },
         },
       ]);
     });
@@ -3318,7 +3323,7 @@ describe('LifecycleService.sweep — governance tenant scan failure (#12853)', (
       { created_at: { $lt: isoCutoff('90d') }, organization_id: 'org_reg' },
       {
         created_at: { $lt: isoCutoff('30d') },
-        $or: [{ organization_id: { $nin: ['org_reg'] } }, { organization_id: null }],
+        organization_id: { $nin: ['org_reg'] },
       },
     ]);
     expect(box.deletes).toHaveLength(2);
