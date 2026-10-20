@@ -1,9 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#24522] The 18.x line's upgrade harness: a database an 18.0 install created
-// upgrades to THIS commit, boots, and keeps its data (R2), and a v17-shaped one
-// is still refused (R3). Ruling record 6266750393 on the v18 epic makes R2 a
-// check every PR on the line passes before it merges.
+// [#24522] The 18.x line's upgrade harness, RESTATED by 18.x step 6 (ruling
+// records 6266750393, 6269955919 and 6270035914 on the v18 epic): a database
+// an 18.0 install created takes the upgrade ceremony and then boots THIS
+// commit with its data (R2), and so does a v17-shaped one (R3). The ceremony
+// is open now, and the boot guard recognises a database by its birth marker:
+// 18.0 wrote none, so an 18.0 database is refused until the ceremony has
+// certified it at this release's ownership shape generation.
 //
 // The fixture (`upgrade-harness/fixture-18.0/`) is a showcase install of the
 // 18.0 code after real use — sign-ups, an invitation, settings with a secret, a
@@ -15,34 +18,47 @@
 //
 // What is asserted, on a fresh copy of the fixture:
 //
-//   1. HEAD boots over it, composed the way `os serve` composes it — the
-//      ownership boot guard included — and nothing refuses it.
+//   1. R2, restated: HEAD refuses it at boot, composed the way `os serve`
+//      composes it, naming the ceremony — and the refused boot writes no
+//      marker.
+//   1b. `os migrate organization-ownership` — the real binary, in the
+//      showcase's directory — plans it and applies that plan, and the marker
+//      verifies at this release's shape generation.
+//   1c. HEAD then boots over it, and nothing refuses it.
 //   2. It serves the fixture's data: the fixture's people sign in with their
 //      18.0 passwords and read the fixture's own task.
-//   3. Once HEAD has stopped, every reshaped table still holds every row the
-//      fixture gave it, with the same key columns (`organization_id` among
-//      them): a step that moved, deleted or re-stamped 18.0 rows outside the
-//      upgrade ceremony goes red here, naming the table and the row.
-//   4. The same fixture with one v17 trait added — a physical `organization_id`
-//      on `sys_metadata`, an object that declares none — is refused at boot
-//      with the guard's code. Until step 6 opens the ceremony that is the
-//      answer a v17 database gets; step 6 rewrites this case, by name.
+//   2b. The fixture's declared webhook — customized in 18.0 only by switching
+//      it on — now answers from its declaration, switched on by the activation
+//      row the ceremony wrote: one delivery per task change, naming the
+//      declaration.
+//   3. Once HEAD has stopped, every 18.0 row of every reshaped table is where
+//      the ceremony put it, with its key columns: kept in place, moved to its
+//      sibling (identity mail, the global audit rows), re-sourced (the
+//      deliveries), or deleted as a copy of a declaration (the webhook) — and
+//      `organization_id` dropped where the table became deployment-level, NOT
+//      NULL where it stayed.
+//   4. R3, restated: the same fixture with one v17 trait added — a physical
+//      `organization_id` on `sys_metadata`, an object that declares none — is
+//      refused at boot with the guard's code, takes the ceremony, and boots.
 //
 // ⛔ Additive change passes: a row HEAD's boot ADDS (an activity shard, a
 // seeder's row) is not a failure, so counts are compared as "at least", and
 // every fixture row is looked up by id.
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isOrganizationOwnershipBootRefusal } from '@objectstack/runtime';
+import { ORGANIZATION_OWNERSHIP_SHAPE_GENERATION } from '@objectstack/spec/system';
 import type { VerifyStack } from '@objectstack/verify';
-import { columnsOf, keyRowsOf, type FixtureManifest } from './upgrade-harness/fixture-manifest.js';
+import { columnsOf, type FixtureManifest } from './upgrade-harness/fixture-manifest.js';
 import { FIXTURE_NAMES, FIXTURE_PEOPLE, bootFixture } from './upgrade-harness/populate-fixture.js';
 import { loadSqlIntoSqlite } from './upgrade-harness/sqlite-text-dump.js';
+import { OWNERSHIP_MARKER, runOwnershipCeremony } from './upgrade-harness/ceremony.js';
 
 const FIXTURE = new URL('./upgrade-harness/fixture-18.0/', import.meta.url);
+const MARKER = OWNERSHIP_MARKER;
 const manifest = JSON.parse(readFileSync(new URL('manifest.json', FIXTURE), 'utf8')) as FixtureManifest;
 const fixtureSql = readFileSync(new URL('database.sql', FIXTURE), 'utf8');
 
@@ -54,22 +70,59 @@ function refusalIn(error: unknown): unknown {
   return undefined;
 }
 
+/** A boot of HEAD over `file`; the stack, or the error that stopped it. */
+async function tryBoot(file: string): Promise<{ stack?: VerifyStack; error?: unknown }> {
+  try {
+    return { stack: await bootFixture(file) };
+  } catch (error) {
+    return { error };
+  }
+}
+
+/** The ceremony on `file`, as an operator runs it (`runOwnershipCeremony`). */
+function ceremony(dir: string, file: string, tag: string): Record<string, unknown> {
+  return runOwnershipCeremony(dir, file, tag);
+}
+
+/** The ceremony's marker on `file`: verified, blocking 0, at this release's generation. */
+function expectCertified(file: string): void {
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    const marker = db.prepare('SELECT verified_at, blocking, details FROM sys_migration WHERE id = ?').get(MARKER) as
+      | { verified_at: unknown; blocking: unknown; details: unknown }
+      | undefined;
+    expect(marker?.verified_at, 'the ceremony verified its marker').toBeTruthy();
+    expect(Number(marker?.blocking)).toBe(0);
+    expect(JSON.parse(String(marker?.details)).checkpoint?.shapeGeneration).toBe(ORGANIZATION_OWNERSHIP_SHAPE_GENERATION);
+  } finally {
+    db.close();
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowsOf = (body: any): any[] => (Array.isArray(body) ? body : (body?.records ?? body?.data ?? []));
 
-describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.sha.slice(0, 12)}) upgrades to HEAD and keeps its data`, () => {
+describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.sha.slice(0, 12)}) takes the ceremony, upgrades to HEAD and keeps its data`, () => {
   const dir = mkdtempSync(join(tmpdir(), 'dogfood-upgrade-18x-'));
   const file = join(dir, 'upgraded.db');
+  /**
+   * The ceremony's output, copied once it verified, and booted. A refused boot
+   * lives on in this process, its SQLite driver never torn down, and a later
+   * boot over the SAME path can meet its stale image (measured on the
+   * boot-refusal-order dogfood); booting the copied bytes is the operator's
+   * sequence — the refused `os serve` process has exited.
+   */
+  const migrated = join(dir, 'upgraded.migrated.db');
   let stack: VerifyStack | undefined;
+  let refusedError: unknown;
   let bootError: unknown;
+  let report: Record<string, unknown> | undefined;
 
   beforeAll(async () => {
     loadSqlIntoSqlite(fixtureSql, file);
-    try {
-      stack = await bootFixture(file);
-    } catch (error) {
-      bootError = error;
-    }
+    const refused = await tryBoot(file);
+    await refused.stack?.stop();
+    refusedError = refused.error ?? new Error('the 18.0 database booted without the ceremony');
   }, 240_000);
 
   afterAll(async () => {
@@ -81,11 +134,36 @@ describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.s
     for (const t of manifest.reshaped) expect(t.count, `${t.table} holds rows in the fixture`).toBeGreaterThan(0);
   });
 
-  it('1. HEAD boots over the 18.0 database, and no ownership refusal stops it', () => {
-    const refusal = refusalIn(bootError);
-    expect(refusal, `the ownership boot guard refused the 18.0 database: ${String((refusal as Error | undefined)?.message)}`).toBeUndefined();
-    expect(bootError, `the boot failed: ${String((bootError as Error | undefined)?.stack ?? bootError)}`).toBeUndefined();
+  it('1. R2, restated: HEAD refuses the 18.0 database at boot, naming the ceremony, and writes no marker', () => {
+    const refusal = refusalIn(refusedError) as { message?: string } | undefined;
+    expect(refusal, `the boot was not refused by the ownership guard: ${String((refusedError as Error)?.stack ?? refusedError)}`).toBeDefined();
+    expect(refusal!.message).toContain('os migrate organization-ownership');
+    expect(refusal!.message).not.toMatch(/on a 17\.x release|stay on 17|every 18\.0/);
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+      expect(db.prepare('SELECT id FROM sys_migration WHERE id = ?').all(MARKER)).toEqual([]);
+    } finally {
+      db.close();
+    }
   });
+
+  it('1b. R2, restated: the ceremony plans and applies it, and certifies it at this release\'s shape generation', () => {
+    report = ceremony(dir, file, 'r2');
+    expect(report.complete).toBe(true);
+    expect(report.blocking).toBe(0);
+    expectCertified(file);
+    copyFileSync(file, migrated);
+  }, 640_000);
+
+  it('1c. R2, restated: HEAD then boots over it, and no ownership refusal stops it', async () => {
+    expect(report, 'the ceremony ran').toBeDefined();
+    const booted = await tryBoot(migrated);
+    stack = booted.stack;
+    bootError = booted.error;
+    const refusal = refusalIn(bootError);
+    expect(refusal, `the ownership boot guard refused the migrated database: ${String((refusal as Error | undefined)?.message)}`).toBeUndefined();
+    expect(bootError, `the boot failed: ${String((bootError as Error | undefined)?.stack ?? bootError)}`).toBeUndefined();
+  }, 240_000);
 
   it('2. it serves the 18.0 data: the fixture\'s people sign in, and the fixture\'s task is there', async () => {
     expect(stack).toBeDefined();
@@ -98,24 +176,17 @@ describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.s
     expect(titles).toContain(`${FIXTURE_NAMES.task} — edited`);
   });
 
-  // [#24529, step 1] Declared webhooks are read from the registry, and the 18.0
-  // seeder's rows stay until the ceremony. The fixture's mirror of
-  // `showcase_task_changed` was activated in 18.0, which stamped it
-  // `customized`, so it answers as itself and the declaration of the same name
-  // is withheld even while the declaration is switched on: one delivery per
-  // task change, from the row, never a second one from the declaration.
-  it('2b. the fixture\'s customized declared webhook dispatches exactly once on a task change', async () => {
+  // [18.x step 5a] The fixture's mirror of `showcase_task_changed` was only
+  // switched on in 18.0 (customized by its `active` alone), so the ceremony
+  // kept that switch as the declaration's activation row and deleted the
+  // copy. The declaration now answers, once: a reader that still served the
+  // row would deliver a second time.
+  it('2b. the fixture\'s declared webhook dispatches exactly once on a task change, from its declaration', async () => {
     expect(stack).toBeDefined();
     const adminTok = await stack!.signIn(FIXTURE_PEOPLE.admin.email, FIXTURE_PEOPLE.admin.password);
     const hooks = rowsOf(await (await stack!.apiAs(adminTok, 'GET', `/data/sys_webhook?name=${FIXTURE_NAMES.webhook}`)).json())
       .filter((h) => h?.name === FIXTURE_NAMES.webhook);
-    expect(hooks, 'the 18.0 mirror row is still there').toHaveLength(1);
-    expect(hooks[0].customized, 'the fixture activated it in 18.0, which marks it customized').toBe(true);
-    // Switch the declaration ON as well (the showcase ships it inactive), so a
-    // reader that served both the row and the declaration WOULD deliver twice:
-    // without this the case could not fail on the rule it pins.
-    const on = await stack!.apiAs(adminTok, 'POST', `/security/_activation/webhook/${FIXTURE_NAMES.webhook}`, { enabled: true });
-    expect(on.status, await on.clone().text()).toBe(200);
+    expect(hooks, 'the 18.0 copy is gone').toEqual([]);
     const deliveries = async () => rowsOf(await (await stack!.apiAs(adminTok, 'GET', '/data/sys_http_delivery?limit=500')).json())
       .filter((d) => d?.source === 'webhook');
     const before = new Set((await deliveries()).map((d) => String(d.id)));
@@ -136,31 +207,60 @@ describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.s
     }
     await new Promise((r) => setTimeout(r, 1000));
     fresh = (await deliveries()).filter((d) => !before.has(String(d.id)));
-    expect(fresh.map((d) => d.ref_id), 'one delivery, from the customized row').toEqual([hooks[0].id]);
+    expect(fresh.map((d) => d.ref_id), 'one delivery, from the declaration').toEqual([`declared:${FIXTURE_NAMES.webhook}`]);
   });
 
-  it('3. every reshaped table keeps every 18.0 row, with its key columns, once HEAD has stopped', async () => {
+  it('3. every 18.0 row of every reshaped table is where the ceremony put it, with its key columns', async () => {
     await stack?.stop();
     stack = undefined;
-    const db = new DatabaseSync(file, { readOnly: true });
+    const db = new DatabaseSync(migrated, { readOnly: true });
     try {
+      // Where a row may be now: its own table, or the deployment-level sibling it moved to.
+      const SIBLING: Record<string, string> = { sys_email: 'sys_identity_email', sys_setting_audit: 'sys_platform_setting_audit' };
+      // Tables that became deployment-level: their organization column is gone.
+      const DEPLOYMENT_LEVEL = new Set(['sys_secret', 'sys_flow_credential']);
+      const rowById = (table: string, id: string): Record<string, unknown> | undefined =>
+        db.prepare(`SELECT * FROM "${table}" WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+      const project = (row: Record<string, unknown>, cols: readonly string[]): Record<string, string | null> =>
+        Object.fromEntries(cols.map((c) => [c, row[c] === null || row[c] === undefined ? null : String(row[c])]));
       for (const t of manifest.reshaped) {
-        for (const physical of t.physical) {
-          const cols = columnsOf(db, physical);
-          expect(cols.length, `${physical} still exists`).toBeGreaterThan(0);
-          for (const c of t.keyColumns) expect(cols, `${physical}.${c} still exists`).toContain(c);
+        for (const fixtureRow of t.rows) {
+          const id = String(fixtureRow.id);
+          if (t.table === 'sys_webhook') {
+            // The declared webhook's copy: deleted, its switch kept as the declaration's activation row.
+            for (const physical of t.physical) expect(rowById(physical, id), `sys_webhook copy ${id} is deleted`).toBeUndefined();
+            continue;
+          }
+          const home = t.physical.find((physical) => rowById(physical, id));
+          const moved = !home && SIBLING[t.table] ? SIBLING[t.table] : undefined;
+          const now = home ? rowById(home, id) : moved ? rowById(moved, id) : undefined;
+          expect(now, `${t.table} row ${id} is kept${SIBLING[t.table] ? ` or moved to ${SIBLING[t.table]}` : ''}`).toBeDefined();
+          const cols = moved || DEPLOYMENT_LEVEL.has(t.table) ? t.keyColumns.filter((c) => c !== 'organization_id') : t.keyColumns;
+          const expected = { ...project(fixtureRow, cols) };
+          if (t.table === 'sys_http_delivery') expected.ref_id = `declared:${FIXTURE_NAMES.webhook}`;
+          expect(project(now!, cols), `${t.table} row ${id}`).toEqual(expected);
         }
-        const now = keyRowsOf(db, t.physical, t.keyColumns);
-        const byId = new Map(now.map((r) => [r.id, r]));
-        expect(now.length, `${t.table}: ${now.length} rows now, ${t.count} in the fixture`).toBeGreaterThanOrEqual(t.count);
-        for (const row of t.rows) expect(byId.get(row.id), `${t.table} row ${row.id}`).toEqual(row);
+      }
+      // The identity mail and the global audit rows moved; tenant mail and tenant audit stayed.
+      const reset = manifest.reshaped.find((t) => t.table === 'sys_email')!.rows;
+      expect(reset.filter((r) => rowById('sys_identity_email', String(r.id))).length, 'the reset mail moved').toBeGreaterThan(0);
+      expect(reset.filter((r) => rowById('sys_email', String(r.id))).length, 'the invitation mail stayed').toBeGreaterThan(0);
+      expect(db.prepare(`SELECT COUNT(*) AS n FROM sys_setting_audit WHERE scope = 'global'`).get()).toEqual({ n: 0 });
+      // The webhook's switch, kept.
+      expect(db.prepare(`SELECT active FROM sys_metadata_activation WHERE metadata_type = 'webhook' AND name = ?`).get(FIXTURE_NAMES.webhook)).toEqual({ active: 1 });
+      // Deployment-level tables lost the column; the tenant tables hold it NOT NULL.
+      for (const table of DEPLOYMENT_LEVEL) expect(columnsOf(db, table), table).not.toContain('organization_id');
+      const notNull = (table: string): unknown =>
+        (db.prepare(`SELECT "notnull" AS nn FROM pragma_table_info(?) WHERE name = 'organization_id'`).get(table) as { nn?: unknown } | undefined)?.nn;
+      for (const table of ['sys_email', 'sys_setting_audit', 'sys_share_link', 'sys_member', 'sys_user_permission_set']) {
+        expect(notNull(table), `${table}.organization_id is NOT NULL`).toBe(1);
       }
     } finally {
       db.close();
     }
   });
 
-  it('4. R3: the same database with a v17 trait is still refused at boot, with the guard\'s code', async () => {
+  it('4. R3, restated: the same database with a v17 trait is refused at boot, takes the ceremony, and boots', async () => {
     const v17 = join(dir, 'v17-shaped.db');
     loadSqlIntoSqlite(fixtureSql, v17);
     const db = new DatabaseSync(v17);
@@ -170,15 +270,26 @@ describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.s
     } finally {
       db.close();
     }
-    let error: unknown;
-    try {
-      const refused = await bootFixture(v17);
-      await refused.stop();
-    } catch (e) {
-      error = e;
-    }
-    const refusal = refusalIn(error);
+    const refused = await tryBoot(v17);
+    await refused.stack?.stop();
+    const refusal = refusalIn(refused.error);
     expect(refusal, 'the v17-shaped database was refused by the ownership boot guard').toBeDefined();
     expect((refusal as { tables?: string[] }).tables).toContain('sys_metadata');
-  }, 240_000);
+
+    const v17Report = ceremony(dir, v17, 'r3');
+    expect([v17Report.complete, v17Report.blocking]).toEqual([true, 0]);
+    expectCertified(v17);
+    const check = new DatabaseSync(v17, { readOnly: true });
+    try {
+      expect(columnsOf(check, 'sys_metadata')).not.toContain('organization_id');
+    } finally {
+      check.close();
+    }
+    const v17Migrated = join(dir, 'v17-shaped.migrated.db');
+    copyFileSync(v17, v17Migrated);
+    const booted = await tryBoot(v17Migrated);
+    await booted.stack?.stop();
+    expect(refusalIn(booted.error), String((booted.error as Error | undefined)?.message)).toBeUndefined();
+    expect(booted.error).toBeUndefined();
+  }, 900_000);
 });
