@@ -198,8 +198,9 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 
 ##### A 17.x or 18.0 pre-release development database is upgraded in place
 
-A v18 server refuses to start on a database with no birth marker, which 17.x
-and the 18.0 pre-releases (`18.0.0-next.*`) created, until the [ownership ceremony](#os-migrate-organization-ownership)
+Fresh installs are supported under every tenancy posture. A v18 server
+refuses to start on a database with no birth marker, which 17.x and the 18.0
+pre-releases (`18.0.0-next.*`) created, until the [ownership ceremony](#os-migrate-organization-ownership)
 has run on it. `os dev` runs that ceremony for you when the database is a local
 SQLite file:
 
@@ -1507,10 +1508,11 @@ upgrading rather than wait for that.
 #### `os migrate organization-ownership`
 
 The v18 ownership ceremony (ADR-0131 D10), and the upgrade path of a database
-17.x or an 18.0 pre-release (`18.0.0-next.*`) created. A v18 `os serve` / `os start` serves a database this release
-created itself, or one this ceremony certified; it refuses any other until the
-ceremony has run. Under `os dev` it runs on its own for a local SQLite
-database (see [`os dev`](#os-dev)).
+17.x or an 18.0 pre-release (`18.0.0-next.*`) created.
+Fresh installs are supported under every tenancy posture and never need it.
+A v18 `os serve` / `os start` serves a database this release created itself, or one this ceremony
+certified; it refuses any other until the ceremony has run. Under `os dev` it
+runs on its own for a local SQLite database (see [`os dev`](#os-dev)).
 
 How a database is recognised: the first boot that creates a datastore from
 empty writes a **birth marker** into `sys_migration` (row
@@ -1518,8 +1520,19 @@ empty writes a **birth marker** into `sys_migration` (row
 born in. The ceremony writes the same row, verified, when its post-check
 passes. A server decides on that generation alone: a database with no birth
 marker, which 17.x and the 18.0 pre-releases created, or one a shorter ceremony
-certified at an older
-generation, is refused, and the refusal names this command.
+certified at an older generation, is refused, and the refusal names this
+command.
+
+The sequence on an existing database:
+
+1. Start this release against it once (`os serve`). The boot is refused, but
+   its schema sync has already created the tables this release adds, the
+   sibling logs the ceremony moves rows into among them. A plan drawn before
+   that boot blocks its `sibling-moves` step, naming the missing table and this
+   remedy.
+2. Take a backup.
+3. Write the plan, review it, then apply that reviewed plan (below).
+4. Start the server again.
 
 ```bash
 os migrate organization-ownership --out plan.json            # the plan: reads only
