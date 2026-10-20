@@ -555,9 +555,7 @@ and neither does a decision whose flow moves on to another approval step: on
 a two-step flow the first step's decision is silent and the decision that ends
 the run is the one that notifies. Whether a later step opened is read from the
 run, not from the flow's graph, so when a decision node routes around the
-later step, the first decision is the outcome and notifies. A later step's
-request records as its submitter the person whose decision opened it, so on a
-multi-step flow that person is the one told.
+later step, the first decision is the outcome and notifies.
 
 Two cases tell nobody by design. A submitter who decided their own request
 already knows. An SLA `auto_approve` or `auto_reject` is told by the
