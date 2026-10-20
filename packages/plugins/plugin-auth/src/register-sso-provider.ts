@@ -22,6 +22,7 @@
  * (per-environment runtime) — mirroring `runSetInitialPassword`.
  */
 
+import { carryForwardedClientAddress } from './client-address-forwarding.js';
 import { inProcessRedispatchUrl } from './in-process-redispatch.js';
 import { readJsonRequestBody } from './request-json-body.js';
 
@@ -75,6 +76,7 @@ async function resolveActiveOrganizationId(
     if (cookie) h.set('cookie', cookie);
     const authz = headers.get('authorization');
     if (authz) h.set('authorization', authz);
+    carryForwardedClientAddress(headers, h);
     // [#22398] A cookie request reads without renewal: this response's cookie
     // is never sent (`in-process-redispatch.ts`).
     const resp = await handle(new Request(inProcessRedispatchUrl(sessionUrl, h), { method: 'GET', headers: h }));
@@ -201,12 +203,7 @@ export async function runRegisterSsoProviderFromForm(
   } catch {
     return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Bad request URL' } } };
   }
-  const headers = new Headers({ 'content-type': 'application/json' });
-  const cookie = request.headers.get('cookie');
-  if (cookie) headers.set('cookie', cookie);
-  const authz = request.headers.get('authorization');
-  if (authz) headers.set('authorization', authz);
-  headers.set('origin', request.headers.get('origin') || origin);
+  const headers = forwardAuthHeaders(request, origin);
 
   // Org-scope the provider to the caller's active organization (best-effort).
   // `@better-auth/sso`'s management endpoints (delete / update / domain
@@ -307,12 +304,7 @@ export async function runRegisterSamlProviderFromForm(
   };
   if (identifierFormat) samlConfig.identifierFormat = identifierFormat;
 
-  const headers = new Headers({ 'content-type': 'application/json' });
-  const cookie = request.headers.get('cookie');
-  if (cookie) headers.set('cookie', cookie);
-  const authz = request.headers.get('authorization');
-  if (authz) headers.set('authorization', authz);
-  headers.set('origin', request.headers.get('origin') || origin);
+  const headers = forwardAuthHeaders(request, origin);
 
   // Org-scope to the caller's active org (best-effort) so any org owner/admin
   // can manage the provider — see the OIDC helper above.
@@ -430,6 +422,11 @@ function rewriteSsoAdminUrl(request: Request, fromSuffix: RegExp, toPath: string
   }
 }
 
+/**
+ * The headers every re-dispatch below carries: the caller's credential
+ * (cookie / bearer), its `Origin` (or the request's own), and its forwarding
+ * facts.
+ */
 function forwardAuthHeaders(request: Request, origin: string): Headers {
   const headers = new Headers({ 'content-type': 'application/json' });
   const cookie = request.headers.get('cookie');
@@ -437,6 +434,7 @@ function forwardAuthHeaders(request: Request, origin: string): Headers {
   const authz = request.headers.get('authorization');
   if (authz) headers.set('authorization', authz);
   headers.set('origin', request.headers.get('origin') || origin);
+  carryForwardedClientAddress(request.headers, headers);
   return headers;
 }
 
