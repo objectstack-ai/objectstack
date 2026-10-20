@@ -1117,7 +1117,10 @@ export function runRuntimeAuthoringRules(args: {
     // [#24563] The closure the snapshots' `objects` were narrowed to, stated
     // exactly when the builder above narrowed them (the same predicate), so a
     // rule can tell an object outside the package's declared reach from one
-    // a whole-collection snapshot merely does not carry.
+    // that exists nowhere. [#24668] Absent here, the snapshots carry the whole
+    // collection the host serves, so an object missing from them exists
+    // nowhere in this deployment; only the CLI, whose stack is one app, still
+    // cannot decide that.
     ...(packageScopeInForce(args.packageScope) ? { packageScope: args.packageScope } : {}),
     // [#20611] Spelled against the CANDIDATE, the one snapshot that holds the
     // written item. The baseline pass shares the set and cannot match it: the

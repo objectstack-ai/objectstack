@@ -16,6 +16,8 @@ import {
   validateListViewFieldRefs as validateListViewFieldRefsUnrecorded,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
+  LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
+  LIST_VIEW_OBJECT_UNKNOWN,
   listViewWalkedPositions,
   type ListViewFieldRefFinding,
 } from './validate-list-view-field-refs.js';
@@ -1088,6 +1090,21 @@ describe('[#22161] one-line verdicts — list-view-field-unknown, list-view-fiel
         'could only match zero records',
         '`gantt.quickFilters[].field`',
         '`gantt.tooltipFields[]`',
+      ],
+      // The two binding verdicts carry their reasoning only here: the closure's
+      // limbs and which door judges which snapshot.
+      [LIST_VIEW_OBJECT_OUTSIDE_CLOSURE]: [
+        'declares in `dependencies`',
+        'platform objects',
+        '`object-reference-unknown`',
+        '`list-view-object-unknown`',
+        'a draft save',
+      ],
+      [LIST_VIEW_OBJECT_UNKNOWN]: [
+        'the whole collection the deployment serves',
+        'no deployment serves zero objects',
+        '`list-view-object-outside-closure`',
+        'a draft save',
       ],
     };
     for (const [rule, list] of Object.entries(facts)) {

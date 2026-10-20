@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/hono",
-  "version": "18.0.0-next.5",
+  "version": "18.0.0",
   "license": "Apache-2.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

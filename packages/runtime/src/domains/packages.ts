@@ -2141,6 +2141,16 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Adopting orphaned metadata into package "${id}"`);
             if (walled) return walled;
+            // [#24813] ADR-0070 D2: a package the deployment ships is not a
+            // base, so nothing is adopted into it. `reassignOrphanedMetadata`
+            // asks no writability question and rebinds every package-less row
+            // to whatever id it is handed, so this door refuses with the answer
+            // install-overwrite, disable, publish, revert, the manifest PATCH
+            // and delete give. Asked BEFORE the protocol is resolved, so a
+            // read-only id answers 422 whether or not this deployment can
+            // adopt. An id nothing installed is writable by the predicate's own
+            // rule, so it still reaches the protocol.
+            const readOnly = requireWritablePackage(deps, qlService, id, 'adopt items into'); if (readOnly) return readOnly;
             const protocol = await resolveProtocol(deps, _context);
             if (!protocol || typeof protocol.reassignOrphanedMetadata !== 'function') {
                 return { handled: true, response: deps.error('Orphan adoption not supported', 501) };

@@ -1,5 +1,642 @@
 # @objectstack/plugin-email
 
+## 18.0.0
+
+### Minor Changes
+
+- fbafb85: feat(plugin-email,plugin-auth): identity mail — verification, password reset, magic link, the email-change notice, an account invitation — is recorded in `sys_identity_email`, a deployment-level sibling of `sys_email` with no organization column
+  
+  Clause-②: yes (widening)
+  
+  ADR-0131 D7, ruling of record 6257510973 (letter Q2 A). Expand-first: this release adds the new log and its write path, and keeps reading every row and job an 18.0 install left behind. It moves and deletes nothing.
+  
+  - **The new object.** `sys_identity_email` (`@objectstack/platform-objects`, registered by `EmailServicePlugin`) has `sys_email`'s fields, so the row shape is the same, and `systemFields: { tenant: false }`, so it has no organization column. It is append-only, readable over `get` / `list`, and gated by `manage_platform_settings` (like `sys_job`), because its rows carry password-reset and sign-in links.
+  - **The contract.** `SendEmailInput` and `SendTemplateInput` (`@objectstack/spec/contracts`) gain `identityMail?: boolean`. With `true`, the mail service writes the row to `sys_identity_email`. Without it, the row goes to `sys_email`, as before. `identityMail: true` together with an `organizationId` is refused as `VALIDATION_FAILED` and recorded as a rejected row in `sys_identity_email`. The organization is not written.
+  - **One pipeline, both logs.** The queue worker, the outbox drain hook, the boot outbox sweep, attachment reclamation and the internal-header readback read a row from the log it lives in. A delivery or reclaim job for a `sys_identity_email` row carries `object: 'sys_identity_email'` beside `rowId`. A job with no `object` reads `sys_email`, which covers every job an 18.0 process queued. A job naming anything else is refused at `error` and touches no row. `EmailPersistence.insert` / `update` / `readHeadersJson` take the log as an optional last argument. A custom implementation that ignores it keeps every row in its one store. `@objectstack/plugin-email` exports `TENANT_EMAIL_OBJECT`, `IDENTITY_EMAIL_OBJECT`, `EMAIL_LOG_OBJECTS`, `isEmailLogObject` and `EmailLogObject`.
+  - **plugin-auth.** The five identity sends say `identityMail: true` and name no organization, under every posture. Before, they carried the Default Organization under `single` and nothing under a wall. The organization invitation (`auth.invitation`) is tenant mail. It still carries its organization and still lands in `sys_email`.
+  - **What a reader of `sys_email` sees.**
+    - **Before.** Identity mail was a `sys_email` row: stamped with the Default Organization under `single`, organization-less under a wall.
+    - **Now.** New identity mail is a `sys_identity_email` row. Rows already in `sys_email` stay there and are still delivered, swept and reclaimed.
+    - **Remedy.** A report, export or query that looks for verification or reset mail reads both logs. For example: `ql.find('sys_identity_email', { where: { related_object: 'sys_user', related_id: userId } })` beside the same query on `sys_email`.
+  - **Inventory.** `os migrate organization-ownership`'s inventory lists `sys_identity_email` as deployment-level (column-drop fate, nothing to attribute). Moving the identity rows already in `sys_email` is an 18.x upgrade-ceremony step, not part of this release.
+- 8c5aa50: feat(plugin-email,plugin-auth)!: an organization can no longer create or edit an email template row; the template provenance stamp and the auth SMS template seed retire
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime write door (an organization's create and update of a sys_email_template row are refused) and a boot seed (no sys_notification_template row is written). The three retired names are runtime functions and a string constant of @objectstack/plugin-email with no metadata surface and no replacement: a direct caller meets the compiler's missing-export error and deletes the call. Measured consumers in this repository outside the package: one audit script, updated here. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and the retired names are functions and a constant, not a type surface (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing and three retired exports), shipped as `minor` under the launch-window convention for breaking changes. It carries ADR-0131 D6 and the maintainer's ruling C on ADR-0131 §6 Q1: email templates are not overridden per organization.
+  
+  **What stops being accepted.**
+  
+  - **The `sys_email_template` organization door is closed.** An organization's create and update of a template row are refused with `403 PERMISSION_DENIED`, and the message names the closed door: every engine `insert` / `update` whose context names a caller and is not system-elevated. That covers `POST` / `PATCH /api/v1/data/sys_email_template`, the Studio record editor, batch and import routes, and scripts and flows that run as a user or a service principal. System-context writes still pass: the built-in seed, the declared-template boot sweep, the live projection of a Studio `email_template` save into its row, and the v18 migration ceremony's promotion. Delete is not part of this door.
+  - **The template provenance stamp is retired.** It marked a package- or platform-seeded row `customized: true` when a non-system caller updated it. With the door closed no such update reaches the engine's write, so nothing marks a row any more. Rows already marked keep their mark and are still never overwritten by the boot seeders; they are the population the v18 migration ceremony promotes to environment-level Studio templates.
+  - **Retired exports of `@objectstack/plugin-email`:** `bindEmailTemplateProvenanceStamp`, `unbindEmailTemplateProvenanceStamp` and `EMAIL_TEMPLATE_PROVENANCE_PACKAGE`. They have no replacement. `EmailServicePlugin` closes the door itself, and there is no stamp left to bind, so a direct call is deleted, not rewritten.
+  - **The auth SMS template seed is retired.** A boot with phone sign-in on no longer writes the built-in OTP and invitation texts into `sys_notification_template` as rows. It was internal to `@objectstack/plugin-auth` and exported nothing.
+  
+  **What renders unchanged.**
+  
+  - Every email template renders as before: the template loader still reads `sys_email_template`, and a Studio edit of an `email_template` still reaches the mail at once and survives a restart.
+  - Every auth SMS text renders byte for byte as the seeded store rendered it, for every built-in text and every recipient locale. Each locale rung renders an operator's active row when one exists, and the built-in text where no row exists at that locale. A deactivated or blank row passes its rung on, as it did before.
+  - A `sys_notification_template` row an operator already has still wins, and no existing row is touched.
+  
+  **What changes for you.** To change what an email template sends, edit the `email_template` in Studio. A script or integration that wrote `sys_email_template` rows through the data API now receives `403 PERMISSION_DENIED`. `@objectstack/platform-objects` corrects the `is_system` and `customized` field help on `sys_email_template`, which said an organization may edit a row.
+- 7de0265: feat(plugin-email)!: email templates resolve from the registry; the built-in seed, the declared-template boot sweep and the live projector retire
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What changes is where @objectstack/plugin-email reads a template (the email_template metadata in the registry instead of the sys_email_template rows it used to copy there) and which runtime exports and plugin options exist. The retired names are runtime functions, two types, a string constant and two EmailServicePluginOptions members of @objectstack/plugin-email, each with its one-line fix below; measured consumers in this repository outside the package (a showcase test and three dogfood tests) are rewritten here. The legacy sys_email_template rows stay where they are, untouched: promoting the customized ones to environment-level templates is the v18 migration ceremony's (ADR-0131 C7), not this change's. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and the retired names include runtime functions, not only a type surface (not runtime-interface-only / type-surface-only). The body does carry a FROM → TO block for the retired runtime exports and plugin options, but that is a code change the compiler carries to each caller, not a metadata migration for `objectstack migrate meta`, and ADR-0087's disposition vocabulary has no category that fits this shape exactly, so the maintainer is asked to rule the reading. -->
+  
+  **BREAKING** (retired exports and plugin options of `@objectstack/plugin-email`), graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, so this ships in an `18.0.0-next.N`. It carries ADR-0131 D6/D10 and the maintainer's ruling C on ADR-0131 §6 Q1.
+  
+  **What changes.**
+  
+  - **Templates resolve from the registry.** `sendTemplate` and `renderTemplate` read `email_template` metadata by `(name, locale)` at every send: the protocol's layered list (`GET /meta/email_template`'s items — the environment's item over each code package's declaration), or the ObjectQL registry on a host with no metadata door. The locale ladder is unchanged: the named locale exactly, then `en-US`, then — only for a call that named none — the bundle's lowest locale tag.
+  - **The built-in auth templates are code-declared items** of the email plugin's own package (`com.objectstack.service.email`), registered at plugin init, so they now appear in Studio's email-template list. An app that declares the same `(name, locale)` wins over the built-in; the built-in still serves the locales the app leaves out; a Studio save overrides either at environment level. Every built-in renders byte-identical to the row it used to be seeded into, in every locale (pinned on the rendered subject, HTML and text).
+  - **A Studio save is live on the next send**, with no projection and no restart. The `PUT /meta/email_template/:name` response no longer carries `projectionApplied`, because nothing is projected.
+  - **No `sys_email_template` row is written at boot or read at send.** The table and its rows stay; the organization door stays closed.
+  - **A malformed template fails its send loudly** with the schema's own message, instead of falling through to the built-in copy of the same slot.
+  
+  **What moves for consumers.**
+  
+  - FROM `createSysEmailTemplateLoader(engine, options?)` TO `createRegistryEmailTemplateLoader(sources)`, where `sources` is `{ protocol?, registry? }` (type `EmailTemplateRegistrySources`) or a function returning it. FROM the types `TemplateLoaderEngine` / `CreateTemplateLoaderOptions` TO `EmailTemplateRegistrySources`.
+  - FROM `bootstrapDeclaredEmailTemplates(...)`, `upsertDeclaredEmailTemplate(...)` or `deactivateDeclaredEmailTemplate(...)` TO nothing: templates are not copied into rows any more. Delete the call.
+  - FROM `mapTemplateToRow(tpl)` TO nothing: there is no row projection. To resolve a template the way the mailer does, call `createRegistryEmailTemplateLoader(...).load(name, locale)`.
+  - FROM `EMAIL_TEMPLATE_OBJECT` TO the literal `'sys_email_template'`, only if you still address the legacy table. FROM the type `BootstrapDeclaredEmailTemplatesResult` TO nothing.
+  - FROM `new EmailServicePlugin({ seedTemplates: false })` TO `new EmailServicePlugin()`: there is no seed to switch off. Delete the option.
+  - FROM `new EmailServicePlugin({ templates: [...] })` TO the stack's `emailTemplates: [...]` (or a `*.email-template.ts` file): declared templates resolve from the registry. Delete the option.
+  
+  **What a deployment observes.** A `sys_email_template` row an organization customized before its door closed is no longer what sends: the template's code declaration (or an environment-level Studio save) is. The v18 migration ceremony promotes those rows to environment-level templates; to make such an edit live before it runs, re-save the template in Studio.
+  
+  **`@objectstack/spec`** (patch): the `email_template` liveness ledger is re-anchored to the registry loader, and `category` and `isSystem` are graded `dead` — their only consumer was the retired row projection. The `notify` node's `template` description and refusal messages, and the `IEmailService` contract's documentation, name the email templates rather than `sys_email_template` rows. No schema shape changes.
+  
+  **`@objectstack/service-automation`** (patch): the notify node's `template` help text served at `GET /api/v1/automation/actions` names the email templates rather than `sys_email_template` rows.
+- 7895671: feat(metadata-core,rest,runtime,plugin-email,spec)!: the `/meta` doors carry no organization; organization-admin metadata authoring closes and `manage_org_presentation` retires (ADR-0131 D6)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered manage-org-presentation-retired, meta-doors-organization-scope-retired -->
+  
+  **BREAKING**, graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N`.
+  
+  ADR-0131 D6 retires the per-organization overlay axis: environment metadata written by Studio belongs to the whole deployment. The `/meta` doors of both transports (`@objectstack/rest` and the runtime dispatcher's `/meta` branch) used to thread the caller's active organization into writes and reads of the five `allowOrgOverride: true` types (`view`, `dashboard`, `report`, `translation`, `email_template`). They no longer do, for any type, and the read and the write flip together.
+  
+  **What changes.**
+  
+  - **Writes land environment-wide.** `PUT`, `DELETE`, `POST …/publish` and `POST …/rollback` on `/api/v1/meta/:type/:name` hand the protocol no organization, so the row and its audit and history rows carry `organization_id` NULL, whatever the caller's active organization.
+  - **Reads are environment → code.** The item read (both cache arms), the list, the layered view (`/layers` and `?layers=true`), `/published`, `?state=draft`, `GET /meta/_drafts`, `/history`, `/diff`, `/audit` (the environment rows, `organizationId: null`), `GET /meta/diagnostics` and `/references` name no organization.
+  - **An organization admin's metadata write is refused.** `metaWriteCapabilityVerdict` admits `isSystem` or `manage_metadata` only. A caller holding `manage_org_presentation` and not `manage_metadata` is answered `403` on all four item doors (`FORBIDDEN` on REST, `PERMISSION_DENIED` on the dispatcher) with `… requires the \`manage_metadata\` capability.`, for every type and whatever its active organization.
+  - **`manage_org_presentation` retires** from `PLATFORM_CAPABILITIES` (`@objectstack/spec/security`). A permission set naming it still parses and loads, and its other grants still apply; the grant itself admits nothing. The `sys_capability` row seeded for it earlier is not pruned (the seeder upserts only); an operator may delete it in Setup.
+  - **The email-template boot sweep** (`@objectstack/plugin-email`) reads the effective templates environment → code, as the door serves them; it no longer reads in the Default Organization.
+  
+  **What moves for consumers.**
+  
+  - FROM `import { organizationIdForMetaWrite } from '@objectstack/metadata-core'` TO nothing: a `/meta` write carries no organization. Delete the call and the `organizationId` it fed.
+  - FROM `import { ORG_PRESENTATION_AUTHORING_CAPABILITY } from '@objectstack/metadata-core'` TO nothing: delete the import.
+  - FROM `metaWriteCapabilityVerdict({ isSystem, systemPermissions, canonicalType, activeOrganizationId, operation })` TO `metaWriteCapabilityVerdict({ isSystem, systemPermissions, operation })`: drop the two members.
+  - FROM `import { metaReadOrganizationId } from '@objectstack/rest'` TO nothing: a `/meta` read carries no organization. `metaCallerOrganizationId` stays.
+  - FROM `bootstrapEffectiveEmailTemplates(engine, metadataService, { protocol, tenancy })` TO `{ protocol }`: the `tenancy` source is gone.
+  - A permission set granting `manage_org_presentation`: grant `manage_metadata` to whoever must author those five types, and delete the stale grant.
+  
+  **What a deployment observes.** An overlay row an earlier release stored under an organization stays in `sys_metadata` untouched, and is no longer served by any `/meta` read or projected by the email-template sweep until the promotion ceremony (ADR-0131 C7) carries it to the environment layer. Under the `single` posture that is every earlier Studio save of the five types, because it was filed under the Default Organization: on the `/meta` doors such an edit reads as reverted to the environment or code definition. Re-save the item in Studio to make the edit live on the `/meta` doors now. Public forms are the exception: until that ceremony the anonymous form doors read a form `view` in the Default Organization and prefer its overlay for the form's body, while a withdrawal in either layer closes the form, fail-closed. So a legacy organization overlay of a public form keeps serving its body there: a Studio re-save of that body (an environment row) does not change the body the public form serves, and a Studio withdrawal (an environment row) still closes it.
+  
+  **What does not change.** Saves of every other type were already environment-wide. Flow saves, the capability gate's answer for `manage_metadata` holders and `isSystem`, the protocol's own organization-scoped refusals, and the `/packages` doors are untouched by this change.
+- 7098aca: `bootStack` mounts the always-on capability slate `objectstack serve` mounts for every app, and builds each provider from the app's configuration the way `serve` builds it
+  
+  Clause-②: yes (narrowing: a configuration whose mail or SMS settings, or the OS_EMAIL_* / OS_SMS_* environment, name a transport that cannot deliver, now fails bootStack where it booted; widening: bootStack mounts the always-on slate objectstack serve mounts for every app and hands each provider the app's configuration, so the app's analytics cubes now reach the registry, where it mounted fewer and built them with defaults)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the in-process verification boot of @objectstack/verify: a configuration whose mail or SMS settings (or the OS_EMAIL_* / OS_SMS_* environment) name a transport that cannot deliver now fails the boot where the provider was absent or built with defaults. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and the narrowed surface is a runtime boot function, not an interface or a type (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  **`@objectstack/verify` — the composition `serve` mounts, built the way `serve` builds it.** For one configuration, `bootStack(config, opts)` already mounted the providers the app's `requires` names and the plugins in its own `plugins` array. It now also:
+  
+  - **Mounts the always-on slate** `serve` mounts for every app, whether or not `requires` names it: `queue`, `job`, `cache`, `settings`, `email`, `storage`, `sms`, `sharing`, `messaging`, `analytics` and `package-registry`. Before, a slate provider was mounted only where a mounted plugin hard-depended on it, so an app's tests ran without the inbox delivery, the mail service, the file storage and the package registry its users' server has.
+  - **Builds each provider from the app's configuration**, by the same rule `serve` reads: the analytics service gets the app's `analyticsCubes` (the top level, then each package body's), the email service the app's `email` block with `OS_EMAIL_*` over it, the SMS service the `sms` block with `OS_SMS_*` over it, and the storage service the `OS_STORAGE_LOCAL_ROOT` root (`.objectstack/data/uploads` under the working directory by default). Before, each was built with its own defaults: no cubes, no mail configuration. So the app's cubes now reach the analytics registry; a cube the service refuses (one over an object the API does not serve) is warned and skipped by the service, under `bootStack` as under `serve`, and no boot fails on it.
+  - A caller's `extraPlugins`, `security` and `analytics` instances still take precedence by identity, and are not handed the configuration. A suite that needs a provider configured its own way (a temporary storage root, a mail transport) passes its instance in `extraPlugins`.
+  - Not mounted, because they are decisions about a server process rather than about the configuration: `serve`'s MCP endpoint (`OS_MCP_SERVER_ENABLED`) and its pinyin search (`OS_SEARCH_PINYIN_ENABLED`). A suite that exercises either passes the provider in `extraPlugins`.
+  
+  **What now fails that booted before (the narrowing).** A provider `bootStack` constructs and cannot build fails the boot, naming the capability token and the package — whether the app declared the token or the slate appended it. `serve` logs a slate provider it cannot build and boots on; a test boot does not, so an app's tests never pass on a composition its server does not run. In practice:
+  
+  - a configuration whose `email` or `sms` settings, or the `OS_EMAIL_*` / `OS_SMS_*` environment of the test process, name a transport that cannot deliver (`provider: 'smtp'` with no host, `resend` / `postmark` with no API key, an unknown provider tag) is refused with the reader's own remedy. Set `OS_EMAIL_PROVIDER=log` / `OS_SMS_PROVIDER=log` in the test environment if it is not meant to send mail or SMS.
+  
+  **`@objectstack/core`** exports the rule both boots read: `resolveServedCapabilities` (given the tokens a stack declares, which capability tokens a served boot mounts providers for — those, `email` for a declared `auth`, the host's own defaults, the always-on slate unless the preset is `minimal`, and `job` / `queue` ahead of what schedules background work) and `resolveCapabilityArgument` (what each provider is constructed with), with their `ServedCapabilities`, `CapabilityArgumentInput` and `CapabilityArgument` types; and `resolveStorageCapabilityArg`, `resolveStorageLocalRootEnv` and `StorageCapabilityArg`, moved here from the CLI.
+  
+  **`@objectstack/plugin-email`** exports `resolveEmailCapabilityArg`, `resolveDeploymentAppName` and `EmailCapabilityArg`, and **`@objectstack/service-sms`** exports `resolveSmsCapabilityArg` and `SmsCapabilityArg` — the readers that build each provider from the deployment's configuration, moved from the CLI to sit beside the transport vocabulary they refuse against. `resolveCapabilityArgument` reads each off the provider module it is handed.
+  
+  **`@objectstack/cli`**: `serve` reads both rules from `@objectstack/core` and composes exactly what it composed before. `os migrate plan` / `apply`'s declaration boot reads the same token rule for the providers it composes (the same set as before; a declared `auth` now places `email` right after the declared tokens, as `serve` does). `os verify` boots through `bootStack`, so it now mounts the always-on slate and builds the providers from the app's configuration. The moved functions stay importable from the `serve` command module.
+- fc1a55a: feat(plugin-email): a built-in `auth.account_invitation` email template, for an account an administrator created, in four locales
+  
+  Clause-②: yes (widening)
+  
+  A new built-in template, `auth.account_invitation`, ships in `en-US`, `zh-CN`, `ja-JP` and `es-ES`. It is registered like the other built-in auth templates, so it is listed and resolved the same way, and a Studio save overrides it for an environment.
+  
+  - **When it is sent.** `@objectstack/plugin-auth` sends it when an administrator creates an account for someone and emails them a link to set their first password. Today that is the identity import (Setup › Users › Import, `POST /api/v1/auth/admin/import-users`).
+  - **What an imported user receives, FROM → TO.** FROM the password-reset email ("We received a request to reset the password … If you didn't request this, ignore this email"). TO an invitation that names who created the account, the account's address, a "Set your password" link and when that link expires.
+  - **Its variables.** `user.name` (optional), `user.email`, `inviter.name`, `inviter.email`, `setPasswordUrl`, `expiresInMinutes`, and `appName` (optional). Every one except the two optional ones is required, so a send without one is refused with `MISSING_VARIABLES` rather than half-rendered. It names no organization and no role: an imported user may have neither.
+  - **Exports.** `AUTH_ACCOUNT_INVITATION_TEMPLATE`, its three locale rows (`_ZH_CN`, `_JA_JP`, `_ES_ES`) and the list `AUTH_ACCOUNT_INVITATION_TEMPLATES`. `BUILTIN_AUTH_TEMPLATES` grows from 24 rows to 28.
+  - **Unchanged.** `auth.invitation` (an invitation into an organization) and `auth.password_reset` render byte for byte as before, in every locale.
+
+### Patch Changes
+
+- 56bf27a: The declared-email-template boot sweep reads the stored rows in bulk and no longer rewrites a template that has not changed
+  
+  Clause-②: no
+  
+  Every boot used to look each effective email template up on its own and rewrite its
+  `sys_email_template` row unconditionally: one lookup, one UPDATE and the engine's two read-backs
+  per template, whether or not anything had changed. Measured on `ObjectQL` over `SqlDriver`
+  (better-sqlite3), a steady boot over 450 unchanged templates sent 1,800 statements; it now sends 3
+  reads and no write (79 templates: 316 statements, now 1).
+  
+  - The sweep reads the stored rows for the declared names in `$in` pages of 200 names. Each
+    `(name, locale)` takes the first row the read returns, in the order the driver gives the
+    per-template lookup, so a slot several organizations hold resolves to the same row as before.
+  - A template the bulk read did not answer (new since the last boot, a read cut short at its row
+    bound, or a failed read) is looked up on its own before anything is inserted, as before.
+  - A `managed_by: 'package'` row that already holds every column the template projects is not
+    rewritten. `upsertDeclaredEmailTemplate` now returns `false` for it, and
+    `bootstrapDeclaredEmailTemplates` counts it under `skipped`, the value both already document for
+    a row deliberately not written. A row with any other provenance is handled exactly as before:
+    admin-owned and customized rows are never written, and a legacy row with no `managed_by` is
+    rewritten and adopted.
+  
+  An org-scoped template edit still survives the next boot. Signatures and accepted input are unchanged.
+- ec7f7f8: feat(spec)!: retire an email template's `category` and `isSystem` — the grouping and the built-in flag nothing read (#22876)
+  
+  **BREAKING** — `category` and `isSystem` on an email template (`EmailTemplateDefinitionSchema`, the `email_template` metadata type) are now refused at parse. Nothing read either key once templates stopped being copied into `sys_email_template` rows: the Studio listing never offered the filter facet `category` promised, and no door refused deleting a template that set `isSystem`. Delete both keys. A template is found by its `name`, so group templates with a dotted namespace prefix (`auth.password_reset`, `crm.welcome`). A built-in template is a code package's declaration: a Studio save overrides it for the environment, and discarding that save restores the package's copy.
+  
+  Clause-②: no (narrowing)
+  
+  Measured before removal: no reader of either key in `@objectstack/plugin-email`, `@objectstack/service-messaging`, `@objectstack/plugin-auth`, the metadata protocol, ObjectQL, the runtime or the REST layer, and none in the Studio console at its pinned commit beyond a fallback form input, which the console's own companion change removes. Both keys carried a schema default (`category: 'custom'`, `isSystem: false`), so every parsed template carried them and the liveness advisory fired on every template, with no way for an author to clear it.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `category: 'auth'` (or `'notification'`, `'workflow'`, `'marketing'`, `'custom'`) | nothing — delete the key; group by the `name` prefix |
+  | `isSystem: true` | nothing — delete the key |
+  | `isSystem: false` | nothing — delete the key |
+  | `import { EmailTemplateDefinitionCategorySchema } from '@objectstack/spec/system'` | nothing — the enum is removed with its key |
+  | `type EmailTemplateDefinitionCategory` | nothing — the type is removed with its key |
+  
+  **The one-line fix:** delete `category` and `isSystem` from every email template.
+  
+  **What an author who still writes either sees.** `tsc` fails at the authoring site (`EmailTemplateDefinition` types both keys as retired), and the parse — `defineEmailTemplateDefinition()`, `defineStack({ emailTemplates })`, `PUT /api/v1/meta/email_template/:name` — refuses each at its own path with the prescription:
+  
+  > `email_template.category` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — nothing read it: the Studio listing never offered the filter facet it promised, and delivery never depended on it. Delete the key. A template is found by its `name`, so group templates with a dotted namespace prefix instead (`auth.password_reset`, `crm.welcome`). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+  
+  > `email_template.isSystem` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — nothing enforced it: no door refused deleting a template that set it. Delete the key. A built-in template is a code package's declaration: a Studio save overrides it for the environment, and discarding that save restores the package's copy. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+  
+  ## The retirement kit
+  
+  - **Two `retiredKey()` tombstones** on `EmailTemplateDefinitionSchema`, a `strictObject` — so the refusal carries the prescription rather than a bare unknown-key report, and `tsc` fails first. `RETIRED_KEYS_BY_MAJOR[18]`: `system/EmailTemplateDefinition:category`, `system/EmailTemplateDefinition:isSystem`. The `category` enum, `EmailTemplateDefinitionCategorySchema`, had no other consumer and leaves with it: `RETIRED_DEFS_BY_MAJOR[18]`: `system/EmailTemplateDefinitionCategory`.
+  - **The D2 conversion `email-template-category-is-system-removed`** (protocol 18, retired from the load path) deletes both keys from every `emailTemplates[]` entry, one notice per key, as a lossless delete. Because both keys carried a default, every built artifact and every stored `email_template` row written under 17.x carries them; both load through the rehydration seams, which replay this conversion. The retired-default residue stage is not adopted: the replayed conversion heals those populations, and an authored source that still writes either key meets the prescription.
+  - **The D3 entry `email-template-category-is-system-retired`** asks the author whether anything they built read either key — a report or integration that filtered templates by `category`, or one that treated `isSystem: true` as protection against deletion. Nothing ever enforced that.
+  - **Studio:** the email-template form drops the `category` select and the `isSystem` checkbox.
+  - **Ledger:** both rows stay `dead`, re-noted as tombstones (a tombstone keeps the key in the walked shape).
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  **`@objectstack/plugin-email`:** the six built-in auth templates (in every locale) no longer write `category: 'auth'` or `isSystem: true`. They render and send exactly as before.
+  
+  **`@objectstack/platform-objects`:** the metadata-form translation bundles drop the two retired form inputs' labels (`email_template.fields.category`, `email_template.fields.isSystem`). The `sys_email_template` object and its `category` / `is_system` columns are unchanged.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered email-template-category-is-system-removed, email-template-category-is-system-retired -->
+- 33228c5: Clause-②: no
+  
+  fix(plugin-email): a template send issued before `EmailServicePlugin`'s own `kernel:ready` renders, persists its `sys_email` row and delivers, instead of throwing `TEMPLATE_NOT_FOUND: no templateLoader configured on EmailService`
+  
+  `EmailServicePlugin` now wires `sys_email` persistence and the registry template loader in `init`, before it registers the `email` service. Before this, both were wired in the plugin's own `kernel:ready` hook, and a plugin that starts earlier runs its `kernel:ready` hooks first. The dev admin seed (`objectstack dev --seed-admin`, the default) signs its account up from one of those hooks, so on a boot with email verification required the seed's verification mail failed. Each such boot logged `ERROR [Better Auth]: Failed to run background task: Error: TEMPLATE_NOT_FOUND …` and left no `sys_email` row. That send now goes through the transport and default sender the boot was configured with. The `mail` settings namespace is still applied at `kernel:ready`. Sends made after boot behave as before.
+- 8a88901: fix(plugin-auth,plugin-email): the organization invitation mail names the invitee's role by its label in the mail's language (`成员`, `メンバー`, `Miembro`, `Member`), not by the stored value `member`
+  
+  Clause-②: yes (widening)
+  
+  - **What changed.** The zh-CN, ja-JP and es-ES invitation mails printed the stored membership role inside a translated sentence: 「邀请您以 member 的身份加入」. The sender now passes `{{role}}` as the `sys_member.role` option label in the locale the mail is written in, the same label the console shows for that option. It reads the label through the runtime's i18n service and the console's own object translation path, so a tenant's translation of the option, made in Studio, reaches the mail too. The four bodies keep interpolating the one `role` variable; its name and type are unchanged, and its declaration now says it carries the label.
+  - **The plain-text part names the role too.** The four text bodies gain the role clause their HTML bodies carry, so both parts of the mail name the same facts. For example, the English text is now `Dana (dana@example.com) invited you to join Northwind on Acme as Member.`
+  - **Stated fallbacks.** A role list (`admin,member`) is labelled role by role and joined as a list in the mail's language (`管理员和成员`). A value with no option label is named as stored, and one warning names it. With no i18n service, or one that fails, the mail names the option's authored English label, never an empty string.
+  - **New option (widening).** `AuthManagerOptions.getI18n?: () => II18nService | undefined` is a lazy accessor for the `i18n` service, read when the invitation is sent. `AuthPlugin` wires it from the kernel. An embedder that builds `AuthManager` itself and omits it gets the authored labels.
+  - **What changes for you.** If you have overridden `auth.invitation` and interpolate `{{role}}`, it now receives the label, not the stored value.
+- Updated dependencies [5a871e4]
+- Updated dependencies [ffba02e]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [1b40780]
+- Updated dependencies [d11fa8c]
+- Updated dependencies [ca426cb]
+- Updated dependencies [4ad3ce5]
+- Updated dependencies [8016a9d]
+- Updated dependencies [df9d07e]
+- Updated dependencies [8eac321]
+- Updated dependencies [a5a781b]
+- Updated dependencies [9a7838e]
+- Updated dependencies [191e043]
+- Updated dependencies [b12e16a]
+- Updated dependencies [fbafb85]
+- Updated dependencies [35450f0]
+- Updated dependencies [4840720]
+- Updated dependencies [1e8b628]
+- Updated dependencies [12d1476]
+- Updated dependencies [bd6dab0]
+- Updated dependencies [14ccb1d]
+- Updated dependencies [c0803b0]
+- Updated dependencies [d117382]
+- Updated dependencies [4bc3bec]
+- Updated dependencies [1f949da]
+- Updated dependencies [ecb7b44]
+- Updated dependencies [41edf73]
+- Updated dependencies [1c1144f]
+- Updated dependencies [3983965]
+- Updated dependencies [0c910d5]
+- Updated dependencies [9d13b5f]
+- Updated dependencies [317cddd]
+- Updated dependencies [b2e7870]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [dac99c2]
+- Updated dependencies [0d3ea29]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [0253192]
+- Updated dependencies [48cca4a]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [66949b7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [f9b4217]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [7958bdf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [4e4111c]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [0b7ba4d]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [b15f8a1]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [345d3f3]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [746637e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [94379f4]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [194a42d]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [31b5a5f]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [87e902d]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [777eed2]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [ed03834]
+- Updated dependencies [e1deaef]
+- Updated dependencies [3071d3e]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [4216796]
+- Updated dependencies [a22e67b]
+- Updated dependencies [5f37d36]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [1912af4]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [60f9baf]
+- Updated dependencies [f5ef054]
+- Updated dependencies [584e737]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [301eec6]
+- Updated dependencies [572ecfb]
+- Updated dependencies [5547ad4]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [0f05907]
+- Updated dependencies [5e725b8]
+- Updated dependencies [086fa46]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [f606ba2]
+- Updated dependencies [d176b0a]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [ee0e115]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [0a052e6]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [c03077e]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [f7af839]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [a237d7f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [45e6001]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [9f024d8]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [fa26308]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [01fafde]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [26501ae]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [94e60c0]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [adb7910]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [b7a688e]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [8311650]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [325a92e]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/core@18.0.0
+  - @objectstack/spec@18.0.0
+  - @objectstack/platform-objects@18.0.0
+  - @objectstack/formula@18.0.0
+
 ## 18.0.0-next.5
 
 ### Patch Changes
