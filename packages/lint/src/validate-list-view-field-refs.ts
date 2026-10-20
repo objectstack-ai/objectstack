@@ -239,10 +239,11 @@
  *    the package's declared `dependencies` bound what it MAY reference, so the
  *    binding is not resolvable BY DECLARATION. It is the verdict the dataset
  *    door already gives the same reference under the same closure
- *    (`object-reference-unknown` on `datasets[].object`). The flow door's
- *    `flow-trigger-unknown-object` stays advisory; that is its own question
- *    and this rule does not settle it. An object that exists nowhere lands on
- *    the same verdict, because the closure is all this snapshot can see. The
+ *    (`object-reference-unknown` on `datasets[].object`), and [#24669] the
+ *    one the flow door gives a trigger object outside the same closure
+ *    (`flow-trigger-unknown-object`, an `error` there and only there). An
+ *    object that exists nowhere lands on the same verdict, because the
+ *    closure is all this snapshot can see. The
  *    door judges writes only: a stored row is judged at its next save, and a
  *    draft is never gated.
  *  - **The field positions stay unjudged** for that list view. Judging them
@@ -765,7 +766,7 @@ export function validateListViewFieldRefs(
     const pkg = closure.packageId;
     findings.push({
       // `error`: the save door refuses it — see the section of that name on
-      // this module for why, and for the flow door's advisory.
+      // this module for why, and for the flow door's matching verdict.
       severity: 'error',
       rule: LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
       where,

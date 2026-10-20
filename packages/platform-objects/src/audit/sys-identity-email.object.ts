@@ -19,9 +19,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * hook, the boot outbox sweep and attachment reclamation read it by id and
  * status exactly as they read `sys_email`.
  *
- * Expand-first: rows an 18.0 install wrote to `sys_email` for this mail stay
- * there; the mail pipeline keeps reading them, and moving them is the 18.x
- * upgrade ceremony's.
+ * The rows an 18.0 install wrote to `sys_email` for this mail are moved here,
+ * id for id, by the 18.x upgrade ceremony before the database is certified —
+ * their queued jobs and activity timeline pointed at this log first — and the
+ * v18 boot guard refuses a database it has not certified.
  *
  * `systemFields: { tenant: false }` removes the injected organization column.
  * With no column there is no tenant wall, so who may read is object

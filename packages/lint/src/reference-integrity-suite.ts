@@ -313,8 +313,9 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // reference, or nowhere at all — and the member's skip 1 used to read that as
   // "another package's object" and judge nothing. It now refuses the binding
   // instead (`list-view-object-outside-closure`, `error`: the verdict the
-  // dataset door gives an out-of-closure base object under the same closure;
-  // the flow door's trigger-object advisory is a separate question). The
+  // dataset door gives an out-of-closure base object under the same closure,
+  // and [#24669] the one the flow door gives an out-of-closure trigger object,
+  // from its own rule outside this suite). The
   // missing-collection argument above is unchanged: the binding is judged
   // against `stack.objects`, the collection every per-write snapshot carries,
   // and the gate states the scope only when it narrowed that collection.

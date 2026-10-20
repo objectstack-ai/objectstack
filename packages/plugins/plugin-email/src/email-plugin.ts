@@ -997,9 +997,9 @@ export class EmailServicePlugin implements Plugin {
       // not grounds to refuse an otherwise healthy boot; the gate above is
       // where this plugin refuses.
       //
-      // Both logs, each on its own: `sys_email` (which keeps every identity
-      // row an 18.0 install wrote there — expand-first) and its sibling
-      // `sys_identity_email`. One log failing to sweep does not stop the
+      // Both logs, each on its own: `sys_email` and its sibling
+      // `sys_identity_email` (where the upgrade ceremony moved the identity
+      // rows an 18.0 install wrote to `sys_email`). One log failing to sweep does not stop the
       // other, and the settled result is their sum.
       if (persistence) {
         const svc = this.service;
