@@ -185,8 +185,10 @@ import { SystemObjectName } from '@objectstack/spec/system';
  * the session. Recording `admin` for a user clicking "sign out my other
  * devices" would not be a vague audit record, it would be a **wrong** one — it
  * names an actor class that took no action, which is worse for an auditor than
- * no record at all. `admin` therefore means exactly the two `/admin/*` routes,
- * and `user_revoked` means the session's own owner did it.
+ * no record at all. `admin` therefore means exactly the two `/admin/*` routes
+ * — plus the administrator lane of `sys-session-revoke.ts`, which writes this
+ * ledger's `admin` value itself — and `user_revoked` means the session's own
+ * owner did it.
  */
 export const INTERACTIVE_REVOKE_REASON: Readonly<Record<string, string>> = {
   // Self-service — the session owner acting on their own sessions.

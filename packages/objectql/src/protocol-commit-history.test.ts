@@ -912,8 +912,12 @@ describe('#6620 — revertCommit soft-removes a runtime-CREATED `object`', () =>
       ],
     })]);
     await seedCreatedObject(protocol, 'myapp_invoice', APP_PKG);
+    // [#24668] Bound to the object this same build creates: once an object
+    // exists the save door judges the binding against the whole collection,
+    // and refuses one that exists nowhere (`gridBody` reads `case`).
     await protocol.saveMetaItem({
-      type: 'view', name: 'myapp_case_grid', packageId: APP_PKG, item: gridBody('Cases'),
+      type: 'view', name: 'myapp_case_grid', packageId: APP_PKG,
+      item: { ...gridBody('Cases'), object: 'myapp_invoice', columns: ['id', 'name'] },
     });
 
     const res = await protocol.revertCommit({ commitId: 'cmt_new_build' });

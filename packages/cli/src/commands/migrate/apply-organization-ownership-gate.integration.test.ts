@@ -104,8 +104,6 @@ function caseDb(columns: readonly string[]): string {
 
 const dropArgv = (file: string) => ['--database-url', `file:${file}`, '--allow-destructive', '--yes', '--json'];
 
-/** A step of `os migrate organization-ownership`, which 18.0 refuses on every database. */
-const WITHDRAWN_COMMAND = /os migrate organization-ownership|--plan-file|organization-ownership --out/;
 
 beforeAll(async () => {
   for (const key of [...OVERRIDING_ENV, 'NODE_ENV'] as const) savedEnv[key] = process.env[key];
@@ -155,8 +153,6 @@ describe('os migrate apply --allow-destructive waits for the organization-owners
       marker: null,
     });
     expect(payload.detail).toMatch(/organization-ownership ceremony/);
-    // 18.0 refuses `os migrate organization-ownership` on every database: the refusal names no step of it.
-    expect(payload.detail).not.toMatch(WITHDRAWN_COMMAND);
     expect(columnsOf(file, 'sys_platform_setting')).toContain('organization_id');
   }, CASE_TIMEOUT_MS);
 
@@ -169,7 +165,6 @@ describe('os migrate apply --allow-destructive waits for the organization-owners
     expect(exitCode).toBe(1);
     expect(payload).toMatchObject({ message: 'refused_organization_ownership_unmigrated', tables: ['sys_platform_setting'] });
     expect(payload.detail).toMatch(/is not verified \(2 blocking/);
-    expect(payload.detail).not.toMatch(WITHDRAWN_COMMAND);
     expect(columnsOf(file, 'sys_platform_setting')).toContain('organization_id');
   }, CASE_TIMEOUT_MS);
 

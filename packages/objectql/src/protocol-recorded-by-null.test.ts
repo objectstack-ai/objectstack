@@ -187,7 +187,8 @@ function makeStubDriver() {
 }
 
 // [#21470] `name` is the row's: a body `name` that is not its row's is refused by the write doors.
-const viewBody = (label: string, name = 'cases') => ({ name, type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list' }); // [#7741] the inline arm requires the object binding pair
+// [#24668] Bound to `sys_metadata`, an object this harness registers: the overlay save door refuses a list view bound to an object that exists nowhere (it read `case`).
+const viewBody = (label: string, name = 'cases') => ({ name, type: 'grid', label, columns: ['id'], object: 'sys_metadata', viewKind: 'list' }); // [#7741] the inline arm requires the object binding pair
 
 describe('#4556 — protocol write paths store NULL, not the sentinel string', () => {
     let engine: ObjectQL;

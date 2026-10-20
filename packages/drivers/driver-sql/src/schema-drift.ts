@@ -927,8 +927,20 @@ export function diffManagedTable(args: {
    * as the #15771 corruption it still is on an unmoved deployment.
    */
   fileColumnsMoved?: boolean;
+  /**
+   * The table's tenant column (`SqlDriver.resolveTenantField`): the one column
+   * whose nullability the v18 organization-ownership ceremony owns (ruling
+   * record 6269955919 on the v18 epic, ② A). The ceremony applies NOT NULL to
+   * it on a database it upgraded, and no declaration says so — the injected
+   * tenant field is `required: false` with no `storage` — so a NOT NULL on it
+   * is the ceremony's verdict, never drift: no `relax_not_null` is proposed
+   * for it, and nothing here undoes the ceremony's work. Omitted (the
+   * default), every column is judged against its declaration as before.
+   */
+  ceremonyOwnedNullability?: string | null;
 }): ManagedDriftEntry[] {
   const { table, fields, columns, dialect, keyedColumns, varcharColumnChars } = args;
+  const ceremonyOwnedNullability = args.ceremonyOwnedNullability ?? null;
   const fileColumnsMoved = args.fileColumnsMoved === true;
   const out: ManagedDriftEntry[] = [];
 
@@ -950,7 +962,7 @@ export function diffManagedTable(args: {
     // explicit physical constraint — NOT against `required`, which is the
     // write-time contract and implies nothing about the column) ──────────
     const expectNullable = field.storage?.notNull !== true;
-    if (expectNullable && !col.nullable && field.required !== true) {
+    if (expectNullable && !col.nullable && field.required !== true && fieldName !== ceremonyOwnedNullability) {
       // Column STRICTER than its declaration — and the field is not even
       // write-gated, so an omitting write reaches the DB and dies as a raw
       // driver error instead of a clean validation 400. That surprise is

@@ -31,11 +31,11 @@ vi.mock('../../utils/migrate-occupancy-gate.js', () => ({
   probeMigrationTarget: vi.fn(async () => ({ status: 'free' })),
 }));
 
-type Command = (typeof import('./organization-ownership.js'))['OrganizationOwnershipCeremony'];
+type Command = (typeof import('./organization-ownership.js'))['default'];
 let MigrateOrganizationOwnership: Command;
 
 beforeAll(async () => {
-  ({ OrganizationOwnershipCeremony: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
+  ({ default: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
 }, 60_000);
 
 const CASE_TIMEOUT_MS = 60_000;

@@ -806,6 +806,14 @@ export default defineConfig({
       // driver is its storage. Resolved to source for the reason the entry above
       // gives: a verdict about the checkout, not about the last build. Anchored
       // like its neighbours (driver-sqlite-wasm publishes only `"."`).
+      // [18.x step 5a] `utils/organization-ownership-apply.generation-1.test.ts`
+      // pins the ceremony's `declared:NAME` spelling equal to plugin-webhooks'
+      // own `declaredWebhookRefId`; resolved to source, so the pin is a verdict
+      // about the checkout's spelling, not the last build's.
+      {
+        find: /^@objectstack\/plugin-webhooks$/,
+        replacement: path.resolve(__dirname, '../plugins/plugin-webhooks/src/index.ts'),
+      },
       {
         find: /^@objectstack\/driver-sqlite-wasm$/,
         replacement: path.resolve(__dirname, '../drivers/driver-sqlite-wasm/src/index.ts'),
