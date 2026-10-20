@@ -70,6 +70,7 @@
 import { SystemObjectName } from '@objectstack/spec/system';
 import type { AuthSessionApi } from '@objectstack/spec/contracts';
 import { inProcessSessionReadInput } from '@objectstack/types';
+import { carryForwardedClientAddress } from './client-address-forwarding.js';
 import { inProcessRedispatchUrl } from './in-process-redispatch.js';
 import {
   PLATFORM_ADMIN_REFUSAL_MESSAGES,
@@ -210,9 +211,9 @@ export function sysSessionRevokeDepsFor(manager: SysSessionRevokeManager, basePa
 
 /**
  * Owner lane: better-auth's `/revoke-session`, with the resolved token and the
- * caller's own credentials. Only status and body come back from here, so the
- * re-dispatch carries `disableRefresh` for a cookie request
- * (`inProcessRedispatchUrl`).
+ * caller's own credentials and forwarding facts. Only status and body come
+ * back from here, so the re-dispatch carries `disableRefresh` for a cookie
+ * request (`inProcessRedispatchUrl`).
  */
 async function revokeAsOwner(
   deps: SysSessionRevokeDeps,
@@ -226,6 +227,7 @@ async function revokeAsOwner(
   const authorization = request.headers.get('authorization');
   if (authorization) headers.set('authorization', authorization);
   headers.set('origin', request.headers.get('origin') || incoming.origin);
+  carryForwardedClientAddress(request.headers, headers);
 
   const url = new URL(`${deps.basePath}/revoke-session`, incoming.origin).href;
   const response = await deps.handle(

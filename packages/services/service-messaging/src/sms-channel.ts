@@ -280,7 +280,9 @@ export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
             // channel's static default; the store walks its own ladder
             // underneath. `payload.locale` is no longer consulted.
             const locale = resolved.locale ?? defaultLocale;
-            const template = await opts.store.load(n.topic ?? '', 'sms', locale);
+            // The row is the recipient organization's: the delivery's own
+            // organization keys the read (see NotificationTemplateStore).
+            const template = await opts.store.load(n.topic ?? '', 'sms', locale, n.organizationId);
             const rendered = renderNotification(template, {
                 topic: n.topic ?? '',
                 payload,

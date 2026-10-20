@@ -341,6 +341,8 @@ contradicts it, and correct it here when it does.
   the real port). This is "zero hits needs a positive control" applied to one tool: a
   negative from a command that never ran is not evidence.
 
+- **`rsync` is not installed in these containers — copy a scratch app with `tar` or `cp -a`.** QA run #24841 met it.
+
 - **A SIGTERM to the `pnpm` wrapper does not stop the server under it — start a
   backgrounded boot with `setsid` and stop its process group.** The canonical boot (in the
   `--no-ui` entry below) is `pnpm -C … exec objectstack dev …`: pnpm spawns `os dev`, which

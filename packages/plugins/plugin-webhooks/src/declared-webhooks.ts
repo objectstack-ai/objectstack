@@ -160,6 +160,21 @@ export function readDeclaredWebhookItems(engine: unknown, metadataService: unkno
 }
 
 /**
+ * [#24910] The distinct `name`s of the raw declared items — what the boot
+ * report names when the auto-enqueuer cannot run, so nothing declared would be
+ * delivered. Read the way {@link readDeclaredWebhookItems} reads them; never
+ * throws.
+ */
+export function readDeclaredWebhookNames(engine: unknown, metadataService: unknown): string[] {
+    const names = new Set<string>();
+    for (const raw of readDeclaredWebhookItems(engine, metadataService)) {
+        const name = (raw as { name?: unknown })?.name;
+        if (typeof name === 'string' && name) names.add(name);
+    }
+    return [...names];
+}
+
+/**
  * The reader the plugin binds: the declarations from
  * {@link readDeclaredWebhookItems}, the switch from the activation ledger.
  */

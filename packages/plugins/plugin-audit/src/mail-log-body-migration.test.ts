@@ -19,8 +19,11 @@ import { describe, expect, it, vi } from 'vitest';
 // `stored-metadata-body-migration.test.ts` takes.
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SECRET_MASK } from '@objectstack/objectql/core';
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { maskMailLogBodyCopy } from './mail-log-body-mask.js';
+import { SysAuditLog } from './objects/sys-audit-log.object.js';
 import {
+  migrateArchivedMailLogBodyCopies,
   migrateMailLogBodyCopies,
   planMailLogBodyActivityRowPatch,
   planMailLogBodyAuditRowPatch,
@@ -263,5 +266,92 @@ describe('migrateMailLogBodyCopies (driven, paged)', () => {
     // Counts only: no log line names a body.
     const lines = [...log.info.mock.calls, ...log.warn.mock.calls].flat().join('\n');
     expect(lines).not.toMatch(/mail-body-sentinel/);
+  });
+});
+
+describe('migrateArchivedMailLogBodyCopies (an archive datasource, through its driver)', () => {
+  // [#24899] The Archiver copies `sys_audit_log` rows to the archive
+  // datasource VERBATIM (driver `find` → `upsert`), and the engine never routes
+  // the object there. So the store here is a REAL SQL driver holding the table
+  // exactly as the Archiver provisions and fills it: `syncSchema` with the
+  // object's own declaration, then `upsert(object, row, ['id'])` per row.
+  async function archiveStore(rows: Row[]): Promise<SqliteWasmDriver> {
+    const cold = new SqliteWasmDriver({ filename: ':memory:' });
+    await cold.connect();
+    await cold.syncSchema('sys_audit_log', SysAuditLog);
+    for (const row of rows) await cold.upsert('sys_audit_log', row, ['id']);
+    return cold;
+  }
+  const allRows = async (cold: SqliteWasmDriver): Promise<Row[]> =>
+    (await cold.find('sys_audit_log', { orderBy: [{ field: 'id', order: 'asc' }] })).map((r) => ({ ...r }));
+  const logger = () => ({ info: vi.fn(), warn: vi.fn() });
+  const linesOf = (log: ReturnType<typeof logger>): string =>
+    [...log.info.mock.calls, ...log.warn.mock.calls].flat().join('\n');
+
+  it('a dry run counts the archived clear copies and writes nothing', async () => {
+    const cold = await archiveStore(auditRows());
+    const before = await allRows(cold);
+    expect(clearBodies(before)).toBe(3);
+    const report = await migrateArchivedMailLogBodyCopies(cold, logger(), { objects: ['sys_audit_log'] });
+    expect(report).toEqual({
+      apply: false,
+      byObject: { sys_audit_log: { scanned: 4, rewritten: 3 } },
+      scanned: 4,
+      rewritten: 3,
+      failures: 0,
+    });
+    expect(isDeepStrictEqual(await allRows(cold), before)).toBe(true);
+  });
+
+  it('--apply leaves 0 archived clear copies, moves nothing else, and a re-run changes no byte', async () => {
+    const cold = await archiveStore(auditRows());
+    const before = new Map((await allRows(cold)).map((r) => [r.id, r]));
+    const log = logger();
+    const report = await migrateArchivedMailLogBodyCopies(cold, log, { apply: true, pageSize: 2, objects: ['sys_audit_log'] });
+    expect(report.rewritten).toBe(3);
+    expect(report.failures).toBe(0);
+
+    const after = await allRows(cold);
+    expect(clearBodies(after)).toBe(0);
+    for (const row of after) {
+      const original = before.get(row.id)!;
+      for (const key of Object.keys(original)) {
+        if (key === 'new_value' || key === 'old_value') continue;
+        // `updated_at` included: the archived row keeps its own stamp.
+        expect(row[key], `${String(row.id)}.${key}`).toEqual(original[key]);
+      }
+    }
+    // The masked copy reads the writer's mask, and every other key it held is kept.
+    const created = JSON.parse(String(after.find((r) => r.id === 'al_1')!.new_value));
+    expect(created.body_text).toBe(SECRET_MASK);
+    expect(created.body_html).toBe(SECRET_MASK);
+    expect(created.subject).toBe('Subject kept');
+    // Another object's archived row is untouched.
+    expect(after.find((r) => r.id === 'al_5')).toEqual(before.get('al_5'));
+    // Counts only: no log line names a body.
+    expect(linesOf(log)).not.toMatch(/mail-body-sentinel/);
+
+    const again = await migrateArchivedMailLogBodyCopies(cold, logger(), { apply: true, objects: ['sys_audit_log'] });
+    expect(again.rewritten).toBe(0);
+    expect(again.scanned).toBe(4);
+    expect(isDeepStrictEqual(await allRows(cold), after)).toBe(true);
+  });
+
+  it('an archive table nothing was archived into yet reads as no rows, never a failure', async () => {
+    const cold = new SqliteWasmDriver({ filename: ':memory:' });
+    await cold.connect();
+    const report = await migrateArchivedMailLogBodyCopies(cold, logger(), { apply: true });
+    expect(report).toMatchObject({ scanned: 0, rewritten: 0, failures: 0 });
+  });
+
+  it('any other refused archive read is a failure, never a clean report', async () => {
+    const cold = await archiveStore(auditRows());
+    const refusing = {
+      find: async () => { throw new Error('archive read refused'); },
+      update: cold.update.bind(cold),
+    };
+    const report = await migrateArchivedMailLogBodyCopies(refusing, logger(), { apply: true, objects: ['sys_audit_log'] });
+    expect(report.failures).toBe(1);
+    expect(report.rewritten).toBe(0);
   });
 });

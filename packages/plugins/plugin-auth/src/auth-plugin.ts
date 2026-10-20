@@ -69,7 +69,7 @@ import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { runSetInitialPassword } from './set-initial-password.js';
-import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain } from './register-sso-provider.js';
+import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain, type AuthRequestHandler } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
 import { readJsonRequestBody } from './request-json-body.js';
@@ -2960,6 +2960,21 @@ export class AuthPlugin implements Plugin {
       return verdict.actor;
     };
 
+    // ── [#24877] ADR-0069 D5/D7 — better-auth's universal handler for the
+    // request a raw mount below serves, WITH that request's transport. Every
+    // in-process bridge re-dispatches through `AuthManager.handleRequest` with
+    // the transport of the request it serves — a bridge that hands a helper a
+    // handler takes it from here; one that delegates the request itself passes
+    // `transportOf(c)` inline, as the catch-all at the end of this method
+    // does — so `handleRequest` establishes the re-dispatched request's client
+    // address by the platform's trust rule (`resolveClientAddress`): forwarded
+    // headers only when the deployment declares `server.trustProxy`, the
+    // connection peer otherwise. `handleRequest(req)` alone leaves the rule no
+    // peer to judge on. Pinned per bridge by
+    // `bridge-redispatch-transport.pin.test.ts`.
+    const handleWithTransportOf = (c: any): AuthRequestHandler => (request) =>
+      this.authManager!.handleRequest(request, transportOf(c));
+
     // ────────────────────────────────────────────────────────────────────
     // SSO admin: register an external OIDC IdP from the flat metadata form
     // (ADR-0135 D6). `@better-auth/sso`'s POST /sso/register expects the protocol
@@ -2993,7 +3008,7 @@ export class AuthPlugin implements Plugin {
         const gated = await gateAdmin(c);
         if (gated instanceof Response) return gated;
         const { status, body } = await runRegisterSsoProviderFromForm(
-          (req) => this.authManager!.handleRequest(req),
+          handleWithTransportOf(c),
           c.req.raw,
         );
         return c.json(body, status as any);
@@ -3293,7 +3308,7 @@ export class AuthPlugin implements Plugin {
         try {
           const gated = await gateAdmin(c);
           if (gated instanceof Response) return gated;
-          return await this.authManager!.handleRequest(c.req.raw);
+          return await this.authManager!.handleRequest(c.req.raw, transportOf(c));
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/remove-user failed', err);
@@ -3370,7 +3385,7 @@ export class AuthPlugin implements Plugin {
               return c.json(answer, 200);
             }
           }
-          return await this.authManager!.handleRequest(c.req.raw);
+          return await this.authManager!.handleRequest(c.req.raw, transportOf(c));
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/has-permission failed', err);
@@ -3493,7 +3508,7 @@ export class AuthPlugin implements Plugin {
         const gated = await gateAdmin(c);
         if (gated instanceof Response) return gated;
         const { status, body } = await runRegisterSamlProviderFromForm(
-          (req) => this.authManager!.handleRequest(req),
+          handleWithTransportOf(c),
           c.req.raw,
         );
         return c.json(body, status as any);
@@ -3521,7 +3536,7 @@ export class AuthPlugin implements Plugin {
         const gated = await gateAdmin(c);
         if (gated instanceof Response) return gated;
         const { status, body } = await runRequestDomainVerification(
-          (req) => this.authManager!.handleRequest(req),
+          handleWithTransportOf(c),
           c.req.raw,
           { domainVerificationEnabled: this.authManager!.isSsoDomainVerificationEnabled() },
         );
@@ -3539,7 +3554,7 @@ export class AuthPlugin implements Plugin {
         const gated = await gateAdmin(c);
         if (gated instanceof Response) return gated;
         const { status, body } = await runVerifyDomain(
-          (req) => this.authManager!.handleRequest(req),
+          handleWithTransportOf(c),
           c.req.raw,
           { domainVerificationEnabled: this.authManager!.isSsoDomainVerificationEnabled() },
         );
@@ -3671,10 +3686,25 @@ export class AuthPlugin implements Plugin {
     // judge). Same family as `sys-oauth-application/register` above: an
     // object-scoped mount outside `/admin/`, because it admits the owner.
     // See `sys-session-revoke.ts` for the lanes and refusals.
+    //
+    // [#24877] The owner lane's re-dispatch goes through the manager slice's
+    // `handleRequest`, so the slice handed over is the manager's own seams
+    // with `handleRequest` bound to this request's transport
+    // (`handleWithTransportOf` above) — the same handler every other bridge
+    // re-dispatches through.
     rawApp.post(`${basePath}/sys-session/revoke`, async (c: any) => {
       try {
+        const manager = this.authManager!;
         const { status, body } = await runSysSessionRevoke(
-          sysSessionRevokeDepsFor(this.authManager!, basePath),
+          sysSessionRevokeDepsFor(
+            {
+              getApi: () => manager.getApi(),
+              getAuthContext: () => manager.getAuthContext(),
+              getDataEngine: () => manager.getDataEngine(),
+              handleRequest: handleWithTransportOf(c),
+            },
+            basePath,
+          ),
           c.req.raw,
         );
         return c.json(body, status as any);
@@ -3702,7 +3732,7 @@ export class AuthPlugin implements Plugin {
     rawApp.post(`${basePath}/send-verification-email`, async (c: any) => {
       try {
         const { status, body } = await runResendVerificationEmail(
-          (req) => this.authManager!.handleRequest(req),
+          handleWithTransportOf(c),
           c.req.raw,
         );
         return c.json(body, status);
