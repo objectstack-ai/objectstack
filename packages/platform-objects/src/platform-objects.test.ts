@@ -327,6 +327,53 @@ describe('@objectstack/platform-objects', () => {
       expect(role.description).toContain('OS_PLATFORM_OWNER_EMAIL');
       expect(role.description).toContain('`single`');
     });
+
+    it('SysSession revoke_session identifies its session by the row id, resolved server-side', () => {
+      const revoke = (SysSession.actions ?? []).find((a) => a.name === 'revoke_session');
+      expect(revoke).toBeDefined();
+      expect(revoke?.type).toBe('api');
+      expect(revoke?.locations).toEqual(['list_item']);
+      expect(revoke?.target).toBe('/api/v1/auth/sys-session/revoke');
+      expect(revoke?.recordIdParam).toBe('sessionId');
+      // The row field that seeds `recordIdParam` defaults to `id` — the one
+      // column every list row carries.
+      expect(revoke?.recordIdField ?? 'id').toBe('id');
+      expect(SysSession.fields.id).toBeDefined();
+    });
+
+    it('SysSession keeps its session token internal: no read path serves it', () => {
+      const token = SysSession.fields.token as { internal?: unknown; hidden?: unknown; readonly?: unknown };
+      expect(token.internal).toBe(true);
+      expect(token.hidden).toBe(true);
+      expect(token.readonly).toBe(true);
+    });
+
+    it('no identity action identifies its record by a field the server never serves', () => {
+      // An action seeds `recordIdParam` from the ROW the console holds. An
+      // `internal` field is omitted from every read, so it can never be on that
+      // row, and an action keyed on one can never name its record.
+      const objects = [
+        SysAccount, SysApiKey, SysBusinessUnit, SysBusinessUnitMember, SysDeviceCode,
+        SysInvitation, SysJwks, SysMember, SysOauthAccessToken, SysOauthApplication,
+        SysOauthRefreshToken, SysOrganization, SysSession, SysSsoProvider, SysTeam,
+        SysTeamMember, SysTwoFactor, SysUser, SysUserPreference, SysVerification,
+      ];
+      const offenders: string[] = [];
+      let seeded = 0;
+      for (const object of objects) {
+        for (const action of object.actions ?? []) {
+          if (!action.recordIdParam && !action.recordIdField) continue;
+          seeded += 1;
+          const field = action.recordIdField ?? 'id';
+          const declared = (object.fields as Record<string, { internal?: unknown } | undefined>)[field];
+          if (field !== 'id' && !declared) offenders.push(`${object.name}.${action.name}: '${field}' is not a field`);
+          if (declared?.internal === true) offenders.push(`${object.name}.${action.name}: '${field}' is internal`);
+        }
+      }
+      // Positive control: the sweep reaches real declarations.
+      expect(seeded).toBeGreaterThan(0);
+      expect(offenders).toEqual([]);
+    });
   });
 
   describe('data portability — derived, not declared (#3025 / #3543)', () => {

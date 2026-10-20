@@ -3,9 +3,25 @@
 import { isGrantActive } from '@objectstack/core';
 
 import type { SharingEngine } from './sharing-service.js';
-import { TeamGraphService } from './team-graph.js';
+import { TeamGraphService, holdsRole } from './team-graph.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+
+/**
+ * The `sys_user_position` predicate "assignments of `positionName`", scoped to
+ * `scopeOrg` when one is given — ONE spelling for the rule-wide expansion
+ * ({@link PositionGraphService.expandPositionUsers}) and the user-scoped check
+ * ({@link PositionGraphService.holdsPosition}), so the two can never disagree
+ * about which assignment rows count.
+ */
+function positionAssignmentPredicate(positionName: string, scopeOrg: string | null | undefined): Record<string, unknown> {
+  const filter: Record<string, unknown> = { position: positionName };
+  if (scopeOrg) filter.organization_id = scopeOrg;
+  return filter;
+}
+
+/** The columns both reads project: the holder and the ADR-0091 D2 validity window. */
+const ASSIGNMENT_FIELDS = ['user_id', 'valid_from', 'valid_until'];
 
 type PositionCache = {
   expand?: Map<string, string[]>;
@@ -73,16 +89,14 @@ export class PositionGraphService {
     const users = new Set<string>();
 
     // 1) Platform assignment table (source of truth).
-    const filter: Record<string, unknown> = { position: positionName };
     const scopeOrg = organizationId ?? this.organizationId;
-    if (scopeOrg) filter.organization_id = scopeOrg;
     try {
       // valid_from / valid_until ride the projection so the ADR-0091 D2
       // validity filter below sees them — expired holders stop receiving
       // position-recipient shares at resolution time, fail-closed.
       const rows = await this.engine.find('sys_user_position', {
-        filter,
-        fields: ['user_id', 'valid_from', 'valid_until'],
+        filter: positionAssignmentPredicate(positionName, scopeOrg),
+        fields: ASSIGNMENT_FIELDS,
         limit: 10000,
         context: SYSTEM_CTX,
       });
@@ -104,5 +118,43 @@ export class PositionGraphService {
     const result = Array.from(users);
     this.cache.expand!.set(key, result);
     return result;
+  }
+
+  /**
+   * Does `userId` hold `positionName`? The user-scoped twin of
+   * {@link expandPositionUsers}: the same two sources, the same organization
+   * scope and the same ADR-0091 D2 validity filter, each narrowed to one user,
+   * so the answer is `expandPositionUsers(positionName, organizationId)
+   * .includes(userId)` — pinned in `position-graph.test.ts` — read in two
+   * indexed lookups instead of the position's whole holder list.
+   *
+   * Exists for the recipient-membership recompute
+   * (`recipient-membership-recompute.ts`), which re-evaluates a position rule
+   * for the ONE user whose assignment was written. That runs on the write path,
+   * once per written row, so a full expansion there would make a bulk
+   * assignment import quadratic in the position's holder count.
+   *
+   * Uncached on purpose: the answer is wanted right after a write that may
+   * have changed it. A failed assignment read falls through to the transition
+   * source, as the expansion's does.
+   */
+  async holdsPosition(userId: string, positionName: string, organizationId?: string): Promise<boolean> {
+    if (!userId || !positionName) return false;
+    const scopeOrg = organizationId ?? this.organizationId;
+    try {
+      const rows = await this.engine.find('sys_user_position', {
+        filter: { ...positionAssignmentPredicate(positionName, scopeOrg), user_id: userId },
+        fields: ASSIGNMENT_FIELDS,
+        limit: 1000,
+        context: SYSTEM_CTX,
+      });
+      const nowMs = Date.now();
+      for (const r of (rows ?? []) as any[]) {
+        if (String(r.user_id ?? '') === userId && isGrantActive(r, nowMs)) return true;
+      }
+    } catch {
+      /* table may not exist on minimal stacks — the transition source below still applies */
+    }
+    return holdsRole(this.engine, positionName, userId, scopeOrg);
   }
 }
