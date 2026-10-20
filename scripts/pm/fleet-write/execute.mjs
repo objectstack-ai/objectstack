@@ -88,8 +88,9 @@
  *   - a stroke whose pacing the relay job cannot hold — its `timeout-minutes`
  *     less the allowance an ordinary stroke has — is REFUSED with zero writes
  *     (exit 2, `strokeBudgetRefusal`), exactly as the packer refuses it at the
- *     seat (`dispatch.mjs`, its batch-gap section): run anyway, the job would
- *     be cancelled mid-stroke with no summary. ⛔ Never a shorter gap instead;
+ *     seat (`dispatch.mjs`, its batch-gap section): run anyway, it could
+ *     outlive the job, which the platform cancels mid-stroke with no summary.
+ *     ⛔ Never a shorter gap instead;
  *   - an announcement the pace log cannot record is REFUSED (exit 10), the way
  *     `paceWrite` refuses an unrecordable write: unpaced is the state the
  *     throttle exists to prevent.
@@ -1181,7 +1182,8 @@ export async function selfTest() {
       t("…and the pacing the runner pays is exactly the pacing the seat budgets for (strokePacing — the packer's refusal and the run-poller's wait)", five.gaps.reduce((a, b) => a + b, 0), strokePacing(base(cards(DEFAULT_BATCH_THRESHOLD))).pacingMs);
       const announced = five.paceLines.findIndex((l) => l.includes(`batch of ${DEFAULT_BATCH_THRESHOLD} ${BATCH_KIND} item(s) announced`));
       const firstLanded = five.logs.findIndex((l) => l.startsWith('  ✓ action 1 '));
-      t('ONE announcement, recorded by write-pace itself under this kind, before the first write — and the transcript says it before the first landing', [five.paceLines.filter((l) => l.includes('announced for token key')).length, announced >= 0, five.logs.findIndex((l) => l.includes('rule ⑤ —')) < firstLanded, firstLanded > 0], [1, true, true, true]);
+      const said = five.logs.findIndex((l) => l.includes('rule ⑤ —'));
+      t('ONE announcement, recorded by write-pace itself under this kind, before the first write — and the transcript says it before the first landing', [five.paceLines.filter((l) => l.includes('announced for token key')).length, announced >= 0, said >= 0 && said < firstLanded, firstLanded > 0], [1, true, true, true]);
       t('…the summary names the pacing in one line, and the token reached neither the summary nor the pace log', [five.summary.includes(`- pacing: rule ⑤ — ${DEFAULT_BATCH_THRESHOLD} content-creating action(s)`), five.summary.includes(TOKEN), readReal(five.file, 'utf8').includes(TOKEN)], [true, false, false]);
 
       const four = await clocked(cards(DEFAULT_BATCH_THRESHOLD - 1));
