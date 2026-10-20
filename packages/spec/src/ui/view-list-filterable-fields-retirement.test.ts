@@ -11,7 +11,8 @@
  * "Field names available for filtering", while its one renderer — objectui's
  * `ListView` (the `filterFields` memo), fed by the app shell's object view —
  * read it as the Filter panel's field WHITELIST. Measured at objectui's pinned
- * sha `4016370a`, with the reader named on the ledger row
+ * sha `4016370a` and re-read at the moved pin `12dc7b47`, with the reader named
+ * on the ledger row
  * (`liveness/view.json`, `/props/list/children/filterableFields`). The ruling is
  * that the platform carries no per-view Filter-panel whitelist, so the key
  * retires and NO key replaces it.
