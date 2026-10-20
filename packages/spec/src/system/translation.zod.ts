@@ -1223,6 +1223,7 @@ const appTranslationDataShape = () => ({
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.inlineHelpText
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.options.<value>   (#22507)
    *   flows.<flow_name>.refusals.<node_id>.message   (a refused `end` node, #22450)
+   *   flows.<flow_name>.approvals.<node_id>.label    (an `approval` node's step label)
    *
    * Every user-read string slot of the flow schemas is either one of these
    * keys or recorded, with its reason, in the family pin
@@ -1315,6 +1316,38 @@ const appTranslationDataShape = () => ({
    * refuses a key over an unknown flow, an unknown node, or a node that is not
    * a refused `end`, as it does for the screen keys.
    *
+   * ## `approvals` — an `approval` node's step label
+   *
+   *   flows.<flow_name>.approvals.<node_id>.label
+   *
+   * An `approval` node (`ApprovalNodeConfigSchema`) is a step a person reads
+   * by name: the approval request it opens snapshots the node's `label` as the
+   * step the submitter and the approvers see (`current_step_label`). Until
+   * this key the group had nowhere to put it, so a pack's step name was
+   * refused `translation-target-unknown` under `screens` (the node is not a
+   * screen) and rendered in the source language on every console.
+   *
+   * - **Grouped by node type, like `screens`.** `screens` addresses `screen`
+   *   nodes and `refusals` refusing `end` nodes, each by `FlowNode.id`; this
+   *   group addresses `approval` nodes the same way, at any depth (an ADR-0031
+   *   region included).
+   * - **The leaf is `label`, the source's own spelling.** The node config
+   *   declares no heading of its own (no `title`, no instructions, no comment
+   *   prompt), so the one person-facing string an approval step carries is
+   *   `FlowNode.label`. A screen spells its leaf `title` because
+   *   `ScreenConfigSchema.title` is what it overlays; `title` here is an alias
+   *   onto `label`.
+   * - ⛔ **The decision dialog's output labels are NOT here.** A typed
+   *   `decisionOutputs[]` entry's `label` is copy the decision dialog draws,
+   *   recorded as owed in `flows-translation-face.test.ts`; it waits on a
+   *   reader for that dialog, not on this key.
+   *
+   * `objectstack validate` refuses a key over an unknown flow, an unknown
+   * node, or a node that is not an `approval`, and points a `screens` or
+   * `refusals` key written over an approval node at this group. This is the
+   * spec half of a contract-first split: the reader that renders the step
+   * label in the reader's locale is `plugin-approvals`'s, a downstream change.
+   *
    * ## `successMessage` / `errorMessage` — the terminal toasts (#22507)
    *
    *   flows.<flow_name>.successMessage
@@ -1390,6 +1423,7 @@ const appTranslationDataShape = () => ({
     aliases: {
       name: 'label', title: 'label', nodes: 'screens', steps: 'screens', screen: 'screens', pages: 'screens',
       refusal: 'refusals', ends: 'refusals',
+      approval: 'approvals',
       // The spellings the toast pair arrives in from an action translation,
       // which spells its own success toast `successMessage` with these aliases.
       success: 'successMessage', successText: 'successMessage',
@@ -1480,6 +1514,20 @@ const appTranslationDataShape = () => ({
           + 'the message it translates, rendered by the engine in the run\'s locale in place of the authored one',
         ),
     })).optional().describe("Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'`"),
+    approvals: z.record(z.string(), strictObject({
+      surface: 'this flow approval-step translation',
+      history: TRANSLATION_HISTORY,
+      // An approval step's one person-facing string is the NODE's `label`
+      // (`FlowNode.label`), so the leaf is spelled as the source spells it.
+      // A screen's headline is `title` one group over; an author who holds
+      // that spelling (the measured HotCRM key) is told the rename.
+      aliases: { title: 'label', name: 'label', heading: 'label', stepLabel: 'label' },
+    }, {
+      label: z.string().optional().describe(
+        "Translated approval-step label — overlays the `approval` node's own `label`, the step name an approval "
+        + 'request shows its submitter and approvers',
+      ),
+    })).optional().describe("Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node"),
   })).optional().describe('Screen-flow translations keyed by flow name'),
 
   /**

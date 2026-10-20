@@ -116,6 +116,14 @@
  * are each an orphan, with its own diagnosis. The message's `{{ }}` holes are
  * the schema's to judge (`TranslationDataSchema`, the one text-slot judge).
  *
+ * `flows.<name>.approvals.<node_id>.label` is judged the same way: the node id
+ * must name an `approval` node (`APPROVAL_NODE_TYPE`), at any depth. A node of
+ * another type and an id the flow does not declare are each an orphan, with
+ * its own diagnosis — a `screen` node pointed at its `screens.<node_id>.title`.
+ * The reverse slip, a `screens` or `refusals` key written over an approval
+ * node, is pointed at `approvals.<node_id>.label` rather than told only that
+ * the node is not a screen.
+ *
  * `flows.<name>.successMessage` / `.errorMessage` (#22507), the terminal
  * toasts, are judged against the flow itself: `translateFlow` overlays a toast
  * only where the flow AUTHORS one, so a translated toast over a flow that
@@ -198,7 +206,7 @@
  */
 
 import { expandViewContainer } from '@objectstack/spec';
-import { flowScreenFieldOptionKey } from '@objectstack/spec/automation';
+import { APPROVAL_NODE_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
 import {
   FLOW_TERMINAL_MESSAGE_KEYS,
   hasPlatformObjectPrefix,
@@ -394,6 +402,11 @@ interface FlowFacts {
    * renders no message, so a key over one is an orphan.
    */
   refusals: Set<string>;
+  /**
+   * The ids of the `approval` nodes — the nodes a
+   * `flows.<name>.approvals.<node_id>` key addresses, at any depth.
+   */
+  approvals: Set<string>;
   /**
    * [#22507] The terminal toasts the flow AUTHORS (`successMessage` /
    * `errorMessage` declared as a string) — the only ones a
@@ -1423,6 +1436,7 @@ function buildUniverse(stack: AnyRec): Universe {
     if (!ownDeclaration && flows.has(flowName)) return;
     const screens = new Map<string, ScreenFacts>();
     const refusals = new Set<string>();
+    const approvals = new Set<string>();
     const otherNodes = new Map<string, string>();
     const messages = new Set<string>(FLOW_TERMINAL_MESSAGE_KEYS.filter((key) => typeof flow[key] === 'string'));
     for (const { node } of walkFlowNodes(flow, '')) {
@@ -1436,6 +1450,7 @@ function buildUniverse(stack: AnyRec): Universe {
         if (nodeType === END_NODE_TYPE && isRec(node.config) && node.config.outcome === REFUSED_OUTCOME) {
           refusals.add(nodeId);
         }
+        if (nodeType === APPROVAL_NODE_TYPE) approvals.add(nodeId);
         continue;
       }
       const config = isRec(node.config) ? node.config : undefined;
@@ -1455,7 +1470,7 @@ function buildUniverse(stack: AnyRec): Universe {
         hasDescription: typeof config?.description === 'string' && config.description.length > 0,
       });
     }
-    flows.set(flowName, { screens, refusals, messages, otherNodes });
+    flows.set(flowName, { screens, refusals, approvals, messages, otherNodes });
   };
   for (const flow of recordsOf(stack.flows)) collectFlowRecord(flow, { ownDeclaration: true });
   for (const flow of artifactProvidedRecords(stack, 'flows')) {
@@ -1923,12 +1938,14 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             orphan(
               `${inLocale} · flow "${flowName}" · screen "${nodeId}"`,
               screenPath,
-              otherType
-                ? `Translations are keyed to screen "${nodeId}", which flow "${flowName}" ` +
-                  `declares as a \`${otherType}\` node, not a \`screen\`, so nothing resolves these keys.`
-                : `Translations are keyed to screen "${nodeId}", which flow "${flowName}" ` +
-                  `declares no screen node for, so the wizard step keeps its source-locale heading.` +
-                  suggest(nodeId, flow.screens.keys()),
+              otherType === APPROVAL_NODE_TYPE
+                ? approvalRedirect('screen', nodeId, flowName)
+                : otherType
+                  ? `Translations are keyed to screen "${nodeId}", which flow "${flowName}" ` +
+                    `declares as a \`${otherType}\` node, not a \`screen\`, so nothing resolves these keys.`
+                  : `Translations are keyed to screen "${nodeId}", which flow "${flowName}" ` +
+                    `declares no screen node for, so the wizard step keeps its source-locale heading.` +
+                    suggest(nodeId, flow.screens.keys()),
               `Screen translations are keyed by the node's \`id\` (the client's ` +
                 `\`ScreenSpec.nodeId\`), not its \`label\`.`,
             );
@@ -1985,18 +2002,39 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
           orphan(
             `${inLocale} · flow "${flowName}" · refusal "${nodeId}"`,
             `${flowPath}.refusals.${nodeId}`,
-            nodeType === END_NODE_TYPE
-              ? `Translations are keyed to refusal "${nodeId}", which flow "${flowName}" declares as an ` +
-                `\`end\` node that completes, not one declaring \`outcome: 'refused'\`, so nothing ` +
-                `resolves this key.`
-              : nodeType
-                ? `Translations are keyed to refusal "${nodeId}", which flow "${flowName}" declares as a ` +
-                  `\`${nodeType}\` node, not a refusing \`end\`, so nothing resolves this key.`
-                : `Translations are keyed to refusal "${nodeId}", a node id flow "${flowName}" does not ` +
-                  `declare, so the refusal keeps its source-locale message.` +
-                  suggest(nodeId, flow.refusals),
+            nodeType === APPROVAL_NODE_TYPE
+              ? approvalRedirect('refusal', nodeId, flowName)
+              : nodeType === END_NODE_TYPE
+                ? `Translations are keyed to refusal "${nodeId}", which flow "${flowName}" declares as an ` +
+                  `\`end\` node that completes, not one declaring \`outcome: 'refused'\`, so nothing ` +
+                  `resolves this key.`
+                : nodeType
+                  ? `Translations are keyed to refusal "${nodeId}", which flow "${flowName}" declares as a ` +
+                    `\`${nodeType}\` node, not a refusing \`end\`, so nothing resolves this key.`
+                  : `Translations are keyed to refusal "${nodeId}", a node id flow "${flowName}" does not ` +
+                    `declare, so the refusal keeps its source-locale message.` +
+                    suggest(nodeId, flow.refusals),
             `Refusal translations are keyed by the \`id\` of an \`end\` node declaring ` +
               `\`outcome: 'refused'\`.`,
+          );
+        }
+        // ── flows.<name>.approvals.<node_id> ──────────────────────────────
+        for (const nodeId of Object.keys(asRecord(rawFlow.approvals))) {
+          if (flow.approvals.has(nodeId)) continue;
+          const nodeType = flow.screens.has(nodeId) ? SCREEN_NODE_TYPE : flow.otherNodes.get(nodeId);
+          orphan(
+            `${inLocale} · flow "${flowName}" · approval step "${nodeId}"`,
+            `${flowPath}.approvals.${nodeId}`,
+            nodeType === SCREEN_NODE_TYPE
+              ? `Translations are keyed to approval step "${nodeId}", which flow "${flowName}" declares as a ` +
+                `\`screen\` node; its heading is keyed \`screens.${nodeId}.title\`.`
+              : nodeType
+                ? `Translations are keyed to approval step "${nodeId}", which flow "${flowName}" declares as a ` +
+                  `\`${nodeType}\` node, not an \`approval\`, so nothing resolves this key.`
+                : `Translations are keyed to approval step "${nodeId}", which flow "${flowName}" declares no ` +
+                  `node for, so the step keeps its source-locale label.` +
+                  suggest(nodeId, flow.approvals),
+            `Approval-step translations are keyed by the \`id\` of an \`approval\` node.`,
           );
         }
       }
@@ -2004,6 +2042,17 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
   }
 
   return findings;
+}
+
+/**
+ * The verdict for a `screens` / `refusals` key written over an `approval`
+ * node: the step's one translatable string is its label, under `approvals`.
+ */
+function approvalRedirect(group: 'screen' | 'refusal', nodeId: string, flowName: string): string {
+  return (
+    `Translations are keyed to ${group} "${nodeId}", which flow "${flowName}" declares as an ` +
+    `\`approval\` node; its step label is keyed \`approvals.${nodeId}.label\`.`
+  );
 }
 
 /** `v` as a record of sub-nodes, or an empty record when absent/malformed. */

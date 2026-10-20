@@ -75,7 +75,9 @@ describe('NotificationTemplateStore', () => {
                     const w = query?.where ?? {};
                     return (
                         rows.find(
-                            (r) => r.topic === w.topic && r.channel === w.channel && r.locale === w.locale && r.is_active,
+                            (r) =>
+                                r.organization_id === w.organization_id &&
+                                r.topic === w.topic && r.channel === w.channel && r.locale === w.locale && r.is_active,
                         ) ?? null
                     );
                 },
@@ -91,20 +93,20 @@ describe('NotificationTemplateStore', () => {
 
     it('returns null when there is no data engine', async () => {
         const store = new NotificationTemplateStore({ getData: () => undefined });
-        expect(await store.load('t', 'email', 'en')).toBeNull();
+        expect(await store.load('t', 'email', 'en', 'org_1')).toBeNull();
     });
 
     it('loads the exact (topic, channel, locale) active template', async () => {
-        const data = fakeData([{ topic: 't', channel: 'email', locale: 'en', is_active: true, subject: 'S', body: 'B' }]);
+        const data = fakeData([{ organization_id: 'org_1', topic: 't', channel: 'email', locale: 'en', is_active: true, subject: 'S', body: 'B' }]);
         const store = new NotificationTemplateStore({ getData: () => data.engine });
-        const row = await store.load('t', 'email', 'en');
+        const row = await store.load('t', 'email', 'en', 'org_1');
         expect(row).toMatchObject({ subject: 'S', body: 'B' });
     });
 
     it('falls back en-US → en → default locale', async () => {
-        const data = fakeData([{ topic: 't', channel: 'email', locale: 'en', is_active: true, subject: 'EN' }]);
+        const data = fakeData([{ organization_id: 'org_1', topic: 't', channel: 'email', locale: 'en', is_active: true, subject: 'EN' }]);
         const store = new NotificationTemplateStore({ getData: () => data.engine });
-        const row = await store.load('t', 'email', 'en-US');
+        const row = await store.load('t', 'email', 'en-US', 'org_1');
         expect(row).toMatchObject({ subject: 'EN' });
         // First tried en-US, then en.
         expect(data.queries.map((q) => q.where.locale)).toEqual(['en-US', 'en']);
@@ -113,6 +115,30 @@ describe('NotificationTemplateStore', () => {
     it('returns null (generic fallback) on a lookup error', async () => {
         const engine = { async findOne() { throw new Error('locked'); } } as any;
         const store = new NotificationTemplateStore({ getData: () => engine });
-        expect(await store.load('t', 'email', 'en')).toBeNull();
+        expect(await store.load('t', 'email', 'en', 'org_1')).toBeNull();
+    });
+
+    // ADR-0131: the table is organization-owned, so a template is resolved in
+    // the recipient's organization. The two-organization reading on a real
+    // engine is `template-organization.integration.test.ts`; these pin the
+    // read's own shape.
+    describe("a template is resolved in the recipient's organization", () => {
+        it('keys every locale rung of the read by the organization it was handed', async () => {
+            const data = fakeData([]);
+            const store = new NotificationTemplateStore({ getData: () => data.engine });
+            expect(await store.load('t', 'email', 'en-US', 'org_1')).toBeNull();
+            expect(data.queries.map((q) => q.where)).toEqual([
+                { organization_id: 'org_1', topic: 't', channel: 'email', locale: 'en-US', is_active: true },
+                { organization_id: 'org_1', topic: 't', channel: 'email', locale: 'en', is_active: true },
+            ]);
+        });
+
+        it('a call that names no organization reads no row and answers the generic fallback', async () => {
+            const data = fakeData([{ organization_id: 'org_1', topic: 't', channel: 'email', locale: 'en', is_active: true, subject: 'S' }]);
+            const store = new NotificationTemplateStore({ getData: () => data.engine });
+            expect(await store.load('t', 'email', 'en')).toBeNull();
+            expect(await store.load('t', 'email', 'en', '')).toBeNull();
+            expect(data.queries).toEqual([]);
+        });
     });
 });

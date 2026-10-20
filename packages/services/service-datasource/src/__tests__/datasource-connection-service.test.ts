@@ -12,7 +12,10 @@ import type { IDataDriver } from '@objectstack/spec/contracts';
 import type { DatasourceConnectPolicy } from '../contracts/connect-policy.js';
 import {
   GENERIC_CONNECT_FAILURE_REMEDY,
+  UNBUILT_WORKSPACE_REMEDY,
   isUnbuiltWorkspaceFailure,
+  missingDriverClient,
+  missingDriverClientRemedy,
 } from '../connect-failure-remedy.js';
 import { missingSqliteWasmDriverMessage } from '../default-datasource-driver-factory.js';
 
@@ -589,6 +592,85 @@ describe('fail-fast remedy is chosen by CAUSE (#5794)', () => {
         .then(() => undefined, (e: Error) => e);
       expect(err!.message.endsWith(GENERIC)).toBe(true);
     });
+
+    // The driver-level codes a real refused or rejected connection carries:
+    // neither is a module-resolution failure, so neither may reach the
+    // missing-client branch (#24909) any more than the unbuilt one.
+    it.each([
+      ['ECONNREFUSED', 'connect ECONNREFUSED 127.0.0.1:5432'],
+      ['28P01', 'password authentication failed for user "app"'],
+    ])('a driver error with code %s still ends on it, byte for byte', async (code, text) => {
+      const err = await failFast(factoryThrowing(withCode(new Error(text), code)));
+      expect(err.message.endsWith(GENERIC)).toBe(true);
+      // `\b`: "pnpm install" contains "npm install" as a substring.
+      expect(err.message).not.toMatch(/\bnpm install\b/);
+      expect(err.message).not.toContain('pnpm build');
+    });
+  });
+
+  // #24909: `@objectstack/driver-sql` reaches PostgreSQL, MySQL and native
+  // SQLite through knex, and knex loads a database client the PROJECT
+  // installs. A missing one is a missing install, not an unbuilt workspace:
+  // `pnpm install && pnpm build` adds no package the project never declared, so
+  // a scaffolded app that followed the build advice was refused again.
+  describe('a missing database client is answered with ITS install (#24909)', () => {
+    /**
+     * knex's own wrapper (`Client.initializeDriver`), in the shape measured on
+     * the real factory arms: a NEW Error that keeps the text and drops `code`.
+     * The genuine article is pinned on the real path in
+     * `missing-driver-client-boot-refusal.test.ts`.
+     */
+    const knexMissingClient = (client: string, dialect: string) =>
+      new Error(
+        `Knex: run\n$ npm install ${client} --save\nCannot find module '${client}'\n` +
+        `Require stack:\n- /app/node_modules/knex/lib/dialects/${dialect}/index.js`,
+      );
+
+    it.each([
+      ['pg', 'postgres'],
+      ['mysql2', 'mysql2'],
+      ['better-sqlite3', 'better-sqlite3'],
+    ])('%s: the refusal ends on the install of that client and names no build', async (client, dialect) => {
+      const err = await failFast(factoryThrowing(knexMissingClient(client, dialect)));
+      const remedy = missingDriverClientRemedy(client);
+      expect(err.message.endsWith(remedy)).toBe(true);
+      // The install of THAT module, named once in the remedy (the earlier
+      // `npm install … --save` belongs to knex's interpolated text).
+      expect(remedy.split(`npm install ${client}`)).toHaveLength(2);
+      expect(err.message).not.toContain('pnpm build');
+      expect(err.message).not.toContain(UNBUILT_WORKSPACE_REMEDY);
+      expectNoHarmfulAdvice(err.message);
+    });
+
+    it("ESM's `Cannot find package 'pg'`, code intact, is the same missing install", async () => {
+      const err = await failFast(
+        factoryThrowing(withCode(new Error("Cannot find package 'pg' imported from /app/x.js"), 'ERR_MODULE_NOT_FOUND')),
+      );
+      expect(err.message.endsWith(missingDriverClientRemedy('pg'))).toBe(true);
+    });
+
+    it('names no environment variable and no configuration key', () => {
+      for (const client of ['pg', 'mysql2', 'better-sqlite3']) {
+        const remedy = missingDriverClientRemedy(client);
+        expect(remedy).not.toMatch(/\bOS_[A-Z_]+/);
+        expect(remedy).not.toContain('--database');
+        expect(remedy).not.toContain('pnpm build');
+      }
+    });
+
+    // The other side of the split: only a BARE specifier on the closed list is
+    // a missing client. Each of these is still the unbuilt/broken-install case.
+    it.each([
+      ['the driver package itself, not installed', "Cannot find package '@objectstack/driver-sql' imported from /w/x.js"],
+      ['the driver package, unbuilt', "Cannot find module '/w/node_modules/@objectstack/driver-sql/dist/index.mjs'"],
+      ['a file inside an installed client', "Cannot find module '/w/node_modules/pg/lib/index.js'"],
+      ['a subpath of an installed client', "Cannot find module 'pg/lib/native'"],
+      ['a hard dependency of the driver (a broken install)', "Cannot find module 'knex'"],
+    ])('%s keeps the unbuilt-workspace remedy', async (_label, text) => {
+      const err = await failFast(factoryThrowing(new Error(text)));
+      expect(err.message.endsWith(UNBUILT_WORKSPACE_REMEDY)).toBe(true);
+      expect(err.message).not.toMatch(/\bnpm install\b/);
+    });
   });
 
   // "Diagnostic classification, zero behaviour change" is the whole claim of
@@ -679,7 +761,39 @@ describe('isUnbuiltWorkspaceFailure (#5794)', () => {
   it('classifies nothing when there was no thrown value to read', () => {
     expect(isUnbuiltWorkspaceFailure(undefined)).toBe(false);
   });
+
+  it('leaves a missing database client alone — an install, not an unbuilt workspace (#24909)', () => {
+    const knexPg = new Error("Knex: run\n$ npm install pg --save\nCannot find module 'pg'\nRequire stack:\n- /a/knex.js");
+    expect(isUnbuiltWorkspaceFailure(knexPg)).toBe(false);
+    expect(missingDriverClient(knexPg)).toBe('pg');
+  });
 });
+
+describe('missingDriverClient (#24909)', () => {
+  it('names the client only for a module-resolution failure', () => {
+    expect(missingDriverClient(new Error("Cannot find module 'mysql2'"))).toBe('mysql2');
+    // The same name in a message that is NOT a module-not-found is not this case.
+    expect(missingDriverClient(new Error('mysql2: connect ECONNREFUSED'))).toBeUndefined();
+    expect(missingDriverClient(undefined)).toBeUndefined();
+  });
+
+  it('reads the FIRST unresolved specifier — the wrapper words come first, the import error after', () => {
+    expect(
+      missingDriverClient(new Error("Cannot find module 'pg'\nRequire stack:\n- /w/node_modules/knex/lib/x.js")),
+    ).toBe('pg');
+    expect(
+      missingDriverClient(new Error("Cannot find package '@objectstack/driver-sql' (… 'pg' …)")),
+    ).toBeUndefined();
+  });
+
+  it('a module-not-found carrying only its code names no client', () => {
+    expect(missingDriverClient(withCodeOnly('MODULE_NOT_FOUND'))).toBeUndefined();
+  });
+});
+
+function withCodeOnly(code: string): Error {
+  return Object.assign(new Error('the entry point is not on disk'), { code });
+}
 
 describe('D3 credential resolution — fail-closed', () => {
   const credExternal: ConnectableDatasource = {
