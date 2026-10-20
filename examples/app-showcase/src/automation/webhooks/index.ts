@@ -4,8 +4,10 @@ import { defineWebhook } from '@objectstack/spec/automation';
 
 /**
  * Outbound webhook — fans out task lifecycle events (create/update/delete)
- * to an external endpoint. No `label` / `description`: a declared webhook has
- * no Setup row to show them on, and the liveness ledger marks both dead.
+ * to an external endpoint. A declared webhook has no Setup row, but a `label` /
+ * `description` authored here is not inert: the liveness ledger grades both
+ * `live`, because the Studio metadata list and quick-find show them, read off
+ * `GET /api/v1/meta/webhook`.
  * Authored via `defineStack({ webhooks })`; the webhooks plugin's dispatcher
  * reads this declaration from the registry (ADR-0131 D2) — no `sys_webhook`
  * row is written for it.
