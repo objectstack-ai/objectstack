@@ -31,10 +31,28 @@
  */
 
 import { temporalStorageForm, type ExportFieldMeta } from '@objectstack/core';
+import { resolveDisplayField } from '@objectstack/spec/data';
 
 // `ExportFieldMeta` and `buildFieldMetaMap` live in `@objectstack/core`
 // (`utils/import-field-meta.ts`), beside the import runner that reads them.
 export { buildFieldMetaMap, type ExportFieldMeta } from '@objectstack/core';
+
+/**
+ * The field metadata the export renderers read: core's {@link ExportFieldMeta}
+ * plus one export-only key, the title field of a reference field's TARGET
+ * object. It is resolved by the route ({@link withReferenceTitleFields}), never
+ * by the formatter, so the cell renderer holds no title rule of its own.
+ */
+export interface ExportCellMeta extends ExportFieldMeta {
+  /**
+   * The field that titles a record of this reference field's target object:
+   * ADR-0079's `resolveDisplayField` over the target schema the protocol
+   * serves (`nameField`, then the deprecated `displayNameField` alias — the
+   * pointer the registry designates on every object it holds). `undefined`
+   * when the target schema could not be read or resolves no title.
+   */
+  titleField?: string;
+}
 
 /**
  * Build the `Content-Disposition` header for an export download.
@@ -102,7 +120,9 @@ const MULTI_OPTION_TYPES = new Set(['multiselect', 'checkboxes', 'tags']);
 
 /**
  * Keys tried, in order, to derive a referenced record's display value when the
- * field carries no explicit `displayField`.
+ * field carries no explicit `displayField` AND the target object resolves no
+ * title field ({@link ExportCellMeta.titleField}). Only a target with no title
+ * pointer reaches this list: a declared title is never second-guessed by it.
  */
 const NAME_KEY_FALLBACKS = [
   'name', 'title', 'label', 'full_name', 'fullName', 'display_name', 'username', 'email',
@@ -117,6 +137,50 @@ export function referenceFieldNames(metaMap: Map<string, ExportFieldMeta>): stri
   const out: string[] = [];
   for (const meta of metaMap.values()) {
     if (meta.type && REFERENCE_TYPES.has(meta.type) && meta.reference) out.push(meta.name);
+  }
+  return out;
+}
+
+/**
+ * Stamp every reference field's {@link ExportCellMeta.titleField}: the title
+ * field of its target object, read once per distinct target per export.
+ *
+ * The rule is ADR-0079's `resolveDisplayField`, the spec's single arbiter of
+ * "which field titles a record of this object" — the same function the
+ * registry designates `nameField` with at registration, so over a schema the
+ * protocol serves it answers that designated pointer. A lookup cell therefore
+ * names the record the way the record names itself, rather than by whichever
+ * key of a fixed list the expanded record happens to carry (a contact's job
+ * `title` ahead of its `full_name` title).
+ *
+ * Best-effort, per target: a schema read that throws or returns nothing leaves
+ * that target's fields without a `titleField`, so their cells keep the
+ * key-list fallback exactly as before. Never throws.
+ */
+export async function withReferenceTitleFields(
+  metaMap: Map<string, ExportFieldMeta>,
+  readSchema: (object: string) => Promise<unknown>,
+): Promise<Map<string, ExportCellMeta>> {
+  const titles = new Map<string, Promise<string | undefined>>();
+  const titleOf = (target: string): Promise<string | undefined> => {
+    let pending = titles.get(target);
+    if (!pending) {
+      pending = readSchema(target).then(
+        (schema) => (schema && typeof schema === 'object' ? resolveDisplayField(schema as never) : undefined),
+        () => undefined,
+      );
+      titles.set(target, pending);
+    }
+    return pending;
+  };
+  const out = new Map<string, ExportCellMeta>();
+  for (const [key, meta] of metaMap) {
+    if (meta.type && REFERENCE_TYPES.has(meta.type) && meta.reference) {
+      const titleField = await titleOf(meta.reference);
+      out.set(key, titleField ? { ...meta, titleField } : meta);
+    } else {
+      out.set(key, meta);
+    }
   }
   return out;
 }
@@ -333,19 +397,38 @@ export function cellFontColor(value: unknown, meta?: ExportFieldMeta): string | 
   return toArgb(hit?.color);
 }
 
-function displayFromRecord(rec: Record<string, unknown>, displayField?: string): string {
+/**
+ * The display text of one expanded referenced record.
+ *
+ * In order: the lookup field's own `displayField` (the field author's explicit
+ * choice); else the target object's resolved `titleField`; else — only for a
+ * target that resolves no title — the first scalar hit of
+ * {@link NAME_KEY_FALLBACKS}; else the record's id.
+ *
+ * A target that HAS a title field never consults the key list, also when the
+ * title is absent from this record: field-level security deletes an unreadable
+ * field from the expanded record, and the key list would then put another
+ * column in the name's place (a contact named by its job title). The id is the
+ * cell's floor instead.
+ */
+function displayFromRecord(rec: Record<string, unknown>, displayField?: string, titleField?: string): string {
   if (displayField && rec[displayField] != null) return String(rec[displayField]);
-  for (const k of NAME_KEY_FALLBACKS) {
-    const v = rec[k];
+  if (titleField) {
+    const v = rec[titleField];
     if (v != null && typeof v !== 'object') return String(v);
+  } else {
+    for (const k of NAME_KEY_FALLBACKS) {
+      const v = rec[k];
+      if (v != null && typeof v !== 'object') return String(v);
+    }
   }
   if (rec.id != null) return String(rec.id);
   try { return JSON.stringify(rec); } catch { return String(rec); }
 }
 
-function formatReference(value: unknown, displayField?: string): unknown {
+function formatReference(value: unknown, displayField?: string, titleField?: string): unknown {
   const one = (v: unknown): unknown =>
-    v && typeof v === 'object' ? displayFromRecord(v as Record<string, unknown>, displayField) : v;
+    v && typeof v === 'object' ? displayFromRecord(v as Record<string, unknown>, displayField, titleField) : v;
   if (Array.isArray(value)) return value.map(one).join(', ');
   return one(value);
 }
@@ -359,7 +442,7 @@ function formatReference(value: unknown, displayField?: string): unknown {
  */
 export function formatCellValue(
   value: unknown,
-  meta?: ExportFieldMeta,
+  meta?: ExportCellMeta,
   timezone?: string,
 ): unknown {
   if (value === null || value === undefined) return value;
@@ -377,7 +460,7 @@ export function formatCellValue(
   }
   if (t === 'date') return formatDate(value, false);
   if (t === 'datetime') return formatDate(value, true, timezone);
-  if (REFERENCE_TYPES.has(t)) return formatReference(value, meta.displayField);
+  if (REFERENCE_TYPES.has(t)) return formatReference(value, meta.displayField, meta.titleField);
   return value;
 }
 
@@ -390,7 +473,7 @@ export function formatCellValue(
 export function formatRowCells(
   row: Record<string, unknown>,
   fields: string[],
-  metaMap: Map<string, ExportFieldMeta>,
+  metaMap: Map<string, ExportCellMeta>,
   timezone?: string,
 ): unknown[] {
   return fields.map((f) => formatCellValue(row?.[f], metaMap.get(f), timezone));
@@ -403,7 +486,7 @@ export function formatRowCells(
  */
 export function formatRowForJson(
   row: Record<string, unknown>,
-  metaMap: Map<string, ExportFieldMeta>,
+  metaMap: Map<string, ExportCellMeta>,
   timezone?: string,
 ): Record<string, unknown> {
   if (metaMap.size === 0 || !row || typeof row !== 'object') return row;

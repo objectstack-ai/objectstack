@@ -286,7 +286,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_template: {
     label: "Notification Template",
     pluralLabel: "Notification Templates",
-    description: "The subject and body each notification topic sends, per channel and language.",
+    description: "各通知トピックが言語ごとに送信するメールと SMS のテキストです。アプリ内の受信トレイはこれらのテンプレートを使用しません。",
     fields: {
       id: {
         label: "Template ID"
@@ -296,7 +296,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Channel",
-        help: "Channel id this template renders for (email/inbox/push/…)."
+        help: "このテンプレートを使用するチャネル：email または sms。アプリ内の受信トレイは使用しません。アプリ内の内容は、メールテンプレートを作成して通知ステップの template で指定してください。"
       },
       locale: {
         label: "Locale",
@@ -307,7 +307,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       subject: {
         label: "Subject / Title",
-        help: "Rendered into the email subject / inbox title. Supports {{ payload.x }}."
+        help: "メールの件名です。SMS は本文が空の場合にのみこれを送信します。{{ payload.x }} を使用できます。"
       },
       body: {
         label: "Body",
@@ -338,8 +338,13 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "すべて",
         emptyState: {
           title: "まだ通知テンプレートがありません",
-          message: "トピック、チャネル、ロケールごとにテンプレートを追加します。追加するまでは、送信元が指定したタイトルと本文で通知が送信されます。"
+          message: "トピック、チャネル（メールまたは SMS）、言語ごとにテンプレートを追加します。追加するまでは、これらのチャネルは通知のタイトルと本文を送信します。アプリ内の内容はメールテンプレートから取得されます。メールテンプレートを指定した通知はそれをメールと受信トレイで送信し、SMS は引き続きここのテンプレートを使用します。"
         }
+      }
+    },
+    _validations: {
+      channel_renders_template: {
+        message: "このチャネルは通知テンプレートを使用しません。使用するのは email と sms だけなので、このテンプレートは送信されません。アプリ内（受信トレイ）の内容は、メールテンプレート（email_template）を作成して通知ステップの template で指定してください。メールと受信トレイの両方がそれを表示します。"
       }
     }
   },

@@ -642,7 +642,7 @@
       ],
       "source": [
         "packages/spec/src/automation/webhook.zod.ts#WebhookTriggerType (WebhookTriggerType enum + why undelete/api are absent; materialization contract; strict shape #4001)",
-        "packages/spec/liveness/webhook.json (9 props live on the registry read; label/description dead since the boot seeder retired)",
+        "packages/spec/liveness/webhook.json (9 props live on the registry read; label/description live on the Studio metadata list and quick-find, which read the declared item over GET /api/v1/meta/webhook)",
         "packages/plugins/plugin-webhooks/src/declared-webhooks.ts + auto-enqueuer.ts (the registry read and its remaps; trigger→event mapping incl. the #4639 bulk pair; #3196 unknown-trigger warn; the activation-ledger switch; an 18.0 database's seeded rows read beside the declaration)",
         "packages/services/service-messaging/src/http-outbox.ts#HttpRedeliverError (delivery statuses, attempts; HttpRedeliverError + assertHttpRedeliverable/assertRedeliverAllowed — terminal-only, the attempts===0 parked-row refusal, the fail-closed guard) + packages/services/service-messaging/src/http-signature-at-rest.integration.test.ts (redelivery replays the stored signature byte-for-byte)",
         "packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts#session (POST /api/v1/webhooks/redeliver — session auth with NO capability gate by design ('every authenticated user counts'), #10740 activeOrganizationId threading, the 401/400/404/409/500 arms) + (the #8069 redeliver-guard install; its ABSENCE is an error-level log, not a silent pass)",

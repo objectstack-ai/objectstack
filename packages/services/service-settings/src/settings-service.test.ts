@@ -679,8 +679,10 @@ describe('SettingsService — save-time validation (declared options are enforce
  * `locked: true`. So the values #5094/#5133 retired from `mail.provider` could
  * walk back in through the one door with no gate on it —
  * `OS_MAIL_PROVIDER=sendgrid` reached the mail plugin unchallenged — and a plain
- * typo (`OS_BRANDING_THEME_MODE=drak`) was served to every consumer as a normal
- * value with a normal-looking provenance.
+ * typo (`OS_BRANDING_THEME_MODE=drak`, a key since retired) was served to every
+ * consumer as a normal value with a normal-looking provenance. The cases below
+ * use `localization.locale`, a domain-less select, since `branding.theme_mode`
+ * left the Branding manifest (#24766).
  *
  * Per the ruling on #5204 an offending override is IGNORED, not repaired: the
  * value falls through to the next cascade layer, and the read API reports THAT
@@ -695,12 +697,13 @@ describe('SettingsService — env overrides are checked against declared options
 
   it('ignores an out-of-table env value and resolves the manifest default instead', async () => {
     const { errors, logger } = spyLogger();
-    // The issue's own example: a typo, one transposition away from 'dark'.
-    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'drak' }, logger });
-    svc.registerManifest(brandingSettingsManifest);
+    // A typo one transposition away from 'en-US' (the issue's own example was
+    // `OS_BRANDING_THEME_MODE=drak`, a key since retired).
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_LOCALE: 'en-SU' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
 
-    const r = await svc.get('branding', 'theme_mode');
-    expect(r.value).toBe('system'); // the manifest default, not 'drak'
+    const r = await svc.get('localization', 'locale');
+    expect(r.value).toBe('en-US'); // the manifest default, not 'en-SU'
     expect(r.source).toBe('default');
     // The override is not in force, so it does not lock anything either.
     expect(r.locked).toBe(false);
@@ -710,21 +713,21 @@ describe('SettingsService — env overrides are checked against declared options
     expect(r.cascadeChain?.some((e) => e.scope === 'env')).toBe(false);
 
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain('OS_BRANDING_THEME_MODE');
-    expect(errors[0]).toContain('drak');
-    expect(errors[0]).toContain('light, dark, system'); // the legal value set
+    expect(errors[0]).toContain('OS_LOCALIZATION_LOCALE');
+    expect(errors[0]).toContain('en-SU');
+    expect(errors[0]).toContain('en-US, zh-CN, ja-JP, es-ES'); // the legal value set
     expect(errors[0]).toContain('IGNORED');
   });
 
   it('falls back to the next cascade layer, not straight to the default', async () => {
     // "Ignored" means the env layer is skipped, not that the whole cascade is.
     const { errors, logger } = spyLogger();
-    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'drak' }, logger });
-    svc.registerManifest(brandingSettingsManifest);
-    await svc.set('branding', 'theme_mode', 'dark');
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_LOCALE: 'en-SU' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
+    await svc.set('localization', 'locale', 'ja-JP');
 
-    const r = await svc.get('branding', 'theme_mode');
-    expect(r.value).toBe('dark');
+    const r = await svc.get('localization', 'locale');
+    expect(r.value).toBe('ja-JP');
     expect(r.source).toBe('tenant');
     expect(r.locked).toBe(false);
     expect(errors).toHaveLength(1);
@@ -734,14 +737,14 @@ describe('SettingsService — env overrides are checked against declared options
     // The regression pin for the untouched path: a legal override keeps its
     // precedence, its `locked: true`, and its reason string.
     const { errors, logger } = spyLogger();
-    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'dark' }, logger });
-    svc.registerManifest(brandingSettingsManifest);
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_LOCALE: 'ja-JP' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
 
-    const r = await svc.get('branding', 'theme_mode');
-    expect(r.value).toBe('dark');
+    const r = await svc.get('localization', 'locale');
+    expect(r.value).toBe('ja-JP');
     expect(r.source).toBe('env');
     expect(r.locked).toBe(true);
-    expect(r.lockedReason).toContain('OS_BRANDING_THEME_MODE');
+    expect(r.lockedReason).toContain('OS_LOCALIZATION_LOCALE');
     expect(r.cascadeChain?.[0]).toMatchObject({ scope: 'env', effective: true });
     expect(errors).toHaveLength(0);
   });
@@ -751,10 +754,10 @@ describe('SettingsService — env overrides are checked against declared options
     // locked, `setMany` refuses. Pinned here so the coherence fix below cannot be
     // over-applied into "env never locks anything".
     const { logger } = spyLogger();
-    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'dark' }, logger });
-    svc.registerManifest(brandingSettingsManifest);
-    expect((await svc.get('branding', 'theme_mode')).locked).toBe(true);
-    await expect(svc.set('branding', 'theme_mode', 'light')).rejects.toBeInstanceOf(
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_LOCALE: 'ja-JP' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
+    expect((await svc.get('localization', 'locale')).locked).toBe(true);
+    await expect(svc.set('localization', 'locale', 'zh-CN')).rejects.toBeInstanceOf(
       SettingsLockedError,
     );
   });
@@ -766,14 +769,14 @@ describe('SettingsService — env overrides are checked against declared options
     // `SETTINGS_LOCKED`, leaving the key configurable by nothing at all — env
     // value ignored, UI refused — a lockout only an env edit could clear.
     const { logger } = spyLogger();
-    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'drak' }, logger });
-    svc.registerManifest(brandingSettingsManifest);
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_LOCALE: 'en-SU' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
 
-    expect((await svc.get('branding', 'theme_mode')).locked).toBe(false);
+    expect((await svc.get('localization', 'locale')).locked).toBe(false);
     // …and the write the read surface just advertised as possible really is.
-    await expect(svc.set('branding', 'theme_mode', 'light')).resolves.toBeDefined();
-    const after = await svc.get('branding', 'theme_mode');
-    expect(after.value).toBe('light');
+    await expect(svc.set('localization', 'locale', 'zh-CN')).resolves.toBeDefined();
+    const after = await svc.get('localization', 'locale');
+    expect(after.value).toBe('zh-CN');
     expect(after.source).toBe('tenant');
   });
 
@@ -857,11 +860,11 @@ describe('SettingsService — env overrides are checked against declared options
     // per-read line would be a firehose — and AGENTS.md's "Degradation log
     // levels" names training people to skim `error` as the mirror-image failure.
     const { errors, logger } = spyLogger();
-    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'drak' }, logger });
-    svc.registerManifest(brandingSettingsManifest); // one report here
-    for (let i = 0; i < 5; i++) await svc.get('branding', 'theme_mode');
-    await svc.getNamespace('branding');
-    await svc.getNamespace('branding');
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_LOCALE: 'en-SU' }, logger });
+    svc.registerManifest(localizationSettingsManifest); // one report here
+    for (let i = 0; i < 5; i++) await svc.get('localization', 'locale');
+    await svc.getNamespace('localization');
+    await svc.getNamespace('localization');
     expect(errors).toHaveLength(1);
   });
 
@@ -870,16 +873,16 @@ describe('SettingsService — env overrides are checked against declared options
     // a live `process.env` reference, so a newly-set bad override must not
     // inherit an earlier line's silence.
     const { errors, logger } = spyLogger();
-    const env: Record<string, string | undefined> = { OS_BRANDING_THEME_MODE: 'drak' };
+    const env: Record<string, string | undefined> = { OS_LOCALIZATION_LOCALE: 'en-SU' };
     const svc = new SettingsService({ env, logger });
-    svc.registerManifest(brandingSettingsManifest);
+    svc.registerManifest(localizationSettingsManifest);
     expect(errors).toHaveLength(1);
 
-    env.OS_BRANDING_THEME_MODE = 'lite';
-    const r = await svc.get('branding', 'theme_mode');
+    env.OS_LOCALIZATION_LOCALE = 'zz-ZZ';
+    const r = await svc.get('localization', 'locale');
     expect(r.source).toBe('default');
     expect(errors).toHaveLength(2);
-    expect(errors[1]).toContain('lite');
+    expect(errors[1]).toContain('zz-ZZ');
   });
 
   it('the read surface reports the layer actually in force, never a phantom env', async () => {
@@ -888,19 +891,19 @@ describe('SettingsService — env overrides are checked against declared options
     // field is pinned by the deployment and not editable — about a value nothing
     // is using.
     const { logger } = spyLogger();
-    const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'drak' }, logger });
-    svc.registerManifest(brandingSettingsManifest);
-    await svc.set('branding', 'theme_mode', 'light');
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_LOCALE: 'en-SU' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
+    await svc.set('localization', 'locale', 'zh-CN');
 
-    const payload = await svc.getNamespace('branding');
-    expect(payload.values.theme_mode).toMatchObject({
-      value: 'light',
+    const payload = await svc.getNamespace('localization');
+    expect(payload.values.locale).toMatchObject({
+      value: 'zh-CN',
       source: 'tenant',
       locked: false,
     });
-    expect(payload.values.theme_mode.cascadeChain?.some((e) => e.scope === 'env')).toBe(false);
+    expect(payload.values.locale.cascadeChain?.some((e) => e.scope === 'env')).toBe(false);
     // A sibling key with a legal env override is unaffected in the same payload.
-    expect(payload.values.workspace_name.source).toBe('default');
+    expect(payload.values.timezone.source).toBe('default');
   });
 
   it('falls back to console.error when no logger is injected', async () => {
@@ -909,10 +912,10 @@ describe('SettingsService — env overrides are checked against declared options
     // very failure #5204 is about.
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      const svc = new SettingsService({ env: { OS_BRANDING_THEME_MODE: 'drak' } });
-      svc.registerManifest(brandingSettingsManifest);
+      const svc = new SettingsService({ env: { OS_LOCALIZATION_LOCALE: 'en-SU' } });
+      svc.registerManifest(localizationSettingsManifest);
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(String(spy.mock.calls[0]![0])).toContain('OS_BRANDING_THEME_MODE');
+      expect(String(spy.mock.calls[0]![0])).toContain('OS_LOCALIZATION_LOCALE');
     } finally {
       spy.mockRestore();
     }

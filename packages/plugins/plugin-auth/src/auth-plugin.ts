@@ -1112,12 +1112,36 @@ export class AuthPlugin implements Plugin {
                 );
               }
             };
-            await applyBrand();
-            if (typeof settings.subscribe === 'function') {
-              settings.subscribe('branding', () => {
-                void applyBrand();
-              });
-              ctx.logger.info('Auth: bound appName to settings namespace=branding');
+            // [#24766] Bound only where the settings service LISTS the
+            // `branding` namespace — the test the runtime-config door makes.
+            // Under a walled tenancy posture service-settings withholds it
+            // (`UNWALLED_ONLY_NAMESPACES`): there is no value to bind, and
+            // the read would fail into the warn above on every correct walled
+            // boot. The configured `appName` (e.g. `OS_APP_NAME`) stays in
+            // force, which is all a walled read of organization-less rows
+            // ever produced. A service with no listing is treated the same.
+            let brandingOffered = false;
+            try {
+              const listManifests = (settings as {
+                listManifests?: () => ReadonlyArray<{ namespace?: unknown } | undefined>;
+              }).listManifests;
+              brandingOffered = typeof listManifests === 'function'
+                && listManifests.call(settings).some((m) => m?.namespace === 'branding');
+            } catch (err: any) {
+              // Kept local so the locale bindings below still run.
+              ctx.logger.warn(
+                'Auth: could not list settings namespaces, branding.workspace_name not bound: ' +
+                  (err?.message ?? err),
+              );
+            }
+            if (brandingOffered) {
+              await applyBrand();
+              if (typeof settings.subscribe === 'function') {
+                settings.subscribe('branding', () => {
+                  void applyBrand();
+                });
+                ctx.logger.info('Auth: bound appName to settings namespace=branding');
+              }
             }
 
             // #2815 — bind the auth SMS locale to the deployment default

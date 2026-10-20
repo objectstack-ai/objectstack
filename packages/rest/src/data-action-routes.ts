@@ -64,7 +64,8 @@ import {
     formatRowForJson,
     cellFontColor,
     exportContentDisposition,
-    type ExportFieldMeta,
+    withReferenceTitleFields,
+    type ExportCellMeta,
 } from './export-format.js';
 import { importControlOptOutRefusal, prepareImportRequest } from './import-prepare.js';
 import { readTemplateMode, templateFieldDefs } from './import-template.js';
@@ -1086,27 +1087,32 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 // labels, 是/否, formatted dates) and the $expand that resolves
                 // references. Best-effort: when the schema is unavailable the export
                 // falls back to raw values, byte-identical to the un-formatted path.
-                let metaMap = new Map<string, ExportFieldMeta>();
+                let metaMap = new Map<string, ExportCellMeta>();
                 // Localized object display label (e.g. 合同) — drives the
                 // suggested download filename below.
                 let objectLabel: string | undefined;
-                try {
-                    // Field metadata comes from the same place `findData` resolves
-                    // the object: `getMetaItem` is registry-first (DB fallback), so
-                    // it returns the live `ObjectSchema` whose `fields` is an object
-                    // map. The read hands back the envelope `{ type, name, item }`
-                    // — one shape, unconditionally, since #5563 — so the schema
-                    // document is read straight off `.item`. Legacy
-                    // `getObjectSchema` is consulted as a last resort so existing
-                    // test doubles keep working.
+                // Field metadata comes from the same place `findData` resolves
+                // the object: `getMetaItem` is registry-first (DB fallback), so
+                // it returns the live `ObjectSchema` whose `fields` is an object
+                // map. The read hands back the envelope `{ type, name, item }`
+                // — one shape, unconditionally, since #5563 — so the schema
+                // document is read straight off `.item`. Legacy
+                // `getObjectSchema` is consulted as a last resort so existing
+                // test doubles keep working. The same read serves the export's
+                // object and each reference field's target object below.
+                const readObjectSchema = async (name: string): Promise<any> => {
                     let schema: any = undefined;
                     if (typeof (p as any).getMetaItem === 'function') {
-                        const res: any = await (p as any).getMetaItem({ type: 'object', name: objectName });
+                        const res: any = await (p as any).getMetaItem({ type: 'object', name });
                         schema = res?.item;
                     }
                     if (!schema && typeof (p as any).getObjectSchema === 'function') {
-                        schema = await (p as any).getObjectSchema(objectName, environmentId);
+                        schema = await (p as any).getObjectSchema(name, environmentId);
                     }
+                    return schema;
+                };
+                try {
+                    let schema: any = await readObjectSchema(objectName);
                     // Localize field labels to the request locale (Accept-Language /
                     // `?locale=`) the same way the metadata endpoints do, so the
                     // export header row matches the UI column headers instead of
@@ -1133,6 +1139,13 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         if (names.length > 0) { fields = names; fieldsFromSchema = true; }
                     }
                 } catch { /* fall back to first-row derivation + raw values */ }
+
+                // A lookup cell names the referenced record by the TARGET
+                // object's title field (ADR-0079), read once per target here and
+                // handed to the formatter on the field meta. Best-effort per
+                // target, never throws: an unreadable target schema keeps that
+                // column's key-list fallback.
+                metaMap = await withReferenceTitleFields(metaMap, readObjectSchema);
 
                 // Expand reference fields so lookup/user ids resolve to their record
                 // (and thus a name). Batched $in inside findData — no N+1.
