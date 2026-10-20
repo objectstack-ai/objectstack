@@ -7043,7 +7043,7 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * 2. **`external != null`** — a federated object (ADR-0015), whose schema
    *    is owned by the REMOTE database (#7738). The driver turns `tenantId`
-   *    into `(organization_id = :tenant OR organization_id IS NULL)`, and
+   *    into `organization_id = :tenant`, and
    *    against a remote table that carries no such column that is a SQL error
    *    on Postgres/MySQL — or worse on SQLite, whose quoted-identifier
    *    fallback reinterprets the unresolvable identifier as the string
@@ -9693,8 +9693,9 @@ export class ObjectQL implements IObjectQLEngine {
    * `reference_not_found`. The tenancy exemptions stay where they are decided:
    * `buildDriverOptions` withholds `tenantId` for a `tenancy.enabled: false`
    * (platform-global) object and for a federated one, so a reference to either
-   * still resolves from an org-bound caller, and a NULL-organization row passes
-   * the driver's `OR … IS NULL` term.
+   * still resolves from an org-bound caller. A row with no organization is no
+   * tenant's (ADR-0131 D1): the driver's scope is the organization equality,
+   * with no `IS NULL` arm, so an org-bound caller's probe does not find one.
    *
    * ## …except a master-detail header, which the caller must be able to read (#22519)
    *
@@ -10072,8 +10073,9 @@ export class ObjectQL implements IObjectQLEngine {
    * organization outside that scope — another organization, or under `group`
    * one outside the caller's membership set — is not found, and it binds
    * exactly as a header that exists nowhere does — absent. The tenancy exemptions stay where they are decided:
-   * a `tenancy.enabled: false` or federated master gets no `tenantId`, and a
-   * NULL-organization header passes the driver's `OR … IS NULL` term. A system
+   * a `tenancy.enabled: false` or federated master gets no `tenantId`. A
+   * header with no organization is no tenant's (ADR-0131 D1): the driver's
+   * scope carries no `IS NULL` arm, so a scoped read does not find it. A system
    * caller with no `tenantId` (seed replay, boot) still reads unscoped.
    *
    * `null` on any failure — no relation, no id, header not returned by the
