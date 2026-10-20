@@ -458,7 +458,12 @@ contradicts it, and correct it here when it does.
 
 - **A walled boot is a fixture of its own: `os serve` boots `group` and `isolated` once the
   walled prerequisites are provisioned, and the stock showcase provisions none of them.**
-  18.0 refused a walled posture at boot; 18.x step 4 (#24580) removed that refusal, so
+  18.0.0 boots a walled posture: under ruling record 6282882793 on the v18 epic it is
+  published only after 18.x step 4 (#24580) has merged, and step 4 deleted the boot refusal
+  (`walledPostureRefusal()` in `packages/cli/src/commands/serve.ts`). Of the builds published
+  so far, only the `18.0.0-next.5` prerelease carries that refusal, as `main` did from
+  `ae6bd1a6` until step 4: `next.0` to `next.3` predate it, and no `next.4` was published.
+  So on 18.0.0
   `OS_TENANCY_POSTURE=group` or `isolated` (or the legacy `OS_MULTI_ORG_ENABLED=true`, which
   `resolveTenancyPosture()` in `packages/types/src/env.ts` reads as `isolated`) boots through
   `os serve`, and so `os dev` and `os start`. Each prerequisite below refuses the boot with a
