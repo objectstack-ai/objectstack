@@ -1245,7 +1245,7 @@
       "title": "Admin CSV identity import: password-policy auto/temporary drive per-row credentials, imported users sign in, non-admins denied",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["platform admin (running the import)", "an imported user (signing in afterwards)", "a non-admin (forger)"],
@@ -1258,7 +1258,7 @@
         ],
         "knownGaps": [
           "observing the `auto` INVITE path needs a transport to capture the invitation; with the dev log transport it is observable, otherwise the invite-vs-fallback split is blocked(fixture). The one-time passwords (auto-fallback + all of temporary) are returned ONLY in the response — the result step must reveal them; they are never persisted",
-          "the `auto` policy's TEMPORARY-FALLBACK branch is UNREACHABLE on `objectstack dev` (run #7663) — do not score it as a missing behaviour and do not re-derive this next sweep. `auto` falls back only when a row is neither email- nor SMS-deliverable (admin-import-users.ts), and on dev neither can be made false: service-email / service-sms always register (a log transport is the no-provider fallback, service-sms/src/sms-plugin.ts,169), so isEmailServiceAvailable() is a bare 'is a service wired?' check (auth-manager.ts) and returns true; and isPhoneOtpDeliverable() (auth-manager.ts) only returns false for an unconfigured transport when NODE_ENV === 'production', which `objectstack dev` rules out (cli/src/commands/dev.ts spawns with NODE_ENV='development'; serve.ts sets it under --dev). So every email row takes the invite path, and a phone-only row without the phoneNumber plugin fails PHONE_NOT_ENABLED before any plan is chosen. To exercise the fallback, boot WITHOUT an email service (or with NODE_ENV=production + an unconfigured SMS transport) — otherwise score the fallback via the `temporary` policy, which forces the same credential path for every row"
+          "the `auto` policy's TEMPORARY-FALLBACK branch is UNREACHABLE on `objectstack dev` (run #7663) — do not score it as a missing behaviour and do not re-derive this next sweep. `auto` falls back only when a row is neither email- nor SMS-deliverable (admin-import-users.ts), and on dev neither can be made false: service-email / service-sms always register (a log transport is the no-provider fallback: packages/services/service-sms/src/sms-plugin.ts#resolveInitialTransport answers LogSmsTransport, and init logs 'no provider configured'), so isEmailServiceAvailable() is a bare 'is a service wired?' check (auth-manager.ts) and returns true; and isPhoneOtpDeliverable() (auth-manager.ts) only returns false for an unconfigured transport when NODE_ENV === 'production', which `objectstack dev` rules out (cli/src/commands/dev.ts spawns with NODE_ENV='development'; serve.ts sets it under --dev). So every email row takes the invite path, and a phone-only row without the phoneNumber plugin fails PHONE_NOT_ENABLED before any plan is chosen. To exercise the fallback, boot WITHOUT an email service (or with NODE_ENV=production + an unconfigured SMS transport) — otherwise score the fallback via the `temporary` policy, which forces the same credential path for every row"
         ]
       },
       "steps": [
@@ -1324,11 +1324,12 @@
       "source": [
         "objectui packages/app-shell/src/views/identityImport.ts (IdentityPasswordPolicy 'auto'|'none'|'invite'|'temporary'; wraps ImportWizard onto POST /api/v1/auth/admin/import-users; ≤500-row batches; one-time passwords response-only, never persisted; upsert idempotent on email/phone)",
         "packages/plugins/plugin-auth/src/admin-user-endpoints.ts#explicit (POST /api/v1/auth/admin/import-users — platform-admin-gated login-capable account creation; explicit-password/generatePassword resolution)",
-        "packages/plugins/plugin-auth/src/admin-import-users.ts#plan (the `auto` per-row plan: invite where email- or SMS-deliverable, temporary only otherwise) + auth-manager.ts,4074 (isEmailServiceAvailable / isPhoneOtpDeliverable — the two gates that decide it)"
+        "packages/plugins/plugin-auth/src/admin-import-users.ts#plan (the `auto` per-row plan: invite where email- or SMS-deliverable, temporary only otherwise) + packages/plugins/plugin-auth/src/auth-manager.ts#isEmailServiceAvailable + packages/plugins/plugin-auth/src/auth-manager.ts#isPhoneOtpDeliverable (the two gates that decide it)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: admin CSV identity import with password-policy matrix (auto/temporary/invite/none), imported-user sign-in, upsert idempotency, response-only one-time passwords, non-admin denied, grounded in objectui identityImport.ts + admin-user-endpoints.ts (PENDING-GAPS §G)", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "from run #7663: recorded the fixture note that the `auto` policy's temporary-fallback branch cannot occur on `objectstack dev` — both transports always register (log fallback) and dev pins NODE_ENV='development', so neither deliverability gate can be made false and every row takes the invite path. The clause now says score the invite half and record the fallback half as not-exercised-by-fixture rather than as a defect, and names the boot that WOULD exercise it. Recorded so the next sweep does not re-derive it", "ref": "#7740" }
+        { "revision": 2, "date": "2026-08-11", "change": "from run #7663: recorded the fixture note that the `auto` policy's temporary-fallback branch cannot occur on `objectstack dev` — both transports always register (log fallback) and dev pins NODE_ENV='development', so neither deliverability gate can be made false and every row takes the invite path. The clause now says score the invite half and record the fallback half as not-exercised-by-fixture rather than as a defect, and names the boot that WOULD exercise it. Recorded so the next sweep does not re-derive it", "ref": "#7740" },
+        { "revision": 3, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.knownGaps[1] cited line 169 of sms-plugin.ts and source[2] line 4074 of auth-manager.ts in the comma-range spelling (authored in 3bb9340974 as the lists 149 and 169, and 4054 and 4074). At that commit 149 and 169 were the LogSmsTransport fallback in resolveInitialTransport and its 'no provider configured' log in init, and 4054 and 4074 were isEmailServiceAvailable and isPhoneOtpDeliverable; at this base all four have moved. knownGaps[1] now anchors sms-plugin.ts#resolveInitialTransport, and source[2] anchors auth-manager.ts#isEmailServiceAvailable and #isPhoneOtpDeliverable, the two gates its words already name. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#PENDING-24579R9" }
       ]
     },
     {
@@ -1517,7 +1518,7 @@
       "title": "Backup codes: revealed once at enable, spendable exactly once at the sign-in challenge, and regeneration kills the prior set — and the navigable regenerate surface reveals the new set in a one-shot dialog",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["a user with a VERIFIED enrollment (run identity-auth.two-factor-verify-to-activate's path first)", "the same user at the sign-in challenge spending a code"],
@@ -1564,7 +1565,7 @@
           "evidence": "the two traces"
         },
         {
-          "clause": "regeneration invalidates the prior set wholesale: after generate-backup-codes, an UNSPENT code from the old set is refused and a code from the new set works — exactly what the regenerate dialog's own copy promises ('Previous backup codes are now invalid', sys-two-factor.object.ts,120)",
+          "clause": "regeneration invalidates the prior set wholesale: after generate-backup-codes, an UNSPENT code from the old set is refused and a code from the new set works — exactly what the regenerate dialog's own copy promises ('Previous backup codes are now invalid': the resultDialog of the regenerate_backup_codes action, packages/platform-objects/src/identity/sys-two-factor.object.ts#regenerate_backup_codes)",
           "oracle": "api",
           "verify": "the old-unspent-code refusal + the new-code 200, both at fresh challenges after the regenerate 200",
           "evidence": "the regenerate response shape + the two spend traces"
@@ -1608,6 +1609,12 @@
           "date": "2026-10-17",
           "change": "steps[8] and acceptance[5].verify cite the regenerate by its index (checklist-accuracy finding of the identity-auth slice report on #23878 (6216631966)): they said 'step-5 regenerate', but the regenerate is steps[4]. Wording only",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[3].clause cited line 120 of sys-two-factor.object.ts in the comma-range spelling (authored in 8d74a57487 as the list 113 and 120). At that commit 120 was the resultDialog description of the regenerate_backup_codes action, the quoted copy; at this base it has moved. The clause now anchors that action by its name, sys-two-factor.object.ts#regenerate_backup_codes. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#PENDING-24579R9"
         }
       ]
     },
@@ -1703,7 +1710,7 @@
       "title": "Zero-user first-run: the /setup owner wizard serves even under OS_DISABLE_SIGNUP, creates the owner + names the personal org through a full-document exit, and every bootstrap bypass closes the moment an owner exists",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor on a zero-user boot (the would-be owner)", "the created owner (post-bootstrap)", "a second anonymous visitor (post-bootstrap forger)"],
@@ -1735,7 +1742,7 @@
         {
           "clause": "bootstrap-status is public and truthful on both sides: the zero-user boot answers {hasOwner:false} to an unauthenticated GET, and after the wizard completes the same call answers {hasOwner:true}",
           "oracle": "api",
-          "verify": "GET /api/v1/auth/bootstrap-status with no credentials, before and after; the route is ledgered and mounted ahead of the auth wall (auth-plugin.ts,1936-1949)",
+          "verify": "GET /api/v1/auth/bootstrap-status with no credentials, before and after; the route is ledgered and mounted ahead of the auth wall (packages/plugins/plugin-auth/src/auth-plugin.ts#registerAuthRoutes: its ADR-0069 D5 network-gating middleware lets /config and /bootstrap-status through)",
           "evidence": "the two bootstrap-status responses"
         },
         {
@@ -1784,11 +1791,12 @@
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (GET /api/v1/auth/bootstrap-status = auth.bootstrapStatus, objectstack-mount — re-pointed #18104: bootstrapStatus is a CLIENT METHOD name, carried in this file only inside a dotted string value)",
         "packages/plugins/plugin-auth/src/auth-manager.ts#isBootstrapCreation (the bypass's contract comment) + (the before-hook: isBootstrapCreation flips disableSignUp for this request — [#11767] fixed the inert probe) + (isBootstrapCreation: human rows, fail-closed on a full page)",
         "packages/plugins/plugin-auth/src/audience-posture.ts#isHumanUserRow (isHumanUserRow) + (decideAudienceAdmission isBootstrap arm) + (undeclared audience ⇒ invite_only, maintainer ruling 2026-08-24)",
-        "packages/cli/src/commands/dev.ts,339 (seed-admin defaults ON — why a zero-user boot needs --no-seed-admin)"
+        "packages/cli/src/commands/dev.ts#seedAdmin (seed-admin defaults ON — why a zero-user boot needs --no-seed-admin)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep ([x2] hit, angles 1+4): the zero-user first-run wizard had no item. Encodes the public bootstrap-status door, the deliberate disableSignUp + audience-gate bypass scoped to the zero-user state, the full-document exit hazard (objectui#4181), the rename-not-create org contract, both closed-door contrasts, and /setup's two meanings (objectui#2794); recorded the rows-vs-humans divergence between the two bootstrap probes as observe-and-record", "ref": "#sweep-2026-08-30" },
-        { "revision": 2, "date": "2026-10-17", "change": "steps[7] and acceptance[4] (verify, evidence) corrected (checklist-accuracy finding of the identity-auth slice report on #23878 (6216631966)). On the OS_DISABLE_SIGNUP boot an uninvited forge is refused first by the audience gate (403 SELF_REGISTRATION_CLOSED, invite_only), so door 1 — the re-enforced toggle — was never reached by the step's anonymous visitor; only an invited address reaches it, answering 400 EMAIL_PASSWORD_SIGN_UP_DISABLED. The step adds the owner's invitation and the clause names which address proves which door. Not loosened: every forged sign-up after the owner exists must still be refused with no row written", "ref": "#24036" }
+        { "revision": 2, "date": "2026-10-17", "change": "steps[7] and acceptance[4] (verify, evidence) corrected (checklist-accuracy finding of the identity-auth slice report on #23878 (6216631966)). On the OS_DISABLE_SIGNUP boot an uninvited forge is refused first by the audience gate (403 SELF_REGISTRATION_CLOSED, invite_only), so door 1 — the re-enforced toggle — was never reached by the step's anonymous visitor; only an invited address reaches it, answering 400 EMAIL_PASSWORD_SIGN_UP_DISABLED. The step adds the owner's invitation and the clause names which address proves which door. Not loosened: every forged sign-up after the owner exists must still be refused with no row written", "ref": "#24036" },
+        { "revision": 3, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[0].verify cited lines 1936-1949 of auth-plugin.ts and source[6] line 339 of the cli dev.ts in the comma-range spelling (authored in 45397edf53 as the lists 1895 and 1936-1949, and 141-142 and 339). At that commit 1936-1949 were the ADR-0069 D5 network-gating middleware in registerAuthRoutes that lets /config and /bootstrap-status through, and 339 was the seedAdmin default; at this base both have moved. acceptance[0].verify now anchors auth-plugin.ts#registerAuthRoutes and source[6] anchors dev.ts#seedAdmin. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#PENDING-24579R9" }
       ]
     },
     {
@@ -1796,7 +1804,7 @@
       "title": "Self-signup gate: the default audience posture (invite_only) refuses at the server with a LOUD code, a pending invitation carves through, and OS_DISABLE_SIGNUP bounces the UI AND the endpoint — the console offers the register form only to a visitor the server would admit (an invitation redirect, or a deployment with no owner) and explains the by-invitation rule to everyone else; the form is never the gate",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous uninvited registrant", "an invited email's registrant", "org admin (mints the invitation)", "env owner (sets OS_DISABLE_SIGNUP)"],
@@ -1862,8 +1870,8 @@
         "under stock invite_only on a deployment with an owner, a generic 'Sign up' link on the login page, or the register form on /register for a visitor who did not come from an invitation, is a FAIL: that is the pre-objectui#11691 shape, which offered the form and then refused the finished form with 403 SELF_REGISTRATION_CLOSED. Equally, no form for an /accept-invitation/ID redirect, or on a deployment with no owner yet, strands the people the carve-out and the bootstrap exist to admit — FAIL"
       ],
       "variants": [
-        "invite_only (stock default; refuse SELF_REGISTRATION_CLOSED, invitation carve-out admits — audience-posture.ts,398-402)",
-        "email_domain (allowlisted address admitted + granted the declared set; off-list refused EMAIL_DOMAIN_NOT_ALLOWED; matching rules pinned — last-@, case-insensitive, exact entry, no subdomain implication, +tag irrelevant, audience-posture.ts,411-421) — blocked(fixture) without a config boot",
+        "invite_only (stock default; refuse SELF_REGISTRATION_CLOSED, invitation carve-out admits — packages/plugins/plugin-auth/src/audience-posture.ts#decideAudienceAdmission, whose pending-invitation branch admits before the posture switch)",
+        "email_domain (allowlisted address admitted + granted the declared set; off-list refused EMAIL_DOMAIN_NOT_ALLOWED; matching rules pinned — last-@, case-insensitive, exact entry, no subdomain implication, +tag irrelevant: packages/plugins/plugin-auth/src/audience-posture.ts#emailDomainAllowed, which the email_domain case of packages/plugins/plugin-auth/src/audience-posture.ts#decideAudienceAdmission asks) — blocked(fixture) without a config boot",
         "open (admitted + granted selfRegistrationPermissionSet; verification forced on unless the deployment declares it off — the loop is email-verification-loop's) — blocked(fixture) without a config boot",
         "OS_DISABLE_SIGNUP=true env (UI bounce + server refusal; env > config; OS_AUTH_SIGNUP_ENABLED inverts and wins over it)",
         "ssoOnlyMode (forces disableSignUp true — surface covered by identity-auth.sso-enforced-first-paint; here only the config-resolution fact)"
@@ -1874,8 +1882,8 @@
         "packages/plugins/plugin-auth/src/audience-posture.ts#resolveAudience (the single owner of audience admission: resolveAudience default invite_only; decideAudienceAdmission — operator/provider exempt, bootstrap admit, invitation carve-out, posture semantics; SELF_REGISTRATION_CLOSED / EMAIL_DOMAIN_NOT_ALLOWED; pinned domain rules in the module doc)",
         "packages/plugins/plugin-auth/src/auth-manager.ts#readDisableSignUpEnv (readDisableSignUpEnv: OS_AUTH_SIGNUP_ENABLED wins, then OS_DISABLE_SIGNUP) + (effective disableSignUp: ssoOnly forces true, else env ?? config) + (the sign-up route raises the audience refusal BEFORE the anti-enumeration shield — measured swallow documented in place) +,5040 (getPublicConfig: disableSignUp NOT forced by posture, features.audiencePosture advertised)",
         "packages/spec/src/system/auth-config.zod.ts#AUDIENCE_POSTURES (AUDIENCE_POSTURES const — invite_only/email_domain/open, the named enum backing posture z.enum) + (AudienceConfigSchema on AuthConfigSchema — the stack-config door; the auth settings namespace is the second door, through the console and the OS_AUTH_AUDIENCE_* env overrides)",
-        "objectui apps/console/src/pages/auth/RegisterPage.tsx,69-88 (probe /auth/config, bounce to /login when disableSignUp; server-side gate named as the source of truth in its own header)",
-        "objectui apps/console/src/pages/auth/LoginPage.tsx,136,298 (signUpDisabled from /auth/config; registerUrl withheld when disabled)",
+        "objectui apps/console/src/pages/auth/RegisterPage.tsx (the RegisterPage component's getAuthConfig probe, and its effect that bounces to /login when decideSignUpOffer answers 'closed', which is disableSignUp; server-side gate named as the source of truth in its own header)",
+        "objectui apps/console/src/pages/auth/LoginPage.tsx (the LoginPage component passes registerUrl to LoginFormCard only once the /auth/config read is known and decideSignUpOffer answers 'form', so never under disableSignUp; the signUpDisabled state it used to keep is gone)",
         "objectui packages/app-shell/src/console/auth/signUpOffer.ts (decideSignUpOffer: form / by-invitation / closed / pending from disableSignUp, features.audiencePosture, the invitation redirect and the bootstrap probe — the one decision the console's /login and /register and the package's DefaultLoginPage / DefaultRegisterPage share, objectui#11691 / objectui#11705) + apps/console/src/pages/auth/RegisterPage.tsx (the register-by-invitation notice) + apps/console/src/pages/auth/__tests__/signUpFollowsPosture-11691.test.tsx (the objectui-side pins)"
       ],
       "history": [
@@ -1888,6 +1896,12 @@
           "date": "2026-10-19",
           "change": "steps[0] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.self-signup-gate; wave anchor #24579 §3): the step quoted the by-invitation notice as 'Self-registration is not open on this environment…'; the pinned console (objectui 4016370a, RegisterPage.tsx) renders '…not open on this system…'. The step no longer pins the sentence; the data-testid and the absent form are the oracle. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). variants[0] and variants[1] cited lines 398-402 and 411-421 of audience-posture.ts, and source[3] and source[4] objectui RegisterPage.tsx 69-88 and LoginPage.tsx 136 and 298, in the comma-range spelling (authored in 45397edf53). At that commit the audience-posture lines were decideAudienceAdmission's pending-invitation branch and its email_domain case; at this base both have moved, and the variants now anchor audience-posture.ts#decideAudienceAdmission and #emailDomainAllowed. At the objectui pin 45397edf53 shipped, 9602dc820450, the RegisterPage lines were its getAuthConfig probe that bounced to /login on disableSignUp, and the LoginPage lines its signUpDisabled state and the registerUrl it withheld. At the shipped pin 12dc7b47c340 both pages decide through decideSignUpOffer, whose 'closed' answer is disableSignUp, and the signUpDisabled state is gone; source[3] and source[4] now say so. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#PENDING-24579R9"
         }
       ]
     },
@@ -1896,7 +1910,7 @@
       "title": "Email verification loop: a challenged sign-up lands a captured verification mail, unverified sign-in is refused EMAIL_NOT_VERIFIED server-side, the link admits, resend works — and the default boot never challenges",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["a fresh registrant (unverified, then verified)", "admin (reads state)", "env owner (configures the verification boot)"],
@@ -1914,7 +1928,7 @@
       },
       "steps": [
         "on the verification boot, sign up a fresh admissible address: the console routes to /verify-email-prompt after sign-up (RegisterPage header contract) and the verification mail is sent via template auth.verify_email — capture the link/token from its sys_email row (admin GET /api/v1/data/sys_email; the LogTransport line carries no link) (sendVerificationEmail, auth-manager.ts: template failures THROW into the log rather than silently dropping)",
-        "attempt POST /api/v1/auth/sign-in/email for the unverified user: capture the refusal carrying EMAIL_NOT_VERIFIED, and in the browser confirm the login page redirects that error into /verify-email-prompt (LoginPage.tsx,346,360)",
+        "attempt POST /api/v1/auth/sign-in/email for the unverified user: capture the refusal carrying EMAIL_NOT_VERIFIED, and in the browser confirm the login page redirects that error into /verify-email-prompt (objectui LoginPage.tsx: the onError of its LoginFormCard)",
         "resend from the prompt page (useAuth().sendVerificationEmail → POST /api/v1/auth/send-verification-email, ledgered auth-route-ledger.ts) and capture the second mail from its own, newer sys_email row",
         "follow the captured link: the console's /verify-email consumes ?token= via GET /api/v1/auth/verify-email?token=… — better-auth serves the route as GET ONLY (a POST answers 404, objectui#11633), and sent WITHOUT callbackURL it answers JSON ({status: true, user: null} once the token verifies — no user object, 401 {code, message} for a garbage or expired one) instead of a 302, which is how the SPA keeps the post-verify UX (VerifyEmailPage.tsx; ledger row GET /api/v1/auth/verify-email) — and renders the success state",
         "sign in again with the same credentials: admitted; get-session identifies the user",
@@ -1975,14 +1989,15 @@
         "objectui apps/console/src/App.tsx (/verify-email + /verify-email-prompt routes)",
         "objectui apps/console/src/pages/auth/VerifyEmailPage.tsx (consumes ?token= via GET with no callbackURL, which answers JSON so the SPA controls the post-verify UX; better-auth serves no POST variant — it answers 404, objectui#11633)",
         "objectui apps/console/src/pages/auth/VerifyEmailPromptPage.tsx (shown after sign-up or an EMAIL_NOT_VERIFIED-blocked sign-in; resend via useAuth().sendVerificationEmail)",
-        "objectui apps/console/src/pages/auth/LoginPage.tsx,346,360 (EMAIL_NOT_VERIFIED → /verify-email-prompt redirect + the named error copy)",
+        "objectui apps/console/src/pages/auth/LoginPage.tsx (the onError of its LoginFormCard: EMAIL_NOT_VERIFIED → /verify-email-prompt redirect) + objectui packages/app-shell/src/console/auth/signInRefusalMessages.ts (signInRefusalMessages: the named error copy, which moved there from LoginPage.tsx)",
         "packages/plugins/plugin-email/src/transports/index.ts (the dev `log` capture transport — same harness as identity-auth.self-service-password-reset)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep (angle 4): the verification loop (challenge, capture, verify, resend, default-never-challenges) had no item. Grounded the #11739 posture-forces-verification invariant and its advertised mirror, the console's three surfaces (/verify-email POST-variant consumption, /verify-email-prompt resend, LoginPage's EMAIL_NOT_VERIFIED redirect), and the admissibility precondition the audience wall adds to the fixture", "ref": "#sweep-2026-08-30" },
         { "revision": 2, "date": "2026-09-28", "change": "restated the forced-verification wording to the shipped rule: email_domain always forces verification on; open forces it on unless the deployment declares it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config); a false stored only through the settings console is refused under open. The (b) fixture, clause 6, the mirror negative and two source notes said every permitting posture forces it; the negative now names the open opt-out boot, which advertises false correctly, as not a FAIL. Steps, oracles and the other clauses are unchanged", "ref": "#20413" },
         { "revision": 3, "date": "2026-10-13", "change": "steps[3], acceptance[2].clause and source[4] name the GET verify-email the console uses (stale step, #23166 C2; parked on #23121, carried by #23169). POST /api/v1/auth/verify-email answers 404 — better-auth serves the route as GET only — and the console's VerifyEmailPage calls GET ?token= without a callbackURL, which answers JSON (objectui#11633, at 1fb1ced36243, still this repo's .objectui-sha). The route ledger already books only the GET row. QA run #23166 verified through GET and passed", "ref": "#23169" },
-        { "revision": 4, "date": "2026-10-17", "change": "fixtures.requires[2], knownGaps[1], steps[0], [2] and [3] and acceptance[1].verify, [2].clause and [3].verify re-pointed (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). Three premises had moved: the dev transport logs no body or link, so the mail is captured from its sys_email row; verify-email answers {status: true, user: null}, so the step and clause no longer imply a user object; and a consumed token presented for an already-verified user answers a silent 200, so clause 3's 'or the first's already-consumed state is reported loudly' described a refusal that never happens — the resend is now proven by verifying with the resent token first. Not loosened: the resent mail must still carry a token that verifies", "ref": "#24036" }
+        { "revision": 4, "date": "2026-10-17", "change": "fixtures.requires[2], knownGaps[1], steps[0], [2] and [3] and acceptance[1].verify, [2].clause and [3].verify re-pointed (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). Three premises had moved: the dev transport logs no body or link, so the mail is captured from its sys_email row; verify-email answers {status: true, user: null}, so the step and clause no longer imply a user object; and a consumed token presented for an already-verified user answers a silent 200, so clause 3's 'or the first's already-consumed state is reported loudly' described a refusal that never happens — the resend is now proven by verifying with the resent token first. Not loosened: the resent mail must still carry a token that verifies", "ref": "#24036" },
+        { "revision": 5, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). steps[1] and source[6] cited objectui LoginPage.tsx 346 and 360 in the comma-range spelling (authored in 45397edf53 as the list 339, 346 and 360). At the objectui pin that commit shipped, 9602dc820450, those lines were the onError redirect of EMAIL_NOT_VERIFIED to /verify-email-prompt and the named error copy; at the shipped pin 12dc7b47c340 the redirect sits in the onError of LoginPage.tsx's LoginFormCard, and the copy moved to app-shell's signInRefusalMessages. Both now say so. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#PENDING-24579R9" }
       ]
     },
     {
