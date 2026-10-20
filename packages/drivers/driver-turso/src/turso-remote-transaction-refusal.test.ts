@@ -308,14 +308,14 @@ describe('[#18616] the refusal fires on the HANDLE, not on remote mode', () => {
 
   it('an explicitly undefined handle is not a handle', async () => {
     const { driver, stub } = await makeRemote();
-    await driver.create('crm_note', { id: 'n2', title: 'also kept' }, { transaction: undefined });
+    await driver.create('crm_note', { id: 'n2', organization_id: 'orgA', title: 'also kept' }, { transaction: undefined });
     expect(rowCount(stub)).toBe(1);
   });
 
   it('LOCAL: rollback still undoes the write — the pin this card mirrors', async () => {
     const driver = await makeLocal();
     const trx = await driver.beginTransaction();
-    await driver.create('crm_note', { id: 'l1', title: 'RollbackUser' }, { transaction: trx });
+    await driver.create('crm_note', { id: 'l1', organization_id: 'orgA', title: 'RollbackUser' }, { transaction: trx });
     await driver.rollback(trx);
     expect(await driver.find('crm_note', { where: { id: 'l1' } })).toHaveLength(0);
   });
@@ -323,7 +323,7 @@ describe('[#18616] the refusal fires on the HANDLE, not on remote mode', () => {
   it('LOCAL: commit still keeps the write', async () => {
     const driver = await makeLocal();
     const trx = await driver.beginTransaction();
-    await driver.create('crm_note', { id: 'l2', title: 'TrxUser' }, { transaction: trx });
+    await driver.create('crm_note', { id: 'l2', organization_id: 'orgA', title: 'TrxUser' }, { transaction: trx });
     await driver.commit(trx);
     expect(await driver.find('crm_note', { where: { id: 'l2' } })).toHaveLength(1);
   });
@@ -331,7 +331,7 @@ describe('[#18616] the refusal fires on the HANDLE, not on remote mode', () => {
   it('REPLICA: the third face still opens and rolls back a transaction', async () => {
     const driver = await makeReplica();
     const trx = await driver.beginTransaction();
-    await driver.create('crm_note', { id: 'r1', title: 'ReplicaUser' }, { transaction: trx });
+    await driver.create('crm_note', { id: 'r1', organization_id: 'orgA', title: 'ReplicaUser' }, { transaction: trx });
     await driver.rollback(trx);
     expect(await driver.find('crm_note', { where: { id: 'r1' } })).toHaveLength(0);
   });

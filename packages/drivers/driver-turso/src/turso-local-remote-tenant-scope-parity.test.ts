@@ -42,6 +42,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { DriverOptions } from '@objectstack/spec/data';
 import { TursoDriver } from './turso-driver.js';
 import { asLibsqlClient, makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+import { initObjectsPre18 } from './pre-18-tenant-column.testkit.js';
 
 interface WireBearingError extends Error {
   code?: string;
@@ -126,7 +127,9 @@ describe('a tenant-scoped call on BOTH TursoDriver faces answers one row set', (
 
     drivers = { local, remote };
     for (const driver of Object.values(drivers)) {
-      await driver.initObjects([{ ...LEDGER, fields: { ...LEDGER.fields } }]);
+      // The seed's platform row carries no organization, which only a store
+      // built before 18.x can hold (ADR-0131 D1).
+      await initObjectsPre18(driver, { ...LEDGER, fields: { ...LEDGER.fields } });
       for (const row of SEED) await driver.create(LEDGER.name, { ...row }, UNSCOPED);
     }
   });
