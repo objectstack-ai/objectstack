@@ -25,6 +25,7 @@ import {
   SysUserPreference,
   SysVerification,
 } from './identity/index.js';
+import * as identityObjects from './identity/index.js';
 // RBAC objects (SysRole/SysPermissionSet/… + defaultPermissionSets) moved to
 // @objectstack/plugin-security and the sharing objects to
 // @objectstack/plugin-sharing per ADR-0029 K2 — see their packages' tests.
@@ -91,6 +92,63 @@ describe('@objectstack/platform-objects', () => {
 
     it('sys_account.password is a hashed `text` column, not a `password` field', () => {
       expect((SysAccount as any).fields?.password?.type).toBe('text');
+    });
+  });
+
+  describe('credential action params declare `password`, so the dialog masks what is typed', () => {
+    // An action param's `type` picks the console dialog's widget and nothing
+    // else: no server path reads it (the endpoints take the posted string as
+    // before), and the read mask above keys on FIELDS, never on params. A
+    // `text` param renders `<input type="text">`, so a typed password is
+    // readable on screen and in screenshots; `password` renders the masked
+    // input. The roster pins each param by name; the sweep over every identity
+    // object fails on a credential-named param added later as `text`.
+    const roster: Array<[string, { name: string; actions?: readonly unknown[] }, string, string]> = [
+      ['SysUser', SysUser, 'create_user', 'password'],
+      ['SysUser', SysUser, 'set_user_password', 'newPassword'],
+      ['SysUser', SysUser, 'change_my_password', 'currentPassword'],
+      ['SysUser', SysUser, 'change_my_password', 'newPassword'],
+      ['SysUser', SysUser, 'delete_my_account', 'password'],
+      ['SysUser', SysUser, 'enable_two_factor', 'password'],
+      ['SysUser', SysUser, 'disable_two_factor', 'password'],
+      ['SysUser', SysUser, 'generate_backup_codes', 'password'],
+      ['SysTwoFactor', SysTwoFactor, 'enable_two_factor', 'password'],
+      ['SysTwoFactor', SysTwoFactor, 'disable_two_factor', 'password'],
+      ['SysTwoFactor', SysTwoFactor, 'regenerate_backup_codes', 'password'],
+      ['SysSsoProvider', SysSsoProvider, 'register_sso_provider', 'clientSecret'],
+    ];
+
+    type Param = { name?: string; type?: string };
+    type Action = { name?: string; params?: readonly Param[] };
+    const actionsOf = (object: unknown): readonly Action[] =>
+      ((object as { actions?: readonly Action[] }).actions ?? []);
+
+    it.each(roster)('%s.%s#%s declares `password`', (_exportName, object, actionName, paramName) => {
+      const action = actionsOf(object).find((a) => a.name === actionName);
+      const param = (action?.params ?? []).find((p) => p.name === paramName);
+      expect(param, `${object.name}.${actionName} must declare a '${paramName}' param`).toBeDefined();
+      expect(param?.type).toBe('password');
+    });
+
+    it('every credential-named action param on an identity object declares `password`', () => {
+      const credential = /password|secret/i;
+      const seen: string[] = [];
+      const offenders: string[] = [];
+      for (const object of Object.values(identityObjects)) {
+        const objectName = (object as { name?: unknown }).name;
+        if (typeof objectName !== 'string') continue;
+        for (const action of actionsOf(object)) {
+          for (const param of action.params ?? []) {
+            if (!param.name || !credential.test(param.name)) continue;
+            const key = `${objectName}.${action.name}#${param.name}`;
+            seen.push(key);
+            if (param.type !== 'password') offenders.push(`${key}: '${String(param.type)}'`);
+          }
+        }
+      }
+      // Positive control: the sweep reaches exactly the rostered params.
+      expect(seen.sort()).toEqual(roster.map(([, o, a, p]) => `${o.name}.${a}#${p}`).sort());
+      expect(offenders).toEqual([]);
     });
   });
 
