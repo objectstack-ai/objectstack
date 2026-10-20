@@ -365,6 +365,8 @@ application-level emptiness check is needed.
 }
 ```
 
+**`expression` on a stored field.** A field of any other type may declare `expression` too, and it validates differently from a `formula`. The engine computes the value on every insert and every update by id, and stores it. A value a client sends for the field is not refused and not reported as dropped: it is overwritten by the computed one. The one refusal is a predicate update that moves an input: when the matched rows would compute different values, the update is refused with `VALIDATION_FAILED` and an `invalid_value` error naming the field, and nothing is written. See [`expression` on a stored field](/docs/data-modeling/field-types#expression-on-a-stored-field) and the `expression` row of [`FieldSchema`](/docs/references/data/field).
+
 ### `summary`
 
 | Property | Type | Default | Validation Behavior |
