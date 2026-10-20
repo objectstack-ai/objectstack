@@ -42,6 +42,7 @@ So `drawer`/`modal`/`split` *as `FormView.type` values* are **redundant with —
 2. **Remove `drawer` / `modal` from `FormView.type`.** A form is *placed in* a drawer/modal by the **caller** (list `addRecord.mode`, `NavigationMode`, action `type:'modal'`), and the container renders an `ObjectForm` whose `type` is a *layout*. This makes "modal + tabbed" expressible — the whole point.
 
    > **Note (2026-10-20, ruling record [`6281834942`](https://github.com/objectstack-ai/objectstack/issues/24692#issuecomment-6281834942)):** the list add-record open mode is no longer declared on `addRecord` — `addRecord.mode` and `addRecord.formView` were retired (ADR-0049 enforce-or-remove); the create form is chosen by convention (`formViews.create` when declared, else `form` / `formViews.default`), how it opens stays the renderer's, and a per-list open mode, if ever wanted, is the list's existing `navigation.mode`, never a second enum.
+
 3. **Remove `split` from `FormView.type`.** Master-detail is already `subforms` (single-record parent/child) + the list's `NavigationMode:'split'` (list+detail). A form-level `split` is a third, redundant spelling.
 4. **`ObjectForm` drops its `drawer`/`modal`/`split` branches** (`DrawerForm`/`ModalForm` become caller-supplied containers; `SplitForm` retires in favour of `subforms`). It keeps `simple`/`tabbed`/`wizard`.
 
