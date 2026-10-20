@@ -3637,8 +3637,37 @@ export class AuthPlugin implements Plugin {
           return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'redirectURLs must contain at least one URL' } }, 400);
         }
 
-        const allowedTypes = new Set(['web', 'native', 'user-agent-based']);
-        const safeType = typeof type === 'string' && allowedTypes.has(type) ? type : 'web';
+        // [#24773] The form's Application Type reaches the provider as the OIDC
+        // `application_type` its `/oauth2/create-client` body declares (`web` |
+        // `native`). It was forwarded as `type`, a member that body does not
+        // declare, so the provider stripped it and judged and stored every
+        // client as `web`: a `native` client could not register the RFC 8252
+        // loopback redirect URI the provider grants native clients. The
+        // provider's own rule is the one authority — `web` needs https on a
+        // non-loopback host, `native` may use http only on exactly `localhost`,
+        // `127.0.0.1` or `[::1]` — and nothing here re-judges a URI.
+        //
+        // Any other value (the form's `user-agent-based` and `public`, which
+        // have no `application_type`, or anything else) keeps the outcome it
+        // always had: registered and judged as `web`. Refusing it would narrow
+        // what this door accepts, and such a narrowing ships its loud half
+        // first (the standing post-GA rule, #6015 `6292005854`): one warning
+        // per registration, naming the value. No type at all is the
+        // provider's own default, `web`, and says nothing.
+        let applicationType: 'web' | 'native' = 'web';
+        if (type === 'web' || type === 'native') {
+          applicationType = type;
+        } else if (type !== undefined && type !== null) {
+          const requestedType = typeof type === 'string' ? type.slice(0, 64) : `(${typeof type})`;
+          ctx.logger.warn(
+            `[AuthPlugin] sys-oauth-application/register: application type ${JSON.stringify(requestedType)} is not ` +
+              "one the OAuth provider judges (it knows 'web' and 'native'), so this client is registered and judged " +
+              "as 'web': https redirect URIs on non-loopback hosts only, and a client secret is issued. Register it " +
+              "as 'web', or as 'native' to use an http://localhost, http://127.0.0.1 or http://[::1] redirect URI. " +
+              'A future major version refuses this value.',
+            { requestedType, registeredAs: 'web' },
+          );
+        }
 
         const authApi: any = await this.authManager!.getApi();
         if (!authApi?.createOAuthClient) {
@@ -3658,7 +3687,7 @@ export class AuthPlugin implements Plugin {
             body: {
               client_name: name.trim(),
               redirect_uris: redirectUris,
-              type: safeType,
+              application_type: applicationType,
             },
             ...inProcessSessionReadInput(c.req.raw.headers),
           });

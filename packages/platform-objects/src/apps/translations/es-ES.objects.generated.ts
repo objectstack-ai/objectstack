@@ -930,7 +930,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "Unidad de negocio principal",
-        help: "Autorreferencia para el árbol organizativo. Null = raíz del tenant."
+        help: "Autorreferencia para el árbol organizativo. Null = raíz del tenant. Una unidad que aún tiene unidades hijas no se puede eliminar hasta que se reasignen a otro padre o se eliminen."
       },
       timezone: {
         label: "Zona horaria",

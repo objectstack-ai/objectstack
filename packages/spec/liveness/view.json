@@ -227,7 +227,7 @@
         },
         "addRecord": {
           "status": "live",
-          "note": "objectui: ListView.tsx:374 (addRecord + userActions.addRecordForm drive the add-record flow). Sub-keys addRecord.mode / addRecord.formView have NO reader (audit L20, re-verified objectui@fb35e48) — dead sub-surface."
+          "note": "objectui: ListView.tsx:374 (addRecord + userActions.addRecordForm drive the add-record flow). Sub-keys addRecord.mode / addRecord.formView had NO reader (audit L20, re-verified objectui@fb35e48; re-read at objectui 616df6598b ListView.tsx#resolveAddRecordPlacement and the showAddRecord memo: the button needs an explicit `enabled: true`, an absent `position` renders at the top, nothing reads mode or formView). REMOVED 2026-10-20 (#24692, ruling letter B′) — tombstoned at the schema (retiredKey carries the prescription; authoring either is a tsc error and a parse error) and stripped from stored and built bodies by the protocol-18 conversion add-record-mode-form-view-removed. `enabled` is REQUIRED with no default and `position` defaults to `top`; add-record-enabled-defaulted writes the old default onto a stored block that omits `enabled`. The sub-keys are one drill level below this row (view/list.addRecord is a recorded undrilled container), so no row of their own exists to keep; the create form is chosen by convention (formViews.create when declared, else the default form)."
         },
         "showRecordCount": {
           "status": "live",

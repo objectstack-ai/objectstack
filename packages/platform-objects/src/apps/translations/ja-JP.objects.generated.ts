@@ -930,7 +930,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "親ビジネスユニット",
-        help: "組織ツリーの自己参照。null = テナントのルート。"
+        help: "組織ツリーの自己参照。null = テナントのルート。子ユニットが残っているユニットは、子ユニットを別の親に付け替えるか削除するまで削除できません。"
       },
       timezone: {
         label: "タイムゾーン",
