@@ -1109,10 +1109,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "検索対象フィールド",
         helpText: "クイック検索で使用可能なフィールド名"
       },
-      filterableFields: {
-        label: "フィルター対象フィールド",
-        helpText: "フィルターで使用可能なフィールド名"
-      },
       resizable: {
         label: "サイズ変更可"
       },

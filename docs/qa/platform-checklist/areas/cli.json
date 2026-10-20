@@ -212,7 +212,7 @@
       "title": "os migrate: bare command is a read-only plan, apply is safe-by-default, re-runs are idempotent, and --json exits 0 on success (#4873)",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -298,14 +298,15 @@
         "security-catalog-overlays",
         "comment-reactions",
         "activity-changed-fields",
-        "comment-parent-pair"
+        "comment-parent-pair",
+        "audit-mail-bodies"
       ],
       "traps": ["stale-dist"],
       "automated": { "kind": "unit", "ref": "packages/cli/src/utils/format.exit-code.test.ts — covers acceptance[2] ONLY (#4873: emitJson / emitText leave the exit code alone on success and a duration can no longer reach the exit-code slot); acceptance[0], [1] and [3]–[6] need the run" },
       "source": [
         "packages/cli/src/commands/migrate/index.ts + plan.ts (#2186 bare-command-is-plan; #3917 enforced never-mutates; occupancy warning) + apply.ts (--allow-destructive / --force / --yes / in_sync)",
         "packages/cli/src/utils/format.ts#CliExitCode (CliExitCode narrows the emitJson exit slot — the #4873 fix, commit 83df2fd)",
-        "packages/cli/src/commands/migrate/ (the 18 registered subcommands under `os migrate`, besides the bare command, enumerated as variants — oclif pattern strategy, one default-exported Command per non-test file)",
+        "packages/cli/src/commands/migrate/ (the 19 registered subcommands under `os migrate`, besides the bare command, enumerated as variants — oclif pattern strategy, one default-exported Command per non-test file)",
         "sibling item cli.migrate-duplicates-inventory (the duplicates subcommand's own contract — cross-referenced, not duplicated)"
       ],
       "history": [
@@ -328,6 +329,12 @@
           "date": "2026-10-19",
           "change": "steps[1] and automated.ref corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24551, cli.migrate-plan-apply-json step 2; round 2's Tier 1 record #24598, which names this ref among those that over-claim clause coverage; wave anchor #24579 §3). On an os-dev-synced DB the pending plan also lists the lifecycle-classed tables: at base 9a7838edf5 the one-shot boot provisions the telemetry sibling only under isDevelopmentBoot (packages/cli/src/utils/schema-migrate.ts) and resolveTelemetryDbPath declines on a non-dev boot without OS_TELEMETRY_DB. The one pin asserts only the #4873 exit-code contract, so the ref now says it covers acceptance[2] alone. No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "variants: audit-mail-bodies added, the 19th registered subcommand (#24693: the one-off mask of the mail bodies that sys_audit_log / sys_activity copies of sys_email and sys_identity_email rows still hold in clear). The source note's count moves from 18 to 19 with it. No clause changed",
+          "ref": "#24693"
         }
       ]
     },

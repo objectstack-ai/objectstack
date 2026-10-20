@@ -90,7 +90,7 @@ import { AdminScopeSchema, PermissionSetSchema } from '../security/permission.zo
 import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { PageComponentSchema, PageSchema } from '../ui/page.zod';
-import { FormFieldSchema, FormSectionSchema } from '../ui/view.zod';
+import { FormFieldSchema, FormSectionSchema, ListViewSchema, ObjectListViewSchema } from '../ui/view.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { JobSchema } from '../system/job.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
@@ -344,6 +344,12 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ],
   // #23650: retired after 17.7.0, so the v18 train's major.
   'page-header-show-star-removed': [tombstone(PageHeaderProps, 'page:header', 'showStar')],
+  // #24640: retired after 17.7.0, so the v18 train's major. One tombstone on
+  // the list-view shape, walked as both list-view defs.
+  'view-list-filterable-fields-removed': [
+    tombstone(ListViewSchema, 'view.list', 'filterableFields'),
+    tombstone(ObjectListViewSchema, 'object.listViews.*', 'filterableFields'),
+  ],
   // #23904: the two data-at-rest halves of the #23610 page refusals, retired
   // after 17.7.0; each prescription is the parse's own refusal at its key — the
   // one sentence the registry door prints too — and names the release.

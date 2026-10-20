@@ -9,7 +9,7 @@
       "title": "Provider-bound declarative connectors materialize at boot for every installed provider kind (rest/openapi/mcp), list with origin:'declarative' state:'ready', and dispatch end-to-end from connector_action",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -82,7 +82,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "packages/qa/dogfood/test/showcase-declarative-mcp.dogfood.test.ts"
+        "ref": "packages/qa/dogfood/test/showcase-declarative-mcp.dogfood.test.ts — ⚠️ covers PART of this item, clause by clause: negative[0] whole (showcase_erp_catalog is absent from the runtime listing); acceptance[0]'s mcp variant whole (origin 'declarative', state 'ready'), and of the rest and openapi variants their state 'ready' only — their origin is not asserted; acceptance[1]'s mcp half as containment (echo_upper is among the actions), not the openapi half (getHealth); acceptance[2]'s mcp dispatch (the echo flow's output carries OBJECTSTACK), not the rest ping. acceptance[3]–[5] and negative[1] (the authoring refusals, the unknown-provider boot error, the disabled declaration) rest on no pin — drive them by hand"
       },
       "source": [
         "docs/plans/release-15.1-test-plan.md §B1 (#2994/#3062)",
@@ -104,6 +104,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed clause by clause, in the scope-depth-asymmetry shape — round 2 part 1 of wave anchor #24579 (comment 6272032736: Tier 1 run #24598 named this ref among those that over-claim clause coverage). QA run #24575 scored every clause pass on the pin's 2/2; read against the spec, its two cases cover negative[0], acceptance[0]'s mcp variant and the other two variants' state, and the mcp halves of acceptance[1] and [2] only. No clause changed",
+          "ref": "#24717"
         }
       ]
     },
@@ -112,13 +118,13 @@
       "title": "An unreachable connector upstream degrades that ONE instance (CONNECTOR_UPSTREAM_UNAVAILABLE) instead of failing boot, retries on 5s→300s backoff, and recovers atomically — while config faults stay boot-fatal",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the showcase_mcp_tools stdio instance — break its upstream deterministically by pointing providerConfig.transport.args at a nonexistent script (the exact experiment its own fixture comment prescribes, examples/app-showcase/src/system/connectors/index.ts)",
+          "the showcase_mcp_tools stdio instance — break its upstream deterministically by making its script unreachable: point providerConfig.transport.args at a nonexistent script (the experiment its own fixture comment prescribes, examples/app-showcase/src/system/connectors/index.ts#DevToolsMcpConnector), or move scripts/mcp-fixture.mjs out of the app, as QA run #24575 did. Do either in a SCRATCH copy of examples/app-showcase, for every boot of this item (steps[0] and steps[5]), never the shared tree. The path is relative to the serving process's cwd (./scripts/mcp-fixture.mjs), and moving the file is the variant steps[4] can undo with no config change",
           "a config-fault twin for the both-sides check: the same entry with an invalid providerConfig shape (e.g. transport.kind: 'carrier_pigeon')"
         ]
       },
@@ -127,9 +133,9 @@
         "GET /api/v1/automation/connectors; record the husk descriptor (state, degradedReason, actions)",
         "POST the flow that dispatches it (showcase_mcp_connector_echo trigger); capture the dispatch failure",
         "watch the log through at least three retry cycles; record the intervals",
-        "restore the upstream (fix the script path is a config CHANGE — instead restore by making the original path valid again, e.g. re-adding the file) WITHOUT restarting; wait one backoff cycle; re-read the descriptor",
+        "restore the upstream (fix the script path is a config CHANGE — instead restore by making the original path valid again, e.g. re-adding the file) WITHOUT restarting; wait one backoff cycle; re-read the descriptor. At the default `warn` log level the visible sign of the swap is the engine's warn `Connector 'showcase_mcp_tools' replaced`; the '[Automation] recovered connector instance …' line is info-level and prints only on a --log-level info boot (QA run #24575)",
         "separately, boot the config-fault twin and capture that boot's outcome",
-        "trigger a metadata:reloaded reconcile (touch/save the entry) and confirm it retries immediately and resets the backoff"
+        "trigger a metadata:reloaded reconcile WITHOUT a restart and confirm it retries immediately while the attempt count keeps climbing. A per-item publish announces one: QA run #24575 used PUT /api/v1/meta/view/NAME?mode=draft, then POST /api/v1/meta/view/NAME/publish, and the retry followed 1.2 s later. ⛔ Not by touching or saving the entry's source: under os dev that rebuilds and RESTARTS the server (dev's --restart default), which discards the in-memory retry state instead of reconciling it. Only a config edit to the entry, a changed materialization signature, resets the backoff; this item does not drive that arm live"
       ],
       "acceptance": [
         {
@@ -153,7 +159,7 @@
         {
           "clause": "retries back off from DECLARATIVE_RETRY_BASE_MS (5s) doubling to the 300s ceiling — no hot loop against the dead upstream",
           "oracle": "log",
-          "verify": "observed retry intervals ≈ 5s/10s/20s… (service-automation/src/plugin.ts constants); a config edit or reload reconcile resets the backoff and retries immediately",
+          "verify": "observed retry intervals ≈ 5s/10s/20s… (service-automation/src/plugin.ts constants). A metadata:reloaded reconcile retries IMMEDIATELY but does not reset the backoff: the attempt count keeps climbing and the next delay keeps doubling (QA run #24575 read attempt 6 with a 160 s next delay after a reload). Only a config edit, a changed materialization signature, resets it (packages/services/service-automation/src/plugin.ts#degradeConnectorInstance restarts attempts at 1 only when the signature differs)",
           "evidence": "timestamped log excerpt"
         },
         {
@@ -189,6 +195,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3; wave anchor #24579 §3, which lists it under automation). acceptance[3].verify and steps[6] said a reload reconcile resets the backoff; it retries at once and keeps counting, and only a config edit (a changed materialization signature) resets it, as degradeConnectorInstance has it. steps[6] said to touch or save the entry, which restarts os dev; it now names a restart-free reload, a per-item publish. fixtures.requires[0] puts every boot in a scratch copy (the stdio path is cwd-relative) and names #24575's file-move break, the one steps[4] can undo with no config change; steps[4] names the warn line that shows the swap at the default log level. Not loosened: every clause keeps its oracle",
+          "ref": "#24717"
         }
       ]
     },
@@ -684,14 +696,14 @@
       "title": "Job metadata schedules through every ScheduleSchema variant, executes with retry/timeout enforced, records sys_job/sys_job_run truth, and refuses the closed doors (id key, runtime create, missing handler)",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
         "app": "showcase",
         "requires": [
           "the shipped cron fixture: showcase_health_sweep (schedule cron '0 1 * * *' UTC, handler 'sweepProjectHealth' registered in defineStack({ functions }), retryPolicy { maxRetries: 2, backoffMs: 5000, backoffMultiplier: 2 }, timeoutMs 300000 — examples/app-showcase/src/automation/jobs/index.ts; the handler-missing regression here was #4774/#4888)",
-          "scratch jobs in a writable package for the interval / once / failing / timing-out probes (near-term schedules so the run observes real executions)",
+          "scratch jobs for the interval / once / cron / failing / timing-out probes (near-term schedules so the run observes real executions), authored in a WRITABLE copy of the app: QA run #24575's recipe copies examples/app-showcase, symlinks its node_modules, deletes the copy's dist/ so the boot recompiles with the scratch jobs, and boots the copy. The shipped cron fixture fires only at 01:00 UTC, so the cron variant rests on a scratch near-term cron with a timezone",
           "OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 exported on every boot of this item: by default a stock boot leaves package-authored scheduled work OFF by deployment policy — the boot banner says so ('… package-authored scheduled work is off on this deployment (OS_AUTOMATION_SCHEDULED_WORK_ENABLED is unset or not truthy), so no time trigger arms and no packaged `defineJob` is scheduled'), and at info level AppPlugin logs '[AppPlugin] declarative jobs NOT scheduled — …' (packages/runtime/src/app-artifact-handlers.ts, the reason text in packages/types/src/env.ts#SCHEDULED_WORK_DISABLED_REASON) — so without the switch neither showcase_health_sweep nor any scratch job is scheduled (sys_job holds no showcase_health_sweep row) and every firing clause is unprovable"
         ]
       },
@@ -708,9 +720,9 @@
         "read sys_job over /api/v1/data: the row is keyed by NAME (the adapter mints its own row id) with the schedule persisted",
         "author three scratch jobs (interval ~5s, once at now+1min, and a cron) with observable side effects; boot; let each fire; read sys_job_run rows and sys_job.last_run_at/last_status/run_count",
         "author a deliberately-throwing job with retryPolicy { maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 }; let it exhaust; capture run rows + failure_count",
-        "author a job whose handler sleeps past a small `timeoutMs`; capture the run's status",
+        "author a job whose handler sleeps past a small `timeoutMs`; capture the run's status. Then author a SECOND timing-out job that also carries a retryPolicy and capture its attempts: only the second can show a timeout counting as a failure for the retry loop (QA run #24575: attempt 2 followed at +1.5 s)",
         "author a job with enabled:false and one whose handler string names NO registered function; boot; capture how each is skipped",
-        "author a job carrying `id: 'x'` and one with a stray key; build both; capture the errors",
+        "author a job carrying `id: 'x'` and one with a stray key; build EACH on its own (a build stops at the first refused job, so two bad jobs in one build print one error — QA run #24575); capture both errors",
         "attempt to create a job at runtime through the meta door and capture the refusal (allowRuntimeCreate:false, #4509)"
       ],
       "acceptance": [
@@ -735,8 +747,8 @@
         {
           "clause": "an over-`timeoutMs` run is recorded with execution status 'timeout' (the in-flight handler is abandoned, not force-cancelled — as documented), and timeouts COUNT as failures for the retry loop (#3494)",
           "oracle": "api",
-          "verify": "the timeout probe's run row status",
-          "evidence": "the run row"
+          "verify": "the first timeout probe's run row status ('timeout'), and the retry-policy timeout probe's attempt rows, a second attempt after the backoff (packages/services/service-job/src/run-with-policy.ts#runWithPolicy)",
+          "evidence": "the run rows of both timeout probes"
         },
         {
           "clause": "the two skip doors are distinct, and the dangerous one is LOUD: a handler naming no registered function skips with a WARN, '[AppPlugin] job handler not found in bundle.functions — skipping' — the exact silent no-op that let the showcase sweep never run for months (#4774/#4888); enabled:false — a deliberate author choice — skips scheduling at registration and says so only at DEBUG, '[AppPlugin] job disabled — skipping' (packages/runtime/src/app-artifact-handlers.ts), so it is read on a boot with --log-level debug",
@@ -790,6 +802,12 @@
           "date": "2026-10-16",
           "change": "fixtures.requires gains the scheduling switch, and acceptance[4] (clause, verify) is corrected (checklist-accuracy findings of QA run #23922, wave #23878). A stock boot never schedules packaged jobs: OS_AUTOMATION_SCHEDULED_WORK_ENABLED is off by default ('declarative jobs NOT scheduled — disabled by deployment policy'), and neither fixtures nor steps named it. acceptance[4] called both skip doors LOUD, but the enabled:false skip logs at DEBUG by design (app-artifact-handlers.ts) — only the handler-missing skip, the #4774/#4888 regression class, is a WARN. The clause keeps that WARN as the loud requirement and reads the debug line on a debug-level boot. Not loosened: a silent handler-missing skip still FAILS",
           "ref": "#24036"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3; wave anchor #24579 §3, whose dashboards/search bullet says the job timeout probe needs a retryPolicy). steps[4]'s timeout probe carried no retryPolicy, so it could not show acceptance[3]'s 'timeouts COUNT as failures' half; a second probe with a policy now does, and acceptance[3]'s verify and evidence read both. fixtures.requires[1] carries the writable-copy recipe #24575 used and says the shipped cron fixture fires only at 01:00 UTC. steps[6] builds each refused shape on its own, since a build stops at the first refused job. Not loosened: no clause changed",
+          "ref": "#24717"
         }
       ]
     },
@@ -957,7 +975,7 @@
       "title": "The flow notify node delivers to the recipient's inbox (sys_inbox_message + receipt), readable and markable over /notifications, recipient-scoped — with unimplemented channels dead-lettering, never faking delivery",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -968,14 +986,14 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the shipped fixture flow showcase_task_assigned_notify (notify node: topic 'task.assigned', recipients ['{record.assignee}'], channels ['inbox'], title/message/actionUrl — examples/app-showcase/src/automation/flows/index.ts)",
+          "the shipped fixture flow showcase_task_assigned_notify (notify node: topic 'task.assigned', recipients: one CEL value envelope, has(record.assignee) ? record.assignee : null, channels ['inbox'], title/message/actionUrl — examples/app-showcase/src/automation/flows/index.ts)",
           "MessagingServicePlugin installed (the showcase config requires the 'messaging' capability)",
           "three personas with sessions: admin, the assignee, an unrelated member — mint them by SIGNING THEM UP (or via POST /api/v1/auth/admin/create-user), not by grafting a credential onto a seeded demo persona; see the knownGap"
         ],
         "knownGaps": [
           "channels push/slack/teams/webhook have NO delivery implementation (#3197 — notification.zod.ts says the dispatcher dead-letters them, and the enum's 'in-app' spelling vs the implemented 'inbox' channel is a known naming drift); this item tests inbox only and records the dead-letter behavior as a negative, not as deliverable channels",
           "THE OLD PERSONA-LOGIN RECIPE IS CLOSED (run #7690): `POST /api/v1/data/sys_account` answers 405, so the trick of inserting a credential row to turn a seeded demo persona into a real login no longer works. It is by design, not drift — sys_account is managedBy:'better-auth' and declares apiMethods ['get','list'] only, so HTTP answers 405 before the identity write guard's 403 (packages/platform-objects/src/identity/sys-account.object.ts, #1591 / ADR-0092 D2). Mint personas through better-auth instead: sign-up, or POST /api/v1/auth/admin/create-user as the platform admin (explicit password wins — #3031/#3033). Recorded here because every multi-persona item in this area pays for re-deriving it",
-          "acceptance[3]'s 501 half needs a boot WITHOUT MessagingServicePlugin, and no `objectstack dev` boot is one: 'messaging' is on the always-on slate every served boot mounts (packages/spec/src/kernel/platform-capabilities.ts#PLATFORM_ALWAYS_ON_CAPABILITIES), so even an app whose config does not require it (examples/app-todo, measured by #24036's re-run) composes the service and answers 200. Score the 501 half blocked(fixture) (QA run #23166 A3-501) unless a host composes the kernel without the plugin, naming that host; the 401 half runs on stock"
+          "acceptance[3]'s 501 half needs a served boot WITHOUT MessagingServicePlugin. A default boot always composes it: 'messaging' is on the always-on slate (packages/spec/src/kernel/platform-capabilities.ts#PLATFORM_ALWAYS_ON_CAPABILITIES), so even app-todo, which does not require it, answers 200 (#24036's re-run). `--preset minimal` mounts no slate (packages/core/src/capability-composition.ts#resolveServedCapabilities; minimal is ['core'] in packages/core/src/stack-auth.ts#STACK_TIER_PRESETS), and QA run #24615 proved the recipe on it: a SCRATCH copy of examples/app-todo whose requires is ['automation', 'triggers', 'auth'], booted with `objectstack dev --ui --seed-admin --preset minimal` (its plugin list carries no MessagingServicePlugin). Anonymous GET /api/v1/notifications → 401; the authenticated admin → 501 NOT_IMPLEMENTED ('Install @objectstack/service-messaging to enable'), and POST /notifications/read and /read/all the same 501. The copy adds 'auth' because app-todo with --preset minimal alone refuses to boot ('This stack mounts no auth …'). Score the 501 half on that boot and name it; the 401 half runs on stock"
         ]
       },
       "variants": [
@@ -990,7 +1008,7 @@
         "as the THIRD member, GET /api/v1/notifications and confirm the notification is absent",
         "unauthenticated GET /api/v1/notifications; capture the 401",
         "as the assignee, POST /api/v1/notifications/read with { ids: [<id>] }; re-list with ?read=false and confirm it dropped out; then POST /notifications/read/all",
-        "read the backing rows over the data API (sys_inbox_message + sys_notification_receipt keyed (notification_id, user_id, channel:'inbox')) to confirm the surface reflects storage",
+        "AS THE RECIPIENT, read the backing rows over the data API (sys_inbox_message + sys_notification_receipt keyed (notification_id, user_id, channel:'inbox')) to confirm the surface reflects storage — not as the admin: QA run #24575 found the admin's /data view of sys_notification_receipt owner-scoped, so it does not show the assignee's receipt",
         "author a scratch flow copy whose notify node names channels ['push'] (POST /api/v1/automation registers a runtime flow on stock showcase); run it; capture the server's WARN refusal and confirm that NO inbox row and NO sys_notification_delivery row were written — emit refuses a delivery on an unregistered channel up front rather than enqueueing a row the dispatcher could only dead-letter"
       ],
       "acceptance": [
@@ -1015,13 +1033,13 @@
         {
           "clause": "the surface gates correctly on BOTH sides: unauthenticated → 401; with the messaging service absent/unserveable the route answers the 501 capability-unavailable envelope (never a fabricated empty inbox from a stub)",
           "oracle": "api",
-          "verify": "the anonymous 401; the 501 side may be cited from a minimal boot without the messaging plugin",
+          "verify": "the anonymous 401 on stock; the 501 side on the --preset minimal scratch app-todo boot of knownGaps[2], with the absence of MessagingServicePlugin from its plugin list recorded beside it",
           "evidence": "the two responses"
         },
         {
           "clause": "an unimplemented channel never fakes delivery: the ['push'] probe produces NO inbox row and NO delivery row — emit refuses the delivery up front and says so in a WARN naming the channel ('[messaging] emit: channel 'push' is not registered; refused N delivery row(s) the dispatcher could only dead-letter …', packages/services/service-messaging/src/messaging-service.ts) — declared-but-unimplemented channels must stay visible failures (#3197)",
           "oracle": "log",
-          "verify": "no sys_inbox_message row and no sys_notification_delivery row for the probe run, and the WARN refusal naming channel 'push' in the server log. A delivery row reported success, or an inbox row, is the FAIL",
+          "verify": "no sys_inbox_message row and no sys_notification_delivery row for the probe run — read as a before/after count of each table, or filtered on the probe's notification id, never as 'the table is empty': inbox deliveries DO write sys_notification_delivery rows (emit enqueues one per registered channel × recipient, packages/services/service-messaging/src/messaging-service.ts, QA run #24575) — and the WARN refusal naming channel 'push' in the server log. A delivery row for the probe reported success, or an inbox row, is the FAIL",
           "evidence": "absence check + log excerpt"
         }
       ],
@@ -1064,6 +1082,12 @@
           "date": "2026-10-16",
           "change": "steps[6] and acceptance[4] (clause, verify) re-pointed (checklist-accuracy finding of QA run #23922, wave #23878). The clause said the dispatcher records a dead-letter for the push probe; on the live pipeline emit refuses the delivery up front — WARN 'channel push is not registered; refused 1 delivery row(s) the dispatcher could only dead-letter' — and no sys_notification_delivery row exists, which is what #23922 read. The clause now scores that refusal: no inbox row, no delivery row, the WARN present. Not loosened: any fabricated delivery or inbox row still FAILS. knownGaps[2] is corrected too: its 'minimal non-showcase boot without the plugin' does not exist, since messaging is on the CLI's always-on slate — app-todo, which does not require it, still answers GET /notifications 200",
           "ref": "#24036"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "checklist-accuracy findings of QA runs #24575 (5b14b7f3) and #24615 (ba4afcc2), 18.0 sweep; wave anchor #24579 §3 and its round 2 part 2. knownGaps[2] said no served boot lacks MessagingServicePlugin; `--preset minimal` mounts no always-on slate, and #24615 scored the 501 half on a scratch app-todo copy requiring automation, triggers and auth, so the gap carries that recipe and acceptance[3].verify names the boot. steps[5] reads the receipts as the recipient (the admin's /data view is owner-scoped); acceptance[4].verify counts delivery rows before and after, because inbox deliveries write them too. fixtures.requires[0] spells the recipients as the flow now declares them, one CEL value envelope. Not loosened: a fabricated inbox, delivery or receipt still FAILS",
+          "ref": "#24717"
         }
       ]
     },
@@ -1072,7 +1096,7 @@
       "title": "A declared external datasource federates: its objects query in place over REST, read-only",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1081,7 +1105,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the shipped read-only SQLite external datasource (examples/app-showcase/src/system/datasources/ — showcase-external.datasource.ts + external-fixture.ts, External Customer / External Order)"
+          "the shipped read-only SQLite external datasource (examples/app-showcase/src/system/datasources/ — showcase-external.datasource.ts + external-fixture.ts, External Customer / External Order). The fixture DB is provisioned at boot under the serving process's cwd, .objectstack/data/showcase_external.db (examples/app-showcase/src/system/datasources/external-fixture.ts#EXTERNAL_DB_FILE), so a boot from the shared tree writes it into examples/app-showcase/.objectstack/ (gitignored; this item only reads it)"
         ]
       },
       "steps": [
@@ -1089,7 +1113,7 @@
         "GET /api/v1/meta and confirm the federated objects are registered",
         "GET /api/v1/data/<external object> and read fixture rows",
         "attempt a write (POST/PATCH) against the read-only external object; capture the refusal",
-        "confirm the connection is listed with its health over the admin API that backs the Setup → Datasources page: GET /api/v1/datasources (both connections, showcase_external carrying schemaMode:external, origin:code, active:true, status ok) and GET /api/v1/datasources/showcase_external for the full descriptor. The console page renders from exactly this, so the server read is the oracle; if the page is driven instead, record that as a substitution"
+        "confirm the connection is listed with its health over the admin API that backs the Setup → Datasources page: GET /api/v1/datasources (both connections, showcase_external carrying schemaMode:external, origin:code, active:true, status ok) and GET /api/v1/datasources/showcase_external for the full descriptor. The console page renders from exactly this, so the server read is the oracle; if the page is driven instead, record that as a substitution; its route is /_console/apps/setup/metadata/datasource (/_console/apps/setup/datasources answers 'Object Not Found', QA run #24575)"
       ],
       "acceptance": [
         {
@@ -1106,9 +1130,9 @@
         },
         {
           "clause": "the connection is visible and health-badged: the datasources admin API reports it active with an ok status (the Setup → Datasources page renders from this response)",
-          "oracle": "screenshot",
+          "oracle": "api",
           "verify": "GET /api/v1/datasources lists the external connection with status ok; GET /api/v1/datasources/showcase_external returns its descriptor",
-          "evidence": "screenshot"
+          "evidence": "the two datasources responses (the list and the showcase_external descriptor); a screenshot only when the page was driven as a substitution"
         }
       ],
       "negative": [
@@ -1130,7 +1154,8 @@
           "ref": "claude/platform-test-checklist-ocwugl"
         },
         { "revision": 2, "date": "2026-08-18", "change": "re-worded clause 3 and step 5 for this item's declared api surface. Both named the Setup → Datasources console page inside an item whose surface is api, so the clause could only ever be scored by a substitution the item did not authorize. The datasources admin API is what the page renders from, so it is now the oracle and the page is the optional substitution — surface left as api rather than widened to mixed, since every other clause here is a server read (#9417)", "ref": "#9386" },
-        { "revision": 3, "date": "2026-10-16", "change": "acceptance[0].verify corrected (checklist-accuracy finding of QA run #23922, wave #23878): 'filters/$top work as on a native object' — OData $filter is refused 400 INVALID_FILTER on /data (the filter must be JSON), while the JSON filter param and top work, which is what #23922 used. The verify text names the working spellings and the refusal. Not loosened: a filter that returns the unfiltered set still FAILS", "ref": "#24036" }
+        { "revision": 3, "date": "2026-10-16", "change": "acceptance[0].verify corrected (checklist-accuracy finding of QA run #23922, wave #23878): 'filters/$top work as on a native object' — OData $filter is refused 400 INVALID_FILTER on /data (the filter must be JSON), while the JSON filter param and top work, which is what #23922 used. The verify text names the working spellings and the refusal. Not loosened: a filter that returns the unfiltered set still FAILS", "ref": "#24036" },
+        { "revision": 4, "date": "2026-10-20", "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3; wave anchor #24579 §3). acceptance[2]'s oracle still read 'screenshot' and its evidence 'screenshot', although revision 2 made the datasources API the oracle; both now name the API reads. steps[4] names the console route for the substitution (…/setup/datasources is not one). fixtures.requires[0] says where the fixture DB is provisioned. Not loosened: the clause and its verify are unchanged", "ref": "#24717" }
       ]
     },
     {
@@ -1138,7 +1163,7 @@
       "title": "The /api/v1/datasources admin lifecycle: all 11 routes behind ONE manage_platform_settings floor (drivers catalog included), runtime create with provenance+health, draft test probe, credential migration into the store, secret never echoes (hasSecret only), bad drafts 400 DATASOURCE_ADMIN_ERROR, unwired federation degrades 503 naming external-datasource",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1159,19 +1184,19 @@
       "steps": [
         "boot showcase via os dev (serve.ts mounts /api/v1/datasources by default on a non-memory engine); sign in as the admin holding manage_platform_settings; also mint an authenticated session holding NO capability and keep an anonymous client",
         "probe the uniform floor: GET /api/v1/datasources, GET /api/v1/datasources/drivers and one write (POST /api/v1/datasources) each anonymous (expect 401 UNAUTHENTICATED — do NOT misread the drivers 401 as 'catalog gone': the route is static but gated since #9391) and as the no-capability session (expect 403 PERMISSION_DENIED naming manage_platform_settings) — requireDatasourceAdmin runs on all 11 routes BEFORE any service resolution",
-        "GET /api/v1/datasources/drivers as the admin; confirm the static catalog (memory/sqlite/postgres/mysql/mongo, each with a configSchema) — the route has NO service dependency (it answers even when the datasource-admin service is unwired), but it is NOT anonymous-available",
-        "POST /api/v1/datasources/test with an UNSAVED sqlite draft { name: 'qa_ds_probe', driver: 'sqlite', config: { file: '<writable path>' }, secret: '...' } — the wizard's pre-Save probe; capture the result AND confirm nothing persisted (the subsequent list is unchanged); note the route is registered before the :name routes so the literal 'test' segment is never captured as a datasource name (admin-routes.ts)",
-        "POST /api/v1/datasources with a sqlite-file draft { name: 'qa_ds_probe', driver: 'sqlite', config: { file: '<writable path>' }, secret?: '...' }; capture status + the returned datasource",
-        "GET /api/v1/datasources; confirm qa_ds_probe appears with origin:'runtime' and a health field",
+        "GET /api/v1/datasources/drivers as the admin; confirm the static catalog (memory/sqlite/postgres/mysql/mongodb, each with a configSchema) — the route has NO service dependency (it answers even when the datasource-admin service is unwired), but it is NOT anonymous-available",
+        "POST /api/v1/datasources/test with an UNSAVED sqlite draft { name: 'qa_ds_probe', driver: 'sqlite', config: { filename: '<writable path>' }, secret: '...' } — the wizard's pre-Save probe; capture the result AND confirm nothing persisted (the subsequent list is unchanged); the literal 'test' segment is never captured as a datasource name because no POST route takes a bare :name (the POST :name routes all carry a suffix: /:name/test, /:name/migrate-credential, /:name/object-draft), NOT because of registration order: POST /test is registered AFTER every :name route, whatever the comment above it in admin-routes.ts says. A GET /api/v1/datasources/test IS captured as a name (404 'Datasource \"test\" does not exist.', QA run #24615). The sqlite key is `filename`; `file` is an alias authoring refuses with a rename hint (packages/spec/src/data/driver/sqlite.zod.ts#SqliteConfigSchema)",
+        "POST /api/v1/datasources with a sqlite-file draft { name: 'qa_ds_probe', driver: 'sqlite', config: { filename: '<writable path>' }, secret?: '...' }; capture status + the returned datasource",
+        "GET /api/v1/datasources; confirm qa_ds_probe appears with origin:'runtime' and its health in `status` ('ok' | 'error' | 'blocked' | 'unvalidated', with `statusReason` beside 'error' and 'blocked' — packages/services/service-datasource/src/contracts/datasource-admin-service.ts#DatasourceSummary)",
         "GET /api/v1/datasources/qa_ds_probe; inspect the body for config + a hasSecret flag and confirm the cleartext secret value is ABSENT",
         "POST /api/v1/datasources with a bad draft (invalid config shape / missing required); capture status + code",
-        "POST /api/v1/datasources/qa_ds_probe/migrate-credential (#8155): the fresh, cleanly-created row has nothing to re-home, so capture the 200 whose result reports the plan outcome (action 'none', status 'already-bound'/'nothing-to-migrate' — datasource-credential-migration.ts) rather than a 400; for the live 'bind' arm a stored row still carrying an inline cleartext credential must be PLANTED directly (the current create path splits `secret` out, so no parse-produced row has one — same fixture caveat as datasource-credential-refusal-matrix's legacy-alias clause); if it cannot be planted, score that arm from the unit pin and record blocked(fixture)",
+        "POST /api/v1/datasources/qa_ds_probe/migrate-credential (#8155): the fresh, cleanly-created row has nothing to re-home, so capture the 200 whose result reports the plan outcome (the wire answers { result: { name, status } }: 'already-bound' for a row created with a `secret`, 'nothing-to-migrate' for one holding no credential, 'refused' with reason + remedy — packages/services/service-datasource/src/contracts/datasource-admin-service.ts#CredentialMigrationResult) rather than a 400; for the live 'bind' arm a stored row still carrying an inline cleartext credential must be PLANTED directly (the current create path splits `secret` out, so no parse-produced row has one — same fixture caveat as datasource-credential-refusal-matrix's legacy-alias clause); the recipe QA run #24615 proved: stop the server, insert a sys_metadata row of type 'datasource' and origin 'runtime' whose config carries the password inline and no external.credentialsRef, and restart. The detail then reads hasSecret false and redactedConfigKeys ['password'], migrate-credential answers status 'migrated' with migratedKey 'password', and a re-run answers 'already-bound'. Only a run that cannot write such a row scores that arm from the unit pin and records blocked(fixture)",
         "GET /api/v1/datasources/qa_ds_probe/remote-tables (an external-datasource-served route): on a stock os dev boot federation IS wired (serve.ts) so expect a WIRED answer (2xx, or a 400 EXTERNAL_DATASOURCE_ERROR from the introspector — not a 503) and score the 503 clause via its unit pin; only a boot that genuinely lacks the service (dynamic import failed / custom host without the plugin) shows the 503 — capture which service the answer names either way",
         "GET /api/v1/datasources/does-not-exist; capture the 404"
       ],
       "acceptance": [
         {
-          "clause": "the driver catalog is static but NOT anonymous: to the entitled admin GET /api/v1/datasources/drivers returns the curated driver set (memory/sqlite/postgres/mysql/mongo) each with a projected configSchema, with NO datasource-admin service dependency — while an unauthenticated probe gets the floor's 401, deliberately (the family's floor is uniform on purpose: 'a family whose floor has one hole is a family whose floor has to be read route by route', admin-routes.ts). A 401 here is the floor working, never 'catalog broken'",
+          "clause": "the driver catalog is static but NOT anonymous: to the entitled admin GET /api/v1/datasources/drivers returns the curated driver set (memory/sqlite/postgres/mysql/mongodb) each with a projected configSchema, with NO datasource-admin service dependency — while an unauthenticated probe gets the floor's 401, deliberately (the family's floor is uniform on purpose: 'a family whose floor has one hole is a family whose floor has to be read route by route', admin-routes.ts). A 401 here is the floor working, never 'catalog broken'",
           "oracle": "api",
           "verify": "the admin's drivers body against DRIVER_CATALOG (driver-catalog.ts); the anonymous 401 on the same route; route needs no service (admin-routes.ts)",
           "evidence": "the two drivers responses (admin 200, anonymous 401)"
@@ -1183,7 +1208,7 @@
           "evidence": "the 401/403 responses for a read, the catalog, and a write"
         },
         {
-          "clause": "POST /api/v1/datasources/test probes an UNSAVED draft with NO persistence: the inline draft (+ optional cleartext secret, split out via splitSecret before the service sees the draft) is connection-tested and answered, and no datasource row exists afterwards; the literal 'test' segment is registered before the :name routes so it is never captured as a datasource name — distinct from POST /:name/test, which round-trips a SAVED datasource",
+          "clause": "POST /api/v1/datasources/test probes an UNSAVED draft with NO persistence: the inline draft (+ optional cleartext secret, split out via splitSecret before the service sees the draft) is connection-tested and answered, and no datasource row exists afterwards; the literal 'test' segment is never captured as a datasource name — because no POST route takes a bare :name, not because of registration order (POST /test is registered after every :name route; steps[3]) — distinct from POST /:name/test, which round-trips a SAVED datasource",
           "oracle": "api",
           "verify": "the test response + an unchanged GET /api/v1/datasources afterwards (admin-routes.ts; the saved-name twin); the ledger rows for both spellings (datasource-route-ledger.ts)",
           "evidence": "the probe response + the unchanged list"
@@ -1195,9 +1220,9 @@
           "evidence": "the migrate responses + the post-migration detail read (or the unit-test output for the bind arm)"
         },
         {
-          "clause": "a runtime create lands with provenance + health: POST /api/v1/datasources creates a sqlite-file datasource (201) and the subsequent list shows it with origin:'runtime' and a health status",
+          "clause": "a runtime create lands with provenance + health: POST /api/v1/datasources creates a sqlite-file datasource (201) and the subsequent list shows it with origin:'runtime' and its health `status`",
           "oracle": "api",
-          "verify": "POST status 201; GET /api/v1/datasources contains qa_ds_probe with origin 'runtime' + a health field",
+          "verify": "POST status 201; GET /api/v1/datasources contains qa_ds_probe with origin 'runtime' + `status` (with `statusReason` when 'error' or 'blocked')",
           "evidence": "the create + list responses"
         },
         {
@@ -1268,6 +1293,12 @@
           "date": "2026-08-30",
           "change": "coverage sweep, two stale texts + three uncovered arms. STALE: the rev-1 'UNLEDGERED admin CRUD / tranche-3 discipline gap' finding clause and the matching source lines were FALSE at head — #7744 landed the family's own datasource-route-ledger.ts (11 rows, all server-only, SDK question filed as #7954) with a registrar-derived conformance test, so a run following the old text files a false finding; the clause now asserts the ledger + gate positively. STALE: 'always-available static catalog' for GET /drivers — since #9391/#9593 requireDatasourceAdmin guards all 11 routes (401 anonymous, 403 without manage_platform_settings, decided before any service resolution), so the wording now pins the floor and warns a runner off misreading the drivers 401. ADDED: the uniform-floor clause (both sides, per ADR-0124 D5), the POST /datasources/test draft-probe clause (no persistence; 'test' never captured as a name), and the POST /:name/migrate-credential clause (#8155 — bind/drop-inline/none/refuse plan outcomes, 200-not-400 for a row with nothing to re-home, cleartext gone after a bind; live bind arm needs a planted legacy row, unit pin as fallback). Personas widened for the floor probes",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "checklist-accuracy findings of QA run #24615 (18.0 sweep round 2, ba4afcc2; wave anchor #24579 §3, round 2 part 2). The served driver id is `mongodb`, not `mongo` (steps[2], acceptance[0].clause); the sqlite config key is `filename`, and `file` is an alias authoring refuses (steps[3], steps[4]); the health field is spelled `status`, beside `statusReason` (steps[5], acceptance[4] clause and verify). steps[3] and acceptance[2].clause said POST /test is registered before the :name routes; it is registered after every one of them (admin-routes.ts), and 'test' stays uncaptured because no POST route takes a bare :name. The code comment that says otherwise is reported, not edited. steps[8] carries the live bind-arm recipe #24615 proved and names the wire statuses. Not loosened: no clause's oracle or verdict changed",
+          "ref": "#24717"
         }
       ]
     },
@@ -1276,7 +1307,7 @@
       "title": "External-datasource schema introspection happy path: remote-tables lists live tables with columnCount (?schema= honoured since #7955), object-draft renders a reviewable *.object.ts, both route spellings answer as one operation behind the platform auth floor",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1290,7 +1321,7 @@
           "os dev wiring: ExternalDatasourceServicePlugin AND registerDatasourceAdminRoutes are both wired unconditionally by packages/cli/src/commands/serve.ts (+), so both route spellings are live on a stock boot"
         ],
         "knownGaps": [
-          "live ?schema= NARROWING is not observable on the stock fixture: SQLite introspection returns bare, unqualified table names (sql-driver.ts introspectSchema reads sqlite_master), so no table carries an attributable schema and the service filter (external-datasource-service.ts — skips only when `tableSchema && tableSchema !== opts.schema`) has nothing to exclude. A live ?schema=<x> therefore returns the SAME full set as no filter — indistinguishable from the pre-#7955 dropped-query bug — so the narrowing clause is scored by the pinned twin-equivalence test (schema-qualified postgres fake), never by the live SQLite read; a schema-qualified (postgres) external fixture would make it live-scoreable",
+          "live ?schema= NARROWING is not observable on the stock fixture: SQLite introspection returns bare, unqualified table names (sql-driver.ts introspectSchema reads sqlite_master), so no table carries an attributable schema and the service filter (external-datasource-service.ts — skips only when `tableSchema && tableSchema !== opts.schema`) has nothing to exclude. A live ?schema=<x> therefore returns the SAME full set as no filter — indistinguishable from the pre-#7955 dropped-query bug — so the narrowing clause is scored by the pinned twin-equivalence test (schema-qualified postgres fake), never by the live SQLite read. A Postgres external fixture does NOT make it live-scoreable either (QA run #24615, on a real PostgreSQL 16 holding public.widgets, public.gadgets and sales.invoices): the SQL driver's Postgres branch lists only the tables of the session's current_schemas(false), with bare names (packages/drivers/driver-sql/src/sql-driver.ts#introspectSchema), so ?schema=sales answered the public tables and never sales.invoices. Live narrowing is unobservable on every in-tree SQL driver, which is the product defect #24664 (#24619 row c); only the pinned fake, which returns qualified names, exercises the filter",
           "the stock fixture's clean text/number/date columns may legitimately produce an EMPTY draft.review[] (notes fire only for unrecognised or lossy type mappings, external-datasource-service.ts) — an empty array is a pass, not a missing feature"
         ]
       },
@@ -1376,6 +1407,12 @@
           "date": "2026-10-04",
           "change": "A1 and A3 / step 6 re-pointed. A1 (assertion defect): columnCount is 7 per table, not 5 — the fixture provisions through initObjects, which adds the created_at / updated_at audit timestamps (external-fixture.ts CUSTOMER_TABLE / ORDER_TABLE, sql-driver.ts initObjects builtinColumns); fixtures.requires says so. A3 (stale): the draft no longer emits fields.<f>.primaryKey; the remote PK is rendered as a '// Remote primary key:' comment and ObjectSchema is imported as a value for ObjectSchema.create (external-datasource-service.ts REMOTE_PRIMARY_KEY_COMMENT, renderObjectSource). Source 4257e4e4e3 (#11073)",
           "ref": "#21735"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0] corrected — checklist-accuracy finding of QA run #24615 (18.0 sweep round 2, ba4afcc2; wave anchor #24579 §3, round 2 part 2). It said a schema-qualified Postgres fixture would make ?schema= narrowing live-scoreable; measured on PostgreSQL 16, the SQL driver's Postgres introspection returns bare names from current_schemas(false) too, so narrowing stays unobservable live. That is the product defect #24664, split from #24619 row (c); acceptance[1] states the #7955 contract and stays as written, scored by its pin. No clause changed",
+          "ref": "#24717"
         }
       ]
     },
@@ -1384,7 +1421,7 @@
       "title": "Boot-time external-schema drift gate (ADR-0015 §5.2 Gate 2): onMismatch defaults to 'fail' and refuses boot naming the object and mismatched column; 'warn' proceeds logging the diff; 'ignore' is silent; checkOnBoot:false skips a datasource with a loud info line (boot step only — the interval sweep is unaffected); a partial metadata read withholds the all-clear instead of faking one",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -1397,14 +1434,14 @@
           "the shipped external datasource + fixture DB (showcase_external — IN SYNC by construction, provisioned idempotently each boot by external-fixture.ts)"
         ],
         "knownGaps": [
-          "NO stock drift fixture exists — drift must be INDUCED, and only in a scratch copy: the fixture DB is re-provisioned in-sync each boot, and showcase_external deliberately declares onMismatch:'warn' (showcase-external.datasource.ts) precisely so drift can never brick the stock showcase. To induce: work in a scratch app/worktree copy, alter the fixture DB between boots (prefer a column TYPE change — the idempotent provisioning initObjects re-runs at every boot and may heal an added/dropped column; verify the induced drift survives the re-run before scoring) or bind a scratch federated object to a missing/mismatched table. Without an induced drift, the live arms of clauses 1-3 are blocked(fixture) and the unit pins are the fallback evidence",
+          "NO stock drift fixture exists — drift must be INDUCED, and only in a scratch copy: the fixture DB is re-provisioned in-sync each boot, and showcase_external deliberately declares onMismatch:'warn' (showcase-external.datasource.ts) precisely so drift can never brick the stock showcase. To induce, in a scratch app copy: the recipe QA run #24615 proved adds a field to the federated OBJECT instead of altering the fixture DB — ExternalCustomer gained `qa_drift_col: Field.text`, which no remote column backs, a measured missing_column — and it survives the boot's idempotent re-provisioning because the fixture's own table definition is untouched. Altering the fixture DB between boots is the weaker route (initObjects re-runs at every boot and may heal an added or dropped column; verify any such drift survives the re-run before scoring), as is binding a scratch federated object to a missing or mismatched table. Without an induced drift, the live arms of clauses 1-3 are blocked(fixture) and the unit pins are the fallback evidence",
           "the 'fail'-DEFAULT arm additionally needs a datasource that OMITS external.validation.onMismatch (the `?? 'fail'` default, external-validation-plugin.ts; an unreadable definition also lands there — the def loader swallows the read failure to undefined) — stock showcase never exercises it live",
         "INDUCE MEASURED drift, not an outage: only MEASURED diffs reach the onMismatch policy — an 'unreachable' row (remote or definition could not be read) warns loudly and CONTINUES boot by maintainer ruling 2026-08-23 (#11166, external-validation-plugin.ts), so breaking connectivity (deleting the fixture DB file, bad credentials) tests the wrong arm and a non-aborting boot there is correct, not a gate failure",
           "clause 5's partial-read arm (a degraded metadata loader) is not reasonably inducible live — it is scored via its pin (list-diagnosed-consumer-sweep.test.ts), declared here rather than pretending a loader-outage fixture exists"
         ]
       },
       "steps": [
-        "boot stock showcase; capture the in-sync all-clear info line '[external-validation] all federated objects match their remote schema' with its objects count",
+        "boot stock showcase with --log-level info, as every boot of this item: the CLI's default kernel level is `warn`, and the all-clear here, steps[4]'s SKIPPED line and steps[5]'s armed-timer line are all info-level (packages/runtime/src/external-validation-plugin.ts), so a default boot prints none of them (QA run #24615); capture the in-sync all-clear info line '[external-validation] all federated objects match their remote schema' with its objects count",
         "in a scratch copy, induce a surviving drift (see knownGaps) under the stock 'warn' policy; boot; capture the '[external-validation] external schema drift' warn (datasource/object/diffs) and that boot COMPLETES",
         "same drift with the scratch datasource's external.validation.onMismatch OMITTED (and again with explicit 'fail'); boot; capture the abort — ExternalSchemaMismatchError, message 'Object '<o>' does not match its remote table on datasource '<d>':' plus per-diff lines naming the column",
         "same drift under onMismatch:'ignore'; boot; confirm completion with NO drift warn",
@@ -1492,6 +1529,12 @@
           "date": "2026-08-30",
           "change": "coverage sweep: the rev-1 checkOnBoot declared≠enforced finding is FIXED by #13149 (issue #13037, landed 2026-08-29) — a run following the old clause 4 would file a false finding and mis-score the skip as a bug. Flipped to positive assertions: (a) checkOnBoot:false rows are dropped before any verdict with the loud SKIPPED info line (external-validation-plugin.ts), per-datasource and explicit-false-only (bootCheckEnabled; unreadable/absent validates — safe direction; checkonboot/validateonboot are rejection-path did-you-means, one spelling one read); (b) a NEW clause pins the boot-step-only scope by maintainer ruling 2026-08-29 — checkIntervalMs watchers still arm for a checkOnBoot:false datasource. Also folded in the #11166 unreachable carve-out (measured diffs only reach onMismatch; an outage warns and continues, ruling 2026-08-23) so an induced 'drift' via broken connectivity is not mis-scored against the fail default; re-anchored every rotted line ref (runValidation, resolveOnMismatch, announceAllClear, drift checks) and added the external-validation-checkonboot.test.ts pin",
           "ref": "#13149"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "checklist-accuracy findings of QA run #24615 (18.0 sweep round 2, ba4afcc2; wave anchor #24579 §3). knownGaps[0] preferred altering the fixture DB; the recipe #24615 proved adds a field to the federated object (a measured missing_column) and survives re-provisioning, so the gap leads with it. steps[0] names --log-level info: the all-clear, SKIPPED and armed-timer lines are info-level and absent at the default warn level. No clause changed",
+          "ref": "#24717"
         }
       ]
     },
@@ -1603,7 +1646,7 @@
       "title": "A shipped driver's datasource credential can never be authored inline NOR read back: every inline-credential door refuses at publish, and BOTH read doors redact, including legacy alias spellings already sitting in stored rows. A plugin driver's config is its author's to keep credential-free; the platform redacts only its fixed credential spellings there and does not guess",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["seeded admin", "authenticated non-admin", "anonymous"],
@@ -1616,12 +1659,13 @@
         "knownGaps": [
           "The legacy-alias clause tests a row shape the CURRENT parse refuses to create — a stored row from before the aliases moved to `guidance`. It is only reachable by writing the row directly (⚠️ NOT through the runtime wizard: POST /api/v1/datasources refuses an alias-spelled config key 400 DATASOURCE_ADMIN_ERROR — the aliases moved to `guidance`, which refuses them, #8078 — measured on a stock showcase boot with `passwd` and by QA run #21056. The run planted its rows with a direct sys_metadata write while the server was STOPPED, then booted and read through both doors). If the run cannot write such a row, that clause is blocked(fixture) and MUST be recorded — a redaction that has never been tested against the shape it exists for is an untested redaction.",
           "`encryptionKey` (turso) is deliberately STILL WRITABLE while being redacted on read (#8081 scope item 4). Scoring it as a write refusal is a false fail; the correct expectation is write-accepted + read-redacted.",
-          "acceptance[1] (the credential-bound datasource actually connects) and acceptance[6] (judged by a connect probe after the echoed-mask round-trip) need a reachable, credential-protected database of a SHIPPED driver (postgres, mysql or mongo). Stock showcase and the QA container provide none, and every run so far recorded both clauses blocked(environment) (#21784, #21845). No recipe is proven yet. A run that has such a database (for example a postgres:16 service like the one ci.yml's live-PG job starts) binds external.credentialsRef to it and scores both clauses. A run without one records both blocked(environment). CI has postgres and mysql only inside the Temporal Conformance (live PG + MySQL) job (.github/workflows/ci.yml services postgres:16 and mysql:8.0), which runs no checklist item, and has no mongo anywhere; the QA container has none of the three (QA run #21784, parked on #22017 row 18). ⛔ Never score either clause from a successful publish alone, which proves the paved path is accepted, not that it connects. The stored-credential half of acceptance[6] can still be read without a database (after the PATCH, the admin door still reports hasSecret and the bound secret handle is unchanged); record that as a partial reading, separate from the connect half",
-          "the plugin-driver boundary is RULED (#21921, docs note in content/docs/data-modeling/drivers.mdx): for a driver the platform ships no contract for, the platform neither validates config nor guesses which of its keys are credentials. Keeping credentials out of a plugin driver's config, through external.credentialsRef, is the plugin author's responsibility. Only the platform's FIXED credential spellings are redacted there by name (acceptance[5]). A credential under any other key of a plugin driver's config being stored and served to administrators as written is that boundary, never a finding"
+          "acceptance[1] (the credential-bound datasource actually connects) and acceptance[6] (judged by a connect probe after the echoed-config round-trip) need a reachable, credential-protected database of a SHIPPED driver (postgres, mysql or mongodb — the driver id since 18; an authored `mongo` is refused by name, packages/spec/src/data/datasource.zod.ts). Stock showcase provides none, but the QA container has a PostgreSQL 16 install (/usr/lib/postgresql/16/bin, with a `postgres` system user), and QA run #24575 proved a recipe on it that scored both clauses pass (#24615 reused it): as `postgres`, `initdb -A scram-sha-256` into a scratch data directory, then `pg_ctl … -o '-p PORT -k SOCKETDIR -c listen_addresses=127.0.0.1' start`; create a login role WITH a password and a database it owns; bind it through POST /api/v1/datasources with the password in the top-level `secret`, never in `config`, so the door binds external.credentialsRef. Every parent directory of the data and socket directories must be traversable by `postgres`. Runs before #24575 recorded both clauses blocked(environment) (#21784, #21845). CI has postgres and mysql only inside the Temporal Conformance (live PG + MySQL) job (.github/workflows/ci.yml services postgres:16 and mysql:8.0), which runs no checklist item, and has no mongodb anywhere. ⛔ Never score either clause from a successful publish alone, which proves the paved path is accepted, not that it connects. A run that cannot start the database still reads the stored-credential half of acceptance[6] (after the PATCH, the admin door still reports hasSecret and the bound secret handle is unchanged); record that as a partial reading, separate from the connect half",
+          "the plugin-driver boundary is RULED (#21921, docs note in content/docs/data-modeling/drivers.mdx): for a driver the platform ships no contract for, the platform neither validates config nor guesses which of its keys are credentials. Keeping credentials out of a plugin driver's config, through external.credentialsRef, is the plugin author's responsibility. Only the platform's FIXED credential spellings are redacted there by name (acceptance[5]). A credential under any other key of a plugin driver's config being stored and served to administrators as written is that boundary, never a finding",
+          "no datasource read door serves the mask literal (packages/spec/src/data/secret-mask.ts#SECRET_MASK is read by the encrypted-field read path and the settings REST boundary, not here): the admin door OMITS each withheld credential key and names it in redactedConfigKeys beside hasSecret, and the metadata door serves the external.credentialsRef handle. So the round-trip acceptance[6] drives carries no mask, and what it exercises is the carry-forward of the withheld keys on PATCH (packages/services/service-datasource/src/datasource-config-redaction.ts#restoreRedactedConfig). QA run #24575 also measured a hand-written literal mask: PATCH /api/v1/datasources/NAME with `secret` set to it is accepted 200 and rewraps the stored secret to the mask (the reconnect then fails), and `config.encryptionKey` set to it overwrites the stored key. No read door serves that string, so it is not the echoed case acceptance[6] and negative[5] score; it is held for the maintainer on #24579 §7, where no contract declares it. ⛔ Score it under neither"
         ]
       },
       "steps": [
-        "enumerate the inline-credential refusal doors from packages/spec/src/migrations/entries/semantic/ — at minimum the config-key door, the URL userinfo door, the URL query-parameter door, the driver-options door (mongo), the placeholder door, and the connector inline-authentication door",
+        "enumerate the inline-credential refusal doors from packages/spec/src/migrations/entries/semantic/ — at minimum the config-key door, the URL userinfo door, the URL query-parameter door, the driver-options door (driver `mongodb`: an authored `mongo` is refused by name since 18, so a probe spelled with it meets that refusal instead of the credential one), the placeholder door, and the connector inline-authentication door",
         "for EACH door, author a datasource carrying the credential in that position and attempt to publish it (os build, then the runtime admin door)",
         "author the same datasource with the credential bound through `external.credentialsRef` (or the connection form) and confirm it publishes AND connects",
         "read the published datasource back through the datasource-admin door (GET /api/v1/datasources)",
@@ -1629,7 +1673,7 @@
         "plant a stored row carrying a legacy alias spelling (passwd / pwd / token / jwt / auth_token / authtoken) and read it back through both doors",
         "author a datasource for a driver the platform ships no contract for, carrying a canonically-spelled credential key (password or authToken) AND one non-canonical credential-looking key (for example apiSecret), and read it back. The second key observes the ruled boundary; it is not a redaction target",
         "for turso specifically, write `encryptionKey`, then read it back through both doors",
-        "grep the full response bodies of every read above for the planted cleartext values"
+        "grep the full response bodies of every read above for the planted cleartext values, and of the third read door, GET /api/v1/data/sys_metadata?type=datasource (admin only), which serves the stored row and also redacts (QA run #24575)"
       ],
       "acceptance": [
         {
@@ -1669,7 +1713,7 @@
           "evidence": "the response bodies from both doors"
         },
         {
-          "clause": "the echoed-mask write guard holds: writing the mask value back verbatim is treated as 'unchanged' and does NOT overwrite the stored credential",
+          "clause": "the echoed-config write guard holds: writing the read's config back verbatim (it carries no mask: the withheld credential keys are absent from it, knownGaps[4]) is treated as 'unchanged' and does NOT overwrite or delete the stored credential",
           "oracle": "api",
           "verify": "read a datasource through the admin door, PATCH /api/v1/datasources/<name> with the response's config back unmodified (that door updates by PATCH only — GET, POST, PATCH, DELETE; a PUT answers 405), then probe connectivity — the connection must still work. A form round-trip that destroys the stored credential is the ADR-0100 §B3 defect",
           "evidence": "the round-trip + the post-round-trip connect probe"
@@ -1694,7 +1738,7 @@
       "source": [
         "ADR-0100 (credential read mask; §B3 echoed-mask write guard)",
         "ADR-0015 / ADR-0062 (credentials route through datasource config)",
-        "packages/spec/src/data/secret-mask.ts (the one mask literal both readers import)",
+        "packages/spec/src/data/secret-mask.ts#SECRET_MASK (the ADR-0100 mask literal; its two readers are the encrypted-field read path and the settings REST boundary, and neither datasource read door imports it: both withhold the key instead, knownGaps[4])",
         "packages/spec/src/data/datasource-credential-redaction.ts#STILL_WRITABLE_CREDENTIAL_KEYS (the ONE definition of 'what is a credential key' — schema-derived z.never() refusals, FORMER_CREDENTIAL_ALIASES, STILL_WRITABLE_CREDENTIAL_KEYS)",
         "packages/spec/src/kernel/metadata-type-redaction.ts (the per-type redaction hook — the metadata read door)",
         "packages/services/service-datasource/src/datasource-config-redaction.ts + datasource-credential-migration.ts (the datasource-admin read door)",
@@ -1731,6 +1775,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 18). Already recorded as a knownGap by #21932 (revision 3): A2 / A7 need a reachable, credential-protected postgres, mysql or mongo. This revision adds only whether CI has one (postgres and mysql inside the Temporal Conformance job, which runs no checklist item; no mongo) and cites the record. No clause changed",
           "ref": "#22017"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3), the P0 run #24556's continuation and wave anchor #24579 §3. knownGaps[2] said no Postgres recipe is proven and the QA container has no database; the container has PostgreSQL 16 and #24575 proved a recipe that scored acceptance[1] and [6] pass, so the gap carries it. The driver id is `mongodb` since 18 (an authored `mongo` is refused by name, #24556), in knownGaps[2] and steps[0]. steps[8] names the admin-only third read door, /data/sys_metadata, which also redacts. knownGaps[4] (new) records that no datasource read door serves the mask (the admin door withholds the key, the metadata door serves the credentialsRef handle), so acceptance[6].clause says the echoed config carries none and source[2] no longer says both readers import it; the literal-mask PATCH #24575 measured is held for the maintainer on #24579 §7 and scored under no clause. Not loosened: every verify and every negative is unchanged",
+          "ref": "#24717"
         }
       ]
     },
@@ -1739,7 +1789,7 @@
       "title": "Declarative connector static auth kinds (none/api-key/basic/bearer) resolve credentialRef at materialization and land on the wire in exactly their header/query shape; an unresolvable credentialRef is boot-fatal with the env-var prescription; oauth2 has NO authorable spelling (EE tier)",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -1750,7 +1800,7 @@
           "env vars set for each probe's credentialRef before boot (the open tier resolves credentialRef from environment variables — plugin.ts)"
         ],
         "knownGaps": [
-          "NO shipped connector declares a secret-bearing auth kind — all three showcase instances are auth:{type:'none'} on purpose (examples/app-showcase/src/system/connectors/index.ts,103,142; its own comment says a real upstream would use bearer+credentialRef). The per-kind instances are therefore scratch-authored in a writable package against the echo upstream; without the echo upstream the wire-shape clauses are blocked(fixture) and fall back to the unit pins (rest-connector.test.ts drives applyAuth through a stubbed fetch)"
+          "NO shipped connector declares a secret-bearing auth kind — all three showcase instances are auth:{type:'none'} on purpose (examples/app-showcase/src/system/connectors/index.ts#StatusApiConnector, and StatusOpenApiConnector and DevToolsMcpConnector beside it, each declare auth: { type: 'none' }; StatusApiConnector's own comment says a real upstream would use bearer+credentialRef). The per-kind instances are therefore scratch-authored in a writable package against the echo upstream; without the echo upstream the wire-shape clauses are blocked(fixture) and fall back to the unit pins (rest-connector.test.ts drives applyAuth through a stubbed fetch)"
         ]
       },
       "variants": [
@@ -1765,7 +1815,7 @@
       ],
       "steps": [
         "start the echo upstream; export the probe env vars (e.g. QA_BEARER_TOK, QA_API_KEY, QA_BASIC_PW); author five scratch rest-provider instances against it in a writable package: auth none / {type:'bearer',credentialRef:'QA_BEARER_TOK'} / {type:'basic',username:'qa',credentialRef:'QA_BASIC_PW'} / {type:'api-key',credentialRef:'QA_API_KEY'} / {type:'api-key',credentialRef:'QA_API_KEY',paramName:'api_key'}; boot",
-        "dispatch each instance's `request` action (flow connector_action or direct engine dispatch) at an echo path; capture what the upstream received per instance",
+        "dispatch each instance's `request` action (through a runtime flow: POST /api/v1/automation with a start → connector_action node, then POST /api/v1/automation/NAME/trigger, the vehicle QA run #24615 used on a stock-shaped boot; no HTTP route dispatches a connector action directly) at an echo path; capture what the upstream received per instance",
         "read the authored rows back over GET /api/v1/meta and GET /api/v1/automation/connectors; grep both full bodies for every resolved secret value",
         "unset QA_BEARER_TOK and boot again; capture the boot failure verbatim",
         "author one instance with auth {type:'oauth2', ...} and one catalog/instance entry with inline authentication {type:'api-key', key:'x'}; build both; capture the two rejections",
@@ -1821,7 +1871,7 @@
         "packages/services/service-automation/src/plugin.ts#resolveInstanceAuth (resolveInstanceAuth — credentialRef → ResolvedConnectorAuth; empty resolution throws with the env-var prescription; api-key headerName default applied)",
         "packages/connectors/connector-rest/src/rest-connector.ts#applyAuth (applyAuth — the wire shapes per kind) + rest-provider.ts (the factory receives the RESOLVED static subset)",
         "packages/connectors/connector-openapi/src/openapi-provider.ts#auth (the openapi provider shares the same static-auth transport)",
-        "examples/app-showcase/src/system/connectors/index.ts,66,103,142 (all shipped instances auth none; the fixture's own pointer at bearer+credentialRef for real upstreams)"
+        "examples/app-showcase/src/system/connectors/index.ts#StatusApiConnector (with StatusOpenApiConnector and DevToolsMcpConnector: every shipped instance is auth none; StatusApiConnector's comment is the fixture's own pointer at bearer+credentialRef for real upstreams)"
       ],
       "history": [
         {
@@ -1829,6 +1879,12 @@
           "date": "2026-08-30",
           "change": "new item from the 2026-08-30 coverage sweep (spec-enums angle): the static connector-auth tier had NO checklist coverage — connector-declarative-boot proves the auth-less happy path and the inline-secret refusal, but no item proved a resolved credential actually lands on the wire per kind, the credentialRef boot-fatal contract, or the oauth2 no-authorable-spelling boundary. Register hypothesis CORRECTED against source: the register said oauth2 'declared in open edition degrades loudly' — it does not reach runtime at all; ConnectorInstanceAuthSchema simply has no oauth2 arm, so it is a parse rejection at authoring (and the inline `authentication` spelling is the #7990 publish refusal) — the clause asserts refusal-at-build, not a runtime degrade. Not enumSource-pinnable (discriminated union, no named z.enum) — hand-enumerated 4 static kinds and said so in variants",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "checklist-accuracy findings of QA run #24615 (18.0 sweep round 2, ba4afcc2; wave anchor #24579 §3). steps[1] offered 'direct engine dispatch', which has no HTTP door; it names the runtime-flow vehicle #24615 used (POST /api/v1/automation, then POST /automation/NAME/trigger). fixtures.knownGaps[0] and source[5] cited the showcase connectors file by comma-separated line numbers, the rot class the line-citation limb exists for; both now anchor the declaring symbol. No clause changed",
+          "ref": "#24717"
         }
       ]
     },
@@ -1837,7 +1893,7 @@
       "title": "Setup → Datasources federation UI (ADR-0015 §6.4): SchemaBrowser mirrors the remote-table listing, ImportObjectDialog lands a REAL object through the metadata channel, Refresh catalog and ValidationPanel drive the three previously-uncovered federation routes (import / refresh-catalog / validate) behind their capability floors",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1854,26 +1910,27 @@
           "the federation-unavailable 503 arm is NOT reachable on a stock boot (serve.ts wires ExternalDatasourceServicePlugin unconditionally — same bound as datasource-admin-lifecycle's 503 clause); it needs a deliberately unwired boot. No CLI flag or preset unwires it: serve.ts wires the plugin whenever @objectstack/service-datasource resolves (QA run #21784, parked on #22017 row 21)",
           "the UI's 503 detector is FIXED at the current pin. objectui 0abd4f9f8769 (objectui#11628, objectui PR #11640) maps the server's 503 envelope { success:false, error:{ code:'SERVICE_UNAVAILABLE', message } } to ExternalServiceUnavailableError (packages/app-shell/src/views/metadata-admin/external/api.ts). Its api.test.ts pins that for all four reads ('%s maps 503 SERVICE_UNAVAILABLE to the typed error') and pins that a 503 naming another code is not read as 'federation not wired'. QA runs #21782 / #21784 ran objectui 2e818d0b51ec, whose detector still matched the retired pre-#3843 string body, so acceptance[6]'s expected-fail was true for them and is stale now (re-pointed on #22017 row 21)",
           "FIXED at objectui 1fb1ced36243: ValidationPanel.tsx's label map (DIFF_LABEL_KEY) now labels 'unreachable' (engine.externalDatasource.diff.unreachable) beside the other nine, so every one of the 10 SchemaDiffEntryKind kinds renders labelled, and the panel's comment records the ruling that 'unreachable' reads as 'cannot check', never as 'schema changed'. An unlabelled kind cell is now a regression of the #4115 class, not an expected-fail",
-          "diff-kind labels beyond the in-sync fixture need INDUCED drift — reuse external-schema-drift-gate's induced-drift recipe notes (scratch copy, measured column-type change); the stock in-sync fixture proves only the all-green render"
+          "diff-kind labels beyond the in-sync fixture need INDUCED drift, and one recipe needs no scratch copy (QA run #24615): import a table through the UI (acceptance[2]), then PUT /api/v1/meta/object/IMPORTED with one extra field — the next validate measures a missing_column on it, and the shared fixture DB is untouched (sqlite_master identical before and after). ⛔ Do not induce a field TYPE change this way: the save answers 422 DESTRUCTIVE_CHANGE ('re-submit with ?force=true'), and forcing it would run against the shared fixture DB. Other diff kinds still need external-schema-drift-gate's scratch-copy recipe; the stock in-sync fixture proves only the all-green render",
+          "a second POST …/external/tables/REMOTE/import for an object that already exists answers 201 again and overwrites it, with no conflict refusal (QA run #24615; importObject persists without an existence check, packages/services/service-datasource/src/external-datasource-service.ts#importObject). No clause covers re-import and no contract says which answer is intended: score it neither way, and delete each scratch import before the next run (steps[5])"
         ]
       },
       "steps": [
         "boot showcase isolated via os dev with the console; sign in as the entitled admin; pre-capture the API ground truth: GET /api/v1/datasources/showcase_external/external/tables and POST .../external/validate",
-        "navigate Setup → Datasources (the metadata-admin engine route …/metadata/datasource — the left-nav names it directly, objectui#3660/register.ts) and open showcase_external: the ExternalDatasourcePanel renders (DatasourcePreview.tsx keys it off schemaMode !== 'managed') with the schemaMode badge and the read-only/writes-allowed pill; screenshot FIRST, then read the DOM",
+        "type the datasource's engine EDIT route directly, /_console/apps/setup/metadata/datasource/showcase_external — no entry from the Setup list reaches it: Setup → Datasources (…/metadata/datasource, which the left-nav names, objectui#3660/register.ts) is the custom DatasourceResourcePage list, whose rows offer Test / Sync objects / Edit / Delete and neither open the item nor render the panel (objectui DatasourceResourcePage.tsx, at the sweep pin 4016370a and the shipped pin 12dc7b47c340; QA run #24615). On the edit route the ExternalDatasourcePanel renders (DatasourcePreview.tsx keys it off schemaMode !== 'managed') with the schemaMode badge and the read-only/writes-allowed pill; screenshot FIRST, then read the DOM",
         "Tables tab: SchemaBrowser loads the remote tables (mount + explicit Refresh only — never a timer); compare the rendered list name-by-name and columnCount-by-columnCount against the pre-captured listing",
         "header 'Refresh catalog': click it and capture the POST /api/v1/datasources/showcase_external/external/refresh-catalog on the network; the snapshot timestamp renders from the returned catalog.snapshotAt",
         "Import: pick customers → ImportObjectDialog fires POST.../external/tables/customers/draft, renders the suggested name, any review flags, and the generated *.object.ts source; click 'Import as Object' and capture the PUT /api/v1/meta/object/<name> it performs (the UI's import door IS the metadata channel — api.ts importObjectDraft); confirm the object now exists over GET /api/v1/meta and answers a read-only /data query against the external rows",
         "the server-side import twin: POST /api/v1/datasources/showcase_external/external/tables/orders/import (a second, scratch import) → 201 { object }; confirm it too landed and is queryable; then delete/clean up both imported objects",
         "Validation tab: run validation; capture POST .../external/validate → { ok, results } (URL-scoped work, #10537) and compare the rendered per-object verdict rows against it; on the in-sync stock fixture expect all-green; if an induced-drift scratch copy is available, confirm each reported diff kind renders with its DIFF_LABEL text",
-        "the floor, both sides: replay tables + validate as the no-capability session (403 PERMISSION_DENIED naming manage_platform_settings) and import + refresh-catalog as the same session (403 naming manage_metadata — FEDERATION_WRITE_CAPABILITY), plus one anonymous probe of each family (401 UNAUTHENTICATED, decided before any service lookup); also probe the UI import door's floor: the no-capability session's PUT /api/v1/meta/object/<name> refuses ('Rewriting stored metadata requires the `manage_metadata` capability')",
+        "the floor, both sides: replay tables + validate as the no-capability session (403 PERMISSION_DENIED naming manage_platform_settings) and import + refresh-catalog as the same session (403 naming manage_metadata — FEDERATION_WRITE_CAPABILITY), plus one anonymous probe of each family (401 UNAUTHENTICATED, decided before any service lookup); also probe the UI import door's floor: the no-capability session's PUT /api/v1/meta/object/<name> refuses 403 FORBIDDEN 'Saving a metadata item requires the `manage_metadata` capability.' (packages/metadata-core/src/meta-write-capability.ts#metaWriteCapabilityVerdict, the item save door's sentence; 'Rewriting stored metadata …' is POST /meta/_migrate-stored's, and the federation routes answer PERMISSION_DENIED)",
         "run the objectui api.test.ts 503 cases (acceptance[6]). ONLY on a deliberately unwired boot (see knownGaps), also drive the Tables tab into the 503 and record that the designed 'Federation is not enabled on this server.' state renders"
       ],
       "acceptance": [
         {
-          "clause": "the panel renders for a FEDERATED datasource only: showcase_external (schemaMode external/validate-only) shows the External Datasource panel with Tables + Validation tabs and the read-only pill; a managed datasource shows no such panel — and an unsaved draft shows the save-first guidance instead of firing name-less REST calls",
+          "clause": "the panel renders for a FEDERATED datasource only: showcase_external (schemaMode external/validate-only) shows the External Datasource panel with Tables + Validation tabs and the read-only pill; a managed datasource shows no such panel — and an unsaved draft fires no name-less REST call (no /datasources//external request). The save-first guidance itself is not reachable at the pins: datasource create mode renders no preview (objectui ResourceEditPage.tsx CREATE_MODE_CANVAS_TYPES is object / report / dataset / doc), and the list page's 'New datasource' dialog is a separate form without the panel, so score the guidance half not-run, never fail (QA run #24615)",
           "oracle": "screenshot",
-          "verify": "the panel on showcase_external vs its absence on a managed datasource (DatasourcePreview.tsx; the unsaved-draft guard ExternalDatasourcePanel.tsx)",
-          "evidence": "the two screenshots (+ the unsaved-draft state if a wizard draft is on hand)"
+          "verify": "the panel on showcase_external vs its absence on a managed datasource (DatasourcePreview.tsx; the unsaved-draft guard ExternalDatasourcePanel.tsx); for the draft half, the network trace of /_console/apps/setup/metadata/datasource/new carries no /datasources//external call",
+          "evidence": "the two screenshots (+ the create route's network trace)"
         },
         {
           "clause": "SchemaBrowser mirrors the API exactly: the rendered table list equals GET .../external/tables name-for-name with per-table columnCount (customers/orders, 7 each on the provisioned stock fixture — fixtures.requires[0]) — the network response is the authority, not the panel; data loads on mount + explicit Refresh only, never a timer",
@@ -1890,7 +1947,7 @@
         {
           "clause": "Refresh catalog round-trips: the header button fires POST .../external/refresh-catalog (a federation WRITE — manage_metadata floor), and the returned catalog.snapshotAt renders as the snapshot timestamp",
           "oracle": "network",
-          "verify": "the captured POST + the rendered timestamp (ExternalDatasourcePanel.tsx,108-123; route at external-datasource-routes.ts)",
+          "verify": "the captured POST + the rendered timestamp (objectui ExternalDatasourcePanel.tsx: its handleRefresh callback, and the header's catalog.snapshotAt span; route at external-datasource-routes.ts)",
           "evidence": "the network capture + the header screenshot"
         },
         {
@@ -1956,6 +2013,12 @@
           "date": "2026-10-13",
           "change": "fixtures.requires[0], acceptance[1].clause, knownGaps[2], acceptance[4] (clause and verify) and source[1] (stale spec, #23166 A1 / A4; parked on #23121, carried by #23169). The provisioned fixture tables carry 7 columns each, and the API and the panel agree, while the DDL declares 5 fields; the clause now reads the count off the API. At objectui 1fb1ced36243, still this repo's .objectui-sha, ValidationPanel's label map (now DIFF_LABEL_KEY) labels 'unreachable', so all 10 diff kinds render labelled and the expected-fail caveat is gone. QA run #23166 passed both clauses",
           "ref": "#23169"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "checklist-accuracy findings of QA run #24615 (18.0 sweep round 2, ba4afcc2, driven by hand at the console pin 4016370a; wave anchor #24579 §3, round 2 part 2), re-read in objectui at the shipped pin 12dc7b47c340. steps[1]: no entry from the Setup list reaches the panel (DatasourceResourcePage rows never open the item), so the step names the engine edit route. acceptance[0] (clause, verify, evidence): the save-first guidance is unreachable (datasource is not in CREATE_MODE_CANVAS_TYPES), so the clause scores the observable half, no name-less call, and records the guidance half not-run. steps[7]: the quoted refusal was POST /meta/_migrate-stored's; the item save door answers 403 FORBIDDEN 'Saving a metadata item requires…'. knownGaps[3] carries #24615's drift recipe that needs no scratch copy; knownGaps[4] (new) records that a repeated import answers 201 and overwrites, which no clause scores. acceptance[3].verify's comma-range line citation names the handler instead (the line-citation rot class). Not loosened: every other clause and negative is unchanged",
+          "ref": "#24717"
         }
       ]
     },
@@ -1964,7 +2027,7 @@
       "title": "Inbound mail (new on v18): with requires:[\"mailbox\"] and an IMAP mailbox, a synced message is stored as sys_mail_message and associated with the record whose mailAssociation email field matches (inline forwards by an org member match on the original participants), attachments land as sys_file + sys_attachment, and an unmatched message is visible only to manage_mailboxes holders",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1975,10 +2038,10 @@
         "app": "showcase",
         "requires": [
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
-          "a scratch app with requires:[\"mailbox\"], a contact-like object with an email field marked mailAssociation, and an IMAP mailbox the sync job can reach (a local IMAP double) — there is NO HTTP ingest door, so this needs the IMAP sync composed"
+          "a scratch app that mounts MailboxServicePlugin WITH its IMAP sync composed (new MailboxServicePlugin({ imap: { accountFor } }) — requires: [\"mailbox\"] alone constructs the plugin with no options, so nothing is synced), a contact-like object with an email field marked mailAssociation (no object under examples/ has one), and an IMAP mailbox the sync job can reach (a local IMAP double) — there is NO HTTP ingest door"
         ],
         "knownGaps": [
-          "no in-repo app composes the mailbox service and no IMAP double ships with a stock boot — the live clauses are blocked(fixture) until one does; the Tier-1 pins compose a kernel with an IMAP double and are the evidence in the meantime"
+          "the showcase DOES compose the mailbox service: its requires lists 'mailbox', so MailboxServicePlugin loads and GET /api/v1/data/sys_mailbox, sys_mail_message and sys_mail_association answer 200 with total 0 (QA run #24558). But the capability boot constructs it with no options, so no IMAP sync runs (packages/services/service-mailbox/src/mailbox-service-plugin.ts#MailboxServicePlugin; at info level the boot says 'no IMAP account source is composed'). What no in-repo app provides is the IMAP sync composition, an object with a mailAssociation email field, and an IMAP double (none ships; Python's standard library has only the imaplib client). Until a run provides all three, the live clauses are blocked(fixture); the Tier-1 pins compose a kernel with an IMAP double and are the evidence in the meantime"
         ]
       },
       "steps": [
@@ -2028,6 +2091,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "checklist-accuracy findings of QA run #24558 (since:v18, 5b14b7f3; its first comment; wave anchor #24579). knownGaps[0] said no in-repo app composes the mailbox service; the showcase requires 'mailbox' and serves the sys_mail_* objects, and what is missing is the IMAP sync composition, a mailAssociation field and an IMAP double, so knownGaps[0] and fixtures.requires[1] now say that. No clause changed",
+          "ref": "#24717"
         }
       ]
     },
@@ -2036,7 +2105,7 @@
       "title": "Messaging and integration answers on v18: a notify from a system-context run stores the organization of the record it is about (never NULL), mark-read writes a receipt only for notifications delivered to the caller, redelivering for an inactive or deleted webhook subscription is 409 DELIVERY_NOT_ELIGIBLE, and a declarative MCP stdio connector with a relative command boots healthy from another directory",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2048,14 +2117,14 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a showcase notify flow (integration-system.notify-inbox-delivery names one)",
-          "the showcase outbound webhook (shipped inactive) with one delivery"
+          "a webhook delivery in a TERMINAL state for a webhook that is then switched off. The shipped showcase_task_changed (examples/app-showcase/src/automation/webhooks/index.ts#TaskChangedWebhook, isActive: false) can supply none: the dispatcher skips an inactive webhook, so it never has a delivery (packages/plugins/plugin-webhooks/src/redeliver-guard.ts — the guard asks the dispatcher's own `active === true` predicate). Recipe (QA run #24558): create an ACTIVE webhook pointing at a local sink the server can reach (POST /api/v1/data/sys_webhook), let one delivery reach success, failed or dead, then deactivate or delete the webhook"
         ]
       },
       "steps": [
         "fire the notify flow from a system-context run; GET /api/v1/data/sys_notification and read organization_id",
         "as the member POST /api/v1/notifications/read with the ADMIN's notification id; read readCount",
-        "POST /api/v1/webhooks/redeliver for a delivery of the inactive webhook",
-        "from the repo root run `os verify --app examples/app-showcase` (or boot from another cwd) and read the MCP connector health"
+        "POST /api/v1/webhooks/redeliver for that terminal delivery of the now-inactive webhook. ⛔ Not for a delivery still 'pending': it answers DELIVERY_NOT_ELIGIBLE too, for its non-terminal status rather than the webhook's switch (packages/services/service-messaging/src/http-outbox.ts#assertHttpRedeliverable), so it would read as a pass for the wrong reason",
+        "from the repo root run `os verify --app examples/app-showcase` (or boot from another cwd) and read the MCP connector health — no live clause scores this leg, only acceptance[0]'s pin (mcp-stdio-cwd.test.ts), so record the reading as corroboration, never as a clause verdict (QA run #24558)"
       ],
       "acceptance": [
         {
@@ -2099,6 +2168,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "checklist-accuracy findings of QA run #24558 (since:v18, 5b14b7f3; its first comment; wave anchor #24579). fixtures.requires[2] asked for the shipped inactive webhook 'with one delivery', which cannot exist: an inactive webhook is never dispatched. It now carries #24558's recipe (an active webhook to a local sink, a terminal delivery, then switch it off), and steps[2] warns off a pending row, which answers the same code for another reason. steps[3] says its MCP leg is scored by acceptance[0]'s pin only. No clause changed",
+          "ref": "#24717"
         }
       ]
     }

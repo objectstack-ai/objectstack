@@ -66,6 +66,19 @@ export type {
   StoredMetadataBodyMigrationEngine,
   StoredMetadataBodyMigrationReport,
 } from './stored-metadata-body-migration.js';
+// [#24693] The one-off rewrite of the mail-log bodies this writer copied in
+// clear into `sys_audit_log` / `sys_activity` before it masked them, the pure
+// planners the CLI command (`os migrate audit-mail-bodies`) drives, and the
+// one mask both it and the writer apply.
+export { maskMailLogBodyCopy } from './mail-log-body-mask.js';
+export {
+  migrateMailLogBodyCopies,
+  planMailLogBodyAuditRowPatch,
+  planMailLogBodyActivityRowPatch,
+  MAIL_LOG_BODY_COPY_OBJECTS,
+  MAIL_LOG_BODY_MIGRATION_PAGE_SIZE,
+} from './mail-log-body-migration.js';
+export type { MailLogBodyMigrationEngine, MailLogBodyMigrationReport } from './mail-log-body-migration.js';
 // [ADR-0139 E6] The stored-row backfill of `sys_activity`'s two writer-stamped
 // read-rule columns, and the one planner it, the CRUD mirror and the
 // before-insert hook stamp by. The CLI command

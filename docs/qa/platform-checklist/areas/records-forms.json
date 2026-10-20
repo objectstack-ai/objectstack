@@ -930,7 +930,7 @@
       "title": "Grid-level conditional rules: row-scoped requiredWhen and parent-scoped readonlyWhen in the inline line-item grid",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -997,7 +997,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/grid-conditional-rules.spec.ts, e2e/live/grid-parent-rules.spec.ts, e2e/live/grid-file-upload.spec.ts",
+        "ref": "objectui: e2e/live/grid-conditional-rules.spec.ts (acceptance[0]'s inline-flag half ONLY — on the New Invoice dialog's first line, Description carries no required flag at Qty 2, is flagged at Qty 100 and clears once filled; the spec adds no second row and never saves, so neither the unflagged sibling row nor the blocked save is pinned), e2e/live/grid-parent-rules.spec.ts, e2e/live/grid-file-upload.spec.ts (stale at the pin, see automated.stale). No pin covers acceptance[1] or acceptance[4]",
         "stale": {
           "since": "2026-10-19",
           "observedIn": "#24598",
@@ -1049,6 +1049,12 @@
           "date": "2026-10-20",
           "change": "automated.stale added — §2 theme \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 at the sweep's console pin 4016370af3c9: grid-file-upload.spec.ts failed as a stale spec (a strict-mode locator collision; cause from QA run #24572, #24616 drove the item by hand); grid-conditional-rules.spec.ts and grid-parent-rules.spec.ts passed and stay cited. Re-read at the shipped pin 12dc7b47c340: the spec and the colliding description are unchanged. No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep), one of the leftovers round 6 (#24697) named. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: grid-conditional-rules.spec.ts passed, but it flags the Description cell on one row and never saves, so #24598 scored acceptance[0] not-run (round 1's QA run #24572 had scored it pass on that spec). The ref now says the spec claims acceptance[0]'s inline-flag half only, and that no pin covers acceptance[1] or [4]; QA run #24616 drove acceptance[1], [3] and [4] by hand. The spec is byte-identical at the shipped pin 12dc7b47c340. grid-parent-rules.spec.ts and grid-file-upload.spec.ts stay cited as they were, and the automated.stale record (grid-file-upload.spec.ts) is unchanged. No clause changed",
+          "ref": "#24723"
         }
       ]
     },
@@ -1175,7 +1181,7 @@
       "title": "Master + line items save as one atomic batch, with server-side roll-up",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1216,7 +1222,7 @@
         {
           "clause": "invoice.total is a SERVER-side roll-up: computed on the atomic create, recomputed when a line is added and again when it is deleted",
           "oracle": "api",
-          "verify": "total == sum(line.amount) after each mutation (pinned by objectui e2e/live/summary-rollup.spec.ts: computed on atomic create; recomputes on child add/delete)",
+          "verify": "total == sum(line.amount) after each mutation. No pin covers this clause: objectui e2e/live/summary-rollup.spec.ts, cited here until revision 5, asserts a server roll-up on another carrier (showcase_project's SUM / COUNT over showcase_task, written through a direct /api/v1/batch), never invoice.total",
           "evidence": "the three total reads"
         },
         {
@@ -1248,7 +1254,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/master-detail.spec.ts, e2e/live/summary-rollup.spec.ts, e2e/live/form-view-subforms.spec.ts",
+        "ref": "objectui: e2e/live/master-detail.spec.ts, e2e/live/form-view-subforms.spec.ts. Dropped at revision 5: e2e/live/summary-rollup.spec.ts, which rolls showcase_task's estimate_hours up into showcase_project (total_estimate as a SUM, task_count as a COUNT) through a direct POST /api/v1/batch, reading both back after that create and again after a child delete. It never opens the invoice form and never reads invoice.total, the roll-up acceptance[2] scores, so it asserts no clause of this item (Tier 1 run #24598 scored acceptance[2] not-run on it for that carrier mismatch)",
         "stale": {
           "since": "2026-10-19",
           "observedIn": "#24598",
@@ -1288,6 +1294,12 @@
           "date": "2026-10-20",
           "change": "automated.stale added — §2 theme \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 at the sweep's console pin 4016370af3c9: form-view-subforms.spec.ts failed as a stale spec (a strict-mode locator collision; cause from QA run #24572, #24616 drove the item by hand); master-detail.spec.ts and summary-rollup.spec.ts passed and stay cited. Re-read at the shipped pin 12dc7b47c340: the spec and the colliding description are unchanged. No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "automated.ref and acceptance[2].verify corrected — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep), one of the leftovers round 6 (#24697) named. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: summary-rollup.spec.ts passed 2/2, but it rolls showcase_task up into showcase_project through a direct batch and never reads invoice.total, so #24598 scored acceptance[2] not-run on it (round 1's QA run #24572 had scored acceptance[2] pass on it). It asserts no clause of this item, so it is dropped from the ref and named there, and acceptance[2].verify no longer says it pins the clause. The spec is byte-identical at the shipped pin 12dc7b47c340. QA run #24616 drove the invoice.total roll-up by hand. master-detail.spec.ts and form-view-subforms.spec.ts stay cited, and the automated.stale record (form-view-subforms.spec.ts) is unchanged. No clause text changed",
+          "ref": "#24723"
         }
       ]
     },
@@ -3467,7 +3479,7 @@
       "title": "Object lifecycle hooks fire on the write path with the right timing, gate, async and error semantics — driven over /api/v1/data/*, oracled by the record effect and the log line",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3572,8 +3584,8 @@
         {
           "clause": "a condition that cannot be evaluated FAILS CLOSED (#4775): the write is ABORTED, not silently skipped — and it is NOT softened by onError:'log' nor fire-and-forgotten, because the condition gate runs OUTSIDE the async/retry/onError wrappers",
           "oracle": "api",
-          "verify": "scratch hook whose condition COMPILES but cannot be evaluated at runtime (e.g. int(record.name) > 0, written to a row whose name is not numeric); a write to that object is refused and the row does not land (hook-wrappers.ts: conditionFn throws outside runWithErrorPolicy). The 18.0 wire envelope is a generic 500 {code: 'INTERNAL_ERROR'}, with the class only in the server log ('[REST] Unhandled error: HookConditionError …') — #24619 row (b), open, tracks the coded refusal it should be. Until that lands score the clause on the refusal, the absent row and the log line, and record the 500 against #24619 rather than as a new finding. An UNCOMPILABLE condition never reaches this gate: it is refused at authoring (PUT /api/v1/meta/hook → 422 INVALID_METADATA, expression-invalid), so it cannot stand in for the runtime fail-closed probe",
-          "evidence": "the refusal (status + body) + the HookConditionError server-log line + a post-attempt count showing no row"
+          "verify": "scratch hook whose condition COMPILES but cannot be evaluated at runtime (e.g. int(record.name) > 0, written to a row whose name is not numeric); a write to that object is refused and the row does not land (hook-wrappers.ts: conditionFn throws outside runWithErrorPolicy). The wire envelope is a coded refusal: 400 {code: 'VALIDATION_ERROR'}, whose error text names the hook and the CEL fault (\"Hook 'NAME' could not evaluate its condition (FAULT) — operation aborted.\") and never the condition source, and no '[REST] Unhandled error' line is logged for it (#24662 retired the generic 500 INTERNAL_ERROR that #24619 row (b) recorded). A 500 INTERNAL_ERROR here is a FAIL. An UNCOMPILABLE condition never reaches this gate: it is refused at authoring (PUT /api/v1/meta/hook → 422 INVALID_METADATA, expression-invalid), so it cannot stand in for the runtime fail-closed probe",
+          "evidence": "the refusal (status 400 + code VALIDATION_ERROR + the hook named in its error text) + a post-attempt count showing no row"
         },
         {
           "clause": "two hooks on the SAME object+event run lowest-priority-first: scratch hooks at priority 10 and 90 log in that order on one write (hook-binder passes priority to engine.registerHook; the engine orders by it, lower first)",
@@ -3649,6 +3661,12 @@
         },
         {
           "revision": 7,
+          "date": "2026-10-19",
+          "change": "acceptance[8] (verify, evidence) follow the shipped envelope. An unevaluable hook condition's refusal is now a coded 400 VALIDATION_ERROR whose error text names the hook and the CEL fault, and no '[REST] Unhandled error' line is logged for it (#24662, split from #24619 row (b)). The 500 INTERNAL_ERROR that revision 6 recorded is retired and is now a FAIL; the server-log evidence goes with it. The clause is unchanged: the write is still refused and the row still absent",
+          "ref": "#24662"
+        },
+        {
+          "revision": 8,
           "date": "2026-10-20",
           "change": "fixture roster only, no clause moved — the showcase gained three hooks, the paid-invoice line guards on showcase_invoice_line (beforeInsert, beforeUpdate, beforeDelete; each throws a user-facing refusal when the line's invoice is paid). Three stated facts they made false ('the five seeded showcase hooks', 'beforeDelete has NO seeded showcase hook', 'the one seeded hook that throws') now name them, and say why they do not close this item's beforeDelete variant or abort-rollback clause: this item does not drive them, and the clauses' verify steps name scratch hooks.",
           "ref": "#24684"
