@@ -161,7 +161,9 @@ type DeclaredRuleScope = string | typeof DEPLOYMENT_WIDE_SCOPE;
  * typed marker that replaced the organization-less (`organization_id: null`)
  * projection, in the shape of the declared webhooks' `deploymentWide` (the
  * epic's ruling A on the walled shape of a declared webhook, record
- * 6278609968). It carries no `organization_id` at all.
+ * 6278609968). It carries no `organization_id` at all. The marker itself is
+ * declared on the spec contract (`SharingRuleRow.deploymentWide`); this type
+ * narrows it to present.
  */
 export interface DeploymentWideSharingRule extends SharingRuleRow {
   readonly deploymentWide: true;

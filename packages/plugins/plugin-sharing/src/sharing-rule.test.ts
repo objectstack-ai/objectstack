@@ -1296,6 +1296,18 @@ describe('[#7761] getRule by-id is scoped to the caller organization', () => {
     expect(grantsOf(seededId)).toEqual([]);
   });
 
+  it('an organization-less row is unreachable BY ID — delete is a no-op that leaves the row AND its grants intact', async () => {
+    // The successor of the retired #7795 delete guard: the row is no longer
+    // refused by class, it is simply not the org admin's to address. Grants
+    // are materialised under BOOT (this double registers no organization
+    // object, so the row sweeps the deployment) so the no-op has something to lose.
+    await rules.evaluateRule(seededId, BOOT);
+    expect(grantsOf(seededId)).toHaveLength(1);
+    await rules.deleteRule(seededId, ORG1_ADMIN);
+    expect(engine._tables.sys_sharing_rule.find((r) => r.id === seededId)).toBeTruthy();
+    expect(grantsOf(seededId)).toHaveLength(1);
+  });
+
   // ── unchanged behaviour ──────────────────────────────────────────────
 
   it('the caller’s OWN org rule is still fully addressable by id', async () => {
