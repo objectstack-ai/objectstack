@@ -15,7 +15,6 @@
  * | recipient_type | membership table    | recipient column | read by                                   |
  * |----------------|---------------------|------------------|-------------------------------------------|
  * | `position`     | `sys_user_position` | `position`       | `PositionGraphService` (source of truth, ADR-0057 D4) |
- * | `position`     | `sys_member`        | `role`           | `PositionGraphService` (transition source, ADR-0057 D4 addendum) |
  * | `team`         | `sys_team_member`   | `team_id`        | `TeamGraphService.expandUsers`            |
  *
  * So when one of those rows is inserted, deleted, or updated in a column the
@@ -31,6 +30,12 @@
  * membership table instead. `user` (a literal id), `queue` (expands to nobody)
  * and `field` (per record, re-derived by the record's own write) have no
  * membership table to watch.
+ *
+ * The position expansion also unions `sys_member.role`, the ADR-0057 D4
+ * transition source. The holder check reads it — a user who still holds the
+ * position there keeps the rule's grants when an assignment row goes — but its
+ * writes are not watched here: its values are the closed set of membership
+ * grades (ADR-0108), not business positions.
  *
  * ## Cost: scoped to one user and to the rules that name the recipient
  *
@@ -73,8 +78,8 @@
  * delete still knows whose membership it removed.
  *
  * System writes are NOT skipped. The realistic producers of these rows are an
- * HRIS or directory sync, a seed, and better-auth's own adapter (which writes
- * through the engine as a system context) — skipping them would leave the
+ * HRIS or directory sync, a seed, and — for team membership — better-auth's own
+ * adapter, which writes through the engine as a system context. Skipping them would leave the
  * invariant false on the paths most likely to exercise it. The rule-hook
  * materialisation reached the same conclusion (`rule-hooks.ts`, the retired
  * `isSystem` skip).
@@ -127,8 +132,6 @@ export interface RecipientMembershipSource {
  *    for an organization rule, `organization_id`; it projects `user_id` and
  *    drops a holder outside `valid_from` / `valid_until` (ADR-0091 D2), so a
  *    change to the window moves the holding as surely as a change of user.
- *  - `sys_member` — the same service unions `role` as the position
- *    transition source, filtered by `organization_id` the same way.
  *  - `sys_team_member` — `TeamGraphService.expandUsers` filters on `team_id`
  *    alone, with no organization scope.
  */
@@ -139,13 +142,6 @@ export const RECIPIENT_MEMBERSHIP_SOURCES: readonly RecipientMembershipSource[] 
     recipientColumn: 'position',
     organizationScoped: true,
     expansionColumns: ['user_id', 'position', 'organization_id', 'valid_from', 'valid_until'],
-  },
-  {
-    object: 'sys_member',
-    recipientType: 'position',
-    recipientColumn: 'role',
-    organizationScoped: true,
-    expansionColumns: ['user_id', 'role', 'organization_id'],
   },
   {
     object: 'sys_team_member',

@@ -854,9 +854,8 @@ export class SharingServicePlugin implements Plugin {
             bindBusinessUnitTreeRecompute(engine, this.ruleService, ctx.logger as any);
 
             // …and a rule whose recipient is a POSITION or a TEAM changes
-            // audience when a membership row (`sys_user_position`, the
-            // `sys_member.role` transition source, `sys_team_member`) is
-            // written. Each such write re-evaluates the rules naming that
+            // audience when a membership row (`sys_user_position`,
+            // `sys_team_member`) is written. Each such write re-evaluates the rules naming that
             // recipient for the one user the row names, so a new holder gains
             // the rule's grants and a former holder loses them before the write
             // returns. Bound outside the rebind seam for the same reason as the

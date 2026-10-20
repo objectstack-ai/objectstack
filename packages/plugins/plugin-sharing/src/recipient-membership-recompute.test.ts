@@ -5,8 +5,8 @@
  * user when the membership behind the recipient changes
  * (`recipient-membership-recompute.ts`).
  *
- * The invariant: a write to `sys_user_position`, to the `sys_member.role`
- * transition source, or to `sys_team_member` re-evaluates every sharing rule
+ * The invariant: a write to `sys_user_position` or to `sys_team_member`
+ * re-evaluates every sharing rule
  * whose recipient the row names, for the user the row names, before the write
  * returns — a new holder gains the rule's grants, a former holder loses them,
  * and no other user's grants and no other rule move.
@@ -360,15 +360,16 @@ describe('position assignment writes re-evaluate position-recipient rules for th
   });
 });
 
-describe('the membership role transition source and team membership move the holding too', () => {
-  it('a membership role naming the position grants, and a role change away from it revokes', async () => {
+describe('team membership writes re-evaluate team-recipient rules, and the transition source still counts', () => {
+  it('a holder who still holds the position through the membership role keeps the grants when the assignment goes', async () => {
     const t = await boot();
-    await t.ql.insert('sys_member', { id: 'm_1', organization_id: ORG_A, user_id: 'u_member', role: 'eu_sales' }, { context: SYSTEM } as never);
-    expect(await t.grantsOf('u_member')).toEqual(EU_GRANTS);
+    await t.driver.create('sys_member', { id: 'm_1', organization_id: ORG_A, user_id: 'u_both', role: 'eu_sales' } as never);
+    await t.assign('up_both', 'u_both', 'eu_sales');
+    expect(await t.grantsOf('u_both')).toEqual(EU_GRANTS);
 
-    await t.ql.update('sys_member', { id: 'm_1', role: 'member' }, { context: SYSTEM } as never);
+    await t.ql.delete('sys_user_position', { where: { id: 'up_both' }, context: SYSTEM } as never);
 
-    expect(await t.grantsOf('u_member')).toEqual([]);
+    expect(await t.grantsOf('u_both')).toEqual(EU_GRANTS);
   });
 
   it('a new team member gains the team rule\'s grants, and a removed one loses them', async () => {
@@ -416,7 +417,6 @@ describe('binding and write classification', () => {
   it('watches exactly the membership tables the position and team expansions read', () => {
     expect(RECIPIENT_MEMBERSHIP_SOURCES.map((s) => `${s.object}.${s.recipientColumn}->${s.recipientType}`)).toEqual([
       'sys_user_position.position->position',
-      'sys_member.role->position',
       'sys_team_member.team_id->team',
     ]);
   });
@@ -434,7 +434,7 @@ describe('binding and write classification', () => {
   });
 
   it('pins a rule to the organizations of the rows it can read', () => {
-    const [positions, , teams] = RECIPIENT_MEMBERSHIP_SOURCES;
+    const [positions, teams] = RECIPIENT_MEMBERSHIP_SOURCES;
     const orgs = new Set<string | null>([ORG_A]);
     expect(ruleReadsRowsOf(positions, { organization_id: ORG_A }, orgs)).toBe(true);
     expect(ruleReadsRowsOf(positions, { organization_id: ORG_B }, orgs)).toBe(false);
