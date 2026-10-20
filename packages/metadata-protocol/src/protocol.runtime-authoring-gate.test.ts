@@ -3777,7 +3777,12 @@ describe('runtime authoring gate on VIEW writes that name no package — the who
         // universe is the registry FOLDED with the store, so it is there.
         rows.set(keyOf({ type: 'object', name: 'tenant_ticket', organization_id: null, state: 'active' }), {
             id: 'r_obj', type: 'object', name: 'tenant_ticket', organization_id: null, state: 'active',
-            metadata: JSON.stringify(object('tenant_ticket')),
+            metadata: JSON.stringify({
+                name: 'tenant_ticket',
+                label: 'Tenant Ticket',
+                sharingModel: 'private',
+                fields: { title: { type: 'text', label: 'Title' } },
+            }),
         });
         const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
         return { protocol, rows };
@@ -3873,7 +3878,7 @@ describe('runtime authoring gate on VIEW writes that name no package — the who
         });
 
         // The boot path runs no authoring rule.
-        await expect(protocol.loadMetaFromDb()).resolves.toMatchObject({ errors: 0, invalid: 0 });
+        await expect(protocol.loadMetaFromDb()).resolves.toMatchObject({ loaded: 2, errors: 0, invalid: 0 });
 
         // The next save is a write, and is judged.
         const err = await saveView(protocol, stored).catch((e: any) => e);
