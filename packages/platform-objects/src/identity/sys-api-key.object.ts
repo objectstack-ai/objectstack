@@ -135,6 +135,13 @@ export const SysApiKey = ObjectSchema.create({
       method: 'PATCH',
       target: '/api/v1/data/sys_api_key/{id}',
       bodyExtra: { revoked: true },
+      // Offered on a live key only, Restore on a revoked one, in the form of
+      // `sys_oauth_application`'s Disable / Enable pair: a null `revoked`
+      // reads as live. Display only, no door reads `visible`; who may restore
+      // a key a forced password reset revoked is the server's
+      // (`api-key-restore-guard.ts` in plugin-auth). Pinned in
+      // `action-state-visibility.test.ts`.
+      visible: 'has(record.revoked) && record.revoked != true',
       confirmText: 'Revoke this API key? Any clients using it will immediately lose access.',
       successMessage: 'API key revoked',
       refreshAfter: true,
@@ -150,6 +157,7 @@ export const SysApiKey = ObjectSchema.create({
       method: 'PATCH',
       target: '/api/v1/data/sys_api_key/{id}',
       bodyExtra: { revoked: false },
+      visible: 'has(record.revoked) && record.revoked == true',
       confirmText: 'Restore this revoked API key? Existing clients holding the key will regain access.',
       successMessage: 'API key restored',
       refreshAfter: true,

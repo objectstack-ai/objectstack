@@ -43,6 +43,8 @@ export const FIXTURE_NAMES = {
   workspaceName: 'Upgrade Harness Workspace',
   sharingRule: 'upgrade_harness_red_projects',
   webhook: 'showcase_task_changed',
+  /** The webhook an 18.0.0 admin authors, because 18.0.0 seeds no row for the declared one. */
+  authoredWebhook: 'upgrade_harness_task_changed',
   shareLinkObject: 'showcase_client_brief',
 } as const;
 
@@ -149,12 +151,44 @@ export async function useTheInstall(stack: VerifyStack): Promise<void> {
   // A flow credential: an inbound flow saved through the metadata door.
   await expectStatus(await stack.apiAs(adminTok, 'PUT', `/meta/flow/${FIXTURE_NAMES.flow}`, inboundFlow()), [200, 201], 'flow with a hook secret');
 
-  // The declared webhook's seeded row, customized the way the showcase's docblock
-  // tells an admin to (activate it), and a task change it delivers.
+  // The declared webhook, switched on the way the release's showcase docblock
+  // tells an admin to, and a task change it delivers. An 18.0 pre-release
+  // seeded a mirror row, and the admin activated that row. 18.0.0 seeds none
+  // (step 5): the switch is the declaration's activation row, and the admin
+  // authors a webhook of the organization's own under a new name, so
+  // `sys_webhook` still holds the row an 18.0.0 install holds.
   const hooks = rowsOf(await expectStatus(await stack.apiAs(adminTok, 'GET', `/data/sys_webhook?name=${FIXTURE_NAMES.webhook}`), [200], 'webhook list'));
   const hook = hooks.find((h: any) => h?.name === FIXTURE_NAMES.webhook);
-  if (!hook?.id) throw new Error(`populate: the declared webhook ${FIXTURE_NAMES.webhook} has no seeded row`);
-  await expectStatus(await stack.apiAs(adminTok, 'PATCH', `/data/sys_webhook/${hook.id}`, { active: true }), [200], 'activate webhook');
+  if (hook?.id) {
+    await expectStatus(await stack.apiAs(adminTok, 'PATCH', `/data/sys_webhook/${hook.id}`, { active: true }), [200], 'activate webhook');
+  } else {
+    await expectStatus(
+      await stack.apiAs(adminTok, 'POST', `/security/_activation/webhook/${FIXTURE_NAMES.webhook}`, { enabled: true }),
+      [200, 201],
+      'activate the declared webhook',
+    );
+    const authored = {
+      name: FIXTURE_NAMES.authoredWebhook,
+      object: 'showcase_task',
+      triggers: ['update'],
+      url: 'https://example.invalid/upgrade-harness',
+      method: 'POST',
+    };
+    await expectStatus(
+      await stack.apiAs(adminTok, 'POST', '/data/sys_webhook', {
+        name: authored.name,
+        label: 'Upgrade harness: task updates',
+        object_name: authored.object,
+        triggers: authored.triggers,
+        url: authored.url,
+        method: 'post',
+        active: true,
+        definition_json: JSON.stringify(authored),
+      }),
+      [200, 201],
+      'author a webhook',
+    );
+  }
 
   // Record use: activity, audit and the webhook's delivery tail.
   const projects = rowsOf(await expectStatus(await stack.apiAs(adminTok, 'GET', '/data/showcase_project'), [200], 'project list'));

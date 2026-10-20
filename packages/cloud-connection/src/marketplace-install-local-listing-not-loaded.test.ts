@@ -43,7 +43,7 @@ import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { LocalManifestSource, type InstalledManifestEntry } from './local-manifest-source.js';
-import { installerGrantRows, INSTALLER_USER_ID, INSTALLER_SET } from './install-local-principal.fixtures.js';
+import { answerDefaultOrganizationRead, installerGrantRows, INSTALLER_USER_ID, INSTALLER_SET } from './install-local-principal.fixtures.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 type Handler = (c: any) => Promise<any>;
@@ -82,8 +82,12 @@ function ledgerEntry(manifest: { id: string; version: string }): InstalledManife
     };
 }
 
-/** A tenant administrator that does NOT hold `manage_metadata`: the narrowed caller. */
+/**
+ * A tenant administrator that does NOT hold `manage_metadata`: the narrowed caller. Its
+ * grant is owned by {@link MEMBER_ORG}, the organization its session is active in.
+ */
 const MEMBER_ID = 'usr_member';
+const MEMBER_ORG = 'org_acme';
 const MEMBER_GRANTS: Record<string, unknown[]> = {
     sys_user: [{ id: MEMBER_ID, email: 'member@objectstack.test' }],
     sys_member: [],
@@ -91,7 +95,7 @@ const MEMBER_GRANTS: Record<string, unknown[]> = {
     sys_position: [],
     sys_metadata_activation: [],
     sys_position_permission_set: [],
-    sys_user_permission_set: [{ id: 'ups_member', user_id: MEMBER_ID, permission_set_id: 'ps_member', permission_set: 'organization_admin', organization_id: null }],
+    sys_user_permission_set: [{ id: 'ups_member', user_id: MEMBER_ID, permission_set_id: 'ps_member', permission_set: 'organization_admin', organization_id: MEMBER_ORG }],
     sys_permission_set: [{ id: 'ps_member', name: 'organization_admin', system_permissions: ['setup.access', 'manage_org_users'] }],
 };
 
@@ -119,6 +123,9 @@ async function restartWith(manifests: Array<{ id: string; version: string }>, di
         async find(object: string, query?: any): Promise<unknown[]> {
             const granted = grants();
             if (Object.prototype.hasOwnProperty.call(granted, object)) return granted[object]!;
+            // The resolver's Default Organization read: the operator's grant is owned by it.
+            const defaultOrganization = answerDefaultOrganizationRead(object, query, []);
+            if (defaultOrganization) return defaultOrganization;
             reads.push(object);
             if (!objects.has(object)) throw new Error(`Object '${object}' not found`);
             const where: Record<string, unknown> = query?.where ?? {};
@@ -137,7 +144,7 @@ async function restartWith(manifests: Array<{ id: string; version: string }>, di
     const register = vi.fn((m: any) => { for (const o of m?.objects ?? []) objects.set(o.name, o); });
     const services: Record<string, unknown> = {
         manifest: { register },
-        auth: { api: { getSession: async () => ({ user: { id: caller.as === 'operator' ? INSTALLER_USER_ID : MEMBER_ID }, session: {} }) } },
+        auth: { api: { getSession: async () => ({ user: { id: caller.as === 'operator' ? INSTALLER_USER_ID : MEMBER_ID }, session: caller.as === 'operator' ? {} : { activeOrganizationId: MEMBER_ORG } }) } },
         objectql: engine,
         metadata: { getObject: async (name: string) => objects.get(name) },
     };

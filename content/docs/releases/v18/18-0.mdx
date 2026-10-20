@@ -70,12 +70,20 @@ every changeset of every `18.0.0-next.N`, in landing order. In
 CHANGELOG has an `18.0.0` section it holds 1,115 distinct entries, 340 of them
 marked breaking or narrowing. Read it with two cautions:
 
-- **A later entry can undo an earlier one.** `ae6bd1a` says "18.0 supports fresh
-  `single` installs only — `os migrate organization-ownership` refuses, and
-  `os serve` refuses a walled posture at boot"; `12d1476` and `fc34d00`, later in
-  the same section, open the ceremony and lift the walled refusal, and the
-  18.0.0 tarball does what the later entries say. `record:json` is declared by
-  `97b8e7a` and retired by `030a7b8`; it shipped only in `18.0.0-next.3`.
+- **A later entry can undo an earlier one.** In the `CHANGELOG.md` the published
+  `@objectstack/cli@18.0.0` tarball carries — the copy `node_modules` holds
+  after you install 18.0.0 — `ae6bd1a` says "18.0 supports fresh `single`
+  installs only — `os migrate organization-ownership` refuses, and `os serve`
+  refuses a walled posture at boot"; `12d1476` and `fc34d00`, later in the same
+  section, open the ceremony and lift the walled refusal, and the 18.0.0 code
+  does what the later entries say. The repository's
+  `packages/cli/CHANGELOG.md` no longer reads that way: #24912 amended the
+  released `ae6bd1a` entry in place (it now reads "the 18.0 pre-release
+  refusals of `os migrate organization-ownership` and of a walled posture at
+  boot, both lifted in 18.0.0") and `fc34d00`'s headline ("… supported on fresh
+  installs and on databases the ownership ceremony upgraded"); the 18.0.0
+  tarball keeps the old text. `record:json` is declared by `97b8e7a` and
+  retired by `030a7b8`; it shipped only in `18.0.0-next.3`.
 - **The refusal is the authority.** Every refusal this page quotes was read off
   the published 18.0.0 packages, not off the CHANGELOG: where the two differ,
   the package's own message says what the package does.
@@ -117,9 +125,10 @@ printed the numbers quoted below. Each line says how it was measured:
 - **Read off the 18.0.0 tarball** — the code or the message was found in the
   published package (`npm pack @objectstack/PKG@18.0.0`), and nothing was run.
 
-⛔ The walk was one small app on SQLite under the `single` posture. A walled
-database (`group` / `isolated`), Postgres, MySQL and Turso were not walked, and
-no upgrade of a production application was run for this page.
+⛔ The walk was one small app on SQLite, under the `single` posture, plus one
+upgrade of the same app's database created under `group` (step 4) and one of an
+`os dev` database (step 2). `isolated` databases, Postgres, MySQL and Turso were
+not walked, and no upgrade of a production application was run for this page.
 </Callout>
 
 #### 1. Move the pins
@@ -192,8 +201,10 @@ no upgrade of a production application was run for this page.
 A database that 17.x (or an `18.0.0-next.N` prerelease) created carries no
 organization-ownership marker, and 18.0.0 does not serve it until the ownership
 ceremony has certified it. A database 18.0.0 creates from empty writes its own
-birth marker and needs none of this. The command's reference is
-[`os migrate organization-ownership`](/docs/deployment/cli#os-migrate-organization-ownership).
+birth marker and needs none of this. The overview is
+[Upgrading to 18.0](/docs/upgrading#upgrading-to-180); the command's reference is
+[`os migrate organization-ownership`](/docs/deployment/cli#os-migrate-organization-ownership);
+the lines below are the walk's measured output for each step.
 
 - **Before the first 18.0.0 boot, clear the security-catalog overlays:**
   `os migrate security-catalog-overlays` lists the environment's stored
@@ -256,10 +267,17 @@ birth marker and needs none of this. The command's reference is
   the three columns. The next boot logged no drift, and the reaction read back
   from `sys_comment_reaction`. *Measured in the walk.*
 
-`os dev` runs the ceremony on its own for a local SQLite development database,
-according to the
-[CLI reference](/docs/deployment/cli#os-migrate-organization-ownership); the
-walk used `objectstack start` and did not exercise that path.
+**A development database (`os dev`).** Measured on a 17.7.0 app whose database
+17.7.0's `os dev` created: `os serve --dev` against that database file was
+refused with the ceremony named in its `--dev` form
+(`Run 'os migrate organization-ownership --dev --out PLAN' …`), and `os dev`
+18.0.0 upgraded it in place — `✓ Upgraded the development database to the v18
+organization ownership`, with a copy kept under `.objectstack/data/backups/` —
+then served it. ⚠️ **Run `os build` first:** while `dist/objectstack.json` was
+still the artifact 17.7.0's `os start` had compiled, the same `os dev` refused
+its plan with the protocol-`^17` refusal and changed nothing
+(`✗ The upgrade plan was refused, and nothing was changed.`). *Measured in the
+walk.*
 
 #### 3. Edit what 18.0.0 refuses
 
@@ -586,16 +604,16 @@ Every line here was answered by the walk's 18.0.0 server after the ceremony.
 #### 4. What 18.0.0 does not carry yet, and what it carries unlisted
 
 The v18 line keeps landing on `main`, and the version commit did not take
-everything that landed before it. Read on `main` at `a7199ef974`: 20 pending
-changesets, six of them `minor`, so the release that publishes them is
+everything that landed before it. Read on `main` at `71696121a6`: 26 pending
+changesets, ten of them `minor`, so the release that publishes them is
 **18.1.0**. They fall in two sets.
 
-**Shipped in 18.0.0, listed in no 18.0.0 CHANGELOG.** Eight of the 20 belong to
+**Shipped in 18.0.0, listed in no 18.0.0 CHANGELOG.** Eight of the 26 belong to
 commits that landed before the 18.0.0 version commit (`06cab4849a`), so their
 code is in the 18.0.0 packages while their entries will first appear in
 18.1.0's CHANGELOG. Two of them reach an upgrade:
 
-- **A production server boot with no auth secret is refused** (18.x step 7,
+- **A production `os serve` boot with no auth secret is refused** (18.x step 7,
   part 7b-3, #24845; it also stops an organization-less row drawing its
   autonumber from the `__global__` counter). Measured on 18.0.0 — `os serve`
   exited `1` before it listened:
@@ -606,7 +624,9 @@ code is in the 18.0.0 packages while their entries will first appear in
 
   Set `OS_AUTH_SECRET` to a long random value, identical across restarts and
   nodes (the walk set the older `AUTH_SECRET`, which 18.0.0 still reads); `os dev`
-  uses a development fallback. *Measured on 18.0.0.*
+  uses a development fallback. `os start` is not refused: with no secret set it
+  wrote `HOME_DIR/auth-secret` (mode `0600`) on its first run and served
+  sign-up. *Measured on 18.0.0.*
 - **A declared sharing rule served under `single` carries
   `deploymentWide: true`** where it carried `organization_id: null`, and the
   organization-less readers of sharing rules, approval units and the seed
@@ -618,19 +638,26 @@ The other six are fixes with no edit for an upgrader, among them
 `code: 'ROLE_NOT_FOUND'`
 (#24846, in the 18.0.0 `@objectstack/plugin-auth`).
 
-**Not in 18.0.0.** Twelve changesets belong to commits after the version
-commit, and only 18.1.0 carries them. Two are `minor`:
-`POST /api/v1/packages/:id/adopt-orphans` refuses a read-only package with
-`422 WRITABLE_PACKAGE_REQUIRED` (#24861; absent from the 18.0.0
-`@objectstack/runtime`), and a team record no longer lists Sessions (#24881).
+**Not in 18.0.0.** Eighteen changesets belong to commits after the version
+commit, and only 18.1.0 carries them. Six are `minor`:
+
+- **18.x step 7, part 7a-2** (#24872, merged after the cut): a grant applies only
+  in its own organization — an organization-less grant row confers nothing, and
+  the Default Organization's `admin_full_access` grant is the only
+  platform-admin anchor;
+- `os migrate apply` on an empty database writes the organization-ownership
+  birth marker (#24875);
+- `POST /api/v1/packages/:id/adopt-orphans` refuses a read-only package with
+  `422 WRITABLE_PACKAGE_REQUIRED` (#24861; absent from the 18.0.0
+  `@objectstack/runtime`);
+- on PostgreSQL, `introspectSchema` reads each table in its own schema
+  (#24920); `os lint` reports a retired `filterableFields` by name (#24878);
+  and a team record no longer lists Sessions (#24881).
+
 The rest are fixes: masked password inputs in the identity action dialogs, an
 impersonation session that a target's forced password reset no longer holds,
 `server.trustProxy` read for the vendored auth library's client address, and
 others.
-
-**18.x step 7, part 7a-2** — "a grant applies only in its own organization; the
-organization-less grant readers retire" — is an open pull request (#24872) and
-is not on `main`: neither 18.0.0 nor the pending set carries it.
 
 **The walled postures on 18.0.0, measured.** `os serve` 18.0.0 boots `group`
 and `isolated` on a fresh database (the `18.0.0-next.5` refusal of a walled
@@ -647,9 +674,17 @@ With `@objectstack/organizations@18.0.0` declared in the app,
 `OS_PLATFORM_OWNER_EMAIL` set, a membership policy declared
 (`OS_AUTH_MEMBERSHIP_POLICY=invite-only`) and a stable `OS_SECRET_KEY`, both
 postures printed `✓ Server is ready` with `Tenancy: group` /
-`Tenancy: isolated`. *Measured on a fresh database.* Upgrading a **walled**
-17.x database runs the same ceremony, whose walled branch the 18.0.0 CLI
-carries; it was not walked for this page.
+`Tenancy: isolated`. *Measured on a fresh database.*
+
+**A walled 17.x database upgrades through the same ceremony.** Measured on a
+17.7.0 app booted under `group` with `@objectstack/organizations@17.7.0` (its
+owner signed up and wrote two records): after the move to 18.0.0 — the exact
+`"@objectstack/organizations": "17.7.0"` pin moved by hand, like every
+`@objectstack/*` pin — `os migrate security-catalog-overlays` exited `0`, the
+boot was refused as in step 2, the plan read `posture group` (81 tables,
+`unattributableRows: 0`), the apply completed, and 18.0.0 served the database
+under `Tenancy: group` with both records in their organization. *Measured in
+the walk.* An `isolated` database was not walked.
 
 #### 5. The npm tags
 

@@ -139,7 +139,8 @@ const authService = {
   api: {
     getSession: async ({ headers }: { headers: Headers }) => {
       const id = USERS[headers?.get?.('authorization') ?? ''];
-      return id ? { user: { id } } : null;
+      // Every caller acts in `o1`, the organization its grant is stamped with.
+      return id ? { user: { id }, session: { userId: id, activeOrganizationId: 'o1' } } : null;
     },
   },
 };
@@ -195,7 +196,7 @@ const makeQl = () => bindTestSecurityCatalog({
       return setId
         ? [{
           id: `ups_${where.user_id}`, user_id: where.user_id, permission_set_id: setId,
-          permission_set: SETS[setId].name, organization_id: null,
+          permission_set: SETS[setId].name, organization_id: 'o1',
         }]
         : [];
     }

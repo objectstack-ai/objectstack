@@ -57,8 +57,9 @@
  * [ADR-0131 D12 items 7–8] Under this rig's `isolated` posture every package
  * WRITE is the platform operator's, so the three members are refused at the
  * write doors before any protocol call, and reach no partition at all; the
- * read doors serve them the env-wide partition. The operator (an unscoped
- * `admin_full_access` grant, its session naming `org_alpha`) is the admitted
+ * read doors serve them the env-wide partition. The operator (an
+ * `admin_full_access` grant owned by the Default Organization, its session
+ * naming `org_alpha`) is the admitted
  * writer, and it reaches the env-wide partition too.
  */
 
@@ -75,6 +76,8 @@ const PREFIX = '/api/v1';
 const PKG = 'com.acme.crm';
 const ALPHA = 'org_alpha';
 const BETA = 'org_beta';
+/** The Default Organization, which owns the operator's grant. */
+const DEFAULT_ORG = 'org_default';
 /** The env-wide partition's key: what a request carrying no organization reaches. */
 const ENV_WIDE = 'env_wide';
 const SESSION_HEADER = 'x-test-session';
@@ -178,7 +181,8 @@ function protocolDouble() {
 /**
  * `u_exmember`'s stale session names `org_alpha` while their only current
  * `sys_member` row is `org_beta`. `u_member` is a current `org_alpha` member.
- * Both hold ONE shared permission set carrying both package capabilities.
+ * Both hold ONE shared permission set carrying both package capabilities,
+ * bound to the built-in `everyone` position.
  */
 function makeQl() {
     const tables: Record<string, any[]> = {
@@ -193,11 +197,19 @@ function makeQl() {
             { id: 'u_exmember', email: 'u_exmember@example.com' },
             { id: 'u_admin', email: 'u_admin@example.com' },
         ],
+        // The Default Organization: it owns the operator's `admin_full_access`
+        // grant, the one grant that anchors platform standing.
+        sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }],
         sys_user_permission_set: [
-            { user_id: 'u_member', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
-            { user_id: 'u_exmember', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
-            { user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
+            { user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: DEFAULT_ORG },
         ],
+        // The ONE shared set reaches every caller through the built-in
+        // `everyone` position, so it holds in whichever organization a caller
+        // acts in and with none — the ex-member's dropped claim included. A
+        // user grant applies only in its own organization, so it could not be
+        // shared across the arms.
+        sys_position: [{ id: 'pos_everyone', name: 'everyone' }],
+        sys_position_permission_set: [{ id: 'pps_everyone_shared', position_id: 'pos_everyone', permission_set_id: 'ps_shared' }],
         sys_permission_set: [
             { id: 'ps_shared', name: 'shared_access', system_permissions: ['manage_metadata', 'studio.access'] },
             { id: 'ps_admin', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access'] },

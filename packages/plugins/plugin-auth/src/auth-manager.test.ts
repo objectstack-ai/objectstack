@@ -3644,9 +3644,10 @@ describe('AuthManager', () => {
   });
 
   describe('customSession – derived identity and positions array', () => {
-    // dataEngine stub: `adminLinks` controls whether the user resolves as a
+    // dataEngine stub: `platformAdmin` controls whether the user resolves as a
     // platform admin (a sys_user_permission_set row pointing at the
-    // admin_full_access permission set with no organization scope).
+    // admin_full_access permission set, owned by the Default Organization —
+    // the `sys_organization` row slugged `default` the stub serves).
     const makeDataEngine = (opts: { platformAdmin: boolean }) => bindTestSecurityCatalog({
       // Two parameters because the seam has two: `IDataEngine.find(objectName,
       // query?, options?)`, and every production read reaching this double goes
@@ -3656,11 +3657,14 @@ describe('AuthManager', () => {
       find: vi.fn(async (object: string, _query?: any) => {
         if (object === 'sys_user_permission_set') {
           return opts.platformAdmin
-            ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', permission_set: 'admin_full_access', organization_id: null }]
+            ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', permission_set: 'admin_full_access', organization_id: 'org_default' }]
             : [];
         }
         if (object === 'sys_permission_set') {
           return [{ id: 'ps-admin', name: 'admin_full_access' }];
+        }
+        if (object === 'sys_organization') {
+          return [{ id: 'org_default', slug: 'default' }];
         }
         return [];
       }),
@@ -3753,15 +3757,16 @@ describe('AuthManager', () => {
       const inner = engine.find;
       engine.find = vi.fn(async (object: string, q?: any) => {
         if (object === 'sys_user_position') {
-          return [{ user_id: 'u-1', position: 'demo_reviewer', organization_id: null }];
+          return [{ user_id: 'u-1', position: 'demo_reviewer', organization_id: 'o1' }];
         }
         return inner(object, q);
       }) as any;
 
+      // The assignment applies in its own organization, so the session acts in it.
       const callback = await getSessionCallback(engine);
       const result = await callback({
         user: { id: 'u-1', email: 'a@b.com', role: 'manager' },
-        session: {},
+        session: { activeOrganizationId: 'o1' },
       });
       expect(result.user.positions).toContain('demo_reviewer');
       // Still not the scalar — the two axes do not blend.
@@ -5066,26 +5071,33 @@ describe('isPlatformAdminUserId – the /sso/register criterion is platform-admi
   const SECRET = 'test-secret-at-least-32-chars-long';
 
   /**
-   * Read-only engine stub. `platformAdmin` controls the ADR-0068 org-less
-   * `admin_full_access` link; `members` are `sys_member` rows, which this
+   * Read-only engine stub. `platformAdmin` controls the ADR-0068
+   * `admin_full_access` link, owned by the Default Organization (`org-default`,
+   * slugged `default`) unless `grantOrganization` names another owner — `null`
+   * for an organization-less row; `members` are `sys_member` rows, which this
    * criterion must now ignore entirely. `find` honours the `where` the judge
    * passes, so any org-scoping is the product's, not the fixture's.
    */
-  const makeEngine = (opts: { members?: any[]; platformAdmin?: boolean; throws?: boolean; orgScopedGrant?: boolean } = {}) => bindTestSecurityCatalog({
+  const makeEngine = (opts: { members?: any[]; platformAdmin?: boolean; throws?: boolean; grantOrganization?: string | null } = {}) => bindTestSecurityCatalog({
     find: vi.fn(async (object: string, query?: any) => {
       if (opts.throws) throw new Error('db down');
+      const byWhere = (rows: any[]) => {
+        const where = query?.where ?? {};
+        return rows.filter((row) =>
+          Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return row[k] === v; }),
+        );
+      };
       if (object === 'sys_user_permission_set') {
+        const organization_id = opts.grantOrganization === undefined ? 'org-default' : opts.grantOrganization;
         return opts.platformAdmin
-          ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', permission_set: 'admin_full_access', organization_id: opts.orgScopedGrant ? 'org-1' : null }]
+          ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', permission_set: 'admin_full_access', organization_id }]
           : [];
       }
       if (object === 'sys_permission_set') return [{ id: 'ps-admin', name: 'admin_full_access' }];
-      if (object === 'sys_member') {
-        const where = query?.where ?? {};
-        return (opts.members ?? []).filter((row) =>
-          Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return row[k] === v; }),
-        );
+      if (object === 'sys_organization') {
+        return byWhere([{ id: 'org-default', slug: 'default' }, { id: 'org-1', slug: 'org-1' }]);
       }
+      if (object === 'sys_member') return byWhere(opts.members ?? []);
       return [];
     }),
     findOne: vi.fn(),
@@ -5136,7 +5148,7 @@ describe('isPlatformAdminUserId – the /sso/register criterion is platform-admi
 
   // -- (2) the other direction: a real platform admin is still admitted ------
   describe('the ADR-0068 platform admin is still ADMITTED', () => {
-    it('admits an org-less admin_full_access grant even when the membership is a plain member', async () => {
+    it('admits the Default Organization\'s admin_full_access grant even when the membership is a plain member', async () => {
       expect(await judge(makeEngine({ platformAdmin: true, members: [memberRow('member')] }))).toBe(true);
     });
 
@@ -5151,10 +5163,18 @@ describe('isPlatformAdminUserId – the /sso/register criterion is platform-admi
       expect(await judge(makeEngine({ members: [memberRow('member')] }))).toBe(false);
     });
 
-    it('refuses when the admin_full_access grant is ORG-SCOPED, not platform-wide', async () => {
-      // `organization_id != null` is an org-scoped assignment — ADR-0068 D2
-      // reads only the org-less link as platform admin.
-      expect(await judge(makeEngine({ platformAdmin: true, orgScopedGrant: true }))).toBe(false);
+    it('refuses when the admin_full_access grant is owned by ANOTHER organization, not the Default one', async () => {
+      // Any organization's grant other than the Default Organization's is an
+      // org-scoped assignment — it confers the set there, never platform standing.
+      expect(await judge(makeEngine({ platformAdmin: true, grantOrganization: 'org-1' }))).toBe(false);
+    });
+
+    it('refuses an ORGANIZATION-LESS admin_full_access grant — it anchors nothing', async () => {
+      // Invalid state since the ownership ceremony made the column NOT NULL; the
+      // reading that took it as the platform-wide link retired. The Default
+      // Organization's grant on the same engine is the control (admitted above).
+      expect(await judge(makeEngine({ platformAdmin: true, grantOrganization: null }))).toBe(false);
+      expect(await judge(makeEngine({ platformAdmin: true }))).toBe(true);
     });
 
     it('refuses when the engine read throws (fail CLOSED)', async () => {
