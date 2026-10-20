@@ -36,7 +36,11 @@
  * severity: they do not refuse, they manufacture findings that describe
  * nothing. Both are pinned below, because a closure that is uniform is the
  * property #9612/commit 6f5a44976 declared and a per-collection patch is what produced
- * this card.
+ * this card. [#24669] The `objects` gap now refuses on the flow door too: a
+ * batch publish states its package's closure, and a flow whose trigger object
+ * is outside it is an `error` there — so a phantom on that collection would
+ * roll a batch back exactly as the datasets one did, and the silence pin below
+ * guards a refusal, not an advisory.
  *
  * ## The discriminating tests are the ones that expect SILENCE
  *
@@ -449,7 +453,7 @@ describe('publishPackageDrafts judges each draft against the BATCH closure (#103
         expect(said).toMatch(/LIVE declarations only/);
     });
 
-    // ── objects: the same gap at advisory severity ──
+    // ── objects: the same gap, now at refusal severity on the flow door (#24669) ──
 
     it('a flow bound to a same-batch OBJECT draft raises no phantom trigger advisory', async () => {
         const { engine } = makeStubEngine();
@@ -463,12 +467,16 @@ describe('publishPackageDrafts judges each draft against the BATCH closure (#103
         expect(
             rulesOf(res, 'shyx_on_ticket'),
             `'shyx_ticket' is drafted in THIS batch, so the flow's trigger object resolves. A `
-            + `[flow-trigger-unknown-object] here is the datasets defect at advisory severity: it does `
-            + `not refuse, it describes nothing.`,
+            + `[flow-trigger-unknown-object] here is the datasets defect on the objects collection: `
+            + `it describes nothing.`,
         ).not.toContain('flow-trigger-unknown-object');
     });
 
-    it('STILL reports a flow bound to an object that is in neither the batch nor the registry', async () => {
+    it('STILL refuses a flow bound to an object that is in neither the batch nor the registry', async () => {
+        // [#24669] The batch states the package's closure, so a trigger object
+        // found in neither the batch nor the registry is outside it: refused at
+        // `error`, and the batch rolls back (ADR-0067 D2). It used to publish
+        // with the finding as an advisory.
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         await stageDraft(protocol, 'object', detailObject('shyx_ticket'));
@@ -476,8 +484,16 @@ describe('publishPackageDrafts judges each draft against the BATCH closure (#103
 
         const res = await protocol.publishPackageDrafts({ packageId: PKG });
 
-        expect(res.failed).toEqual([]);
-        expect(rulesOf(res, 'shyx_on_ghost')).toContain('flow-trigger-unknown-object');
+        expect(res).toMatchObject({ success: false, publishedCount: 0 });
+        expect(res.published).toEqual([]);
+        const causal = res.failed.find((f) => f.name === 'shyx_on_ghost')!;
+        expect(causal.code).toBe('INVALID_METADATA');
+        const unknown = (causal as any).issues.filter((i: any) => i.rule === 'flow-trigger-unknown-object');
+        expect(unknown).toHaveLength(1);
+        expect(unknown[0]).toMatchObject({ severity: 'error', path: 'flows[0].nodes[0].config.objectName' });
+        expect(unknown[0].message).toMatch(/shyx_ghost/);
+        // All-or-nothing: the healthy sibling is aborted, not published around it.
+        expect(res.failed.find((f) => f.name === 'shyx_ticket')?.code).toBe('BATCH_ABORTED');
     });
 
     // ── permissions: same gap, reached through an object publish ──
