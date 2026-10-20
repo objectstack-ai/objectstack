@@ -86,16 +86,11 @@
  *
  * ## The KEY, and why each sentinel is copied rather than chosen
  *
- * Both spellings already exist in this repo; neither is invented here.
+ * The spelling already exists in this repo; it is not invented here.
  *
- * - `organization_id` → `'__global__'`. ADR-0120 D3's exact form for a tenant
- *   column, and the literal `SqlDriver`'s `GLOBAL_TENANT` /
- *   `organizationKeyPartSql` materializes. It is reproduced (not imported)
- *   because this package must not depend on a driver — so the literal is pinned
- *   by the sibling test, and a silent edit here cannot re-partition the index.
- *   ⚠️ Reproducing it is also what keeps this a pure tightening of the SHIPPED
- *   index rather than a re-keying of it: change this literal and the platform
- *   bucket moves.
+ * - `organization_id` → none since ADR-0131 D1: the tenant column is NOT NULL,
+ *   so its key part is the plain column, exactly as the driver now keys it.
+ *   Before that it was `'__global__'`, ADR-0120 D3's form for a tenant column.
  * - `user_id` → `''`. The `ensureOverlayIndex` precedent for a NON-tenant
  *   nullable discriminator (`COALESCE(package_id, '')`), whose comment states
  *   this same NULL-distinct reason. A user id is never the empty string, so the
@@ -208,14 +203,19 @@ export const SYS_SETTING_IDENTITY_INDEX_COLUMNS = [
  *
  * A column listed here is materialized as `COALESCE(<column>, '<sentinel>')` so
  * its NULL rows form ONE bucket that is unique among itself, instead of being
- * mutually DISTINCT and therefore unconstrained. Both spellings are copied from
- * an existing in-repo precedent — see the module header for which, and why
- * neither may be edited casually.
+ * mutually DISTINCT and therefore unconstrained. The spelling is copied from
+ * an existing in-repo precedent — see the module header for which, and why it
+ * may not be edited casually.
  *
- * `namespace`, `key` and `scope` are required and take no sentinel.
+ * `namespace`, `key` and `scope` are required and take no sentinel, and since
+ * ADR-0131 D1 neither does `organization_id`: the tenant column is NOT NULL
+ * (the organization-ownership ceremony moves the `scope = 'global'` rows out
+ * to `sys_platform_setting`), so the driver keys it plain and so does this
+ * index. An index an earlier release built with `COALESCE(organization_id,
+ * '__global__')` is rebuilt to this key by the next boot's run, which rebuilds
+ * the definition on every boot anyway.
  */
 export const SYS_SETTING_NULL_SENTINELS: Readonly<Record<string, string>> = {
-    organization_id: '__global__',
     user_id: '',
 };
 
@@ -326,9 +326,8 @@ export function buildSysSettingPresenceSql(): string {
  * exactly TWO dialects that can build the index this query explains, so it must
  * be legal on both, not on the lenient one.
  *
- * Folding costs the operator nothing: neither sentinel can occur in real data,
- * so `organization_id_key = '__global__'` reads as "organization_id IS NULL" and
- * `user_id_key = ''` as "user_id IS NULL".
+ * Folding costs the operator nothing: the sentinel cannot occur in real data,
+ * so `user_id_key = ''` reads as "user_id IS NULL".
  */
 export function buildSysSettingDuplicateProbeSql(): string {
     return duplicateProbeSqlIn(BARE);
