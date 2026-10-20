@@ -3445,6 +3445,13 @@ export class ApprovalService implements IApprovalService {
       flowLabel?: string;
       /** Authored node label, snapshotted for inbox display. */
       nodeLabel?: string;
+      /**
+       * Who submitted the run this step belongs to — the approval node passes
+       * its trigger user. `null` is an answer: the trigger resolved no user, so
+       * the step has no submitter. Only an OMITTED value falls back to the
+       * acting context's user: on a later step that context is the previous
+       * step's decider, who did not submit the run.
+       */
       submitterId?: string | null;
       record?: any;
       organizationId?: string | null;
@@ -3725,12 +3732,13 @@ export class ApprovalService implements IApprovalService {
       const n = Array.isArray(prior) ? prior.length : 0;
       if (n > 0) configSnapshot.__round = n + 1;
     } catch { /* round display is best-effort */ }
+    const submitterId = input.submitterId !== undefined ? input.submitterId : (context.userId ?? null);
     const row: any = {
       id,
       process_name: processName,
       object_name: input.object,
       record_id: input.recordId,
-      submitter_id: input.submitterId ?? context.userId ?? null,
+      submitter_id: submitterId,
       status: 'pending',
       // [#23889] The display snapshots the approval lists show: the flow's and
       // the node's authored labels as the flow engine handed them over, and
@@ -3757,7 +3765,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', await this.actionRow(row, {
       id: uid('aact'), request_id: id, organization_id: requestOrg,
       step_name: input.nodeId, step_index: 0, action: 'submit',
-      actor_id: input.submitterId ?? context.userId ?? null, comment: null, created_at: now,
+      actor_id: submitterId, comment: null, created_at: now,
     }), { context: SYSTEM_CTX });
 
     // [#22824] The request's display says why it is with the administrators:
@@ -5477,9 +5485,19 @@ export class ApprovalService implements IApprovalService {
     // approver: a reminder names no channel, messaging's default materializes
     // it in the in-app inbox, and the inbox row carries the title, the body and
     // the deep link below, never links. The deep link is the approver's way in.
+    //
+    // [#24751] Each address once — the opening's rule (`openedOn`). A slate
+    // lists a person once per group they resolved into (per_group tagging), and
+    // `pending_approvers` keeps every one of those slots until the first vote,
+    // so one id can stand there twice. Messaging delivers that person ONE
+    // reminder (both emits carry the same dedup key), so counting per slot
+    // answered a `notified` the inbox contradicts. `notified` is the number of
+    // reminders handed over: one per distinct address. A user id and the same
+    // account's email are two addresses here, exactly as at the opening — two
+    // slots the person takes separately, and two reminders delivered.
     const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
     let notified = 0;
-    const concrete = pending.filter(a => a && !a.includes(':'));
+    const concrete = new Set(pending.filter(a => a && !a.includes(':')));
     const literals = pending.filter(a => a && a.includes(':'));
     for (const approver of concrete) {
       notified += await this.notify({

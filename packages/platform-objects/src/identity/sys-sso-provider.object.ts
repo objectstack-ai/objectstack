@@ -110,7 +110,7 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'issuer', label: 'Issuer URL', type: 'text', required: true, helpText: 'IdP issuer, e.g. https://acme.okta.com. Discovery is fetched from here unless an explicit URL is given below.' },
         { name: 'domain', label: 'Email Domain', type: 'text', required: true, helpText: 'Users with this email domain are routed to this IdP, e.g. acme.com.' },
         { name: 'clientId', label: 'Client ID', type: 'text', required: true, helpText: 'OAuth client ID issued by the IdP for this system.' },
-        { name: 'clientSecret', label: 'Client Secret', type: 'text', required: true, helpText: 'OAuth client secret (stored encrypted by better-auth).' },
+        { name: 'clientSecret', label: 'Client Secret', type: 'password', required: true, helpText: 'OAuth client secret (stored encrypted by better-auth).' },
         { name: 'discoveryEndpoint', label: 'Discovery URL', type: 'text', required: false, helpText: 'Optional. OIDC discovery document URL. Leave blank to derive `<issuer>/.well-known/openid-configuration`.' },
         { name: 'scopes', label: 'Scopes', type: 'text', required: false, placeholder: 'openid email profile', helpText: 'Optional. Space- or comma-separated OAuth scopes. Defaults to "openid email profile".' },
         // No "Map: User ID claim" param here on purpose. `@better-auth/sso@1.7.0-rc.2`

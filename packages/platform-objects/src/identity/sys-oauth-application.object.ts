@@ -183,6 +183,13 @@ export const SysOauthApplication = ObjectSchema.create({
       // then the `resultDialog` that reveals the new secret AFTER the rotation.
       // The result dialog is not part of the #7278 defect — it is a post-run
       // reveal for output shown only once, not a second pre-run decision.
+      //
+      // Both texts state the same cut-off, because that is what the route does:
+      // better-auth's `rotateClientSecretEndpoint` (@better-auth/oauth-provider
+      // 1.7.3) overwrites the client's single stored `clientSecret`, and
+      // `validateClientCredentials` checks a presented secret against that one
+      // value only. No previous secret is kept, so there is no grace period —
+      // the old secret is refused from the moment the rotation commits.
       description: 'Rotate this OAuth client\'s secret? The previous secret will stop working immediately and any integrations using it will break until they are updated with the new secret. The new secret is shown only once.',
       refreshAfter: true,
       params: [
@@ -190,7 +197,7 @@ export const SysOauthApplication = ObjectSchema.create({
       ],
       resultDialog: {
         title: 'Client secret rotated',
-        description: 'Save the new secret now — it is shown only once. Update every integration before the previous secret\'s grace period ends.',
+        description: 'Save the new secret now — it is shown only once. The previous secret has already stopped working: update every integration with the new secret.',
         acknowledge: 'I have updated my integrations',
         fields: [
           { path: 'client_secret', label: 'New Client Secret', format: 'secret' },

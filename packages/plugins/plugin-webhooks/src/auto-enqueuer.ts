@@ -677,12 +677,23 @@ export class AutoEnqueuer {
      *
      * AGENTS.md decides that with one question — *does the system still look
      * normal from the outside while something it claims is persisted has not
-     * landed?* For a PARKED subscription the answer is unambiguously yes, and
-     * worse than for an ordinary enqueue failure: the durable record is the
+     * landed?* The answer is yes on BOTH branches, so both report at `error`.
+     *
+     * [#24835] The ordinary branch used to log a bare `warn` ("enqueue
+     * failed"), on the reading that the subscription is otherwise healthy. That
+     * reading is the problem: the record write that produced the event already
+     * answered 200, the webhook still reads active, and the `sys_http_delivery`
+     * row — the outbox's whole durability claim — was never written, so the
+     * event is never sent, retried or redeliverable, and nothing else looks
+     * wrong. Measured on PostgreSQL, where every update delivery was lost this
+     * way behind one WARN per event. It is said ONCE per webhook
+     * ({@link writeFailing}), with the consequence and the fix, and re-armed by
+     * the next recorded delivery for that webhook; each further lost event is
+     * kept at `debug` with its `eventId`.
+     *
+     * For a PARKED subscription it is worse still: the durable record is the
      * only trace this event ever existed, so losing the write puts us back
-     * exactly where this issue started, silently. So `error` there, and the
-     * pre-existing `warn` for an ordinary enqueue, where the delivery itself is
-     * the thing that did not happen and the subscription is otherwise healthy.
+     * exactly where #8069 started, silently.
      *
      * The realistic cause of the parked branch is a host that wired
      * {@link HttpEnqueueFn} straight to `IHttpOutbox.enqueue` instead of
@@ -699,7 +710,30 @@ export class AutoEnqueuer {
     ): void {
         const meta = { webhook: sub.name, eventId, err: (err as Error)?.message ?? err };
         if (!sub.parkedReason) {
-            this.logger?.warn?.(`[webhook-auto-enqueuer] ${verb} failed`, meta);
+            if (this.writeFailing.has(sub.id)) {
+                this.logger?.debug?.(
+                    `[webhook-auto-enqueuer] webhook '${sub.name}': ${verb} failed again — this event `
+                        + 'is lost too (reported at error on the first failure)',
+                    meta,
+                );
+                return;
+            }
+            this.writeFailing.add(sub.id);
+            const lost =
+                `[webhook-auto-enqueuer] webhook '${sub.name}': a delivery could not be recorded in `
+                + 'sys_http_delivery, so this event is LOST — it will never be sent, retried or '
+                + 'redelivered, and there is no row for an operator to find. The record write that '
+                + 'produced it already succeeded and the webhook still reads active, so nothing else '
+                + 'looks wrong. Fix: the cause in this record\'s meta says why the outbox write was '
+                + 'refused — make that write succeed (the datasource holding sys_http_delivery '
+                + 'reachable and its schema synced; a payload the outbox cannot store comes from the '
+                + 'event\'s producer, upstream of this webhook). Said once until a delivery for this '
+                + 'webhook is recorded again; each further lost event is logged at debug with its eventId.';
+            if (typeof this.logger?.error === 'function') {
+                this.logger?.error(lost, err, meta);
+            } else {
+                this.logger?.warn?.(lost, meta);
+            }
             return;
         }
         const message =
@@ -716,6 +750,20 @@ export class AutoEnqueuer {
         } else {
             this.logger?.warn?.(message, meta);
         }
+    }
+
+    /**
+     * [#24835] Webhook ids whose outbox write has failed and not yet succeeded
+     * again — the say-once ledger for {@link reportWriteFailure}'s ordinary
+     * branch, the enqueue twin of {@link droppedForSecret}: the loud first
+     * report is said once per outage, and said again if the same webhook breaks
+     * after a delivery for it was recorded.
+     */
+    private readonly writeFailing = new Set<string>();
+
+    /** [#24835] A delivery for `sub` was recorded — a later failure is a new outage. */
+    private recordedWrite(sub: CachedSubscription): void {
+        this.writeFailing.delete(sub.id);
     }
 
     private park(sub: CachedSubscription, err: unknown, credential: DropReason): void {
@@ -1195,7 +1243,10 @@ export class AutoEnqueuer {
                     action,
                     timestamp: event.timestamp,
                 },
-            }).catch((err) => this.reportWriteFailure(sub, eventId, err, 'enqueue'));
+            }).then(
+                () => this.recordedWrite(sub),
+                (err) => this.reportWriteFailure(sub, eventId, err, 'enqueue'),
+            );
         }
     }
 
@@ -1333,7 +1384,10 @@ export class AutoEnqueuer {
                     action,
                     timestamp: event.timestamp,
                 },
-            }).catch((err) => this.reportWriteFailure(sub, eventId, err, 'bulk enqueue'));
+            }).then(
+                () => this.recordedWrite(sub),
+                (err) => this.reportWriteFailure(sub, eventId, err, 'bulk enqueue'),
+            );
         }
     }
 

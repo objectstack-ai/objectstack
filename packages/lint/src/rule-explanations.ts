@@ -3143,7 +3143,9 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'view bound to a provider other than `object`, and the positions other rules own: `sort` ' +
       '(`sort-field-unknown`), `searchableFields` (`searchable-field-unknown`), the `chart` ' +
       'bindings, action names, `conditionalFormatting` predicates and `addRecord.formView`. An ' +
-      'unresolvable `data.object` skips the whole list view, so one typo yields one finding.',
+      'unresolvable binding skips the whole list view on `os validate`, `os build` and `os lint`, so one ' +
+      'typo yields one finding; the runtime save door refuses it once instead, as `list-view-object-unknown` ' +
+      'or, for a write into a package, `list-view-object-outside-closure`.',
   ],
 };
 
@@ -3174,6 +3176,64 @@ const LIST_VIEW_FIELD_DOTTED_EXPLANATION: RuleExplanation = {
       'walks an embedded record: `gantt.quickFilters[].field`, `gantt.tooltipFields[]` and every ' +
       'renderer binding. `sort` keeps its own rule. Always an error: every judged position is ' +
       'refused outright by its door.',
+  ],
+};
+
+/** Which keys a list view's binding is read from, and what stays unjudged (both binding ids write it out). */
+const LIST_VIEW_BINDING_SCOPE =
+  'One finding per list view, at the key the binding was read from: the view\'s `object`, or a list ' +
+  'view\'s own `data.object` where it sets one. The view\'s field references stay unjudged while the ' +
+  'binding does not resolve, so a wrong name is reported once per list view rather than once per ' +
+  'position. Not judged: a draft save, and a stored view until its next save — the door judges ' +
+  'writes only.';
+
+const LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-object-outside-closure',
+  covers: 'what a package closure holds, and why the view refuses',
+  paragraphs: [
+    'A view written into a package at the runtime save door is judged against that package\'s ' +
+      'closure, never the whole deployment: the package\'s own objects, the objects of the packages its ' +
+      'manifest declares in `dependencies`, platform objects, and tenant-authored objects that carry no ' +
+      'package. The declared `dependencies` bound what the package MAY reference, so a list view bound ' +
+      'to an object outside that closure is not resolvable by declaration — whether the object belongs ' +
+      'to a package the manifest never declared or exists nowhere at all, because the closure is all ' +
+      'the door can see.',
+    'An error, so the publish is refused (`422`): it is the verdict the dataset door gives a base ' +
+      'object outside the same closure (`object-reference-unknown`). Judging the view\'s field ' +
+      'references against an object the package may not reference would judge the package against the ' +
+      'wrong set; declaring the dependency puts the object, and the field judgement with it, inside the ' +
+      'closure.',
+    LIST_VIEW_BINDING_SCOPE,
+    'To fix it, declare a dependency on the package that defines the object in the `dependencies` of ' +
+      'the written package\'s manifest, or bind the view to an object inside the closure; when the name ' +
+      'is a typo, the verdict names the nearest object in reach. A write that names no package is ' +
+      'judged against the whole collection instead (`list-view-object-unknown`), and `os validate`, ' +
+      '`os build` and `os lint` judge neither: a stack there is one app, and an unresolved binding may ' +
+      'be a dependency package\'s object the stack does not carry.',
+  ],
+};
+
+const LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-object-unknown',
+  covers: 'why the save door can say an object exists nowhere',
+  paragraphs: [
+    'A view written at the runtime save door with no package named (an overlay write) is judged ' +
+      'against the whole collection the deployment serves: every installed package\'s objects, enabled ' +
+      'or not, the platform\'s, and the objects saved at run time — the same merge the object metadata ' +
+      'listing answers from. Nothing narrows it, so a list view bound to an object missing from it is ' +
+      'bound to an object that exists nowhere: there is no other package for it to come from.',
+    'An error, so the publish is refused (`422`): left in, the view would be stored with none of its ' +
+      'field references checked and fail only when it renders. The nearest object name rides the ' +
+      '`fix:` line, never the verdict, so a stored view\'s verdict does not change when an unrelated ' +
+      'write creates an object with a similar name.',
+    LIST_VIEW_BINDING_SCOPE,
+    'To fix it, bind the view to an object that exists, or save the object before you publish the ' +
+      'view. Not judged: a write into a package, which is judged against that package\'s closure ' +
+      'instead (`list-view-object-outside-closure`); an empty collection, which means the host supplied ' +
+      'none, because no deployment serves zero objects; and `os validate`, `os build` and `os lint`, ' +
+      'where a stack is one app and an unresolved binding may be a dependency package\'s object the ' +
+      'stack does not carry, so the list view is skipped and the binding left to the object-reference ' +
+      'checks.',
   ],
 };
 
@@ -4786,6 +4846,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FILTER_EMPTY_NODE_EXPLANATION.rule]: FILTER_EMPTY_NODE_EXPLANATION,
   [LIST_VIEW_FIELD_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_FIELD_UNKNOWN_EXPLANATION,
   [LIST_VIEW_FIELD_DOTTED_EXPLANATION.rule]: LIST_VIEW_FIELD_DOTTED_EXPLANATION,
+  [LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION.rule]: LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION,
+  [LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION,
   [TRANSLATION_TARGET_UNKNOWN_EXPLANATION.rule]: TRANSLATION_TARGET_UNKNOWN_EXPLANATION,
   [TRANSLATION_OPTION_KEY_UNKNOWN_EXPLANATION.rule]: TRANSLATION_OPTION_KEY_UNKNOWN_EXPLANATION,
   [TRANSLATION_SECTION_NAME_MISSING_EXPLANATION.rule]: TRANSLATION_SECTION_NAME_MISSING_EXPLANATION,
