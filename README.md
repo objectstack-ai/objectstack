@@ -9,10 +9,10 @@
 > **One executable business ontology.** AI writes it, the runtime runs it, agents
 > operate it, you own it.
 >
-> 本体即软件,本体驱动。
+> 本体即软件。
 >
 > Ontology-driven: database, API, UI and agent tools all derive from that one
-> definition of the business, so there is no second codebase to keep in step
+> definition of the business, so there is no second application to keep in step
 > with it.
 >
 > Apps small enough for AI to hold whole.
