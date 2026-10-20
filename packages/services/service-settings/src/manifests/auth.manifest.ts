@@ -359,7 +359,7 @@ const manifest = {
       label: 'Allowed IP ranges',
       required: false,
       description:
-        'CIDR ranges or exact IPs (one per line, or comma-separated), e.g. 203.0.113.0/24. When set, sign-in from outside these ranges is rejected. Empty = no restriction. Requires a trusted proxy to set X-Forwarded-For.',
+        'CIDR ranges or exact IPs (one per line, or comma-separated), e.g. 203.0.113.0/24. When set, sign-in from outside these ranges is rejected, and so is any request whose client address the server cannot establish. Empty = no restriction. The address judged is the connection\'s peer; behind a reverse proxy, declare server.trustProxy in the stack so the forwarded client address is judged instead.',
     },
     // [#23367, ruling A] The API-key lifecycle policy. Two readers, one
     // source: `bindAuthSettings` binds these into the auth service

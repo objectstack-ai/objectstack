@@ -126,7 +126,8 @@ const BOB = 'usr_bob';
 const NAME = 'case_grid';
 
 // [#21470] `name` is the row's: a body `name` that is not its row's is refused by the write doors.
-const viewBody = (label: string) => ({ name: NAME, type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list' });
+// [#24668] Bound to `sys_metadata`, an object this harness registers: the overlay save door refuses a list view bound to an object that exists nowhere (it read `case`).
+const viewBody = (label: string) => ({ name: NAME, type: 'grid', label, columns: ['id'], object: 'sys_metadata', viewKind: 'list' });
 
 describe('#23033 — the sys_metadata row records who created it and who last changed it', () => {
     let kernel: ObjectKernel;

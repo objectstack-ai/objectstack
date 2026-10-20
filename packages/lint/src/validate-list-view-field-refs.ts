@@ -210,8 +210,10 @@
  *    ladder a local "not in this stack ⇒ error" would not have. When the bound
  *    object does not resolve, this rule skips the whole list view (skip 1
  *    below) so one typo yields one finding rather than one per position.
- *    ONE exception, and it is this rule's own: a binding judged under a
- *    package closure (the next section).
+ *    TWO exceptions, both this rule's own and both at the runtime save door,
+ *    where the snapshot's `objects` is a set the door can name: a binding
+ *    judged under a package closure (the next section), and a binding judged
+ *    against the whole collection (the section after it).
  *
  * ## [#24563] A binding outside the written package's closure is REFUSED
  *
@@ -248,14 +250,60 @@
  *    ruling #9612 says it may not reference; the remedy the hint names —
  *    declare the dependency — is what puts the object, and with it the field
  *    judgement, inside the closure.
- *  - **Only under a stated closure.** The CLI commands and a write that names
- *    no package (an overlay write, the whole collection) pass no scope and
- *    keep skip 1 exactly as before: there an unresolved binding may come from
+ *  - **Only under a stated closure.** The CLI commands pass no scope and keep
+ *    skip 1 exactly as before: there an unresolved binding may come from
  *    another package, and `defineStack`'s cross-reference check and
- *    `validateObjectReferences` own it.
+ *    `validateObjectReferences` own it. A write that names no package passes
+ *    no scope either; it is judged against the whole collection, which is the
+ *    next section.
  *
  * Skip 2 is unchanged under a closure: an object that IS in the closure but
  * declares no readable field map is still unjudgeable, never a finding.
+ *
+ * ## [#24668] A binding that exists nowhere in the whole collection is REFUSED
+ *
+ * A runtime write that names no package (an overlay write, `PUT
+ * /api/v1/meta/view/:name` with no `?package=`) is judged against the WHOLE
+ * collection: the host hands the gate every object the deployment serves —
+ * the registry's (every installed package's, enabled or not, and the
+ * platform's) folded with the stored rows, the merge `GET /meta/object`
+ * answers from — and nothing narrows it (`resolveWritePackageScope` answers
+ * no closure). Skip 1 read an unresolvable binding there as "another
+ * package's object", which is the CLI's question and not the door's: there is
+ * no other package for it to come from. So the list view was stored with
+ * every field reference unjudged — `200`, no advisory — and failed only at
+ * render, while the same body written into a package is refused
+ * `list-view-object-outside-closure` and a dataset over an unknown object is
+ * refused `object-reference-unknown`.
+ *
+ * So when the caller states the snapshot is that whole collection
+ * (`ListViewFieldRefOptions.wholeCollection`, which the reference-integrity
+ * suite sets for a runtime write with no closure in force), an unresolvable
+ * binding is reported here, once per list view, at the key the binding was
+ * read from, as {@link LIST_VIEW_OBJECT_UNKNOWN}:
+ *
+ *  - **`error`**, so the save door refuses the publish-mode write (`422`) —
+ *    the verdict the two doors above give. The door judges writes only: a
+ *    stored row is judged at its next save, and a draft is never gated.
+ *  - **The field positions stay unjudged**, as under a closure: there is no
+ *    field map to judge them against.
+ *  - **The nearest name is in the hint, never the message.** The gate's
+ *    differential fingerprints `rule`, `where`, `path` and `message`, and the
+ *    suggestion is computed over the snapshot's object names, which an
+ *    `object` write changes by one. In the message, a stored object's list
+ *    view bound to `crm_acount` would read differently in the candidate once
+ *    an unrelated write creates `crm_account`, and that write would be
+ *    refused for a finding it did not make.
+ *  - **⛔ An EMPTY collection is not a whole one.** No deployment serves zero
+ *    objects — the platform's own are always there — so an empty graph means
+ *    the host supplied no universe, and the rule judges nothing, exactly as
+ *    before.
+ *  - **⛔ Never on the CLI.** `os validate` / `os build` / `os lint` do not
+ *    state it: a stack there is one app, and an unresolved binding may be a
+ *    dependency package's object the app's stack does not carry.
+ *
+ * A closure wins over the statement when both are given: it is the narrower
+ * set, and its remedy (declare the dependency) is the one that applies.
  *
  * ## Skips — the same three every field-existence rule in this package takes
  *
@@ -299,6 +347,13 @@ export const LIST_VIEW_FIELD_UNKNOWN = 'list-view-field-unknown';
 export const LIST_VIEW_OBJECT_OUTSIDE_CLOSURE = 'list-view-object-outside-closure';
 
 /**
+ * [#24668] A list view, judged against the whole collection the runtime save
+ * door serves, whose bound object exists nowhere in it — see the section of
+ * that name on this module.
+ */
+export const LIST_VIEW_OBJECT_UNKNOWN = 'list-view-object-unknown';
+
+/**
  * [#14282] A list-view field reference written as a DOTTED path at a position
  * whose name reaches a query door — where the door refuses it by name. See the
  * second-class section on this module for the scope and the measurements.
@@ -336,10 +391,16 @@ export interface ListViewFieldRefFinding {
  * `packageScope` — [#24563] the package closure the runtime publish gate
  * narrowed `stack.objects` to (`RuntimePackageScope`), present only when one
  * was in force. Absent on the CLI commands and on a write that names no
- * package, which keep skip 1 as before.
+ * package.
+ *
+ * `wholeCollection` — [#24668] `true` when `stack.objects` is the whole
+ * collection the deployment serves: the runtime publish gate with no closure
+ * in force. Absent on the CLI commands, which keep skip 1 as before. Ignored
+ * when `packageScope` is given.
  */
 export interface ListViewFieldRefOptions {
   packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
+  wholeCollection?: boolean;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -681,8 +742,13 @@ export function validateListViewFieldRefs(
 
   const graph: ObjectGraph = indexObjectGraph(stack);
   const scope = options?.packageScope;
+  // [#24668] The whole collection, stated — and only without a closure, which
+  // is the narrower set and wins.
+  const whole = !scope && options?.wholeCollection === true;
   // [#24563] Under a stated closure an empty graph is still a verdict: every
-  // object binding is then outside it, and is refused below.
+  // object binding is then outside it, and is refused below. [#24668] An empty
+  // WHOLE collection is not: no deployment serves zero objects, so it means
+  // the host supplied no universe (see the section of that name).
   if (graph.size === 0 && !scope) return findings;
 
   /**
@@ -712,6 +778,28 @@ export function validateListViewFieldRefs(
       hint:
         `Declare a dependency on the package that defines "${object}" in the \`dependencies\` of "${pkg}"'s ` +
         `manifest, or bind the view to an object inside that closure`,
+    });
+  };
+
+  /**
+   * [#24668] One list view whose binding exists nowhere in the whole
+   * collection — see the section of that name on this module. One finding per
+   * list view, at the key the binding was read from; the nearest name rides
+   * the hint so the differential's fingerprint does not move with the
+   * snapshot's object names.
+   */
+  const reportUnknownObject = (object: string, where: string, path: string): void => {
+    findings.push({
+      severity: 'error',
+      rule: LIST_VIEW_OBJECT_UNKNOWN,
+      where,
+      path,
+      message:
+        `binds object "${object}", which exists nowhere in this deployment (no installed package, platform ` +
+        `object or saved object has that name), so none of the view's field references are checked.`,
+      hint:
+        `Bind the view to an object that exists, or save the object "${object}" before you publish the view.` +
+        suggestName(object, graph.keys()),
     });
   };
 
@@ -820,8 +908,11 @@ export function validateListViewFieldRefs(
     // [#24563] Except under a stated package closure, where the base object
     // was dropped by the closure or exists nowhere: refused once, and the
     // positions stay unjudged (see the section of that name on this module).
+    // [#24668] And against the stated whole collection, where it exists
+    // nowhere: refused once the same way.
     if (!graph.has(object)) {
       if (scope) reportOutsideClosure(scope, object, where, bindingPath);
+      else if (whole) reportUnknownObject(object, where, bindingPath);
       return;
     }
     if (!graph.get(object)) return;

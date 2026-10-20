@@ -16,6 +16,11 @@
       "types": "./dist/rate-limit-storage.d.ts",
       "import": "./dist/rate-limit-storage.mjs",
       "require": "./dist/rate-limit-storage.js"
+    },
+    "./client-address": {
+      "types": "./dist/client-address.d.ts",
+      "import": "./dist/client-address.mjs",
+      "require": "./dist/client-address.js"
     }
   },
   "scripts": {

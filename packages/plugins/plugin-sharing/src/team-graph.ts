@@ -107,6 +107,86 @@ export async function managerIsProvablyOutsideOrg(
   return !orgs.includes(callerOrg);        // member here => route as before
 }
 
+/**
+ * The `sys_team_member` predicate "the members of `teamId`" — ONE spelling for
+ * the rule-wide expansion ({@link TeamGraphService.expandUsers}) and the
+ * user-scoped membership check ({@link teamHasMember}), so the two can never
+ * disagree about who is a member.
+ */
+function teamMemberPredicate(teamId: string): Record<string, unknown> {
+  return { team_id: teamId };
+}
+
+/**
+ * The `sys_member` predicate "holders of role `roleName`", scoped to `org` when
+ * one is given — ONE spelling for {@link TeamGraphService.expandRoleUsers} and
+ * {@link holdsRole}.
+ */
+function roleHolderPredicate(roleName: string, org: string | null | undefined): Record<string, unknown> {
+  const filter: Record<string, unknown> = { role: roleName };
+  if (org) filter.organization_id = org;
+  return filter;
+}
+
+/**
+ * Is `userId` a member of `teamId`? The user-scoped twin of
+ * {@link TeamGraphService.expandUsers}: the same table and the same predicate,
+ * narrowed to one user, so the answer is `expandUsers(teamId).includes(userId)`
+ * read in one indexed lookup instead of the whole membership list.
+ *
+ * Exists for the recipient-membership recompute (`recipient-membership-recompute.ts`),
+ * which re-evaluates a team rule for the ONE user whose membership row was
+ * written — a write path, where reading every member of the team per written
+ * row would make a bulk membership import quadratic. A failed read answers
+ * `false`, exactly as the expansion answers `[]`.
+ *
+ * ⛔ Not exported from the package index — an internal seam, not a public
+ * affordance of {@link TeamGraphService}.
+ */
+export async function teamHasMember(engine: SharingEngine, teamId: string, userId: string): Promise<boolean> {
+  if (!teamId || !userId) return false;
+  try {
+    const rows = await engine.find('sys_team_member', {
+      where: { ...teamMemberPredicate(teamId), user_id: userId },
+      fields: ['user_id'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    return (rows ?? []).some((r: any) => String(r?.user_id ?? '') === userId);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Does `userId` hold role `roleName` (in `organizationId`, when given)? The
+ * user-scoped twin of {@link TeamGraphService.expandRoleUsers}, for the same
+ * reason and with the same failure answer as {@link teamHasMember}. Its one
+ * caller is `PositionGraphService.holdsPosition`, which reads the role column as
+ * the position transition source (ADR-0057 D4 addendum).
+ *
+ * ⛔ Not exported from the package index.
+ */
+export async function holdsRole(
+  engine: SharingEngine,
+  roleName: string,
+  userId: string,
+  organizationId?: string | null,
+): Promise<boolean> {
+  if (!roleName || !userId) return false;
+  try {
+    const rows = await engine.find('sys_member', {
+      filter: { ...roleHolderPredicate(roleName, organizationId), user_id: userId },
+      fields: ['user_id'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    return (rows ?? []).some((r: any) => String(r?.user_id ?? '') === userId);
+  } catch {
+    return false;
+  }
+}
+
 export class TeamGraphService implements ITeamGraphService {
   private readonly engine: SharingEngine;
   private readonly organizationId: string | null;
@@ -129,7 +209,7 @@ export class TeamGraphService implements ITeamGraphService {
     let rows: any[] = [];
     try {
       rows = await this.engine.find('sys_team_member', {
-        where: { team_id: teamId },
+        where: teamMemberPredicate(teamId),
         fields: ['user_id'],
         limit: 10000,
         context: SYSTEM_CTX,
@@ -147,13 +227,11 @@ export class TeamGraphService implements ITeamGraphService {
     const key = `${organizationId ?? this.organizationId ?? '*'}::${roleName}`;
     const cached = this.cache.expandRole!.get(key);
     if (cached) return cached;
-    const filter: Record<string, unknown> = { role: roleName };
     const org = organizationId ?? this.organizationId;
-    if (org) filter.organization_id = org;
     let rows: any[] = [];
     try {
       rows = await this.engine.find('sys_member', {
-        filter,
+        filter: roleHolderPredicate(roleName, org),
         fields: ['user_id'],
         limit: 10000,
         context: SYSTEM_CTX,

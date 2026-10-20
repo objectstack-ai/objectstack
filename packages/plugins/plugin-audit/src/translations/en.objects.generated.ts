@@ -33,6 +33,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           delete: "delete",
           login: "login",
           logout: "logout",
+          login_failed: "login_failed",
+          account_locked: "account_locked",
           config_change: "config_change",
           import: "import",
           platform_admin_standing_change: "platform_admin_standing_change"

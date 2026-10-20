@@ -54,7 +54,33 @@
  * it never could. The captured argument is the same value, taken at a moment it
  * is guaranteed present. No context at all ⇒ the cause is unknown ⇒ no row:
  * losing the record is the safe direction, inventing one is not.
+ *
+ * ## Account events: a refused sign-in, and a lockout
+ *
+ * A session hook cannot see a sign-in that did not succeed — no session row is
+ * ever minted for it. So the password sign-in's own outcome, observed in
+ * `AuthManager`'s `/sign-in/email` middleware where the ADR-0069 D2 lockout is
+ * enforced, is the seam for the two account events:
+ *
+ *  - **`login_failed`** — one per refused `/sign-in/email` that names an
+ *    existing account: refused by the credential check (the after-hook's
+ *    returned error) or by the lockout gate before it (the before-hook).
+ *  - **`account_locked`** — one each time the lockout is STAMPED on the
+ *    account, i.e. the refused attempt that reaches the threshold.
+ *
+ * Both name the account the sign-in resolved to, the outcome (the action plus
+ * the refusal's machine code), and the client fingerprint read by the same rule
+ * better-auth applies when it stamps a session row — so a refused attempt and a
+ * successful one from the same client carry the same `ip_address`.
+ *
+ * ⛔ Neither event carries anything the caller typed. The password is never
+ * read here, and the submitted identifier is never recorded either: the row
+ * names the RESOLVED account's id, and an identifier that resolves to no
+ * account produces no row (an auth row without a subject is the shape this
+ * module already refuses to write, above).
  */
+
+import { getIP } from '@better-auth/core/utils/ip';
 
 /**
  * The audit sink's shape, declared LOCALLY so plugin-auth takes no runtime
@@ -72,7 +98,7 @@
  */
 export interface AuthEventAuditSurface {
   recordAuthEvent(event: {
-    action: 'login' | 'logout';
+    action: 'login' | 'logout' | 'login_failed' | 'account_locked';
     userId: string;
     sessionId?: string;
     organizationId?: string;
@@ -105,6 +131,9 @@ interface BetterAuthSessionRow {
 
 /** The endpoint whose whole job is ending the caller's own session. */
 export const SIGN_OUT_PATH = '/sign-out';
+
+/** The password sign-in endpoint — the one the ADR-0069 D2 lockout governs. */
+export const SIGN_IN_EMAIL_PATH = '/sign-in/email';
 
 /** A non-empty string, or undefined — never `''`, never `String(undefined)`. */
 function str(v: unknown): string | undefined {
@@ -169,11 +198,107 @@ export function logoutEventFor(
   };
 }
 
+/** The client fingerprint an account event carries. */
+export interface SignInClientFingerprint {
+  ipAddress?: string;
+  userAgent?: string;
+}
+
+/**
+ * Read the client fingerprint of a sign-in request by better-auth's OWN rule —
+ * the one `internalAdapter.createSession` applies when it stamps a session row
+ * (`getIP(headers, options)` over the endpoint's headers, and the
+ * `user-agent` header), which is where every `login` row's `ip_address` comes
+ * from. A refused sign-in mints no session row to copy them from, so the same
+ * resolution is applied to the same request instead. ⛔ Not a second IP rule:
+ * whatever better-auth's `advanced.ipAddress` configuration answers for a
+ * session row, it answers here.
+ */
+export function signInClientFingerprint(ctx: unknown): SignInClientFingerprint {
+  const c = ctx as { headers?: unknown; request?: { headers?: unknown }; context?: { options?: unknown } } | null;
+  const headers = (c?.headers ?? c?.request?.headers) as Headers | undefined;
+  if (!headers || typeof (headers as Headers).get !== 'function') return {};
+  let ipAddress: string | undefined;
+  try {
+    const options = c?.context?.options as Parameters<typeof getIP>[1] | undefined;
+    ipAddress = options ? str(getIP(headers, options)) : undefined;
+  } catch {
+    ipAddress = undefined;
+  }
+  const userAgent = str(headers.get('user-agent'));
+  return {
+    ...(ipAddress ? { ipAddress } : {}),
+    ...(userAgent ? { userAgent } : {}),
+  };
+}
+
+/** A machine error code: SCREAMING_SNAKE, bounded — never free text. */
+const REFUSAL_CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
+
+/**
+ * The refusal's machine code (`INVALID_EMAIL_OR_PASSWORD`, `ACCOUNT_LOCKED`, …)
+ * off better-auth's returned `APIError`, or undefined. Only a value shaped as
+ * an error code is taken, so nothing but a constant from the refusing
+ * endpoint's vocabulary can reach the row.
+ */
+export function refusalCodeOf(returned: unknown): string | undefined {
+  const body = (returned as { body?: { code?: unknown } } | null | undefined)?.body;
+  const code = typeof body?.code === 'string' ? body.code : undefined;
+  return code && REFUSAL_CODE.test(code) ? code : undefined;
+}
+
+/**
+ * The `login_failed` event for a refused password sign-in, or `null` when no
+ * account was resolved (no subject ⇒ no row; see the module note).
+ */
+export function signInFailureEventFor(
+  userId: string | null | undefined,
+  outcome: { path: string; reason?: string; fingerprint?: SignInClientFingerprint },
+): AuthSessionAuditEventInput | null {
+  const subject = str(userId);
+  if (!subject) return null;
+  const context: Record<string, unknown> = { endpoint: outcome.path };
+  if (outcome.reason) context.reason = outcome.reason;
+  return {
+    action: 'login_failed',
+    userId: subject,
+    ...(outcome.fingerprint ?? {}),
+    context,
+  };
+}
+
+/**
+ * The `account_locked` event for the refused sign-in that stamped the ADR-0069
+ * D2 lockout, or `null` when no account was resolved.
+ */
+export function accountLockedEventFor(
+  userId: string | null | undefined,
+  lock: { path: string; lockedUntil: Date; threshold: number; fingerprint?: SignInClientFingerprint },
+): AuthSessionAuditEventInput | null {
+  const subject = str(userId);
+  if (!subject) return null;
+  const until = lock.lockedUntil instanceof Date && !Number.isNaN(lock.lockedUntil.getTime())
+    ? lock.lockedUntil.toISOString()
+    : undefined;
+  return {
+    action: 'account_locked',
+    userId: subject,
+    ...(lock.fingerprint ?? {}),
+    context: {
+      endpoint: lock.path,
+      ...(until ? { locked_until: until } : {}),
+      threshold: lock.threshold,
+    },
+  };
+}
+
 /**
  * Hand one event to the sink, swallowing everything.
  *
- * Auth must never fail on bookkeeping: the sign-in has already happened, the
- * session is on disk, and the user is holding a valid token. The sink itself
+ * Auth must never fail on bookkeeping: for a session event the sign-in has
+ * already happened, the session is on disk, and the user is holding a valid
+ * token; for an account event the refusal is already decided, and the audit
+ * row must not change it. The sink itself
  * reports a lost row at `error` (once per process) — that is where the
  * durability report belongs, and duplicating it here would double every line.
  */

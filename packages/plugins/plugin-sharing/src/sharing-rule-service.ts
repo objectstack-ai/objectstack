@@ -41,7 +41,7 @@ import type { SharingEngine } from './sharing-service.js';
 import type { SharingService } from './sharing-service.js';
 import { normalizeAccessLevel, normalizeStoredAccessLevel } from './access-level.js';
 import { parseCriteria, isMatchAllCriteria, MATCH_ALL_CRITERIA_MESSAGE } from './rule-criteria.js';
-import { TeamGraphService } from './team-graph.js';
+import { TeamGraphService, teamHasMember } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
 import type { DeclaredSharingRule, DeclaredSharingRuleSource } from './declared-sharing-rules.js';
@@ -1614,7 +1614,130 @@ export class SharingRuleService implements ISharingRuleService {
     return stale.length;
   }
 
+  /**
+   * Reconcile ONE rule's grants for ONE user — the user-scoped pass a
+   * recipient-membership write runs (`recipient-membership-recompute.ts`): a
+   * position assignment, a membership role, or a team membership row naming
+   * `userId` was inserted, changed or removed.
+   *
+   * ## What it guarantees
+   *
+   * The outcome equals the whole-rule pass ({@link evaluateRule}) restricted to
+   * `userId`. When the rule reaches the user, the user's grants of this rule
+   * become exactly one per matched record at the rule's access level; when it
+   * does not — the rule is inactive, its position is switched off, or the user
+   * no longer holds its recipient — the user keeps none. A new holder gains the
+   * rule's grants and a former holder loses them in the write that changed the
+   * holding, with nobody re-evaluating the rule by hand. Every other user's
+   * grants of the rule are untouched.
+   *
+   * ## Why per user, and why that is cheap enough to be synchronous
+   *
+   * The `bu-tree-recompute.ts` design refuses to recompute every rule on every
+   * graph write, and queues its grant half, because a BU write can move many
+   * recipients at once and the re-grant fans out to (matched records × moved
+   * members). A membership row moves exactly ONE user. Scoped to that user the
+   * pass costs one recipient check ({@link ruleReachesUser} — an indexed lookup
+   * per source, never the recipient's whole member list), one read of that
+   * user's grants of the rule, and — only when the rule reaches the user — one
+   * criteria read plus a write per grant the user lacks. Nothing in it grows
+   * with how many OTHER users hold the recipient, so a bulk import of N rows
+   * costs N user-scoped passes, never N whole-rule passes.
+   *
+   * Withdrawal goes through `SharingService.revoke`, one grant at a time, as
+   * the whole-rule pass's own withdrawal does ({@link reconcile}); a user holds
+   * at most one grant per matched record, so the count is bounded by the
+   * rule's matched set.
+   *
+   * A `field` rule has no rule-wide recipient to check a user against; its
+   * recipients live on each record and are re-derived by that record's write
+   * ({@link evaluateAllForRecord}), so it is declined here, as it is at
+   * {@link revokeRuleGrantsForRetiredRecipients}' door.
+   */
+  async reconcileRuleForUser(rule: SharingRuleRow, userId: string): Promise<SharingRuleReconcilePassResult> {
+    const pass: SharingRuleReconcilePassResult = {
+      ruleId: rule?.id,
+      matchedRecords: 0,
+      expandedUsers: 0,
+      grantsCreated: 0,
+      grantsUpdated: 0,
+      grantsRevoked: 0,
+      grantsRefused: 0,
+    };
+    if (!rule?.id || !userId || rule.recipient_type === 'field') return pass;
+
+    const scope = { ...ruleGrantScope(rule), recipient_id: userId };
+    const existing = await this.engine.find('sys_record_share', {
+      where: scope,
+      fields: ['id', 'record_id', 'access_level'],
+      limit: 100000,
+      context: SYSTEM_CTX,
+    });
+    const held = new Map<string, any>();
+    for (const row of (existing ?? [])) held.set(String((row as any).record_id), row);
+
+    if (!(await this.ruleReachesUser(rule, userId, {}))) {
+      for (const [, row] of held.entries()) {
+        await this.sharing.revoke(String(row.id), SYSTEM_CTX);
+        pass.grantsRevoked += 1;
+      }
+      return pass;
+    }
+
+    pass.expandedUsers = 1;
+    const matchedIds = await this.findMatchingRecords(rule);
+    pass.matchedRecords = matchedIds.length;
+    for (const recordId of matchedIds) {
+      const cur = held.get(recordId);
+      if (cur) {
+        // Out of the stale set BEFORE the attempt — the twin of the note in
+        // {@link reconcile}: a refused level update leaves the desired row.
+        held.delete(recordId);
+        if (cur.access_level === rule.access_level) continue;
+        if (await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId)) pass.grantsUpdated += 1;
+        else pass.grantsRefused += 1;
+      } else if (await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId)) {
+        pass.grantsCreated += 1;
+      } else {
+        pass.grantsRefused += 1;
+      }
+    }
+    // The user's grants on records the rule no longer matches — what the
+    // whole-rule pass would revoke for this user too.
+    for (const [, stale] of held.entries()) {
+      await this.sharing.revoke(String(stale.id), SYSTEM_CTX);
+      pass.grantsRevoked += 1;
+    }
+    return pass;
+  }
+
   // ── internals ─────────────────────────────────────────────────────
+
+  /**
+   * Is `userId` among the users `rule` expands to? The user-scoped twin of
+   * {@link expandRecipient}, used by {@link reconcileRuleForUser}.
+   *
+   * `position` and `team` — the two kinds a membership write moves — are
+   * answered by the graph services' user-scoped checks
+   * (`PositionGraphService.holdsPosition`, `teamHasMember`), which read the
+   * same rows the expansion reads, narrowed to one user. A `position` passes
+   * the same activation gate first ({@link positionConfersAccess}): a
+   * switched-off position reaches nobody. Every other kind is answered from the
+   * rule-wide expansion itself.
+   */
+  private async ruleReachesUser(rule: SharingRuleRow, userId: string, pass: RuleEvaluationPass): Promise<boolean> {
+    if (!rule.active) return false;
+    if (rule.recipient_type === 'position') {
+      if (!(await this.positionConfersAccess(rule.recipient_id, pass))) return false;
+      const positionGraph = new PositionGraphService({
+        engine: this.engine,
+        organizationId: rule.organization_id ?? null,
+      });
+      return positionGraph.holdsPosition(userId, rule.recipient_id, rule.organization_id ?? undefined);
+    }
+    if (rule.recipient_type === 'team') return teamHasMember(this.engine, rule.recipient_id, userId);
+    return (await this.expandRecipient(rule, pass)).includes(userId);
+  }
 
   /**
    * [#3896] ADR-0049 backstop, evaluated on EVERY pass rather than only at

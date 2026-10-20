@@ -699,6 +699,13 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // `validate-expressions.ts`), where a declared block resolves and its
     // leaves are judged: the build and the door accept all 8, and refuse a
     // misspelt leaf.
+    //
+    // [#24677] The object pass also refuses a `lookup` / `master_detail`
+    // whose `reference` is a stored-metadata-body table — the declaration the
+    // #24316 hop refusal presupposes, which the engine never hydrates. No
+    // entry-level change: it rides the object crossing above. MEASURED first:
+    // 0 in-repo producers reference either family table, against 45 files
+    // that reference an ordinary platform table.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object'],
     run: (stack, ctx) =>
