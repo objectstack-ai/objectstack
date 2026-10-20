@@ -60,6 +60,7 @@ import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objec
 
 import { SecurityPlugin } from './security-plugin.js';
 import { buildContextForUser } from './explain-engine.js';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const SYS = { context: { isSystem: true } } as any;
 /** The organization that authors the colliding sets. Nobody below is its member except `USER_OTHER`. */
@@ -141,6 +142,10 @@ async function boot(): Promise<ObjectQL> {
     ],
   } as any);
   await engine.syncSchemas();
+  // The organization-less rows below (global sets, positions, grants) exist only
+  // on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column NOT
+  // NULL): this is that store.
+  await relaxEveryRegisteredTenantColumn(engine);
   engines.push(engine);
   const e = engine as any;
   await e.insert('sys_organization', { id: ORG_OTHER, name: ORG_OTHER, slug: 'other' }, SYS);

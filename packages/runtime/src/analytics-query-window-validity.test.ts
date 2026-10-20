@@ -42,6 +42,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { AnalyticsServicePlugin, type AnalyticsService } from '@objectstack/service-analytics';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 // [#21061] The analytics domain refuses an anonymous caller first (ADR-0056 D2),
 // so this harness signs its caller in: an `auth` slot in the shape
@@ -159,6 +160,9 @@ for (const cell of CELLS) {
                 await engine.init();
                 engine.registry.registerObject(DEAL as any);
                 await engine.syncSchemas();
+                // A real `single` install's Default Organization: the system writes below
+                // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+                await installDefaultOrganization(engine);
                 for (const row of ROWS) await engine.insert(OBJECT, { ...row } as any);
 
                 // Count what reaches the engine for THIS object, on both bridges.

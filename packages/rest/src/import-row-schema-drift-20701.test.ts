@@ -46,6 +46,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysImportJob } from '@objectstack/platform-objects/audit';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'proj_drift_20701';
 
@@ -94,6 +95,9 @@ async function boot() {
   engine.registry.registerObject(PROJ as any);
   engine.registry.registerObject(SysImportJob as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   await engine.insert(OBJECT, { id: 'e1', title: 'existing', code: 'X', must: 'm' } as any);
   // The drift: `late` is declared after the DDL ran.
   engine.registry.registerObject(PROJ_DRIFTED as any);

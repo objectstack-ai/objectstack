@@ -65,6 +65,7 @@ import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { leaveOrganization } from './armed.js';
 import { catalogPermissionSet } from './catalog-permission-set.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const RULES = '/sharing/rules';
 const SYS = { isSystem: true } as const;
@@ -167,6 +168,9 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     // NULL-reader stages.
     const globalGrant = (row: Record<string, unknown>) =>
       ql.getDriver('sys_user_permission_set').create('sys_user_permission_set', { ...row, organization_id: null });
+    // That residue lives only on a store built before 18.x, whose tenant column is
+    // nullable (ADR-0131 D1 makes a fresh one NOT NULL): the table is that store's.
+    await relaxTenantColumns(ql as any, ['sys_user_permission_set']);
     await globalGrant({ id: 'ups_8158_org_less', user_id: orgLessUserId, permission_set: 'sharing_admin_8158' });
     // The #8158 grant as filed — scoped to tenant A — for the control (which
     // has tenant A active) and for the org-scoped persona (which has none).

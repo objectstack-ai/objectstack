@@ -60,6 +60,7 @@ import {
   resolveSeedTenancySeam,
   GLOBAL_TENANT,
 } from '@objectstack/metadata-protocol';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const ORG_ID = 'org_mssymr19xzd645gv';
 const SEEDED_ROWS = 38;
@@ -113,6 +114,9 @@ async function bootInstall() {
   engine.registry.registerObject(CASE_OBJECT, '#8686');
   engine.registry.registerObject(ORG_OBJECT, '#8686');
   await driver.initObjects([CASE_OBJECT, ORG_OBJECT]);
+  // The pre-ADR-0131 residue lands only on a store built before 18.x, whose
+  // tenant column is nullable (D1 makes a fresh one NOT NULL): this is that store.
+  await relaxTenantColumns(driver as any, [CASE_OBJECT.name]);
   return { driver, engine };
 }
 
@@ -482,6 +486,9 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     engine.registry.registerObject(ticketObject, '#12394');
     engine.registry.registerObject(ORG_OBJECT, '#12394');
     await driver.initObjects([ticketObject, ORG_OBJECT]);
+    // The pre-ADR-0131 residue lands only on a store built before 18.x, whose
+    // tenant column is nullable (D1 makes a fresh one NOT NULL): this is that store.
+    await relaxTenantColumns(driver as any, [ticketObject.name]);
 
     // Seed-shaped writes: untenanted, because no organization existed yet —
     // the pre-ADR-0131 residue, landed through the driver call the engine made
@@ -550,6 +557,9 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     engine.registry.registerObject(sysObject, '#8686');
     engine.registry.registerObject(ORG_OBJECT, '#8686');
     await driver.initObjects([sysObject, ORG_OBJECT]);
+    // The pre-ADR-0131 residue lands only on a store built before 18.x, whose
+    // tenant column is nullable (D1 makes a fresh one NOT NULL): this is that store.
+    await relaxTenantColumns(driver as any, [sysObject.name]);
 
     // Land untenanted platform rows, then bring an organization into existence.
     // [C8 stage 8b] Straight through the driver, as `landPreC1SeedResidue` does:

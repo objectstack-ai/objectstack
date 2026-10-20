@@ -53,6 +53,7 @@ import { allFlows, TaskCompletionFlow } from '../src/flows/index.js';
 import { todoFunctions, computeNextTaskDueDate } from '../src/functions/index.js';
 import { Task } from '../src/objects/task.object.js';
 import taskHook from '../src/objects/task.hook.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -106,6 +107,9 @@ async function bootTodoKernel(): Promise<{
   objectql.registry.registerObject(Task, 'todo', 'todo');
   objectql.bindHooks([taskHook], { packageId: 'app:com.example.todo' });
   await objectql.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(objectql);
 
   automation.setFunctionResolver(
     (name: string) => (todoFunctions as Record<string, unknown>)[name] as any,

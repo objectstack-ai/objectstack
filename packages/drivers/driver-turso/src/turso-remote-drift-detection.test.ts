@@ -51,6 +51,7 @@ import { createClient, type Client } from '@libsql/client';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 import { replicaFiles } from './replica-file.testkit.js';
+import { initObjectsPre18 } from './pre-18-tenant-column.testkit.js';
 
 const scratch = mkdtempSync(join(tmpdir(), 'turso-remote-drift-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -147,7 +148,10 @@ type Drift = Awaited<ReturnType<TursoDriver['detectManagedDrift']>>;
 
 describe('each drifted shape reads alike on the remote and the local face', () => {
   /** The physical drift each case puts on disk after a clean remote sync, and the finding it must produce. */
-  const CASES: Array<[string, string[], (drift: Drift) => void]> = [
+  // The fourth element: the case's rows carry no organization, which only a
+  // store built before 18.x can hold (ADR-0131 D1), so `tenant_t` is built in
+  // that shape first (`initObjectsPre18`).
+  const CASES: Array<[string, string[], (drift: Drift) => void, boolean?]> = [
     [
       'an extra physical column the declaration omits',
       ['ALTER TABLE "t" ADD COLUMN "legacy" TEXT', 'CREATE INDEX "idx_t_legacy" ON "t" ("legacy")'],
@@ -182,12 +186,14 @@ describe('each drifted shape reads alike on the remote and the local face', () =
       (drift) => expect(drift).toContainEqual(expect.objectContaining({
         table: 'tenant_t', category: 'destructive', op: expect.objectContaining({ type: 'recreate_index' }),
       })),
+      true,
     ],
   ];
 
-  it.each(CASES)('%s', async (_label, statements, finding) => {
+  it.each(CASES)('%s', async (_label, statements, finding, pre18Tenant) => {
     const file = nextFile();
     const { driver: remote } = await remoteOver(file);
+    if (pre18Tenant) await initObjectsPre18(remote, TENANT);
     await SYNC.syncSchemasBatch(remote, ALL);
     for (const sql of statements) await onDisk(file, sql);
     const local = await localOver(file, ALL);

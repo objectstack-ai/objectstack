@@ -3,6 +3,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { isUniqueViolationError } from '@objectstack/types';
 import { SqlDriver, classifyIndexKeyPart, parseIndexDdl, legacyUniqueReplacements } from '../src/index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /**
  * #8554 — the FOURTH act of the #8323 class: five more tenant-scoped objects
@@ -416,6 +417,9 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
         // is what prevents that, and seed upsert-by-name relies on it.
         const d = makeDriver();
         await d.initObjects(app(sub, 'fixed') as any);
+        // Rows with no organization exist only on a database built before 18.x
+        // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+        await asPre18TenantColumn(d, sub.table);
 
         expect((await createAsApi(d, sub.table, row(sub, 'seed1', undefined, sub.key))).status).toBe(201);
         expect(await createAsApi(d, sub.table, row(sub, 'seed2', undefined, sub.key))).toMatchObject(
@@ -455,6 +459,9 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
          */
         const seedDeployed = async (d: SqlDriver) => {
           await d.initObjects(app(sub, 'pre') as any);
+          // Every deployment in the field was built before 18.x: its tenant
+          // column is nullable, and `r3` below is a row with no organization.
+          await asPre18TenantColumn(d, sub.table);
           await d.create(sub.table, row(sub, 'r1', 'org_jia', sub.key) as any);
           await d.create(sub.table, row(sub, 'r2', 'org_jia', sub.control) as any);
           await d.create(sub.table, row(sub, 'r3', undefined, sub.platformKey) as any);

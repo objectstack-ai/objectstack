@@ -22,6 +22,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYS = { context: { isSystem: true, userId: 'usr_system' } };
 
@@ -67,6 +68,9 @@ beforeEach(async () => {
     objects: [PROBE_ORDER],
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   for (const [id, name, amount] of [['o1', 'a', 50], ['o2', 'b', 150], ['o3', 'c', 50], ['o4', 'd', 150]] as const) {
     await engine.insert('probe_order', { id, name, amount }, SYS as never);
   }

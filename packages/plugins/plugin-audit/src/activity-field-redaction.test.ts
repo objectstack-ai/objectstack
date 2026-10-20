@@ -41,6 +41,7 @@ import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { AuditPlugin } from './audit-plugin.js';
 import { resolveServedFields } from './activity-field-redaction.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const ACTIVITY = 'sys_activity';
 const ITEM = 'afr_item';
@@ -159,6 +160,9 @@ describe('[#21081] sys_activity value-bearing columns are served through the sec
     engine.registry.registerObject(itemObject as any, HARNESS_PACKAGE);
     engine.registry.registerObject(labelledObject as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     // Every row below is written by the real audit writer's CRUD mirror.
     ids.item = (await engine.insert(

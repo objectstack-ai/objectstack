@@ -25,6 +25,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 // Sharing-rule routes are anchored on the API base, not under `/data/:object`
 // (they administer rules tenant-wide) — `/api/v1/sharing/rules`.
@@ -137,6 +138,9 @@ describe('#3896 — a sharing rule POSTed without criteria is rejected, never ma
     const id = 'srule_3896_legacy';
     const driver = (ql as any).getDriverForObject('sys_sharing_rule');
     expect(driver, 'sys_sharing_rule driver must be resolvable').toBeTruthy();
+    // That residue lives only on a store built before 18.x, whose tenant column is
+    // nullable (ADR-0131 D1 makes a fresh one NOT NULL): the table is that store's.
+    await relaxTenantColumns(ql as any, ['sys_sharing_rule']);
     await driver.create('sys_sharing_rule', {
       id,
       name: 'legacy_match_all_3896',

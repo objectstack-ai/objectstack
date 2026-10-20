@@ -10,6 +10,7 @@ import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuditPlugin } from './audit-plugin.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /**
  * [#24235] A summary line is stored ONCE, at write time, so the writer's held
@@ -80,6 +81,9 @@ describe('audit writers — a localization change reaches the very next audited 
     engine.registry.registerObject(sysSetting as any, HARNESS_PACKAGE);
     engine.registry.registerObject(task as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     sql = async (statement, bindings) => {
       const result = await (driver as unknown as { execute(s: string, b: unknown[]): Promise<unknown> }).execute(

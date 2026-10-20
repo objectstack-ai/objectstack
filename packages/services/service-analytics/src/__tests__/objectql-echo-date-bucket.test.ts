@@ -64,6 +64,7 @@ import { AnalyticsServicePlugin } from '../plugin.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import type { StrategyContext } from '../strategies/types.js';
 import { declaredRefusalMessage } from '@objectstack/types';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const DEAL = 'os21441_bucket_deal';
 
@@ -209,6 +210,9 @@ for (const cell of CELLS) {
         await engine.init();
         engine.registry.registerObject(DEAL_OBJECT as any);
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
         for (const row of DEALS) await engine.insert(DEAL, { ...row } as any);
         driver.knex.on('query', (q: { sql: string }) => { driverRan.push(q.sql); });
 

@@ -30,6 +30,7 @@ import { SysImportJob } from '@objectstack/platform-objects/audit';
 // from here so that moving it is observable at the enforcement point.
 import { IMPORT_JOB_MAX_ROWS } from '@objectstack/spec/api';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 // The real backend: better-sqlite3 `:memory:`, constructed the canonical way
 // (`examples/app-crm`, `cli db clean`, PR #5715's `makeDefaultDriver()`).
@@ -102,6 +103,9 @@ async function boot(decorateDriver?: (driver: any) => void) {
   engine.registry.registerObject(SYS_IMPORT_JOB as any);
   // Real DDL for both tables before the first job row is written.
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
 
   // [#21516] The protocol reads the stored-metadata family; the engine refuses a
   // name its registry does not hold, so the harness registers the family as a boot
@@ -291,15 +295,17 @@ describe('async import job — real engine + protocol integration', () => {
     // job is running — but the 3-row job has no mid-loop checkpoint, so the
     // loop still completes every row before noticing.
     const slowCtx = await boot((driver) => {
+      // Every argument is forwarded: the options carry the organization the
+      // engine stamps (ADR-0131 D9), which a NOT NULL tenant column needs (D1).
       const bulkCreate = driver.bulkCreate.bind(driver);
-      driver.bulkCreate = async (o: string, rows2: any[]) => {
+      driver.bulkCreate = async (o: string, rows2: any[], ...rest: any[]) => {
         if (o === 'task') await new Promise((r) => setImmediate(r));
-        return bulkCreate(o, rows2);
+        return bulkCreate(o, rows2, ...rest);
       };
       const create = driver.create.bind(driver);
-      driver.create = async (o: string, data: any) => {
+      driver.create = async (o: string, data: any, ...rest: any[]) => {
         if (o === 'task') await new Promise((r) => setImmediate(r));
-        return create(o, data);
+        return create(o, data, ...rest);
       };
     });
     const created = await callCreate(slowCtx.create, {

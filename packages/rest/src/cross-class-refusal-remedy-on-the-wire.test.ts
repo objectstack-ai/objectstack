@@ -41,6 +41,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** The record matcher's remedy, as its message opens. */
 const MATCHER_REMEDY =
@@ -114,6 +115,9 @@ async function boot(f: Fixture) {
     ],
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
 
   const set = PermissionSetSchema.parse({
     name: 'qa_cross_class_remedy',

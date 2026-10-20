@@ -45,6 +45,7 @@ import { SysMetadataActivation } from '@objectstack/platform-objects/system';
 import { HttpDispatcher } from './http-dispatcher.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 import { bindTestSecurityCatalog } from './security/security-catalog.testkit.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const PREFIX = '/api/v1';
 /** `registry.registerObject` requires a package id (see the sibling real-stack tests). */
@@ -116,6 +117,9 @@ async function bootEngine(objects: readonly object[]): Promise<ObjectQL> {
     await engine.init();
     for (const o of objects) engine.registry.registerObject(o as any, TEST_PACKAGE_ID);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     return engine;
 }
 

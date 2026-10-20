@@ -36,6 +36,7 @@ import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
 const SUBMITTER = { userId: 'u_submitter', positions: [], permissions: [] } as any;
@@ -85,6 +86,9 @@ describe('the boot-time action-slot backfill (#21411)', () => {
     // Real DDL — including the `acted_as` column, so a write of it the schema
     // does not carry fails here rather than passing against a permissive fake.
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     svc = new ApprovalService({ engine: engine as any, logger: { warn: () => {} } as any });
     await engine.insert('crm_deal', { id: 'D1', title: 'Deal' }, { context: SYSTEM } as any);
   });

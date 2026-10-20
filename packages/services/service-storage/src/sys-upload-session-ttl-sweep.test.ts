@@ -51,6 +51,7 @@ import { LifecycleService, applySystemFields, assertEngineDeleteDispatch } from 
 import type { LifecycleEngineLike, LifecycleObjectLike } from '@objectstack/objectql';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { SystemUploadSession } from './objects/system-upload-session.object.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const DAY_MS = 86_400_000;
 /** The instant the sweep runs. Every window below is expressed against it. */
@@ -127,6 +128,9 @@ async function seeded(opts?: { lifecycle?: unknown }) {
   });
   openDrivers.push(driver);
   await driver.initObjects([schema]);
+  // The legacy organization-less rows below exist only on a store built before
+  // 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+  await relaxTenantColumns(driver as any, ['sys_upload_session']);
 
   await driver.create('sys_upload_session', {
     id: 's_legacy_null',

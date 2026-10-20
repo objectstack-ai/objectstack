@@ -34,6 +34,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'pf_required_lead_24131';
 const SLUG = 'pf-required-24131';
@@ -126,6 +127,9 @@ describe('[#24131] POST /forms/:slug/submit enforces the form\'s own `required`'
     await engine.init();
     engine.registry.registerObject(LEAD as any);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     const protocol: any = new ObjectStackProtocolImplementation(engine as any);
     const realGetMetaItems = protocol.getMetaItems.bind(protocol);

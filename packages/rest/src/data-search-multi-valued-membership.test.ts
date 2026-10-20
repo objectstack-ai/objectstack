@@ -36,6 +36,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** `examples/app-todo`'s `todo_task.tags` shape: a `select` declared `multiple: true`, in the auto-default set. */
 const TASK = {
@@ -154,6 +155,9 @@ for (const cell of CELLS) {
         engine.registry.registerObject(TASK as any);
         engine.registry.registerObject(NOTE as any);
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
         for (const row of TASK_ROWS) await engine.insert(TASK.name, { ...row } as any);
         for (const row of NOTE_ROWS) await engine.insert(NOTE.name, { ...row } as any);
         vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);

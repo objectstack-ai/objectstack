@@ -99,6 +99,7 @@ import '@better-auth/core/context';
 import '@better-auth/core/error';
 import '@better-auth/oauth-provider';
 import '@better-auth/scim';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /**
  * [#23184] Every sign-in below verifies the password the case attached, which
@@ -241,6 +242,10 @@ async function bootEngine(): Promise<BootedSqliteEngine> {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
   }
   await engine.syncSchemas();
+  // The organization-less rows below (global sets, grants, identities) exist
+  // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column
+  // NOT NULL): this is that store.
+  await relaxEveryRegisteredTenantColumn(engine);
   // [ADR-0131 D3/D4] `admin_full_access` is a catalog definition — what the
   // break-glass guard, like the resolver, resolves a grant's set name to.
   bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS }] });

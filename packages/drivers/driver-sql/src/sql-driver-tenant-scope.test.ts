@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach, assert } from 'vitest';
 import { ObjectSchema } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /**
  * Tenant-scope (organization_id) isolation tests.
@@ -140,6 +141,9 @@ describe('SqlDriver tenant scope (organization_id)', () => {
   // therefore no tenant's: only an unscoped read reaches it.
   describe('NULL tenant column = no tenant\'s row (ADR-0131 D1)', () => {
     beforeEach(async () => {
+      // An organization-less row exists only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
+      await asPre18TenantColumn(driver, 'account');
       await driver.create('account', { id: 'g1', name: 'Orphan', tier: 'none' });
     });
 
@@ -478,6 +482,8 @@ describe('SqlDriver tenant scope (organization_id)', () => {
     });
 
     it('the union path does not reach an organization-less row either (ADR-0131 D1)', async () => {
+      // A pre-18 database's row with no organization (ADR-0131 D1).
+      await asPre18TenantColumn(driver, 'account');
       await driver.create('account', { id: 'g1', name: 'ORPHAN' });
       const rows = await driver.find(
         'account',

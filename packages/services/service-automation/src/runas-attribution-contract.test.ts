@@ -53,6 +53,7 @@ import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationServicePlugin } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** Real backend: better-sqlite3 `:memory:` through driver-sql. */
 function makeSqliteDriver() {
@@ -178,6 +179,9 @@ describe("runAs:'system' attribution contract — elevation decides authorizatio
     ql.registerDriver(driver, true);
     ql.registry.registerObject(crmTask as any, 'attribution-test', 'attribution-test');
     await ql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(ql);
 
     // Observe the SAME session envelope the audit stamp hooks and
     // plugin-audit's `writeAudit` read. Registered at priority 100 so it runs

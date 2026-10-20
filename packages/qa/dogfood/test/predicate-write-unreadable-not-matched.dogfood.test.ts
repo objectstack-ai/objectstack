@@ -58,6 +58,7 @@ import {
 import { buildCmtOpen, buildCmtPrivate, buildCmtReadonly, commentManagerSet } from './fixtures/comments-fixture.js';
 import { armedWhen, assertArmed, leaveOrganization, principalArmed, resolveAuthzFor } from './armed.js';
 import { catalogPermissionSet } from './catalog-permission-set.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYS = { isSystem: true } as const;
 
@@ -162,6 +163,9 @@ async function boot(inside: boolean, email: string): Promise<Booted> {
     // organization-less system insert with the Default Organization (ADR-0131 D9),
     // so the global row is landed beneath the engine, as the residue an older
     // release left. The readers still apply it until C8's NULL-reader stages.
+    // That residue lives only on a store built before 18.x, whose tenant column is
+    // nullable (ADR-0131 D1 makes a fresh one NOT NULL): the table is that store's.
+    await relaxTenantColumns(ql as any, ['sys_user_permission_set']);
     await ql.getDriver('sys_user_permission_set').create('sys_user_permission_set', {
       id: `ups_${userId}_${set.name}`, user_id: userId, permission_set: set.name, organization_id: null,
     });

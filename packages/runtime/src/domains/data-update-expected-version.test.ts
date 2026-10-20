@@ -52,6 +52,7 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { RestServer } from '@objectstack/rest';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const PREFIX = '/api/v1';
 const DATA = `${PREFIX}/data`;
@@ -96,6 +97,9 @@ async function bootStore() {
     await engine.init();
     engine.registry.registerObject(TASK as any, TEST_PACKAGE_ID);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     const protocol = new ObjectStackProtocolImplementation(engine as any);
     await protocol.createData({ object: 'task', data: { id: 'r1', name: BEFORE } } as any);
     const row: any = await engine.findOne('task', { where: { id: 'r1' } });

@@ -71,6 +71,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
+import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'os20889_measure_ledger';
 
@@ -243,6 +244,9 @@ for (const cell of CELLS) {
         await engine.init();
         engine.registry.registerObject(LEDGER as any);
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
         for (const row of ROWS) await engine.insert(OBJECT, { ...row } as any);
 
         const realExecute = (engine as any).execute.bind(engine);
@@ -357,7 +361,11 @@ for (const cell of CELLS) {
         // exact-decimal column stores them exactly (SQLite's column rounds on write).
         const EXACT = ['9007199254740993', '12345678901234567.123456789'];
         for (const [i, literal] of EXACT.entries()) {
-          await driver.execute(`insert into ${OBJECT} (id, category, amount) values ('p${i}', 'p${i}', ${literal})`);
+          // The raw row names the install's organization, as the engine's own
+          // writes do: a fresh tenant column is NOT NULL (ADR-0131 D1).
+          await driver.execute(
+            `insert into ${OBJECT} (id, category, amount, organization_id) values ('p${i}', 'p${i}', ${literal}, '${DEFAULT_ORGANIZATION_ID}')`,
+          );
         }
         const native = byCategory((await cubeRead('native', ['sum_amount', 'avg_amount', 'min_amount'], ['category'])).rows);
         const objectql = byCategory((await cubeRead('objectql', ['sum_amount', 'avg_amount', 'min_amount'], ['category'])).rows);

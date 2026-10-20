@@ -36,6 +36,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import type { EngineAggregateOptions, EngineQueryOptions } from '@objectstack/spec/data';
 
 import { AuditPlugin } from './audit-plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const LEDGER = 'sys_audit_log';
 const ITEM = 'alg_item';
@@ -163,6 +164,9 @@ describe('[#21154] a query over the ledger snapshots by a reader withheld a pare
     engine.registerDriver(driver, true);
     for (const object of [itemObject, openObject]) engine.registry.registerObject(object as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     // Every ledger row is written by the real audit writer's CRUD mirror.
     ids.item = (await engine.insert(ITEM, { name: 'item', f_masked: V.masked1, f_unserved: V.unserved1 }, { context: SYS })).id;

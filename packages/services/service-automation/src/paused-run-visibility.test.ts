@@ -80,6 +80,7 @@ import { AutomationEngine } from './engine.js';
 import type { RunRecord, SuspendedRun, SuspendedRunStore } from './engine.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import { AutomationServicePlugin } from './plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const silent = { info() {}, warn() {}, error() {}, debug() {}, child() { return silent; } } as never;
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -547,6 +548,9 @@ describe('#8050 cold boot over the same sqlite file (full stack)', () => {
             (ql as any).registry.registerObject(o.def as never, o.owner);
         }
         await ql.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(ql);
 
         const automation = kernel.getService<AutomationEngine>('automation');
         automation.registerNodeExecutor(holdExecutor);

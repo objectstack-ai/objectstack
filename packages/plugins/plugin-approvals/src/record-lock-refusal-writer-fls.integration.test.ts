@@ -41,6 +41,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { bindApprovalLockHook } from './lifecycle-hooks.js';
 import type { FieldVisibilitySource } from './payload-redaction.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
 /** The writer's envelope carries `permissions`, which the hook session does not. */
@@ -132,6 +133,9 @@ describe('[#23618] the RECORD_LOCKED refusal names the record from what its writ
       engine.registry.registerObject(o as any, 'com.objectstack.test.23618');
     }
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     lockedId = String((await engine.insert('opportunity', { name: TITLE, amount: 100 }, { context: SYSTEM } as any)).id);
     freeId = String((await engine.insert('opportunity', { name: 'Unlocked deal', amount: 5 }, { context: SYSTEM } as any)).id);

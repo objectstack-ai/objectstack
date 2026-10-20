@@ -42,6 +42,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SysAttachment } from '@objectstack/platform-objects';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import { installAttachmentReadVisibility } from './attachment-access-hooks.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const ATTACHMENT = 'sys_attachment';
 /** Owner-scoped: a member reads its own records. */
@@ -204,6 +205,9 @@ describe('[ADR-0139 E7] the attachment read gate on the leaf path', () => {
     engine.registry.registerObject(objectOf(GATED) as any, HARNESS_PACKAGE);
     engine.registry.registerObject(objectOf(FAR, { datasource: 'warehouse' }) as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     installSecurityMiddleware(engine);
     // D5's second class: an object-scoped read middleware narrows the gated parent.
     engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {
@@ -378,6 +382,9 @@ describe('[ADR-0139 D3] on a driver that refuses the leaf, the attachment read f
     ({ kernel, engine } = await bootKernel(new RefusingDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })));
     engine.registry.registerObject(objectOf(DOC) as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     installAttachmentReadVisibility(engine as any, silent, () => kernel.getService<ISecurityService>('security'));
     const doc = await engine.insert(DOC, { name: 'one', owner: MEMBER_A.userId }, { context: SYS });
     await engine.insert(ATTACHMENT, attachmentTo(DOC, doc.id), { context: SYS });

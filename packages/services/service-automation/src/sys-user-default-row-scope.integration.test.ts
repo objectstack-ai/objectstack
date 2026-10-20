@@ -150,7 +150,18 @@ describe("sys_user's one `||` default keeps the reader's own row on every user-c
     }
     // The one grant: a global (organisation-less) assignment of the `'*'` reader,
     // written straight into the table — a system write here must name one of
-    // the two organisations, and a global grant names none.
+    // the two organisations, and a global grant names none. Such a row exists
+    // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant
+    // column NOT NULL), so the table is that store's, relaxed through the
+    // driver's own drift apply door.
+    const relaxed = await (driver as any).applyMigrationEntries([
+      {
+        kind: 'nullability_mismatch', remoteName: 'sys_user_permission_set', table: 'sys_user_permission_set',
+        column: 'organization_id', category: 'needs_confirm',
+        op: { type: 'relax_not_null', table: 'sys_user_permission_set', column: 'organization_id' },
+      },
+    ]);
+    expect(relaxed.applied).toHaveLength(1);
     await (driver as unknown as { knex: (t: string) => { insert(r: object): Promise<unknown> } })
       .knex('sys_user_permission_set')
       .insert({ id: 'ups_me', user_id: 'usr_me', permission_set: STAR_READER.name, organization_id: null });

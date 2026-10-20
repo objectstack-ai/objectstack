@@ -50,6 +50,7 @@ import type {
   SysFilePublicScopeBackfillOptions as EntryOptions,
   SysFilePublicScopeBackfillReport as EntryReport,
 } from './index.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const SYSTEM = { context: { isSystem: true } };
 
@@ -91,6 +92,9 @@ describe('sys_file public-scope backfill (#22443 ruling B) — a real ObjectQL o
       fields: { title: { type: 'text' }, image: { type: 'image' } },
     } as any, 'test-22443');
     await engine.syncSchemas();
+    // The legacy organization-less rows below exist only on a store built before
+    // 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is that store.
+    await relaxTenantColumns(sql as any, ['sys_file']);
 
     storage = {
       upload: vi.fn(async () => {}),
@@ -120,8 +124,10 @@ describe('sys_file public-scope backfill (#22443 ruling B) — a real ObjectQL o
    * condition that reaches `copyOwnedFile` (copy-on-claim), which re-inserts
    * the source row's scope on the copy.
    */
+  // The claiming write acts in an organization: `product` is created by this
+  // release, whose tenant column is NOT NULL (ADR-0131 D1).
   const copyBySecondReference = (recordId: string, fileId: string) =>
-    engine.insert('product', { id: recordId, title: recordId, image: fileId });
+    engine.insert('product', { id: recordId, title: recordId, image: fileId }, { context: { tenantId: 'org_a' } } as any);
 
   it('a deployment with no public rows runs clean: it counts zero and writes nothing', async () => {
     await engine.insert('sys_file', { ...legacyPublicRow('f_user'), scope: 'user' }, SYSTEM as any);

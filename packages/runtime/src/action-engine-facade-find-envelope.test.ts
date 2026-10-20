@@ -46,6 +46,7 @@ import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { buildActionEngineFacade, ACTION_ENGINE_FIND_ENVELOPE_PRESCRIPTION } from './action-execution.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const deps: any = { resolveService: () => undefined, getObjectQL: async () => undefined };
 
@@ -201,6 +202,9 @@ async function makeRealEngine() {
     await engine.init();
     engine.registry.registerObject(PROBE_OBJECT, 'test');
     await engine.syncSchemas?.();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     const ctx = { isSystem: true } as any;
     // t3 carries a non-null `deleted_at`, so a filter that is HONOURED returns

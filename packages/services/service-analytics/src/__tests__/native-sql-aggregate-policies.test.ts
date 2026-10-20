@@ -60,6 +60,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'os21042_policy_ledger';
 
@@ -237,6 +238,9 @@ for (const cell of CELLS) {
         await engine.init();
         engine.registry.registerObject(LEDGER as any);
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
         for (const row of ROWS) await engine.insert(OBJECT, { ...row } as any);
 
         const realExecute = (engine as any).execute.bind(engine);

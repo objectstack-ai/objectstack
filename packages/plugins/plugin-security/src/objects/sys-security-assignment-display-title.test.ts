@@ -48,6 +48,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveDisplayField } from '@objectstack/spec/data';
 import { SysUserPermissionSet } from './sys-user-permission-set.object.js';
 import { SysUserPosition } from './sys-user-position.object.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as any;
 
@@ -123,6 +124,9 @@ describe('[#20044] permission-assignment tables resolve a real record title unde
       engine.registry.registerObject(schema, 'com.objectstack.test.20044');
     }
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
   });
 
   afterAll(async () => {

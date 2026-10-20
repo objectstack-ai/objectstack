@@ -569,11 +569,15 @@ describe('attachments permission matrix (#2755)', () => {
       // Hook-bypass re-reference: a DIRECT DRIVER insert (no engine hooks
       // fire, so afterInsert cannot un-tombstone) + a backdated tombstone.
       const driver = ql.getDriverForObject('sys_attachment');
+      // The row carries its parent's organization, as the engine would stamp
+      // it: a fresh tenant column is NOT NULL (ADR-0131 D1).
+      const parent = await ql.findOne('att_case', { where: { id: caseAId }, context: SYS });
       await driver.create('sys_attachment', {
         id: `bypass-${fileId}`,
         parent_object: 'att_case',
         parent_id: caseAId,
         file_id: fileId,
+        organization_id: parent.organization_id,
         created_at: new Date(),
       });
       await ql.update(

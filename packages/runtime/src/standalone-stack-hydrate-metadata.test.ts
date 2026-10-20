@@ -167,7 +167,8 @@ describe('[#20071] createStandaloneStack declares sys_metadata hydration instead
         // is the only path that puts it there — which is what makes it a sharp
         // second leg below.
         expect(engine1.registry.getObject(OBJECT)?.name, 'boot 1 registers the object it just saved').toBe(OBJECT);
-        await engine1.insert(OBJECT, { title: 'survives the restart' });
+        // Written in an organization: a fresh tenant column is NOT NULL (ADR-0131 D1).
+        await engine1.insert(OBJECT, { title: 'survives the restart' }, { context: { tenantId: 'org_a' } } as never);
         await first.shutdown();
         kernels.splice(kernels.indexOf(first), 1);
 
