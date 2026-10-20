@@ -2635,7 +2635,7 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the thirteen files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the fourteen files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
         // [#21733] Joined the population deliberately: the card's acceptance is
         // a plain `os dev` restart on the BUILT packages, and its production leg
@@ -2664,6 +2664,12 @@ export function selfTest() {
         // PRODUCTION posture, and `bin/run-dev.js` sets `NODE_ENV=development`
         // before argv is parsed. Every spawn hands its child `NODE_ENV: undefined`.
         'packages/cli/test/serve-mcp-stdio-early-initialize.integration.test.ts',
+        // [ADR-0131 D9] Joined the population deliberately: its subject is the
+        // refusal of a PRODUCTION server boot with no auth secret, and
+        // `bin/run-dev.js` sets `NODE_ENV=development` before argv is parsed,
+        // where the development fallback secret always composes auth. Every
+        // spawn hands its child `NODE_ENV: undefined`.
+        'packages/cli/test/serve-no-auth-secret-refusal.integration.test.ts',
         // [#23573] Joined the population deliberately: the no-storage boot
         // guard is registered only when a PRODUCTION storage step declared
         // nothing, and `bin/run-dev.js` sets `NODE_ENV=development` before argv

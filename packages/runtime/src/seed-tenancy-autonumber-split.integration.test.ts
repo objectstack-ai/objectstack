@@ -143,17 +143,42 @@ async function seedFreshInstall(engine: ObjectQL) {
 }
 
 /**
+ * Run `land` as a 17.x driver would have: with no organization-less refusal on
+ * the counter. Since ADR-0131 D9 stage 8d the driver refuses an
+ * organization-less row on a tenant table wherever it registered the
+ * organization object (`OrganizationlessCounterRefusal`); 17.x had no such
+ * refusal and minted the number on the `__global__` counter. The residue this
+ * file repairs is exactly what that older driver wrote, so it is landed through
+ * the same driver call with the refusal's composition fact withheld — the
+ * driver's own 17.x path, not a hand-written imitation of its rows.
+ */
+async function asA17xDriver(driver: SqlDriver, land: () => Promise<void>): Promise<void> {
+  const d = driver as any;
+  const registered = d.organizationObjectRegistered;
+  expect(registered, 'the 18.x driver under test never registered the organization object').toBe(true);
+  d.organizationObjectRegistered = false;
+  try {
+    await land();
+  } finally {
+    d.organizationObjectRegistered = registered;
+  }
+}
+
+/**
  * The RESIDUE an install seeded before ADR-0131 carries: the same rows the
  * pre-C1 loader wrote when no organization existed yet, through the very driver
- * call the engine made for them — no `tenantId`, so the driver mints each
- * number on the `__global__` counter. The loader and the engine now refuse that
- * write; an install that made it before keeps the rows, and repairing them is
- * what the backfill and the handoff below exist for (ADR-0131 C7's residue).
+ * call the engine made for them — no `tenantId`, so the 17.x driver minted each
+ * number on the `__global__` counter. The loader, the engine and (since stage
+ * 8d) the driver now refuse that write; an install that made it before keeps
+ * the rows, and repairing them is what the backfill and the handoff below exist
+ * for (ADR-0131 C7's residue).
  */
 async function landPreC1SeedResidue(driver: SqlDriver, count = SEEDED_ROWS) {
-  for (let i = 0; i < count; i++) {
-    await (driver as any).create('crm_case', { subject: `seeded ${i + 1}` });
-  }
+  await asA17xDriver(driver, async () => {
+    for (let i = 0; i < count; i++) {
+      await (driver as any).create('crm_case', { subject: `seeded ${i + 1}` });
+    }
+  });
 }
 
 /** The sign-up that first brings an organization into existence. */
@@ -488,8 +513,10 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     // for it then (the engine now refuses it at zero organizations, D9).
     const seed = (region: string, n: number) =>
       (driver as any).create('crm_ticket', { subject: `seeded ${region} ${n}`, region });
-    for (let i = 1; i <= 3; i++) await seed('EU', i);
-    for (let i = 1; i <= 2; i++) await seed('US', i);
+    await asA17xDriver(driver, async () => {
+      for (let i = 1; i <= 3; i++) await seed('EU', i);
+      for (let i = 1; i <= 2; i++) await seed('US', i);
+    });
 
     // Two independent counters, one per rendered scope.
     expect(await readScopedSequences(driver)).toEqual([
@@ -555,9 +582,11 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     // [C8 stage 8b] Straight through the driver, as `landPreC1SeedResidue` does:
     // under `single` the engine no longer writes an organization-less platform
     // row, so these are the residue an older release left behind.
-    for (let i = 0; i < 3; i++) {
-      await (driver as any).create('sys_audit_entry', { subject: `e${i}` });
-    }
+    await asA17xDriver(driver, async () => {
+      for (let i = 0; i < 3; i++) {
+        await (driver as any).create('sys_audit_entry', { subject: `e${i}` });
+      }
+    });
     await createOrganization(engine);
     expect(await readSequences(driver)).toEqual([{ tenant: GLOBAL_TENANT, lastValue: 3 }]);
 

@@ -489,9 +489,11 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
       active: true,
       managed_by: 'package',
       customized: false,
-      organization_id: null,
+      // [ADR-0131 D2/D8] The typed deployment-wide marker, never a NULL organization.
+      deploymentWide: true,
     });
     expect(byName(served, 'share_legacy_deals').criteria).toEqual({ status: 'open' });
+    expect(byName(served, 'share_legacy_deals')).not.toHaveProperty('organization_id');
 
     // Three declared rules in, three served, each exactly once: the legacy
     // rule is served ONE time, not a second time beside a modern spelling.
@@ -502,7 +504,7 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
     expect(rows.sys_sharing_rule).toEqual([]);
   });
 
-  it('the rules served carry the reader-derived shape, organization-less under the `single` posture', () => {
+  it('the rules served carry the reader-derived shape, deployment-wide under the `single` posture', () => {
     const modern = byName(served, 'share_modern_deals');
     expect(modern).toMatchObject({
       name: 'share_modern_deals',
@@ -513,8 +515,10 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
       active: true,
       managed_by: 'package',
       customized: false,
-      organization_id: null,
+      // [ADR-0131 D2/D8] The typed deployment-wide marker, never a NULL organization.
+      deploymentWide: true,
     });
     expect(modern.criteria).toEqual({ stage: 'won' });
+    expect(modern).not.toHaveProperty('organization_id');
   });
 });
