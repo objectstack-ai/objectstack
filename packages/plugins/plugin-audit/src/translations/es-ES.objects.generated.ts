@@ -33,6 +33,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           delete: "Eliminar",
           login: "Inicio de sesión",
           logout: "Cierre de sesión",
+          login_failed: "Inicio de sesión fallido",
+          account_locked: "Cuenta bloqueada",
           config_change: "Cambio de configuración",
           import: "Importar",
           platform_admin_standing_change: "Cambio de acceso de administrador de plataforma"

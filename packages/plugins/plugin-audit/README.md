@@ -108,11 +108,24 @@ these are the only values that are ever written:
 | `delete` | `installAuditWriters` (this package) | `afterDelete` |
 | `login` | `createAuthEventAuditSink` (this package), called by `@objectstack/plugin-auth` | session start |
 | `logout` | `createAuthEventAuditSink` (this package), called by `@objectstack/plugin-auth` | session end |
+| `login_failed` | `createAuthEventAuditSink` (this package), called by `@objectstack/plugin-auth` | a refused password sign-in (`/sign-in/email`) that names an existing account |
+| `account_locked` | `createAuthEventAuditSink` (this package), called by `@objectstack/plugin-auth` | the refused sign-in that stamps the account lockout (`lockoutThreshold`, ADR-0069 D2) |
 | `config_change` | `@objectstack/service-settings` | every successful settings write |
 | `import` | `@objectstack/plugin-auth` admin user import | one run-level row, with `record_id: null` |
+| `platform_admin_standing_change` | `@objectstack/plugin-security` | a change of who holds platform-administrator standing, plus a first-boot baseline |
 
 Action values are snake_case. There is no namespaced `domain:action` spelling — the enum
 above is the complete accepted set, and a value outside it is not a form this object takes.
+
+**Session events and account events.** A `login` / `logout` row is about a session: it names
+`sys_session` and the session id, and `actor` is the subject (or the administrator who
+started an impersonation session). A `login_failed` / `account_locked` row is about an
+account and exists without any session: `user_id` is the account the sign-in named, the row
+names `sys_user` and that account's id, and `actor` is null, because a refused attempt
+authenticated nobody. Its `metadata` carries the endpoint and the refusal's machine code
+(`INVALID_EMAIL_OR_PASSWORD`, `ACCOUNT_LOCKED`, …), plus the lock's expiry and threshold on
+an `account_locked` row. It never carries the attempted credential, and an identifier that
+resolves to no account writes no row.
 
 ## `sys_audit_log` fields
 
@@ -123,7 +136,7 @@ written only by internal system hooks running under `sudo()`, never through UI f
 |---|---|---|
 | `id` | text | Audit log entry id |
 | `created_at` | datetime | When the action occurred (`NOW()` default) |
-| `action` | select | One of the eight values above |
+| `action` | select | One of the eleven values above |
 | `user_id` | lookup → `sys_user` | Null for non-user / service actions |
 | `actor` | text | Principal label: a user id, `svc:<name>`, or null. Attributes service-token writes that `user_id` structurally cannot hold |
 | `object_name` | text | Target object, e.g. `sys_user` |
@@ -144,7 +157,9 @@ without the secret itself reaching the ledger.
 **`ip_address` / `user_agent` are populated on auth events only.** Neither the
 record-level writer nor the record-view writer stamps them: a `create` / `update` /
 `delete` / `read` row records who and what, not from where. Do not read a null client
-fingerprint on such a row as "the request had none".
+fingerprint on such a row as "the request had none". On every auth event they are
+resolved by better-auth's own rule: a session event copies the session row's values, and
+an account event applies the same resolution to the sign-in request.
 
 **`old_value` / `new_value` are null on every `read` row**, deliberately and not as an
 omission — see [Record-view auditing](#record-view-auditing--the-read-action).
@@ -336,7 +351,7 @@ the standard object API or `services.data`, and through the shipped list views:
 |---|---|
 | `recent` | Everything, newest first |
 | `writes_only` | `create` / `update` / `delete` |
-| `auth_events` | `login` / `logout` |
+| `auth_events` | `login` / `logout` / `login_failed` / `account_locked` |
 | `record_views` | `read` — who opened which record |
 | `config_changes` | `config_change` / `import` |
 | `all_events` | Everything, larger page size |
@@ -355,9 +370,10 @@ interface AuthEventAuditSink {
 }
 ```
 
-`AuthSessionAuditEvent.action` is the closed union `'login' | 'logout'`. `@objectstack/plugin-auth`
-resolves this slot lazily and calls it from the session lifecycle. It is not a query API:
-to read audit history, query the `sys_audit_log` object.
+`AuthSessionAuditEvent.action` is the closed union `'login' | 'logout' | 'login_failed' |
+'account_locked'` (`AuthEventAuditAction`). `@objectstack/plugin-auth` resolves this slot
+lazily and calls it from the session lifecycle and from the password sign-in outcome. It is
+not a query API: to read audit history, query the `sys_audit_log` object.
 
 ## Retention and archival
 
@@ -430,6 +446,7 @@ export type {
 // Auth-event ingress (the `audit` service slot)
 export { createAuthEventAuditSink };
 export type {
+  AuthAccountAuditAction, AuthEventAuditAction,
   AuthEventAuditLogger, AuthEventAuditSink, AuthEventAuditSinkOptions,
   AuthSessionAuditAction, AuthSessionAuditEvent,
 };

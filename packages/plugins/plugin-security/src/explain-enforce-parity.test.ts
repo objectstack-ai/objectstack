@@ -764,6 +764,8 @@ const D_ORG = 'u_d_org';
 const D_OWN = 'u_d_own';
 /** Owns the rows nobody the rig explains owns. */
 const D_OTHER = 'u_d_other';
+/** Write depth `org`, its own writes bounded by app-authored row-level policies: the delegator #24746 is about. */
+const D_BOUNDED = 'u_d_bounded';
 
 /**
  * #24646 ruling item 3: for an ON-BEHALF-OF caller — an OAuth agent acting for
@@ -784,7 +786,9 @@ const D_OTHER = 'u_d_other';
  * - `p_org_mine_created_by_other`: owned by `D_ORG`, created by someone else;
  * - `p_theirs`, `p_org_mine`, `p_own_mine`: the controls;
  * - `p_beta`: another organization's row, which only the wall-less posture lets through;
- * - `p_del_*`: the same two shapes again, for the delete rows (a delete that lands removes its row).
+ * - `p_del_*`: the same two shapes again, for the delete rows (a delete that lands removes its row);
+ * - `p_bounded_*`, `p_del_bounded_*`, `m_bounded_*`: rows `D_BOUNDED`'s own authored
+ *   policies refuse (`held`) or admit (`free`), and a detail under each master (#24746).
  *
  * One rig per posture, shared by its rows: an admitted update writes only
  * `note`, which no policy reads, and every delete row has its own record.
@@ -839,7 +843,7 @@ async function bootDelegated(posture: TenancyPosture) {
 
   const e = engine as unknown as { insert: (o: string, row: Record<string, unknown>, opts: never) => Promise<unknown> };
   for (const id of [ALPHA, BETA]) await e.insert('sys_organization', { id, name: id, slug: id }, SYS);
-  for (const id of [D_ORG, D_OWN, D_OTHER]) {
+  for (const id of [D_ORG, D_OWN, D_OTHER, D_BOUNDED]) {
     await e.insert('sys_user', { id, name: id, email: `${id}@example.test` }, SYS);
     await e.insert('sys_member', { id: `mem_${id}_${n}`, user_id: id, organization_id: ALPHA, role: 'member' }, SYS);
   }
@@ -855,15 +859,24 @@ async function bootDelegated(posture: TenancyPosture) {
       name: 'qa_d_own',
       objects: { [PARENT]: own, [MASTER]: { ...own, readScope: 'org' }, [DETAIL]: detail },
     }),
+    PermissionSetSchema.parse({
+      name: 'qa_d_bounded',
+      objects: { [PARENT]: org, [MASTER]: org, [DETAIL]: { ...detail, allowDelete: true } },
+      rowLevelSecurity: [
+        { name: 'qa_d_bounded_updates', object: PARENT, operation: 'update', using: "name != 'held'" },
+        { name: 'qa_d_bounded_deletes', object: PARENT, operation: 'delete', using: "name != 'held'" },
+        { name: 'qa_d_bounded_master_updates', object: MASTER, operation: 'update', using: "name != 'held'" },
+      ],
+    }),
   ];
   // A catalogue row with no organization, landed through the driver as in rig 2.
-  for (const name of ['qa_d_org', 'qa_d_own']) {
+  for (const name of ['qa_d_org', 'qa_d_own', 'qa_d_bounded']) {
     await (engine as any).getDriver('sys_permission_set').create('sys_permission_set', {
       id: `ps_${name}_${n}`, name, label: name, organization_id: null, managed_by: 'admin', active: true,
       object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
     });
   }
-  for (const [user, set] of [[D_ORG, 'qa_d_org'], [D_OWN, 'qa_d_own']] as const) {
+  for (const [user, set] of [[D_ORG, 'qa_d_org'], [D_OWN, 'qa_d_own'], [D_BOUNDED, 'qa_d_bounded']] as const) {
     await e.insert('sys_user_permission_set', {
       id: `ups_${user}_${n}`, user_id: user, permission_set: set, organization_id: ALPHA,
     }, SYS);
@@ -879,11 +892,19 @@ async function bootDelegated(posture: TenancyPosture) {
     row('p_beta', D_ORG, D_ORG, BETA),
     row('p_del_theirs_created_by_org', D_OTHER, D_ORG),
     row('p_del_org_mine_created_by_other', D_ORG, D_OTHER),
+    { ...row('p_bounded_held', D_BOUNDED, D_BOUNDED), name: 'held' },
+    { ...row('p_bounded_free', D_BOUNDED, D_BOUNDED), name: 'free' },
+    { ...row('p_del_bounded_held', D_BOUNDED, D_BOUNDED), name: 'held' },
   ]) await e.insert(PARENT, r, SYS);
   await e.insert(MASTER, row('m_org', D_ORG, D_ORG), SYS);
   await e.insert(MASTER, row('m_theirs', D_OTHER, D_OTHER), SYS);
+  await e.insert(MASTER, { ...row('m_bounded_held', D_BOUNDED, D_BOUNDED), name: 'held' }, SYS);
+  await e.insert(MASTER, { ...row('m_bounded_free', D_BOUNDED, D_BOUNDED), name: 'free' }, SYS);
   await e.insert(DETAIL, { id: 'd_under_org', note: '', created_by: D_ORG, master: 'm_org', organization_id: ALPHA }, SYS);
   await e.insert(DETAIL, { id: 'd_under_theirs', note: '', created_by: D_ORG, master: 'm_theirs', organization_id: ALPHA }, SYS);
+  for (const [id, master] of [['d_under_bounded_held', 'm_bounded_held'], ['d_under_bounded_free', 'm_bounded_free']] as const) {
+    await e.insert(DETAIL, { id, note: '', created_by: D_BOUNDED, master, organization_id: ALPHA }, SYS);
+  }
 
   let security: any;
   let sharing: SharingService | undefined;
@@ -1217,7 +1238,7 @@ const CLAIM_KEPT_UNDER_A_WALL =
  * caller cannot read).
  */
 function delegatedRows(posture: TenancyPosture, label: string, walled: boolean): Row[] {
-  type Cell = [who: string, onBehalf: boolean, op: 'update' | 'delete', object: 'PARENT' | 'DETAIL', id: string, shape: string, enforced: Enforced | 'admitted'];
+  type Cell = [who: string, onBehalf: boolean, op: 'update' | 'delete', object: 'PARENT' | 'DETAIL', id: string, shape: string, enforced: Enforced | 'admitted', card?: string];
   const cells: Cell[] = [
     // The delegated path's two legs, each deciding a row.
     [D_ORG, true, 'update', 'PARENT', 'p_theirs_created_by_org', 'a row owned by someone else that it created', 'admitted'],
@@ -1236,10 +1257,19 @@ function delegatedRows(posture: TenancyPosture, label: string, walled: boolean):
     [D_ORG, false, 'update', 'DETAIL', 'd_under_theirs', "a detail under someone else's master", 'admitted'],
     [D_ORG, false, 'update', 'PARENT', 'p_beta', 'its own row in another organization', walled ? REFUSED_NOT_FOUND : 'admitted'],
     [D_OWN, false, 'update', 'DETAIL', 'd_under_org', "a detail it reads under someone else's master", REFUSED_DENIED],
+    // #24746: an on-behalf-of write never admits a row its delegator's own write refuses.
+    [D_BOUNDED, true, 'update', 'PARENT', 'p_bounded_held', 'a row its own authored update policy refuses', REFUSED_DENIED, '#24746'],
+    [D_BOUNDED, false, 'update', 'PARENT', 'p_bounded_held', 'a row its own authored update policy refuses', REFUSED_DENIED, '#24746'],
+    [D_BOUNDED, true, 'update', 'PARENT', 'p_bounded_free', 'a row its own authored update policy admits', 'admitted', '#24746'],
+    [D_BOUNDED, true, 'delete', 'PARENT', 'p_del_bounded_held', 'a row its own authored delete policy refuses', REFUSED_DENIED, '#24746'],
+    [D_BOUNDED, true, 'update', 'DETAIL', 'd_under_bounded_held', 'a detail under a master its own authored update policy refuses', REFUSED_DENIED, '#24746'],
+    [D_BOUNDED, false, 'update', 'DETAIL', 'd_under_bounded_held', 'a detail under a master its own authored update policy refuses', REFUSED_DENIED, '#24746'],
+    [D_BOUNDED, true, 'update', 'DETAIL', 'd_under_bounded_free', 'a detail under a master its own authored update policy admits', 'admitted', '#24746'],
   ];
-  return cells.map(([who, onBehalf, op, object, id, shape, enforced]) => ({
-    card: '#24646 item 3',
-    shape: `${label}: ${onBehalf ? `an agent on behalf of the \`${who === D_ORG ? 'org' : 'own'}\` writer` : `the \`${who === D_ORG ? 'org' : 'own'}\` writer`}, ${shape}, ${op}`,
+  const depthOf = (who: string): string => (who === D_ORG ? 'org' : who === D_OWN ? 'own' : 'bounded');
+  return cells.map(([who, onBehalf, op, object, id, shape, enforced, card]) => ({
+    card: card ?? '#24646 item 3',
+    shape: `${label}: ${onBehalf ? `an agent on behalf of the \`${depthOf(who)}\` writer` : `the \`${depthOf(who)}\` writer`}, ${shape}, ${op}`,
     position: 'record.visible' as const,
     enforced,
     run: withDelegated(posture, async (r) => ({

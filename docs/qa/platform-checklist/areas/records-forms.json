@@ -1912,7 +1912,7 @@
       "title": "All six validation-rule types enforce on the write path with their exact per-type error codes — and advisory severities flag without blocking",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1922,10 +1922,12 @@
         "app": "showcase",
         "requires": [
           "the seeded per-type rules: showcase_account account_lifecycle (state_machine, events [update] only — transitions, no create-time check), tax_id_format + billing_email_format (format), support_config_shape (json_schema), churn_reason_consistency (conditional); showcase_project end_after_start (cross_field), spent_within_budget (script), project_status_flow (state_machine)",
-          "the seeded ADVISORY rule: showcase_project project_health_progression — state_machine on `health` with severity:'warning' (green↔yellow↔red one step at a time; a jump is flagged, not blocked — examples/app-showcase/src/data/objects/project.object.ts)"
+          "the seeded ADVISORY rule: showcase_project project_health_progression — state_machine on `health` with severity:'warning' (green↔yellow↔red one step at a time; a jump is flagged, not blocked — examples/app-showcase/src/data/objects/project.object.ts)",
+          "for the UNEVALUABLE legs (negative[0], negative[1], acceptance[5]): two runtime-authored scratch objects, each carrying one script rule whose condition `int(record.title) > 1` cannot be evaluated over a non-numeric title — no seeded rule is unevaluable, so the stock doors author them. As admin: PUT /api/v1/meta/object/qa_vr_probe {name: qa_vr_probe, label: QA, sharingModel: public_read_write, fields: {title: {type: text}}, validations: [{type: script, name: qa_unevaluable_warn, severity: warning, message: x, condition: \"int(record.title) > 1\"}]} → 200, and the same body as qa_vr_probe_err with the rule named qa_unevaluable_err at severity: error → 200 (the recipe of QA run #24779 / #24782). A write with title \"abc\" then drives each rule"
         ],
         "knownGaps": [
-          "no showcase rule declares severity:'info' — it shares the identical non-error branch with 'warning' (rule-validator.ts tests `severity === 'error'` and logs everything else), so the warning leg is the driven proof; author a scratch info rule only if a distinct observation is wanted, and record which severities were actually driven"
+          "no showcase rule declares severity:'info' — it shares the identical non-error branch with 'warning' (rule-validator.ts tests `severity === 'error'` and logs everything else), so the warning leg is the driven proof; author a scratch info rule only if a distinct observation is wanted, and record which severities were actually driven",
+          "acceptance[5] stays red until #24782 lands: the unevaluable warning rule's write answers 201 and persists (correct), but the server log prints two lines naming the rule that both say \"write rejected\" — the predicate evaluator's fail-closed sentence, emitted before severity is consulted, and the advisory branch's warn, which embeds that violation message (packages/objectql/src/validation/rule-validator.ts). Measured at 580fd4ed (QA run #24779) and again at a43405d596 (#24802). When #24782's fix merges, re-run the clause and drop this line"
         ]
       },
       "variants": [
@@ -1943,7 +1945,8 @@
         "for each variant: send the happy-path twin (same shape, satisfying values) and capture success",
         "after every rejection, re-read the row set to confirm nothing persisted",
         "for state_machine additionally: create with a legal initial state, walk one legal transition, then attempt the illegal one",
-        "severity probe: PATCH a showcase_project's `health` from green straight to red (skipping yellow — a jump project_health_progression matches); capture the response, re-read the row, and read the server log for the warning line"
+        "severity probe: PATCH a showcase_project's `health` from green straight to red (skipping yellow — a jump project_health_progression matches); capture the response, re-read the row, and read the server log for the warning line",
+        "unevaluable probe (the scratch objects of fixtures.requires[2]): POST /api/v1/data/qa_vr_probe {title: \"abc\"} and capture the response, re-read the row, and capture EVERY server-log line naming qa_unevaluable_warn; then POST /api/v1/data/qa_vr_probe_err {title: \"abc\"} and capture the refusal and a re-read showing no row"
       ],
       "acceptance": [
         {
@@ -1975,12 +1978,19 @@
           "oracle": "log",
           "verify": "the 2xx response with its `warnings` entry naming the rule (the write answer reports the write's own advisory hits — packages/metadata-protocol/src/protocol.ts, #22726), the persisted re-read, and the logger.warn line (packages/objectql/src/validation/rule-validator.ts — non-error severities route to opts.logger.warn, never into `errors`). Score the entry's rule, severity, field and code (packages/objectql/src/validation/rule-validator.ts#advisoryEvent copies field and code from the violation, so a state_machine advisory reports invalid_transition), not its message wording; a run wanting a UI-visible advisory is asking for a feature, not verifying this one",
           "evidence": "response + re-read + the captured log line"
+        },
+        {
+          "clause": "an UNEVALUABLE severity:'warning' rule lets the write land, and no log line beside it reports a rejection: the write answers 2xx, the row persists, and no server-log line naming the rule says the write was rejected or that the rule failed closed — the log must not state the opposite of what the server did. Red until #24782 lands",
+          "oracle": "log",
+          "verify": "step-7 qa_vr_probe write: status 201 and a re-read finding the row; then every log entry naming qa_unevaluable_warn, read to its end — the predicate evaluator's entry spans lines (it embeds the CEL source with a caret) and its verdict sits after the caret — none may contain \"write rejected\" or \"fails closed\" (the fail-closed sentence belongs to the error-severity path; rule-validator.ts header: an unevaluable warning/info rule is logged, never thrown). Score the absence of the rejection wording, not whichever replacement sentence #24782 picks; a line saying the rule could not be evaluated is expected and passes. Control: the qa_vr_probe_err write answers 400 VALIDATION_FAILED naming qa_unevaluable_err and persists nothing — there the rejection wording is true",
+          "evidence": "both responses + both re-reads + every log line naming either rule, quoted"
         }
       ],
       "negative": [
-        "an unevaluable CEL expression must fail CLOSED (rule_violation), never fail-open silently accepting the write — the rule-validator's documented posture",
+        "an unevaluable CEL expression must fail CLOSED (rule_violation), never fail-open silently accepting the write — the rule-validator's documented posture; driven on the qa_vr_probe_err scratch object (fixtures.requires[2], steps[6])",
         "the fail-closed posture is SEVERITY-SCOPED: an unevaluable 'warning'/'info' rule stays non-blocking (logged, never thrown — rule-validator.ts 'advisory rules stay advisory'); a warning rule that BLOCKS a write, evaluable or not, is a FAIL in the other direction",
-        "a matching warning rule that leaves NO log line is a FAIL of the surfacing half — flagged-not-blocked means flagged"
+        "a matching warning rule that leaves NO log line is a FAIL of the surfacing half — flagged-not-blocked means flagged",
+        "an unevaluable advisory rule whose log line says the write was REJECTED while the write landed is a FAIL of the surfacing half in the other direction: an operator reading the log for a disputed write is told it was refused when it was stored (#24782)"
       ],
       "traps": [
         "wrong-persona"
@@ -1989,7 +1999,8 @@
         "packages/spec/src/data/validation.zod.ts#ValidationRuleSchema (ValidationRuleSchema, 6 discriminated variants; severity enum ['error','warning','info'] default 'error')",
         "packages/objectql/src/validation/rule-validator.ts#evaluateRule (evaluateRule switch + per-type codes; 'only error blocks', unevaluable-advisory stays non-blocking, the severity fork)",
         "examples/app-showcase/src/data/objects/{account,project,task}.object.ts (the seeded rules; project.object.ts the advisory project_health_progression)",
-        "#1475 (declared ≠ enforced history: 9 declared → 6 declared+enforced)"
+        "#1475 (declared ≠ enforced history: 9 declared → 6 declared+enforced)",
+        "QA-source: #24779 · records-forms.validation-rule-type-matrix · negative[1] (observed beside the clauses — the write did not block, the log beside it said it did; #24782)"
       ],
       "history": [
         {
@@ -2015,6 +2026,12 @@
           "date": "2026-10-19",
           "change": "variants[0] and fixtures.requires[0] corrected from QA run #24572 (18.0 sweep, 5b14b7f3), re-read at objectstack f89d29e382: account_lifecycle binds `events: ['update']` only (examples/app-showcase/src/data/objects/account.object.ts), so the create-with-non-initial-status leg raises invalid_initial_state from project_status_flow alone (events insert + update, initialStates ['planned'], project.object.ts). The since:v18 run #24558's note that this item describes the advisory hit as server-log only is already on main (revision 3 reads the write answer's warnings) and is not repeated. No clause changed. Wave anchor #24579 §3",
           "ref": "#24671"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "acceptance[5], steps[6], negative[3], fixtures.requires[2] and knownGaps[1] added for #24782, which QA run #24779 found beside the clauses (round 3 of the 18.0 sweep, 580fd4ed): an unevaluable warning rule lets the write land, as negative[1] requires, but its log says the write was rejected, and no clause read the log of the unevaluable path. The clause stays red until #24782's fix lands. fixtures.requires[2] is round 3's recipe — a scratch object authored through PUT /api/v1/meta/object carries an unevaluable script rule — and closes round 2's fixture gap (QA run #24616: negative[0] blocked(fixture), 'an unevaluable CEL validation cannot be authored through any door'); negative[0] now names its scratch object. No existing clause changed",
+          "ref": "#24802"
         }
       ]
     },

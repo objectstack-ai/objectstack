@@ -1196,7 +1196,7 @@
       "title": "Documentation audience gating (book + doc): the tree endpoint and the doc read layer gate on ONE semantics — public/org/permissionSet, fail-closed — and an unclaimed doc never leaks through a public book",
       "since": "v14.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1213,7 +1213,8 @@
         ],
         "knownGaps": [
           "Stock showcase authors ONE book with `audience: 'public'` — `showcase_manual` (examples/app-showcase/src/system/books/index.ts) — and none with `audience: { permissionSet: '<name>' }`. Verify against the installed corpus FIRST (GET /api/v1/meta/book and read each item's `audience`): the public clauses run on `showcase_manual`; if no permissionSet-gated book exists, the permissionSet clauses are blocked(fixture) and MUST be recorded as such (or staged per knownGaps[1]) — do NOT score them from the `org` default alone, which is the one audience every authenticated caller passes and therefore proves nothing about the gate.",
-          "Authoring a book/doc at runtime to create the fixture is acceptable only if the run records that it did so and tears it down; the audience is read off the stored row, so a runtime-authored book exercises the same resolver."
+          "Authoring a book/doc at runtime to create the fixture is acceptable only if the run records that it did so and tears it down; the audience is read off the stored row, so a runtime-authored book exercises the same resolver.",
+          "acceptance[2]'s last sentence, an unknown future audience shape also denies, has no pin: the audienceAllows cases in packages/spec/src/system/book.test.ts drive public, org / unset and { permissionSet } (the fail-closed case included), never a shape outside that vocabulary (QA run #24779). The branch is audienceAllows' final `return false` (book.zod.ts, 'unknown future shape → fail closed'): a run reads it from source and records that half not pin-scored, never as a pass carried by the permissionSet case"
         ]
       },
       "steps": [
@@ -1299,6 +1300,12 @@
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[0] and acceptance[3] (clause, verify) corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.docs-audience-gate; wave anchor #24579 §3). knownGaps[0] said stock showcase authors neither a public nor a permissionSet book; it ships the public `showcase_manual` (examples/app-showcase/src/system/books/index.ts), so only the permissionSet half is a fixture gap. acceptance[3] said a lesser persona's tree is a subset of admin's; audienceAllows (packages/spec/src/system/book.zod.ts) admits a permissionSet doc for holders only and has no admin bypass, so for those books the run's admin non-holder saw less than a holder — the subset relation is holder vs non-holder. acceptance[2]'s unknown-shape half (unreachable live, no pin) is a fixture/pin gap left on #24579 §4",
           "ref": "#24632"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "knownGaps[2] is new — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12): no pin covers acceptance[2]'s 'unknown future audience shape → deny' branch. Read at base 307ce4c4b4: book.test.ts's audienceAllows cases drive the three declared shapes only. The item carries no automated.ref, so there is no ref to narrow. No clause changed",
+          "ref": "#24824"
         }
       ]
     },
@@ -1843,7 +1850,7 @@
       "title": "Marketplace install-local: the wiring matrix mounts the right arms per OS_CLOUD_URL, the air-gapped inline install works with NO control plane, reseed/purge touch exactly the sample rows, every mutating door is manage_metadata-gated both sides, and the listing projects installedBy/storageDir per principal",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1856,7 +1863,7 @@
         "app": "showcase",
         "requires": [
           "TWO isolated boots of the same app: boot A = plain `objectstack dev` with NO OS_CLOUD_URL (resolveCloudUrl() falls back to DEFAULT_CLOUD_URL — truthy — so the CLOUD arm mounts: proxy + install-local + cloud-connection + runtime-config); boot B = the same line with OS_CLOUD_URL=off exported (the offline arm: install-local pinned to the 'off' control plane + runtime-config ONLY — nothing that dials out mounts). The matrix is decided by Serve.planMarketplaceWiring, pure and testable (packages/cli/src/commands/serve.ts). ⚠️ On showcase the boot-A cloud arm is the HOST's, not the CLI's: examples/app-showcase/objectstack.config.ts mounts MarketplaceProxyPlugin, MarketplaceInstallLocalPlugin and CloudConnectionPlugin itself whenever resolveCloudUrl() is truthy, and RuntimeConfigPlugin always, and planMarketplaceWiring checks presence — so on boot A the CLI wires none of the four, and on boot B its offline arm adds install-local alone (pinned to the 'off' control plane) beside the host's runtime-config. The observable route matrix is the same either way",
-          "a compiled package artifact for the inline install: pnpm -C examples/app-crm build → dist/objectstack.json (the air-gapped path the #8343 fix exists for — `handleInstall`'s inline branch never reads the cloud URL). Both boots that install run from a SCRATCH COPY of the app, never the shared tree: install-local caches the manifest under the working directory's .objectstack/installed-packages (packages/cloud-connection/src/local-manifest-source.ts#DEFAULT_INSTALLED_PACKAGES_DIR, resolved against process.cwd()), which a per-boot OS_HOME / OS_STORAGE_LOCAL_ROOT does not redirect (RUNNER.md environment facts)",
+          "a compiled package artifact for the inline install: examples/app-crm/dist/objectstack.json. The tree's own `pnpm build` writes it (the root turbo build runs @objectstack/example-crm's `objectstack build` script), and the file is gitignored (examples/*/dist/), so only an unbuilt tree lacks it; then `pnpm -C examples/app-crm build` writes it. A run under a no-rebuild brief installs the existing file, as QA run #24779 did (the air-gapped path the #8343 fix exists for — `handleInstall`'s inline branch never reads the cloud URL). Both boots that install run from a SCRATCH COPY of the app, never the shared tree: install-local caches the manifest under the working directory's .objectstack/installed-packages (packages/cloud-connection/src/local-manifest-source.ts#DEFAULT_INSTALLED_PACKAGES_DIR, resolved against process.cwd()), which a per-boot OS_HOME / OS_STORAGE_LOCAL_ROOT does not redirect (RUNNER.md environment facts)",
           "admin credentials passed to the CLI door (--email/--password or OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD) — the runtime refuses an unauthenticated install with a 401 that names exactly that remedy (packages/cli/src/commands/package/install.ts)"
         ],
         "knownGaps": [
@@ -1867,12 +1874,12 @@
       "steps": [
         "boot A (no OS_CLOUD_URL), as admin: GET /api/v1/runtime/config and record features.marketplace + features.installLocal; probe the mounts — GET /api/v1/marketplace/install-local (authed) → 200, and the browse namespace answers as a mounted passthrough (a non-404 that reflects the upstream's reachability, not this kernel's routing). Capture the boot banner's Marketplace plugin line",
         "boot B (OS_CLOUD_URL=off), as admin: GET /api/v1/runtime/config → still served, now reporting installLocal:true AND marketplace:false (#8389 discovery + #8356 route-table derivation); GET /api/v1/marketplace/install-local → 200 []; a browse-namespace probe (e.g. GET /api/v1/marketplace/packages) → 404 (the proxy did NOT mount); GET /api/v1/cloud-connection/status → 404 (cloud-connection did NOT mount)",
-        "build the artifact: pnpm -C examples/app-crm build; confirm dist/objectstack.json exists",
+        "locate the artifact examples/app-crm/dist/objectstack.json, which the tree's `pnpm build` already wrote (fixtures.requires[1]); run `pnpm -C examples/app-crm build` only when it is absent, and record the manifest's id and version",
         "air-gapped install against boot B: `os package install ./examples/app-crm/dist/objectstack.json` with admin credentials — the CLI signs in, then POSTs the manifest inline to /api/v1/marketplace/install-local (install.ts); capture the success output and the installed entry",
         "confirm the install registered: GET /api/v1/meta/app lists the CRM app; a CRM object answers on /api/v1/data; GET /api/v1/marketplace/install-local as admin shows the entry WITH installedBy, and storageDir on the listing envelope (data.storageDir — one value for the whole ledger, not a per-entry field)",
         "per-principal projection (#9011): repeat the GET as the plain member — 200, the entry listed, but installedBy ABSENT from the entry and storageDir ABSENT from the envelope; repeat anonymous — 401",
-        "reseed/purge on the installed entry: create ONE user-authored row in an installed CRM object and record its id; POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data as admin — capture {deleted, skipped, errors}; re-read: every manifest-declared seed id is gone, the user-authored row SURVIVES (the purge deletes only ids declared in the cached manifest's seed datasets — marketplace-install-local-plugin.ts); restart boot B against the same DB and confirm the purged rows do NOT come back (sampleDataPurged persisted on the ledger entry)",
-        "POST …/:manifestId/reseed-sample-data as admin — the sample rows return and sampleDataPurged flips back off",
+        "reseed/purge on the installed entry: create ONE user-authored row in an installed CRM object and record its id; POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data as admin — capture {deleted, skipped, errors}; re-read: every manifest-declared seed id is gone, the user-authored row SURVIVES (the purge deletes only ids declared in the cached manifest's seed datasets — marketplace-install-local-plugin.ts); restart boot B against the same DB and confirm the purged rows do NOT come back. Read the flag where each side keeps it: the purge answer and the listing entry carry withSampleData:false (the listing derives it per request from the caller's own rows and serves no sampleDataPurged key, #21775), while sampleDataPurged:true is persisted in the ledger file STORAGEDIR/MANIFESTID.json (the admin listing's data.storageDir; local-manifest-source.ts), which the rehydrate-time healer reads",
+        "POST …/:manifestId/reseed-sample-data as admin — the sample rows return, the listing entry reads withSampleData:true again, and the ledger file's sampleDataPurged reads false",
         "capability gate both sides (#8976): as the plain member, POST install-local (any body), DELETE …/:manifestId, POST reseed, POST purge — each 403 naming the manage_metadata requirement; anonymous on each → 401; the admin's same calls succeeded above",
         "DELETE /api/v1/marketplace/install-local/:manifestId as admin → 200 {success:true, data:{manifestId, cleanups, note}}; WITHOUT restarting, re-read: a CRM object's data route answers 404 and GET /meta/app no longer lists the CRM app. Then restart once and re-read — the package stays gone (the ledger entry was removed first, so rehydrate does not bring it back)"
       ],
@@ -1904,7 +1911,7 @@
         {
           "clause": "purge deletes EXACTLY the manifest-declared sample rows: every seed-dataset id gone, the user-authored row untouched, already-deleted ids counted as skipped, and the emptiness is DURABLE — sampleDataPurged persists so the rehydrate-time healer does not re-seed on the next restart",
           "oracle": "api",
-          "verify": "the purge response counts + the post-purge reads (user row present, seed ids absent) + the post-restart re-read (still absent); reseed then restores them and flips the flag back (marketplace-install-local-plugin.ts rehydrate guard, flag write)",
+          "verify": "the purge response counts + the post-purge reads (user row present, seed ids absent) + the post-restart re-read (still absent); reseed then restores them and flips the flag back — sampleDataPurged is read in the ledger file, and the listing entry's withSampleData, derived from the caller's rows, follows the rows (marketplace-install-local-plugin.ts rehydrate guard, flag write, handleList)",
           "evidence": "purge response + before/after/post-restart row reads"
         },
         {
@@ -1966,6 +1973,12 @@
           "date": "2026-10-19",
           "change": "personas[1], steps[3] and fixtures.requires[0] corrected — three checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.marketplace-install-local-lifecycle; wave anchor #24579 §3). The plain member cannot be a fresh sign-up: the stock audience posture is invite_only (plugin-auth audience-posture.ts), so the run created the member through the admin create-user door. steps[3] read `install./examples` (a missing space). On showcase the cloud arm of boot A, and runtime-config on both boots, are mounted by the host config (examples/app-showcase/objectstack.config.ts), and Serve.planMarketplaceWiring wires only what the host did not — the matrix the clauses score is unchanged. No acceptance clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "fixtures.requires[1], steps[2], steps[6]–[7] and acceptance[4].verify — checklist-accuracy findings of QA run #24779 (wave anchor #24579 round 12). The listing serves withSampleData, derived per request from the caller's rows (#21775), never sampleDataPurged, which lives in the ledger file (local-manifest-source.ts, marketplace-install-local-plugin.ts handleList at base 307ce4c4b4). The artifact step now says what a runner needs: the existing examples/app-crm/dist/objectstack.json the tree's build writes, rebuilt only when absent. No clause changed",
+          "ref": "#24824"
         }
       ]
     },
@@ -2691,7 +2704,7 @@
       "title": "Seed mode matrix (insert/update/upsert/replace/ignore): each mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and `replace` is DECLARED delete-all-then-insert but IMPLEMENTED as bare insert (no caller clears the table): the posture is recorded, never ticked as scoped deletion",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -2703,7 +2716,8 @@
         ],
         "knownGaps": [
           "the publish response's seedApplied summary surfaces inserted/updated/errors but not per-row skip detail — the `ignore says so` clause therefore reads the skip from effect (counts + untouched values) plus the loader's summary where surfaced, not from a UI report",
-          "`insert` mode's schema comment says 'fail on duplicate', but the loader does NO matching in insert mode (no existing-records preload) — the failure only materializes where the object itself carries a unique constraint; on an unconstrained scratch object an insert replay simply duplicates rows. The matrix records both shapes honestly"
+          "`insert` mode's schema comment says 'fail on duplicate', but the loader does NO matching in insert mode (no existing-records preload) — the failure only materializes where the object itself carries a unique constraint; on an unconstrained scratch object an insert replay simply duplicates rows. The matrix records both shapes honestly",
+          "after insert mode has duplicated a natural key (acceptance[3]'s unconstrained shape), upsert and update bind each key to ONE of the duplicates and leave the other unconverged, silently: loadExistingRecords (packages/metadata-protocol/src/seed-loader.ts) keys an unordered find by externalId, so the last row read wins — the NEWER duplicate on QA run #24779's SQLite boot, which upsert rewrote while the original kept its value. No clause scores it: record it beside acceptance[3] as an observation, never as a FAIL of acceptance[0] or negative[0]"
         ]
       },
       "steps": [
@@ -2794,6 +2808,12 @@
           "date": "2026-10-16",
           "change": "fixtures.requires[0], steps[0] and [6] and acceptance[4].verify corrected (checklist-accuracy findings of QA run #23939, wave #23878; steps[6] from this card's re-run). A seed body refuses a `name` key (SeedSchema is strict; the URL names the seed) and a scratch object needs a sharingModel (its publish is refused, rule security-owd-unset), so the fixture as written could not be authored; steps[6]'s replay ran after steps 2–4 had rewritten A's rows, so its first replay legitimately writes — the step now scores the second replay, which the re-run measured at 0 inserted / 0 updated; and the verify text pinned decideWriteAction to a source line that has since moved — it now cites the symbols only. Not loosened: every mode clause and the replace posture are scored as before",
           "ref": "#24036"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "knownGaps[2] is new — QA run #24779's observation on acceptance[3] (wave anchor #24579 round 12): after insert mode duplicated a natural key, upsert bound the newer duplicate and left the original unconverged. Read at base 307ce4c4b4 in seed-loader.ts loadExistingRecords, which keys an unordered find by externalId (last row wins). No clause changed",
+          "ref": "#24824"
         }
       ]
     },
@@ -3223,7 +3243,7 @@
       "title": "Settings on v18: a global-scope key is stored in sys_platform_setting (readable through /data only with manage_platform_settings), and under a walled posture one organization's tenant save or lock does not change or lock another's, with a data-API read of sys_setting filtered to readable namespaces",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3236,16 +3256,17 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a second boot with OS_TENANCY_POSTURE=isolated (walled posture) on its own port and file DB — the stock single posture leaves every walled clause vacuous, so confirm the posture from the boot log before scoring",
-          "on the walled boot: two organizations A and B with an admin each"
+          "on the walled boot: two organizations A and B with an admin each, and A's tenant row of the probed key locked by a system write, because no HTTP door sets that lock (knownGaps[1])"
         ],
         "knownGaps": [
-          "acceptance[2] and acceptance[3] are walled legs, and fixtures.requires[1]–[2], personas[2] and steps[2]–[3] serve only them. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. On that boot organizations A and B are created through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records both clauses blocked(fixture) naming those entries, never fail. Their mechanism is scored through acceptance[0]: settings-organization-isolation.pin.test.ts drives two organizations, the lock and the organization-less refusal under a walled posture in-process, and asserts that `single` does not refuse. acceptance[0] and acceptance[1] run as written."
+          "acceptance[2] and acceptance[3] are walled legs, and fixtures.requires[1]–[2], personas[2] and steps[2]–[3] serve only them. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). On that boot organizations A and B are created through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records both clauses blocked(fixture) naming those entries, never fail. Their mechanism is scored through acceptance[0]: settings-organization-isolation.pin.test.ts drives two organizations, the lock and the organization-less refusal under a walled posture in-process, and asserts that `single` does not refuse. acceptance[0] and acceptance[1] run as written.",
+          "No HTTP door sets a tenant-row lock. sys_setting declares apiMethods ['get', 'list'] (packages/platform-objects/src/system/sys-setting.object.ts), so an update over /api/v1/data answers 405 OBJECT_API_METHOD_NOT_ALLOWED, and PUT /api/settings/NAMESPACE carries values only: packages/services/service-settings/src/settings-service.ts#setMany takes a key-to-value patch, and that service reads a row's lock but never writes one. steps[2]'s lock is therefore a fixture prerequisite (fixtures.requires[2]): stamp locked = 1 on A's tenant sys_setting row with a system write on the run's own scratch DB, as QA run #24783 did (never on a shared DB), and record it in the run record as a fixture write made outside HTTP. settings-organization-isolation.pin.test.ts seeds its lock the same way, as a stored row. Whether a tenant lock should have an HTTP door is unruled; QA run #24783 raised it (finding F6) for wave anchor #24579"
         ]
       },
       "steps": [
         "as platform admin write a global-scope key through PUT /api/settings/NAMESPACE; GET /api/v1/data/sys_platform_setting and /sys_setting?filter scope=global",
         "as the member GET /api/v1/data/sys_platform_setting",
-        "walled: as A's admin save a tenant key and lock it; as B's admin read and write the same key",
+        "walled: as A's admin save a tenant key (PUT /api/settings/NAMESPACE); lock A's row with the fixture write of fixtures.requires[2] (knownGaps[1]) and re-read the key as A (locked: true); as B's admin read and write the same key",
         "walled: write a tenant key with no organization in scope"
       ],
       "acceptance": [
@@ -3311,6 +3332,12 @@
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
           "ref": "#24788"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[2]'s tenant lock made a named fixture prerequisite (fixtures.requires[2], new knownGaps[1]), and knownGaps[0]'s prerequisite sentence says os dev — QA run #24783 (findings F6 and F2), round 11 of wave anchor #24579. No HTTP door sets a tenant-row lock: sys_setting answers update 405 (apiMethods get/list) and the settings PUT writes values only, so the run stamped the lock with a system write on its scratch DB. A bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md), so the refusal sentence now names os dev. No clause changed",
+          "ref": "#24801"
         }
       ]
     },

@@ -137,12 +137,24 @@ const manifest = {
 export const knowledgeSettingsManifest = manifest as unknown as SettingsManifest;
 
 /**
- * Built-in fallback handler for `knowledge/test`. The real probe with
- * a live `healthCheck()` round-trip lives in `@objectstack/service-knowledge`
- * and overrides this stub at runtime (mirrors the AI / storage patterns).
+ * The sentence every answer on a remote adapter carries, so a green "Test
+ * connection" is never read as a connection that succeeded.
+ */
+const FORM_CHECK_ONLY = 'This checks the form only — no connection was attempted.';
+
+/**
+ * Handler for `knowledge/test` ("Test connection"), registered by
+ * `SettingsServicePlugin`'s default `actionHandlers` map (#24769).
  *
- * This fallback only validates form completeness so the button is
- * usable when no knowledge adapter plugin is mounted.
+ * It checks form completeness only — a Turso auth token beside a managed
+ * `libsql://` URL, a RAGFlow Base URL and API key — and opens NO connection.
+ * Nothing in this repository replaces it with a live probe:
+ * `@objectstack/service-knowledge`, `@objectstack/knowledge-memory` and
+ * `@objectstack/knowledge-ragflow` neither read this namespace nor register
+ * `knowledge/test` (a plugin that did would call
+ * `SettingsService.registerAction`, which replaces this handler). So every
+ * answer on a remote adapter says no connection was attempted, and none names
+ * a package whose mounting would make this check live — none does.
  */
 export const knowledgeTestActionHandler: SettingsActionHandler = async ({ values, payload }) => {
   const overrides = extractOverrides(payload);
@@ -163,7 +175,9 @@ export const knowledgeTestActionHandler: SettingsActionHandler = async ({ values
       return {
         ok: true,
         severity: 'info',
-        message: 'No URL configured — adapter will reuse the tenant\'s primary libSQL connection at runtime.',
+        message:
+          'No URL configured — adapter will reuse the tenant\'s primary libSQL connection at runtime. ' +
+          FORM_CHECK_ONLY,
       };
     }
     const u = String(url);
@@ -178,7 +192,7 @@ export const knowledgeTestActionHandler: SettingsActionHandler = async ({ values
       ok: true,
       severity: 'info',
       message:
-        `Turso adapter configured (${u}). Live calls need @objectstack/knowledge-turso, ` +
+        `Turso adapter configured (${u}). ${FORM_CHECK_ONLY} Live calls need @objectstack/knowledge-turso, ` +
         'which this platform does not ship: it is built in the ObjectStack Cloud monorepo ' +
         'and published on its own version track, so check that it offers a release ' +
         'compatible with your platform version before mounting it.',
@@ -195,7 +209,7 @@ export const knowledgeTestActionHandler: SettingsActionHandler = async ({ values
     return {
       ok: true,
       severity: 'info',
-      message: `RAGFlow adapter configured (${merged.ragflow_base_url}). Mount @objectstack/knowledge-ragflow to exercise live calls.`,
+      message: `RAGFlow adapter configured (${merged.ragflow_base_url}). ${FORM_CHECK_ONLY}`,
     };
   }
 

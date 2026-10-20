@@ -982,23 +982,23 @@
       "title": "Forgot-password: request → token captured at the dev mail transport → reset; old password refused, expired/reused token refused loudly",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["anonymous visitor (holds no session)", "the account owner (before and after reset)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "email+password sign-in enabled and an email transport configured — a stock boot sends through the dev `log` transport, so nothing leaves the box; the mail is read from its sys_email row (admin GET /api/v1/data/sys_email — body_text / body_html hold the rendered body and its link): the dev `log` transport is not an env switch (EMAIL_TRANSPORT_PROVIDERS is a const list of what the package can build, packages/plugins/plugin-email/src/transports/index.ts) and LogTransport logs only to, subject and hasText/hasHtml — never the body or the link (packages/plugins/plugin-email/src/email-service.ts)",
+          "email+password sign-in enabled and an email transport configured — a stock boot sends through the dev `log` transport, so nothing leaves the box; the mail is read from its sys_identity_email row (admin GET /api/v1/data/sys_identity_email — body_text / body_html hold the rendered body and its link). The reset mail is identity mail: plugin-auth's auth.password_reset send passes identityMail: true, and the mail service records identity mail in the deployment-level sys_identity_email, never in the tenant log sys_email (ADR-0131 D7, packages/plugins/plugin-email/src/email-log-objects.ts), so GET /api/v1/data/sys_email holds no reset row: the dev `log` transport is not an env switch (EMAIL_TRANSPORT_PROVIDERS is a const list of what the package can build, packages/plugins/plugin-email/src/transports/index.ts) and LogTransport logs only to, subject and hasText/hasHtml — never the body or the link (packages/plugins/plugin-email/src/email-service.ts)",
           "a target user with a known current password"
         ],
         "knownGaps": [
-          "capturing the reset TOKEN means reading the reset mail's sys_email row (admin GET /api/v1/data/sys_email, newest row to the requester) — the LogTransport output carries no link. A deployment whose provider persists no sys_email row leaves the token-capture step blocked(fixture); the request/refusal clauses that don't need the token still run"
+          "capturing the reset TOKEN means reading the reset mail's sys_identity_email row (admin GET /api/v1/data/sys_identity_email, newest row to the requester) — the LogTransport output carries no link, and sys_email holds no identity mail. The object is readable by the platform administrator only (its rows carry reset and sign-in links, sys-identity-email.object.ts), which the --seed-admin admin is. A deployment whose provider persists no sys_identity_email row leaves the token-capture step blocked(fixture); the request/refusal clauses that don't need the token still run"
         ]
       },
       "steps": [
         "as anonymous, request a reset: POST /api/v1/auth/request-password-reset with the target email (NOTE the live route is request-password-reset / reset-password — the spec's AuthEndpointPaths says /forget-password, a divergence; trust the live server per RUNNER, and file the doc divergence)",
-        "capture the reset email: as admin, read the newest sys_email row addressed to the requester (GET /api/v1/data/sys_email; to_addresses reads 'NAME <EMAIL>', so match on the address it contains, not on equality) and extract the token from body_text / body_html (the link is GET /api/v1/auth/reset-password/:token). The LogTransport line in the server log shows only to and subject — it never carries the link",
+        "capture the reset email: as admin, read the newest sys_identity_email row addressed to the requester (GET /api/v1/data/sys_identity_email — identity mail, never sys_email; to_addresses reads 'NAME <EMAIL>', so match on the address it contains, not on equality) and extract the token from body_text / body_html (the link is GET /api/v1/auth/reset-password/:token). The LogTransport line in the server log shows only to and subject — it never carries the link",
         "complete the reset: POST /api/v1/auth/reset-password with the token + a new password; capture the response",
         "sign in with the NEW password (2xx) and confirm the OLD password is now refused",
         "reuse the SAME token a second time (POST /api/v1/auth/reset-password again) and capture the loud refusal — a consumed token must not reset again",
@@ -1010,8 +1010,8 @@
         {
           "clause": "the request issues a real reset artifact: POST /api/v1/auth/request-password-reset produces an email at the dev transport carrying a reset token/link (GET /api/v1/auth/reset-password/:token)",
           "oracle": "api",
-          "verify": "the sys_email row the request wrote (to = the requester) carries the reset link with a token in its body; the request response is a non-leaking 2xx/accepted",
-          "evidence": "the captured sys_email row (to, subject, the link with the token redacted after use)"
+          "verify": "the sys_identity_email row the request wrote (to = the requester) carries the reset link with a token in its body; the request response is a non-leaking 2xx/accepted",
+          "evidence": "the captured sys_identity_email row (to, subject, the link with the token redacted after use)"
         },
         {
           "clause": "the token completes the reset and rotates the credential: POST /api/v1/auth/reset-password with the token + new password succeeds, the new password signs in and the old one is refused",
@@ -1058,6 +1058,12 @@
           "date": "2026-10-19",
           "change": "acceptance[0].oracle 'log' → 'api' — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.self-service-password-reset acceptance[0]; wave anchor #24579 §3): the clause's verify and evidence already read the sys_email row the request wrote, an API read, not a log line; the oracle label now names what the run consults. Clause text, verify and evidence unchanged",
           "ref": "#24632"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "fixtures.requires[0], knownGaps[0], steps[1] and acceptance[0] (verify, evidence) read the reset mail from sys_identity_email — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12): sys_email held 0 rows and the mail was in sys_identity_email. Governing text ADR-0131 D7 (identity mail is deployment-level); read at base 307ce4c4b4 in auth-manager.ts (the auth.password_reset send passes identityMail: true) and email-service.ts (emailLogObjectOf). Not loosened: the clause still requires a real mail carrying a working tokened link",
+          "ref": "#24824"
         }
       ]
     },
@@ -2005,15 +2011,15 @@
       "title": "Workspace switcher: org chrome follows posture × membership count (nothing under single; read-only indicator at one membership; switcher at two), and a switch is a full-document reload after which every tenant-scoped read answers from the new org",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
-      "personas": ["a member with one org membership", "the same member after gaining a second membership", "admin (provisions the second org)"],
+      "personas": ["a member with one org membership", "the same member after gaining a second membership", "admin, the walled boot's platform operator (OS_PLATFORM_OWNER_EMAIL): mints the member with POST /api/v1/auth/admin/create-user (RUNNER.md 'A walled boot is a fixture of its own'). It does not provision the second org: the member creates that itself (fixtures.requires[1])"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a WALL-ENFORCING tenancy posture boot: OS_TENANCY_POSTURE=group (or isolated) — the stock default resolves to `single` (resolveTenancyPosture, packages/types/src/env.ts), where multiOrgEnabled is false and NO org chrome may render at all (postureEnforcesWall drives both the flag and the UI predicate — auth-manager.ts). A walled posture REFUSES TO BOOT the stock showcase without three more things, measured by QA run #23166 from a scratch copy: (1) `@objectstack/organizations` declared in the host app's package.json — the multi-org runtime a walled posture needs (ADR-0093 D5); (2) OS_PLATFORM_OWNER_EMAIL, the declared platform owner (set it to the seeded admin's address, whose seed stamps it verified so it can be elevated); (3) a declared membership policy, OS_AUTH_MEMBERSHIP_POLICY (packages/plugins/organizations/src/membership-policy-gate.ts#MEMBERSHIP_POLICY_ERROR_CODE — WALLED_MEMBERSHIP_POLICY_UNDECLARED). Boot it from a scratch copy, never the tree",
-          "a second organization + membership for the test user — runtime-creatable on the posture boot via the better-auth org endpoints (POST /api/v1/auth/organization/create, then the platform-admin-gated POST /api/v1/auth/organization/add-member — auth-route-ledger.ts organization family); the org-create gate follows the SAME posture derivation as the advertised flag, so it admits on this boot. Under OS_AUTH_MEMBERSHIP_POLICY=invite-only the invited test user must also ACCEPT the invitation (POST /api/v1/auth/organization/accept-invitation) before the membership exists"
+          "a WALL-ENFORCING tenancy posture boot: OS_TENANCY_POSTURE=group (or isolated) — the stock default resolves to `single` (resolveTenancyPosture, packages/types/src/env.ts), where multiOrgEnabled is false and NO org chrome may render at all (postureEnforcesWall drives both the flag and the UI predicate — auth-manager.ts). Provision and boot it per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own' (a full-copy scratch app declaring the multi-org runtime, OS_PLATFORM_OWNER_EMAIL and a declared OS_AUTH_MEMBERSHIP_POLICY, booted through os dev), never from the tree. Set OS_PLATFORM_OWNER_EMAIL to the seeded admin's address, whose seed stamps it verified so it can be elevated",
+          "a second organization + membership for the test user, which the user creates itself on the posture boot: POST /api/v1/auth/organization/create makes its caller the new organization's owner, so a user who creates a second organization holds two memberships (QA run #24783: the member created a second organization and switched to it with set-active on both postures). The org-create gate follows the SAME posture derivation as the advertised flag, so it admits on this boot. The platform-admin-gated POST /api/v1/auth/organization/add-member (auth-route-ledger.ts organization family) is not needed; a membership reached through an invitation instead exists only once the invited user ACCEPTS it (POST /api/v1/auth/organization/accept-invitation)"
         ],
         "knownGaps": [
           "not runnable on the stock boot: `single` posture renders no switcher and no indicator BY DESIGN (that absence is itself this item's clause 1, runnable on stock) — every other clause needs the OS_TENANCY_POSTURE boot and is blocked(fixture) without it"
@@ -2088,7 +2094,13 @@
         { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep (angle 1): the workspace-switch surface had no item. CORRECTED against source from the register's 'single membership → indicator' hypothesis: the indicator is posture-gated (postureHasOrgWall — group/isolated only), so the stock `single` boot renders NO org chrome at all and the whole matrix needs an OS_TENANCY_POSTURE boot; encoded the three-cell affordance matrix, the deliberate full-document reload, the #4486 cache-drop read-follow proof, group-posture labeling, and the forged-switch refusal", "ref": "#sweep-2026-08-30" },
         { "revision": 2, "date": "2026-10-05", "change": "clause 6 and step 8 re-pointed (assertion defect, #21784 VF4). The switch fails closed, and the defect is not of the authorization class. better-auth 1.7.3's setActiveOrganization (plugins/organization/routes/crud-org) calls adapter.setActiveOrganization(token, null) before it throws 403 USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION, and plugin-auth mounts the route unwrapped (auth-route-ledger 'sdk'). So the active org becomes none, never the foreign org, and 'unchanged' was the wrong assertion. The verifier's wording is used. The verifier's optional follow-up, wrapping the vendor call to keep the previous org, would be a product enhancement, not this item's concern", "ref": "#21797" },
         { "revision": 3, "date": "2026-10-13", "change": "fixtures.requires[0] and [1] name the walled-posture boot prerequisites (fixture gap, #23166), and steps[6] and acceptance[3] re-ground the meta half (stale spec, #23166 C3b); both parked on #23121, carried by #23169. QA run #23166 found a walled posture refuses to boot the stock showcase without @objectstack/organizations in the host package.json (ADR-0093 D5), OS_PLATFORM_OWNER_EMAIL and OS_AUTH_MEMBERSHIP_POLICY, and that under invite-only the invitee must accept the invitation. It skipped C3b because its premise is retired: metadata writes are deployment-level (ADR-0131 D6/D7), so no metadata id exists in one org only. The clause keeps the data sentinel and now expects the /meta answer to be identical across the switch", "ref": "#23169" },
-        { "revision": 4, "date": "2026-10-17", "change": "steps[6] and acceptance[3] (clause, verify) split by posture (checklist-accuracy finding of the identity-auth slice report on #23878 (6216631966)). The sentinel-absent check holds only under `isolated`: under `group` the active org bounds writes, not reads, so a row that exists only in the old org stays readable after the switch, and the check would FAIL a correct product. Under group the clause now proves the switch on the write side — a post-switch create lands in the new org. Not loosened: under isolated the old-org row must still be absent", "ref": "#24036" }
+        { "revision": 4, "date": "2026-10-17", "change": "steps[6] and acceptance[3] (clause, verify) split by posture (checklist-accuracy finding of the identity-auth slice report on #23878 (6216631966)). The sentinel-absent check holds only under `isolated`: under `group` the active org bounds writes, not reads, so a row that exists only in the old org stays readable after the switch, and the check would FAIL a correct product. Under group the clause now proves the switch on the write side — a post-switch create lands in the new org. Not loosened: under isolated the old-org row must still be absent", "ref": "#24036" },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "fixtures.requires[0]–[1] and personas[2] re-pointed — QA run #24783 (finding F8), round 11 of wave anchor #24579. requires[0]'s 'REFUSES TO BOOT … measured by QA run #23166' predates 18.x step 4 (#24580); the provisioning now points at RUNNER.md's walled-boot entry, keeping only the seeded-admin owner-email hint. requires[1] and personas[2]: the user gets its second membership by creating a second organization itself (QA run #24783, both postures), so the platform-admin add-member is not needed and the admin only mints the member. No clause changed",
+          "ref": "#24801"
+        }
       ]
     },
     {

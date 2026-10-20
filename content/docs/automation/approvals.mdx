@@ -536,8 +536,35 @@ second one for the opening.
 
 If a flow has a `notify` node beside its approval node only to tell the
 approvers that a request is waiting, remove that node: those approvers are now
-told twice. Keep `notify` nodes that address someone else, such as the
-submitter or a watcher, or that report the decision.
+told twice. Keep `notify` nodes that address someone else, such as a watcher,
+or that report the decision to anyone but the submitter.
+</Callout>
+
+<Callout type="info">
+**The decision tells the submitter.** When a decision ends the approval, the
+submitter of the request it decides gets one notification: `approval.approved`
+("Request approved") or `approval.rejected` ("Request rejected"). Its body
+names the record (`Deal D_123`) and the outcome, followed by the decider's
+comment when they wrote one, and it links to that request in the Approvals
+Inbox. There is one topic per outcome, so a delivery preference can mute
+approvals and keep rejections.
+
+"Ends the approval" means the process, not the step. A co-sign vote that
+leaves a `unanimous`, `quorum` or `per_group` request pending tells no one,
+and neither does a decision whose flow moves on to another approval step: on
+a two-step flow the first step's decision is silent and the decision that ends
+the run is the one that notifies. Whether a later step opened is read from the
+run, not from the flow's graph, so when a decision node routes around the
+later step, the first decision is the outcome and notifies.
+
+Two cases tell nobody by design. A submitter who decided their own request
+already knows. An SLA `auto_approve` or `auto_reject` is told by the
+escalation's own submitter notice (`approval.sla_breached`, which names the
+action taken), so `notifySubmitter: false` still means the submitter hears
+nothing about it.
+
+If a flow ends with a `notify` node whose only job is to tell the submitter
+the decision, remove that node: the submitter is now told twice.
 </Callout>
 
 ### Mount the approvals inbox in your app

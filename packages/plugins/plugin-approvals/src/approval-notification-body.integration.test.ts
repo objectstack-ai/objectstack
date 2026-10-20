@@ -25,10 +25,10 @@
  * - a comment and a request-info question ARE the body their recipient gets;
  * - every notification carries a non-empty `body` and no field outside the
  *   payload `notify()` declares — so a second spelling of the text is red;
- * - the battery reaches every call site that can notify anyone — twelve of
- *   the thirteen — so neither pin passes over a site it never drove.
+ * - the battery reaches every call site that can notify anyone — thirteen of
+ *   the fourteen — so neither pin passes over a site it never drove.
  *
- * The thirteenth, the reminder to a slot literal (`position:<p>`), never reaches
+ * The fourteenth, the reminder to a slot literal (`position:<p>`), never reaches
  * messaging at all: `notify()` drops every audience entry that is a slot
  * address, and that reminder's audience is nothing else. Its payload is held
  * to the same declared shape by the compiler, not by this battery.
@@ -102,6 +102,8 @@ const GONE = 'u_gone';
 const COMMENT = 'The signed contract is attached to the record now.';
 const QUESTION = 'Which cost centre should this be booked against?';
 const SEND_BACK = 'Split the total by quarter, please.';
+/** [#24753] The rejecting approver's note, which the submitter's outcome notice carries. */
+const REJECTION = 'Not this quarter: the budget is spent.';
 
 /**
  * [#23284] The two organizations the battery's deals live in. The SLA pair sits
@@ -251,6 +253,12 @@ describe('every approval notification carries its text in body', () => {
     await open('rework', [{ type: 'user', value: 'u_alice' }]);
     await svc.sendBack(ids.rework, { actorId: 'u_alice' } as any, asUser('u_alice'));
 
+    // ── [#24753] The decision that ends a request tells its submitter the outcome ──
+    await open('approved', [{ type: 'user', value: 'u_alice' }]);
+    await svc.decide(ids.approved, { decision: 'approve', actorId: 'u_alice' }, asUser('u_alice'));
+    await open('rejected', [{ type: 'user', value: 'u_alice' }]);
+    await svc.decide(ids.rejected, { decision: 'reject', actorId: 'u_alice', comment: REJECTION }, asUser('u_alice'));
+
     // ── [#23978] The control: a reminder about a record of an object with no label ──
     await open('bare', [{ type: 'user', value: 'u_alice' }], {}, memo.name);
     await svc.remind(ids.bare, { actorId: 'u_sub' }, asUser('u_sub'));
@@ -286,7 +294,7 @@ describe('every approval notification carries its text in body', () => {
     try { await engine?.destroy(); } catch { /* noop */ }
   });
 
-  it('the battery reaches every call site that can notify anyone — twelve of the thirteen', () => {
+  it('the battery reaches every call site that can notify anyone — thirteen of the fourteen', () => {
     expect(new Set(emits.map(siteOf))).toEqual(new Set([
       // The opening tells each concrete approver on every request the battery
       // opens — all but `ooo` and `ooo_gone`, whose one approver is the
@@ -298,6 +306,8 @@ describe('every approval notification carries its text in body', () => {
       'approval.requested@sla_reassign',
       'approval.requested@rework',
       'approval.requested@bare',
+      'approval.requested@approved',
+      'approval.requested@rejected',
       'approval.ooo_substituted@ooo',
       'approval.ooo_skipped@ooo',
       'approval.ooo_substituted@ooo_gone',
@@ -305,6 +315,9 @@ describe('every approval notification carries its text in body', () => {
       'approval.returned@budget',
       'approval.returned@revise',
       'approval.returned@rework',
+      // [#24753] One call site, one topic per outcome.
+      'approval.approved@approved',
+      'approval.rejected@rejected',
       'approval.reassigned@thread',
       'approval.reminder@thread',
       'approval.reminder@bare',
@@ -316,7 +329,7 @@ describe('every approval notification carries its text in body', () => {
     ]));
   });
 
-  it("a comment, a request-info question and a send-back note are their recipient's body", () => {
+  it("a comment, a request-info question, a send-back note and a rejection note reach their recipient's body", () => {
     const one = (topic: string, key: string) => {
       const hits = emits.filter((e) => e.topic === topic && e.source?.id === ids[key]);
       expect(hits.length, `${topic} on ${key}`).toBe(1);
@@ -328,6 +341,9 @@ describe('every approval notification carries its text in body', () => {
     expect([question.audience, question.payload?.body]).toEqual([['u_sub'], QUESTION]);
     const sentBack = one('approval.returned', 'revise');
     expect([sentBack.audience, sentBack.payload?.body]).toEqual([['u_sub'], SEND_BACK]);
+    // [#24753] The rejection note follows the outcome sentence, which names the record.
+    const rejected = one('approval.rejected', 'rejected');
+    expect([rejected.audience, rejected.payload?.body]).toEqual([['u_sub'], `Your Deal D_rejected was rejected.\n\n${REJECTION}`]);
   });
 
   it('[#23978] every body that names the record names it by its object label and its id, as approval.requested does', () => {
@@ -345,6 +361,8 @@ describe('every approval notification carries its text in body', () => {
       'approval.returned@rework': 'Deal D_rework',
       'approval.ooo_substituted@ooo': 'Deal D_ooo',
       'approval.ooo_skipped@ooo': 'Deal D_ooo',
+      'approval.approved@approved': 'Deal D_approved',
+      'approval.rejected@rejected': 'Deal D_rejected',
       // The control: the object's schema has no label, so the record is named
       // by the object's API name and the id.
       'approval.reminder@bare': 'crm_memo D_bare',
