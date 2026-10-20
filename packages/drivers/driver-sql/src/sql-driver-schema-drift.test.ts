@@ -199,15 +199,58 @@ describe('SqlDriver managed-schema drift (#2186)', () => {
       expect(warnedDrift).toMatch(/os migrate/);
     });
 
+    // The production guard is pinned with a `safe` drift — the only category
+    // auto-reconcile applies — so the guard is the sole reason it stays put:
+    // a pre-#4560 build wrote the `current_user` token as the column DEFAULT,
+    // and `drop_column_default` removes it. The control below proves the same
+    // boot applies it outside production.
+    const PRODUCTION_GUARD_WARNING = "[schema-drift] autoMigrate='safe' is ignored under NODE_ENV=production";
+    const seedTokenDefaultTable = async () => {
+      await knexInstance.schema.createTable('biz_unit', (t: any) => {
+        t.string('id').primary();
+        t.timestamp('created_at');
+        t.timestamp('updated_at');
+        t.string('owner').defaultTo('current_user');
+      });
+    };
+    const tokenDefaultMeta = [{ name: 'biz_unit', fields: { owner: { type: 'string', defaultValue: 'current_user' } } }];
+    const warned = (driver: SqlDriver): string =>
+      ((driver as any).logger.warn as ReturnType<typeof vi.fn>).mock.calls.map((c: any[]) => String(c[0])).join('\n');
+
+    it('applies the safe drop_column_default drift outside production (control for the guard below)', async () => {
+      const prev = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'development';
+      try {
+        const driver = makeDriver({ autoMigrate: 'safe' });
+        await seedTokenDefaultTable();
+        await driver.initObjects(tokenDefaultMeta);
+
+        const info = await knexInstance('biz_unit').columnInfo();
+        expect(info.owner.defaultValue ?? null).toBeNull();
+        expect(await driver.detectManagedDrift()).toHaveLength(0);
+        expect(warned(driver)).not.toContain(PRODUCTION_GUARD_WARNING);
+      } finally {
+        process.env.NODE_ENV = prev;
+      }
+    });
+
     it('is force-disabled under NODE_ENV=production (warns, does not alter)', async () => {
       const prev = process.env.NODE_ENV;
       process.env.NODE_ENV = 'production';
       try {
         const driver = makeDriver({ autoMigrate: 'safe' });
-        await seedLegacyTable(driver);
-        await driver.initObjects(relaxedMeta);
+        await seedTokenDefaultTable();
+        await driver.initObjects(tokenDefaultMeta);
+
+        // Unchanged: the token DEFAULT the control above sees removed is still there...
         const info = await knexInstance('biz_unit').columnInfo();
-        expect(info.region_code.nullable).toBe(false); // unchanged
+        expect(String(info.owner.defaultValue)).toContain('current_user');
+        // ...the drift is still the `safe` one auto-reconcile would have applied...
+        const d = (await driver.detectManagedDrift()).find((x) => x.column === 'owner');
+        expect(d?.category).toBe('safe');
+        expect(d?.op.type).toBe('drop_column_default');
+        // ...and the boot said why.
+        expect(warned(driver)).toContain(PRODUCTION_GUARD_WARNING);
       } finally {
         process.env.NODE_ENV = prev;
       }
