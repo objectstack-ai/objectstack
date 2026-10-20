@@ -622,8 +622,11 @@ type RecordOrganizationOwnershipBirth = typeof import('@objectstack/runtime').re
  * A failed write throws: the tables are there and the marker is not, so the
  * first `os serve` would refuse this database, and the command must not end
  * reporting success. The ceremony certifies such a database.
+ *
+ * Exported for its unit pin (`schema-migrate.birth-after-flush.test.ts`), which
+ * holds the failed-write refusal without booting a kernel.
  */
-async function recordBirthOfFlushedStore(
+export async function recordBirthOfFlushedStore(
   kernel: { getService?: (name: string) => unknown },
   recordBirth: RecordOrganizationOwnershipBirth,
   logger: BirthLogger | undefined,
