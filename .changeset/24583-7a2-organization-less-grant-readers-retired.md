@@ -1,6 +1,7 @@
 ---
 '@objectstack/core': minor
 '@objectstack/plugin-security': minor
+'@objectstack/runtime': patch
 ---
 
 feat(core,plugin-security)!: a grant applies only in its own organization — an organization-less grant row confers nothing, and the Default Organization's `admin_full_access` grant is the only platform-admin anchor
@@ -15,6 +16,7 @@ Clause-②: yes (narrowing)
 - **Platform-admin standing.** FROM: under `single`, an organization-less `admin_full_access` grant anchored `platform_admin`, beside the Default Organization's. TO: only the Default Organization's grant anchors it (still in every organization, and with none active). Walled postures are unchanged: standing there comes from `OS_PLATFORM_OWNER_EMAIL` alone.
 - **`bootstrapPlatformAdmin` (`@objectstack/plugin-security`).** The existing-admin check reads only the Default Organization's grant. When no Default Organization can be named (a walled posture, or none to name), it reads no grant at all. The walled "no owner email declared" error drops its sentence about a legacy unscoped grant row.
 - **The delegated-administration gate.** A held position counts toward self-delegation only when its row belongs to the caller's active organization. An organization-less holding, or a caller with no active organization, holds nothing there, which is what the resolver grants. An organization administrator's removal of an organization-less row is refused as "not one of the organization you administer".
+- **The run-lifecycle refusal (`@objectstack/runtime`).** Under `single` it now names the Default Organization's `admin_full_access` grant as the remedy, where it named an unscoped one.
 - **What a lean composition sees.** A composition that registers no organization object (`sys_organization`, which plugin-auth ships) still stores grants without an organization, and those grants now confer nothing. No shipped composition does this: `os serve` registers the security plugin only together with plugin-auth.
 
 **What an operator does.** Nothing beyond the upgrade itself: run `os migrate organization-ownership` before serving a database that 17.x or an 18.0 pre-release created. The server refuses such a database until you do. If an embedding composes `@objectstack/plugin-security` without plugin-auth, register the organization object so that grants carry an organization.

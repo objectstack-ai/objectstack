@@ -379,7 +379,14 @@ function makeSyntheticQl(
       if (object === 'sys_account') return [{ id: 'acc_p', user_id: 'usr_promotable' }];
       // [ADR-0131 D5] The Default Organization, which owns the promotion's grant.
       if (object === 'sys_organization') {
-        return bound(organizations.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v)));
+        return bound(
+          organizations.filter((r) =>
+            Object.entries(where).every(([k, v]) => {
+              if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+              return r[k] === v;
+            }),
+          ),
+        );
       }
       return [];
     },

@@ -761,9 +761,10 @@ function runLifecycleStandingSentence(): string {
  *  - the declared administrator list (`OS_PLATFORM_OWNER_EMAIL`, matched
  *    against the caller's own VERIFIED stored email) confers the rung on EVERY
  *    posture — the config anchor is additive;
- *  - the unscoped `admin_full_access` grant (ADR-0068 D2) confers it under
- *    `single` ONLY: under `group` / `isolated` its anchor is retired, so on a
- *    walled deployment that grant confers nothing.
+ *  - the Default Organization's `admin_full_access` grant (ADR-0068 D2,
+ *    ADR-0131 D5) confers it under `single` ONLY: under `group` / `isolated`
+ *    its anchor is retired, so on a walled deployment that grant confers
+ *    nothing.
  *
  * One fixed sentence naming the grant therefore sent a walled operator to do a
  * thing that then failed silently at the permission layer. The middle part
@@ -822,8 +823,8 @@ function runLifecycleDenyMessage(): string {
  * `resolveUserAuthzGrants` §4 pushes it onto the array. The rung is derived
  * from the platform-admin anchors and never from a position name: on every
  * posture, a declared `OS_PLATFORM_OWNER_EMAIL` address on the caller's own
- * verified stored row; under `single` only, also the unscoped
- * `admin_full_access` grant (ADR-0068 D2), whose anchor a walled posture
+ * verified stored row; under `single` only, also the Default Organization's
+ * `admin_full_access` grant (ADR-0068 D2, ADR-0131 D5), whose anchor a walled posture
  * retires. So it is what the ruling MEANT, and it is byte-for-byte what
  * `hasPlatformAdminStanding` returns.
  *
