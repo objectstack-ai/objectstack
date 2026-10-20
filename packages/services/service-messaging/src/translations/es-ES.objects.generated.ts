@@ -344,7 +344,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _validations: {
       channel_renders_template: {
-        message: "El canal debe ser email o sms: solo esos canales usan una plantilla de notificación, y una plantilla para cualquier otro canal nunca se envía. Para el contenido de la aplicación (bandeja de entrada), escribe una plantilla de correo electrónico (email_template) e indícala en el template del paso de notificación; el correo electrónico y la bandeja de entrada la muestran."
+        message: "Este canal nunca usa una plantilla de notificación: solo email y sms la usan, así que esta plantilla nunca se enviará. Para el contenido de la aplicación (bandeja de entrada), escribe una plantilla de correo electrónico (email_template) e indícala en el template del paso de notificación; el correo electrónico y la bandeja de entrada la muestran."
       }
     }
   },

@@ -344,7 +344,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _validations: {
       channel_renders_template: {
-        message: "通道必须是 email 或 sms：只有这两个通道使用通知模板，其他通道的模板永远不会被发送。站内信内容请编写邮件模板（email_template），并在通知步骤的 template 中指定它；邮件和站内信都会渲染它。"
+        message: "该通道从不使用通知模板：只有 email 和 sms 使用，因此此模板永远不会被发送。站内信内容请编写邮件模板（email_template），并在通知步骤的 template 中指定它；邮件和站内信都会渲染它。"
       }
     }
   },

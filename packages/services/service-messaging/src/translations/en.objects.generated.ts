@@ -344,7 +344,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _validations: {
       channel_renders_template: {
-        message: "Channel must be email or sms: only those channels use a notification template, and a template for any other channel is never sent. For in-app (inbox) content, write an email template (email_template) and name it in the notify step's template; email and the inbox both render it."
+        message: "This channel never uses a notification template: only email and sms do, so this template will never be sent. For in-app (inbox) content, write an email template (email_template) and name it in the notify step's template; email and the inbox both render it."
       }
     }
   },

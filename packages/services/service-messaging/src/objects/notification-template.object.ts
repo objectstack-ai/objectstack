@@ -3,9 +3,10 @@
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 /**
- * The channels that READ a `sys_notification_template` row — the closed set
- * `channel` accepts (the maintainer's ruling D on #24770: narrow templates to
- * the channels that render them).
+ * The channels that READ a `sys_notification_template` row (the maintainer's
+ * ruling D on #24770: narrow templates to the channels that render them). In
+ * 18.x a write naming any other channel is accepted with a warning — see the
+ * `channel_renders_template` rule below; its refusal waits for 19.0.
  *
  * Measured, not assumed — the readers are exactly three, all keyed on one of
  * these two values:
@@ -21,8 +22,8 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * The inbox reads no row on any path (`createInboxChannel` takes no store); its
  * localised content is the `email_template` a notify step names in `template`,
  * rendered through `IEmailService.renderTemplate`. So a row naming any other
- * channel is stored and rendered nowhere — the silent no-op the ruling turns
- * into a refusal at write.
+ * channel is stored and rendered nowhere — a silent no-op until this rule made
+ * it loud.
  */
 const TEMPLATE_CHANNELS = ['email', 'sms'] as const;
 
@@ -106,9 +107,10 @@ export const NotificationTemplate = ObjectSchema.create({
             // `MessagingChannel.id`s, 64 per the landed machine-vocabulary
             // precedent (sys_session.revoke_reason, maxLength: 64).
             maxLength: 64,
-            // [#24924] The accepted values are TEMPLATE_CHANNELS, enforced by
-            // the `channel_renders_template` rule below. The field stays `text`
-            // on purpose — see that rule for why a `select` is not the spelling.
+            // [#24924] The values a row is read for are TEMPLATE_CHANNELS; any
+            // other value is warned about by the `channel_renders_template`
+            // rule below. The field stays `text` on purpose — see that rule for
+            // why a `select` is not the spelling.
             description: 'Which channel uses this template: email or sms. The in-app inbox never does; for in-app content, write an email template and name it in a notify step\'s template.',
         }),
 
@@ -171,34 +173,36 @@ export const NotificationTemplate = ObjectSchema.create({
         { fields: ['topic'] },
     ],
 
-    // [#24924] The closed `channel` set, refused at write with the prescription
-    // the ruling asks for. objectql's rule validator runs `validations` on
-    // insert, by-id update and bulk update — the import runner's writes
-    // included — so no write reaches the column without passing here.
+    // [#24924] The WARNING half of ruling D for 18.x. The ruling record reads
+    // "② refuses stored or new non-email/sms rows. If no stored-row
+    // conversion carries that, 18.x warns on write and corrects the copy, and
+    // the refusal is filed for 19.0." — and no ADR-0087 conversion carries
+    // stored DATA rows, so under the standing rule for narrowings after 18.0
+    // GA this rule warns and never refuses. ⛔ Do not raise it to `error` in
+    // 18.x; the refusal is a 19.0 card.
     //
-    // A `format` rule judges the WRITE, never the stored row: it reads only
-    // a payload that names `channel` (`checkFormat` returns early otherwise),
-    // so a row already stored with another channel keeps reading, listing,
-    // deleting and saving every other column exactly as before — and keeps
-    // rendering nowhere, as it always did. A save that NAMES another channel
-    // (a new row, a change of channel, or a client re-sending the stored
-    // value) is refused.
+    // `severity: 'warning'` is objectql's advisory path: the write goes
+    // through, the engine logs one `Validation rule 'channel_renders_template'
+    // (warning): …` line per write and hands the hit to that write's
+    // `onValidationAdvisory` listener, which the data protocol answers as the
+    // single-record create / clone / update answer's `warnings`. The rule runs
+    // on insert, by-id update and bulk update.
     //
-    // Why not a `select` with options `email` / `sms`, measured at this
-    // commit:
-    //  - its refusal is the generic catalog sentence ("Channel must be one
-    //    of: email, sms"), keyed by message key only — no per-field override
-    //    exists, so it cannot carry the email-template prescription;
-    //  - an import with `createMissingOptions` admits a value outside a
-    //    select's options (`keptOptionValues`), so the closed set would leak
-    //    through the import door;
-    //  - Setup's select widget (objectui `SelectField`, at the console pin)
-    //    clears on load a stored value its options do not offer, so editing
-    //    ANY column of a stored `inbox` row would save `channel: null` and be
-    //    refused as a cleared required field — a stored-row path newly
-    //    refused, which the release rule for narrowings keeps out of 18.x;
-    //  - a select carries no `maxLength`, so the column's physical width and
-    //    its keyed-text bound would move with it.
+    // A `format` rule judges the WRITE, never the stored row: it reads only a
+    // payload that names `channel` (`checkFormat` returns early otherwise), so
+    // a row already stored with another channel is read, listed, edited in any
+    // other column and deleted without a warning — and keeps rendering
+    // nowhere, as it always did. A write that NAMES another channel (a new
+    // row, a change of channel, or a client re-sending the stored value) is
+    // warned about.
+    //
+    // Why not a `select` with options `email` / `sms`: option membership is a
+    // field CONSTRAINT in objectql's record validator, which refuses and has
+    // no advisory severity, so it is the 19.0 refusal and not the 18.x
+    // warning. (For 19.0, measured at this commit: its refusal is the generic
+    // catalog sentence with no per-field override; an import's kept option
+    // values admit a value outside the options; and Setup's select widget
+    // clears on load a stored value its options do not offer.)
     validations: [
         {
             type: 'format',
@@ -207,8 +211,8 @@ export const NotificationTemplate = ObjectSchema.create({
             description: 'Only the email and SMS channels read a notification template, so a template for any other channel would never be sent.',
             field: 'channel',
             regex: `^(?:${TEMPLATE_CHANNELS.join('|')})$`,
-            severity: 'error',
-            message: 'Channel must be email or sms: only those channels use a notification template, and a template for any other channel is never sent. For in-app (inbox) content, write an email template (email_template) and name it in the notify step\'s template; email and the inbox both render it.',
+            severity: 'warning',
+            message: 'This channel never uses a notification template: only email and sms do, so this template will never be sent. For in-app (inbox) content, write an email template (email_template) and name it in the notify step\'s template; email and the inbox both render it.',
         },
     ],
 });

@@ -344,7 +344,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _validations: {
       channel_renders_template: {
-        message: "チャネルは email または sms である必要があります。通知テンプレートを使用するのはこの 2 つのチャネルだけで、ほかのチャネル向けのテンプレートは送信されません。アプリ内（受信トレイ）の内容は、メールテンプレート（email_template）を作成して通知ステップの template で指定してください。メールと受信トレイの両方がそれを表示します。"
+        message: "このチャネルは通知テンプレートを使用しません。使用するのは email と sms だけなので、このテンプレートは送信されません。アプリ内（受信トレイ）の内容は、メールテンプレート（email_template）を作成して通知ステップの template で指定してください。メールと受信トレイの両方がそれを表示します。"
       }
     }
   },

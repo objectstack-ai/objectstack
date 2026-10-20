@@ -1,38 +1,43 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `sys_notification_template.channel` takes only the channels that read a row:
- * `email` and `sms` (the maintainer's ruling D on #24770, card #24924).
+ * `sys_notification_template.channel` names a channel that reads a row, or the
+ * write is WARNED about: the 18.x half of the maintainer's ruling D on #24770
+ * (card #24924).
  *
- * Those two channels are the object's only readers (the email channel's inline
- * path, the SMS channel, and plugin-auth's phone OTP / invitation SMS); the
- * inbox reads no row on any path. A row naming any other channel used to be
- * stored and then rendered nowhere, silently. The object's
- * `channel_renders_template` rule now refuses such a save, pointing in-app
- * content to the email template a notify step names.
+ * Only `email` and `sms` read a row (the email channel's inline path, the SMS
+ * channel, and plugin-auth's phone OTP / invitation SMS); the inbox reads none
+ * on any path. A row naming any other channel used to be stored and then
+ * rendered nowhere, silently. The ruling refuses such rows, but no ADR-0087
+ * conversion carries stored DATA rows, so in 18.x the write is ACCEPTED with a
+ * warning and the refusal waits for 19.0. ⛔ Nothing here asserts a refusal.
+ *
+ * The warning is the object's `channel_renders_template` rule at
+ * `severity: 'warning'` — objectql's advisory path. One hit is handed to the
+ * write's own `onValidationAdvisory` listener (the data protocol answers it as
+ * the single-record write answer's `warnings`) and logged once per write.
  *
  * Pinned on a real `ObjectQL` over `SqlDriver` (better-sqlite3), through every
- * engine write shape the rule validator guards:
+ * engine write shape the rule validator runs on:
  *
- *  - REFUSAL: an insert, a by-id update and a predicate (`multi`) update that
- *    name another channel are refused with the ADR-0112 validation envelope —
- *    `code` `VALIDATION_FAILED`, served `400` — attributed to `channel`, whose
- *    message names the email template, and nothing is written. An import's
- *    kept option values (`keptOptionValues`) do not admit one either: the rule
- *    is not an option list.
- *  - PRESERVATION: `email` and `sms` rows are accepted (the positive twins, so
- *    no refusal pin passes against a rule that refuses everything).
+ *  - WARNING: an insert, an insert carrying an import's kept option values, a
+ *    by-id update and a predicate (`multi`) update that name another channel
+ *    are accepted, the row is stored as written, and exactly one advisory names
+ *    `channel_renders_template` / `channel` with the message head.
+ *  - SILENCE: `email` and `sms` writes produce no advisory (the positive twins,
+ *    so no warning pin passes against a rule that warns about everything).
  *  - STORED ROWS: a row already stored with another channel (written under
  *    the rule's absence, straight through the driver) is read, edited in any
- *    other column and deleted exactly as before, and still renders on no
- *    channel. Only a save that names its channel again is refused.
+ *    other column and deleted with no advisory, and still renders on no
+ *    channel. A write that names its channel again is warned about, and
+ *    accepted.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { resolveThrownHttpError } from '@objectstack/types';
+import type { ValidationAdvisoryEvent } from '@objectstack/spec/data';
 import { NotificationTemplate } from './notification-template.object.js';
 import { NotificationTemplateStore, TEMPLATE_OBJECT } from '../template-renderer.js';
 
@@ -42,8 +47,9 @@ const ORG = 'org_a';
 const TOPIC = 'deal.won';
 const CTX = { isSystem: true, tenantId: ORG } as ExecutionContext;
 
-/** The first sentence of the refusal — the answer an author acts on. */
-const REFUSAL_HEAD = 'Channel must be email or sms';
+const RULE = 'channel_renders_template';
+/** The first sentence of the warning — what the person who saved reads. */
+const WARNING_HEAD = 'This channel never uses a notification template';
 
 let engine: ObjectQL | undefined;
 
@@ -76,64 +82,73 @@ async function channelsStored(ql: ObjectQL): Promise<string[]> {
     return rows.map((r: Record<string, unknown>) => String(r.channel)).sort();
 }
 
-/** Runs `write`, which must be refused, and returns the thrown error. */
-async function refusal(write: () => Promise<unknown>): Promise<any> {
-    let thrown: unknown;
-    try {
-        await write();
-    } catch (err) {
-        thrown = err;
-    }
-    expect(thrown, 'the write was accepted').toBeDefined();
-    return thrown;
+/** A fresh listener for ONE write: the advisories that write reported. */
+function advisories(): { events: ValidationAdvisoryEvent[]; onValidationAdvisory: (e: ValidationAdvisoryEvent) => void } {
+    const events: ValidationAdvisoryEvent[] = [];
+    return { events, onValidationAdvisory: (e) => { events.push(e); } };
 }
 
-/** The refusal's ADR-0112 shape: code + served status, attributed to `channel`, naming the email template. */
-function expectChannelRefusal(err: any): void {
-    const served = resolveThrownHttpError(err);
-    expect(served.code).toBe('VALIDATION_FAILED');
-    expect(served.status).toBe(400);
-    expect(err.fields).toHaveLength(1);
-    expect(err.fields[0]).toMatchObject({ field: 'channel', code: 'invalid_format' });
-    expect(String(err.fields[0].message).startsWith(REFUSAL_HEAD)).toBe(true);
+/** Exactly one advisory, and it is this rule's, on `channel`, with the warning's head and prescription. */
+function expectOneChannelWarning(events: readonly ValidationAdvisoryEvent[]): void {
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ rule: RULE, severity: 'warning', field: 'channel', code: 'invalid_format' });
+    expect(String(events[0].message).startsWith(WARNING_HEAD)).toBe(true);
     // The prescription: in-app content belongs to an email template, named by
     // a notify step's `template`.
-    expect(String(err.fields[0].message)).toContain('email_template');
+    expect(String(events[0].message)).toContain('email_template');
 }
 
-describe('sys_notification_template.channel is the closed set of channels that read a row', () => {
-    it('accepts email and sms (the positive twins of every refusal below)', async () => {
+describe('sys_notification_template.channel: a channel that reads no row is accepted with a warning', () => {
+    it.each(['email', 'sms'])('an insert naming %j is stored with no advisory (the positive twins)', async (channel) => {
         const { ql } = await boot();
-        await ql.insert(TEMPLATE_OBJECT, row('email'), { context: CTX });
-        await ql.insert(TEMPLATE_OBJECT, row('sms'), { context: CTX });
-        expect(await channelsStored(ql)).toEqual(['email', 'sms']);
+        const seen = advisories();
+        await ql.insert(TEMPLATE_OBJECT, row(channel), { context: CTX, onValidationAdvisory: seen.onValidationAdvisory });
+        expect(seen.events).toEqual([]);
+        expect(await channelsStored(ql)).toEqual([channel]);
     });
 
-    it.each(['inbox', 'push', 'webhook', 'Email', ' sms'])('refuses an insert naming %j, and stores nothing', async (channel) => {
+    it.each(['inbox', 'push', 'webhook', 'Email', ' sms'])('an insert naming %j is stored, with one channel advisory', async (channel) => {
         const { ql } = await boot();
-        expectChannelRefusal(await refusal(() => ql.insert(TEMPLATE_OBJECT, row(channel), { context: CTX })));
-        expect(await channelsStored(ql)).toEqual([]);
+        const seen = advisories();
+        await ql.insert(TEMPLATE_OBJECT, row(channel), { context: CTX, onValidationAdvisory: seen.onValidationAdvisory });
+        expectOneChannelWarning(seen.events);
+        expect(await channelsStored(ql)).toEqual([channel]);
     });
 
-    it('refuses an insert naming another channel even when an import kept that value', async () => {
+    it('an insert carrying an import\'s kept option values is stored, with one channel advisory', async () => {
         const { ql } = await boot();
+        const seen = advisories();
         const importCtx = { ...CTX, keptOptionValues: { channel: ['inbox'] } } as ExecutionContext;
-        expectChannelRefusal(await refusal(() => ql.insert(TEMPLATE_OBJECT, row('inbox'), { context: importCtx })));
-        expect(await channelsStored(ql)).toEqual([]);
+        await ql.insert(TEMPLATE_OBJECT, row('inbox'), { context: importCtx, onValidationAdvisory: seen.onValidationAdvisory });
+        expectOneChannelWarning(seen.events);
+        expect(await channelsStored(ql)).toEqual(['inbox']);
     });
 
-    it('refuses a by-id update that moves a row to another channel, and leaves the row as it was', async () => {
+    it('a by-id update moving a row to another channel is stored, with one channel advisory', async () => {
         const { ql } = await boot();
         const created = await ql.insert(TEMPLATE_OBJECT, row('email'), { context: CTX });
-        expectChannelRefusal(await refusal(() => ql.update(TEMPLATE_OBJECT, { channel: 'inbox' }, { where: { id: created.id }, context: CTX })));
-        expect(await channelsStored(ql)).toEqual(['email']);
+        const seen = advisories();
+        await ql.update(TEMPLATE_OBJECT, { channel: 'inbox' }, { where: { id: created.id }, context: CTX, onValidationAdvisory: seen.onValidationAdvisory });
+        expectOneChannelWarning(seen.events);
+        expect(await channelsStored(ql)).toEqual(['inbox']);
     });
 
-    it('refuses a predicate update that moves rows to another channel', async () => {
+    it('a predicate update moving a row to another channel is stored, with one channel advisory', async () => {
         const { ql } = await boot();
         await ql.insert(TEMPLATE_OBJECT, row('email'), { context: CTX });
-        expectChannelRefusal(await refusal(() => ql.update(TEMPLATE_OBJECT, { channel: 'inbox' }, { where: { topic: TOPIC }, multi: true, context: CTX })));
-        expect(await channelsStored(ql)).toEqual(['email']);
+        const seen = advisories();
+        await ql.update(TEMPLATE_OBJECT, { channel: 'inbox' }, { where: { topic: TOPIC }, multi: true, context: CTX, onValidationAdvisory: seen.onValidationAdvisory });
+        expectOneChannelWarning(seen.events);
+        expect(await channelsStored(ql)).toEqual(['inbox']);
+    });
+
+    it('an update of an email row that does not move its channel produces no advisory', async () => {
+        const { ql } = await boot();
+        const created = await ql.insert(TEMPLATE_OBJECT, row('email'), { context: CTX });
+        const seen = advisories();
+        await ql.update(TEMPLATE_OBJECT, { channel: 'sms', body: 'moved' }, { where: { id: created.id }, context: CTX, onValidationAdvisory: seen.onValidationAdvisory });
+        expect(seen.events).toEqual([]);
+        expect(await channelsStored(ql)).toEqual(['sms']);
     });
 
     describe('a row already stored with another channel', () => {
@@ -145,9 +160,11 @@ describe('sys_notification_template.channel is the closed set of channels that r
             return { ql: booted.ql, id };
         }
 
-        it('is read and edited in every other column as before', async () => {
+        it('is read and edited in every other column as before, with no advisory', async () => {
             const { ql, id } = await bootWithStoredInboxRow();
-            await ql.update(TEMPLATE_OBJECT, { body: 'edited body', is_active: false }, { where: { id }, context: CTX });
+            const seen = advisories();
+            await ql.update(TEMPLATE_OBJECT, { body: 'edited body', is_active: false }, { where: { id }, context: CTX, onValidationAdvisory: seen.onValidationAdvisory });
+            expect(seen.events).toEqual([]);
             const [stored] = await ql.find(TEMPLATE_OBJECT, { where: { id } }, { context: CTX });
             expect(stored).toMatchObject({ id, channel: 'inbox', body: 'edited body', is_active: false });
         });
@@ -167,11 +184,13 @@ describe('sys_notification_template.channel is the closed set of channels that r
             expect(await channelsStored(ql)).toEqual([]);
         });
 
-        it('refuses a save that names its channel again — a save naming another channel is refused whatever the row held', async () => {
+        it('a write that names its channel again is stored, with one channel advisory', async () => {
             const { ql, id } = await bootWithStoredInboxRow();
-            expectChannelRefusal(await refusal(() => ql.update(TEMPLATE_OBJECT, { channel: 'inbox', body: 'x' }, { where: { id }, context: CTX })));
+            const seen = advisories();
+            await ql.update(TEMPLATE_OBJECT, { channel: 'inbox', body: 'x' }, { where: { id }, context: CTX, onValidationAdvisory: seen.onValidationAdvisory });
+            expectOneChannelWarning(seen.events);
             const [stored] = await ql.find(TEMPLATE_OBJECT, { where: { id } }, { context: CTX });
-            expect(stored).toMatchObject({ channel: 'inbox', body: 'stored body' });
+            expect(stored).toMatchObject({ channel: 'inbox', body: 'x' });
         });
     });
 });
