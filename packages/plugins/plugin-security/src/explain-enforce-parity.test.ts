@@ -81,6 +81,7 @@ import { SharingService, buildSharingMiddleware, SysRecordShare } from '@objects
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { ExplainDecision, TenancyPosture } from '@objectstack/spec/security';
 import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objects/identity';
+import { installCommentAccessHooks } from '@objectstack/plugin-audit';
 
 import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
@@ -239,6 +240,48 @@ async function expectParity(
       return;
     }
   }
+}
+
+// ── the real parent gate ──────────────────────────────────────────────────
+
+/**
+ * [#24646] The REAL `sys_comment` moderation gate (`@objectstack/plugin-audit`,
+ * read from source by this package's vitest alias), wired to a rig's own
+ * security and sharing services and its engine. Only the comment table is held
+ * in memory: one comment by somebody else on the parent record. `moderate`
+ * deletes it as `caller` would and answers what the gate does — the question
+ * "may the caller edit the parent record?" asked by the gate itself, against
+ * the services enforcement runs on.
+ */
+function realCommentGate(engine: ObjectQL, getSharing: () => unknown, getSecurity: () => unknown) {
+  return async (caller: object, object: string, recordId: string): Promise<Enforced> => {
+    const comment = { id: `c_${next()}`, thread_id: `${object}:${recordId}`, author_id: 'u_comment_author', body: 'x' };
+    const hooks = new Map<string, (ctx: unknown) => Promise<void>>();
+    const e = engine as unknown as {
+      find: (o: string, opts: unknown) => Promise<Array<Record<string, unknown>>>;
+      findOne: (o: string, opts: unknown) => Promise<Record<string, unknown> | null>;
+    };
+    installCommentAccessHooks(
+      {
+        // The FIRST handler per event is the authorization gate.
+        registerHook: (event, handler) => { if (!hooks.has(event)) hooks.set(event, handler as never); },
+        find: async (o, opts) => (o === 'sys_comment' ? [comment] : e.find(o, opts)),
+        findOne: async (o, opts) =>
+          o === 'sys_comment' ? ((opts as { where?: { id?: unknown } })?.where?.id === comment.id ? comment : null) : e.findOne(o, opts),
+      },
+      getSharing as never,
+      { info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      undefined,
+      getSecurity as never,
+    );
+    const userId = (caller as { userId?: string }).userId;
+    return landed(hooks.get('beforeDelete')!({
+      object: 'sys_comment',
+      event: 'beforeDelete',
+      input: { id: comment.id, options: { context: { ...caller } } },
+      session: { userId },
+    }));
+  };
 }
 
 // ── rig 1: one row-level policy, the caller explaining themselves ────────────
@@ -673,6 +716,7 @@ async function bootSharing(opts: { faultReadFilter?: boolean; authored?: boolean
     sharing.buildReadFilter = async () => { throw new Error('share store unavailable'); };
   }
   engine.registerMiddleware(buildSharingMiddleware(sharing, ctx.logger) as never, { object: '*' });
+  const moderate = realCommentGate(engine, () => sharing, () => security);
 
   return {
     explain: (caller: object, operation: 'read' | 'update' | 'delete' | 'transfer', recordId: string) =>
@@ -690,6 +734,208 @@ async function bootSharing(opts: { faultReadFilter?: boolean; authored?: boolean
      * envelope with no operation-private key.
      */
     checkEdit: (caller: object, id: string) => sharing!.checkEdit(LINE, id, { ...caller } as never),
+    /** [#24646] The real `sys_comment` moderation gate, asked about a comment on `LINE/id` ({@link realCommentGate}). */
+    moderate: (caller: object, id: string) => moderate(caller, LINE, id),
+    teardown: async () => {
+      try { await engine.destroy(); } catch { /* noop */ }
+      releaseAsyncContexts(engine, plugin);
+    },
+  };
+}
+
+// ── rig 4: on-behalf-of principals, and the delegators they act for ──────────
+
+/** Write depth `org` on the parent, the master and the detail: the delegator ruling B is about. */
+const D_ORG = 'u_d_org';
+/** Write depth `own`: the control. */
+const D_OWN = 'u_d_own';
+/** Owns the rows nobody the rig explains owns. */
+const D_OTHER = 'u_d_other';
+
+/**
+ * #24646 ruling item 3: for an ON-BEHALF-OF caller — an OAuth agent acting for
+ * a user, its context assembled by the real `assembleExecutionContext` with the
+ * `mcp_agent_data_write` ceiling — explain's record-grained `update` and
+ * `delete` verdicts are what the by-id PATCH and DELETE of the same record
+ * answer, under a walled (`isolated`) and a wall-less (`single`) posture. The
+ * same rig explains the delegators themselves as the controls.
+ *
+ * A `private`-OWD `PARENT` with an owner and a creator column (`created_by` is
+ * what the platform's ownership floor reads, and the delegated path keeps that
+ * floor on both legs), a `private` `MASTER` and a `controlled_by_parent`
+ * `DETAIL`. The rows separate owner from creator, so the delegated write's two
+ * legs — plugin-sharing's gate as the delegator at its write depth, and the
+ * delegator's own write filter beside the agent's — each decide a row:
+ *
+ * - `p_theirs_created_by_org`: owned by someone else, created by `D_ORG`;
+ * - `p_org_mine_created_by_other`: owned by `D_ORG`, created by someone else;
+ * - `p_theirs`, `p_org_mine`, `p_own_mine`: the controls;
+ * - `p_beta`: another organization's row, which only the wall-less posture lets through;
+ * - `p_del_*`: the same two shapes again, for the delete rows (a delete that lands removes its row).
+ *
+ * One rig per posture, shared by its rows: an admitted update writes only
+ * `note`, which no policy reads, and every delete row has its own record.
+ */
+async function bootDelegated(posture: TenancyPosture) {
+  const n = next();
+  const PARENT = `qa_parity_parent_${n}`;
+  const MASTER = `qa_parity_master_${n}`;
+  const DETAIL = `qa_parity_detail_${n}`;
+  const engine = new ObjectQL();
+  engine.registerDriver(
+    new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as never,
+    true,
+  );
+  await engine.init();
+  const ownedFields = {
+    id: { name: 'id', type: 'text', primaryKey: true },
+    name: { name: 'name', type: 'text' },
+    note: { name: 'note', type: 'text' },
+    owner_id: { name: 'owner_id', type: 'text' },
+    created_by: { name: 'created_by', type: 'text' },
+  };
+  engine.registerApp({
+    id: `com.objectstack.qa.explain-parity-delegated-${seq}`,
+    name: 'Explain parity: on-behalf-of principals',
+    version: '1.0.0',
+    type: 'plugin',
+    scope: 'system',
+    objects: [
+      SysPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPosition, SysUserPermissionSet,
+      SysOrganization, SysUser, SysMember, SysRecordShare,
+      { name: PARENT, label: 'Parent', sharingModel: 'private', fields: ownedFields },
+      { name: MASTER, label: 'Master', sharingModel: 'private', fields: ownedFields },
+      {
+        name: DETAIL,
+        label: 'Detail',
+        sharingModel: 'controlled_by_parent',
+        fields: {
+          id: { name: 'id', type: 'text', primaryKey: true },
+          note: { name: 'note', type: 'text' },
+          created_by: { name: 'created_by', type: 'text' },
+          master: { name: 'master', type: 'master_detail', required: true, reference: MASTER },
+        },
+      },
+    ],
+  } as never);
+  await engine.syncSchemas();
+
+  const e = engine as unknown as { insert: (o: string, row: Record<string, unknown>, opts: never) => Promise<unknown> };
+  for (const id of [ALPHA, BETA]) await e.insert('sys_organization', { id, name: id, slug: id }, SYS);
+  for (const id of [D_ORG, D_OWN, D_OTHER]) {
+    await e.insert('sys_user', { id, name: id, email: `${id}@example.test` }, SYS);
+    await e.insert('sys_member', { id: `mem_${id}_${n}`, user_id: id, organization_id: ALPHA, role: 'member' }, SYS);
+  }
+  const org = { allowRead: true, allowEdit: true, allowDelete: true, readScope: 'org', writeScope: 'org' } as const;
+  const own = { allowRead: true, allowEdit: true, allowDelete: true, readScope: 'own', writeScope: 'own' } as const;
+  const detail = { allowRead: true, allowEdit: true } as const;
+  const sets = [
+    ...defaultPermissionSets,
+    PermissionSetSchema.parse({ name: 'qa_d_org', objects: { [PARENT]: org, [MASTER]: org, [DETAIL]: detail } }),
+    // Reads every master (so every detail), writes only its own: a detail under
+    // someone else's master is one it reads and may not write.
+    PermissionSetSchema.parse({
+      name: 'qa_d_own',
+      objects: { [PARENT]: own, [MASTER]: { ...own, readScope: 'org' }, [DETAIL]: detail },
+    }),
+  ];
+  // A catalogue row with no organization, landed through the driver as in rig 2.
+  for (const name of ['qa_d_org', 'qa_d_own']) {
+    await (engine as any).getDriver('sys_permission_set').create('sys_permission_set', {
+      id: `ps_${name}_${n}`, name, label: name, organization_id: null, managed_by: 'admin', active: true,
+      object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
+    });
+  }
+  for (const [user, set] of [[D_ORG, 'qa_d_org'], [D_OWN, 'qa_d_own']] as const) {
+    await e.insert('sys_user_permission_set', {
+      id: `ups_${user}_${n}`, user_id: user, permission_set: set, organization_id: ALPHA,
+    }, SYS);
+  }
+  const row = (id: string, owner: string, creator: string, organization = ALPHA) =>
+    ({ id, name: id, note: '', owner_id: owner, created_by: creator, organization_id: organization });
+  for (const r of [
+    row('p_theirs', D_OTHER, D_OTHER),
+    row('p_theirs_created_by_org', D_OTHER, D_ORG),
+    row('p_org_mine', D_ORG, D_ORG),
+    row('p_org_mine_created_by_other', D_ORG, D_OTHER),
+    row('p_own_mine', D_OWN, D_OWN),
+    row('p_beta', D_ORG, D_ORG, BETA),
+    row('p_del_theirs_created_by_org', D_OTHER, D_ORG),
+    row('p_del_org_mine_created_by_other', D_ORG, D_OTHER),
+  ]) await e.insert(PARENT, r, SYS);
+  await e.insert(MASTER, row('m_org', D_ORG, D_ORG), SYS);
+  await e.insert(MASTER, row('m_theirs', D_OTHER, D_OTHER), SYS);
+  await e.insert(DETAIL, { id: 'd_under_org', note: '', created_by: D_ORG, master: 'm_org', organization_id: ALPHA }, SYS);
+  await e.insert(DETAIL, { id: 'd_under_theirs', note: '', created_by: D_ORG, master: 'm_theirs', organization_id: ALPHA }, SYS);
+
+  let security: any;
+  let sharing: SharingService | undefined;
+  const services: Record<string, unknown> = {
+    manifest: { register: vi.fn() },
+    objectql: engine,
+    metadata: {
+      get: async (type: string, name: string) =>
+        type === 'permission' ? sets.find((s: { name?: string }) => s.name === name) ?? null : engine.getSchema(name) ?? null,
+      list: async () => sets,
+    },
+    tenancy: { posture },
+    get sharing() { return sharing; },
+  };
+  const ctx = {
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    registerService: (name: string, svc: unknown) => { if (name === 'security') security = svc; else services[name] = svc; },
+    hook: () => undefined,
+    getService: (name: string) => {
+      if (!(name in services)) throw new Error(`service not registered: ${name}`);
+      return services[name];
+    },
+  };
+  const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+  await plugin.init(ctx as never);
+  await plugin.start(ctx as never);
+  sharing = new SharingService({ engine: engine as never, securityService: () => security as never });
+  engine.registerMiddleware(buildSharingMiddleware(sharing, ctx.logger) as never, { object: '*' });
+  // The pre-image gate logs the rows it refuses.
+  vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
+
+  /** The caller's context as a request assembles it: the user's session, and for an agent its OAuth ceiling. */
+  const contextOf = async (userId: string, onBehalf: boolean) => {
+    const authz = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
+      ql: engine,
+      headers: {},
+      getSession: async () => ({
+        user: { id: userId },
+        session: { id: `sess_${userId}_${n}`, userId, activeOrganizationId: ALPHA },
+      }),
+      tenancyPosture: posture,
+    });
+    return assembleExecutionContext({
+      authz,
+      oauth: onBehalf
+        ? { userId, scopes: ['data:write'], clientId: 'qa_agent_client', scopePermissions: ['mcp_agent_data_write'], delegatesActions: false }
+        : undefined,
+      localization: undefined,
+      requestLocale: undefined,
+      accessToken: undefined,
+    } as never)!;
+  };
+  const objects = { PARENT, MASTER, DETAIL } as const;
+  type Obj = keyof typeof objects;
+  const moderate = realCommentGate(engine, () => sharing, () => security);
+
+  return {
+    /** The security service's `explain`, asked as the caller about its own by-id write — what the parent gates ask. */
+    explain: async (userId: string, onBehalf: boolean, operation: 'update' | 'delete', object: Obj, recordId: string) =>
+      explained(security.explain({ object: objects[object], operation, recordId }, { ...(await contextOf(userId, onBehalf)) })),
+    update: async (userId: string, onBehalf: boolean, object: Obj, id: string) =>
+      landed(engine.update(objects[object], { note: `n_${next()}` }, { where: { id }, context: { ...(await contextOf(userId, onBehalf)) } } as never)),
+    remove: async (userId: string, onBehalf: boolean, object: Obj, id: string) =>
+      landed(engine.delete(objects[object], { where: { id }, context: { ...(await contextOf(userId, onBehalf)) } } as never)),
+    /** The real `sys_comment` moderation gate, asked about a comment on `object/id` ({@link realCommentGate}). */
+    moderate: async (userId: string, onBehalf: boolean, object: Obj, id: string) =>
+      moderate({ ...(await contextOf(userId, onBehalf)) }, objects[object], id),
     teardown: async () => {
       try { await engine.destroy(); } catch { /* noop */ }
       releaseAsyncContexts(engine, plugin);
@@ -770,6 +1016,25 @@ afterAll(async () => {
 });
 const withPrincipal = (source: PostureSource, f: (rig: PrincipalRig) => Promise<RowFaces>): RowRun => async () => {
   const rig = await sharedPrincipalRig(source);
+  return { ...(await f(rig)), teardown: async () => undefined };
+};
+
+type DelegatedRig = Awaited<ReturnType<typeof bootDelegated>>;
+/** One on-behalf-of rig per posture, booted by its first row (see {@link bootDelegated} for why its rows may share it). */
+const delegatedRigs = new Map<TenancyPosture, Promise<DelegatedRig>>();
+const sharedDelegatedRig = (posture: TenancyPosture): Promise<DelegatedRig> => {
+  let rig = delegatedRigs.get(posture);
+  if (!rig) {
+    rig = bootDelegated(posture);
+    delegatedRigs.set(posture, rig);
+  }
+  return rig;
+};
+afterAll(async () => {
+  for (const rig of delegatedRigs.values()) await (await rig.catch(() => undefined))?.teardown();
+});
+const withDelegated = (posture: TenancyPosture, f: (rig: DelegatedRig) => Promise<RowFaces>): RowRun => async () => {
+  const rig = await sharedDelegatedRig(posture);
   return { ...(await f(rig)), teardown: async () => undefined };
 };
 
@@ -927,6 +1192,46 @@ function principalRows(
 const CLAIM_KEPT_UNDER_A_WALL =
   'with no `tenancy` service, admission keeps a removed member\'s claim while Layer 0 walls at `isolated`';
 
+/**
+ * #24646 ruling item 3, as rows: an on-behalf-of caller's record-grained
+ * `update` / `delete` verdict against its by-id PATCH / DELETE, under one
+ * posture, with the delegators' own requests as the controls. `walled` names
+ * whether the posture walls Layer 0 (another organization's row is then one the
+ * caller cannot read).
+ */
+function delegatedRows(posture: TenancyPosture, label: string, walled: boolean): Row[] {
+  type Cell = [who: string, onBehalf: boolean, op: 'update' | 'delete', object: 'PARENT' | 'DETAIL', id: string, shape: string, enforced: Enforced | 'admitted'];
+  const cells: Cell[] = [
+    // The delegated path's two legs, each deciding a row.
+    [D_ORG, true, 'update', 'PARENT', 'p_theirs_created_by_org', 'a row owned by someone else that it created', 'admitted'],
+    [D_ORG, true, 'update', 'PARENT', 'p_org_mine_created_by_other', 'its own row someone else created', REFUSED_DENIED],
+    [D_ORG, true, 'delete', 'PARENT', 'p_del_theirs_created_by_org', 'a row owned by someone else that it created', 'admitted'],
+    [D_ORG, true, 'delete', 'PARENT', 'p_del_org_mine_created_by_other', 'its own row someone else created', REFUSED_DENIED],
+    [D_ORG, true, 'update', 'PARENT', 'p_theirs', 'a row owned and created by someone else', REFUSED_DENIED],
+    [D_ORG, true, 'update', 'PARENT', 'p_org_mine', 'its own row', 'admitted'],
+    [D_ORG, true, 'update', 'PARENT', 'p_beta', "its own row in another organization", walled ? REFUSED_NOT_FOUND : 'admitted'],
+    [D_ORG, true, 'update', 'DETAIL', 'd_under_org', 'a detail under its own master', 'admitted'],
+    [D_ORG, true, 'update', 'DETAIL', 'd_under_theirs', "a detail under someone else's master", REFUSED_NOT_FOUND],
+    [D_OWN, true, 'update', 'PARENT', 'p_own_mine', 'its own row', 'admitted'],
+    [D_OWN, true, 'update', 'PARENT', 'p_theirs', 'a row it cannot read', REFUSED_NOT_FOUND],
+    // The delegators themselves.
+    [D_ORG, false, 'update', 'PARENT', 'p_theirs', 'a row owned and created by someone else', 'admitted'],
+    [D_ORG, false, 'update', 'DETAIL', 'd_under_theirs', "a detail under someone else's master", 'admitted'],
+    [D_ORG, false, 'update', 'PARENT', 'p_beta', 'its own row in another organization', walled ? REFUSED_NOT_FOUND : 'admitted'],
+    [D_OWN, false, 'update', 'DETAIL', 'd_under_org', "a detail it reads under someone else's master", REFUSED_DENIED],
+  ];
+  return cells.map(([who, onBehalf, op, object, id, shape, enforced]) => ({
+    card: '#24646 item 3',
+    shape: `${label}: ${onBehalf ? `an agent on behalf of the \`${who === D_ORG ? 'org' : 'own'}\` writer` : `the \`${who === D_ORG ? 'org' : 'own'}\` writer`}, ${shape}, ${op}`,
+    position: 'record.visible' as const,
+    enforced,
+    run: withDelegated(posture, async (r) => ({
+      explain: await r.explain(who, onBehalf, op, object, id),
+      enforce: op === 'update' ? await r.update(who, onBehalf, object, id) : await r.remove(who, onBehalf, object, id),
+    })),
+  }));
+}
+
 const TABLE: Row[] = [
   // #20604 position 1, and #20431's record-grained twin, over both orderings of one cross-class pair.
   ...rlsRows('#20604 P1 · #20431', 'cross-class `status != amount`', CROSS_CLASS, true),
@@ -1018,6 +1323,9 @@ const TABLE: Row[] = [
       explain: await r.explain(AUTHORED_WRITER, 'transfer', 'l_theirs'), enforce: await r.transfer(AUTHORED_WRITER, 'l_theirs'),
     })),
   },
+  // #24646 ruling item 3: an on-behalf-of caller's by-id write verdict, under a walled and a wall-less posture.
+  ...delegatedRows('isolated', '`isolated`', true),
+  ...delegatedRows('single', '`single`', false),
   // #20002: a dependency enforcement shares with explain throws.
   {
     card: '#20002', shape: 'the sharing read filter throws, the caller\'s own row, read', position: 'record.visible',
@@ -1087,14 +1395,16 @@ describe('security.explain answers what enforcement does — the enumeration', (
  * #24647's row, beyond the verdict the table compares: what the record story
  * names, and what the `sys_attachment` and `sys_comment` parent gates answer.
  *
- * Both gates ask record sharing's `checkEdit` FIRST, with the caller's envelope
- * and no operation-private key, refuse on its `deny` without asking anything
- * further, and ask explain's record-grained `update` verdict only once that
- * step admits (each gate's own parity table pins it: its `sharing deny` row
- * refuses with explain never called, though the double would admit). So on a
- * row the deferral admits, record sharing's own `deny` still decides both
- * gates: explain admitting it cannot widen either one. That holds for today's
- * gate composition only, and the case below says which card changes it.
+ * [#24646, ruling B] Both gates ask one question about the parent: explain's
+ * record-grained `update` verdict, which composes the by-id write gate's
+ * deferral to an app-authored row-level write policy (#24647). They no longer
+ * ask record sharing's `checkEdit` first — that step, at owner-only depth, is
+ * what used to refuse the row the deferral admits. So on such a row the gate
+ * admits exactly what the parent's by-id update admits, and on a row the policy
+ * does not admit it refuses exactly what that update refuses. The case below
+ * asks the REAL `sys_comment` moderation gate ({@link realCommentGate}) on the
+ * services enforcement runs on, so it fails the day either gate composition or
+ * explain's deferral moves.
  */
 describe('an app-authored row-level write policy the by-id write gate defers to (ADR-0105 D3)', () => {
   it('the update story names the deferral: record sharing excludes the row, row-level security admits it', async () => {
@@ -1113,19 +1423,29 @@ describe('an app-authored row-level write policy the by-id write gate defers to 
     }
   }, 60_000);
 
-  it("the parent gates' first question, record sharing, still refuses the row explain now admits", async () => {
+  it("the parent gates' one question, the by-id update verdict, admits the row the by-id update admits", async () => {
     const rig = await bootSharing({ authored: true });
     try {
-      // ⚠️ A sibling card flips this pin: #24646 (ruling B, comment 6279880675)
-      // drops both gates' own-depth record-sharing step and their master step,
-      // so they ask only explain's record-grained by-id `update` verdict. The
-      // gate then admits exactly what the parent's by-id update admits; for
-      // this scenario, with #24647's deferral, that is ADMITTED. Until then the
-      // gates' first question below is record sharing's, and it refuses.
+      // [#24646, ruling B] Flipped from "the gates' first question, record
+      // sharing, still refuses": record sharing alone still refuses this row at
+      // owner-only depth, and the gates no longer ask it. They ask explain's
+      // record-grained by-id `update` verdict alone, which admits the row as the
+      // by-id update does, and so the gate admits it.
       expect(await rig.checkEdit(AUTHORED_WRITER, 'l_theirs')).toBe('deny');
       const x = await rig.explain(AUTHORED_WRITER, 'update', 'l_theirs');
       expect(x.kind === 'decision' ? x.decision.record?.visible : x.kind, describeExplained(x)).toBe(true);
+      expect(await rig.moderate(AUTHORED_WRITER, 'l_theirs')).toEqual({ kind: 'admitted' });
       expect(await rig.update(AUTHORED_WRITER, 'l_theirs')).toEqual({ kind: 'admitted' });
+
+      // The control: a row the policy does not admit is refused by the update,
+      // by its judgement and by the gate, the gate with its named refusal.
+      const refusedByUpdate = await rig.update(AUTHORED_WRITER, 'l_unnamed');
+      expect(refusedByUpdate.kind).toBe('refused');
+      const y = await rig.explain(AUTHORED_WRITER, 'update', 'l_unnamed');
+      expect(y.kind === 'decision' ? y.decision.record?.visible : y.kind, describeExplained(y)).toBe(false);
+      const moderated = await rig.moderate(AUTHORED_WRITER, 'l_unnamed');
+      expect(moderated.kind === 'refused' ? envelopeKeysOf(moderated) : moderated)
+        .toStrictEqual({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
     } finally {
       await rig.teardown();
     }
@@ -1143,4 +1463,40 @@ describe('an app-authored row-level write policy the by-id write gate defers to 
       await rig.teardown();
     }
   }, 60_000);
+});
+
+/**
+ * [#24646] The REAL `sys_comment` moderation gate on rig 4's services: removing
+ * another person's comment on a parent record is admitted exactly where the
+ * by-id update of that parent is, under a walled and a wall-less posture —
+ * for the `org` writer ruling B admits, for a `controlled_by_parent` parent
+ * judged through its master, and for an on-behalf-of caller, whose by-id write
+ * the gate now judges by explain's delegated verdict (#24646 item 3). A
+ * refusal names the parent (`RECORD_NOT_ACCESSIBLE`) to a caller who reads it
+ * and answers the not-visible refusal (`PERMISSION_DENIED`) to one who does not.
+ */
+describe('the real comment moderation gate admits exactly what the parent by-id update admits', () => {
+  const NAMED: Enforced = { kind: 'refused', code: 'RECORD_NOT_ACCESSIBLE', status: 403 };
+  const NOT_VISIBLE: Enforced = { kind: 'refused', code: 'PERMISSION_DENIED', status: 403 };
+  type GateCell = [who: string, onBehalf: boolean, object: 'PARENT' | 'DETAIL', id: string, shape: string, gate: Enforced];
+  const CELLS: GateCell[] = [
+    [D_ORG, false, 'PARENT', 'p_theirs', 'the `org` writer, a row owned by someone else', { kind: 'admitted' }],
+    [D_OWN, false, 'PARENT', 'p_own_mine', 'the `own` writer, its own row', { kind: 'admitted' }],
+    [D_OWN, false, 'PARENT', 'p_theirs', 'the `own` writer, a row it cannot read', NOT_VISIBLE],
+    [D_ORG, false, 'DETAIL', 'd_under_theirs', "the `org` writer, a detail under someone else's master", { kind: 'admitted' }],
+    [D_OWN, false, 'DETAIL', 'd_under_org', "the `own` writer, a detail it reads under someone else's master", NAMED],
+    [D_ORG, true, 'PARENT', 'p_theirs_created_by_org', 'an agent on behalf of the `org` writer, a row owned by someone else that it created', { kind: 'admitted' }],
+    [D_ORG, true, 'PARENT', 'p_org_mine_created_by_other', 'an agent on behalf of the `org` writer, its own row someone else created', NAMED],
+  ];
+  for (const posture of ['isolated', 'single'] as const) {
+    for (const [who, onBehalf, object, id, shape, gate] of CELLS) {
+      it(`\`${posture}\` · ${shape} → ${gate.kind === 'admitted' ? 'admitted' : `refused ${gate.code} / ${gate.status}`}`, async () => {
+        const rig = await sharedDelegatedRig(posture);
+        const moderated = await rig.moderate(who, onBehalf, object, id);
+        const updated = await rig.update(who, onBehalf, object, id);
+        expect(moderated.kind === 'refused' ? { kind: 'refused', ...envelopeKeysOf(moderated) } : moderated).toStrictEqual(gate);
+        expect(updated.kind, `the by-id update answered ${JSON.stringify(updated)}`).toBe(gate.kind);
+      }, 60_000);
+    }
+  }
 });
