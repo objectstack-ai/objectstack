@@ -53,6 +53,7 @@ import {
 } from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import type {
   ApiKeyLifecyclePolicy,
   IEmailService,
@@ -9393,10 +9394,12 @@ export class AuthManager {
     const engine = this.getDataEngine();
     if (!engine) return undefined;
     try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      const u = await engine.findOne('sys_user', {
-        where: { email: email.toLowerCase() }, fields: ['id'], context: SYSTEM_CTX,
-      } as any);
+      const query: EngineQueryOptions = {
+        where: { email: email.toLowerCase() },
+        fields: ['id'],
+        context: { isSystem: true, positions: [], permissions: [] },
+      };
+      const u = await engine.findOne('sys_user', query);
       return typeof u?.id === 'string' && u.id ? u.id : undefined;
     } catch (e) {
       // The refusal stands either way; what is lost is its ledger row.
