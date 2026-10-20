@@ -160,7 +160,7 @@ describe('a refused password sign-in records one login_failed event for the acco
     expect(accountEvents(events).map((e) => e.action)).toEqual(['login_failed']);
   });
 
-  it('names the account the credential check resolved, whatever the letter case of the address', async () => {
+  it('names the account the credential check resolved the address to', async () => {
     const { engine, manager, events } = deployment();
     await signUp(manager);
     events.length = 0;
