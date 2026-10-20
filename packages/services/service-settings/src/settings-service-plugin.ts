@@ -78,6 +78,35 @@ import { settingsBuiltinTranslations } from './translations/index.js';
  */
 const UNWALLED_ONLY_NAMESPACES: ReadonlySet<string> = new Set(['branding']);
 
+/**
+ * The Setup entry of each {@link UNWALLED_ONLY_NAMESPACES} member, contributed
+ * WITH the namespace (#24766, the amendment's "no Setup entry" half).
+ *
+ * It used to be a static item of `@objectstack/platform-objects`'
+ * `SETUP_NAV_CONTRIBUTIONS`, so a walled deployment listed a page the server
+ * does not serve. It now lives and dies with the capability — the
+ * `@objectstack/mcp` `connect-ui.ts` pattern (cloud ADR-0009): registered
+ * through the `manifest` service from the same `kernel:ready` step that offers
+ * the namespace, and never where the namespace is withheld. The labels stay
+ * keyed `apps.setup.navigation.<id>` in platform-objects' bundles, which is
+ * where the console resolves every Setup entry, contributed or static.
+ *
+ * A factory, not a shared literal: the nav fold pushes contributed items into
+ * the merged tree by reference.
+ */
+const UNWALLED_ONLY_SETUP_NAV: Readonly<Record<string, () => Record<string, unknown>>> = {
+  branding: () => ({
+    id: 'nav_settings_branding',
+    type: 'url',
+    label: 'Branding',
+    url: '/apps/setup/system/settings/branding',
+    icon: 'palette',
+  }),
+};
+
+/** The bundle id the Setup entries register under — distinct from the plugin's own manifest. */
+const UNWALLED_ONLY_SETUP_NAV_BUNDLE_ID = `${SETTINGS_PLUGIN_ID}.setup-nav`;
+
 /** Configuration options for the SettingsServicePlugin. */
 export interface SettingsServicePluginOptions {
   /**
@@ -574,6 +603,32 @@ export class SettingsServicePlugin implements Plugin {
       this.service!.registerManifest(m);
       this.registerActionHandlers(m.namespace);
     }
+    // The Setup entries travel with the namespaces just offered — and only then.
+    const items = this.heldUntilPostureKnown
+      .map((m) => UNWALLED_ONLY_SETUP_NAV[m.namespace]?.())
+      .filter((item): item is Record<string, unknown> => item !== undefined);
+    if (items.length === 0) return;
+    let manifestService: { register(m: unknown): void } | undefined;
+    try {
+      manifestService = ctx.getService<{ register(m: unknown): void }>('manifest');
+    } catch {
+      // No manifest service (lean kernels, tests): no app registry to contribute to.
+      return;
+    }
+    manifestService?.register?.({
+      id: UNWALLED_ONLY_SETUP_NAV_BUNDLE_ID,
+      namespace: 'sys',
+      version: SETTINGS_PLUGIN_VERSION,
+      type: 'plugin',
+      scope: 'system',
+      name: 'Settings Service — Setup entries',
+      description: 'Setup navigation for the settings namespaces offered only where no organization wall stands.',
+      navigationContributions: [
+        // After platform-objects' Configuration entries (priority 100), before
+        // later contributors' (service-messaging, 120).
+        { app: 'setup', group: 'group_configuration', priority: 110, items },
+      ],
+    });
   }
 
   /**

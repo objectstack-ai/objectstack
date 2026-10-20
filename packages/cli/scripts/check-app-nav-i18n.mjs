@@ -369,6 +369,41 @@ const CONTRIBUTORS = [
     },
   },
   {
+    // `nav_settings_branding` (#24766). The plugin contributes it from its
+    // `kernel:ready` hook, and only where no organization wall stands, so this
+    // entry boots it through init → start → kernel:ready on a context of its
+    // own that captures `kernel:ready` — the shared context below fires no
+    // hooks — with no `tenancy` service, which is the `single` reading, and
+    // returns what it registered.
+    source: '@objectstack/service-settings (Setup entries of the single-posture namespaces)',
+    apps: ['setup'],
+    async load() {
+      const { SettingsServicePlugin } = await import('@objectstack/service-settings');
+      const manifests = [];
+      const ready = [];
+      const own = {
+        getService: (name) => {
+          if (name === 'manifest') return { register: (m) => manifests.push(m) };
+          throw new Error(`Service '${name}' not found`);
+        },
+        registerService: () => {},
+        registerServiceFactory: () => {},
+        replaceService: () => {},
+        getServiceScoped: async () => undefined,
+        getServices: () => new Map(),
+        hook: (name, fn) => { if (name === 'kernel:ready') ready.push(fn); },
+        trigger: async () => {},
+        logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+        getKernel: () => undefined,
+      };
+      const plugin = new SettingsServicePlugin({ env: {}, registerRoutes: false });
+      await plugin.init(own);
+      await plugin.start(own);
+      for (const fn of ready) await fn();
+      return { manifests };
+    },
+  },
+  {
     source: '@objectstack/mcp (CONNECT_AGENT_UI_BUNDLE)',
     // The one contributor that lands in BOTH apps: `CONNECT_AGENT_UI_BUNDLE`
     // carries two `navigationContributions` entries pointing at one page —

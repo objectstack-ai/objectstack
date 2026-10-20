@@ -22,6 +22,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
+import { ObjectQL } from '@objectstack/objectql';
+import { SETUP_APP, SETUP_NAV_CONTRIBUTIONS } from '@objectstack/platform-objects';
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import { SettingsServicePlugin } from './settings-service-plugin.js';
 import type { SettingsService } from './settings-service.js';
@@ -64,6 +66,10 @@ async function boot(tenancy: Tenancy) {
       throw new Error('tenancy backend unavailable');
     });
   }
+  // Every manifest the plugin registers — its own, and the Setup entries it
+  // contributes with an offered namespace.
+  const registered: unknown[] = [];
+  kernel.registerService('manifest', { register: (m: unknown) => { registered.push(m); } });
   const getService = kernel.getService.bind(kernel);
   const registerService = kernel.registerService.bind(kernel);
   const warnings: string[] = [];
@@ -109,7 +115,35 @@ async function boot(tenancy: Tenancy) {
   const getBranding = () =>
     call('GET /api/settings/:namespace', { method: 'GET', params: { namespace: 'branding' } as any });
 
-  return { service, listed, putBranding, getBranding, warnings };
+  return { service, listed, putBranding, getBranding, warnings, setupNavIds: () => mergedSetupNavIds(registered) };
+}
+
+/**
+ * The Setup app's navigation as the registry serves it: the shell and
+ * `@objectstack/platform-objects`' own contributions, plus whatever this boot
+ * registered, folded by the real `applyNavContributions`. So the static half
+ * (`SETUP_NAV_CONTRIBUTIONS` no longer carrying the entry) and the contributed
+ * half are judged together, on the merged tree the console reads.
+ */
+function mergedSetupNavIds(registered: unknown[]): { ids: string[]; configuration: string[] } {
+  const engine = new ObjectQL();
+  engine.registry.logLevel = 'silent';
+  engine.registerApp({
+    id: 'com.objectstack.test.setup-shell', namespace: 'sys', version: '0.0.0', type: 'plugin', scope: 'system',
+    name: 'Setup shell (fixture)', apps: [SETUP_APP], navigationContributions: SETUP_NAV_CONTRIBUTIONS,
+  });
+  for (const m of registered) engine.registerApp(m);
+  const ids: string[] = [];
+  const walk = (items: any[] | undefined) => {
+    for (const item of items ?? []) {
+      if (item?.id) ids.push(item.id);
+      walk(item?.children);
+    }
+  };
+  const navigation = (engine.registry.getApp('setup') as { navigation?: any[] } | undefined)?.navigation;
+  walk(navigation);
+  const group = (navigation ?? []).find((item) => item?.id === 'group_configuration');
+  return { ids, configuration: (group?.children ?? []).map((item: any) => item?.id) };
 }
 
 describe('the Branding namespace under a walled posture (#24766)', () => {
@@ -137,6 +171,13 @@ describe('the Branding namespace under a walled posture (#24766)', () => {
         expect(state.status).toBe(404);
         expect(state.body.error.code).toBe('UNKNOWN_NAMESPACE');
       });
+
+      it('Setup serves no Branding entry, while its sibling settings entries stay', async () => {
+        const { ids } = (await boot({ kind: 'service', posture })).setupNavIds();
+        expect(ids).not.toContain('nav_settings_branding');
+        // Control: the fold is real and the Configuration group is populated.
+        expect(ids).toEqual(expect.arrayContaining(['nav_settings_company', 'nav_settings_localization']));
+      });
     });
   }
 });
@@ -157,6 +198,14 @@ describe('the Branding namespace where no wall stands (#24766)', () => {
       const read = await b.getBranding();
       expect(read.status).toBe(200);
       expect(read.body.data.values.workspace_name).toMatchObject({ value: 'Acme', source: 'tenant' });
+    });
+
+    it(`${label}: Setup serves the Branding entry exactly once, in Configuration`, async () => {
+      const { ids, configuration } = (await boot(tenancy)).setupNavIds();
+      expect(ids.filter((id) => id === 'nav_settings_branding')).toHaveLength(1);
+      // In the Configuration group, after the platform-objects entries.
+      expect(configuration).toContain('nav_settings_branding');
+      expect(configuration.indexOf('nav_settings_branding')).toBeGreaterThan(configuration.indexOf('nav_settings_feature_flags'));
     });
   }
 });

@@ -127,7 +127,9 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // the app's base `setup.access`).
       { id: 'nav_settings_localization', type: 'url', label: 'Localization', url: '/apps/setup/system/settings/localization', icon: 'globe' },
       { id: 'nav_settings_company', type: 'url', label: 'Company', url: '/apps/setup/system/settings/company', icon: 'building-2' },
-      { id: 'nav_settings_branding', type: 'url', label: 'Branding', url: '/apps/setup/system/settings/branding', icon: 'palette' },
+      // `nav_settings_branding` is contributed by `@objectstack/service-settings`
+      // with the `branding` namespace, which is offered only where no
+      // organization wall stands (#24766) — so the entry lives and dies with it.
       { id: 'nav_settings_auth', type: 'url', label: 'Authentication', url: '/apps/setup/system/settings/auth', icon: 'lock-keyhole', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_mail', type: 'url', label: 'Email', url: '/apps/setup/system/settings/mail', icon: 'mail', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'] },
