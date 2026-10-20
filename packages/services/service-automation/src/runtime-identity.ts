@@ -6,10 +6,12 @@ import { markGuardRefusal } from './guard-refusal.js';
 /**
  * The IDENTITY envelope a flow's data nodes pass to ObjectQL as
  * `options.context` when the run resolves a principal. A structural subset of
- * the kernel `ExecutionContext` — it always carries the three fields the
- * security middleware keys on (`isSystem`, `positions`, `permissions`) so it is
- * directly assignable to the engine's `context` option, plus the optional
- * `userId`/`tenantId` of the acting user.
+ * the kernel `ExecutionContext`, so it is directly assignable to the engine's
+ * `context` option: always `isSystem`, plus the optional `userId`/`tenantId` of
+ * the acting user, and the `positions` / `permissions` the security middleware
+ * reads for a non-system principal — always on a `runAs:'user'` run, on a
+ * user-less `runAs:'system'` run, and never on a `runAs:'system'` run that
+ * names a user (see {@link positions}).
  */
 export interface RunIdentityContext {
   /** Elevated, RLS-bypassing system principal (full access) when true. */
@@ -39,10 +41,25 @@ export interface RunIdentityContext {
    * human instead of being refused user-less (#3760).
    */
   userId?: string;
-  /** Acting user's role names (RLS parity with a direct REST request). */
-  positions: string[];
-  /** Acting user's explicit permission-set names. */
-  permissions: string[];
+  /**
+   * Acting user's role names (RLS parity with a direct REST request). Always
+   * present on a `runAs:'user'` run, and `[]` on a user-less `runAs:'system'`
+   * run. ABSENT on a `runAs:'system'` run that names a user, with
+   * {@link permissions}: the run's own operations never read them (the
+   * security middleware's `isSystem` short-circuit precedes every gate that
+   * does), and a `runAs:'user'` hook fired by one of its writes de-elevates to
+   * this context, whose carried arrays the hook keeps verbatim. Carried empty,
+   * they ran that hook on the member baseline; absent, the hook resolves the
+   * named user's own grants in {@link tenantId}, as that user's own request
+   * resolves them (ruling 6271152775 on the approvals writes, applied here).
+   */
+  positions?: string[];
+  /**
+   * Acting user's explicit permission-set names. Present and absent exactly as
+   * {@link positions} is: the hook seed resolves a user's grants only when
+   * this one is absent.
+   */
+  permissions?: string[];
   /**
    * The acting user's fellow-organization peers, the user included: the value
    * RLS reads as `current_user.org_user_ids` (`sys_user_org_members` and every
@@ -205,10 +222,13 @@ export function runOrgUserIds(context: AutomationContext | undefined): string[] 
  *    `owner_only_writes` RLS keys on `created_by`). Same envelope shape as
  *    the action-body seam's `{ ...caller, isSystem: true }` (the
  *    hotcrm#548-family fix in @objectstack/runtime) — one platform posture
- *    for "elevated, user-triggered" writers. A run whose trigger genuinely
- *    resolved no user (a schedule) stays user-less: the actor label +
- *    `flowRunId` are its provenance, and ADR-0118 D1 forbids inventing a
- *    sentinel or pseudo-user in its place.
+ *    for "elevated, user-triggered" writers. A run that names a user carries
+ *    no `positions` / `permissions`, so a `runAs:'user'` hook its writes fire
+ *    resolves that user's own grants instead of running on the member
+ *    baseline (see {@link RunIdentityContext.positions}). A run whose trigger
+ *    genuinely resolved no user (a schedule) stays user-less and keeps them
+ *    empty: the actor label + `flowRunId` are its provenance, and ADR-0118 D1
+ *    forbids inventing a sentinel or pseudo-user in its place.
  *  - `runAs:'user'` (default) → the triggering user's identity
  *    (`{ userId, positions, permissions, org_user_ids?, email?, tenantId? }`), so the
  *    security middleware enforces that user's row-level security. The run can
@@ -281,8 +301,20 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
       // A run that must genuinely cross orgs is a user-less one (a schedule
       // carries no org, nothing narrows) or sets explicit fields.
       ...(context.tenantId ? { tenantId: context.tenantId } : {}),
-      positions: [],
-      permissions: [],
+      // Elevation grants this run everything, so no `positions` /
+      // `permissions` are read for its own operations. They matter only to a
+      // `runAs:'user'` hook one of its writes fires: that hook de-elevates to
+      // this context and keeps any arrays it carries verbatim (a narrowed
+      // ceiling is never re-broadened), resolving the user's grants only when
+      // none are carried. So a run that names a user carries none, and such a
+      // hook runs on that user's own grants in `tenantId`, exactly as the
+      // user's own request would — never on the member baseline that empty
+      // arrays left it with. After an approval decision the user is the
+      // decider, so the hooks the post-decision writes fire run on the
+      // decider's grants. A user-less run (a schedule) keeps the empty arrays:
+      // there is no user to resolve, and a `runAs:'user'` hook it fires is
+      // refused for want of one.
+      ...(context.userId ? {} : { positions: [], permissions: [] }),
       ...(flowRunId ? { flowRunId } : {}),
     };
   }

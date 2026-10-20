@@ -130,10 +130,16 @@ describe("AutomationServicePlugin bridges the runAs:'user' grant resolver (#3356
     // #5494 — the acting user rides the elevated context as ATTRIBUTION (it
     // drives the created_by/updated_by stamps and the audit actor; the
     // isSystem short-circuit precedes every gate that reads it). What proves
-    // "the resolver is not consulted" is the untouched authz envelope:
+    // "the resolver is not consulted" is that no grant table was read and no
+    // authz fact was filled in. The envelope carries no positions or
+    // permission sets at all beside a named user: a `runAs:'user'` hook this
+    // write fires then resolves the user's own grants instead of running on
+    // the member baseline (`runas-system-user-hook-grants.integration.test.ts`).
     expect(update!.ctx.userId).toBe('u1');
-    expect(update!.ctx.positions).toEqual([]);
-    expect(update!.ctx.permissions).toEqual([]);
+    expect(Object.keys(update!.ctx)).not.toContain('positions');
+    expect(Object.keys(update!.ctx)).not.toContain('permissions');
+    expect(update!.ctx.org_user_ids).toBeUndefined();
+    expect(crud.filter((c) => c.obj in AUTHZ_TABLES), 'a system run read a grant table').toEqual([]);
 
     await kernel.shutdown();
   });

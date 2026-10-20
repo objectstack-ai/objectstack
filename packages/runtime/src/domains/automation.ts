@@ -954,9 +954,14 @@ function refuseInvalidRunLifecycleBody(
                     + (unknownKeys.includes('requestedBy')
                         ? '; `requestedBy` is filled from the authenticated caller and is not settable from the wire'
                         : ''),
+                    // `unknown_field` — the ADR-0114 D2 catalog member for "a
+                    // key the target does not declare", the code the resume
+                    // arm answers for the same condition. This row used to
+                    // hand-spell Zod's `unrecognized_keys`, a code outside the
+                    // closed catalog.
                     unknownKeys.map((k) => ({
                         field: k,
-                        code: 'unrecognized_keys' as const,
+                        code: 'unknown_field' as const,
                         message: `not a ${door} body key — the ${door} body accepts \`reason\``,
                     })),
                 ),

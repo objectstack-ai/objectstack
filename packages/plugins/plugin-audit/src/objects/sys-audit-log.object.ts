@@ -44,13 +44,20 @@ export const SysAuditLog = ObjectSchema.create({
   titleFormat: '{action} · {object_name}',
   highlightFields: ['created_at', 'action', 'object_name', 'record_id', 'user_id'],
 
+  // A list names the target with the pointer's id half, `record_id`: the
+  // console draws it as the target record and fetches the type half
+  // `object_name` for that cell without a column (objectui#13036). A list
+  // view never shows the type half beside it, which would draw the stored API
+  // name as text (`sys-audit-log-pointer-pair.test.ts`). `config_changes`
+  // keeps `object_name`: its rows carry no `record_id`, so no pointer names
+  // their target.
   listViews: {
     recent: {
       type: 'grid',
       name: 'recent',
       label: 'Recent',
       data: { provider: 'object', object: 'sys_audit_log' },
-      columns: ['created_at', 'action', 'object_name', 'record_id', 'user_id'],
+      columns: ['created_at', 'action', 'record_id', 'user_id'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
       emptyState: { title: 'No audit events', message: 'Activity will appear here as users interact with the platform.' },
@@ -60,7 +67,7 @@ export const SysAuditLog = ObjectSchema.create({
       name: 'writes_only',
       label: 'Writes',
       data: { provider: 'object', object: 'sys_audit_log' },
-      columns: ['created_at', 'action', 'object_name', 'record_id', 'user_id'],
+      columns: ['created_at', 'action', 'record_id', 'user_id'],
       // `restore` removed (#8315): the value is retired from the enum, so the
       // filter would have matched nothing for the rest of time. The three that
       // remain are exactly what `actionFor()` in `audit-writers.ts` can emit.
@@ -105,7 +112,7 @@ export const SysAuditLog = ObjectSchema.create({
       name: 'record_views',
       label: 'Record Views',
       data: { provider: 'object', object: 'sys_audit_log' },
-      columns: ['created_at', 'user_id', 'object_name', 'record_id', 'actor'],
+      columns: ['created_at', 'user_id', 'record_id', 'actor'],
       filter: [{ field: 'action', operator: 'in', value: ['read'] }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
@@ -137,10 +144,24 @@ export const SysAuditLog = ObjectSchema.create({
       name: 'all_events',
       label: 'All',
       data: { provider: 'object', object: 'sys_audit_log' },
-      columns: ['created_at', 'action', 'object_name', 'record_id', 'user_id'],
+      columns: ['created_at', 'action', 'record_id', 'user_id'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 100 },
     },
+  },
+
+  // [ADR-0095 D1, 2026-10-18 note; ADR-0131 D7] This object's default row scope: the one
+  // policy plugin-security's shipped permission sets spread for it today
+  // (`auditLedgerRowScope` in `default-permission-sets.ts`), moved here verbatim. Layer
+  // 0 is inert on the ledger (`systemFields: { tenant: false }` above), so Layer 1
+  // silence means this scope, not no filter. The security plugin's row-policy collection
+  // applies it when no set the caller holds carries a row policy for the object and
+  // operation; the shipped sets still carry it, so their holders read as before. An
+  // `extend` contribution cannot set or loosen it (refused at registration).
+  defaultRowScope: {
+    name: 'sys_audit_log_org',
+    operation: 'select',
+    using: 'tenant_id == current_user.organization_id',
   },
 
   fields: {

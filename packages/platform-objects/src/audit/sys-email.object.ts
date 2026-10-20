@@ -95,16 +95,36 @@ export const SysEmail = ObjectSchema.create({
       group: 'Content',
     }),
 
+    // [#24625] The two BODY columns are read-gated on the platform-only
+    // capability (ADR-0066 D3 field `requiredPermissions`: the key is dropped
+    // on read for a caller without it). An 18.0 install wrote its identity
+    // mail — password reset, account invitation, verification, magic link,
+    // email-change notice — into this log, stamped with the organization, and
+    // those bodies carry sign-in and reset links. The rows stay here until the
+    // 18.x ceremony moves them, and no column tells them apart from tenant mail
+    // reliably: a magic link carries no `related_object`, and the log has no
+    // template column. So the gate is on the columns, for every row: an
+    // organization administrator keeps the row (envelope, subject, delivery
+    // state, linkage) and loses only the body. The same field-level answer
+    // closes every door that serves a row through the engine — the data API,
+    // export, global search (which matches only on the fields the caller may
+    // query, so a body term finds nothing) and the `sys_activity` /
+    // `sys_audit_log` read redaction (which serves a mirror the fields the data
+    // plane serves). The mirrors' WRITERS mask these columns too
+    // (`mail-log-body.ts`). The delivery pipeline reads as the system, which a
+    // field gate does not narrow.
     body_text: Field.textarea({
       label: 'Body (text)',
       required: false,
       searchable: true,
+      requiredPermissions: ['manage_platform_settings'],
       group: 'Content',
     }),
 
     body_html: Field.textarea({
       label: 'Body (HTML)',
       required: false,
+      requiredPermissions: ['manage_platform_settings'],
       group: 'Content',
     }),
 

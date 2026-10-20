@@ -592,7 +592,6 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysOrganization', SysOrganization, 'delete_organization', `(${OWNER}) && ${MULTI_ORG}`],
     ['SysOrganization', SysOrganization, 'set_active_organization', MULTI_ORG],
     ['SysOrganization', SysOrganization, 'leave_organization', MULTI_ORG],
-    ['SysOrganization', SysOrganization, 'change_slug', MULTI_ORG],
     ['SysUser', SysUser, 'invite_user', `${INVITE} && ${ORG}`],
     ['SysUser', SysUser, 'create_user', `(${STANDING}) && features.admin == true`],
     // [#11544] Third mirror of `invite_user` — the Members tab's own copy of
@@ -648,6 +647,19 @@ describe('feature-gate lowering matrix (#2874)', () => {
     const action = (object.actions ?? []).find((a) => a.name === actionName);
     expect(action, `${actionName} exists`).toBeDefined();
     expect((action?.visible as { source?: string })?.source).toBe(expected);
+  });
+
+  // The rows above are the whole multi-org surface of sys_organization: an
+  // action gated on `multiOrgEnabled` without a row here is one this matrix
+  // never pinned. `change_slug` is not among them — its door is the cloud
+  // orchestrator's, and the composition that mounts it declares the action.
+  it('the SysOrganization rows are every action it gates on multiOrgEnabled, and change_slug is none of them', () => {
+    const gated = (SysOrganization.actions ?? [])
+      .filter((a) => ((a.visible as { source?: string } | undefined)?.source ?? '').includes('features.multiOrgEnabled'))
+      .map((a) => a.name);
+    const pinned = rows.filter(([exported]) => exported === 'SysOrganization').map(([, , name]) => name);
+    expect([...gated].sort()).toEqual([...pinned].sort());
+    expect(gated).not.toContain('change_slug');
   });
 
   it('SysUser.create_user#phoneNumber param lowers to the previous hand-written predicate', () => {

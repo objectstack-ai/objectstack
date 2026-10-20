@@ -256,8 +256,18 @@ import { sendError as sendEnvelopeError } from '@objectstack/types';
  * full `ObjectStackProtocol` union. Server-only extensions (drafts, history,
  * diagnostics, clone, …) are feature-detected via runtime casts and so don't
  * widen this contract.
+ *
+ * [#24535] One server-only extension is declared here, OPTIONAL, so it widens
+ * nothing a protocol must provide either: `getMetaItemForExecution`, the
+ * by-name read without the serving decorations
+ * (`ObjectStackProtocolImplementation.getMetaItemForExecution`). The REST
+ * API-exposure gate feature-detects it ({@link RestServer.enforceApiAccess});
+ * a protocol without it is asked `getMetaItem`, as before. ⛔ No door serves
+ * what it returns.
  */
-export type RestProtocol = DataProtocol & MetadataProtocol;
+export type RestProtocol = DataProtocol & MetadataProtocol & {
+    getMetaItemForExecution?: MetadataProtocol['getMetaItem'];
+};
 
 // [#23050 slice 10] `TransportScopedMetaRequest`, the meta doors' request envelope, moved to
 // `ui-routes.ts` with the UI view door's body, its first reader outside this file: exporting
@@ -2572,9 +2582,17 @@ export class RestServer {
         // whole object list, whose decoration diagnosed every object on every
         // request. Same env-scoped request shape the list read sends
         // (`metaListSource`); a protocol with no by-name read is asked the list.
+        // [#24535] …and on the protocol's EXECUTION face where it has one: this
+        // gate reads `enable` and serves no byte of the item, and the served
+        // face's decoration was a full diagnostic `safeParse` of the object's
+        // definition on every `/data` request. Same sources, overlay cache and
+        // governance either way; a protocol without it is asked `getMetaItem`.
         const listSource = this.metaListSource(p, environmentId);
+        const byName = typeof p.getMetaItemForExecution === 'function'
+            ? p.getMetaItemForExecution
+            : typeof p.getMetaItem === 'function' ? p.getMetaItem : undefined;
         const obj = await metaReadGate.loadObjectItem(
-            typeof p.getMetaItem === 'function'
+            byName
                 ? {
                     ...listSource,
                     getObjectItem: (name) => {
@@ -2583,7 +2601,7 @@ export class RestServer {
                             name,
                             ...(environmentId ? { environmentId } : {}),
                         };
-                        return p.getMetaItem(itemRequest);
+                        return byName.call(p, itemRequest);
                     },
                 }
                 : listSource,

@@ -27,6 +27,10 @@
 //  3. FAULTS — a THROWING by-name read fails OPEN and logs, as #3545 requires;
 //     "no object" logs nothing.
 //  4. FALLBACK — a protocol with no by-name read is asked the list, as before.
+//     [#24535] "By-name read" is either face: the gate reads the protocol's
+//     execution face (`getMetaItemForExecution`) where it has one, else
+//     `getMetaItem` (`rest-exposure-gate-execution-read.test.ts` holds that
+//     choice and its cost).
 //  5. A DISABLED PACKAGE'S OBJECT — [#24097] the by-name read refuses it as the
 //     list omits it, so the gate sees no object and every operation, denied or
 //     allowed, gets the data plane's 404 `OBJECT_PACKAGE_DISABLED`.
@@ -155,7 +159,10 @@ function host(opts: { environmentId?: string; withoutByName?: boolean } = {}): H
         const real = protocol[face].bind(protocol);
         protocol[face] = async (...a: unknown[]) => { reads += 1; return real(...a); };
     }
-    if (opts.withoutByName) protocol.getMetaItem = undefined;
+    if (opts.withoutByName) {
+        protocol.getMetaItem = undefined;
+        protocol.getMetaItemForExecution = undefined;
+    }
 
     // The data calls: stubbed for every object this host declares, so a door
     // the gate clears answers 200/201; the REAL call for an unknown object and
@@ -235,10 +242,13 @@ for (const scope of [{ label: 'unscoped kernel', environmentId: undefined }, { l
 
         it('asks the by-name read for exactly the object in the path', async () => {
             const h = host({ environmentId: scope.environmentId });
-            const spy = vi.spyOn(h.protocol, 'getMetaItem');
+            // [#24535] The protocol's execution face, never the served one.
+            const spy = vi.spyOn(h.protocol, 'getMetaItemForExecution');
+            const served = vi.spyOn(h.protocol, 'getMetaItem');
             await call(h, 'list', CODE.name);
             expect(spy).toHaveBeenCalledTimes(1);
             expect(spy.mock.calls[0]![0]).toEqual({ type: 'object', name: CODE.name });
+            expect(served).not.toHaveBeenCalled();
         });
 
         it.each([
@@ -279,7 +289,7 @@ for (const scope of [{ label: 'unscoped kernel', environmentId: undefined }, { l
 
         it('a THROWING by-name read fails OPEN and logs it (#3545)', async () => {
             const h = host({ environmentId: scope.environmentId });
-            h.protocol.getMetaItem = vi.fn().mockRejectedValue(new Error('metadata store unreachable'));
+            h.protocol.getMetaItemForExecution = vi.fn().mockRejectedValue(new Error('metadata store unreachable'));
             const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
             // `create` is refused on this object when its metadata CAN be read.
             const out = await call(h, 'create', CODE.name);
