@@ -444,7 +444,7 @@ describe('explainAccess — record-grained (C2 / ADR-0095)', () => {
     expect(d.record).toMatchObject({ recordId: 'r1', visible: true });
   });
 
-  it('derives PLATFORM_ADMIN posture from the unscoped-grant flag', async () => {
+  it('derives PLATFORM_ADMIN posture from the platform-grant flag', async () => {
     // [#15981] Was "from the platform_admin position". The NAME is no longer
     // that evidence: `positions[]` is the security axis and carries ADR-0057 D4
     // `sys_user_position` names from an `apiEnabled` table, so a tenant can mint
@@ -801,13 +801,14 @@ describe('posture derivation aligns with enforcement (label-drift elimination)',
   });
 
   it('a merely-SCOPED admin_full_access grant no longer over-labels as PLATFORM_ADMIN', async () => {
-    // Name present in `permissions` but NOT held as an unscoped grant and NOT the
-    // projected platform_admin position → MEMBER, matching enforcement (which
-    // requires hasPlatformAdminGrant = unscoped admin_full_access user grant).
+    // Name present in `permissions` but NOT held as the anchoring grant and NOT
+    // the projected platform_admin position → MEMBER, matching enforcement (which
+    // requires hasPlatformAdminGrant = the Default Organization's
+    // admin_full_access user grant).
     expect(await postureOf({ userId: 'a1', tenantId: 'org1', positions: ['everyone'], permissions: ['admin_full_access'] })).toBe('MEMBER');
   });
 
-  it('the unscoped-grant flag (hasPlatformAdminGrant) DOES yield PLATFORM_ADMIN', async () => {
+  it('the platform-grant flag (hasPlatformAdminGrant) DOES yield PLATFORM_ADMIN', async () => {
     expect(await postureOf({ userId: 'a1', tenantId: 'org1', positions: ['everyone'], permissions: ['admin_full_access'], hasPlatformAdminGrant: true })).toBe('PLATFORM_ADMIN');
   });
 
@@ -815,7 +816,7 @@ describe('posture derivation aligns with enforcement (label-drift elimination)',
     // This assertion is INVERTED from what it pinned before, deliberately. It
     // used to read "the PROJECTED platform_admin built-in position still yields
     // PLATFORM_ADMIN", whose premise was that the name is only ever projected
-    // from the unscoped `admin_full_access` grant. Ruling A made `positions[]`
+    // from the anchoring `admin_full_access` grant. Ruling A made `positions[]`
     // the security axis, so it now also carries ADR-0057 D4
     // `sys_user_position` names — and that table is `apiEnabled` with
     // unconstrained values, so the name can be MINTED by a tenant. The genuine
@@ -897,25 +898,47 @@ function makeGrantQl(tables: Rows) {
 const NOW = Date.parse('2026-07-10T12:00:00Z');
 
 describe('buildContextForUser', () => {
+  // A grant applies only in its own organization (an organization-less row
+  // applies nowhere), so the fixtures below own their grant rows by ORG and
+  // explain the user IN it, unless a case says otherwise.
+  const ORG = 'org1';
   const ql = makeGrantQl({
-    sys_user_position: [{ user_id: 'u2', position: 'hr_specialist' }],
-    sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps1', permission_set: 'payroll_reader' }],
+    sys_user_position: [{ user_id: 'u2', organization_id: ORG, position: 'hr_specialist' }],
+    sys_user_permission_set: [{ user_id: 'u2', organization_id: ORG, permission_set_id: 'ps1', permission_set: 'payroll_reader' }],
     sys_permission_set: [{ id: 'ps1', name: 'payroll_reader' }],
   });
 
-  it('derives hasPlatformAdminGrant from an UNSCOPED admin_full_access user grant (matches resolveAuthzContext)', async () => {
-    const qlUnscoped = makeGrantQl({
-      // organization_id absent → unscoped
-      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access' }],
+  it('derives hasPlatformAdminGrant from the DEFAULT ORGANIZATION\'s admin_full_access user grant (matches resolveAuthzContext)', async () => {
+    const qlAnchored = makeGrantQl({
+      sys_organization: [{ id: 'org_default', slug: 'default' }],
+      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access', organization_id: 'org_default' }],
       sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
     });
-    const ctx = await buildContextForUser(qlUnscoped, 'u2');
+    // Explained with NO active organization: the anchoring grant applies
+    // whatever the tenant, because platform standing is the deployment's.
+    const ctx = await buildContextForUser(qlAnchored, 'u2');
     expect(ctx.hasPlatformAdminGrant).toBe(true);
     expect(ctx.permissions).toContain('admin_full_access');
     // The resolver PROJECTS the built-in position from the same grant (ADR-0068
     // D2) and resolves the rung once — both now reach the panel unchanged.
     expect(ctx.positions).toContain('platform_admin');
     expect(ctx.posture).toBe('PLATFORM_ADMIN');
+  });
+
+  it('an organization-LESS admin_full_access user grant anchors nothing and confers nothing, in no organization or in one', async () => {
+    const qlOrphan = makeGrantQl({
+      sys_organization: [{ id: 'org_default', slug: 'default' }],
+      // organization_id absent → the row belongs to no organization
+      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access' }],
+      sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
+    });
+    for (const tenantId of [undefined, 'org_default']) {
+      const ctx = await buildContextForUser(qlOrphan, 'u2', NOW, tenantId);
+      expect(ctx.hasPlatformAdminGrant, String(tenantId)).toBe(false);
+      expect(ctx.permissions, String(tenantId)).not.toContain('admin_full_access');
+      expect(ctx.positions, String(tenantId)).not.toContain('platform_admin');
+      expect(ctx.posture, String(tenantId)).toBe('MEMBER');
+    }
   });
 
   it('[#11974 / #11663 L4, P8] CONFIG-derived standing reaches the panel: a declared+verified admin with ZERO grant rows explains as PLATFORM_ADMIN', async () => {
@@ -965,7 +988,7 @@ describe('buildContextForUser', () => {
   });
 
   it('reconstructs positions + direct grants + the everyone anchor', async () => {
-    const ctx = await buildContextForUser(ql, 'u2');
+    const ctx = await buildContextForUser(ql, 'u2', NOW, ORG);
     expect(ctx).toEqual({
       userId: 'u2',
       positions: ['hr_specialist', 'everyone'],
@@ -990,11 +1013,11 @@ describe('buildContextForUser', () => {
   it('surfaces delegation provenance for a position held via a delegated_from row (ADR-0091 D3)', async () => {
     const qlDelegated = makeGrantQl({
       sys_user_position: [
-        { user_id: 'u2', position: 'hr_specialist' },
-        { user_id: 'u2', position: 'approver', delegated_from: 'u_boss', valid_until: '2026-07-20T00:00:00Z' },
+        { user_id: 'u2', organization_id: ORG, position: 'hr_specialist' },
+        { user_id: 'u2', organization_id: ORG, position: 'approver', delegated_from: 'u_boss', valid_until: '2026-07-20T00:00:00Z' },
       ],
     });
-    const ctx = await buildContextForUser(qlDelegated, 'u2', NOW);
+    const ctx = await buildContextForUser(qlDelegated, 'u2', NOW, ORG);
     expect(ctx.positions).toEqual(['hr_specialist', 'approver', 'everyone']);
     expect(ctx.delegatedPositions).toEqual([
       { name: 'approver', from: 'u_boss', until: '2026-07-20T00:00:00Z' },
@@ -1004,15 +1027,15 @@ describe('buildContextForUser', () => {
   it('filters grants outside their validity window and reports them as expired (ADR-0091 D2)', async () => {
     const qlWindowed = makeGrantQl({
       sys_user_position: [
-        { user_id: 'u2', position: 'hr_specialist' },
-        { user_id: 'u2', position: 'payroll_approver', valid_until: '2026-07-01T00:00:00Z' },
+        { user_id: 'u2', organization_id: ORG, position: 'hr_specialist' },
+        { user_id: 'u2', organization_id: ORG, position: 'payroll_approver', valid_until: '2026-07-01T00:00:00Z' },
         // Pending (future valid_from) is filtered but NOT reported as expired.
-        { user_id: 'u2', position: 'auditor', valid_from: '2026-08-01T00:00:00Z' },
+        { user_id: 'u2', organization_id: ORG, position: 'auditor', valid_from: '2026-08-01T00:00:00Z' },
       ],
       sys_user_permission_set: [
-        { user_id: 'u2', permission_set_id: 'ps1', permission_set: 'payroll_reader' },
+        { user_id: 'u2', organization_id: ORG, permission_set_id: 'ps1', permission_set: 'payroll_reader' },
         {
-          user_id: 'u2', permission_set_id: 'ps2', permission_set: 'quarter_close_admin',
+          user_id: 'u2', organization_id: ORG, permission_set_id: 'ps2', permission_set: 'quarter_close_admin',
           valid_until: '2026-06-01T00:00:00Z',
         },
       ],
@@ -1021,7 +1044,7 @@ describe('buildContextForUser', () => {
         { id: 'ps2', name: 'quarter_close_admin' },
       ],
     });
-    const ctx = await buildContextForUser(qlWindowed, 'u2', NOW);
+    const ctx = await buildContextForUser(qlWindowed, 'u2', NOW, ORG);
     expect(ctx.positions).toEqual(['hr_specialist', 'everyone']);
     expect(ctx.permissions).toEqual(['payroll_reader']);
     expect(ctx.droppedGrants).toEqual([
@@ -1037,15 +1060,15 @@ describe('buildContextForUser', () => {
   it('reports a directly-granted permission set whose catalogue row is deactivated (ADR-0049 / #8714)', async () => {
     const qlDeactivated = makeGrantQl({
       sys_user_permission_set: [
-        { user_id: 'u2', permission_set_id: 'ps1', permission_set: 'payroll_reader' },
-        { user_id: 'u2', permission_set_id: 'psOff', permission_set: 'crm_full' },
+        { user_id: 'u2', organization_id: ORG, permission_set_id: 'ps1', permission_set: 'payroll_reader' },
+        { user_id: 'u2', organization_id: ORG, permission_set_id: 'psOff', permission_set: 'crm_full' },
       ],
       sys_permission_set: [
         { id: 'ps1', name: 'payroll_reader' },
         { id: 'psOff', name: 'crm_full', active: false },
       ],
     });
-    const ctx = await buildContextForUser(qlDeactivated, 'u2', NOW);
+    const ctx = await buildContextForUser(qlDeactivated, 'u2', NOW, ORG);
     // The resolver's fail-closed dropping is untouched…
     expect(ctx.permissions).toEqual(['payroll_reader']);
     // …and the dropped row is REPORTED, with the deactivated reason.
@@ -1057,8 +1080,8 @@ describe('buildContextForUser', () => {
   it('reports a held position whose sys_position row is deactivated — including the 0/1 storage shape (ADR-0049 / #8714)', async () => {
     const qlDeactivated = makeGrantQl({
       sys_user_position: [
-        { user_id: 'u2', position: 'hr_specialist' },
-        { user_id: 'u2', position: 'field_auditor' },
+        { user_id: 'u2', organization_id: ORG, position: 'hr_specialist' },
+        { user_id: 'u2', organization_id: ORG, position: 'field_auditor' },
       ],
       // 0 is what the primary driver hands back for a stored false — the
       // shared isRowActive predicate reads it as deactivated (#8613).
@@ -1067,7 +1090,7 @@ describe('buildContextForUser', () => {
         { id: 'pos_fa', name: 'field_auditor', active: 0 },
       ],
     });
-    const ctx = await buildContextForUser(qlDeactivated, 'u2', NOW);
+    const ctx = await buildContextForUser(qlDeactivated, 'u2', NOW, ORG);
     expect(ctx.positions).toEqual(['hr_specialist', 'everyone']);
     expect(ctx.droppedGrants).toEqual([
       { kind: 'position', name: 'field_auditor', state: 'deactivated' },
@@ -1077,11 +1100,11 @@ describe('buildContextForUser', () => {
   it('a row both expired AND deactivated reports expired — one reason per row, resolver drop order (#8714)', async () => {
     const qlBoth = makeGrantQl({
       sys_user_permission_set: [
-        { user_id: 'u2', permission_set_id: 'psOff', permission_set: 'crm_full', valid_until: '2026-06-01T00:00:00Z' },
+        { user_id: 'u2', organization_id: ORG, permission_set_id: 'psOff', permission_set: 'crm_full', valid_until: '2026-06-01T00:00:00Z' },
       ],
       sys_permission_set: [{ id: 'psOff', name: 'crm_full', active: false }],
     });
-    const ctx = await buildContextForUser(qlBoth, 'u2', NOW);
+    const ctx = await buildContextForUser(qlBoth, 'u2', NOW, ORG);
     expect(ctx.droppedGrants).toEqual([
       { kind: 'permission_set', name: 'crm_full', state: 'expired', until: '2026-06-01T00:00:00Z' },
     ]);
@@ -1093,16 +1116,16 @@ describe('buildContextForUser', () => {
   // and the explainer must side with what the resolver enforces.
   it('a set and a position the LEDGER switched off are reported deactivated, whatever their rows say', async () => {
     const ql = makeGrantQl({
-      sys_user_position: [{ user_id: 'u2', position: 'field_auditor' }],
+      sys_user_position: [{ user_id: 'u2', organization_id: ORG, position: 'field_auditor' }],
       sys_position: [{ id: 'pos_fa', name: 'field_auditor', active: true }],
-      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psOff', permission_set: 'crm_full' }],
+      sys_user_permission_set: [{ user_id: 'u2', organization_id: ORG, permission_set_id: 'psOff', permission_set: 'crm_full' }],
       sys_permission_set: [{ id: 'psOff', name: 'crm_full', active: true }],
       sys_metadata_activation: [
         { metadata_type: 'position', name: 'field_auditor', active: false },
         { metadata_type: 'permission', name: 'crm_full', active: 0 },
       ],
     });
-    const ctx = await buildContextForUser(ql, 'u2', NOW);
+    const ctx = await buildContextForUser(ql, 'u2', NOW, ORG);
     // Enforcement dropped both…
     expect(ctx.positions).toEqual(['everyone']);
     expect(ctx.permissions).toEqual([]);
@@ -1115,13 +1138,13 @@ describe('buildContextForUser', () => {
 
   it("a catalog ROW's `active: false` with no ledger row is in effect, and explain reports nothing dropped", async () => {
     const ql = makeGrantQl({
-      sys_user_position: [{ user_id: 'u2', position: 'field_auditor' }],
+      sys_user_position: [{ user_id: 'u2', organization_id: ORG, position: 'field_auditor' }],
       sys_position: [{ id: 'pos_fa', name: 'field_auditor', active: false }],
-      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psOff', permission_set: 'crm_full' }],
+      sys_user_permission_set: [{ user_id: 'u2', organization_id: ORG, permission_set_id: 'psOff', permission_set: 'crm_full' }],
       sys_permission_set: [{ id: 'psOff', name: 'crm_full', active: false }],
       sys_metadata_activation: [],
     });
-    const ctx = await buildContextForUser(ql, 'u2', NOW);
+    const ctx = await buildContextForUser(ql, 'u2', NOW, ORG);
     expect(ctx.positions).toEqual(['field_auditor', 'everyone']);
     expect(ctx.permissions).toEqual(['crm_full']);
     expect(ctx.droppedGrants).toEqual([]);
@@ -1132,23 +1155,23 @@ describe('buildContextForUser', () => {
     // neither name; the ledger switches one of them off all the same.
     const ql = makeGrantQl({
       sys_user_permission_set: [
-        { user_id: 'u2', permission_set_id: 'ps_gone', permission_set: 'gone_set', valid_until: '2026-06-01T00:00:00Z' },
-        { user_id: 'u2', permission_set_id: 'ps_gone2', permission_set: 'gone_off' },
+        { user_id: 'u2', organization_id: ORG, permission_set_id: 'ps_gone', permission_set: 'gone_set', valid_until: '2026-06-01T00:00:00Z' },
+        { user_id: 'u2', organization_id: ORG, permission_set_id: 'ps_gone2', permission_set: 'gone_off' },
       ],
       sys_metadata_activation: [{ metadata_type: 'permission', name: 'gone_off', active: false }],
     });
-    const ctx = await buildContextForUser(ql, 'u2', NOW);
+    const ctx = await buildContextForUser(ql, 'u2', NOW, ORG);
     expect(ctx.droppedGrants).toEqual([]);
   });
 
   it('an absent `active` column keeps granting and is NOT reported — absent is ACTIVE (ADR-0049)', async () => {
     const qlAbsent = makeGrantQl({
-      sys_user_position: [{ user_id: 'u2', position: 'hr_specialist' }],
+      sys_user_position: [{ user_id: 'u2', organization_id: ORG, position: 'hr_specialist' }],
       sys_position: [{ id: 'pos_hr', name: 'hr_specialist' }],
-      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps1', permission_set: 'payroll_reader' }],
+      sys_user_permission_set: [{ user_id: 'u2', organization_id: ORG, permission_set_id: 'ps1', permission_set: 'payroll_reader' }],
       sys_permission_set: [{ id: 'ps1', name: 'payroll_reader' }],
     });
-    const ctx = await buildContextForUser(qlAbsent, 'u2', NOW);
+    const ctx = await buildContextForUser(qlAbsent, 'u2', NOW, ORG);
     expect(ctx.positions).toEqual(['hr_specialist', 'everyone']);
     expect(ctx.permissions).toEqual(['payroll_reader']);
     expect(ctx.droppedGrants).toEqual([]);
@@ -1194,13 +1217,16 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
       // (ADR-0057 D4), a permission set the POSITION carries
       // (`sys_position_permission_set`), and the cloud ADR-0024 `ai_seat` synthesis.
       name: 'org role + position-bound permission set + ai_seat',
+      // A grant applies only in its own organization, so the grant rows are
+      // org1's and both sides resolve in org1.
+      tenantId: 'org1',
       tables: {
         sys_user: [{ id: 'u2', email: 'u2@example.com', ai_access: true }],
         sys_member: [{ user_id: 'u2', organization_id: 'org1', role: 'admin' }],
-        sys_user_position: [{ user_id: 'u2', position: 'hr_specialist' }],
+        sys_user_position: [{ user_id: 'u2', organization_id: 'org1', position: 'hr_specialist' }],
         sys_position: [{ id: 'pos_hr', name: 'hr_specialist' }],
         sys_position_permission_set: [{ position_id: 'pos_hr', permission_set_id: 'ps_hr_tools' }],
-        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps1', permission_set: 'payroll_reader' }],
+        sys_user_permission_set: [{ user_id: 'u2', organization_id: 'org1', permission_set_id: 'ps1', permission_set: 'payroll_reader' }],
         sys_permission_set: [
           { id: 'ps1', name: 'payroll_reader' },
           { id: 'ps_hr_tools', name: 'hr_tools', system_permissions: ['manage_users'] },
@@ -1236,10 +1262,13 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
       },
     },
     {
-      // [ADR-0068 D2] The platform_admin derivation, both polarities.
-      name: 'unscoped admin_full_access derives platform_admin',
+      // [ADR-0068 D2] The platform_admin derivation, both polarities. The
+      // anchor is the Default Organization's grant, and it applies with no
+      // active organization.
+      name: 'the Default Organization\'s admin_full_access derives platform_admin',
       tables: {
-        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access' }],
+        sys_organization: [{ id: 'org_default', slug: 'default' }],
+        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access', organization_id: 'org_default' }],
         sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
       },
       expected: {
@@ -1249,6 +1278,24 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
         accessible_org_ids: [],
         posture: 'PLATFORM_ADMIN',
         hasPlatformAdminGrant: true,
+      },
+    },
+    {
+      // ...and an organization-less grant of the same set anchors nothing and
+      // applies nowhere: it confers neither the rung nor the set.
+      name: 'organization-less admin_full_access derives nothing',
+      tables: {
+        sys_organization: [{ id: 'org_default', slug: 'default' }],
+        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access' }],
+        sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
+      },
+      expected: {
+        positions: ['everyone'],
+        permissions: [],
+        systemPermissions: [],
+        accessible_org_ids: [],
+        posture: 'MEMBER',
+        hasPlatformAdminGrant: false,
       },
     },
     {
@@ -1292,18 +1339,21 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
     },
     {
       // [ADR-0091 D2] Validity windows drop rows on BOTH sides, including the
-      // platform_admin derivation: an EXPIRED unscoped admin_full_access grant
-      // must not confer the rung. Only the explain-side annotation survives.
+      // platform_admin derivation: an EXPIRED admin_full_access grant of the
+      // Default Organization (org1 here) must not confer the rung. Only the
+      // explain-side annotation survives.
       name: 'ADR-0091 windows: expired admin grant confers nothing',
+      tenantId: 'org1',
       tables: {
+        sys_organization: [{ id: 'org1', slug: 'default' }],
         sys_user_position: [
-          { user_id: 'u2', position: 'hr_specialist' },
-          { user_id: 'u2', position: 'payroll_approver', valid_until: '2026-07-01T00:00:00Z' },
-          { user_id: 'u2', position: 'auditor', valid_from: '2026-08-01T00:00:00Z' },
+          { user_id: 'u2', organization_id: 'org1', position: 'hr_specialist' },
+          { user_id: 'u2', organization_id: 'org1', position: 'payroll_approver', valid_until: '2026-07-01T00:00:00Z' },
+          { user_id: 'u2', organization_id: 'org1', position: 'auditor', valid_from: '2026-08-01T00:00:00Z' },
         ],
         sys_user_permission_set: [
-          { user_id: 'u2', permission_set_id: 'ps1', permission_set: 'payroll_reader' },
-          { user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access', valid_until: '2026-06-01T00:00:00Z' },
+          { user_id: 'u2', organization_id: 'org1', permission_set_id: 'ps1', permission_set: 'payroll_reader' },
+          { user_id: 'u2', organization_id: 'org1', permission_set_id: 'psAdmin', permission_set: 'admin_full_access', valid_until: '2026-06-01T00:00:00Z' },
         ],
         sys_permission_set: [
           { id: 'ps1', name: 'payroll_reader' },
@@ -1349,28 +1399,31 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
   it('the explain-only surface is ADDITIVE — it annotates rows, it never changes the verdict', async () => {
     const tables: Rows = {
       sys_user_position: [
-        { user_id: 'u2', position: 'hr_specialist' },
-        { user_id: 'u2', position: 'approver', delegated_from: 'u_boss', valid_until: '2026-07-20T00:00:00Z' },
-        { user_id: 'u2', position: 'payroll_approver', valid_until: '2026-07-01T00:00:00Z' },
+        { user_id: 'u2', organization_id: 'org1', position: 'hr_specialist' },
+        { user_id: 'u2', organization_id: 'org1', position: 'approver', delegated_from: 'u_boss', valid_until: '2026-07-20T00:00:00Z' },
+        { user_id: 'u2', organization_id: 'org1', position: 'payroll_approver', valid_until: '2026-07-01T00:00:00Z' },
         // [commit 42b05af89] a held position whose catalogue row is switched off
-        { user_id: 'u2', position: 'field_auditor' },
+        { user_id: 'u2', organization_id: 'org1', position: 'field_auditor' },
       ],
       sys_position: [{ id: 'pos_fa', name: 'field_auditor', active: false }],
       sys_user_permission_set: [
         {
-          user_id: 'u2', permission_set_id: 'ps2', permission_set: 'quarter_close_admin',
+          user_id: 'u2', organization_id: 'org1', permission_set_id: 'ps2', permission_set: 'quarter_close_admin',
           valid_until: '2026-06-01T00:00:00Z',
         },
         // [commit 42b05af89] a held direct grant whose SET's catalogue row is switched off
-        { user_id: 'u2', permission_set_id: 'psOff', permission_set: 'crm_full' },
+        { user_id: 'u2', organization_id: 'org1', permission_set_id: 'psOff', permission_set: 'crm_full' },
       ],
       sys_permission_set: [
         { id: 'ps2', name: 'quarter_close_admin' },
         { id: 'psOff', name: 'crm_full', active: false },
       ],
     };
-    const grants = await resolveUserAuthzGrants(makeGrantQl(tables), 'u2', { nowMs: NOW });
-    const ctx = await buildContextForUser(makeGrantQl(tables), 'u2', NOW);
+    // Both sides resolve in org1, the organization the grant rows are owned by.
+    const grants = await resolveUserAuthzGrants(makeGrantQl(tables), 'u2', { nowMs: NOW, tenantId: 'org1' });
+    const ctx = await buildContextForUser(makeGrantQl(tables), 'u2', NOW, 'org1');
+    // Non-vacuity: the live grant the comparison below is about does resolve.
+    expect(ctx.positions).toContain('hr_specialist');
 
     // The annotations are non-empty…
     expect(ctx.delegatedPositions).toEqual([
@@ -1528,8 +1581,11 @@ describe('buildContextForUser bypasses the #11971 grants cache (ruled bypass lis
     const saved = process.env[TTL_ENV];
     process.env[TTL_ENV] = '3600000'; // one hour — nothing here may pass by expiry
     try {
+      // The Default Organization's grant: it anchors platform standing and
+      // applies with no active organization, so the cached answer is the rung.
       const tables: Rows = {
-        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access' }],
+        sys_organization: [{ id: 'org_default', slug: 'default' }],
+        sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'psAdmin', permission_set: 'admin_full_access', organization_id: 'org_default' }],
         sys_permission_set: [{ id: 'psAdmin', name: 'admin_full_access' }],
       };
       const ql = makeSeamGrantQl(tables);
@@ -1537,6 +1593,7 @@ describe('buildContextForUser bypasses the #11971 grants cache (ruled bypass lis
       // Populate the cache through the SAME resolver every request uses.
       const cached = await resolveUserAuthzGrants(ql, 'u2', { nowMs: NOW });
       expect(cached.permissions).toContain('admin_full_access');
+      expect(cached.posture).toBe('PLATFORM_ADMIN');
 
       // Revoke WITHOUT an engine write: no seam reports it, so nothing
       // retires the entry and the cached path keeps the old answer…
@@ -1835,8 +1892,9 @@ describe('[#18253] explain refuses an object that does not exist', () => {
 
 // ─── [#20515] the explainer resolves IN an organization, as enforcement does ──
 //
-// The resolver applies an organization-scoped grant only while that
-// organization is the active tenant; with none, only global grants. The
+// The resolver applies a grant only while its organization is the active
+// tenant; with none, no stored grant applies, and an organization-less row
+// applies nowhere. The
 // explainer used to reach every organization's grants by passing NO tenant —
 // the very resolution that let a member removed from an organization keep that
 // organization's `manage_metadata`. There is no "every organization" option to
@@ -1850,38 +1908,40 @@ describe('[#20515] buildContextForUser and resolveDelegatorContext resolve in an
     sys_user_permission_set: [
       { user_id: 'u_x', permission_set_id: 'ps_alpha', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
       { user_id: 'u_x', permission_set_id: 'ps_beta', permission_set: 'beta_readers', organization_id: BETA },
-      { user_id: 'u_x', permission_set_id: 'ps_global', permission_set: 'global_readers' },
+      // Organization-less: invalid state since the 18.0 ownership ceremony, and
+      // it confers nothing in any resolution.
+      { user_id: 'u_x', permission_set_id: 'ps_orphan', permission_set: 'orphan_readers' },
     ],
     sys_permission_set: [
       { id: 'ps_alpha', name: 'alpha_metadata_editors', system_permissions: ['manage_metadata'] },
       { id: 'ps_beta', name: 'beta_readers' },
-      { id: 'ps_global', name: 'global_readers' },
+      { id: 'ps_orphan', name: 'orphan_readers' },
     ],
   });
 
-  it('with no organization it explains what enforcement answers with none: the global grants only', async () => {
+  it('with no organization it explains what enforcement answers with none: no stored grant at all', async () => {
     const ctx = await buildContextForUser(makeGrantQl(tables()), 'u_x', NOW);
-    expect([...ctx.permissions].sort()).toEqual(['global_readers']);
+    expect([...ctx.permissions].sort()).toEqual([]);
     expect(ctx.systemPermissions).not.toContain('manage_metadata');
     // …and it is the enforcement resolver's own answer for that state.
     const enforced = await resolveUserAuthzGrants(makeGrantQl(tables()), 'u_x', { nowMs: NOW });
     expect(ctx.permissions).toEqual(enforced.permissions);
   });
 
-  it('in an organization it explains that organization\'s grants beside the global ones, never another\'s', async () => {
+  it('in an organization it explains that organization\'s grants alone, never another\'s nor the organization-less one', async () => {
     const inAlpha = await buildContextForUser(makeGrantQl(tables()), 'u_x', NOW, ALPHA);
-    expect([...inAlpha.permissions].sort()).toEqual(['alpha_metadata_editors', 'global_readers']);
+    expect([...inAlpha.permissions].sort()).toEqual(['alpha_metadata_editors']);
     expect(inAlpha.systemPermissions).toContain('manage_metadata');
     const inBeta = await buildContextForUser(makeGrantQl(tables()), 'u_x', NOW, BETA);
-    expect([...inBeta.permissions].sort()).toEqual(['beta_readers', 'global_readers']);
+    expect([...inBeta.permissions].sort()).toEqual(['beta_readers']);
     expect(inBeta.systemPermissions).not.toContain('manage_metadata');
   });
 
   /**
    * The delegator leg is an ENFORCEMENT input (the D10 intersection), not only
    * an explanation: `SecurityPlugin` resolves it through this function on every
-   * on-behalf-of request. Resolved with no tenant it would hold only the
-   * delegator's global grants — never what the delegator holds in the
+   * on-behalf-of request. Resolved with no tenant it would hold none of the
+   * delegator's stored grants — never what the delegator holds in the
    * organization the request runs in.
    */
   describe('resolveDelegatorContext: the delegator is resolved in the live principal\'s organization', () => {
@@ -1905,15 +1965,15 @@ describe('[#20515] buildContextForUser and resolveDelegatorContext resolve in an
       );
       expect(res.kind).toBe('resolved');
       const ctx = (res as { kind: 'resolved'; context: any }).context;
-      expect([...ctx.permissions].sort()).toEqual(['alpha_metadata_editors', 'global_readers']);
+      expect([...ctx.permissions].sort()).toEqual(['alpha_metadata_editors']);
       expect(ctx.tenantId).toBe(ALPHA);
     });
 
-    it('live principal with no organization → the delegator\'s global grants only', async () => {
+    it('live principal with no organization → none of the delegator\'s stored grants', async () => {
       const res = await resolveDelegatorContext(delegatorQl(), { userId: 'agent_1', onBehalfOf: { userId: 'u_x' } }, NOW);
       expect(res.kind).toBe('resolved');
       const ctx = (res as { kind: 'resolved'; context: any }).context;
-      expect([...ctx.permissions].sort()).toEqual(['global_readers']);
+      expect([...ctx.permissions].sort()).toEqual([]);
       expect(ctx.systemPermissions).not.toContain('manage_metadata');
     });
   });

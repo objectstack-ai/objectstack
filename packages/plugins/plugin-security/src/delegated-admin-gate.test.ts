@@ -426,7 +426,15 @@ const iso = (ms: number) => new Date(ms).toISOString();
  *   plain_pos  (NOT delegatable)                     ← u_boss holds directly
  *   spare_pos  (delegatable)                         ← u_boss does NOT hold
  *   approver                                         ← u_relay holds via delegation
+ *
+ * Every holding is owned by {@link DELEGATION_ORG} and every delegation runs in
+ * it: a holding takes effect only in its own organization (`resolveAuthzContext`
+ * step 4, `grantAppliesInTenant`), so an organization-less holding, or a context
+ * carrying no organization, holds nothing to delegate — pinned at the end of
+ * the describe below.
  */
+const DELEGATION_ORG = 'org_1';
+
 function makeDelegationHarness(nowMs = T0) {
   const tables: Record<string, any[]> = {
     sys_position: [
@@ -445,10 +453,10 @@ function makeDelegationHarness(nowMs = T0) {
       { id: 'b_admin', position_id: 'p_admin', permission_set_id: 's_sub' },
     ],
     sys_user_position: [
-      { id: 'h1', user_id: 'u_boss', position: 'approver' },
-      { id: 'h2', user_id: 'u_boss', position: 'plain_pos' },
-      { id: 'h3', user_id: 'u_boss', position: 'admin_pos' },
-      { id: 'h4', user_id: 'u_relay', position: 'approver', delegated_from: 'u_boss', valid_until: iso(nowMs + 20 * DAY) },
+      { id: 'h1', user_id: 'u_boss', position: 'approver', organization_id: DELEGATION_ORG },
+      { id: 'h2', user_id: 'u_boss', position: 'plain_pos', organization_id: DELEGATION_ORG },
+      { id: 'h3', user_id: 'u_boss', position: 'admin_pos', organization_id: DELEGATION_ORG },
+      { id: 'h4', user_id: 'u_relay', position: 'approver', delegated_from: 'u_boss', valid_until: iso(nowMs + 20 * DAY), organization_id: DELEGATION_ORG },
     ],
     sys_user: [{ id: 'u_boss' }, { id: 'u_relay' }, { id: 'u_deleg' }],
   };
@@ -474,8 +482,12 @@ function makeDelegationHarness(nowMs = T0) {
     resolveSets: async () => [{ name: 'member_default', objects: {} }],
     now: () => nowMs,
   });
-  const delegate = (userId: string, row: any) =>
-    gate.assert({ object: 'sys_user_position', operation: 'insert', data: row, context: { userId, positions: [] } });
+  /** `organizationId` null = a context carrying no organization. */
+  const delegate = (userId: string, row: any, organizationId: string | null = DELEGATION_ORG) =>
+    gate.assert({
+      object: 'sys_user_position', operation: 'insert', data: row,
+      context: { userId, positions: [], ...(organizationId ? { organizationId } : {}) },
+    });
   return { gate, ql, tables, delegate };
 }
 
@@ -567,6 +579,20 @@ describe('DelegatedAdminGate — self-service delegation of duty (ADR-0091 D3)',
     await expect(d.delegate('u_boss', { user_id: 'u_deleg', position: 'everyone', delegated_from: 'u_boss', valid_until: iso(T0 + 5 * DAY), reason: 'x' }))
       .rejects.toThrow(/audience anchor/);
   });
+
+  it('an organization-less holding counts nowhere, and a context with no organization holds nothing', async () => {
+    const d = makeDelegationHarness();
+    const row = () => ({ user_id: 'u_deleg', position: 'approver', delegated_from: 'u_boss', valid_until: iso(T0 + 5 * DAY), reason: 'x' });
+    // Control: the holding owned by the organization the request runs in counts.
+    await expect(d.delegate('u_boss', row())).resolves.toBeUndefined();
+    // The same request from a context that carries no organization holds nothing.
+    await expect(d.delegate('u_boss', row(), null)).rejects.toThrow(/do not currently hold/);
+    // A holding with no organization — invalid state since the 18.0 ownership
+    // ceremony — counts in no organization.
+    d.tables.sys_user_position.find((r: any) => r.id === 'h1').organization_id = null;
+    await expect(d.delegate('u_boss', row())).rejects.toThrow(/do not currently hold/);
+    await expect(d.delegate('u_boss', row(), null)).rejects.toThrow(/do not currently hold/);
+  });
 });
 
 // ── [cloud#830 follow-up] Self-delegation anchor containment ────────────────
@@ -588,6 +614,9 @@ describe('DelegatedAdminGate — self-service delegation of duty (ADR-0091 D3)',
 //   ├── east (bu_east)          ← u_boss's own approver anchor
 //   │   └── east_sales (bu_es)
 //   └── west (bu_west)
+//
+// Every row is owned by DELEGATION_ORG and every delegation runs in it (see
+// makeDelegationHarness).
 function makeAnchoredDelegationHarness(nowMs = T0) {
   const tables: Record<string, any[]> = {
     sys_business_unit: [
@@ -604,6 +633,9 @@ function makeAnchoredDelegationHarness(nowMs = T0) {
     sys_business_unit_member: [{ id: 'm_boss', user_id: 'u_boss', business_unit_id: 'bu_es' }],
     sys_user: [{ id: 'u_boss' }, { id: 'u_deleg' }],
   };
+  for (const object of ['sys_business_unit', 'sys_user_position', 'sys_business_unit_member']) {
+    for (const r of tables[object]) r.organization_id = DELEGATION_ORG;
+  }
   const matches = (row: any, where: any): boolean =>
     Object.entries(where ?? {}).every(([k, v]) => {
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
@@ -627,7 +659,10 @@ function makeAnchoredDelegationHarness(nowMs = T0) {
     now: () => nowMs,
   });
   const delegate = (userId: string, row: any) =>
-    gate.assert({ object: 'sys_user_position', operation: 'insert', data: row, context: { userId, positions: [] } });
+    gate.assert({
+      object: 'sys_user_position', operation: 'insert', data: row,
+      context: { userId, positions: [], organizationId: DELEGATION_ORG },
+    });
   const base = (extra: any) => ({
     user_id: 'u_deleg', position: 'approver', delegated_from: 'u_boss',
     valid_until: iso(nowMs + 5 * DAY), reason: 'coverage', ...extra,
@@ -669,7 +704,7 @@ describe('DelegatedAdminGate — self-delegation anchor containment (cloud#830 f
     await expect(d.delegate('u_boss', d.base({ business_unit_id: 'bu_west' })))
       .rejects.toThrow(/outside your own effective anchor/);
     // …and a would-be west holder cannot reach east either (no east holding to source it).
-    d.tables.sys_user_position.push({ id: 'hb', user_id: 'u_deleg', position: 'approver', business_unit_id: 'bu_west' });
+    d.tables.sys_user_position.push({ id: 'hb', user_id: 'u_deleg', position: 'approver', business_unit_id: 'bu_west', organization_id: DELEGATION_ORG });
     await expect(d.delegate('u_deleg', { user_id: 'u_boss', position: 'approver', delegated_from: 'u_deleg', valid_until: iso(T0 + 5 * DAY), reason: 'x', business_unit_id: 'bu_east' }))
       .rejects.toThrow(/outside your own effective anchor/);
   });
@@ -698,7 +733,7 @@ describe('DelegatedAdminGate — self-delegation anchor containment (cloud#830 f
     const d = makeAnchoredDelegationHarness();
     // u_relay holds approver only via delegation, anchored east.
     d.tables.sys_user.push({ id: 'u_relay' });
-    d.tables.sys_user_position.push({ id: 'hd', user_id: 'u_relay', position: 'approver', business_unit_id: 'bu_east', delegated_from: 'u_boss', valid_until: iso(T0 + 20 * DAY) });
+    d.tables.sys_user_position.push({ id: 'hd', user_id: 'u_relay', position: 'approver', business_unit_id: 'bu_east', delegated_from: 'u_boss', valid_until: iso(T0 + 20 * DAY), organization_id: DELEGATION_ORG });
     await expect(d.delegate('u_relay', { user_id: 'u_deleg', position: 'approver', delegated_from: 'u_relay', valid_until: iso(T0 + 5 * DAY), reason: 'x', business_unit_id: 'bu_es' }))
       .rejects.toThrow(/only via delegation/);
   });

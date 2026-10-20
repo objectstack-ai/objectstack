@@ -68,16 +68,23 @@ const GONE = 'usr_pp_gone';
 const LIN = 'usr_pp_lin';
 const DELEGATED_POSITION = 'qa_pp_approver';
 const DELEGATED_UNTIL = '2099-01-01T00:00:00.000Z';
+/**
+ * The organization the rig runs in. A grant applies only in its own
+ * organization, so Grace's and Lin's grant rows are this organization's and
+ * every asker acts in it; under `single` the claim stands without a
+ * membership row.
+ */
+const ORG = 'org_pp';
 
-const DIRECTORY_ADMIN = { userId: 'usr_pp_directory_admin', positions: [] as string[], permissions: [DIRECTORY_SET.name] };
-const MASKED_ADMIN = { userId: 'usr_pp_masked_admin', positions: [] as string[], permissions: [MASKED_DIRECTORY_SET.name] };
-const BLIND_ADMIN = { userId: 'usr_pp_blind_admin', positions: [] as string[], permissions: [USERS_ONLY_SET.name] };
-const SYSTEM = { isSystem: true };
+const DIRECTORY_ADMIN = { userId: 'usr_pp_directory_admin', tenantId: ORG, positions: [] as string[], permissions: [DIRECTORY_SET.name] };
+const MASKED_ADMIN = { userId: 'usr_pp_masked_admin', tenantId: ORG, positions: [] as string[], permissions: [MASKED_DIRECTORY_SET.name] };
+const BLIND_ADMIN = { userId: 'usr_pp_blind_admin', tenantId: ORG, positions: [] as string[], permissions: [USERS_ONLY_SET.name] };
+const SYSTEM = { isSystem: true, tenantId: ORG };
 /** Ada explaining herself, holding the directory. */
-const ADA_SELF = { userId: ADA, positions: [] as string[], permissions: [DIRECTORY_SET.name] };
+const ADA_SELF = { userId: ADA, tenantId: ORG, positions: [] as string[], permissions: [DIRECTORY_SET.name] };
 /** An agent holding the directory, acting on behalf of `delegator` (ADR-0090 D10). */
 const agentFor = (delegator: string) => ({
-  userId: AGENT, positions: [] as string[], permissions: [DIRECTORY_SET.name],
+  userId: AGENT, tenantId: ORG, positions: [] as string[], permissions: [DIRECTORY_SET.name],
   principalKind: 'agent', onBehalfOf: { userId: delegator },
 });
 /** The same agent without the directory: its own leg holds the baseline alone. */
@@ -129,22 +136,23 @@ beforeAll(async () => {
   ], SYS);
   // Grace holds the directory too, so an agent acting for her keeps it under
   // the D10 intersection; the plain user holds nothing beyond the baseline.
-  // [C8 stage 8b] The three grant-side rows below carry no organization: under
+  // [C8 stage 8b] The catalogue row below carries no organization: under
   // `single` the engine stamps or refuses such a platform insert (ADR-0131 D9),
-  // and this rig holds no organization, so they are landed straight through the
-  // driver, as the residue an older release left. The explainer reads them as before.
+  // so the three grant-side rows are landed straight through the driver. The two
+  // user grants are owned by the rig's organization: an organization-less grant
+  // applies nowhere.
   const residue = (o: string, row: Record<string, unknown>) => (engine as any).getDriver(o).create(o, row);
   await residue('sys_permission_set', {
     id: 'ps_pp_directory', name: DIRECTORY_SET.name, label: DIRECTORY_SET.name, organization_id: null, managed_by: 'admin',
     active: true, object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
   });
   await residue('sys_user_permission_set', {
-    id: 'ups_pp_grace', user_id: GRACE, permission_set: DIRECTORY_SET.name,
+    id: 'ups_pp_grace', user_id: GRACE, permission_set: DIRECTORY_SET.name, organization_id: ORG,
   });
   // A position Lin holds because Grace delegated it, until a date far ahead.
   await residue('sys_user_position', {
     id: 'up_pp_lin_delegated', user_id: LIN, position: DELEGATED_POSITION,
-    delegated_from: GRACE, valid_until: DELEGATED_UNTIL,
+    delegated_from: GRACE, valid_until: DELEGATED_UNTIL, organization_id: ORG,
   });
   await e.insert(BOARD, [{ id: 'b_pp_1', name: 'one' }], SYS);
 
