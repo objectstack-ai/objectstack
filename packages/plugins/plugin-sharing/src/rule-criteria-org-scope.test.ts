@@ -2,7 +2,7 @@
 
 /**
  * [#10119] A sharing rule's CRITERIA sweep is scoped to the rule's own
- * organization — and a platform-global rule's is still not.
+ * organization — and a declared rule's deployment-wide projection is not.
  *
  * ## The defect
  *
@@ -49,10 +49,8 @@
  *
  * ## [ADR-0131 D2/D8] Deployment-wide is a typed marker, never a NULL
  *
- * The rule class these cases used to pin beside the org-stamped one was the
- * "platform-global" `organization_id = null` row (#7795), swept unscoped.
- * That branch is retired. A declared rule is deployment-wide by nature (D2)
- * and carries a typed marker on its `single` projection; under a wall it is
+ * A declared rule is deployment-wide by nature (D2) and carries a typed
+ * marker on its `single` projection (`deploymentWide`); under a wall it is
  * served once per organization, each projection inside that organization's
  * one predicate (D8). A STORED row with no organization, in a deployment that
  * has organizations, is invalid state (certification leaves none): it sweeps
@@ -60,23 +58,14 @@
  * organization object at all (a lean embedding) has no organization to scope
  * by, and there every rule is the deployment's.
  *
- * The NULL-org RECORD is here for the third direction. [ADR-0131 D1, D14]
- * NULL is not an owner: `applyTenantScope` emits `field = ?` alone, since 18.x
- * retired the v17 `OR field IS NULL` arm after the upgrade ceremony, so an
- * org-stamped sweep routed through the chokepoint does NOT reach `deal_p1`,
- * while the platform-global sweep, which carries no scope, still does. A sweep
- * that kept its own copy of the retired arm would grant it.
+ * ## The organization-less RECORD, `deal_p1`
  *
- * ## What `deal_p1` does and does NOT assert (#10103)
- *
- * It used to be justified as the platform bucket: a NULL organization marked a
- * platform row that had to stay visible to every tenant (#2734, ADR-0120 D3).
- * The ruling on #10103 superseded that reading (a row belonging to no
- * organization is INVALID STATE, never a platform-wide default) and kept the
- * arm as a driver-level compatibility note; ADR-0131 D14 retired the note with
- * the ceremony that removes the rows it served. `deal_p1` stays as the record
- * no organization's sweep reaches: a certified database holds no such row, so
- * this is the shape a stray one would take, not a population a tenant relies on.
+ * [ADR-0131 D1] NULL is not an owner: the driver's tenant predicate is
+ * `field = ?` alone, so no sweep scoped to an organization reaches `deal_p1`,
+ * and a sweep that kept a copy of its own wider predicate would grant it. Only
+ * the deployment-wide sweep, which carries no tenant, reaches it, and stamps
+ * nothing on its grant. A certified database holds no such record: this is
+ * the shape a stray one would take, not a population a tenant relies on.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -193,7 +182,7 @@ const open: SqlDriver[] = [];
  *   deal_b2  ORG_B   stage=won    <- second one, so a count cannot pass by luck
  *   deal_p1  (null)  stage=won    <- organization-less row: no org-stamped
  *                                    sweep reaches it (ADR-0131 D1), the
- *                                    platform-global one does — see the header.
+ *                                    deployment-wide one does — see the header.
  */
 async function boot(posture?: 'single' | 'isolated' | 'group', opts: BootOptions = {}): Promise<Booted> {
   const driver = new SqlDriver({
@@ -340,11 +329,9 @@ describe('[#10119] sharing-rule criteria sweep is scoped to the rule\'s organiza
     it('a DECLARED rule under a wall is served per organization: each projection sweeps only its own', async () => {
       // [ADR-0131 D8] No projection sweeps the deployment under a wall: one
       // per organization, each inside that organization's one predicate, its
-      // grants stamped with it. The organization-less RECORD `deal_p1` is
-      // removed first: a certified database holds none, and whether one
-      // answers a tenant read is the driver's predicate, not the rule service's.
-      const { driver, rules, grantsAtRest } = await boot('isolated', { declared: [DECLARED] });
-      await driver.delete(OBJECT, 'deal_p1');
+      // grants stamped with it. No organization's projection reaches the
+      // organization-less RECORD `deal_p1` (ADR-0131 D1, see the header).
+      const { rules, grantsAtRest } = await boot('isolated', { declared: [DECLARED] });
       rules.setDeclaredRuleScopes([ORG_A, ORG_B]);
 
       await rules.evaluateRule(DECLARED.name, SYSTEM);
@@ -360,7 +347,7 @@ describe('[#10119] sharing-rule criteria sweep is scoped to the rule\'s organiza
       // Invalid state — certification leaves no such row, and the engine
       // stamps or refuses every new one (D9) — so it is planted through the
       // driver. ⛔ It must not become the deployment-wide sweep: that is the
-      // NULL arm the marker replaced.
+      // organization-less branch the marker replaced.
       const { driver, rules, sharedRecordIds, errors } = await boot(undefined, { organizations: true });
       await driver.create('sys_sharing_rule', {
         id: 'srule_orgless', name: 'os10119_orgless_won', label: 'Org-less won deals', object_name: OBJECT,
