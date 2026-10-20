@@ -43,8 +43,9 @@ const RAW_API_KEY = 'osk_6071_rest_face';
 
 /**
  * A fake data engine holding what a real deployment holds: one `sys_api_key`
- * row for `member1`, a `member_default` grant for `member1` and an UNSCOPED
- * `admin_full_access` grant for `admin1` (→ PLATFORM_ADMIN). Everything else
+ * row for `member1`, a `member_default` grant for `member1` and an
+ * `admin_full_access` grant for `admin1` owned by the Default Organization (the
+ * grant that anchors platform standing → PLATFORM_ADMIN). Everything else
  * resolves empty.
  */
 const makeQl = () => bindTestSecurityCatalog({
@@ -55,9 +56,11 @@ const makeQl = () => bindTestSecurityCatalog({
             return Object.entries(where).every(([k, v]) => (row as any)[k] === v) ? [row] : [];
         }
         if (object === 'sys_user') return [{ id: where.id, email: `${where.id}@example.com` }];
+        // The Default Organization, by its slug.
+        if (object === 'sys_organization') return [{ id: 'org_default', slug: 'default' }];
         if (object === 'sys_user_permission_set') {
-            if (where.user_id === 'admin1') return [{ permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null }];
-            if (where.user_id === 'member1') return [{ permission_set_id: 'ps_member', permission_set: 'member_default', organization_id: null }];
+            if (where.user_id === 'admin1') return [{ permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: 'org_default' }];
+            if (where.user_id === 'member1') return [{ permission_set_id: 'ps_member', permission_set: 'member_default', organization_id: 'org_default' }];
             return [];
         }
         if (object === 'sys_permission_set') {

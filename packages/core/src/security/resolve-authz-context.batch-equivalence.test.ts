@@ -69,6 +69,24 @@
  * convert to (`convertDeactivatedCatalogRows`, the upgrade ceremony's), so the
  * deactivated `retired` position and `dead_set` set still grant nothing. Every
  * fixture now resolves in two legs.
+ *
+ * ⚠️ A fourth recorded move (the organization-less grant readers retire): a
+ * stored grant row applies only in its own organization, and an
+ * organization-less row applies NOWHERE — the ADR-0131 D10 ownership ceremony
+ * attributes every such row, so it is invalid state rather than a "global"
+ * grant. The fixtures' organization-less grant rows that exercised something
+ * else are re-stamped with the active organization (`org_a`), and the
+ * platform-admin grant with the Default Organization (`org_default`, the
+ * `single` posture's anchor, ADR-0131 D5); every `grants` envelope is
+ * byte-identical to the capture. `position-derived-grants` and
+ * `permission-set-derived-grants` each gain one organization-less row that must
+ * resolve to nothing, which the unchanged envelope pins. ONE recorded read
+ * moved: `permission-set-derived-grants` now issues the Default Organization
+ * read (`sys_organization {slug: 'default'}`, limit 1) that an
+ * organization-owned `admin_full_access` grant has always cost under `single`;
+ * it joins the activation-ledger read's wave, so the fixture still resolves in
+ * two legs. That read is in the golden because the code genuinely issues it —
+ * the organization-less row this fixture used to hold asked none.
  */
 
 import { readFileSync } from 'node:fs';
@@ -258,7 +276,9 @@ describe('[#10825] batched resolveUserAuthzGrants — equivalence with the seque
       expect(wave1).toEqual(
         asMultiset(GOLDEN[name].queries)
           .map((s) => JSON.parse(s) as RecordedCall)
-          .filter((c) => c.object !== 'sys_metadata_activation')
+          // Wave 2: the activation ledger and the Default Organization read,
+          // which are issued together after wave 1 (#10757 leg 4).
+          .filter((c) => c.object !== 'sys_metadata_activation' && c.object !== 'sys_organization')
           .map((c) => c.object)
           .sort(),
       );

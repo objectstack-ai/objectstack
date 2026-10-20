@@ -21,6 +21,47 @@ in one major (its D14) instead of spreading them across 17.x minors. While the
 line was open, every other breaking change that landed on `main` shipped on it
 too, under the same rules.
 
+## Upgrading a database to 18.0.0
+
+An existing database moves to 18.0.0 through the **organization-ownership
+ceremony**, `os migrate organization-ownership` (ADR-0131 D10).
+
+- **A fresh install writes a birth marker.** The first boot that creates a
+  datastore from empty writes a `sys_migration` row
+  (`adr-0131-organization-ownership`) naming the ownership shape generation it
+  was born in. A fresh 18.0.0 install never needs the ceremony, under any
+  tenancy posture.
+- **A database without one is refused at boot.** A database 17.x or an 18.0
+  pre-release (`18.0.0-next.*`) created carries no birth marker, so an 18.0.0
+  server refuses it and names the ceremony command. Start 18.0.0 against it
+  once (the refused boot still creates the tables 18.0.0 adds), take a backup,
+  run `os migrate organization-ownership --out plan.json`, review the plan, run
+  `os migrate organization-ownership --apply --plan-file plan.json --backup-taken`,
+  and start the server again. The ceremony writes the same marker, verified,
+  when its post-check passes.
+- **A development boot passes `--dev`.** On a deployment served with `--dev`
+  (`os dev`, `os serve --dev`), for example a local one with no
+  `OS_AUTH_SECRET`, both ceremony commands take `--dev`, as the refusal
+  `os serve --dev` prints names them. `os dev` runs the ceremony itself for a
+  local SQLite development database.
+- **Walled postures boot.** `OS_TENANCY_POSTURE=group` and `isolated` (and
+  `OS_MULTI_ORG_ENABLED=true`) boot on a fresh install and on a database the
+  ceremony upgraded, under the same prerequisites as 17.x: the enterprise
+  `@objectstack/organizations` runtime and `OS_PLATFORM_OWNER_EMAIL`. The
+  18.0 pre-releases refused them; 18.0.0 does not.
+- **A production `os serve` needs an auth secret.** A production `os serve`
+  whose stack enables auth and which resolves no `OS_AUTH_SECRET` is refused
+  before any plugin starts: with no AuthPlugin, no caller can
+  authenticate and every row the boot wrote would have no owner. Set the
+  secret, or serve without the data API (`--no-server`). `os dev` and
+  `os serve --dev` use a development fallback and need none, and `os start`
+  generates an auth secret on its first run and persists it to
+  `<home>/auth-secret`.
+
+The step-by-step is [Upgrading to 18.0](/docs/upgrading#upgrading-to-180), and
+every flag is in
+[`os migrate organization-ownership`](/docs/deployment/cli#os-migrate-organization-ownership).
+
 ## How a breaking stage lands on this line
 
 - **Through `next` before `latest`.** Every major is published to the `next`

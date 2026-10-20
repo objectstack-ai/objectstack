@@ -215,9 +215,10 @@ export const FIXTURES: Fixture[] = [
     },
   },
   {
-    // Position-derived grants: a global row, an org-scoped row for ANOTHER org
-    // (must not resolve), a lapsed row, a not-yet-valid row, plus the ADR-0049
-    // deactivated position whose NAME must leave `positions` too.
+    // Position-derived grants: rows owned by the active org, an org-scoped row
+    // for ANOTHER org (must not resolve), an organization-less row (applies
+    // nowhere, so must not resolve either), a lapsed row, a not-yet-valid row,
+    // plus the ADR-0049 deactivated position whose NAME must leave `positions` too.
     name: 'position-derived-grants',
     userId: 'u_pos',
     opts: { tenantId: 'org_a', seedEmail: 'pos@x.com', nowMs: T0 },
@@ -225,12 +226,13 @@ export const FIXTURES: Fixture[] = [
       sys_user: [{ id: 'u_pos' }],
       sys_member: [{ user_id: 'u_pos', organization_id: 'org_a', role: 'member' }],
       sys_user_position: [
-        { user_id: 'u_pos', position: 'contributor', organization_id: null },
+        { user_id: 'u_pos', position: 'contributor', organization_id: 'org_a' },
         { user_id: 'u_pos', position: 'auditor', organization_id: 'org_a' },
         { user_id: 'u_pos', position: 'foreigner', organization_id: 'org_z' },
-        { user_id: 'u_pos', position: 'expired_role', organization_id: null, valid_until: past },
-        { user_id: 'u_pos', position: 'future_role', organization_id: null, valid_from: future },
-        { user_id: 'u_pos', position: 'retired', organization_id: null },
+        { user_id: 'u_pos', position: 'orgless_role', organization_id: null },
+        { user_id: 'u_pos', position: 'expired_role', organization_id: 'org_a', valid_until: past },
+        { user_id: 'u_pos', position: 'future_role', organization_id: 'org_a', valid_from: future },
+        { user_id: 'u_pos', position: 'retired', organization_id: 'org_a' },
       ],
       sys_position: [
         { id: 'p_contrib', name: 'contributor' },
@@ -254,27 +256,32 @@ export const FIXTURES: Fixture[] = [
     },
   },
   {
-    // Permission-set-derived grants: the UNSCOPED `admin_full_access` user grant
-    // is the ONLY thing that derives platform_admin, an org-scoped copy is not,
-    // a lapsed one is not, and a DEACTIVATED set grants nothing at all.
+    // Permission-set-derived grants: the Default Organization's `admin_full_access`
+    // user grant is the ONLY thing that derives platform_admin (the `single`
+    // posture's anchor, applying in whichever organization is active), another
+    // org's copy is not, an organization-less row confers nothing at all, a
+    // lapsed one is not, and a DEACTIVATED set grants nothing at all.
     name: 'permission-set-derived-grants',
     userId: 'u_ps',
     opts: { tenantId: 'org_a', seedEmail: 'ps@x.com', nowMs: T0 },
     tables: {
       sys_user: [{ id: 'u_ps' }],
+      sys_organization: [{ id: 'org_default', slug: 'default' }, { id: 'org_a', slug: 'org-a' }],
       sys_member: [{ user_id: 'u_ps', organization_id: 'org_a', role: 'member' }],
       sys_user_position: [],
       sys_user_permission_set: [
-        { user_id: 'u_ps', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
+        { user_id: 'u_ps', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: 'org_default' },
         { user_id: 'u_ps', permission_set_id: 'ps_org', permission_set: 'org_tools', organization_id: 'org_a' },
         { user_id: 'u_ps', permission_set_id: 'ps_other', permission_set: 'other_org_tools', organization_id: 'org_z' },
-        { user_id: 'u_ps', permission_set_id: 'ps_lapsed', permission_set: 'lapsed_set', organization_id: null, valid_until: past },
-        { user_id: 'u_ps', permission_set_id: 'ps_dead', permission_set: 'dead_set', organization_id: null },
+        { user_id: 'u_ps', permission_set_id: 'ps_orgless', permission_set: 'orgless_set', organization_id: null },
+        { user_id: 'u_ps', permission_set_id: 'ps_lapsed', permission_set: 'lapsed_set', organization_id: 'org_a', valid_until: past },
+        { user_id: 'u_ps', permission_set_id: 'ps_dead', permission_set: 'dead_set', organization_id: 'org_a' },
       ],
       sys_permission_set: [
         { id: 'ps_admin', name: 'admin_full_access', system_permissions: ['manage_users'] },
         { id: 'ps_org', name: 'org_tools', tab_permissions: { crm: 'hidden' } },
         { id: 'ps_other', name: 'other_org_tools' },
+        { id: 'ps_orgless', name: 'orgless_set', system_permissions: ['orgless_cap'] },
         { id: 'ps_lapsed', name: 'lapsed_set' },
         { id: 'ps_dead', name: 'dead_set', active: false },
       ],
@@ -291,7 +298,7 @@ export const FIXTURES: Fixture[] = [
       sys_user: [{ id: 'u_ta' }],
       sys_member: [{ user_id: 'u_ta', organization_id: 'org_a', role: 'admin' }],
       sys_user_position: [],
-      sys_user_permission_set: [{ user_id: 'u_ta', permission_set_id: 'ps_low', permission_set: 'low', organization_id: null }],
+      sys_user_permission_set: [{ user_id: 'u_ta', permission_set_id: 'ps_low', permission_set: 'low', organization_id: 'org_a' }],
       sys_position: [{ id: 'p_orgadmin', name: 'org_admin' }, { id: 'p_everyone', name: 'everyone' }],
       sys_position_permission_set: [{ position_id: 'p_orgadmin', permission_set_id: 'ps_oa' }],
       sys_permission_set: [
@@ -342,7 +349,7 @@ export const FIXTURES: Fixture[] = [
       sys_user: [{ id: 'u_seed', email: 'ignored@x.com', ai_access: 1 }],
       sys_member: [{ user_id: 'u_seed', organization_id: 'org_a', role: 'member' }],
       sys_user_position: [],
-      sys_user_permission_set: [{ user_id: 'u_seed', permission_set_id: 'ps_x', permission_set: 'extra', organization_id: null }],
+      sys_user_permission_set: [{ user_id: 'u_seed', permission_set_id: 'ps_x', permission_set: 'extra', organization_id: 'org_a' }],
       sys_permission_set: [{ id: 'ps_x', name: 'extra' }],
       sys_position: [],
     },

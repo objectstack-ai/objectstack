@@ -133,6 +133,9 @@ const SETS = [MEMBER_DEFAULT, MANAGER_SET, ROOT_READER_SET, MIDDLE_READER_SET, Q
 /** The execution context `resolveAuthzContext` hands the middleware for an organization member holding the sets. */
 const memberOf = (userId: string, ...sets: string[]) => ({
   userId,
+  // The organization the request runs in — and so the one a delegator's stored
+  // grants are resolved in (`resolveDelegatorContext`).
+  tenantId: ORG,
   positions: ['org_member'],
   permissions: [...sets, 'member_default'],
   posture: 'MEMBER',
@@ -143,7 +146,7 @@ const MIDDLE_READER_CALLER = memberOf(MIDDLE_READER, MIDDLE_READER_SET.name);
 const LOCKED_CALLER = memberOf(LOCKED, MANAGER_SET.name, QUOTE_OPEN_ONLY_SET.name);
 const PLAIN_CALLER = memberOf(PLAIN, PLAIN_SET.name);
 /** Holds the manager's grants and NO `org_member`, so no floor binds it. */
-const AGENT_UNBOUND_CALLER = { userId: AGENT_UNBOUND, positions: [], permissions: [MANAGER_SET.name], posture: 'MEMBER' };
+const AGENT_UNBOUND_CALLER = { userId: AGENT_UNBOUND, tenantId: ORG, positions: [], permissions: [MANAGER_SET.name], posture: 'MEMBER' };
 const onBehalfOf = (caller: object, delegator: string) => ({ ...caller, onBehalfOf: { userId: delegator } });
 
 type Answer = { kind: 'admitted' } | { kind: 'refused'; code?: string; status?: number; message: string };
@@ -225,21 +228,24 @@ beforeAll(async () => {
 
   // The two delegators exist as users, so the on-behalf-of link resolves rather
   // than failing closed. Each holds the manager's set through a stored position
-  // row; only DELEGATOR_MEMBER is an organization member, so only it carries the floor.
+  // row owned by ORG — the organization the delegated request runs in, the only
+  // one a grant row applies in (ADR-0131 D10: an organization-less row applies
+  // nowhere); only DELEGATOR_MEMBER is an organization member, so only it
+  // carries the floor.
   await engine.insert('sys_user', [
     { id: DELEGATOR_UNBOUND, name: 'Delegator, not a member', email: 'delegator-unbound@cbc.test' },
     { id: DELEGATOR_MEMBER, name: 'Delegator, a member', email: 'delegator-member@cbc.test' },
   ], SYS);
   await engine.insert('sys_organization', [{ id: ORG, name: 'CBC', slug: 'cbc' }], SYS);
   await engine.insert('sys_member', [{ id: 'mem_delegator', user_id: DELEGATOR_MEMBER, organization_id: ORG, role: 'member' }], SYS);
-  // [C8 stage 8b] Organization-less position rows are landed straight through the
-  // driver, as the residue an older release left: under `single` the engine now
-  // stamps such a system insert with the one organization (ADR-0131 D9), which
-  // would tie DELEGATOR_UNBOUND's position to an organization it is not a member of.
+  // Landed straight through the driver, so each row stores exactly the
+  // organization named here. DELEGATOR_UNBOUND's row is ORG's without a
+  // membership: under `single` the session's organization is kept without one,
+  // and no `sys_member` row means no `org_member` floor.
   const positions = (engine as any).getDriver('sys_user_position');
   for (const row of [
-    { id: 'up_unbound', user_id: DELEGATOR_UNBOUND, position: MANAGER_SET.name },
-    { id: 'up_member', user_id: DELEGATOR_MEMBER, position: MANAGER_SET.name },
+    { id: 'up_unbound', user_id: DELEGATOR_UNBOUND, position: MANAGER_SET.name, organization_id: ORG },
+    { id: 'up_member', user_id: DELEGATOR_MEMBER, position: MANAGER_SET.name, organization_id: ORG },
   ]) {
     await positions.create('sys_user_position', row);
   }

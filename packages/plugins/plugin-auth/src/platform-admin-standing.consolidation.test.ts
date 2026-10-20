@@ -211,14 +211,23 @@ interface StandingShape {
   deactivatedSet?: boolean;
   /** ADR-0091: the grant carries a `valid_until` already in the past. */
   expiredGrant?: boolean;
-  /** ADR-0068 D2 says PLATFORM standing is the ORG-LESS link; this scopes it. */
-  orgScopedGrant?: boolean;
+  /**
+   * Who owns the grant. PLATFORM standing is anchored only by the Default
+   * Organization's grant (the default here); `'other'` scopes it to another
+   * organization, `'none'` writes the retired organization-less row. The
+   * Default Organization is staged in every shape, so neither near-miss is
+   * refused merely for want of one.
+   */
+  grantOwner?: 'default' | 'other' | 'none';
 }
+
+const ORG_DEFAULT = 'org_default';
 
 const seedPlatformAdmin = async (engine: any, userId: string, shape: StandingShape = {}) => {
   for (let i = 0; i < (shape.decoySets ?? 0); i += 1) {
     await engine.insert('sys_permission_set', { id: `ps_decoy_${i}`, name: `decoy_set_${i}` });
   }
+  await engine.insert('sys_organization', { id: ORG_DEFAULT, name: 'Default Organization', slug: 'default' });
   await engine.insert('sys_permission_set', { id: PS_ADMIN, name: ADMIN_FULL_ACCESS });
   if (shape.deactivatedSet) {
     await engine.insert('sys_metadata_activation', {
@@ -232,7 +241,7 @@ const seedPlatformAdmin = async (engine: any, userId: string, shape: StandingSha
     user_id: userId,
     permission_set_id: PS_ADMIN,
     permission_set: 'admin_full_access',
-    organization_id: shape.orgScopedGrant ? 'org_pin' : null,
+    organization_id: { default: ORG_DEFAULT, other: 'org_pin', none: null }[shape.grantOwner ?? 'default'],
     ...(shape.expiredGrant ? { valid_until: new Date(Date.now() - 60_000).toISOString() } : {}),
   });
 };
@@ -335,7 +344,7 @@ afterAll(scrypt.restore);
 // ───────────────────────────────────────────────────────────────────────────
 // PIN 1 — the genuine ADR-0068 D2 platform admin is admitted at BOTH gates.
 // ───────────────────────────────────────────────────────────────────────────
-describe.concurrent('a genuine platform admin (ADR-0068 D2 org-less admin_full_access) is ADMITTED', () => {
+describe.concurrent('a genuine platform admin (ADR-0068 D2 admin_full_access, owned by the Default Organization) is ADMITTED', () => {
   it('/sso/register admits (and refuses the standing-less control on the same engine)', async () => {
     const { manager, callerBearer, targetBearer } = await arrange((e, id) => seedPlatformAdmin(e, id));
     const v = await ssoVerdict(manager, callerBearer);
@@ -365,7 +374,8 @@ describe.concurrent('an org owner / org admin / TENANT_ADMIN principal is NOT ad
     ['org owner (sys_member.role = owner)', (e, id) => seedOrgAdmin(e, id, 'owner')],
     ['org admin (sys_member.role = admin)', (e, id) => seedOrgAdmin(e, id, 'admin')],
     ['TENANT_ADMIN posture (organization_admin capability grant)', seedTenantAdmin],
-    ['an ORG-SCOPED admin_full_access grant', (e, id) => seedPlatformAdmin(e, id, { orgScopedGrant: true })],
+    ['an ORG-SCOPED admin_full_access grant', (e, id) => seedPlatformAdmin(e, id, { grantOwner: 'other' })],
+    ['an ORGANIZATION-LESS admin_full_access grant', (e, id) => seedPlatformAdmin(e, id, { grantOwner: 'none' })],
   ];
 
   for (const [label, seed] of nearMisses) {

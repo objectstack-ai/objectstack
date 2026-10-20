@@ -23,7 +23,7 @@
  * would pass against a handler that refuses everyone.
  *
  * The platform admin here is REAL: `sys_permission_set`(`admin_full_access`)
- * + an org-less `sys_user_permission_set` link — the exact rows the
+ * + a `sys_user_permission_set` link owned by the Default Organization — the exact rows the
  * customSession override derives `positions[]`/`isPlatformAdmin` from. No
  * `role = 'admin'` scalar is patched anywhere (re-synthesizing it is
  * permanently vetoed, maintainer ruling 2026-08-18).
@@ -44,6 +44,7 @@ const BASE = 'http://localhost:3000';
 const BASE_PATH = '/api/v1/auth';
 const ORG_ACME = 'org_acme';
 const ORG_BETA = 'org_beta';
+const ORG_DEFAULT = 'org_default';
 const PASSWORD = 'S3cure!Passw0rd-9941';
 
 /**
@@ -243,16 +244,20 @@ describe('#9941 POST /organization/add-member — mounted, gated, and it clears 
     orgOwner = await signUp(manager, engine, 'org.owner@example.com');
     target = await signUp(manager, engine, 'existing.user@example.com');
 
-    // The REAL ADR-0068 platform-admin signal: admin_full_access held with
-    // organization_id = null — the rows customSession derives positions[]
-    // from. NOT the legacy role scalar.
+    // The REAL ADR-0068 platform-admin signal: admin_full_access held by the
+    // Default Organization's grant — the rows customSession derives
+    // positions[] from. NOT the legacy role scalar, and not an
+    // organization-less row (that anchors nothing). The Default Organization
+    // is staged AFTER the sign-ups, so it is a third organization the admin is
+    // not a member of, and nothing above saw it.
+    await engine.insert('sys_organization', { id: ORG_DEFAULT, name: 'Default Organization', slug: 'default' });
     await engine.insert('sys_permission_set', { id: 'ps_admin', name: 'admin_full_access' });
     await engine.insert('sys_user_permission_set', {
       id: 'ups_admin',
       user_id: admin.userId,
       permission_set_id: 'ps_admin',
       permission_set: 'admin_full_access',
-      organization_id: null,
+      organization_id: ORG_DEFAULT,
     });
 
     // Org-scoped actors on Acme: a plain member and an org OWNER — the owner

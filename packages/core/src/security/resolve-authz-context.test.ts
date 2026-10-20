@@ -82,10 +82,10 @@ describe('resolveAuthzContext — single source of truth', () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1', email: 'ada@x.com' }],
       sys_member: [],
-      sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
+      sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: 'o1' }],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
     expect(ctx.positions).toContain('contributor');
   });
 
@@ -104,27 +104,42 @@ describe('resolveAuthzContext — single source of truth', () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
       sys_member: [],
-      sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
+      sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: 'o1' }],
       sys_user_permission_set: [],
       sys_position: [{ id: 'r1', name: 'contributor' }],
       sys_position_permission_set: [{ position_id: 'r1', permission_set_id: 'ps1' }],
       sys_permission_set: [{ id: 'ps1', name: 'contributor_ps', system_permissions: ['cap_x'] }],
     });
-    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
     expect(ctx.permissions).toContain('contributor_ps');
     expect(ctx.systemPermissions).toContain('cap_x');
   });
 
-  it('derives platform_admin from an UNSCOPED admin_full_access user grant', async () => {
+  it('derives platform_admin from the Default Organization\'s admin_full_access user grant', async () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
       sys_member: [],
+      sys_organization: [{ id: 'org_default', slug: 'default' }],
+      sys_user_position: [],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: 'org_default' }],
+      sys_permission_set: [{ id: 'psA', name: 'admin_full_access' }],
+    });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
+    expect(ctx.positions).toContain('platform_admin');
+  });
+
+  it('does NOT derive platform_admin from an ORGANIZATION-LESS admin_full_access grant — it anchors nothing', async () => {
+    const ql = makeQl({
+      sys_user: [{ id: 'u1' }],
+      sys_member: [],
+      sys_organization: [{ id: 'org_default', slug: 'default' }],
       sys_user_position: [],
       sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: null }],
       sys_permission_set: [{ id: 'psA', name: 'admin_full_access' }],
     });
     const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
-    expect(ctx.positions).toContain('platform_admin');
+    expect(ctx.positions).not.toContain('platform_admin');
+    expect(ctx.permissions).not.toContain('admin_full_access');
   });
 
   it('does NOT derive platform_admin from an ORG-scoped admin_full_access grant', async () => {
@@ -716,12 +731,12 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
       sys_user: [{ id: 'u1' }],
       sys_member: [],
       sys_user_position: [
-        { user_id: 'u1', position: 'approver', organization_id: null, valid_until: PAST },
-        { user_id: 'u1', position: 'contributor', organization_id: null },
+        { user_id: 'u1', position: 'approver', organization_id: 'o1', valid_until: PAST },
+        { user_id: 'u1', position: 'contributor', organization_id: 'o1' },
       ],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1'), nowMs: NOW });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }), nowMs: NOW });
     expect(ctx.positions).not.toContain('approver');
     expect(ctx.positions).toContain('contributor'); // null bounds = unbounded, unchanged
   });
@@ -730,10 +745,10 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
       sys_member: [],
-      sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: null, valid_from: FUTURE }],
+      sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: 'o1', valid_from: FUTURE }],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1'), nowMs: NOW });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }), nowMs: NOW });
     expect(ctx.positions).not.toContain('approver');
   });
 
@@ -742,13 +757,13 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
       sys_user: [{ id: 'u1' }],
       sys_member: [],
       sys_user_position: [
-        { user_id: 'u1', position: 'stand_in', organization_id: null, valid_from: PAST, valid_until: FUTURE },
+        { user_id: 'u1', position: 'stand_in', organization_id: 'o1', valid_from: PAST, valid_until: FUTURE },
         // Boundary: valid_until exactly NOW → inactive AT the bound (half-open).
-        { user_id: 'u1', position: 'boundary', organization_id: null, valid_until: '2026-07-10T12:00:00Z' },
+        { user_id: 'u1', position: 'boundary', organization_id: 'o1', valid_until: '2026-07-10T12:00:00Z' },
       ],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1'), nowMs: NOW });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }), nowMs: NOW });
     expect(ctx.positions).toContain('stand_in');
     expect(ctx.positions).not.toContain('boundary');
   });
@@ -757,9 +772,10 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
       sys_member: [],
+      sys_organization: [{ id: 'org_default', slug: 'default' }],
       sys_user_position: [],
       sys_user_permission_set: [
-        { user_id: 'u1', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: null, valid_until: PAST },
+        { user_id: 'u1', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: 'org_default', valid_until: PAST },
       ],
       sys_permission_set: [{ id: 'psA', name: 'admin_full_access' }],
     });
@@ -772,10 +788,10 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
       sys_member: [],
-      sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: null, valid_until: 'not-a-date' }],
+      sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: 'o1', valid_until: 'not-a-date' }],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1'), nowMs: NOW });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }), nowMs: NOW });
     expect(ctx.positions).not.toContain('approver');
   });
 
@@ -953,7 +969,7 @@ describe('audience anchors in the resolver (ADR-0090 D5)', () => {
   it('every authenticated principal implicitly holds `everyone` (additive, no cliff)', async () => {
     const ql = makeQl({
       sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
-      sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
+      sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: 'o1' }],
     });
     const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
     // holding an explicit position must NOT cost the baseline anchor
@@ -980,13 +996,14 @@ describe('audience anchors in the resolver (ADR-0090 D5)', () => {
 describe('resolveAuthzContext — posture ladder (ADR-0095 D2/D3)', () => {
   // Each fixture returns the ql tables + the session getter for one principal.
   const FIXTURES: Record<string, { ql: any; getSession: any }> = {
-    // Unscoped admin_full_access grant → the platform-admin capability.
+    // The Default Organization's admin_full_access grant → the platform-admin capability.
     platform_admin: {
       ql: makeQl({
         sys_user: [{ id: 'pa' }],
         sys_member: [],
+        sys_organization: [{ id: 'org_default', slug: 'default' }],
         sys_user_position: [],
-        sys_user_permission_set: [{ user_id: 'pa', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: null }],
+        sys_user_permission_set: [{ user_id: 'pa', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: 'org_default' }],
         sys_permission_set: [{ id: 'psA', name: 'admin_full_access' }],
       }),
       getSession: session('pa'),
@@ -1052,15 +1069,16 @@ describe('resolveAuthzContext — posture ladder (ADR-0095 D2/D3)', () => {
   });
 
   it('platform-admin grant wins over a co-held org-admin grant (capability, not role)', async () => {
-    // A principal who is BOTH an org admin (role) AND holds the unscoped
-    // platform grant resolves PLATFORM_ADMIN — derivation reads the capability,
-    // so the higher rung wins regardless of the better-auth role.
+    // A principal who is BOTH an org admin (role) AND holds the Default
+    // Organization's platform grant resolves PLATFORM_ADMIN — derivation reads
+    // the capability, so the higher rung wins regardless of the better-auth role.
     const ql = makeQl({
       sys_user: [{ id: 'both' }],
       sys_member: [{ user_id: 'both', role: 'admin', organization_id: 'o1' }],
+      sys_organization: [{ id: 'org_default', slug: 'default' }, { id: 'o1', slug: 'o1' }],
       sys_user_position: [],
       sys_user_permission_set: [
-        { user_id: 'both', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: null },
+        { user_id: 'both', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: 'org_default' },
         { user_id: 'both', permission_set_id: 'psO', permission_set: 'organization_admin', organization_id: 'o1' },
       ],
       sys_permission_set: [
@@ -1107,14 +1125,16 @@ describe('resolveUserAuthzGrants — userId-driven authz for non-HTTP surfaces (
     const tables = {
       sys_user: [{ id: 'u1', email: 'ada@x.com' }],
       sys_member: [],
-      sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'contributor_ps', organization_id: null }],
+      sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: 'o1' }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'contributor_ps', organization_id: 'o1' }],
       sys_position: [{ id: 'r1', name: 'contributor' }],
       sys_position_permission_set: [{ position_id: 'r1', permission_set_id: 'ps1' }],
       sys_permission_set: [{ id: 'ps1', name: 'contributor_ps', system_permissions: ['cap_x'] }],
     };
-    const viaHttp = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: makeQl(tables), headers: H(), getSession: session('u1') });
-    const viaUser = await resolveUserAuthzGrants(makeQl(tables), 'u1');
+    const viaHttp = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: makeQl(tables), headers: H(), getSession: session('u1', { org: 'o1' }) });
+    const viaUser = await resolveUserAuthzGrants(makeQl(tables), 'u1', { tenantId: 'o1' });
+    // Not vacuous: both surfaces actually resolved the grants.
+    expect(viaUser.permissions).toContain('contributor_ps');
     expect([...viaUser.positions].sort()).toEqual([...viaHttp.positions].sort());
     expect([...viaUser.permissions].sort()).toEqual([...viaHttp.permissions].sort());
     expect([...viaUser.systemPermissions].sort()).toEqual([...viaHttp.systemPermissions].sort());
@@ -1126,10 +1146,10 @@ describe('resolveUserAuthzGrants — userId-driven authz for non-HTTP surfaces (
       sys_user: [{ id: 'u1' }],
       sys_member: [],
       sys_user_position: [],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'sales_ps', organization_id: null }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'sales_ps', organization_id: 'o1' }],
       sys_permission_set: [{ id: 'ps1', name: 'sales_ps' }],
     });
-    const grants = await resolveUserAuthzGrants(ql, 'u1', { seedPermissions: ['api:scope'] });
+    const grants = await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'o1', seedPermissions: ['api:scope'] });
     expect(grants.permissions[0]).toBe('api:scope');
     expect(grants.permissions).toContain('sales_ps');
   });
@@ -1161,10 +1181,10 @@ describe('resolveUserAuthzGrants — userId-driven authz for non-HTTP surfaces (
       sys_user: [{ id: 'u1' }],
       sys_member: [],
       sys_user_position: [],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'expired_ps', organization_id: null, valid_until: past }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'expired_ps', organization_id: 'o1', valid_until: past }],
       sys_permission_set: [{ id: 'psA', name: 'expired_ps' }],
     });
-    const grants = await resolveUserAuthzGrants(ql, 'u1');
+    const grants = await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'o1' });
     expect(grants.permissions).not.toContain('expired_ps');
   });
 });
@@ -1356,7 +1376,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
   const withActive = (v: unknown) => ({
     sys_user: [{ id: 'u1' }],
     sys_member: [],
-    sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
+    sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: 'o1' }],
     sys_user_permission_set: [],
     sys_position: [{ id: 'r1', name: 'contributor' }],
     sys_position_permission_set: [{ position_id: 'r1', permission_set_id: 'ps1' }],
@@ -1372,7 +1392,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       apiKeyLifecycle: undefined,
       ql: makeQl(withActive(false)),
       headers: H(),
-      getSession: session('u1'),
+      getSession: session('u1', { org: 'o1' }),
     });
     expect(ctx.permissions).not.toContain('contributor_ps');
     expect(ctx.systemPermissions).not.toContain('cap_x');
@@ -1387,7 +1407,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       apiKeyLifecycle: undefined,
       ql: makeQl(withActive(false)),
       headers: H(),
-      getSession: session('u1'),
+      getSession: session('u1', { org: 'o1' }),
     });
     expect(ctx.positions).not.toContain('contributor');
     // The audience anchor is untouched — it is not the deactivated row.
@@ -1400,7 +1420,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       apiKeyLifecycle: undefined,
       ql: makeQl(withActive(true)),
       headers: H(),
-      getSession: session('u1'),
+      getSession: session('u1', { org: 'o1' }),
     });
     expect(ctx.positions).toContain('contributor');
     expect(ctx.permissions).toContain('contributor_ps');
@@ -1413,7 +1433,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       apiKeyLifecycle: undefined,
       ql: makeQl(withActive(undefined)),
       headers: H(),
-      getSession: session('u1'),
+      getSession: session('u1', { org: 'o1' }),
     });
     expect(ctx.positions).toContain('contributor');
     expect(ctx.permissions).toContain('contributor_ps');
@@ -1425,7 +1445,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       apiKeyLifecycle: undefined,
       ql: makeQl(withActive(0)),
       headers: H(),
-      getSession: session('u1'),
+      getSession: session('u1', { org: 'o1' }),
     });
     expect(off.permissions).not.toContain('contributor_ps');
     const on = await resolveAuthzContext({
@@ -1433,7 +1453,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       apiKeyLifecycle: undefined,
       ql: makeQl(withActive(1)),
       headers: H(),
-      getSession: session('u1'),
+      getSession: session('u1', { org: 'o1' }),
     });
     expect(on.permissions).toContain('contributor_ps');
   });
@@ -1457,8 +1477,8 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       sys_user: [{ id: 'u1' }],
       sys_member: [],
       sys_user_position: [
-        { user_id: 'u1', position: 'contributor', organization_id: null },
-        { user_id: 'u1', position: 'reviewer', organization_id: null },
+        { user_id: 'u1', position: 'contributor', organization_id: 'o1' },
+        { user_id: 'u1', position: 'reviewer', organization_id: 'o1' },
       ],
       sys_user_permission_set: [],
       sys_position: [
@@ -1475,7 +1495,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
         { id: 'ps2', name: 'reviewer_ps' },
       ],
     });
-    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
     expect(ctx.permissions).not.toContain('contributor_ps');
     expect(ctx.permissions).toContain('reviewer_ps');
     expect(ctx.positions).not.toContain('contributor');
@@ -1489,7 +1509,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       sys_user: [{ id: 'u1' }],
       sys_member: [],
       sys_user_position: [],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'crm_full', organization_id: null }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'crm_full', organization_id: 'o1' }],
       sys_permission_set: [{
         id: 'ps1',
         name: 'crm_full',
@@ -1498,7 +1518,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       }],
       sys_metadata_activation: [off('permission', 'crm_full')],
     });
-    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
     expect(ctx.permissions).not.toContain('crm_full');
     expect(ctx.systemPermissions).not.toContain('cap_x');
     expect(ctx.tabPermissions?.crm).toBeUndefined();
@@ -1508,8 +1528,9 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
       sys_member: [],
+      sys_organization: [{ id: 'org_default', slug: 'default' }],
       sys_user_position: [],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: null }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: 'org_default' }],
       sys_permission_set: [{
         id: 'psA',
         name: 'admin_full_access',
@@ -1533,8 +1554,8 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       sys_member: [],
       sys_user_position: [],
       sys_user_permission_set: [
-        { user_id: 'u1', permission_set_id: 'ps1', permission_set: 'crm_full', organization_id: null },
-        { user_id: 'u1', permission_set_id: 'ps2', permission_set: 'crm_read', organization_id: null },
+        { user_id: 'u1', permission_set_id: 'ps1', permission_set: 'crm_full', organization_id: 'o1' },
+        { user_id: 'u1', permission_set_id: 'ps2', permission_set: 'crm_read', organization_id: 'o1' },
       ],
       sys_permission_set: [
         { id: 'ps1', name: 'crm_full' },
@@ -1542,7 +1563,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       ],
       sys_metadata_activation: [off('permission', 'crm_full'), off('permission', 'crm_read', true)],
     });
-    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
     expect(ctx.permissions).not.toContain('crm_full');
     expect(ctx.permissions).toContain('crm_read');
   });
@@ -1553,20 +1574,20 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
     const ql = makeQl({
       sys_user: [{ id: 'u1' }],
       sys_member: [],
-      sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
-      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'crm_full', organization_id: null }],
+      sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: 'o1' }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', permission_set: 'crm_full', organization_id: 'o1' }],
       sys_position: [{ id: 'r1', name: 'contributor' }],
       sys_position_permission_set: [{ position_id: 'r1', permission_set_id: 'ps1' }],
       sys_permission_set: [{ id: 'ps1', name: 'crm_full' }],
       sys_metadata_activation: [off('position', 'contributor')],
     });
-    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
     expect(ctx.permissions).toContain('crm_full');
     expect(ctx.positions).not.toContain('contributor');
   });
 
   it('resolveUserAuthzGrants enforces it too — the non-HTTP surfaces share the seam', async () => {
-    const grants = await resolveUserAuthzGrants(makeQl(withActive(false)), 'u1');
+    const grants = await resolveUserAuthzGrants(makeQl(withActive(false)), 'u1', { tenantId: 'o1' });
     expect(grants.permissions).not.toContain('contributor_ps');
     expect(grants.positions).not.toContain('contributor');
   });
@@ -1586,13 +1607,13 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
         return find(object, opts);
       },
     });
-    const grants = await resolveUserAuthzGrants(ql, 'u1');
+    const grants = await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'o1' });
     expect(reads).not.toContain('sys_metadata_activation');
     // No ledger in the composition: nothing is switched off.
     expect(grants.permissions).toContain('contributor_ps');
     // CONTROL — the same engine with the ledger registered reads it, and honours it.
     const registered = Object.assign(makeQl(tables), { registry: { getObject: (name: string) => ({ name }) } });
-    expect((await resolveUserAuthzGrants(registered, 'u1')).permissions).not.toContain('contributor_ps');
+    expect((await resolveUserAuthzGrants(registered, 'u1', { tenantId: 'o1' })).permissions).not.toContain('contributor_ps');
   });
 
   it('[ADR-0131 D3] a catalog ROW\'s `active: false` is not read — the ledger is the switch', async () => {
@@ -1607,7 +1628,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
         sys_permission_set: [{ id: 'ps1', name: 'contributor_ps', active: false, system_permissions: ['cap_x'] }],
       }),
       headers: H(),
-      getSession: session('u1'),
+      getSession: session('u1', { org: 'o1' }),
     });
     expect(ctx.positions).toContain('contributor');
     expect(ctx.permissions).toContain('contributor_ps');
@@ -1964,11 +1985,13 @@ describe('[#20580] vetOrganizationClaim — the organization a claim resolves in
 });
 
 /**
- * [#20515] A resolution with NO active organization applies only the GLOBAL
- * grants (`organization_id` null). A grant scoped to an organization applies
- * only while that organization is the active tenant — §4 (`sys_user_position`)
- * and §6 (`sys_user_permission_set`) ask the one predicate, so they cannot
- * disagree.
+ * [#20515] A grant applies only while its organization is the active tenant —
+ * §4 (`sys_user_position`) and §6 (`sys_user_permission_set`) ask the one
+ * predicate, so they cannot disagree. A resolution with NO active organization
+ * applies no stored grant row, and a row with no organization (`null`) applies
+ * NOWHERE: the ownership ceremony (ADR-0131 D10) attributes every such row to
+ * an organization and makes the column NOT NULL, so it is invalid state, not a
+ * "global" grant.
  *
  * The population this was measured on: a member removed from an organization
  * whose session still names it. The session arm drops the claim (#15409 ruling
@@ -1980,24 +2003,24 @@ describe('[#20580] vetOrganizationClaim — the organization a claim resolves in
  * `DELETE /packages/:id`) is pinned in `packages/runtime`
  * (`packages-orgless-grants-capability-gate.test.ts`).
  */
-describe('[#20515] with no active organization, only global grants apply', () => {
+describe('[#20515] with no active organization, no stored grant applies', () => {
   const ALPHA = 'org_alpha';
   const BETA = 'org_beta';
 
-  /** One set and one position per scope: global, alpha, beta. */
+  /** One set and one position per scope: organization-less, alpha, beta. */
   const grantRows = (userId: string) => ({
     sys_user_position: [
-      { user_id: userId, position: 'global_position', organization_id: null },
+      { user_id: userId, position: 'orgless_position', organization_id: null },
       { user_id: userId, position: 'alpha_position', organization_id: ALPHA },
       { user_id: userId, position: 'beta_position', organization_id: BETA },
     ],
     sys_user_permission_set: [
-      { user_id: userId, permission_set_id: 'ps_global', permission_set: 'global_set', organization_id: null },
+      { user_id: userId, permission_set_id: 'ps_orgless', permission_set: 'orgless_set', organization_id: null },
       { user_id: userId, permission_set_id: 'ps_alpha', permission_set: 'alpha_set', organization_id: ALPHA },
       { user_id: userId, permission_set_id: 'ps_beta', permission_set: 'beta_set', organization_id: BETA },
     ],
     sys_permission_set: [
-      { id: 'ps_global', name: 'global_set', system_permissions: ['global_cap'] },
+      { id: 'ps_orgless', name: 'orgless_set', system_permissions: ['orgless_cap'] },
       { id: 'ps_alpha', name: 'alpha_set', system_permissions: ['manage_metadata'] },
       { id: 'ps_beta', name: 'beta_set', system_permissions: ['beta_cap'] },
     ],
@@ -2010,27 +2033,27 @@ describe('[#20515] with no active organization, only global grants apply', () =>
     systemPermissions: [...g.systemPermissions].sort(),
   });
 
-  it('no tenant: §4 and §6 both keep the global rows and NOTHING scoped to an organization', async () => {
+  it('no tenant: §4 and §6 both keep NOTHING — neither the organization-less rows nor any organization\'s', async () => {
     const ql = makeQl({ sys_user: [{ id: 'u1' }], sys_member: [], ...grantRows('u1') });
     const grants = await resolveUserAuthzGrants(ql, 'u1', {});
     expect(applied(grants)).toEqual({
-      positions: ['global_position'],
-      permissions: ['global_set'],
-      systemPermissions: ['global_cap'],
+      positions: [],
+      permissions: [],
+      systemPermissions: [],
     });
   });
 
-  it('a tenant: §4 and §6 both keep the global rows plus THAT organization\'s, never another\'s', async () => {
+  it('a tenant: §4 and §6 both keep THAT organization\'s rows only — never another\'s, never the organization-less ones', async () => {
     const ql = makeQl({ sys_user: [{ id: 'u1' }], sys_member: [], ...grantRows('u1') });
     expect(applied(await resolveUserAuthzGrants(ql, 'u1', { tenantId: ALPHA }))).toEqual({
-      positions: ['alpha_position', 'global_position'],
-      permissions: ['alpha_set', 'global_set'],
-      systemPermissions: ['global_cap', 'manage_metadata'],
+      positions: ['alpha_position'],
+      permissions: ['alpha_set'],
+      systemPermissions: ['manage_metadata'],
     });
     expect(applied(await resolveUserAuthzGrants(ql, 'u1', { tenantId: BETA }))).toEqual({
-      positions: ['beta_position', 'global_position'],
-      permissions: ['beta_set', 'global_set'],
-      systemPermissions: ['beta_cap', 'global_cap'],
+      positions: ['beta_position'],
+      permissions: ['beta_set'],
+      systemPermissions: ['beta_cap'],
     });
   });
 
@@ -2100,22 +2123,22 @@ describe('[#20515] with no active organization, only global grants apply', () =>
      * `u_gone` has no membership left anywhere; both still hold the operator-
      * authored `manage_metadata` set granted SCOPED to `org_alpha`, which the
      * removal did not revoke. `u_member` is the control: a current `org_alpha`
-     * member holding the same grant. `u_global_ex` is removed the same way but
-     * holds the set GLOBALLY — a global grant is untouched by this card.
+     * member holding the same grant. `u_orgless_ex` is removed the same way but
+     * holds the set on an ORGANIZATION-LESS row — which confers nothing anywhere.
      */
     const tables = () => ({
-      sys_user: ['u_ex', 'u_gone', 'u_member', 'u_global_ex'].map((id) => ({ id, email: `${id}@x.com` })),
+      sys_user: ['u_ex', 'u_gone', 'u_member', 'u_orgless_ex'].map((id) => ({ id, email: `${id}@x.com` })),
       sys_member: [
         { user_id: 'u_ex', organization_id: BETA, role: 'member' },
         { user_id: 'u_member', organization_id: ALPHA, role: 'member' },
-        { user_id: 'u_global_ex', organization_id: BETA, role: 'member' },
+        { user_id: 'u_orgless_ex', organization_id: BETA, role: 'member' },
       ],
       sys_user_position: [],
       sys_user_permission_set: [
         { user_id: 'u_ex', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
         { user_id: 'u_gone', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
         { user_id: 'u_member', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
-        { user_id: 'u_global_ex', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: null },
+        { user_id: 'u_orgless_ex', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: null },
       ],
       sys_permission_set: [{ id: 'ps_meta', name: 'alpha_metadata_editors', system_permissions: ['manage_metadata'] }],
     });
@@ -2153,18 +2176,20 @@ describe('[#20515] with no active organization, only global grants apply', () =>
       expect(ctx.permissions).toContain('alpha_metadata_editors');
     });
 
-    it('a GLOBAL grant is unchanged: the removed member still holds it with no active organization', async () => {
+    it('an ORGANIZATION-LESS grant confers nothing: the removed member does not hold it with no active organization', async () => {
       const ctx = await resolveAuthzContext({
         userAuthGates: undefined,
         apiKeyLifecycle: undefined,
-        ql: makeQl(tables()), headers: H(), getSession: namingAlpha('u_global_ex'), tenancyPosture: 'isolated',
+        ql: makeQl(tables()), headers: H(), getSession: namingAlpha('u_orgless_ex'), tenancyPosture: 'isolated',
       });
+      expect(ctx.userId).toBe('u_orgless_ex');
       expect(ctx.tenantId).toBeUndefined();
-      expect(ctx.systemPermissions).toContain('manage_metadata');
+      expect(ctx.systemPermissions).not.toContain('manage_metadata');
+      expect(ctx.permissions).not.toContain('alpha_metadata_editors');
     });
   });
 
-  describe('platform-admin standing is unchanged — it was only ever derived from an UNSCOPED grant', () => {
+  describe('platform-admin standing is anchored by the Default Organization\'s grant — never an organization-less one', () => {
     const POSTURE_ENV = ['OS_TENANCY_POSTURE', 'OS_MULTI_ORG_ENABLED', 'OS_PLATFORM_OWNER_EMAIL'] as const;
     const saved: Record<string, string | undefined> = {};
     beforeEach(() => {
@@ -2177,22 +2202,39 @@ describe('[#20515] with no active organization, only global grants apply', () =>
       }
     });
 
-    /** The row `bootstrapPlatformAdmin` mints: `admin_full_access`, organization null. */
+    const DEFAULT_ORG = 'org_default';
+    /**
+     * The row `bootstrapPlatformAdmin` mints is `admin_full_access` owned by the
+     * Default Organization; `null` is the organization-less row an earlier
+     * release's promotion wrote, which the ownership ceremony attributes.
+     */
     const adminTables = (organizationId: string | null) => ({
       sys_user: [{ id: 'u_admin', email: 'admin@x.com' }],
+      sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }, { id: ALPHA, slug: 'alpha' }],
       sys_member: [{ user_id: 'u_admin', organization_id: ALPHA, role: 'owner' }],
       sys_user_position: [],
       sys_user_permission_set: [{ user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: organizationId }],
       sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access', system_permissions: ['manage_metadata'] }],
     });
 
-    it('the bootstrap-shaped UNSCOPED grant: PLATFORM_ADMIN with no tenant and with one', async () => {
-      const ql = makeQl(adminTables(null));
+    it('the bootstrap-shaped Default Organization grant: PLATFORM_ADMIN with no tenant and with one', async () => {
+      const ql = makeQl(adminTables(DEFAULT_ORG));
       expect(await hasPlatformAdminStanding(ql, 'u_admin')).toBe(true);
       const orgless = await resolveUserAuthzGrants(ql, 'u_admin', {});
       expect(orgless.posture).toBe('PLATFORM_ADMIN');
       expect(orgless.systemPermissions).toContain('manage_metadata');
       expect((await resolveUserAuthzGrants(ql, 'u_admin', { tenantId: ALPHA })).posture).toBe('PLATFORM_ADMIN');
+    });
+
+    it('an ORGANIZATION-LESS admin_full_access grant anchors nothing and confers nothing, with no tenant and with one', async () => {
+      const ql = makeQl(adminTables(null));
+      expect(await hasPlatformAdminStanding(ql, 'u_admin')).toBe(false);
+      for (const opts of [{}, { tenantId: ALPHA }, { tenantId: DEFAULT_ORG }]) {
+        const grants = await resolveUserAuthzGrants(ql, 'u_admin', opts);
+        expect(grants.posture, JSON.stringify(opts)).not.toBe('PLATFORM_ADMIN');
+        expect(grants.permissions, JSON.stringify(opts)).not.toContain('admin_full_access');
+        expect(grants.systemPermissions, JSON.stringify(opts)).not.toContain('manage_metadata');
+      }
     });
 
     it('an ORG-scoped admin_full_access grant confers no platform standing, with or without that tenant', async () => {
