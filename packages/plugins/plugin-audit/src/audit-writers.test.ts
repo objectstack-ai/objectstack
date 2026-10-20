@@ -1171,6 +1171,8 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
           return {};
         },
       }),
+      // Recipient admission is pinned in `mention-recipient-gate.integration.test.ts`.
+      admitMentionRecipients: async ({ mentions }) => [...mentions],
     });
     return { fire, emits };
   }
@@ -2334,6 +2336,8 @@ describe('audit writers — the writer reads the session key the engine emits (#
           return {};
         },
       }),
+      // Recipient admission is pinned in `mention-recipient-gate.integration.test.ts`.
+      admitMentionRecipients: async ({ mentions }) => [...mentions],
     });
     return { fire, emits };
   };
@@ -2375,6 +2379,52 @@ describe('audit writers — the writer reads the session key the engine emits (#
     });
 
     expect(emits.find((e) => e.topic === 'collab.mention')?.organizationId).toBe('org-2');
+  });
+
+  // The writer never decides who may see a mention on its own: with no
+  // recipient gate composed, or a gate that fails, nothing is emitted.
+  it('emits no @mention notification when no recipient gate is composed', async () => {
+    const { engine, fire } = makeEngine(SINGLE_TENANT);
+    const emits: any[] = [];
+    installAuditWriters(engine as any, 'test.audit', {
+      getMessaging: () => ({ emit: async (e: any) => { emits.push(e); return {}; } }),
+    });
+    await fire('afterInsert', { ...aComment(), session: { organizationId: 'org-1', userId: 'user-1' } });
+    expect(emits.filter((e) => e.topic === 'collab.mention')).toEqual([]);
+  });
+
+  it('emits no @mention notification when the recipient gate fails', async () => {
+    const { engine, fire } = makeEngine(SINGLE_TENANT);
+    const emits: any[] = [];
+    installAuditWriters(engine as any, 'test.audit', {
+      getMessaging: () => ({ emit: async (e: any) => { emits.push(e); return {}; } }),
+      admitMentionRecipients: async () => {
+        throw new Error('permission store unavailable');
+      },
+    });
+    await fire('afterInsert', { ...aComment(), session: { organizationId: 'org-1', userId: 'user-1' } });
+    expect(emits.filter((e) => e.topic === 'collab.mention')).toEqual([]);
+  });
+
+  it('emits only to the recipients the gate admits, with the record as the gate\'s input', async () => {
+    const { engine, fire } = makeEngine(SINGLE_TENANT);
+    const emits: any[] = [];
+    const asked: any[] = [];
+    installAuditWriters(engine as any, 'test.audit', {
+      getMessaging: () => ({ emit: async (e: any) => { emits.push(e); return {}; } }),
+      admitMentionRecipients: async (input) => {
+        asked.push(input);
+        return ['user-2'];
+      },
+    });
+    await fire('afterInsert', {
+      ...aComment({ mentions: '["user-2","user-3"]' }),
+      session: { organizationId: 'org-1', userId: 'user-1' },
+    });
+    expect(asked).toEqual([
+      { mentions: ['user-2', 'user-3'], threadId: 'crm_lead:l-1', actorId: 'user-1', organizationId: 'org-1', commentId: 'c-1' },
+    ]);
+    expect(emits.filter((e) => e.topic === 'collab.mention').map((e) => e.audience)).toEqual([['user-2']]);
   });
 });
 
