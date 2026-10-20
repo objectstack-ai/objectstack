@@ -9,7 +9,11 @@
 > **One executable business ontology.** AI writes it, the runtime runs it, agents
 > operate it, you own it.
 >
-> 本体即软件。
+> 本体即软件,本体驱动。
+>
+> Ontology-driven: database, API, UI and agent tools all derive from that one
+> definition of the business, so there is no second codebase to keep in step
+> with it.
 >
 > Apps small enough for AI to hold whole.
 
@@ -89,6 +93,13 @@ ontology, not part of it, and code does not disappear: it moves into the
 runtime, as hooks, action bodies, CEL, and constrained JSX. The full account is
 [Business Ontology](https://objectstack.ai/docs/concepts/ontology); the short
 form is the [glossary entry](https://objectstack.ai/docs/getting-started/glossary#business-ontology).
+
+Metadata-driven, as the previous generation of platforms used the word, names
+the mechanism — behaviour derived from a declarative definition instead of
+written as code — and ObjectStack keeps it. Calling the stack ontology-driven
+names what that definition is and whose it is: a definition of the business
+rather than configuration of a platform, an open format in your repository
+rather than inside a vendor's system, and written for an agent to read.
 
 [How it compares](https://objectstack.ai/docs/concepts/compare) sets ObjectStack
 beside knowledge ontologies, semantic layers, operational ontologies, metadata
