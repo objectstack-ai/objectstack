@@ -111,7 +111,7 @@ export const TENANT_SCOPE_FIELD_DEF: Readonly<Record<string, unknown>> = {
   readonly: true,
   system: true,
   description:
-    'Tenant scope (auto-populated by org-scoping on insert; NULL on single-tenant stacks).',
+    'Tenant scope (stamped on insert by org-scoping; never NULL — a write that names no organization is refused).',
 };
 
 /**

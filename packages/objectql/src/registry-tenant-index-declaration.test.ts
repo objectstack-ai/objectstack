@@ -167,7 +167,7 @@ describe('#6810 — a registry-backed object reads back valid at both /meta exit
       readonly: true,
       system: true,
       description:
-        'Tenant scope (auto-populated by org-scoping on insert; NULL on single-tenant stacks).',
+        'Tenant scope (stamped on insert by org-scoping; never NULL — a write that names no organization is refused).',
     });
   });
 
