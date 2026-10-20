@@ -1,0 +1,240 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#24693] One-off rewrite of the mail-log bodies this plugin's writer copied
+ * in clear before it masked them.
+ *
+ * `writeAudit` COPIES the audited row into `sys_audit_log.new_value` /
+ * `old_value` and into both halves of `sys_activity.metadata`. For a
+ * `sys_email` / `sys_identity_email` row that copy carried the mail BODY —
+ * reset, verification, magic-link and invitation links included — into a
+ * second, at-rest store. The writer masks those columns now (#24625,
+ * `ledgerView`), but only on NEW writes: rows copied before keep the body in
+ * clear. This module masks them, with the writer's own helper
+ * ({@link maskMailLogBodyCopy}), so a repaired copy and a new one read the same.
+ *
+ * ## Every mail-log copy, never a selector
+ *
+ * Both logs are masked on every row, as the writer does: `sys_identity_email`
+ * holds identity mail only, and the 18.0 identity rows still in `sys_email`
+ * cannot be told apart from tenant mail by any column. So the rewrite needs no
+ * identity selector and does not depend on the organization-ownership
+ * ceremony: run before it, it masks the `sys_email` copies; run after it, the
+ * activity copies the ceremony re-pointed name `sys_identity_email`, which is
+ * masked the same. The `sys_audit_log` copies keep the object name they were
+ * written under either way.
+ *
+ * ## Pure planner, driven runner
+ *
+ * The decision is pure ({@link planMailLogBodyAuditRowPatch} /
+ * {@link planMailLogBodyActivityRowPatch}); {@link migrateMailLogBodyCopies}
+ * pages the two tables through the engine and rewrites only the rows a planner
+ * changed — and in a row, only the column holding the copy. Nothing else in the
+ * copy moves: the other keys of the snapshot and of the activity pair are
+ * re-serialized as they were read.
+ *
+ * ## Idempotent, its own verification
+ *
+ * A masked body is the mask, so a second run finds nothing to rewrite, and
+ * re-running and reading a clean report is the check (the posture
+ * `os migrate audit-metadata-bodies` takes). No `sys_migration` flag is
+ * recorded: nothing gates irreversible behaviour on it. The report holds counts
+ * only; no log line names a value.
+ */
+
+import type { IDataEngine } from '@objectstack/spec/contracts';
+import { MAIL_LOG_OBJECTS } from '@objectstack/platform-objects/audit';
+import { maskMailLogBodyCopy } from './mail-log-body-mask.js';
+import type { MigrationLogger } from './stored-metadata-body-migration.js';
+
+/** The two audit-family tables the writer copies a mail-log row into. */
+export const MAIL_LOG_BODY_COPY_OBJECTS = ['sys_audit_log', 'sys_activity'] as const;
+
+/** Rows read per page. */
+export const MAIL_LOG_BODY_MIGRATION_PAGE_SIZE = 500;
+
+/** The rewrite reads and writes as the platform, never as a user. */
+const SYSTEM_CTX = { isSystem: true } as const;
+
+/**
+ * Mask the body columns of one parsed snapshot of an `objectName` row. A
+ * non-object, or a snapshot with no clear body, comes back unchanged.
+ */
+function maskedSnapshot(objectName: unknown, snapshot: unknown): { changed: boolean; value: unknown } {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return { changed: false, value: snapshot };
+  const copy = { ...(snapshot as Record<string, unknown>) };
+  return maskMailLogBodyCopy(objectName, copy) ? { changed: true, value: copy } : { changed: false, value: snapshot };
+}
+
+/** Parse → apply `step` → re-serialize one stored JSON string column. A non-string / unparseable value is left as-is. */
+function rewriteSerialized(
+  serialized: unknown,
+  step: (parsed: unknown) => { changed: boolean; value: unknown },
+): { changed: boolean; value: unknown } {
+  if (typeof serialized !== 'string' || serialized === '') return { changed: false, value: serialized };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(serialized);
+  } catch {
+    return { changed: false, value: serialized };
+  }
+  const { changed, value } = step(parsed);
+  return changed ? { changed: true, value: JSON.stringify(value) } : { changed: false, value: serialized };
+}
+
+/**
+ * The patch for one `sys_audit_log` row about a mail log — its `new_value`
+ * (create, and the after half of an update diff) and `old_value` (delete, and
+ * the before half) with each clear body masked — or `null` when the row is
+ * about another object or holds no clear body.
+ */
+export function planMailLogBodyAuditRowPatch(
+  row: Record<string, unknown>,
+): { new_value?: unknown; old_value?: unknown } | null {
+  const patch: { new_value?: unknown; old_value?: unknown } = {};
+  for (const column of ['new_value', 'old_value'] as const) {
+    const out = rewriteSerialized(row[column], (parsed) => maskedSnapshot(row.object_name, parsed));
+    if (out.changed) patch[column] = out.value;
+  }
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+/**
+ * The patch for one `sys_activity` row about a mail log — the serialized pair
+ * `{ old, new }` with each half's clear body masked, every other key of the
+ * pair kept — or `null` when the row is about another object or holds no clear
+ * body.
+ */
+export function planMailLogBodyActivityRowPatch(row: Record<string, unknown>): { metadata: unknown } | null {
+  const out = rewriteSerialized(row.metadata, (parsed) => {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { changed: false, value: parsed };
+    const pair = parsed as Record<string, unknown>;
+    const next: Record<string, unknown> = { ...pair };
+    let changed = false;
+    for (const half of ['old', 'new'] as const) {
+      if (!(half in pair)) continue;
+      const masked = maskedSnapshot(row.object_name, pair[half]);
+      if (!masked.changed) continue;
+      next[half] = masked.value;
+      changed = true;
+    }
+    return { changed, value: changed ? next : parsed };
+  });
+  return out.changed ? { metadata: out.value } : null;
+}
+
+/** The engine surface the runner needs — the real data-engine contract's members. */
+export type MailLogBodyMigrationEngine = Pick<IDataEngine, 'find' | 'update'>;
+
+/** What one migration run did (or would do in dry-run). Counts only. */
+export interface MailLogBodyMigrationReport {
+  apply: boolean;
+  /** Per copy table: mail-log copy rows read, and rows rewritten (or that would be). */
+  readonly byObject: Record<string, { scanned: number; rewritten: number }>;
+  /** Mail-log copy rows read, total. */
+  scanned: number;
+  /** Rows holding a clear body, total — rewritten under `apply`. */
+  rewritten: number;
+  /** A failed read, or a row an `update` threw on (apply mode) — re-run to finish. */
+  failures: number;
+}
+
+function asArray(result: unknown): Record<string, unknown>[] {
+  if (Array.isArray(result)) return result as Record<string, unknown>[];
+  if (result && typeof result === 'object' && Array.isArray((result as { records?: unknown }).records)) {
+    return (result as { records: Record<string, unknown>[] }).records;
+  }
+  return [];
+}
+
+/**
+ * Mask the mail-log body in every `sys_audit_log` / `sys_activity` copy of a
+ * `sys_email` or `sys_identity_email` row that still holds it in clear.
+ * Dry-run by default; `apply` writes. Idempotent.
+ */
+export async function migrateMailLogBodyCopies(
+  engine: MailLogBodyMigrationEngine,
+  logger: MigrationLogger,
+  options: { apply?: boolean; pageSize?: number } = {},
+): Promise<MailLogBodyMigrationReport> {
+  const apply = options.apply === true;
+  const pageSize = options.pageSize && options.pageSize > 0 ? options.pageSize : MAIL_LOG_BODY_MIGRATION_PAGE_SIZE;
+  const report: MailLogBodyMigrationReport = { apply, byObject: {}, scanned: 0, rewritten: 0, failures: 0 };
+
+  const tables: ReadonlyArray<{
+    object: (typeof MAIL_LOG_BODY_COPY_OBJECTS)[number];
+    fields: readonly string[];
+    plan: (row: Record<string, unknown>) => Record<string, unknown> | null;
+  }> = [
+    { object: 'sys_audit_log', fields: ['id', 'object_name', 'new_value', 'old_value'], plan: planMailLogBodyAuditRowPatch },
+    { object: 'sys_activity', fields: ['id', 'object_name', 'metadata'], plan: planMailLogBodyActivityRowPatch },
+  ];
+
+  for (const { object, fields, plan } of tables) {
+    const stats = (report.byObject[object] = { scanned: 0, rewritten: 0 });
+    // Keyset paging on `id`: a rewritten row keeps its id and is never read
+    // twice in one run.
+    let after: string | undefined;
+    for (;;) {
+      const copies: Record<string, unknown> = { object_name: { $in: [...MAIL_LOG_OBJECTS] } };
+      const where = after === undefined ? copies : { $and: [copies, { id: { $gt: after } }] };
+      let rows: Record<string, unknown>[];
+      try {
+        rows = asArray(
+          await engine.find(
+            object,
+            { where, fields: [...fields], orderBy: [{ field: 'id', order: 'asc' }], limit: pageSize },
+            { context: SYSTEM_CTX },
+          ),
+        );
+      } catch (e) {
+        // A table this run could not read is NOT a clean table: counted, so the
+        // run says so (and the door exits non-zero).
+        report.failures += 1;
+        logger.warn(
+          `[mail-log-body-migration] could not read ${object} — its remaining rows were NOT examined: ` +
+            `${(e as Error)?.message ?? String(e)}`,
+        );
+        break;
+      }
+      if (rows.length === 0) break;
+
+      for (const row of rows) {
+        report.scanned += 1;
+        stats.scanned += 1;
+        const patch = plan(row);
+        if (!patch) continue;
+        report.rewritten += 1;
+        stats.rewritten += 1;
+        if (!apply) continue;
+        const id = row.id;
+        if (typeof id !== 'string' || id === '') {
+          report.failures += 1;
+          logger.warn(`[mail-log-body-migration] ${object} row has no id — cannot rewrite it`);
+          continue;
+        }
+        try {
+          // A single-id write, as the platform: a system caller is exempt from
+          // the static-readonly strip every audit/activity field carries.
+          await engine.update(object, { ...patch, id }, { context: SYSTEM_CTX });
+        } catch (e) {
+          report.failures += 1;
+          logger.warn(
+            `[mail-log-body-migration] failed to rewrite ${object}/${id}: ${(e as Error)?.message ?? String(e)}`,
+          );
+        }
+      }
+
+      const last = rows[rows.length - 1]?.id;
+      if (rows.length < pageSize || typeof last !== 'string' || last === '') break;
+      after = last;
+    }
+  }
+
+  logger.info?.(
+    `[mail-log-body-migration] ${apply ? 'masked' : 'would mask'} the mail body in ${report.rewritten} of ` +
+      `${report.scanned} audit/activity cop(ies) of a mail-log row` +
+      (report.failures > 0 ? ` (${report.failures} failed — re-run to finish)` : ''),
+  );
+  return report;
+}
