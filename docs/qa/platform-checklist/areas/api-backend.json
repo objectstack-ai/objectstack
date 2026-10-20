@@ -9,7 +9,7 @@
       "title": "transactionalBatch capability bit matches the mounted /batch behavior — atomicity, rollback codes, size cap",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -26,7 +26,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; GET /api/v1/discovery and read capabilities.transactionalBatch.enabled — on the wire each capability is a CapabilityDescriptor object { enabled, features?, description? } (discovery.zod.ts), never a bare boolean. The @objectstack/client getter is the exception: it FLATTENS each descriptor to a real boolean, so client.capabilities.transactionalBatch is a boolean and the two reads are spelled differently on purpose",
+        "boot the showcase on its own port and DB; GET /api/v1/discovery and read capabilities.transactionalBatch.enabled — on the wire each capability is a CapabilityDescriptor object { enabled, features?, description? } (discovery.zod.ts), never a bare boolean. The @objectstack/client getter is the exception: it FLATTENS each descriptor to a real boolean, so client.capabilities.transactionalBatch is a boolean and the two reads are spelled differently on purpose",
         "POST /api/v1/batch with a well-formed cross-object atomic batch: operations = [create showcase_private_note {title}, create showcase_task {title, project: <a seeded showcase_project id>}] and a TOP-LEVEL atomic: true; verify both rows exist afterwards. ⚠️ CrossObjectBatchRequestSchema declares operations + a top-level atomic and no options key at all — an options wrapper is silently STRIPPED by Zod, so the request runs with atomic defaulting to true",
         "POST /api/v1/batch with the same operations and a TOP-LEVEL atomic: false; capture status + error code. ⛔ Spelled as options {atomic: false} the key is stripped, atomic defaults to true, and the batch simply SUCCEEDS — the clause below then reads as a product failure when nothing failed",
         "POST /api/v1/batch where a MIDDLE operation must fail (e.g. create showcase_invoice missing its required name), sandwiched between two valid creates; capture the per-operation results and re-read all three would-be rows",
@@ -123,6 +123,12 @@
           "date": "2026-10-20",
           "change": "acceptance[5], steps[6], negative[1] and knownGaps[0] added for #24781, which QA run #24779 found beside the clauses (round 3 of the 18.0 sweep, 580fd4ed): no clause asked what the cross-object door answers for an empty-string id, and it answers 500 where a missing id answers 400 VALIDATION_FAILED. The clause asserts the missing-id answer and stays red until #24781's fix lands. No existing clause changed",
           "ref": "#24802"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -378,7 +384,7 @@
       "title": "Data-API query contract: every filter operator gives known answers; $-params, select, sort, expand honored; malformed input 400s with the exact code",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -393,7 +399,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; as admin GET /api/v1/data/showcase_account with no filter and a generous $top — this unfiltered baseline is the local ground truth every operator answer is computed from (never hardcode counts; the seed can drift)",
+        "boot the showcase on its own port and DB; as admin GET /api/v1/data/showcase_account with no filter and a generous $top — this unfiltered baseline is the local ground truth every operator answer is computed from (never hardcode counts; the seed can drift)",
         "for each operator variant below, run BOTH spellings against showcase_account (or showcase_task where the type fits): the POST /api/v1/data/showcase_account/query body form (where: {field: {$op: value}}) and the AST array form ([field, op, value] — spellings per AST_OPERATOR_MAP); e.g. where {status: {$eq: 'active'}}, {annual_revenue: {$gt: 10000000}}, {status: {$in: ['active','prospect']}}, {annual_revenue: {$between: [5000000, 50000000]}}, {name: {$contains: 'orth'}}, {name: {$startsWith: 'Con'}}, {churn_reason: {$null: true}}",
         "for each operator: compute the expected id set from the baseline locally and compare with the returned records — a known-answer check, not a smoke 200",
         "pagination window: GET /api/v1/data/showcase_account?$orderby=name&$top=3&$skip=2 and verify it equals rows 3–5 of the locally sorted baseline; also POST body limit/offset/top equivalents",
@@ -536,6 +542,12 @@
           "date": "2026-10-19",
           "change": "steps[4] states the projection the build serves — checklist-accuracy finding of the 18.0 QA sweep (QA run #24556, api-backend.query-contract-matrix step 5; wave anchor #24579 §3): $select narrows to exactly the requested keys and adds no identity key. Re-derived at base 9a7838edf5 (objectql engine.ts: SqlDriver emits builder.select(query.fields) verbatim). No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -544,7 +556,7 @@
       "title": "Sampled endpoints return the standard error envelope with ledgered codes — no invented codes, no retired keys, statuses match the map",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -560,7 +572,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; induce one error per family and capture the FULL body + status each time:",
+        "boot the showcase on its own port and DB; induce one error per family and capture the FULL body + status each time:",
         "validation: as admin POST /api/v1/data/showcase_invoice {} (missing required name) — expect the field-level envelope",
         "auth: anonymous GET /api/v1/data/showcase_private_note — the 401 sample",
         "authorization: as the baseline member POST /api/v1/data/showcase_announcement {\"title\": \"probe\"} — the 403 sample",
@@ -659,6 +671,12 @@
           "date": "2026-10-19",
           "change": "acceptance[3] (clause, verify) names the oracle it can be judged by — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.error-envelope-ledger acceptance[3]; wave anchor #24579 §3): HttpStatusErrorCodeMap is a status → floor-code map (400 → VALIDATION_ERROR, 404 → RESOURCE_NOT_FOUND, …), and OBJECT_NOT_FOUND / RECORD_NOT_FOUND / VALIDATION_FAILED have no entry in it. Re-derived at base 9a7838edf5 (packages/spec/src/api/errors.zod.ts: HttpStatusErrorCodeMap, standardErrorCodeForHttpStatus, ErrorHttpStatusMap)",
           "ref": "#24649"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -667,7 +685,7 @@
       "title": "Bulk write doors (createMany/updateMany/deleteMany, per-object batch): per-row outcomes, size cap, single/bulk parity, no silent full-table writes",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -682,7 +700,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; as the member POST /api/v1/data/showcase_private_note/createMany with a BARE JSON ARRAY of 3 notes with unique-marker titles (the body is the array; a {records} wrapper answers 400 VALIDATION_FAILED); GET them back",
+        "boot the showcase on its own port and DB; as the member POST /api/v1/data/showcase_private_note/createMany with a BARE JSON ARRAY of 3 notes with unique-marker titles (the body is the array; a {records} wrapper answers 400 VALIDATION_FAILED); GET them back",
         "single/bulk parity: POST a 4th note via the single door (POST /api/v1/data/showcase_private_note) and diff its response/stored shape against one createMany row (same fields stamped: owner_id, timestamps, defaults)",
         "as the member POST /api/v1/data/showcase_private_note/updateMany {\"records\": [{\"id\": \"<marker id>\", \"data\": {…}}, …]} naming ONLY the marker rows' ids — updateMany is id-based (UpdateManyRequestSchema); a {where, data} body answers 400 VALIDATION_FAILED naming `records`; re-read",
         "as the member POST updateMany naming ids that match nothing the member may touch: a nonexistent id, and the id of another user's private note (invisible to the member) — in SEPARATE calls, or in one call with options.continueOnError: true: under the default (continueOnError: false) the first failed row ends the run and the second id reports NOT_ATTEMPTED, which says nothing about the no-existence-oracle parity; capture the per-row results, then re-read the foreign note system-side. Also send {\"records\": []}",
@@ -769,6 +787,12 @@
           "date": "2026-10-19",
           "change": "steps[3] and acceptance[2].verify send the two ids so each gets an answer — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.bulk-write-contract step 4 / acceptance[2]): updateMany stops at the first failed row by default, so one batch [nonexistent, foreign] reports the foreign id NOT_ATTEMPTED. Re-derived at base 9a7838edf5: BatchOptions continueOnError defaults false (packages/spec/src/api/batch.zod.ts). No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -962,7 +986,7 @@
       "title": "Metadata-authored `api` endpoints mount as real URLs with their declared auth/cache policy",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -983,7 +1007,7 @@
         "script/proxy target — refused at authoring, never served; the runtime's 501 is a second door, pinned"
       ],
       "steps": [
-        "boot showcase isolated; sign in as admin",
+        "boot the showcase on its own port and DB; sign in as admin",
         "GET /api/v1/apps/showcase/tasks authed; capture status, body, and response headers",
         "GET the same endpoint unauthenticated; capture status",
         "a script / proxy target cannot be authored into a live server. `api` is code-only (#5488: allowRuntimeCreate false, so no scratch package can hold one), and the stack schema refuses `type: 'script'` / `'proxy'`. Author one in a scratch config and run `os validate` (or `os build`); capture the refusal naming the endpoint, the type and the flow prescription. Do not attempt a live 501",
@@ -1049,6 +1073,12 @@
           "date": "2026-10-16",
           "change": "the fixture text named two live declarative endpoints while the showcase declares three and os build reports '3 APIs' (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6: apis/index.ts declares showcase_task_feed (object_operation), showcase_inquiry_purge_api and showcase_recalc_estimates_api (both flow). Wording only, no re-run owed; the feed's live answers still hold (authed 200 with Cache-Control: private, max-age=30; anonymous 401 UNAUTHENTICATED; an unmatched /apps path 404)",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1057,7 +1087,7 @@
       "title": "Package REST lifecycle: POST /packages creates (201), a duplicate name is refused 409 (no silent manifest clobber), PATCH partial-patches the manifest, and an explicit overwrite re-install replaces in place without duplicating",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1073,7 +1103,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; sign in as admin; choose a scratch id com.example.qa-pkg-lifecycle-probe",
+        "boot the showcase on its own port and DB; sign in as admin; choose a scratch id com.example.qa-pkg-lifecycle-probe",
         "POST /api/v1/packages with { manifest: { id: 'com.example.qa-pkg-lifecycle-probe', name: 'QA Probe', version: '1.0.0', scope: 'project', type: 'app' } }; capture status + body; then GET /api/v1/packages/com.example.qa-pkg-lifecycle-probe to confirm it persisted (the dispatcher install lands in BOTH the in-memory registry and durable sys_packages) (scope must be one of cloud | system | project — 'custom' answers 400 VALIDATION_ERROR naming manifest.scope — and the install derives a namespace from the id)",
         "POST the SAME manifest again with NO overwrite flag; capture status + body",
         "PATCH /api/v1/packages/com.example.qa-pkg-lifecycle-probe with { name: 'QA Probe Renamed', description: 'edited', version: '1.1.0' }; GET the package back and confirm the patch persisted and that id/scope/type and the lifecycle fields (enabled/status/installedAt) are untouched",
@@ -1153,6 +1183,12 @@
           "date": "2026-10-16",
           "change": "step 2's manifest used scope 'custom', which POST /api/v1/packages refuses 400 VALIDATION_ERROR ('manifest.scope: Invalid option: expected one of cloud|system|project'), so the install the rest of the item builds on never happened (#23878 checklist-accuracy finding). It now uses scope 'project'. Clause 4 pinned two message sentences, one of which had changed ('version must be a SemVer 2.0.0 string …'); it now scores status 400 and code VALIDATION_ERROR for all three bodies. Re-run on main c91af8ed6: 201 install, 409 RESOURCE_CONFLICT duplicate, partial PATCH 200, the three malformed PATCHes 400 VALIDATION_ERROR, overwrite re-install 201 with exactly one row",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1161,7 +1197,7 @@
       "title": "Developer API Console (a deep link on a stock boot): the endpoint tree mirrors /discovery, a seeded-object GET executes with live JSON + status + timing, and a malformed body surfaces the server error envelope verbatim",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -1175,7 +1211,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; sign in as admin; open /_console/apps/setup/developer/api-console directly (the Studio → Developer → API Console nav lives only in the Studio app, which a stock boot does not serve — fixtures.requires[0])",
+        "boot the showcase on its own port and DB; sign in as admin; open /_console/apps/setup/developer/api-console directly (the Studio → Developer → API Console nav lives only in the Studio app, which a stock boot does not serve — fixtures.requires[0])",
         "GET /api/v1/discovery out of band and record its services + routes maps — the ground truth the tree is gated on (useApiDiscovery gates each service group on isServiceUsable(discovery.services[name]), ADR-0076 D12)",
         "screenshot the endpoint tree AFTER the 'Discovering APIs' spinner settles; only then read the DOM",
         "spot-check the tree against REST_ROUTE_LEDGER families: a seeded object (showcase_task) shows its CRUD family (GET/POST/PATCH/DELETE /api/v1/data/showcase_task) under a Data group, the Metadata group lists /api/v1/meta/object/showcase_task, System lists discovery/packages/health",
@@ -1242,6 +1278,12 @@
           "date": "2026-10-13",
           "change": "steps[0], fixtures.requires[0] and the title reach the page by deep link (stale step, #23163 C0; parked on #23121, carried by #23169). The 'Studio → Developer → API Console' nav entry, nav_api_console, is declared only in packages/platform-objects/src/apps/studio.app.ts, and a stock boot does not serve the Studio app. QA run #23163 reached /_console/apps/setup/developer/api-console by URL and passed every clause there",
           "ref": "#23169"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1565,7 +1607,7 @@
       "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1586,7 +1628,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated on the real HTTP stack (os dev); sign in as admin",
+        "boot the showcase on its own port and DB, on the real HTTP stack (os dev); sign in as admin",
         "disable the probe: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} → 200 (the door's own arms are api-backend.action-activation-door-contract's item — do not re-prove them here); confirm the row via GET /api/v1/data/sys_metadata_activation (metadata_type 'action', name showcase_mark_done, active false) and confirm the row's KEY SET carries NO organization_id at all — the ledger has no tenant column (#15024 / ADR-0131 D7). ⛔ Never confirm the tenant half by reading the value: a check of the shape `row.organization_id ?? null` answers `null` for a column that does not exist, so it passes while measuring nothing",
         "REST door: POST /api/v1/actions/showcase_task/showcase_mark_done with {\"recordId\": \"no-such-record-0000\"}; capture status + body; then re-read a REAL seeded task and confirm no done/progress write happened anywhere",
         "param-ordering discriminator: disable showcase_action_param_gallery (POST /actions/_activation/showcase_field_zoo/showcase_action_param_gallery {\"enabled\":false}), then invoke POST /actions/showcase_field_zoo/showcase_action_param_gallery with params: {\"bogus_key\": 1} (missing required p_text AND an unknown key) plus a nonexistent recordId; capture. Re-enable and repeat the IDENTICAL request; capture the contrast",
@@ -1700,6 +1742,12 @@
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0] no longer falls back to the unit pin for the MCP clause. PR #24891's carried finding (round 15's acceptance notes: the 'score from the pin' spelling, the MCP clause's unit fallback), read under RUNNER rule 6. acceptance[4]'s oracle is the MCP tool's answer. The 'door 2' case of packages/runtime/src/domains/action-activation-dispatch.test.ts calls invokeBusinessAction in-process over a stubbed engine and metadata service (read at base feb09db14a), so where the endpoint is not mounted the clause is blocked(environment), with the pin beside it. No clause changed",
           "ref": "#24963"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated on ' → 'boot the showcase on its own port and DB, on '. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1708,7 +1756,7 @@
       "title": "POST /actions/_activation/:object/:action — the activation door's ordered arms: authority before body and lookup, the exact 400 shapes, 404 undeclared, 409 ambiguity, 501/503 honesty, and the reserved segment surviving the real mount",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1730,7 +1778,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (os dev — the LIVE mount matters here, see the trap note); sign in as admin and as the non-admin member",
+        "boot the showcase on its own port and DB (os dev — the LIVE mount matters here, see the trap note); sign in as admin and as the non-admin member",
         "authority-first probe, as the NON-ADMIN: POST /api/v1/actions/_activation/showcase_task/no_such_action with body {\"enable\": false} — a request that is simultaneously mis-bodied AND undeclared; capture. Repeat the same request anonymous; capture",
         "shape arms, as admin: POST /api/v1/actions/_activation/showcase_mark_done {} (2-segment); POST /api/v1/actions/_activation/showcase_task/showcase_mark_done/extra {} (4-segment); capture both",
         "body arms, as admin, against the declared action: {\"enable\": false} (one letter off); {\"enabled\": \"false\"} (string, not boolean); [] (non-object body); {} (empty); capture each with full envelope",
@@ -1838,6 +1886,12 @@
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[2] re-pointed — QA run #24783 (finding F5), round 11 of wave anchor #24579. 'Needs an enterprise tenancy runtime no example app composes' is stale since 18.x step 4 (#24580): a scratch app declaring the open @objectstack/organizations composes the walled posture (RUNNER.md 'A walled boot is a fixture of its own'), and QA run #24783 measured the authority-first order on both walled postures. The line now points at that entry and names the handler whose order it asserts. No clause changed",
           "ref": "#24801"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1846,7 +1900,7 @@
       "title": "Server-side aggregation contract: every AggregationFunction × DateGranularity gives known answers — ruled empty-set values, ISO-Monday week buckets, retired array_agg/string_agg refuse with prescriptions, and aggregate stays secured (engine-only, never raw driver)",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1870,7 +1924,7 @@
       },
       "steps": [
         "read the two enums and pin the matrix: AggregationFunction (packages/spec/src/data/query.zod.ts — 6 members: count/sum/avg/min/max/count_distinct, with retirement error messages wired for array_agg/string_agg) and DateGranularity (— 5 members: day/week/month/quarter/year). Only ONE enumSource pin fits an item; AggregationFunction carries it — hand-count DateGranularity's 5 members at run time and record the count",
-        "boot showcase isolated; as admin read the unfiltered showcase_account baseline (generous $top) — the local ground truth every expected value below is computed from",
+        "boot the showcase on its own port and DB; as admin read the unfiltered showcase_account baseline (generous $top) — the local ground truth every expected value below is computed from",
         "function matrix: for each of the 6 functions POST /api/v1/data/showcase_account/query with { groupBy: ['status'], aggregations: [{ function, field: 'annual_revenue', alias: 'v' }] } (count also in its fieldless/'*' spelling), plus one UNgrouped run per function; compute each expected per-group value locally from the baseline and compare exactly — known answers, not smoke 200s. Add the #11152 leg: min/max over a boolean field answer the NUMBER it is worth (0/1, maintainer ruling 2026-08-28), never false/true",
         "granularity matrix: record wall clock + timezone, then for each of the 5 granularities POST { groupBy: [{ field: 'signed_on', dateGranularity }], aggregations: [{ function: 'count', alias: 'n' }] }; reconcile the returned bucket KEYS and counts against locally computed ISO-8601 buckets (bucketDateValue's own shapes: 'YYYY', 'YYYY-Qn', 'YYYY-MM', 'YYYY-MM-DD', 'YYYY-Wnn' with weeks starting Monday / week 1 = first Thursday); rows with null/unparseable dates must land in ONE real-null-keyed bucket (#3839 — never a '(null)' sentinel string). The TIMEZONE lever is not on this door: POST /api/v1/data/showcase_account/query refuses a `timezone` key 400 INVALID_FIELD (the protocol does not forward one; engine.aggregate reads only query.timezone). The one wire lever is POST /api/v1/analytics/query with `timezone` — on the stock cube showcase_delivery, a count measure over its time dimension due_date at granularity day, once at UTC and once in a negative-offset zone such as America/Los_Angeles (QA run #24595: the answer's data.sql is present on the driver path and absent on the in-memory one, and the SQL echo refuses a non-UTC bucket)",
         "empty-set semantics: (a) a query whose where matches nothing, grouped and ungrouped; (b) a per-aggregation filter (#10576 — aggregations[].filter, SQL FILTER(WHERE …) semantics) that empties one measure while a sibling measure keeps the full bucket. Expected per the platform ruling (emptyGroupValueFor, packages/spec/src/data/aggregation-policy.ts): count/count_distinct/sum → 0, avg/min/max → null — a 0 flattened onto avg (or a null on count) is a FAIL either direction (objectui#3136)",
@@ -1971,6 +2025,12 @@
           "date": "2026-10-19",
           "change": "steps[3], steps[5], knownGaps[1] and negative[2] name the doors that answer — checklist-accuracy findings of the 18.0 QA sweep (QA run #24541 step 6, and QA run #24595 knownGaps[1] / step 4 / negative[2], api-backend.aggregate-contract-matrix; wave anchor #24579 §3, comment 6272314386). On POST /data/:object/query a non-array aggregations is refused by the request schema before the protocol's worked example, and that door carries no timezone; the lever is POST /api/v1/analytics/query on cube showcase_delivery / due_date. negative[2] now says a date dimension's labels are zone-independent; that row's FAIL was the product defect #24618, which PR #24642 (787939130c) fixed on main after this round's base; the clause is unchanged. Re-derived at base 9a7838edf5 (protocol.ts assertAggregationFieldsExist, objectql engine.ts ENGINE_AGGREGATE_OPTION_KEYS, spec data/analytics.zod.ts timezone, examples/app-showcase/src/data/analytics/showcase.cube.ts)",
           "ref": "#24649"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[1] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -2216,7 +2276,7 @@
       "title": "RestServerConfig.crud is the CRUD surface's construction contract: five switches gate six mounts, dataPrefix moves the routes and their discovery advertisement together, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2235,7 +2295,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; as admin fire the six default-config data mounts and capture status per route: GET /api/v1/data/showcase_task (list), GET /api/v1/data/showcase_task/<id> (read), POST /api/v1/data/showcase_task (create), POST /api/v1/data/showcase_task/query (the QueryAST door), PATCH /api/v1/data/showcase_task/<id> (update), DELETE /api/v1/data/showcase_task/<id> (delete)",
+        "boot the showcase on its own port and DB; as admin fire the six default-config data mounts and capture status per route: GET /api/v1/data/showcase_task (list), GET /api/v1/data/showcase_task/<id> (read), POST /api/v1/data/showcase_task (create), POST /api/v1/data/showcase_task/query (the QueryAST door), PATCH /api/v1/data/showcase_task/<id> (update), DELETE /api/v1/data/showcase_task/<id> (delete)",
         "fire the routing-404 control (GET /api/v1/definitely-not-a-route) and keep its body — every absence verdict below is scored against this shape, never against a bare status",
         "GET /api/v1/discovery and read routes.data — it must equal the base plus the configured dataPrefix",
         "harness: construct a RestServer with { crud: { operations: { create: false } } }, registerRoutes(), and read getRoutes() — POST {dataPrefix}/:object must be absent while the other five mounts remain",
@@ -2330,6 +2390,12 @@
           "date": "2026-10-19",
           "change": "knownGaps[1], automated.ref and acceptance[2] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24541, api-backend.rest-crud-config-contract knownGaps[1] + automated.ref and acceptance[2]; wave anchor #24579 §3). \"The MOUNT half has no permanent pin\" is stale: rest-config-mount-table.pin.test.ts (#15544) pins every crud.operations.* radius, measured at base 9a7838edf5 under os-verify-lock (24 passed). acceptance[2] was an api clause no stock boot can observe (knownGaps[0] makes every non-default clause harness-scored) and its dispatcher-vs-hono-route trap is not discharged by a RestServer-only table, since the dispatcher's data domain also serves /data; it now reads oracle test and says so. Re-derived at base 9a7838edf5; FOLLOW-UPS.md is not edited here",
           "ref": "#24649"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -2338,7 +2404,7 @@
       "title": "RestServerConfig.batch is the bulk surface's construction contract: three switches and enableBatchEndpoint gate four per-object mounts (each ANDed with its protocol member), maxBatchSize is the one cap every bulk door measures, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2358,7 +2424,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; as admin fire the four per-object bulk doors on the default config and capture status: POST /api/v1/data/showcase_private_note/batch, /createMany, /updateMany, /deleteMany; fire the routing-404 control alongside them",
+        "boot the showcase on its own port and DB; as admin fire the four per-object bulk doors on the default config and capture status: POST /api/v1/data/showcase_private_note/batch, /createMany, /updateMany, /deleteMany; fire the routing-404 control alongside them",
         "fire the cross-object door POST /api/v1/batch on the same boot — it is NOT gated by enableBatchEndpoint and must answer whether or not the per-object door is switched off",
         "cap probe on the live boot: POST /createMany with 201 records against the default cap of 200; capture the status, code and the reported max",
         "harness: construct with { batch: { enableBatchEndpoint: false } }, registerRoutes(), read getRoutes() — POST {dataPrefix}/:object/batch is absent, the three *Many mounts and POST {basePath}/batch remain",
@@ -2459,6 +2525,12 @@
           "date": "2026-10-19",
           "change": "knownGaps[1] and automated.ref corrected — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.rest-batch-config-contract knownGaps[1] + automated.ref; wave anchor #24579 §3): the mount half has a permanent pin, rest-config-mount-table.pin.test.ts (#15544), covering batch.enableBatchEndpoint, operations.*Many and the protocol-member conjunct — measured at base 9a7838edf5 under os-verify-lock (24 passed). No clause changed; FOLLOW-UPS.md is not edited here",
           "ref": "#24649"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -2467,7 +2539,7 @@
       "title": "RestServerConfig.metadata is the metadata surface's construction contract: prefix moves eleven mounts and their discovery advertisement, four endpoint switches each gate exactly the face its name states (#15542/#15854), maskObjectFields is the ADR-0106 D8 disclosure gate, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2488,7 +2560,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; as admin fire the default-prefix metadata mounts and capture status: GET /api/v1/meta, /meta/types, /meta/diagnostics, /meta/_drafts, GET /meta/object, GET /meta/object/showcase_task, /meta/object/showcase_task/references, /meta/object/showcase_task/layers, /meta/book/<a seeded book>/tree; fire the routing-404 control alongside",
+        "boot the showcase on its own port and DB; as admin fire the default-prefix metadata mounts and capture status: GET /api/v1/meta, /meta/types, /meta/diagnostics, /meta/_drafts, GET /meta/object, GET /meta/object/showcase_task, /meta/object/showcase_task/references, /meta/object/showcase_task/layers, /meta/book/<a seeded book>/tree; fire the routing-404 control alongside",
         "GET /api/v1/discovery and read routes.metadata — it must equal the base plus the configured prefix",
         "as the restricted persona (a member bound to the client_liaison position) GET /api/v1/meta/object/showcase_project and diff the served fields against the admin's copy of the same document",
         "harness: construct with { metadata: { prefix: '/metadata' } } and confirm every metadata mount re-bases and the discovery body advertises the new prefix",
@@ -2601,6 +2673,12 @@
           "date": "2026-10-19",
           "change": "steps[8], acceptance[4] (clause, verify) and personas[1] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24541, api-backend.rest-metadata-config-contract acceptance[4] / step 9 and personas[1]; wave anchor #24579 §3). The enableCache carve-outs are SEVEN: a ?member= read also bypasses getMetaItemCached (packages/rest/src/meta-item-read-routes.ts, memberScoped, #22877, at base 9a7838edf5); and personas[1] still named showcase_account, which revision 4 moved to showcase_project / client_liaison everywhere else in the item",
           "ref": "#24649"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
