@@ -1,5 +1,580 @@
 # @objectstack/plugin-webhooks
 
+## 18.0.0
+
+### Minor Changes
+
+- fc34d00: feat(plugin-webhooks): under `group` and `isolated`, a declared webhook is deployment-wide, as it is under `single`; it receives every organization's events, and each delivery is stamped with its event's organization
+  
+  Clause-②: yes (widening)
+  
+  A webhook declared with `defineStack({ webhooks })` belongs to the deployment under every tenancy posture (ADR-0131 D2/D6, the epic's ruling A on the walled shape of a declared webhook).
+  
+  - **Before.** Under a walled posture (`group` / `isolated`) a declared webhook had no organization, so the dispatcher refused every organization-stamped event it matched. It logged one warning per webhook and delivered nothing.
+  - **Now.** Switched on, it receives every organization's matching events, as under `single`. Each `sys_http_delivery` row is stamped with its event's organization, so an organization reads only its own deliveries. The switch is unchanged: one deployment-level `sys_metadata_activation` row through `POST /api/v1/security/_activation/webhook/<name>`. Under a wall only the platform operator may flip it; an organization administrator gets `403 PERMISSION_DENIED`.
+  - **Unchanged.** Webhooks an organization authors as `sys_webhook` rows still receive only their own organization's events.
+  
+  **If you relied on the old behaviour.** A walled deployment that declared a webhook it did not want delivered across organizations should switch it off: `POST /api/v1/security/_activation/webhook/<name>` with `{ "enabled": false }`, as the platform operator.
+- fc34d00: feat(plugin-webhooks)!: a `sys_webhook` row can no longer take a declared webhook's name — an insert of one, or a rename onto one, is refused with `409 RESOURCE_CONFLICT`
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A write-door narrowing on one platform table: no spec key, export of the spec, option or stored metadata shape is added, removed or renamed, so `objectstack migrate meta` has nothing to rewrite; rows already stored are never touched, and the remedy is a run-time one, stated below -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the launch-window convention for breaking changes (ADR-0131 D6 regime C).
+  
+  A declared webhook (`defineStack({ webhooks })`) is read-only, and a `sys_webhook` row holding its name withholds the declaration for the whole deployment. Under a walled posture one organization's same-name row would silence the declaration for every organization. So no write may take a declared name, as declared sharing rules already do.
+  
+  - **Refused now.** A non-system insert into `sys_webhook` whose `name` is declared, switched on or off, and an update that changes `name` onto a declared one. Every door is covered (Setup, the `/data` API, scripts, AI tools): the refusal is `DeclaredWebhookNameConflictError`, `code: 'RESOURCE_CONFLICT'`, `status: 409`, naming the declared webhook.
+  - **Unchanged.** System writes (the platform's own sweeps and migrations). An update that keeps its name, so the rows an 18.0 install's seeder wrote, and the ones an administrator customised there, stay editable as before. Names nothing declares.
+  
+  **The remedy.** To change a declared webhook, author your own `sys_webhook` row under another name, and switch the declared one off: `POST /api/v1/security/_activation/webhook/<name>` with `{ "enabled": false }`.
+- 191e043: feat(plugin-webhooks,runtime)!: declared webhooks are read from the registry — the boot seeder retires, no `sys_webhook` row is written for one, and it is switched through the activation ledger
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no spec key, export, option or stored metadata shape is added, removed or renamed, so `objectstack migrate meta` has nothing to rewrite; the rows an 18.0 seeder wrote stay in place and keep working, and what changes is where a declared webhook lives and how it is switched -->
+  
+  **BREAKING** (a narrowing of where a declared webhook can be edited), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0131 D2 says no seeder writes declared items into a table, and D6 charts behavioural types under regime C. A webhook declared with `defineStack({ webhooks })` now follows both, as declared sharing rules already do: the dispatcher reads the declaration from the metadata registry on every subscription-cache refresh, and `bootstrapDeclaredWebhooks` no longer runs.
+  
+  What changes:
+  
+  - **No `sys_webhook` row for a declared webhook.** Before: every boot wrote or refreshed one `managed_by: 'package'` row per declared webhook, shown and editable in Setup → Integrations → Webhooks. Now: a fresh install writes none, and Setup lists only the webhooks an organization authors. The declared webhook still delivers, with the same URL, method, triggers, `timeoutMs`, signing secret and headers; its secret and headers are code, held in memory, and never stored. Its deliveries carry `ref_id = declared:<name>`.
+  - **A declared webhook is read-only, and switched through the activation ledger.** Before: an administrator edited the seeded row in Setup (`customized: true`). Now: switch it on or off for the deployment with `POST /api/v1/security/_activation/webhook/<name>` and `{ "enabled": true | false }` — one `sys_metadata_activation` row of type `webhook`, which overrides the declared `isActive` in either direction, so a webhook shipped inactive is switched on the same way. The door is the declared-sharing-rule door with `webhook` admitted: `manage_metadata`, then the platform operator under a wall; `404` for a name nothing declares; `503` when no declared-webhook reader is bound or it cannot be read. The dispatcher refreshes in the request that wrote the row. Remedy for a change beyond on/off: author a copy under a new name as a `sys_webhook` row, and switch the declared one off.
+  - **`label` and `description` on a declared webhook are no longer shown anywhere.** The seeded row was their only reader. They are display-only, so no delivery changes; the liveness ledger marks them dead, owed enforce-or-remove.
+  
+  On a database an 18.0 install created (expand first — nothing is moved or deleted):
+  
+  - The rows the 18.0 seeder wrote stay where they are until the ownership ceremony settles them, and the v18 boot guard refuses the database until the ceremony has certified it. A pristine copy (`managed_by: 'package'`, not `customized`) is deleted by the ceremony, its deliveries re-pointed at the declaration, so a declared webhook is never delivered twice.
+  - A seeded row an administrator edited (`customized: true`), or a row an administrator authored under a declared name, answers as itself, and the declaration is not dispatched beside it — an administrator's `active: false` on a noisy webhook keeps holding. This is logged at `warn` once per name per process, with the remedy.
+  - A seeded row whose declaration was removed keeps delivering, as it did on 18.0.
+  - Redelivering an old delivery of a pristine seeded copy is judged by the declaration, because the ceremony re-points that delivery at `declared:<name>`; a webhook switched off through the ledger is not re-sent.
+  
+  Deleting the seeded rows, and re-pointing their `sys_http_delivery` history at the declaration, is the ownership ceremony's `declared-webhooks` step (`os migrate organization-ownership`).
+- 12d1476: feat(cli,runtime)!: `os migrate organization-ownership` upgrades a database 17.x or an 18.0 pre-release created; a server serves only a database it created or one the ceremony certified
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The data migration this change prescribes is the operator's ceremony, `os migrate organization-ownership`, stated below; the boot refusal names it. Two `@objectstack/objectql` exports are removed, `WALLED_ORGANIZATION_LESS_BRIDGE` and `isWalledOrganizationLessBridgeObject`: they named the two tables whose organization-less inserts were let through under a wall while those tables still carried an organization column, and both tables now declare none. Neither is a metadata key and no stored row or stack names them, so a caller has nothing to migrate: drop the import, since a deployment-level table is recognised by `systemFields: { tenant: false }`. -->
+  
+  **BREAKING** for a database with no birth marker — one 17.x or an 18.0 pre-release (`18.0.0-next.*`) created — shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D10).
+  
+  - **The ceremony is open.** `os migrate organization-ownership` runs again (the 18.0 pre-releases refused it with `NOT_IMPLEMENTED`): a bare run writes the plan, and `--apply --plan-file PLAN --backup-taken` applies that reviewed plan. Its new steps carry what an 18.0 pre-release database still owes, each selected by the rows' shape, never by a NULL organization:
+    - `sibling-moves`: the global settings-audit rows move to `sys_platform_setting_audit`, and identity mail (reset, verification, account invitation, change-email notice, magic link) to `sys_identity_email`, id for id. Their queued mail jobs and their activity rows follow them. The organization invitation stays in `sys_email`.
+    - `declared-webhooks`: each `sys_webhook` copy a package's seeder wrote under a name a package still declares is settled. A pristine copy is deleted once its deliveries name the declaration (`declared:NAME`), with the cipher it referenced. A copy customized only in its switch becomes the declaration's activation row. Any other edit becomes the administrator's own webhook under a new name (`NAME_custom`), and the declaration is switched off.
+    - `declared-rule-copies`: each stored sharing rule under a declared rule's name becomes a clone under a new name, its grants kept, and the declaration is switched off.
+    - `not-null`: after the column drops, every table the post-step plan clears takes `organization_id` NOT NULL. The ceremony owns that nullability, so the schema differ no longer reports it as `relax_not_null` drift.
+  - **The boot guard decides on a marker.** The first boot that creates a datastore from empty writes a birth marker (`sys_migration` row `adr-0131-organization-ownership`, `details.birth.shapeGeneration`). Every CLI data boot writes it too, so a fresh install whose first command is `os migrate apply` or `os seed` still boots. On the Turso remote face (`libsql://`), `getSchemaSyncStats` now answers what its schema doors created and found (it answered `{ created: 0, existing: 0 }` before), so a fresh remote database is observed as one and gets its marker. The ceremony's verified marker carries the same `shapeGeneration` (now `1`, `ORGANIZATION_OWNERSHIP_SHAPE_GENERATION` in `@objectstack/spec/system`). A server refuses a database with no marker (one 17.x or an 18.0 pre-release created), one certified at an older generation, or an uncertified one. The refusal names the command and no longer says to stay on 17.x. The v17-shape probe also reads `tenancy: { enabled: false }` and `systemFields: false`.
+  - **`sys_secret` and `sys_flow_credential` are deployment-level** (`systemFields: { tenant: false }`). Their `organization_id` is dropped by the ceremony's column-drops step. The settings service no longer writes one, and `SettingsSecretStore.insert` no longer takes it. With no organization column, their organization-less system inserts land under a walled posture on the engine's own rule, so `@objectstack/objectql` no longer exports `WALLED_ORGANIZATION_LESS_BRIDGE` or `isWalledOrganizationLessBridgeObject`, and the system-write refusal's remedy names `systemFields: { tenant: false }`.
+  
+  **What an operator does.** Fresh installs are supported under every tenancy posture and need nothing. Before serving a database 17.x or an 18.0 pre-release created with this release: start this release against it once (the boot is refused, and its schema sync has already created the tables this release adds, which the ceremony moves rows into), take a backup, run `os migrate organization-ownership --out plan.json`, review the plan, then run `os migrate organization-ownership --apply --plan-file plan.json --backup-taken`, and start the server. `os dev` does this for a local SQLite development database. On a walled database, a customized copy of a declared webhook or sharing rule blocks its step, naming the row: rename it to a name no package declares, or delete it, then re-run.
+- bd6dab0: refactor(plugin-webhooks,platform-objects)!: 18.x step 7c retires the dual reads steps 1–2 added for 18.0 databases. Any `sys_webhook` row that holds a declared webhook's name now answers as itself. `sys_setting_audit.scope` no longer declares `global`.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped, and no public export, type or error code is removed or renamed. Two things narrow at run time. The dispatcher no longer skips a pristine seeded webhook row in favour of its declaration (an internal reader, never exported). A stored select value is refused on one platform object. Both apply only to rows the v18 ownership ceremony settles or moves before a database is certified, and the v18 boot guard refuses a database it has not certified. -->
+  
+  **BREAKING** narrowing, shipped as `minor` under the launch-window convention for breaking changes (ADR-0087, the ratified pre-launch launch-window section; the decisions retired here are ADR-0131 D2, D6 and D7). The 18.x upgrade ceremony settles every row these readers existed for before a database is certified, so a certified database and a fresh install read the same either way.
+  
+  - **Declared webhooks (plugin-webhooks).** Before: a `sys_webhook` row seeded by the 18.0 seeder under a declared name, and never edited (`managed_by` `package`/`platform`, not `customized`), was skipped as a "mirror". The declaration answered in its place, for dispatch and for redelivery. Now: any row holding a declared name answers as itself and the declaration is withheld, reported once per name (regime C). The ceremony (step 5a) deletes or settles every such copy, so on a certified database this changes one case only. A seeded row the ceremony kept, because no package declared its name then, now withholds a declaration of that name added later, where before it was skipped. **Remedy:** rename or delete that row, and the declaration answers. The provenance stamp (`customized`) stays: the ceremony still reads it when a superseding reviewed plan re-runs the ceremony from the start.
+  - **Settings audit (platform-objects).** Before: `sys_setting_audit.scope` declared `global`, `tenant` and `user`, and a reader of the global rung's history read both `sys_setting_audit` and `sys_platform_setting_audit`. Now: `sys_setting_audit.scope` declares `tenant` and `user` only, and an insert with `scope: 'global'` is refused (`VALIDATION_FAILED` on `scope`). The global rung's history is `sys_platform_setting_audit` alone. The settings service already wrote global-rung rows there, and the ceremony (step 5b) moves every 18.0 row. **Remedy:** none for a certified database. A script that wrote audit rows by hand writes global-scope rows to `sys_platform_setting_audit`.
+  - **Unchanged.** Identity mail: only docblocks change. The tenant mail log keeps its body read gate, and a mail job with no object still reads `sys_email`, because a tenant mail row an 18.0 process queued stays there.
+- 0984817: feat(plugin-webhooks): the `webhooks` service serves the redeliver door from a web-standard `Request` (`IWebhookService.handleRedeliver`), and the redelivery veto no longer waits for realtime (#22756)
+  
+  Clause-②: yes
+  
+  - **What is new.** The plugin registers the `webhooks` service and implements its optional `IWebhookService.handleRedeliver(request)` member: the webhook redeliver door, `POST /api/v1/webhooks/redeliver`, from a `Request` to a `Response`, with no raw app, no Hono context and no `http.server`. A hosted tenant kernel owns no socket, so this is how the door reaches it; its one caller is the runtime HTTP dispatcher's `POST /webhooks/redeliver` domain, which lands separately.
+  - **One door, two faces.** The member and the self-hosted route run the same code: the same session check, the same active-organization tenant, the same replay through `MessagingService.redeliverHttp` and the same answer for every outcome. For the same request they answer the same status, the same `Content-Type: application/json` and the same bytes: `401 UNAUTHENTICATED`, `400 INVALID_REQUEST`, `400 MISSING_REQUIRED_FIELD`, `404 RESOURCE_NOT_FOUND`, `409 DELIVERY_NOT_ELIGIBLE`, `409 DELIVERY_NEVER_SENT`, `500 INTERNAL_ERROR`, or `200` with the row's id and new status.
+  - **The redelivery veto is installed wherever the door is.** The veto that refuses to replay a webhook delivery whose subscription is gone, or whose signing secret cannot be recovered, now needs only the data engine and the messaging service. It used to be installed only when realtime was present and `autoEnqueue` was not `false`, so on other kernels such a delivery was replayed. It is now refused with `409 DELIVERY_NOT_ELIGIBLE` there too. The `webhooks` service is registered only where the veto is installed.
+  - **The route is found under `http.server` too.** The plugin reads `http.server` first, then the `http-server` alias. A host that registers its server only as `http.server` now gets the self-hosted route; one that registers it under both names gets it once.
+  - **The self-hosted route is otherwise unchanged.** Where it was mounted before, it answers the same status, headers and bytes for the same request, and it is never mounted twice.
+- 08b38cb: fix(services)!: the datasource admin, share-link, webhook redeliver and storage families refuse a session the ADR-0069 authentication policy holds
+  
+  Clause-②: no (narrowing) — a session ADR-0069 holds out of protected resources is refused by families that answered it; core's existing exports only, no published schema or export moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at four families of routes mounted directly on the host server, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped, and a session the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which sessions these families serve: a session whose user carries the ADR-0069 posture (an expired password, or enforced MFA not yet enrolled) is now refused with the gate's 403 before any of the family's logic runs. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers these routes and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 holds a signed-in user out of every protected resource while their password has expired or while enforced MFA is not yet enrolled, until they remediate. REST and the runtime dispatcher already refuse such a session. Four families of routes mounted straight on the host server never asked, so they served it as an ordinary signed-in caller:
+  
+  - **`@objectstack/service-datasource`**: the datasource admin family (`registerDatasourceAdminRoutes`). Its door now asks the shared decision (`evaluateAuthGate`, `@objectstack/core`) about the session it already reads, before the anonymous floor and the capability check.
+  - **`@objectstack/plugin-sharing`**: the share-link family (`registerShareLinkRoutes`). Every route, the two capability-token routes included, is now mounted through one door that refuses a context carrying `authGate`. `SharingServicePlugin`'s resolver now puts the session's posture on that context, as REST does.
+  - **`@objectstack/plugin-webhooks`**: the redeliver door (`WebhookOutboxPlugin`), on both of its faces: the route the plugin mounts, and the `webhooks` service's `handleRedeliver`.
+  - **`@objectstack/service-storage`**: the storage family, the two capability-token raw-transfer routes included. Every route is now mounted through one door. The posture is bound where every other storage gate is bound, so both the plugin's own mount and the host door `mountStorageRoutes` carry it. When a gate feature is active, the door reads the session and refuses a held one. When the gate is active but the session cannot be read, the door answers the declared `503` (`SERVICE_UNAVAILABLE`), as REST does. A direct call of `registerStorageRoutes` mounts the family exactly as before, because like the other storage gates this one is bound by the package's composition. No exported declaration changes.
+  
+  - **Refused now:** a held session gets `403` with the gate's own `code` (`PASSWORD_EXPIRED` or `MFA_REQUIRED`) and `message`, in each family's declared error envelope, before the family does anything else. This is the answer REST gives the same session.
+  - **Unchanged:** a session the policy does not hold is served exactly as before, and an API-key caller is unaffected because it has no session to hold. A CORS preflight is answered as before.
+  
+  What changes for you. A user the policy holds must remediate (change the password, or enroll an authenticator) before these routes answer them, as on every other protected route. If you mount the storage routes through `mountStorageRoutes`, the gate is bound from the kernel's `auth` service with nothing to configure. If you mount `registerShareLinkRoutes` yourself with your own `contextFromRequest`, set `authGate` on the context it returns for a held session; the door refuses on that field.
+
+### Patch Changes
+
+- 39e93b9: fix(plugin-sharing, plugin-webhooks): the `by_object` lists of sharing rules and webhooks no longer head each group with an object API name
+  
+  Clause-②: no
+  
+  - **`sys_sharing_rule.by_object` and `sys_webhook.by_object` sort by object instead of grouping on it.** Both grouped on `object_name`, and a group header draws its value as stored text, so each group was headed by an API name such as `crm_account`. The sort on `object_name`, then `label`, still keeps one object's rows together, and the Object column still draws each object's icon and label.
+  - **Unchanged:** `object_name` stays a declared field on both objects, with the same widget, and no stored column, index or query changes.
+  
+  A patch: one list view key is removed on each of two shipped platform objects. No export, type, accepted value, stored column or authorable key changes.
+- 4f4c4ed: fix(auth,services): the remaining in-process session reads no longer renew a browser session behind its cookie (#22258)
+  
+  **What was wrong.** better-auth's `getSession` renews a session older than `session.updateAge`: it moves `sys_session.expires_at` to `now + expiresIn` and stages the renewed session cookie on that call's own response. Nine doors in these packages read the session in-process (`auth.api.getSession({ headers })`) and answer with their own response, so the renewal landed in the database and its cookie was discarded. The browser kept its old cookie, which then expired before the session: a dead cookie beside a live bearer, after which every cookie-only path saw a signed-out user. The doors: `POST /api/v1/auth/admin/oauth2/toggle-disabled`, every `/api/v1/auth/admin/*` mount behind the shared platform-admin gate, `POST /api/v1/auth/admin/unlock-user` and `POST /api/v1/auth/admin/has-permission` (`@objectstack/plugin-auth`); `POST /api/v1/webhooks/redeliver`; the storage upload and download doors (`/api/v1/storage/*`); the share-link management routes (`/api/v1/share-links`); the settings routes (`/api/settings`); and the datasource-admin routes (`/api/v1/datasources/*`).
+  
+  **The rule now** is the one the REST, dispatcher, current-user and cloud-connection doors already follow. Each of these reads goes through `inProcessSessionReadInput(headers)` from `@objectstack/types`:
+  
+  - **A request carrying a session cookie** (a browser, including a console that sends its cookie beside its bearer) reads with `query.disableRefresh`. The session renews only through `GET /api/v1/auth/get-session`, which re-issues the cookie with `Max-Age = expiresIn`, so cookie and session expire together.
+  - **A bearer-only request** (`@objectstack/client` outside a browser, the `os` CLI) is unchanged: a read past `updateAge` still renews the session, and no cookie is set on a response to a request that sent none.
+  
+  **Upgrading.** Nothing to change. `@objectstack/plugin-webhooks` now depends on `@objectstack/types` directly; it already reached it through `@objectstack/core`.
+- bb0db13: The webhook redeliver veto now refuses a delivery whose `sys_webhook` subscription is inactive. The `active` field declares that an inactive webhook is skipped by the dispatcher, and an operator's explicit replay is the dispatcher too, so the declaration now holds on both paths.
+  
+  Clause-②: no
+  
+  - FROM: the redeliver door (`POST /api/v1/webhooks/redeliver`, and the `webhooks` slot's `handleRedeliver`) replayed a finished delivery whose subscription had `active` switched off. The veto refused only a subscription that was gone, or whose signing secret could not be recovered.
+  - TO: the door answers `409 DELIVERY_NOT_ELIGIBLE` for that delivery and leaves the row as it is. The message names the webhook, says it is inactive, and names the remedy. The test is the dispatcher's own predicate, `active === true`, so a row whose `active` is null or absent is refused exactly as the dispatcher skips it. Every row the engine writes carries a boolean there: the field is required, with default `true`.
+  - Fix, for an operator who means to replay: re-activate the webhook, then redeliver.
+  
+  The gone-subscription and unrecoverable-secret refusals are unchanged, in text and in order. The inactive check runs after the gone check and before the secret check, so an inactive webhook whose key is also unrecoverable is refused as inactive, the first remedy to try. No code, status, field or export changes.
+- af284b0: feat(spec): the remaining `getSession` readers read `AuthSessionApi`'s declared result, and none reads a top-level `activeOrganizationId`
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec/contracts` — `AuthSessionApi.getSession`'s result gains three optional `user` members**, each declared for a named reader: `isPlatformAdmin` (`boolean`, the ADR-0068 D2 rung plugin-auth's `customSession` derives) and `role` (`string | null`, better-auth's `admin` plugin scalar), both read by `judgePlatformAdmin` in `@objectstack/plugin-auth`; and `name` (`string`), read by the runtime dispatcher's AI-route `req.user` resolver as the display name. Every member is optional, so every implementer and caller typechecks unchanged.
+  - **The readers read through the declared type instead of `any` or a cast** (types only, runtime behaviour unchanged): `judgePlatformAdmin` and the four platform-admin mounts in `@objectstack/plugin-auth` (better-auth's own session type now has to fit the declaration at those reads), the REST server's two session reads (`@objectstack/rest`), the dispatcher's posture read, `resolveSessionData` and both `HttpDispatcher` reads (`@objectstack/runtime`), the cloud-connection and install-local session reads (`@objectstack/cloud-connection`), the webhook redeliver door (`@objectstack/plugin-webhooks`), and the storage session bridge (`@objectstack/service-storage`).
+  - **Fix — the top-level `activeOrganizationId` fallback is removed** from the storage upload stamp (`@objectstack/service-storage`) and from install-local's `resolveActiveOrgId` (`@objectstack/cloud-connection`). The active organization is read from `session.activeOrganizationId` alone, where the contract declares it. No in-process producer answers a top-level `activeOrganizationId` (better-auth's read is `{ user, session }`), so for the shipped auth plugin nothing changes. An auth service that answered only the flattened shape now gets no organization: the upload is not stamped, and install-local reports no active organization. To fix it, answer the active organization on `session.activeOrganizationId`, as `AuthSessionApi` declares it.
+- Updated dependencies [5a871e4]
+- Updated dependencies [ffba02e]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [1b40780]
+- Updated dependencies [d11fa8c]
+- Updated dependencies [ca426cb]
+- Updated dependencies [4ad3ce5]
+- Updated dependencies [8016a9d]
+- Updated dependencies [df9d07e]
+- Updated dependencies [8eac321]
+- Updated dependencies [a5a781b]
+- Updated dependencies [9a7838e]
+- Updated dependencies [191e043]
+- Updated dependencies [b12e16a]
+- Updated dependencies [fbafb85]
+- Updated dependencies [35450f0]
+- Updated dependencies [1e8b628]
+- Updated dependencies [12d1476]
+- Updated dependencies [bd6dab0]
+- Updated dependencies [14ccb1d]
+- Updated dependencies [c0803b0]
+- Updated dependencies [d117382]
+- Updated dependencies [4bc3bec]
+- Updated dependencies [1f949da]
+- Updated dependencies [ecb7b44]
+- Updated dependencies [41edf73]
+- Updated dependencies [1c1144f]
+- Updated dependencies [014863d]
+- Updated dependencies [3983965]
+- Updated dependencies [3230d66]
+- Updated dependencies [0c910d5]
+- Updated dependencies [9d13b5f]
+- Updated dependencies [317cddd]
+- Updated dependencies [b2e7870]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [dac99c2]
+- Updated dependencies [0d3ea29]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [0253192]
+- Updated dependencies [48cca4a]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [66949b7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [f9b4217]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [7958bdf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [a7a48b7]
+- Updated dependencies [b88c356]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [0db5ad5]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [4e4111c]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [0b7ba4d]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [b15f8a1]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [746637e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [194a42d]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [31b5a5f]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [87e902d]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [777eed2]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [ed03834]
+- Updated dependencies [e1deaef]
+- Updated dependencies [3071d3e]
+- Updated dependencies [d294951]
+- Updated dependencies [6a6a4d3]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [4216796]
+- Updated dependencies [a22e67b]
+- Updated dependencies [5f37d36]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [1912af4]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [5d63c37]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [60f9baf]
+- Updated dependencies [f5ef054]
+- Updated dependencies [584e737]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [301eec6]
+- Updated dependencies [572ecfb]
+- Updated dependencies [5547ad4]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [24e064f]
+- Updated dependencies [0f05907]
+- Updated dependencies [5e725b8]
+- Updated dependencies [086fa46]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [f606ba2]
+- Updated dependencies [d176b0a]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [ee0e115]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [0a052e6]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [c03077e]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [f7af839]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [a237d7f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [45e6001]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [9f024d8]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [fa26308]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [01fafde]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [26501ae]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [94e60c0]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [adb7910]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [b7a688e]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [8311650]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [325a92e]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/core@18.0.0
+  - @objectstack/spec@18.0.0
+  - @objectstack/platform-objects@18.0.0
+  - @objectstack/types@18.0.0
+  - @objectstack/service-messaging@18.0.0
+
 ## 18.0.0-next.5
 
 ### Patch Changes

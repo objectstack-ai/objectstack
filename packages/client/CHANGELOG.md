@@ -1,5 +1,559 @@
 # @objectstack/client
 
+## 18.0.0
+
+### Minor Changes
+
+- 6a3fe25: feat(spec,service-storage,client)!: one upload-scope list — the upload requests' `scope` and the SDK's `storage.upload` close to the new `UploadScope` enum, the `sys_file` scope select is built from it, and the upload doors answer any other scope with `400` naming the allowed values instead of `500 INTERNAL` (#22470)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered upload-request-scope-closed -->
+  
+  **BREAKING** — an accept-set narrowing on a published request contract and on the SDK method that sends it, shipped as `minor` under the launch-window convention for accept-set narrowings, plus one new export.
+  
+  The presigned and chunked upload requests declared `scope` an open string, while the stored file record (`sys_file.scope`, a closed select) only ever took `user`, `tenant`, `private`, `temp` and `attachments`. Any other value reached the `sys_file` insert, the data engine refused it as an invalid option, and the upload door answered that caller error as `500 INTERNAL`, with a message telling the operator to restore the data engine.
+  
+  ### What changes
+  
+  - **`UploadScopeSchema` / `UploadScope`** (`@objectstack/spec`, new, exported from `@objectstack/spec/api`): the upload-scope vocabulary, declared once — `user`, `tenant`, `private`, `temp`, `attachments`. It is a different list from `StorageScopeSchema`, which classifies a storage configuration and is not read by any upload.
+  - **`GetPresignedUrlRequestSchema.scope` and `InitiateChunkedUploadRequestSchema.scope`** read it. The default stays `user`. A literal outside the list fails `tsc`, and a parse refuses it on the `scope` key.
+  - **`client.storage.upload(file, scope)`** (`@objectstack/client`): the `scope` parameter is typed `UploadScope` instead of `string`, default `user` unchanged, so a scope outside the list fails `tsc` at the SDK call. `client.storage.getPresignedUrl` and `client.storage.initChunkedUpload` take the request types above and narrow with them.
+  - **The `sys_file` scope select** (`@objectstack/service-storage`) takes its options from the enum, in its order, with the same labels. The stored values do not change.
+  - **The presigned upload door and the chunked upload door** answer a scope outside the list — any string, a case variant, `null`, a number — with `400 INVALID_REQUEST`, naming the allowed values, before a file record, a session record, an upload URL or a backend upload exists. `public` is refused by the same gate and keeps its remedy (`acl: 'public_read'` on the stored file record). An omitted scope is the default `user`, as before. A real data-engine fault still answers `500`.
+  
+  ### FROM → TO
+  
+  | before | what to write instead |
+  | --- | --- |
+  | an upload naming a scope outside the list (a key prefix such as `avatars`, a folder, a record path) | one of `user`, `tenant`, `private`, `temp`, `attachments`, or no `scope` for the default `user` |
+  | `client.storage.upload(file, scope)` called with a `scope` typed `string` (`@objectstack/client`) | pass one of the five, or type the value `UploadScope` (`import type { UploadScope } from '@objectstack/spec/api'`) |
+  | a caller passing a scope typed `string` into either upload request | type it `UploadScope` |
+  
+  **The one-line fix: send one of the five upload scopes, or none.** `attachments` is for a file whose referrers are record attachment rows (it is what orphan tombstoning reads); `temp` for a scratch file; otherwise `user` or `tenant`.
+  
+  **No stored file record moves**: no upload naming another scope ever succeeded, so no stored record carries one.
+  
+  ### The kit
+  
+  - **D3 entry `upload-request-scope-closed`** carries the judgement no rewrite can make: which scope a file that was sent under a free name really belongs under. No D2 conversion: no metadata type carries the upload request, so `os migrate meta` has no authored source to rewrite.
+  - **Liveness.** No ledger row: the liveness ledger walks metadata types, and no metadata type carries the upload request.
+- 490cb6d: A write answer now carries the advisory validation-rule hits of that write as `warnings`
+  
+  Clause-②: yes (widening)
+  
+  A `severity: 'warning'` or `'info'` validation rule never blocks a write. Until now its hit was only logged on the server, so no client could show the person who saved what the rule says. A create, an update or a clone now answers the hits of that one write, and the validate-only preview reports the same entries.
+  
+  - **Write answers.** `CreateDataResponseSchema`, `UpdateDataResponseSchema` and `CloneDataResponseSchema` declare an optional `warnings`: one entry per advisory rule hit, carrying the rule's `name` as `rule`, its `severity`, the `field` it is about, the finding `code` and the author-written `message`. The key is absent when there is no hit, so an existing client's reading of the answer does not move. REST relays it in the response body unchanged. The write's status and record are unchanged, and an `error` rule still refuses the write.
+  - **One element, shared with the preview.** `ValidateDataIssueSchema` gains optional `rule` and `severity`, set only on an advisory rule hit. It is the element of the new `warnings`. `validateData` appends the advisory hits of the same evaluation to each accepted row's existing `results[].warnings`, after the value-shape findings the deployment admits. An import's dry run copies that array to the row verbatim, as before.
+  - **Engine.** `WriteObservabilityOptions` gains `onValidationAdvisory`, an in-process listener beside `onFieldsDropped`, with its event schema `ValidationAdvisoryEventSchema`. The engine calls it once per advisory hit on the write it was passed to: per row on `insert`, and on `update` by id and per matched row of a `multi` update. A nested write a hook or a flow makes inside that write carries its own options, so its hits never reach the outer write's listener or answer. `evaluateValidationRules` returns its advisory hits (an empty array when there are none) instead of `void`.
+  - **Unchanged.** Rule semantics, the per-write `warn` log line and the seed and boot load's one summary line per rule are all as before. No authorable key is added: `ValidationRuleSchema` is untouched. A rule whose condition could not be evaluated is not a hit. Its fault text is for the operator, so it stays in the server log only.
+  - **Client.** `CreateDataResult`, `UpdateDataResult` and `CloneDataResult` declare `warnings?: ValidateDataIssue[]`.
+  
+  **For authors.** Nothing to change in metadata. Write each advisory rule's `message` for the person saving the record, because a client can now show it to them.
+- 4f1e435: feat(client): `meta.deleteItem` can name the package whose row it removes (`packageId`, sent as `?package=`), so a caller can follow the `409 RESOURCE_CONFLICT` remedy the reset door prescribes for an item two packages hold (#23293)
+  
+  Clause-②: yes (widening)
+  
+  **What is new.** `DeleteMetaItemOptions` gains `packageId?: string`. Both `deleteItem` declarations take it, the unscoped `ObjectStackClient.meta` and the environment-scoped `client.environment(id).meta`, and send it as `?package=<id>` through the one query builder they share. The name, the query key and the omission rule are the ones `saveItem`'s `packageId` already uses: only a non-empty id reaches the wire, and `undefined` and `''` send nothing.
+  
+  **Why.** A metadata item can hold one row per package (ADR-0048). The REST reset door `DELETE /api/v1/meta/:type/:name` reads `?package=` and refuses a delete that names no package of an item two or more packages hold, with `409 RESOURCE_CONFLICT`. The refusal names the packages and the remedy, which is to name one with `?package=`. This client had no option for it, so an SDK caller (an agent, the CLI, an app) could not do what the refusal said.
+  
+  FROM → TO:
+  
+  ```ts
+  // FROM: refused 409 RESOURCE_CONFLICT when two packages hold the item, with no way to name one
+  await client.meta.deleteItem('view', 'shared_grid');
+  
+  // TO: removes com.acme.crm's row of the item and no other package's row
+  await client.meta.deleteItem('view', 'shared_grid', { packageId: 'com.acme.crm' });
+  ```
+  
+  **Unchanged.** A delete without `packageId` sends the same request as before: no query string unless `state: 'draft'` is set, and no header unless `ifMatch` is set. `packageId` combines with `ifMatch` and `state` (`?state=draft&package=<id>`). `?dropStorage` is still not an option.
+- 361a1c4: feat(client): `meta.publishItem` can name the package whose pending draft it promotes (`packageId`, sent as `?package=`), so a caller can follow the `?package=` remedy the per-item publish door prescribes when it refuses a publish that names no package (#23658)
+  
+  Clause-②: yes (widening)
+  
+  **What is new.** `meta.publishItem`'s options gain `packageId?: string`, sent as `?package=<id>` on `POST /api/v1/meta/:type/:name/publish`. The name, the query key and the omission rule are the ones `saveItem`'s and `deleteItem`'s `packageId` already use: only a non-empty id reaches the wire, and `undefined` and `''` send nothing.
+  
+  **Why.** A metadata item can hold one row per package (ADR-0048). A per-item publish that names no package promotes the draft a draft save naming no package writes, and the door refuses it in two states, each with `?package=` as the remedy and nothing published: `409 RESOURCE_CONFLICT` when two or more packages hold the item, and `404 NO_DRAFT` when the item's one package holds no draft and another package's draft is stored. This client had no option for it, so an SDK caller (an agent, the CLI, an app) could not do what the refusal said.
+  
+  FROM → TO:
+  
+  ```ts
+  // FROM: refused 409 RESOURCE_CONFLICT when two packages hold the item, with no way to name one
+  await client.meta.publishItem('view', 'shared_grid');
+  
+  // TO: promotes com.acme.crm's pending draft into com.acme.crm's active row, and no other package's draft
+  await client.meta.publishItem('view', 'shared_grid', { packageId: 'com.acme.crm' });
+  ```
+  
+  **Unchanged.** A publish without `packageId` sends the same request as before: no query string, and the body `{ message }` when a message is given, `{}` otherwise. `packageId` combines with `message`, which still rides the body. The environment-scoped `client.environment(id).meta` declares no `publishItem`, and this release adds none.
+- 1e001c7: feat(client): `packages.publishDrafts(id, { backfill })` sends the opt-in backfill of new fields' defaults
+  
+  Clause-②: yes (widening)
+  
+  - `opts.backfill?: Array<{ object, field }>` is sent in the publish body; the response's `backfillApplied` reports the rows written per field. A field the publish does not add, or one without a literal `defaultValue`, refuses the whole request with a `400` before anything is published.
+
+### Patch Changes
+
+- d112087: docs: the suggested-binding acceptance is deployment-level and takes effect
+  
+  Clause-②: no
+  
+  Text only. These are the published sentences that describe what confirming a package's `isDefault` suggestion does. They now match the behaviour `@objectstack/plugin-security` ships in this release.
+  
+  - `@objectstack/spec`: `ISecurityService.listAudienceBindingSuggestions`, `confirmAudienceBindingSuggestion` and `dismissAudienceBindingSuggestion` keep "writes the binding" for the confirm. The text now also says what that means: a `manage_metadata` holder accepts once for the deployment, `everyone`'s definition is derived again, and a dismiss on an accepted suggestion revokes it. The package-level `isDefault` note keeps "an admin confirms in Setup" and adds who that admin is.
+  - `@objectstack/client`: the `security.suggestedBindings.confirm` and `.dismiss` TSDoc.
+  - `@objectstack/rest`: the route summaries of the confirm and dismiss routes. Paths and envelopes are unchanged.
+  - `@objectstack/cli`: the ownership-inventory citation for `sys_audience_binding_suggestion` now says the record is deployment-level and owned by the Default Organization.
+- a1285f2: feat(cli): `os meta delete` and `os meta register` take `--package <id>`, so a CLI user can follow the `409 RESOURCE_CONFLICT` remedy the metadata doors prescribe for an item two packages hold (#23350)
+  
+  Clause-②: yes (widening)
+  
+  **What is new.** Both commands declare an optional `--package` flag, a package id such as `com.acme.crm`, and forward it verbatim as the SDK's `packageId`, sent as `?package=<id>`:
+  
+  ```bash
+  os meta delete view shared_grid --package com.acme.crm              # removes com.acme.crm's row of the item, no other package's row
+  os meta register view --data view-def.json --package com.acme.crm   # writes com.acme.crm's row of the item
+  ```
+  
+  **Why.** A metadata item can hold one row per package (ADR-0048). When two or more packages hold an item, the reset door `DELETE /api/v1/meta/:type/:name` and the save door `PUT /api/v1/meta/:type/:name` both refuse a request that names no package, with `409 RESOURCE_CONFLICT`. The refusal names the packages and prescribes `?package=`. Neither command could send it, so a CLI user was told to do something the CLI could not do.
+  
+  **Unchanged.** Without `--package`, both commands send the same request as before: `os meta delete` adds no query string unless `--draft` is given, and `os meta register` saves active with no query string. `--package` combines with `--draft` and `--if-match` on `os meta delete`. An empty `--package` (for example `--package "$PKG"` with `PKG` unset) is refused before anything is sent, as an empty `--if-match` already is, because a package-less request is not always refused: the server may resolve it to a row the operator did not mean.
+  
+  **`@objectstack/client` (patch).** The `DeleteMetaItemOptions` docblock now names the reset door's carriers (`If-Match`, `state`, `package`, `dropStorage`, `member`) instead of stating a count that had gone stale. No type or behavior changes.
+- 6d1660d: Clause-②: no
+  
+  fix(client): `client.automation.getRuntimeStatus()` types its rows as the declared contract `FlowRuntimeState` (#23859)
+  
+  **What was wrong.** The method declared its answer as `{ flows: Array<{ name, enabled, bound }>; total }`. `GET /automation/_status` serves the automation engine's `getFlowRuntimeStates()` rows unchanged, and each row is the contract `FlowRuntimeState` from `@objectstack/spec/contracts`. The SDK's type therefore hid five optional fields the wire already carries: `status`, `triggerType`, `object`, `reason` (one sentence saying why an enabled, triggered flow is not armed) and `unboundCause` (which of the closed `FLOW_UNBOUND_CAUSES` that sentence describes). A caller that read `row.reason` or `row.unboundCause` got a type error and either cast past it or concluded the field did not exist.
+  
+  **What changes.** The return type is now `Promise<{ flows: FlowRuntimeState[]; total: number }>`. `name`, `enabled` and `bound` stay required, so existing callers compile unchanged. Read `row.unboundCause` to classify an unarmed flow, and render `row.reason` without parsing it. The request, the route and the values on the wire are unchanged.
+- 66d2757: feat(spec)!: every installed-package row declares where it came from, a closed `source: 'code' | 'marketplace' | 'authored'`, and the `GET /packages` rows declare the `writable` verdict they already served (#23972)
+  
+  Clause-②: yes (narrowing — the served row gains two declared keys, and the record schema, the served-row union and the registry's installPackage signature each refuse what they accepted before)
+  
+  **BREAKING** — three published accept sets narrow. `InstalledPackageSchema` refuses a row without `source`, or with a value outside `code` / `marketplace` / `authored`. The served-row union `InstalledPackageAtEitherStageSchema` refuses a row without a boolean `writable`. `SchemaRegistry.installPackage` and `EngineSchemaRegistryView.installPackage` take `source` as their second argument and refuse a call without it. The migration is below. None of it is mechanically convertible, because only the door that registers a package knows where it came from.
+  
+  **What is new on the wire.** `GET /api/v1/packages` and `GET /api/v1/packages/:id` serve two declared keys on every row:
+  
+  - `source` names the package's origin. `code` means the deployment's own code registered it (a `defineStack()` host, a plugin's bundled manifest, a platform package). `marketplace` means the marketplace install-local plugin installed it, and that holds after a restart too, when the plugin rehydrates it from its ledger. `authored` means it is a database-authored package (a Studio base, a duplicate, an HTTP install), including after the restart that rehydrates it from `sys_packages`. The door that registers the package stamps the value. No reader derives it.
+  - `writable` is the server's own writability verdict (ADR-0070 D2), served on these rows since #14375 and now declared. It is computed per read and never stored, so it is declared on the served row (`InstalledPackageAtEitherStageSchema`) and not on the registry record.
+  
+  FROM → TO for a reader of these rows:
+  
+  | you did | do instead |
+  | --- | --- |
+  | treated `writable: true` as authored, and looked up each non-writable row in the marketplace's installed list (the control plane's, else install-local's) to tell marketplace from code | read `row.source` |
+  | read the undeclared `writable` | read the declared `writable` (unchanged value) |
+  
+  The two keys are separate statements: `source` says where the package came from, and `writable` says what this server lets an org do to it.
+  
+  **`InstalledPackageSchema` requires `source`.** It is `InstalledPackageSourceSchema`, exported from `@objectstack/spec/kernel`. A row without it, or with a value outside the closed set, is refused at the `source` key.
+  
+  **API change for code that registers packages (`@objectstack/objectql`).** The registry records the origin and never infers it:
+  
+  | you wrote | write instead |
+  | --- | --- |
+  | `registry.installPackage(manifest)` | `registry.installPackage(manifest, 'code')` (or `'marketplace'` / `'authored'`, whichever is where the package came from) |
+  | `registry.installPackage(manifest, settings, scope)` | `registry.installPackage(manifest, source, settings, scope)` |
+  | `ctx.getService('manifest').register(artifact)` for a marketplace install | `ctx.getService('manifest').register(artifact, { source: 'marketplace' })` |
+  
+  `SchemaRegistry.installPackage` throws a `TypeError` naming the closed set when `source` is missing or unknown, before anything is recorded. `ObjectQL.registerApp(body, scope?, source?)` and the `manifest` service record `'code'` when no source is given. They accept `'code'` or `'marketplace'` and refuse `'authored'`. The `IObjectQLEngine` registry contract (`@objectstack/spec/contracts`) declares the same `installPackage(manifest, source, settings?)`.
+  
+  **The one-line fix:** pass the package's origin as `installPackage`'s second argument.
+  
+  Readers: objectui's Setup → Packages Source column and its `?source=` filter (it switches from the two-read join to `source` in its own follow-up), and the client SDK's `packages.list()` / `packages.get()` row types.
+  
+  <!-- adr-0087: registered installed-package-row-source-required, registry-install-package-source-argument -->
+- b7a688e: Clause-②: no
+  
+  fix(client,platform-objects): the `ai.models()` TSDoc and the translated permission-set `packageId` help say "this system", as the spec now does
+  
+  - **What changed.** Inside the running system, published copy names the system the reader is in as "this system", and a permission set made here, not shipped by a package, is "authored in this system". `@objectstack/spec` already says both (`AiModelsResponse.models`, the permission set's `packageId` help text); this follows it in two more places.
+    - The TSDoc of `client.ai.models()` now reads "Models this system offers in the chat model picker (cloud ADR-0028)". The citation is qualified as `cloud ADR-0028`: the AI service that serves this list is a cloud package, and this repository's ADR-0028 is about metadata naming.
+    - The zh-CN, ja-JP and es-ES values of the permission set's `packageId` help text in the Setup forms bundle now say 本系统 / このシステム / este sistema where they said 本环境 / この環境 / este entorno, matching the English text "Leave empty for a set authored in this system."
+  - **Unchanged.** Every method, route, type, form field, key and behaviour. No translation key is added or removed.
+- Updated dependencies [5a871e4]
+- Updated dependencies [ffba02e]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [1b40780]
+- Updated dependencies [ca426cb]
+- Updated dependencies [4ad3ce5]
+- Updated dependencies [8016a9d]
+- Updated dependencies [df9d07e]
+- Updated dependencies [8eac321]
+- Updated dependencies [a5a781b]
+- Updated dependencies [9a7838e]
+- Updated dependencies [191e043]
+- Updated dependencies [b12e16a]
+- Updated dependencies [fbafb85]
+- Updated dependencies [35450f0]
+- Updated dependencies [1e8b628]
+- Updated dependencies [12d1476]
+- Updated dependencies [14ccb1d]
+- Updated dependencies [c0803b0]
+- Updated dependencies [4bc3bec]
+- Updated dependencies [1f949da]
+- Updated dependencies [ecb7b44]
+- Updated dependencies [41edf73]
+- Updated dependencies [1c1144f]
+- Updated dependencies [3983965]
+- Updated dependencies [0c910d5]
+- Updated dependencies [317cddd]
+- Updated dependencies [b2e7870]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [dac99c2]
+- Updated dependencies [0d3ea29]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [66949b7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [f9b4217]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [7958bdf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [b15f8a1]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [194a42d]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [87e902d]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [777eed2]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [ed03834]
+- Updated dependencies [e1deaef]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [4216796]
+- Updated dependencies [a22e67b]
+- Updated dependencies [5f37d36]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [1912af4]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [60f9baf]
+- Updated dependencies [f5ef054]
+- Updated dependencies [584e737]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [301eec6]
+- Updated dependencies [572ecfb]
+- Updated dependencies [5547ad4]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [0f05907]
+- Updated dependencies [5e725b8]
+- Updated dependencies [086fa46]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [daafae6]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [f606ba2]
+- Updated dependencies [d176b0a]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [ee0e115]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [0a052e6]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [c03077e]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [45e6001]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [9f024d8]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [fa26308]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [01fafde]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [26501ae]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [94e60c0]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [adb7910]
+- Updated dependencies [f573976]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [325a92e]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/core@18.0.0
+  - @objectstack/spec@18.0.0
+
 ## 18.0.0-next.5
 
 ### Patch Changes
