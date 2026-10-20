@@ -119,7 +119,14 @@ describe('PositionGraphService.holdsPosition — the user-scoped twin of the exp
     async find(object: string, options: any) {
       const f = options?.filter ?? options?.where ?? {};
       const rows: any[] = object === 'sys_user_position' ? ASSIGN : object === 'sys_member' ? MEMBER : [];
-      return rows.filter((r) => Object.entries(f).every(([k, v]) => r[k] === v)).slice(0, options?.limit ?? rows.length);
+      const matches = (row: any, where: any): boolean => {
+        for (const [k, v] of Object.entries(where)) {
+          if (k.startsWith('$')) throw new Error('test double: unsupported logical operator ' + k);
+          if (row[k] !== v) return false;
+        }
+        return true;
+      };
+      return rows.filter((r) => matches(r, f)).slice(0, options?.limit ?? rows.length);
     },
   } as any;
   const USERS = ['u_a', 'u_b', 'u_global', 'u_expired', 'u_pending', 'u_mixed', 'u_role_a', 'u_role_b', 'u_none'];
