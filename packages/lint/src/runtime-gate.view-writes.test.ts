@@ -123,10 +123,15 @@ describe('a flattened list overlay at the runtime publish gate (#9313)', () => {
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
-  it('an overlay bound to an object outside the live universe is not judged', () => {
-    // Skip ① — the same cross-package posture every walked surface takes.
+  it('an overlay bound to an object outside the live universe: its field positions are not judged, its binding is', () => {
+    // Skip ① for the field axes — one typo is one finding, never one per
+    // position. [#24668] The binding itself is refused once: with no package
+    // named, the live universe is the whole collection, so an object missing
+    // from it exists nowhere (`runtime-gate.whole-collection.test.ts`).
     const { errors } = gate(overlay({ object: 'pkg_external_case', sort: 'no_such_field' }));
-    expect(errors, JSON.stringify(errors)).toEqual([]);
+    expect(errors.map((e) => [e.rule, e.path]), JSON.stringify(errors)).toEqual([
+      ['list-view-object-unknown', 'views[0].object'],
+    ]);
   });
 
   // ── [#14107] the rest of the same overlay's field surface ──

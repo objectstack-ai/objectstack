@@ -98,6 +98,17 @@ async function boot() {
     engine.registry.registerObject(SysMetadata as any, TEST_PACKAGE_ID);
     engine.registry.registerObject(SysMetadataHistoryObject as any, TEST_PACKAGE_ID);
     engine.registry.registerObject(SysMetadataAuditObject as any, TEST_PACKAGE_ID);
+    // [#24668] The object the fixture view binds to: the overlay save door
+    // refuses a list view bound to an object that exists nowhere, and nothing
+    // here declared `lead`.
+    engine.registry.registerObject({
+        name: 'lead',
+        label: 'Lead',
+        fields: {
+            name: { name: 'name', label: 'Name', type: 'text' },
+            owner: { name: 'owner', label: 'Owner', type: 'text' },
+        },
+    } as any, TEST_PACKAGE_ID);
     await engine.syncSchemas();
 
     const protocol = new ObjectStackProtocolImplementation(engine as any);
