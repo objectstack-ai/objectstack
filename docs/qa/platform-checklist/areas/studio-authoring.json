@@ -96,7 +96,7 @@
       "title": "Object designer round-trip: field add/edit/reorder persists to metadata, identifiers derive and survive typing",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -149,7 +149,16 @@
         "an API name frozen at field_N after its label was set pre-save is audit finding 2 regressed — FAIL, but confirm against a fresh objectui build first: the vendored /_console bundle may predate the derive-on-blur fix the e2e now pins"
       ],
       "traps": ["stale-console-bundle", "automation-input"],
-      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/studio-object-designer.spec.ts" },
+      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/studio-object-designer.spec.ts",
+      "stale": {
+        "since": "2026-10-19",
+        "observedIn": "#24598",
+        "ref": "#24579 §2",
+        "partial": "objectui: e2e/live/studio-object-designer.spec.ts cases F1 and F4 ONLY — F2 and F3 passed",
+        "why": "RED AT THE PIN, AS STALE CASES — not a product defect. Tier 1 run #24598 ran the spec at the sweep's console pin 4016370af3c9: 2 passed (F2, F3), 2 failed (F1, F4); the round-1 record #24571 names the causes. F4 adds a picklist and one empty option row with no real option and expects no metadata-validation banner, which contradicts acceptance[3]'s own judging order: a select with no option source is refused at parse (packages/spec/src/data/field.zod.ts, options), so that banner is correct. F1 opens /apps/com.objectstack.studio, an app no stock boot loads (RUNNER.md environment facts). Re-read at the shipped pin 12dc7b47c340: the spec's bytes are unchanged and both causes hold — field.zod.ts is unchanged between the objectstack builds the two pins consume (2c9bf9430a11 and f4755a68a797), and the studio app is still not default-loaded at objectstack 92ce3af404.",
+        "runnerRule": "Cite F3 for acceptance[1]'s designer half (the derived API-name input) and F2 for acceptance[2]. Do NOT cite F4 or F1, and do NOT score their failure as this item's FAIL: drive acceptance[3] by hand in the clause's order (the 3 real options first, then the empty row), and acceptance[0] and acceptance[1]'s stored-column half by hand as before. F1 asserts no clause of this item.",
+        "ownedBy": "objectui — re-pointing F1 and F4 at the current surface is objectui's half, recorded on wave anchor #24579 §2; this repository reports it and does not edit the spec"
+      } },
       "source": [
         "objectui: e2e/live/studio-object-designer.spec.ts (F1–F4, the objectui#1926 regression classes: per-keystroke sanitisation, label→api-name derivation, empty picklist row, switcher refresh)",
         "docs/audits/2026-07-studio-package-create-ux-dogfood.md (finding 2 — field API name did not follow the label at audit time)",
@@ -180,6 +189,12 @@
           "date": "2026-10-19",
           "change": "steps[4] and steps[5] corrected from QA run #24604 (18.0 sweep round 2, ba4afcc2), re-read at the console pin 4016370af3c9: after the first save the editor autosaves (ResourceEditPage.tsx, the metadata-admin:autosave toggle defaults on), so the steps' 'Save draft' is implicit, and the field reorder is native HTML5 drag-and-drop, which raw mouse moves do not drive. No clause changed. Wave anchor #24579 §3",
           "ref": "#24671"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "automated.stale added — §2 theme \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 ran studio-object-designer.spec.ts at the sweep's console pin 4016370af3c9: F2 and F3 passed, F1 and F4 failed as stale cases (causes from QA run #24571; #24604 drove acceptance[0], acceptance[3] and negative[0] by hand). Re-read at the shipped pin 12dc7b47c340: the spec is byte-identical and both causes hold. The ref keeps the spec, F2 and F3 still citable. No clause changed",
+          "ref": "#24697"
         }
       ]
     },
@@ -260,7 +275,7 @@
       "title": "Record-page authoring round-trip: created bound to its object, seeded from the default layout, block-edited, published, rendered",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors)", "end user (opens the record). On stock no non-admin persona reads showcase_contact (auditor.demo is refused 'You don't have access to Contact records', QA run #24604), so the viewer is the admin unless a grant is provisioned — e.g. a member bound to the `manager` position, whose showcase_manager set reads showcase_contact (examples/app-showcase/src/security/permission-sets.ts); record which"],
@@ -316,9 +331,9 @@
         "ref": "objectui: e2e/live/studio-record-page.spec.ts",
         "stale": {
           "since": "2026-08-11",
-          "observedIn": "#7695",
+          "observedIn": "#24598",
           "ref": "#7753 item 6",
-          "why": "STALE, NOT RED — the spec fails against the CURRENT surface, not against a product defect. `studio-record-page.spec.ts` fills the Object control as an input when it is now a `role=combobox` button; `studio-editor.spec.ts` (cited in source, and the pin behind the Add-block clause) targets a 'Layout' heading that no longer exists, plus a SHIPPED page the editor correctly locks. Neither is reporting a regression.",
+          "why": "STALE, NOT RED — the spec fails against the CURRENT surface, not against a product defect. `studio-record-page.spec.ts` fills the Object control as an input when it is now a `role=combobox` button; `studio-editor.spec.ts` (cited in source, and the pin behind the Add-block clause) targets a 'Layout' heading that no longer exists, plus a SHIPPED page the editor correctly locks. Neither is reporting a regression. Re-measured at the 18.0 sweep: Tier 1 run #24598 ran it at the sweep's console pin 4016370af3c9, 0 passed / 1 failed; re-read at the shipped pin 12dc7b47c340, the spec's bytes are unchanged and nothing on the page create path changed between the pins (the only ResourceEditPage change is the declaration-only gate for sharing rules), so it is still stale there. First observed by #7695 on 2026-08-11; #7753 closed without the objectui half landing.",
           "runnerRule": "Do NOT satisfy this item by citing these specs' output, and do NOT score their failure as a FAIL of this item — drive the clauses by hand (browser + the captured PUT) until the specs are re-pointed. A stale ref left unmarked costs a red run every time the area is exercised, which is how a stale ref turns into ignored signal.",
           "ownedBy": "objectui — re-pointing the specs at the current surface is a cross-repo half of #7753, reported not edited from this repo",
           "seeAlso": "the same class, already repaired: object-designer-roundtrip's 4th automated ref failed only because package-create moved to /_console/studio; that contract passes on the current surface"
@@ -348,6 +363,12 @@
           "date": "2026-10-19",
           "change": "the page's object moved from showcase_invoice to showcase_contact (fixtures.requires[0], steps[0], steps[2], steps[6], acceptance[0].verify, acceptance[3].verify), with personas[1] and steps[3] beside it — §3 of wave anchor #24579 from QA run #24571 (5b14b7f3), confirmed by #24604 (ba4afcc2), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. showcase_invoice ships showcase_invoice_document isDefault:true, which usePageAssignment serves ahead of any authored page and which makes a second default answer 422 DEFAULT_RECORD_PAGE_CONFLICT, so acceptance[3] could not pass on it; showcase_contact ships no record page and #24604 scored acceptance[3] pass there. No stock non-admin reads showcase_contact, so personas[1] names the grant or the admin. The page editor shows Basics / Data Context / Advanced, not a Layout section. Clause substance unchanged",
           "ref": "#24671"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "automated.stale.observedIn and automated.stale.why refreshed — §2 theme \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 re-measured studio-record-page.spec.ts red at the sweep's console pin 4016370af3c9 (0 passed / 1 failed; QA runs #24571 / #24604 drove the clauses by hand), and a re-read at the shipped pin 12dc7b47c340 finds the spec byte-identical and its create path unchanged, so the marker first written from #7695 still holds. No clause changed",
+          "ref": "#24697"
         }
       ]
     },

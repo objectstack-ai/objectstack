@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { provisionPrimary } from '@objectstack/spec/data';
 import { SysAuditLog } from './objects/sys-audit-log.object.js';
 import * as AuditObjects from './objects/index.js';
 
@@ -100,5 +101,96 @@ describe('audit list views — a pointer shows as its id half, never its type ha
       'sys_audit_log.record_views: record_id',
       'sys_audit_log.all_events: record_id',
     ]));
+  });
+});
+
+/**
+ * [#24611] The record page names a row's target by the Details tab's pointer
+ * card, and no audit surface draws a pair's type half as text.
+ *
+ * The console's default record page (objectui at this repository's
+ * `.objectui-sha`) draws the H1 from the object's title pointer, draws each
+ * `highlightFields` entry in the strip as its stored text, and hides every
+ * strip field and the H1 field from the Details tab. The Details tab is where
+ * a `referenceVia` id half draws as the pointer card, headed by the target
+ * object's label. So the type half must be neither the title nor a strip
+ * field, and the id half must not be a strip field either. The title pointer
+ * is read as the registry serves it (`provisionPrimary`, the designate-only
+ * pass `SchemaRegistry.registerObject` runs).
+ *
+ * The list half widens #24501's rule above: a type half is not a column even
+ * where its id half is absent. `config_changes` listed `object_name` alone,
+ * and its rows carry no `record_id`, so the column drew a stored API name with
+ * no pointer beside it.
+ */
+describe('audit record pages and lists — the type half never draws as text (#24611)', () => {
+  type TitledObject = {
+    name: string;
+    nameField?: string;
+    titleFormat?: string | { source?: string };
+    highlightFields?: readonly string[];
+    fields: Record<string, { referenceVia?: unknown } | undefined>;
+    listViews?: Record<string, {
+      columns?: ReadonlyArray<string | { field: string }>;
+      grouping?: { fields?: ReadonlyArray<{ field: string }> };
+    }>;
+  };
+
+  const objects = Object.values(AuditObjects) as unknown as TitledObject[];
+
+  /** Each declared pair as `[id half, type half]`. */
+  function pairs(object: TitledObject): Array<[string, string]> {
+    return Object.entries(object.fields).flatMap(([name, def]) =>
+      typeof def?.referenceVia === 'string' ? [[name, def.referenceVia] as [string, string]] : []);
+  }
+
+  const paired = objects.filter((o) => pairs(o).length > 0);
+
+  it('enumerates the pointer-pair objects, so no case below passes on an empty set', () => {
+    expect(paired.map((o) => o.name).sort()).toEqual(['sys_activity', 'sys_audit_log']);
+  });
+
+  it('the served title pointer is never a type half', () => {
+    const served = paired.map((o) => {
+      const designated = provisionPrimary(structuredClone(o) as never, { synthesize: false }) as { nameField?: string };
+      return { object: o.name, served: designated.nameField, typeHalf: pairs(o).some(([, via]) => via === designated.nameField) };
+    });
+    expect(served).toEqual(expect.arrayContaining([
+      { object: 'sys_audit_log', served: 'action', typeHalf: false },
+    ]));
+    expect(served.filter((s) => s.typeHalf)).toEqual([]);
+  });
+
+  it('no titleFormat interpolates a type half', () => {
+    const hits = paired.flatMap((o) => {
+      const raw = o.titleFormat;
+      const source = typeof raw === 'string' ? raw : raw?.source ?? '';
+      return pairs(o).filter(([, via]) => source.includes(`{${via}}`)).map(([, via]) => `${o.name}: ${via}`);
+    });
+    expect(hits).toEqual([]);
+  });
+
+  it('highlightFields lists neither half of a pair', () => {
+    const hits = paired.flatMap((o) =>
+      pairs(o).flatMap((pair) => pair.filter((f) => (o.highlightFields ?? []).includes(f)).map((f) => `${o.name}: ${f}`)));
+    expect(hits).toEqual([]);
+  });
+
+  it('no list view shows or groups on a type half, with or without its id half', () => {
+    const hits = paired.flatMap((o) => {
+      const typeHalves = new Set(pairs(o).map(([, via]) => via));
+      return Object.entries(o.listViews ?? {}).flatMap(([view, def]) => [
+        ...(def.columns ?? []).map((c) => (typeof c === 'string' ? c : c.field)),
+        ...(def.grouping?.fields ?? []).map((g) => g.field),
+      ].filter((f) => typeHalves.has(f)).map((f) => `${o.name}.${view}: ${f}`));
+    });
+    expect(hits).toEqual([]);
+  });
+
+  it('control: config_changes is still declared with its filter, and the pair stays declared', () => {
+    const view = SysAuditLog.listViews?.config_changes as { filter?: unknown; columns?: unknown } | undefined;
+    expect(view?.filter).toEqual([{ field: 'action', operator: 'in', value: ['config_change', 'import'] }]);
+    expect(view?.columns).toEqual(['created_at', 'action', 'user_id']);
+    expect((SysAuditLog.fields as Record<string, Record<string, unknown>>).record_id.referenceVia).toBe('object_name');
   });
 });

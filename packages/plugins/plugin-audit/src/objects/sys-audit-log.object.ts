@@ -41,16 +41,24 @@ export const SysAuditLog = ObjectSchema.create({
   description: 'Immutable audit trail for platform events',
   displayNameField: 'action',
   nameField: 'action', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{action} · {object_name}',
-  highlightFields: ['created_at', 'action', 'object_name', 'record_id', 'user_id'],
+  // [#24611] No `titleFormat`. It read `{action} · {object_name}`, but the
+  // declared `action` pointer is required and outranks the template on every
+  // title reader, so the template never titled a row; it only kept the target's
+  // API name in the object's title declaration.
+  //
+  // Neither half of the `record_id` / `object_name` pointer pair is listed. The
+  // record page's strip draws a listed field as its stored text, so the type
+  // half read as an API name and the id half as a raw id; a field the strip
+  // draws is also hidden from the Details tab, which is where `record_id`
+  // draws as the pointer card headed by the target object's label
+  // (`sys-audit-log-pointer-pair.test.ts`).
+  highlightFields: ['created_at', 'action', 'user_id'],
 
   // A list names the target with the pointer's id half, `record_id`: the
   // console draws it as the target record and fetches the type half
   // `object_name` for that cell without a column (objectui#13036). A list
-  // view never shows the type half beside it, which would draw the stored API
-  // name as text (`sys-audit-log-pointer-pair.test.ts`). `config_changes`
-  // keeps `object_name`: its rows carry no `record_id`, so no pointer names
-  // their target.
+  // view never shows the type half, which would draw the stored API name as
+  // text (`sys-audit-log-pointer-pair.test.ts`).
   listViews: {
     recent: {
       type: 'grid',
@@ -128,7 +136,13 @@ export const SysAuditLog = ObjectSchema.create({
       name: 'config_changes',
       label: 'Config',
       data: { provider: 'object', object: 'sys_audit_log' },
-      columns: ['created_at', 'action', 'object_name', 'user_id'],
+      // [#24611] No Object column. Its rows carry no `record_id`, so no pointer
+      // names their target, and the column drew one of three stored API names
+      // (`sys_setting`, `sys_platform_setting` for a global-scope change,
+      // `sys_user` for an import). Which setting changed is in `metadata` and
+      // `new_value`, and the row's page still shows `object_name` and the
+      // `tenant_id` a global change leaves empty.
+      columns: ['created_at', 'action', 'user_id'],
       // `export` removed (#8147) — retired from the enum, nothing ever wrote it.
       // `import` KEPT deliberately: `plugin-auth`'s admin user-import writes a
       // real run-level row (`admin-import-users.ts`, `action: 'import'` with
@@ -148,6 +162,20 @@ export const SysAuditLog = ObjectSchema.create({
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 100 },
     },
+  },
+
+  // [ADR-0095 D1, 2026-10-18 note; ADR-0131 D7] This object's default row scope: the one
+  // policy plugin-security's shipped permission sets spread for it today
+  // (`auditLedgerRowScope` in `default-permission-sets.ts`), moved here verbatim. Layer
+  // 0 is inert on the ledger (`systemFields: { tenant: false }` above), so Layer 1
+  // silence means this scope, not no filter. The security plugin's row-policy collection
+  // applies it when no set the caller holds carries a row policy for the object and
+  // operation; the shipped sets still carry it, so their holders read as before. An
+  // `extend` contribution cannot set or loosen it (refused at registration).
+  defaultRowScope: {
+    name: 'sys_audit_log_org',
+    operation: 'select',
+    using: 'tenant_id == current_user.organization_id',
   },
 
   fields: {

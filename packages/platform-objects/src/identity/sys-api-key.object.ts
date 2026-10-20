@@ -227,6 +227,20 @@ export const SysApiKey = ObjectSchema.create({
     },
   },
 
+  // [ADR-0095 D1, 2026-10-18 note] This object's default row scope: the one policy
+  // plugin-security's shipped permission sets spread for it today (the `_self`
+  // carve-outs in `default-permission-sets.ts`), moved here verbatim. Layer 0 is inert
+  // on this table (no organization column), so Layer 1 silence means this scope, not no
+  // filter. The security plugin's row-policy collection applies it when no set the
+  // caller holds carries a row policy for the object and operation; the shipped sets
+  // still carry it, so their holders read as before. An `extend` contribution cannot set
+  // or loosen it (refused at registration).
+  defaultRowScope: {
+    name: 'sys_api_key_self',
+    operation: 'all',
+    using: 'user_id == current_user.id',
+  },
+
   fields: {
     // ── Identity ─────────────────────────────────────────────────
     // The five fields below are `readonly` for one reason (ADR-0092 D4's
