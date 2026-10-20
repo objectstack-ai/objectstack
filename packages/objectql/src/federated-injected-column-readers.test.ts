@@ -144,6 +144,17 @@ const READERS: Record<string, Row> = {
     disposition: 'skips',
     why: 'finds the participants the scan would probe; the same skip follows the reference match',
   },
+  // [#24948] The organization-delete refusal reads the tenant column of every
+  // relation the cascade follows into `sys_organization`.
+  'engine.ts#organizationOwnedRowCounts :: resolveTenantFieldName()': {
+    disposition: 'skips',
+    via: 'cascadeRelationBehavior',
+    why: "counts a tenant column only once the cascade's own relation reading admits it, so a federated object's unprovisioned injected column is never counted",
+  },
+  'engine.ts#isTenantColumnSetNull :: resolveTenantFieldName()': {
+    disposition: 'not-a-read',
+    why: "compares a field name with the object's tenant column, on a relation its callers already read through cascadeRelationBehavior; it reads no row",
+  },
   'lifecycle/lifecycle-service.ts#tenantWindowsFor :: isFederatedUnprovisionedInjectedColumn()': {
     disposition: 'skips',
     why: 'a federated object whose organization_id is the injection has no tenant partition',
@@ -563,7 +574,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
     }
   }, SCAN_BUDGET_MS);
 
-  it('the sites that skip are exactly the cascade scan, its plan, and the lifecycle tenant partition', () => {
+  it('the sites that skip are exactly the cascade scan, its plan, the organization-delete count, and the lifecycle tenant partition', () => {
     const skipping = new Set(
       Object.entries(READERS)
         .filter(([, row]) => row.disposition === 'skips')
@@ -571,6 +582,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
     );
     expect([...skipping].sort()).toEqual([
       'engine.ts#cascadeRelationBehavior',
+      'engine.ts#organizationOwnedRowCounts',
       'engine.ts#planCascadeAtomicity',
       'lifecycle/lifecycle-service.ts#tenantWindowsFor',
     ]);
