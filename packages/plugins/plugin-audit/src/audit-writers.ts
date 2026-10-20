@@ -18,8 +18,8 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 // for the same value, so it honours the same declaration the same way — the
 // producer's declaration consumed, not a masking rule of this package's own.
 import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields } from '@objectstack/objectql/core';
-// [#24625] The mail logs and their body columns, named once beside the objects.
-import { MAIL_LOG_BODY_FIELDS, isMailLogObject } from '@objectstack/platform-objects/audit';
+// [#24625] The mask of a mail-log row's body columns in a copy of it.
+import { maskMailLogBodyCopy } from './mail-log-body-mask.js';
 // [#7230] ADR-0079's record display-name contract, imported rather than
 // re-derived. `resolveDisplayField` IS the definition of "which field is this
 // object's human title" (`nameField` → deprecated `displayNameField` alias →
@@ -1760,12 +1760,8 @@ export function installAuditWriters(
     // identity rows still in `sys_email` cannot be told apart from tenant mail
     // by any column, so both logs' bodies are masked on every row. The log row
     // keeps the body behind its field gate; the copy never holds it in clear.
-    if (isMailLogObject(objectName)) {
-      for (const field of MAIL_LOG_BODY_FIELDS) {
-        if (!(field in out)) continue;
-        out[field] = out[field] == null ? null : SECRET_MASK;
-      }
-    }
+    // [#24693] One helper, the one the at-rest rewrite of older copies applies.
+    maskMailLogBodyCopy(objectName, out);
     // [#21120] A stored metadata BODY (`sys_metadata` / `sys_metadata_history`)
     // is not a top-level secret field, so the mask above never touches it. The
     // audit copy is a credential read exit exactly like `/meta`, so the body is

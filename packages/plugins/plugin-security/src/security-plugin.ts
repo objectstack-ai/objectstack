@@ -4860,7 +4860,9 @@ export class SecurityPlugin implements Plugin {
    */
   /**
    * [ADR-0090 D6] Explain access for a caller. `request.userId` (explaining
-   * someone else) requires the caller to hold `manage_users`, be system, or —
+   * someone else) requires the caller to hold `manage_users`, be system, be
+   * the organization administrator of an organization the target is a member
+   * of (D12 as amended 2026-10-17), or —
    * [D12] — hold a delegated `adminScope` whose BU subtree covers the target
    * user (an access report is itself sensitive data, but an admin who can
    * already rewire a user's grants may read why they resolve as they do).
@@ -4891,19 +4893,27 @@ export class SecurityPlugin implements Plugin {
         const callerSets = await this.resolvePermissionSetsForContext(callerContext).catch(() => []);
         const held = this.permissionEvaluator.getSystemPermissions(callerSets);
         if (!held.has('manage_users')) {
-          // [ADR-0090 D12] Delegated administrators may explain principals
-          // inside their delegation boundary (fail-closed on any error).
-          const delegated = this.delegatedAdminGate
+          // [ADR-0090 D12, amended 2026-10-17] An organization administrator
+          // may explain a member of the organization it administers — the
+          // members whose assignments it creates and removes. Then [D12]
+          // delegated administrators may explain principals inside their
+          // delegation boundary. Both fail closed on any error, and both read
+          // the organization the caller's sets were resolved in, never another.
+          const organizationLevel = this.delegatedAdminGate
             ? await this.delegatedAdminGate
-                // Same organization the caller's sets were resolved in — a
-                // delegation boundary is never read across organizations.
-                .scopesCoverUser(callerSets, request.userId, callerContext)
+                .organizationAdminCoversUser(callerSets, request.userId, callerContext)
                 .catch(() => false)
             : false;
+          const delegated = organizationLevel || (this.delegatedAdminGate
+            ? await this.delegatedAdminGate
+                .scopesCoverUser(callerSets, request.userId, callerContext)
+                .catch(() => false)
+            : false);
           if (!delegated) {
             throw new PermissionDeniedError(
               `[Security] Access denied: explaining another user's access requires the 'manage_users' ` +
-                `capability or a delegated adminScope covering that user (ADR-0090 D6/D12).`,
+                `capability, organization administration of an organization that user is a member of, ` +
+                `or a delegated adminScope covering that user (ADR-0090 D6/D12).`,
               { object, operation, targetUserId: request.userId },
             );
           }

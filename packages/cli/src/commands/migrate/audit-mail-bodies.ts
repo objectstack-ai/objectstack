@@ -1,0 +1,235 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+import { Command, Flags } from '@oclif/core';
+import chalk from 'chalk';
+import { createInterface } from 'node:readline';
+import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import {
+  printHeader,
+  printSuccess,
+  printWarning,
+  printError,
+  printInfo,
+  printStep,
+  createTimer,
+  emitJson,
+  isExitSignal,
+  errorCodeFields,
+} from '../../utils/format.js';
+import { bootSchemaStack } from '../../utils/schema-migrate.js';
+import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
+import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
+import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
+import { absentTableReads } from '../../utils/absent-table-reads.js';
+
+async function confirm(question: string): Promise<boolean> {
+  if (!process.stdin.isTTY) return false; // non-interactive → require --yes
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer: string = await new Promise((resolve) => rl.question(question, resolve));
+    return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * `os migrate audit-mail-bodies` — the one-off mask of the mail-log bodies the
+ * audit writer copied in clear into `sys_audit_log` / `sys_activity` (#24693).
+ *
+ * The audit writer COPIES a `sys_email` / `sys_identity_email` row into
+ * `sys_audit_log.new_value` / `old_value` and both halves of
+ * `sys_activity.metadata`. Before #24625 that copy carried the mail BODY in
+ * clear, reset, verification, magic-link and invitation links included: a
+ * second, at-rest store of them. The writer masks those columns now, but only
+ * on NEW writes; rows copied before keep the body. This command masks them with
+ * the writer's own mask (`@objectstack/plugin-audit`'s
+ * `migrateMailLogBodyCopies`). Operators run it once after upgrading, dry run
+ * first.
+ *
+ * Its own command, not a step of `os migrate organization-ownership`: it masks
+ * every copy of both mail logs, so it needs no identity-mail selector and gives
+ * the same result run before or after the ceremony, on a database the ceremony
+ * never runs on too. Only the copy column of a copy row is written.
+ *
+ * Dry run by default (writes no row), `--apply` to mask. Idempotent: a masked
+ * body is the mask, so a second run masks nothing — re-running and reading a
+ * clean report is the verification. The report is counts only. No
+ * `sys_migration` flag is recorded: nothing gates irreversible behaviour on it.
+ * The flags are `os migrate audit-metadata-bodies`'s, one for one.
+ */
+export default class MigrateAuditMailBodies extends Command {
+  static override description =
+    'Mask the mail bodies (body_text, body_html) of sys_email / sys_identity_email rows that the audit writer ' +
+    'copied in clear into sys_audit_log / sys_activity before it masked them. Dry run by default; --apply writes. ' +
+    'Reports counts only.';
+
+  static override examples = [
+    '$ os migrate audit-mail-bodies',
+    '$ os migrate audit-mail-bodies --apply',
+    '$ os migrate audit-mail-bodies --apply --yes --json',
+  ];
+
+  static override flags = {
+    'database-url': Flags.string({
+      description: 'Database URL to migrate (defaults to $OS_DATABASE_URL / the project DB)',
+      env: 'OS_DATABASE_URL',
+    }),
+    apply: Flags.boolean({
+      description: 'Mask the copies that hold a mail body in clear (default is a read-only dry run)',
+      default: false,
+    }),
+    yes: Flags.boolean({ char: 'y', description: 'Skip the --apply confirmation prompt', default: false }),
+    force: Flags.boolean({
+      description: 'Apply even when another process is using the database (SQLite occupancy check)',
+      default: false,
+    }),
+    json: Flags.boolean({ description: 'Output as JSON (implies non-interactive; requires --yes to apply)' }),
+  };
+
+  async run(): Promise<void> {
+    const { flags } = await this.parse(MigrateAuditMailBodies);
+    const timer = createTimer();
+    const apply = flags.apply;
+
+    if (!flags.json) printHeader('Migrate · audit-mail-bodies');
+    const occupancy = await probeMigrationTarget(flags['database-url']);
+    if (occupancy.status === 'busy' && apply && !flags.force) {
+      if (flags.json) {
+        await emitJson(
+          { error: 'database_busy', database: occupancy.filename, signal: occupancy.signal, detail: occupancy.detail, hint: OCCUPANCY_HINT },
+          0,
+          { compact: true },
+        );
+        this.exit(1);
+        return;
+      }
+      printError(describeOccupancy(occupancy));
+      printWarning(OCCUPANCY_HINT);
+      this.exit(1);
+      return;
+    }
+    if (occupancy.status === 'busy' && !flags.json) {
+      printWarning(apply
+        ? `--force: ${describeOccupancy(occupancy)} Masking anyway — the live process may write rows mid-walk.`
+        : `${describeOccupancy(occupancy)} The dry run below writes no row or table, but its counts may shift while that process is running. ${JOURNAL_MODE_SWITCH_NOTE}`);
+    }
+    if (occupancy.status === 'unknown' && !flags.json) {
+      printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);
+    }
+
+    if (apply && !flags.yes) {
+      if (flags.json || !process.stdin.isTTY) {
+        if (flags.json) {
+          await emitJson({ error: 'confirmation_required', hint: 'pass --yes' }, 0, { compact: true });
+          this.exit(1);
+          return;
+        }
+        printWarning('Apply mode rewrites audit/activity rows. Re-run with --yes to confirm, or run without --apply to preview.');
+        this.exit(1);
+        return;
+      }
+      const ok = await confirm(
+        chalk.bold('\nMask the mail body in every audit/activity copy of a mail-log row on this database? [y/N] '),
+      );
+      if (!ok) {
+        printInfo('Aborted — no changes made.');
+        return;
+      }
+    }
+
+    if (!flags.json) {
+      printStep(apply ? 'Booting data stack (APPLY mode)…' : 'Booting data stack (dry run)…');
+    }
+
+    let stack;
+    try {
+      // [#21349] The dry run boots READ-ONLY — the same boot `os migrate plan`
+      // takes: `deferSchemaDdl` holds schema DDL back and suppresses the
+      // artifact's inline seed loader (whose upserts rewrite every seeded row
+      // of the app's tables), and `readOnlyProbe` keeps a missing sqlite file
+      // from being created. `--apply` keeps the plain boot, unchanged.
+      stack = await bootSchemaStack({
+        jsonOutput: flags.json,
+        databaseUrl: flags['database-url'],
+        extraPlugins: await buildDataMigrationPlugins({ audit: true }),
+        ...(apply ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
+      });
+    } catch (error: any) {
+      if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
+      printError(error.message || String(error));
+      this.exit(1);
+      return;
+    }
+
+    try {
+      // `SchemaStack.kernel` is untyped, so the slot's contract is stated on the
+      // RESULT — the `objectql` slot serves `IObjectQLEngine`, whose `find` /
+      // `update` are exactly what the rewrite calls.
+      const engine = stack.kernel.getService('objectql') as IObjectQLEngine | undefined;
+      if (typeof engine?.find !== 'function' || typeof engine?.update !== 'function') {
+        throw new Error('No ObjectQL engine on this stack — cannot rewrite audit rows.');
+      }
+
+      const { migrateMailLogBodyCopies } = await import('@objectstack/plugin-audit');
+
+      const logger = flags.json
+        ? { info: (m: string) => console.error(m), warn: (m: string) => console.error(m) }
+        : { info: (m: string) => printInfo(m), warn: (m: string) => printWarning(m) };
+
+      // [#21552] The read view `os migrate audit-metadata-bodies` reads the same
+      // two tables through: a table the read-only boot MEASURED absent holds no
+      // copy and answers no rows without the read; `sys_activity`, rotation-
+      // managed and a view over time-sharded tables, is always read, and only
+      // the refusal of a table that is not there reads as no rows. ⛔ Any other
+      // refused read is still counted in `failures` and still exits non-zero.
+      // `--apply` booted plain; its writes go to the engine itself.
+      const reads = absentTableReads(stack, (object) => engine.getObject(object));
+      const readView: Pick<IObjectQLEngine, 'find' | 'update'> = {
+        find: (object, query, options) => reads.rows(object, () => engine.find(object, query, options)),
+        update: (object, data, options) => engine.update(object, data, options),
+      };
+
+      const report = await migrateMailLogBodyCopies(readView, logger, { apply });
+
+      if (flags.json) {
+        reads.notice(true);
+        await emitJson({ database: stack.dbLabel, apply, report, duration: timer.elapsed() });
+        if (report.failures > 0) this.exit(1);
+        return;
+      }
+
+      printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
+      reads.notice(false);
+      console.log('');
+      for (const [object, stats] of Object.entries(report.byObject)) {
+        console.log(
+          `  ${chalk.white(object)}: ${stats.scanned} mail-log cop(ies) scanned, ${stats.rewritten} ${apply ? 'masked' : 'to mask'}`,
+        );
+      }
+      console.log('');
+
+      if (report.failures > 0) {
+        printError(`${report.failures} read(s) or row(s) failed — re-run to finish them.`);
+      } else if (apply && report.rewritten > 0) {
+        printSuccess(
+          `Masked the mail body in ${report.rewritten} audit/activity row(s). Re-run any time — it only revisits copies still holding a body.`,
+        );
+      } else if (!apply && report.rewritten > 0) {
+        printInfo(`Dry run only — ${report.rewritten} row(s) would be masked. Re-run with --apply.`);
+      } else {
+        printSuccess('Nothing to mask — no audit/activity copy of a mail-log row holds a mail body in clear.');
+      }
+      console.log(chalk.dim(`  ${timer.display()}`));
+      console.log('');
+      if (report.failures > 0) this.exit(1);
+    } catch (error: any) {
+      if (isExitSignal(error)) throw error;
+      if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
+      printError(error.message || String(error));
+      this.exit(1);
+    } finally {
+      await stack.shutdown();
+    }
+  }
+}

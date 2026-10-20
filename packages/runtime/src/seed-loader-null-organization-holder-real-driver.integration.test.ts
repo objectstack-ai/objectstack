@@ -209,10 +209,12 @@ describe('scoped seed load over NULL-organization holders (sqlite-file)', () => 
     expect(kickoff.targetObject).toBe('tw_event');
     expect(kickoff.targetField).toBe('subject');
     expect(kickoff.attemptedValue).toBe('Kickoff');
-    // The message names the key, the unowned holder and the remedy's command.
+    // The message names the key, the unowned holder and what 18.0 supports:
+    // never the ceremony 18.0 refuses.
     expect(kickoff.message).toContain('subject=Kickoff');
     expect(kickoff.message).toContain("'ev_kickoff'");
-    expect(kickoff.message).toContain('os migrate organization-ownership');
+    expect(kickoff.message).toContain('18.0 supports fresh installs only and does not upgrade a v17 database');
+    expect(kickoff.message).not.toContain('os migrate organization-ownership');
     expect(result.success).toBe(false);
     // Loud: said at `error`, once per dataset.
     const lines = logger.error.mock.calls.map((c) => String(c[0])).filter((m) => refusals.some((e) => m.includes(e.message)));

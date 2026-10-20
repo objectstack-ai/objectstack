@@ -3479,7 +3479,7 @@
       "title": "Object lifecycle hooks fire on the write path with the right timing, gate, async and error semantics — driven over /api/v1/data/*, oracled by the record effect and the log line",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3584,8 +3584,8 @@
         {
           "clause": "a condition that cannot be evaluated FAILS CLOSED (#4775): the write is ABORTED, not silently skipped — and it is NOT softened by onError:'log' nor fire-and-forgotten, because the condition gate runs OUTSIDE the async/retry/onError wrappers",
           "oracle": "api",
-          "verify": "scratch hook whose condition COMPILES but cannot be evaluated at runtime (e.g. int(record.name) > 0, written to a row whose name is not numeric); a write to that object is refused and the row does not land (hook-wrappers.ts: conditionFn throws outside runWithErrorPolicy). The 18.0 wire envelope is a generic 500 {code: 'INTERNAL_ERROR'}, with the class only in the server log ('[REST] Unhandled error: HookConditionError …') — #24619 row (b), open, tracks the coded refusal it should be. Until that lands score the clause on the refusal, the absent row and the log line, and record the 500 against #24619 rather than as a new finding. An UNCOMPILABLE condition never reaches this gate: it is refused at authoring (PUT /api/v1/meta/hook → 422 INVALID_METADATA, expression-invalid), so it cannot stand in for the runtime fail-closed probe",
-          "evidence": "the refusal (status + body) + the HookConditionError server-log line + a post-attempt count showing no row"
+          "verify": "scratch hook whose condition COMPILES but cannot be evaluated at runtime (e.g. int(record.name) > 0, written to a row whose name is not numeric); a write to that object is refused and the row does not land (hook-wrappers.ts: conditionFn throws outside runWithErrorPolicy). The wire envelope is a coded refusal: 400 {code: 'VALIDATION_ERROR'}, whose error text names the hook and the CEL fault (\"Hook 'NAME' could not evaluate its condition (FAULT) — operation aborted.\") and never the condition source, and no '[REST] Unhandled error' line is logged for it (#24662 retired the generic 500 INTERNAL_ERROR that #24619 row (b) recorded). A 500 INTERNAL_ERROR here is a FAIL. An UNCOMPILABLE condition never reaches this gate: it is refused at authoring (PUT /api/v1/meta/hook → 422 INVALID_METADATA, expression-invalid), so it cannot stand in for the runtime fail-closed probe",
+          "evidence": "the refusal (status 400 + code VALIDATION_ERROR + the hook named in its error text) + a post-attempt count showing no row"
         },
         {
           "clause": "two hooks on the SAME object+event run lowest-priority-first: scratch hooks at priority 10 and 90 log in that order on one write (hook-binder passes priority to engine.registerHook; the engine orders by it, lower first)",
@@ -3658,6 +3658,12 @@
           "date": "2026-10-19",
           "change": "steps[0], negative[2], fixtures.requires[3], acceptance[8] (verify, evidence) and automated.ref corrected from wave anchor #24579 round 2 part 1 (6272032736) and QA runs #24598 / #24616 (ba4afcc2), re-read at objectstack f89d29e382. (1) The hook list route is GET /api/v1/meta/hook; /meta/types/hook answers 404. (2) acceptance[8]'s refusal answers 500 INTERNAL_ERROR with the class in the server log only; #24619 row (b) (open) tracks the coded refusal, so the clause states the shipped envelope and scores against #24619. (3) The ref named source files (hook-wrappers.ts, hook-binder.ts) no resolver can run; it now names four test files, each measured at base under os-verify-lock (83 passed), mapped to the clause whose mechanism it pins. (4) The run-proven scratch-hook recipe is recorded in requires[3]. Part 1's note on a `$select` in the steps does not hold: no step of this item spells `$select` (0 hits in records-forms.json)",
           "ref": "#24671"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-19",
+          "change": "acceptance[8] (verify, evidence) follow the shipped envelope. An unevaluable hook condition's refusal is now a coded 400 VALIDATION_ERROR whose error text names the hook and the CEL fault, and no '[REST] Unhandled error' line is logged for it (#24662, split from #24619 row (b)). The 500 INTERNAL_ERROR that revision 6 recorded is retired and is now a FAIL; the server-log evidence goes with it. The clause is unchanged: the write is still refused and the row still absent",
+          "ref": "#24662"
         }
       ]
     },

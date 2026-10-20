@@ -93,6 +93,7 @@
 import { ErrorCode, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { declaresServerFault, looksLikeInternalErrorLeak } from './error-leak.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
+import { unevaluableHookConditionRefusal } from './hook-condition-refusal.js';
 
 /** The HTTP answer a thrown error declares. See {@link resolveThrownHttpError}. */
 export interface ThrownHttpError {
@@ -100,7 +101,8 @@ export interface ThrownHttpError {
   status: number;
   /**
    * The status the THROW ITSELF declared — `.status`, `.statusCode`, or the
-   * 400 a validation-shaped throw declares by shape — and **absent** when it
+   * 400 a validation-shaped throw or an unevaluable hook condition (#24662)
+   * declares by shape — and **absent** when it
    * declared none, i.e. when {@link ThrownHttpError.status} above is the
    * caller's `fallbackStatus`.
    *
@@ -190,10 +192,10 @@ export interface ThrownHttpError {
  *
  * | Question | Answer |
  * |---|---|
- * | status | `.status` → `.statusCode` → 400 if it is a validation failure → `fallbackStatus` |
+ * | status | `.status` → `.statusCode` → 400 if it is a validation failure → 400 if it is an unevaluable hook condition → `fallbackStatus` |
  * | declaredStatus | the same chain WITHOUT the fallback — absent when the throw declared none |
  * | code | `VALIDATION_FAILED` if it is one → a REGISTERED `.code` → derived from the status |
- * | declaredCode | `VALIDATION_FAILED` if it is one → any non-empty string `.code` → absent |
+ * | declaredCode | `VALIDATION_FAILED` if it is one → any non-empty string `.code` → the derived code if it is an unevaluable hook condition → absent |
  * | message | `.message` when it is a string → `String(error)` |
  * | userMessage | a non-empty string `.userMessage` → absent (see {@link declaredUserMessage}) |
  *
@@ -212,10 +214,21 @@ export function resolveThrownHttpError(error: unknown, fallbackStatus = 500): Th
   // producer did say "this is a client's input problem" — which is the fact
   // `declaredStatus` reports. Only the `fallbackStatus` limb below is the
   // caller's own invention, and it is the only one left out.
+  // [#24662] …and so is an unevaluable hook condition's: `HookConditionError`
+  // carries no status or code by its own contract, and the shape says "the
+  // author's condition faulted on this record, and the write was refused" —
+  // a 400 refusal, the status its validation-predicate sibling is served
+  // with. See `hook-condition-refusal.ts` for the code choice and the scope.
+  // It is a declaration of BOTH halves, as the validation shape's is, so the
+  // Hono doors' declared-envelope gate (a declared status AND a registered
+  // code) serves it rather than the bare 500.
+  const hookCondition = validation ? undefined : unevaluableHookConditionRefusal(e);
+
   const declaredStatus =
     typeof e?.status === 'number' ? e.status
     : typeof e?.statusCode === 'number' ? e.statusCode
     : validation ? VALIDATION_FAILED_STATUS
+    : hookCondition ? hookCondition.status
     : undefined;
   const status = declaredStatus ?? fallbackStatus;
 
@@ -228,7 +241,7 @@ export function resolveThrownHttpError(error: unknown, fallbackStatus = 500): Th
   const code: ErrorCode = validation
     ? validation.code
     : (registered ?? standardErrorCodeForHttpStatus(status));
-  const declaredCode = validation ? validation.code : spelled;
+  const declaredCode = validation ? validation.code : (spelled ?? hookCondition?.code);
 
   const issues = Array.isArray(e?.issues) ? e.issues : undefined;
   const details: Record<string, unknown> = {
