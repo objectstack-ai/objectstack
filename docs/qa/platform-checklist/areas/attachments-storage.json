@@ -1177,7 +1177,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line dated the walled boot's second organization 'Since 18.x step 4 (#24580)', so a runner on 18.0.0 could not tell whether its release boots the walled posture, and a runner on a prerelease was not told which one refuses it. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
-          "ref": "#PENDING-24579R10"
+          "ref": "#24788"
         }
       ]
     }

@@ -2472,7 +2472,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[2]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
-          "ref": "#PENDING-24579R10"
+          "ref": "#24788"
         }
       ]
     },
@@ -2621,7 +2621,7 @@
           "revision": 7,
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
-          "ref": "#PENDING-24579R10"
+          "ref": "#24788"
         }
       ]
     },
@@ -2954,7 +2954,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "source[5] and source[7] re-pointed — the two comma-range line citations round 9 of wave anchor #24579 left, because PR #24667 held the item then (round 9's report 6283532816, out_of_scope_findings[0]). At the authoring commit 45397edf53, line 200 of env.ts was the resolvePlatformOwnerEmail declaration and line 261 of admin-routes.ts was the DATASOURCE_ADMIN_CAPABILITY declaration. At base 795ff708d8 source[5] anchors both PLATFORM_OWNER_EMAIL_ENV and resolvePlatformOwnerEmail in env.ts, and source[7] anchors the DATASOURCE_ADMIN_CAPABILITY declaration in admin-routes.ts instead of the string literal manage_platform_settings. All three resolve as declarations in the shared resolver. The ',NNN' residue is what #13786's strip left of a two-range list. No clause, step or other field changed",
-          "ref": "#PENDING-24579R10"
+          "ref": "#24788"
         }
       ]
     },
@@ -3499,7 +3499,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
-          "ref": "#PENDING-24579R10"
+          "ref": "#24788"
         }
       ]
     },
@@ -3838,7 +3838,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
-          "ref": "#PENDING-24579R10"
+          "ref": "#24788"
         }
       ]
     },
@@ -3936,7 +3936,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
-          "ref": "#PENDING-24579R10"
+          "ref": "#24788"
         }
       ]
     },
