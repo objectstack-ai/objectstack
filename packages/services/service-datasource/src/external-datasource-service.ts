@@ -23,8 +23,10 @@ import type {
   IntrospectedSchema,
   IntrospectedTable,
   IntrospectedColumn,
+  IDataDriver,
 } from '@objectstack/spec/contracts';
 import type { SchemaDiffEntry } from '@objectstack/spec/shared';
+import { DEFAULT_DATASOURCE_NAME } from './datasource-connection-service.js';
 import {
   suggestFieldTypeForSqlType,
   isCompatible,
@@ -77,6 +79,18 @@ export interface Logger {
 export interface ExternalDatasourceServiceConfig {
   /** Introspect a datasource's live schema via its driver. */
   introspect: (datasource: string) => Promise<IntrospectedSchema>;
+  /**
+   * [#24772] The live driver registered for `datasource`, resolved by
+   * ADR-0062's default-driver rule (`registeredDriverName` in
+   * `datasource-connection-service.ts`), or `undefined` when none is
+   * registered. {@link ExternalDatasourceService.testConnection} reads it to
+   * probe a datasource that `introspect` cannot answer for: the platform's
+   * primary datasource, and a driver with no `introspectSchema`.
+   *
+   * Optional. A host that wires only `introspect` keeps Test as the
+   * introspection round trip it always was.
+   */
+  liveDriver?: (datasource: string) => Pick<IDataDriver, 'checkHealth' | 'introspectSchema'> | undefined;
   /** Resolve a datasource definition by name. */
   getDatasource: (name: string) => Promise<DatasourceLike | undefined>;
   /** Resolve one object definition by name. */
@@ -421,6 +435,43 @@ function importNameRefusedError(message: string): Error {
   return err;
 }
 
+/**
+ * [#24772] The refusal every federation door answers for the platform's
+ * primary datasource: listing its remote tables, drafting or importing one,
+ * refreshing its catalog.
+ *
+ * ADR-0015 §1 puts federation on datasources whose `schemaMode` is not
+ * `managed`. The primary datasource is the platform's own managed storage:
+ * every table in it was created from an object the platform already serves.
+ * These doors used to answer the engine's "has no registered driver to
+ * introspect" for it, which is false (the driver is live; ADR-0062 registers
+ * it under its natural name), while the Datasources page reads it as
+ * connected. The answer is still a refusal, with the same status and code
+ * these doors served before; only the reason is now the true one.
+ *
+ * ⛔ Not "make introspection reach the default". Listing and importing the
+ * primary database's tables would let an import federate a platform table, and
+ * the engine's write gate exempts the default datasource, so nothing would
+ * stand behind it.
+ *
+ * `code` is the one the calling door serves (`EXTERNAL_IMPORT_ERROR` for the
+ * import, `EXTERNAL_DATASOURCE_ERROR` for the rest), so the declaration and
+ * the served envelope agree, as for `importNameRefusedError` above.
+ */
+function primaryDatasourceNotFederatedError(
+  datasource: string,
+  code: 'EXTERNAL_DATASOURCE_ERROR' | 'EXTERNAL_IMPORT_ERROR',
+): Error {
+  const err = new Error(
+    `Datasource '${datasource}' is the platform's managed primary datasource, not a federation source: ` +
+      `its tables are the platform's own objects, so there are no remote tables to list, draft or import ` +
+      `from it. Sync objects from an external datasource instead.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = code;
+  err.status = 400;
+  return err;
+}
+
 /** snake_case → Title Case label. */
 function toLabel(name: string): string {
   return name
@@ -454,12 +505,16 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * whose schema the driver did not name is never let through a filter it
    * cannot be judged by. With no filter, every introspected table is listed.
    * See {@link unattributedSchemaFilterError} for why the in-tree SQL driver
-   * lands on the refusal.
+   * lands on the refusal. The platform's primary datasource is refused
+   * outright: see {@link primaryDatasourceNotFederatedError}.
    */
   async listRemoteTables(
     datasource: string,
     opts?: { schema?: string },
   ): Promise<RemoteTable[]> {
+    if (datasource === DEFAULT_DATASOURCE_NAME) {
+      throw primaryDatasourceNotFederatedError(datasource, 'EXTERNAL_DATASOURCE_ERROR');
+    }
     const [schema, ds] = await Promise.all([
       this.config.introspect(datasource),
       this.config.getDatasource(datasource),
@@ -504,12 +559,46 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * structured result rather than throwing so the route can render ok/error
    * uniformly. This backs the `datasource` `test_connection` action
    * (`POST /datasources/:name/test`).
+   *
+   * [#24772] Two datasources the introspection round trip cannot test, which
+   * answered `ok: false` while the Datasources page read them as connected.
+   * With a `liveDriver` wired, both take the driver's own connectivity probe,
+   * `checkHealth()`, instead:
+   *
+   *  - the platform's PRIMARY datasource. Its driver is live under its natural
+   *    name (ADR-0062), and it is not a federation source, so its tables are not
+   *    introspected: that costs a round trip per table of the platform database
+   *    and answers nothing the connection question needs. No `tableCount`.
+   *  - a driver with no `introspectSchema` (memory, mongodb). The answer says
+   *    so in `introspection: 'unsupported'`, rather than calling a connected
+   *    datasource failed.
+   *
+   * Every other datasource is tested exactly as before. So is one with no live
+   * driver: `introspect` names the absence itself.
    */
   async testConnection(
     datasource: string,
-  ): Promise<{ ok: boolean; latencyMs?: number; tableCount?: number; error?: string }> {
+  ): Promise<{
+    ok: boolean;
+    latencyMs?: number;
+    tableCount?: number;
+    introspection?: 'unsupported';
+    error?: string;
+  }> {
     const started = Date.now();
     try {
+      const driver = this.config.liveDriver?.(datasource);
+      const canIntrospect = typeof driver?.introspectSchema === 'function';
+      if (driver && (datasource === DEFAULT_DATASOURCE_NAME || !canIntrospect)) {
+        if (!(await driver.checkHealth())) {
+          return { ok: false, error: `Datasource '${datasource}' is registered, but its driver failed its health check.` };
+        }
+        return {
+          ok: true,
+          latencyMs: Date.now() - started,
+          ...(canIntrospect ? {} : { introspection: 'unsupported' as const }),
+        };
+      }
       const schema = await this.config.introspect(datasource);
       return {
         ok: true,
@@ -526,6 +615,9 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     remoteName: string,
     opts: GenerateDraftOpts = {},
   ): Promise<ObjectDraft> {
+    if (datasource === DEFAULT_DATASOURCE_NAME) {
+      throw primaryDatasourceNotFederatedError(datasource, 'EXTERNAL_DATASOURCE_ERROR');
+    }
     const schema = await this.config.introspect(datasource);
     const table = this.findTable(schema, remoteName);
     if (!table) {
@@ -615,6 +707,11 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     remoteName: string,
     opts: ImportObjectOpts = {},
   ): Promise<ImportObjectResult> {
+    // [#24772] First: no store configuration makes the primary datasource a
+    // federation source, so its refusal is the true answer whatever else holds.
+    if (datasource === DEFAULT_DATASOURCE_NAME) {
+      throw primaryDatasourceNotFederatedError(datasource, 'EXTERNAL_IMPORT_ERROR');
+    }
     if (!this.config.persistObject) {
       throw new Error(
         `importObject requires a writable metadata store, but none is wired ` +
@@ -667,6 +764,9 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   }
 
   async refreshCatalog(datasource: string): Promise<ExternalCatalog> {
+    if (datasource === DEFAULT_DATASOURCE_NAME) {
+      throw primaryDatasourceNotFederatedError(datasource, 'EXTERNAL_DATASOURCE_ERROR');
+    }
     const schema = await this.config.introspect(datasource);
     // Parse through the Zod schema so the persisted record is canonical
     // (defaults applied, shape validated) and matches the `external_catalog`
