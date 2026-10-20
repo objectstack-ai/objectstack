@@ -75,7 +75,7 @@ docker run -p 8080:8080 \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET \
   -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:17.7.0
+  ghcr.io/objectstack-ai/objectstack:18.0.0
 ```
 
 (`OS_ARTIFACT_PATH` also accepts an `https://` URL, so the artifact can come
@@ -93,7 +93,7 @@ docker run -p 8080:8080 \
   -e OS_ARTIFACT_URL="https://releases.example.com/hotcrm-2.2.2.json#sha256=<64 hex chars>" \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:17.7.0
+  ghcr.io/objectstack-ai/objectstack:18.0.0
 ```
 
 Both schemes work: `https://…` is fetched at boot, `file:///…` is read directly
@@ -150,7 +150,7 @@ COPY . .
 RUN npx os build              # → dist/objectstack.json
 
 # ── Runtime: the official ObjectStack runtime image ──────────────────
-FROM ghcr.io/objectstack-ai/objectstack:17.7.0
+FROM ghcr.io/objectstack-ai/objectstack:18.0.0
 COPY --from=build --chown=node:node /app/dist/objectstack.json /srv/app/objectstack.json
 ```
 
@@ -173,7 +173,7 @@ FROM node:22-slim
 RUN npm install --prefix /tmp/os-installer-npm --no-save --no-audit --no-fund "npm@11.21.0" \
  && export PATH="/tmp/os-installer-npm/node_modules/.bin:$PATH" \
  && test "$(npm --version)" = "11.21.0" \
- && npm install -g @objectstack/cli@17.7.0 "pg@^8.0.0" "mysql2@^3.0.0" \
+ && npm install -g @objectstack/cli@18.0.0 "pg@^8.0.0" "mysql2@^3.0.0" \
  && npm cache clean --force \
  && rm -rf /tmp/os-installer-npm
 
@@ -411,9 +411,16 @@ and keep three things in sync with the public origin:
 
 ```bash
 OS_AUTH_URL=https://app.example.com          # auth callbacks / cookie origin
-OS_TRUSTED_ORIGINS=https://app.example.com   # CORS allow-list
+OS_TRUSTED_ORIGINS=https://app.example.com   # auth callback / CSRF allow-list
 OS_PORT=8080                                 # must match the proxy upstream
 ```
+
+CORS needs no entry here: the Console and the API share the public origin,
+and with no `OS_CORS_ORIGIN` the server admits no cross-origin caller. Only a
+front-end served from **another** origin needs one, listed explicitly
+(`OS_CORS_ORIGIN=https://portal.example.com`, comma-separated for several) —
+never `*`, which the server refuses at boot while credentials are on. See
+[Environment variables → CORS](/docs/deployment/environment-variables#cors).
 
 ```text title="Caddyfile"
 app.example.com {
@@ -466,8 +473,7 @@ lock sign-up down via `OS_AUTH_SIGNUP_ENABLED` /
 configuration.** First-registrant promotion is removed there: with
 self-registration reachable, whoever posts to the sign-up endpoint first would
 otherwise receive cross-tenant access. No grant row is written on those
-postures, ever. Declare the administrators **before first boot** instead
-(18.0 supports fresh `single` installs; upgrades and walled postures arrive in 18.x. In 18.0 `os serve` refuses a walled posture at boot):
+postures, ever. Declare the administrators **before first boot** instead:
 
 ```bash
 # one address, or a comma-separated list

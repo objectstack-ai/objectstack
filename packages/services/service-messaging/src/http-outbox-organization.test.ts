@@ -4,12 +4,12 @@
  * [#13546] `sys_http_delivery` rows carry the producer's organization.
  *
  * The consequence being pinned: the cross-organization wall on `redeliver()`
- * (#10740) scopes by the row's `organization_id`, and the driver's tenant term
- * is `(organization_id = :tenantId OR organization_id IS NULL)` — a deliberate
- * global-row fail-open. A row enqueued without an organization therefore
- * belongs to NO organization and is visible to EVERY one; before this repair
- * the enqueue door never stamped the column, so 100% of rows were in that arm
- * and the wall excluded nothing.
+ * (#10740) scopes by the row's `organization_id`. The driver's tenant term was
+ * then `(organization_id = :tenantId OR organization_id IS NULL)`, a global-row
+ * fail-open, and the enqueue door never stamped the column, so 100% of rows
+ * were in that arm and the wall excluded nothing. ADR-0131 D8 has since
+ * retired the NULL arm: the term is `organization_id = :tenantId` alone, and
+ * an organization-less row is reached by no tenant-scoped redeliver.
  *
  * ⭐ The control for this suite is the sibling notification outbox
  * (`SqlOutbox.enqueue` writes `organization_id: input.organizationId ?? null`)
@@ -166,16 +166,23 @@ describe('#13546 — MemoryHttpOutbox parity', () => {
         expect(row.organizationId).toBe('org_pin_alpha');
     });
 
-    it('an org-less row stays a GLOBAL row any tenant may replay (the driver fail-open arm, mirrored)', async () => {
-        // The over-denial control: hiding NULL rows from every tenant would be
-        // a different defect (platform rows invisible to everyone). The memory
-        // predicate must mirror `(organization_id = :tenantId OR organization_id
-        // IS NULL)`, not tighten it.
+    it('an org-less row is INVISIBLE to every tenant-scoped redeliver — no NULL arm (ADR-0131 D8)', async () => {
+        // The memory predicate mirrors the SQL driver's `organization_id =
+        // :tenantId` with no `OR organization_id IS NULL` arm: NULL is not an
+        // owner, so no tenant may replay a row of no organization.
         const outbox = new MemoryHttpOutbox();
         const id = await deadRow(outbox);
 
-        const row = await outbox.redeliver(id, { tenantId: 'org_pin_beta' });
-        expect(row.status).toBe('pending');
+        const attempt = outbox.redeliver(id, { tenantId: 'org_pin_beta' });
+        await expect(attempt).rejects.toBeInstanceOf(HttpRedeliverError);
+        await expect(attempt).rejects.toMatchObject({ code: 'RESOURCE_NOT_FOUND' });
+        const [row] = await outbox.list({ status: 'dead' });
+        expect(row.id).toBe(id);
+        expect(row.attempts).toBe(1);
+
+        // Still reachable where nothing scopes: a tenant-less caller.
+        const replayed = await outbox.redeliver(id, { tenantId: undefined });
+        expect(replayed.status).toBe('pending');
     });
 
     it('a tenant-less caller stays unscoped (the honest degraded shape RedeliverOptions rules)', async () => {

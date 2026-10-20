@@ -48,11 +48,13 @@ import {
   API_KEY_DEFAULT_EXPIRY_DAYS,
   API_KEY_INACTIVITY_DAYS,
   API_KEY_MAX_EXPIRY_DAYS,
+  accountScopeAuthGate,
   hasPlatformAdminStanding,
   resolveUserAuthzGrants,
 } from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import type {
   ApiKeyLifecyclePolicy,
   IEmailService,
@@ -79,9 +81,14 @@ import { permissionSetInEffect } from './catalog-set-in-effect.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
 import {
+  accountLockedEventFor,
   emitAuthSessionAuditEvent,
   loginEventFor,
   logoutEventFor,
+  refusalCodeOf,
+  signInClientFingerprint,
+  signInFailureEventFor,
+  SIGN_IN_EMAIL_PATH,
   type AuthEventAuditSurface,
 } from './auth-session-audit.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
@@ -99,6 +106,7 @@ import {
 } from './impersonation-bearer-rotation.js';
 import { echoInstalledSessionToken } from './two-factor-rotated-token-echo.js';
 import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-verified-reset.js';
+import { codeInviteRoleNotFound } from './invite-role-not-found-code.js';
 import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
 import {
   applyPlatformAdminImpersonation,
@@ -127,6 +135,9 @@ import {
 } from './remove-member-permission-guard.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { readAccountInvitation, settleImportResetDelivery } from './account-invitation-marker.js';
+import { resolveClientAddress } from './client-address.js';
+import { vendorClientAddressOptions, withVendorClientAddress } from './client-address-vendor.js';
+import { clientAddressStateEntries, readRequestClientAddress } from './request-client-address.js';
 import {
   REVOKE_SESSION_NOT_FOUND_CODE,
   REVOKE_SESSION_NOT_FOUND_MESSAGE,
@@ -1028,12 +1039,38 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
 
   /**
    * ADR-0069 D5 — network gating. When non-empty, auth requests (sign-in,
-   * session) from a client IP outside these CIDR / exact ranges are rejected
-   * with `IP_NOT_ALLOWED` at the auth-route middleware. Requires a trusted proxy
-   * to set `x-forwarded-for` / `cf-connecting-ip`; fails OPEN when the client IP
-   * can't be determined (so a missing proxy header is a no-op, not a lockout).
+   * session) are judged at the auth-route middleware against these CIDR / exact
+   * ranges, and refused with `403 IP_NOT_ALLOWED` unless the client address is
+   * inside one.
+   *
+   * The address judged is the one the server ESTABLISHED, by the platform's
+   * client-address trust rule ({@link resolveClientAddress}, shared with the
+   * runtime's inbound rate limiter): forwarded headers only when
+   * {@link trustProxy} is declared, the transport's peer address otherwise.
+   * Behind a reverse proxy, declare `server.trustProxy`, or the allow-list
+   * judges the proxy's own address.
+   *
+   * A request whose address cannot be established (no peer address, no trusted
+   * forwarded header) is REFUSED with the same `403 IP_NOT_ALLOWED`, and the
+   * first such refusal logs a warning naming this setting and `server.trustProxy`.
+   * Unset or empty: no restriction, and nothing is judged.
    */
   allowedIpRanges?: string[];
+
+  /**
+   * The deployment's `server.trustProxy`: believe `X-Forwarded-For` /
+   * `X-Real-IP` when establishing a request's client address for the ADR-0069
+   * D5 allow-list ({@link allowedIpRanges}) and the D7 login audit
+   * (`last_login_ip`) — and for what the vendored auth library records and
+   * keys on by client address (session `ip_address`, the sign-in audit
+   * fingerprint, its own per-address {@link rateLimit}), which is handed that
+   * same address (`client-address-vendor.ts`). The same authored value the
+   * runtime's inbound rate limiter reads; `objectstack serve` passes it to
+   * both. A host that composes `AuthPlugin` itself passes the value it gives
+   * the dispatcher.
+   * @default false
+   */
+  trustProxy?: boolean;
 
   /**
    * ADR-0069 D2 — better-auth-native per-IP rate limiting, passed through to
@@ -1117,22 +1154,41 @@ function ipv4ToInt(ip: string): number | null {
   return (((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]) >>> 0;
 }
 
-/** ADR-0069 D5 — does `ip` match `range` (IPv4 CIDR `a.b.c.d/n`, or exact IP)? */
+/**
+ * `::ffff:203.0.113.7` → `203.0.113.7`; anything else is returned trimmed.
+ *
+ * A dual-stack listener reports an IPv4 peer in this IPv4-mapped IPv6 form, and
+ * the ADR-0069 D5 allow-list judges the transport's peer address when no proxy
+ * is trusted. So both sides of a comparison are read as the IPv4 address they
+ * denote, or an IPv4 range could never admit an IPv4 client on such a socket.
+ */
+function unmapIpv4(address: string): string {
+  const trimmed = address.trim();
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(trimmed);
+  return mapped ? mapped[1] : trimmed;
+}
+
+/**
+ * ADR-0069 D5 — does `ip` match `range` (IPv4 CIDR `a.b.c.d/n`, or exact IP)?
+ * An IPv4-mapped IPv6 address on either side compares as its IPv4 address.
+ */
 export function ipMatchesRange(ip: string, range: string): boolean {
-  const r = (range || '').trim();
+  const r = unmapIpv4(range || '');
   if (!r) return false;
+  const address = unmapIpv4(ip);
   if (r.includes('/')) {
-    const [base, bitsStr] = r.split('/');
+    const [rawBase, bitsStr] = r.split('/');
+    const base = unmapIpv4(rawBase);
     const bits = Number(bitsStr);
-    const ipInt = ipv4ToInt(ip);
+    const ipInt = ipv4ToInt(address);
     const baseInt = ipv4ToInt(base);
     if (ipInt === null || baseInt === null || !(bits >= 0 && bits <= 32)) {
-      return ip.trim() === base.trim(); // non-IPv4-CIDR → exact-match fallback
+      return address === base; // non-IPv4-CIDR → exact-match fallback
     }
     const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
     return ((ipInt & mask) >>> 0) === ((baseInt & mask) >>> 0);
   }
-  return ip.trim() === r;
+  return address === r;
 }
 
 /**
@@ -2733,9 +2789,11 @@ export class AuthManager {
           // ── ADR-0069 D2: account lockout (gate) ─────────────────────
           // Reject a sign-in for a locked identity BEFORE better-auth checks
           // the password — a lock must hold even against the correct password.
-          if (ctx?.path === '/sign-in/email') {
+          // The refusal is a refused sign-in, so it writes its `login_failed`
+          // row (`auth-session-audit.ts`, account events) before it throws.
+          if (ctx?.path === SIGN_IN_EMAIL_PATH) {
             const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
-            if (email) await this.assertAccountNotLocked(email);
+            if (email) await this.assertAccountNotLocked(email, ctx);
             return;
           }
 
@@ -2823,7 +2881,7 @@ export class AuthManager {
           // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
           // the after-hook with it on `ctx.context.returned`; a success leaves
           // the session payload there. Count failures, reset on success.
-          if (ctx?.path === '/sign-in/email') {
+          if (ctx?.path === SIGN_IN_EMAIL_PATH) {
             const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
             if (email) {
               let succeeded = true;
@@ -2833,24 +2891,22 @@ export class AuthManager {
               } catch {
                 succeeded = !(ctx?.context?.returned instanceof Error);
               }
-              await this.recordSignInOutcome(email, succeeded);
+              const lockStamped = await this.recordSignInOutcome(email, succeeded);
+              // A refused sign-in writes `login_failed`, and the one that
+              // stamped the lockout also writes `account_locked`. A successful
+              // one is recorded as `login` by the session hook, unchanged.
+              if (!succeeded) await this.auditRefusedSignIn(ctx, email, lockStamped);
               if (succeeded) {
                 const uid = ctx?.context?.returned?.user?.id;
                 if (typeof uid === 'string') await this.enforceConcurrentCap(uid);
                 // ADR-0069 D7 — login audit: stamp last_login_at/ip on success.
                 // Independent of lockout config (recordSignInOutcome no-ops when
-                // lockout is off). IP from the trusted forwarded headers, same
-                // precedence as the D5 allow-list middleware.
+                // lockout is off). The IP is the address `handleRequest`
+                // established for this request by the client-address trust rule,
+                // the same address the D5 allow-list judged; none when it was
+                // undetermined. ⛔ Never re-read from a header here.
                 if (typeof uid === 'string') {
-                  const hdr = (k: string): string =>
-                    ((ctx?.headers?.get?.(k) ?? ctx?.request?.headers?.get?.(k)) as string) || '';
-                  const fwd = hdr('x-forwarded-for');
-                  const ip =
-                    (fwd && fwd.split(',')[0].trim()) ||
-                    hdr('cf-connecting-ip') ||
-                    hdr('x-real-ip') ||
-                    undefined;
-                  await this.stampLastLogin(uid, ip);
+                  await this.stampLastLogin(uid, await readRequestClientAddress());
                 }
               }
             }
@@ -2920,6 +2976,12 @@ export class AuthManager {
             }
             return;
           }
+
+          // ── #24750: invite-member's unknown-role refusal carries its code ──
+          // better-auth throws it with only a message; the spec promises
+          // `ROLE_NOT_FOUND` (see `invite-role-not-found-code.ts`). It throws
+          // on a match, so it stays after every section above.
+          await codeInviteRoleNotFound(ctx);
 
           if (ctx?.path !== '/sign-up/email') return;
           // ADR-0069 D1 — stamp password_changed_at for a newly-created local
@@ -3026,19 +3088,23 @@ export class AuthManager {
         return origins.length ? { trustedOrigins: origins } : {};
       })(),
 
-      // Advanced options (cross-subdomain cookies, secure cookies, CSRF, etc.)
-      ...(this.config.advanced ? {
-        advanced: {
-          ...(this.config.advanced.crossSubDomainCookies
-            ? { crossSubDomainCookies: this.config.advanced.crossSubDomainCookies } : {}),
-          ...(this.config.advanced.useSecureCookies != null
-            ? { useSecureCookies: this.config.advanced.useSecureCookies } : {}),
-          ...(this.config.advanced.disableCSRFCheck != null
-            ? { disableCSRFCheck: this.config.advanced.disableCSRFCheck } : {}),
-          ...(this.config.advanced.cookiePrefix != null
-            ? { cookiePrefix: this.config.advanced.cookiePrefix } : {}),
-        },
-      } : {}),
+      // Advanced options (cross-subdomain cookies, secure cookies, CSRF, etc.),
+      // and — always — the library's own client-address source: the one
+      // platform-owned header `handleRequest` writes from the address the
+      // client-address trust rule established (`client-address-vendor.ts`).
+      // Never left at the library's default reader, which knows neither the
+      // transport's peer address nor `server.trustProxy`.
+      advanced: {
+        ...(this.config.advanced?.crossSubDomainCookies
+          ? { crossSubDomainCookies: this.config.advanced.crossSubDomainCookies } : {}),
+        ...(this.config.advanced?.useSecureCookies != null
+          ? { useSecureCookies: this.config.advanced.useSecureCookies } : {}),
+        ...(this.config.advanced?.disableCSRFCheck != null
+          ? { disableCSRFCheck: this.config.advanced.disableCSRFCheck } : {}),
+        ...(this.config.advanced?.cookiePrefix != null
+          ? { cookiePrefix: this.config.advanced.cookiePrefix } : {}),
+        ipAddress: vendorClientAddressOptions(),
+      },
     };
 
     const auth = betterAuth(betterAuthConfig);
@@ -4537,10 +4603,16 @@ export class AuthManager {
         // revokes the session in place when exceeded (next request → 401).
         await this.enforceSessionControls((session as any)?.id, (session as any)?.createdAt);
 
+        // An impersonation session carries the administrator who started it
+        // (`impersonatedBy`, written by the admin plugin's impersonation and
+        // stored as `sys_session.impersonated_by`); which postures hold the
+        // session depends on it — see computeAuthGate().
+        const impersonatedBy = (session as any)?.impersonatedBy;
         const authGate = await this.computeAuthGate(
           user.id,
           (session as any)?.activeOrganizationId,
           (user as any)?.twoFactorEnabled === true,
+          { impersonation: typeof impersonatedBy === 'string' && impersonatedBy.trim() !== '' },
         );
 
         return {
@@ -6437,9 +6509,36 @@ export class AuthManager {
    * response status and log server errors so they are not silently swallowed.
    *
    * @param request - Web standard Request object
+   * @param transport - What the transport knows about the request that a Fetch
+   *   `Request` does not carry: `remoteAddress` is its peer address
+   *   (`IHttpRequest.remoteAddress`). Omitted, the request's client address is
+   *   established from trusted forwarded headers alone, and is undetermined
+   *   when `trustProxy` is not declared. Either way the vendored library is
+   *   handed that address and no other (`client-address-vendor.ts`).
    * @returns Web standard Response object
    */
-  async handleRequest(request: Request): Promise<Response> {
+  async handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+    // ADR-0069 D7 — the client address this request's sign-in audit stamps,
+    // established ONCE, here, by the same trust rule the D5 allow-list judges
+    // with (`resolveClientAddress`). Read before any rewrite below, and carried
+    // to the after-hook in better-auth's request state (`request-client-address.ts`).
+    const clientHeaders: Record<string, string> = {};
+    request.headers.forEach((value, name) => {
+      clientHeaders[name] = value;
+    });
+    const clientAddress = this.resolveClientAddress({
+      headers: clientHeaders,
+      ...(transport?.remoteAddress ? { remoteAddress: transport.remoteAddress } : {}),
+    });
+
+    // The vendored library's OWN client-address reader (session `ip_address`,
+    // the sign-in audit fingerprint, its per-address rate limiter) reads only
+    // the platform-owned header (`vendorClientAddressOptions`, composed in
+    // `createAuthInstance`). Written HERE, from the address just established,
+    // after dropping any copy the caller sent — so the library answers the same
+    // address the D5 allow-list judged, or none. See `client-address-vendor.ts`.
+    request = withVendorClientAddress(request, clientAddress);
+
     // Dev DX: better-auth's CSRF protection rejects state-changing requests
     // (e.g. `/sign-in/email`) with a 403 when neither `Origin` nor `Referer`
     // is present. Browsers always send one; non-browser API clients (curl,
@@ -6515,7 +6614,10 @@ export class AuthManager {
     // The previous single call site flattened it with the `await` below.
     const runHandler = async (): Promise<Response> =>
       await runWithAuthActorScope(() =>
-        runWithRequestState(new WeakMap(), () => auth.handler(request)),
+        runWithRequestState(
+          new WeakMap<object, unknown>(clientAddressStateEntries(clientAddress)),
+          () => auth.handler(request),
+        ),
       );
 
     // [#7724] A subject-erasure request is ONE unit of work, and better-auth
@@ -8820,15 +8922,36 @@ export class AuthManager {
   /**
    * ADR-0069 — the auth-policy gate posture for a SESSION: the first, most
    * urgent posture {@link resolveUserAuthGates} reports for its user in its
-   * active organization, else undefined. Every scope holds a session, because
-   * a session IS the password sign-in (#23287, ruling C′ item 1).
+   * active organization that holds this session, else undefined.
+   *
+   * What a posture holds is its declared scope (`AUTH_GATE_SCOPES`, #23287,
+   * ruling C′ item 1): `account` holds every credential of the user,
+   * `credential` holds the password sign-in alone. Which postures hold a
+   * session therefore depends on what the session is:
+   *
+   *  - a session the user signed in to themselves is held by every scope: it
+   *    IS the password sign-in a `credential` posture holds;
+   *  - an IMPERSONATION session (`options.impersonation`, read off
+   *    `session.impersonatedBy`) is not the user's password sign-in. It is
+   *    minted from the administrator's own session, which passed its own
+   *    posture check at the impersonation door. So only an `account`-scope
+   *    posture holds it: the first one the list reports, wherever it sits
+   *    (`accountScopeAuthGate`, the reading the API-key admission seam gives
+   *    a key, the other credential that is not the password sign-in). A target
+   *    held by both the forced reset and enforced MFA answers `MFA_REQUIRED`
+   *    on it, never nothing (#24762, ruling 6288774214 items 1 and 2).
+   *
+   * The other callers ask for a user's own session (`options` omitted), so
+   * their answer is the list's first entry, as it always was.
    */
   private async computeAuthGate(
     userId: string,
     activeOrgId: string | undefined,
     _twoFactorEnabledHint: boolean,
+    options: { impersonation?: boolean } = {},
   ): Promise<AuthGate | undefined> {
     const gates = await this.resolveUserAuthGates(userId, { organizationId: activeOrgId });
+    if (options.impersonation === true) return accountScopeAuthGate(gates) ?? undefined;
     return gates[0];
   }
 
@@ -8837,7 +8960,8 @@ export class AuthManager {
    * `userId` holds right now, most urgent first; `[]` when no policy holds
    * them. The ONE per-user posture computation (`IAuthService.resolveUserAuthGates`):
    *
-   *  - the session gate takes its first entry ({@link computeAuthGate}, onto
+   *  - the session gate takes its first entry, and on an impersonation session
+   *    its first `account`-scope entry ({@link computeAuthGate}, onto
    *    `user.authGate` in `customSession`);
    *  - the API-key admission seam (`resolveApiKeyAdmission`, `@objectstack/core`)
    *    asks it for a key's owner and holds the key on an `account`-scope entry
@@ -8848,10 +8972,11 @@ export class AuthManager {
    * organization may require MFA above the global floor.
    *
    * Order, most urgent first: the administrator's forced reset, then natural
-   * password expiry, then enforced MFA. The session shows the first; a key is
-   * held only by an `account`-scope entry, wherever it sits in the list — a
-   * user whose password expired AND who owes MFA enrolment holds their keys
-   * on the MFA entry even though their session shows the expiry.
+   * password expiry, then enforced MFA. The user's own session shows the
+   * first; a key, and an impersonation session, are held only by an
+   * `account`-scope entry, wherever it sits in the list — a user whose
+   * password expired AND who owes MFA enrolment holds their keys on the MFA
+   * entry even though their session shows the expiry.
    *
    * No-op (no read) when no gate feature is enabled. Fails OPEN on any lookup
    * error, answering `[]` — a transient hiccup must never lock a compliant user
@@ -9213,24 +9338,41 @@ export class AuthManager {
    * out (brute-force protection). No-op when lockout is disabled
    * (`lockoutThreshold <= 0`) or no data engine is wired. Fails OPEN on a
    * lookup error: an infra hiccup must never block every login.
+   *
+   * The lock it enforces is the one held by the account the credential check
+   * resolves the identifier to ({@link findSignInAccount}), so it holds for
+   * every spelling of the address that signs in to that account.
+   *
+   * The refusal is a refused sign-in of the account it names, so — given the
+   * endpoint context `ctx` — it writes that account's `login_failed` row with
+   * the refusal's own code before throwing (`auth-session-audit.ts`).
    */
-  private async assertAccountNotLocked(email: string): Promise<void> {
+  private async assertAccountNotLocked(email: string, ctx?: unknown): Promise<void> {
     const threshold = Number(this.config.lockoutThreshold) || 0;
     if (threshold <= 0) return;
     const engine = this.getDataEngine();
     if (!engine) return;
     let locked = false;
+    let lockedUserId: string | undefined;
     try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      const u = await engine.findOne('sys_user', {
-        where: { email }, fields: ['id', 'locked_until'], context: SYSTEM_CTX,
-      } as any);
-      const lu = u?.locked_until;
+      const u = await this.findSignInAccount(engine, email, ['locked_until']);
+      const lu = u?.locked_until as string | number | Date | null | undefined;
       locked = !!(lu && new Date(lu).getTime() > Date.now());
+      if (locked && u) lockedUserId = u.id;
     } catch {
       return; // fail-open
     }
     if (locked) {
+      if (ctx !== undefined && lockedUserId) {
+        await emitAuthSessionAuditEvent(
+          this.config.getAuditSink?.(),
+          signInFailureEventFor(lockedUserId, {
+            path: SIGN_IN_EMAIL_PATH,
+            reason: 'ACCOUNT_LOCKED',
+            fingerprint: signInClientFingerprint(ctx),
+          }),
+        );
+      }
       const { APIError } = await import('better-auth/api');
       throw new APIError('FORBIDDEN', {
         message:
@@ -9248,20 +9390,31 @@ export class AuthManager {
    * both (only writing when there is something to clear, to avoid a no-op
    * history row on every login). No-op when lockout is disabled. Never throws —
    * a counter write must not turn a valid login into an error.
+   *
+   * The counter it moves is the one held by the account the credential check
+   * resolves the identifier to ({@link findSignInAccount}) — the account the
+   * gate above enforces — so every refused attempt on that account counts
+   * toward one lock, and every success on it clears that lock, whatever
+   * spelling of the address the attempt carried.
+   *
+   * Resolves to the lock it stamped — the account, the expiry and the
+   * threshold — when THIS call wrote `locked_until` and the write landed, and
+   * to `undefined` otherwise. That is the lockout transition the
+   * `account_locked` row records, so a lock that was never written is never
+   * reported as one.
    */
-  private async recordSignInOutcome(email: string, success: boolean): Promise<void> {
+  private async recordSignInOutcome(
+    email: string,
+    success: boolean,
+  ): Promise<{ userId: string; lockedUntil: Date; threshold: number } | undefined> {
     const threshold = Number(this.config.lockoutThreshold) || 0;
-    if (threshold <= 0) return;
+    if (threshold <= 0) return undefined;
     const engine = this.getDataEngine();
-    if (!engine) return;
+    if (!engine) return undefined;
     try {
       const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      const u = await engine.findOne('sys_user', {
-        where: { email },
-        fields: ['id', 'failed_login_count', 'locked_until'],
-        context: SYSTEM_CTX,
-      } as any);
-      if (!u?.id) return;
+      const u = await this.findSignInAccount(engine, email, ['failed_login_count', 'locked_until']);
+      if (!u) return undefined;
       if (success) {
         if ((Number(u.failed_login_count) || 0) !== 0 || u.locked_until) {
           await engine.update(
@@ -9270,15 +9423,18 @@ export class AuthManager {
             { context: SYSTEM_CTX } as any,
           );
         }
-        return;
+        return undefined;
       }
       const next = (Number(u.failed_login_count) || 0) + 1;
       const patch: Record<string, unknown> = { id: u.id, failed_login_count: next };
+      let lockedUntil: Date | undefined;
       if (next >= threshold) {
         const mins = Number(this.config.lockoutDurationMinutes) || 15;
-        patch.locked_until = new Date(Date.now() + mins * 60_000);
+        lockedUntil = new Date(Date.now() + mins * 60_000);
+        patch.locked_until = lockedUntil;
       }
       await engine.update('sys_user', patch, { context: SYSTEM_CTX } as any);
+      return lockedUntil ? { userId: u.id, lockedUntil, threshold } : undefined;
     } catch (e) {
       // Never break the auth response. [#12981] But lockout accounting that
       // silently stops accounting is brute-force protection that is OFF.
@@ -9293,7 +9449,116 @@ export class AuthManager {
         e,
         { object: 'sys_user', threshold, success },
       );
+      return undefined;
     }
+  }
+
+  /**
+   * Write the account events for a refused `/sign-in/email`: one
+   * `login_failed` row for the account the sign-in named, carrying the
+   * refusal's machine code, and — when this attempt stamped the ADR-0069 D2
+   * lockout (`lockStamped`, from {@link recordSignInOutcome}) — one
+   * `account_locked` row. Independent of the lockout configuration: a refused
+   * sign-in is recorded whether or not a threshold is set.
+   *
+   * ⛔ The submitted identifier is used only to FIND the account and is never
+   * recorded; an identifier that resolves to no account writes nothing
+   * (`auth-session-audit.ts`, account events). The password is never read.
+   * Never throws — the refusal is already decided and the sink swallows.
+   */
+  private async auditRefusedSignIn(
+    ctx: any,
+    email: string,
+    lockStamped: { userId: string; lockedUntil: Date; threshold: number } | undefined,
+  ): Promise<void> {
+    const sink = this.config.getAuditSink?.();
+    if (!sink) return;
+    const userId = lockStamped?.userId ?? (await this.resolveSignInAccountId(email));
+    if (!userId) return;
+    const fingerprint = signInClientFingerprint(ctx);
+    await emitAuthSessionAuditEvent(
+      sink,
+      signInFailureEventFor(userId, {
+        path: SIGN_IN_EMAIL_PATH,
+        reason: refusalCodeOf(ctx?.context?.returned),
+        fingerprint,
+      }),
+    );
+    if (lockStamped) {
+      await emitAuthSessionAuditEvent(
+        sink,
+        accountLockedEventFor(lockStamped.userId, {
+          path: SIGN_IN_EMAIL_PATH,
+          lockedUntil: lockStamped.lockedUntil,
+          threshold: lockStamped.threshold,
+          fingerprint,
+        }),
+      );
+    }
+  }
+
+  /**
+   * The id of the account a password sign-in for `email` is checked against,
+   * or `undefined` — {@link findSignInAccount}'s answer, so the `login_failed`
+   * row names the account the credential check actually judged and the lock
+   * gate and counter hold.
+   */
+  private async resolveSignInAccountId(email: string): Promise<string | undefined> {
+    const engine = this.getDataEngine();
+    if (!engine) return undefined;
+    try {
+      return (await this.findSignInAccount(engine, email, []))?.id;
+    } catch (e) {
+      // The refusal stands either way; what is lost is its ledger row.
+      this.logDurabilityDegradation(
+        'AuthManager: a refused sign-in was NOT recorded in sys_audit_log — the account it named '
+          + 'could not be resolved, so its `login_failed` row was not written. The refusal itself was '
+          + 'answered normally, so nothing looks broken, and the Auth preset of Setup → Audit Log is '
+          + 'missing this attempt. Remedy: make the sys_user read land — check driver connectivity.',
+        e,
+        { object: 'sys_user', action: 'login_failed' },
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * ADR-0069 D2 — the ONE answer to "which account does this password sign-in
+   * name", read by the lock gate ({@link assertAccountNotLocked}), the counter
+   * ({@link recordSignInOutcome}) and the account events
+   * ({@link resolveSignInAccountId}): the `sys_user` row with `fields`
+   * (plus `id`), or `undefined` when the identifier names no account.
+   *
+   * It asks exactly what better-auth's `/sign-in/email` credential check asks
+   * (1.7.3: `internalAdapter.findUserByEmail(email.toLowerCase())`, an
+   * equality match of the `email` column against the lower-cased address,
+   * which is also the spelling `internalAdapter.createUser` stores), so the
+   * gate, the counter, the ledger and the credential check name one account
+   * for every identifier the credential check resolves to it.
+   *
+   * The lockout state lives on that row (`failed_login_count` /
+   * `locked_until`) and every write to it is by the row's `id`, so one account
+   * holds one counter. ⛔ Never resolve the account any other way on this
+   * path: the lockout holds exactly as far as it names the account the
+   * credential check names.
+   *
+   * Throws what the engine throws; each caller keeps its own failure posture
+   * (the gate fails open, the counter and the ledger report the lost write).
+   */
+  private async findSignInAccount(
+    engine: IDataEngine,
+    email: string,
+    fields: readonly string[],
+  ): Promise<({ id: string } & Record<string, unknown>) | undefined> {
+    const query: EngineQueryOptions = {
+      where: { email: email.toLowerCase() },
+      fields: ['id', ...fields],
+      context: { isSystem: true, positions: [], permissions: [] },
+    };
+    const row = await engine.findOne('sys_user', query);
+    return row && typeof row.id === 'string' && row.id
+      ? (row as { id: string } & Record<string, unknown>)
+      : undefined;
   }
 
   /**
@@ -9598,15 +9863,45 @@ export class AuthManager {
 
   /**
    * ADR-0069 D5 — is `ip` within the configured allow-list? True (allow) when no
-   * ranges are configured, OR when the IP can't be determined (fail-open so a
-   * misconfigured proxy never locks everyone out — an admin enabling this must
-   * ensure forwarded headers are trusted). Supports IPv4 CIDR + exact IPv4/IPv6.
+   * ranges are configured: nothing is judged then. With ranges configured, true
+   * only for an address inside one of them, and FALSE for an undetermined
+   * address (`undefined` / empty): an allow-list is a gate, and a gate that
+   * opens for "unknown" is open to anyone who can make themselves unknown.
+   * Supports IPv4 CIDR + exact IPv4/IPv6 (IPv4-mapped IPv6 compares as IPv4).
+   *
+   * `ip` must be the address the server established
+   * ({@link resolveClientAddress}), never a header read by the caller.
    */
   public isClientIpAllowed(ip: string | undefined): boolean {
     const ranges = this.config.allowedIpRanges;
     if (!ranges || ranges.length === 0) return true;
-    if (!ip) return true; // undetermined → fail-open
+    if (!ip) return false; // undetermined → refused
     return ranges.some((r) => ipMatchesRange(ip, r));
+  }
+
+  /**
+   * The client address this deployment establishes for a request: the
+   * platform's client-address trust rule (`./client-address.ts`, shared with the
+   * runtime's inbound rate limiter) applied with this deployment's
+   * {@link AuthManagerOptions.trustProxy}. Forwarded headers count only when
+   * `trustProxy` is declared; otherwise the transport's `remoteAddress`;
+   * `undefined` when neither is available. The ADR-0069 D5 allow-list judges
+   * this address and the D7 login audit stamps it.
+   */
+  public resolveClientAddress(transport: {
+    headers?: Record<string, string | string[] | undefined>;
+    remoteAddress?: string;
+  }): string | undefined {
+    return resolveClientAddress({
+      ...(transport.headers ? { headers: transport.headers } : {}),
+      ...(transport.remoteAddress ? { remoteAddress: transport.remoteAddress } : {}),
+      trustProxy: this.config.trustProxy === true,
+    });
+  }
+
+  /** Whether this deployment declared `server.trustProxy` ({@link AuthManagerOptions.trustProxy}). */
+  public trustsForwardedHeaders(): boolean {
+    return this.config.trustProxy === true;
   }
 
   /**

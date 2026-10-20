@@ -20,10 +20,11 @@
  * ## The two organizations a grant can carry, stated side by side
  *
  * Ruled 2026-09-02: a rule-materialised grant carries the RULE's organization,
- * a direct grant the RECORD's. `deal_p1` — an organization-less record an
- * org-A rule still matches through the driver's compatibility arm — is what
- * separates the two: under the org-A rule its grant carries ORG_A (the rule's),
- * under the platform-global rule it carries nothing (the record's).
+ * a direct grant the RECORD's. `deal_p1` is an organization-less record. Under
+ * the platform-global rule its grant carries nothing (the record's). No walled
+ * org-A sweep reaches it: since 18.x the driver's scope carries no `IS NULL`
+ * arm (ADR-0131 D1, D14), so the v17 case in which the org-A rule's grant on
+ * it carried ORG_A no longer arises.
  *
  * ## The P4 measurement, pinned
  *
@@ -192,7 +193,7 @@ const WON = { stage: 'won' };
 const byRecord = (rows: ShareRow[]) => Object.fromEntries(rows.map((r) => [r.record_id, r.organization_id]));
 
 describe("[#14484] a rule-materialised grant carries the RULE's organization", () => {
-  it("an ORG-STAMPED rule's grants all carry ORG_A — the organization-less record included", async () => {
+  it("an ORG-STAMPED rule's grants all carry ORG_A, and its walled sweep does not reach the organization-less record", async () => {
     // [ADR-0131 D8] `isolated`: the sweep's organization scope is the wall's,
     // and under `single` there is none to keep ORG_B's won deals out.
     const { rules, shares } = await boot('isolated');
@@ -205,9 +206,10 @@ describe("[#14484] a rule-materialised grant carries the RULE's organization", (
     await rules.evaluateRule(rule.id, ORG_A_ADMIN);
     const rows = await shares();
 
-    // `deal_p1` is the discriminating row: the RECORD carries no organization,
-    // the RULE does, and the ruling says the grant is the rule's.
-    expect(byRecord(rows)).toEqual({ deal_a1: ORG_A, deal_p1: ORG_A });
+    // `deal_p1` carries no organization, and NULL is not an owner (ADR-0131 D1,
+    // D14): the sweep's scope is the organization equality, with no `IS NULL`
+    // arm, so it never matches here and gets no grant.
+    expect(byRecord(rows)).toEqual({ deal_a1: ORG_A });
     expect(rows.every((r) => r.organization_id === ORG_A)).toBe(true);
   });
 
@@ -249,8 +251,9 @@ describe("[#14484] a direct grant carries the RECORD's organization", () => {
 
   it("an organization-less record falls back to the acting session's organization", async () => {
     const { sharing, shares } = await boot();
-    // `deal_p1` is reachable to an ORG_B session through the driver's
-    // compatibility arm; the record has nothing to give, the session does.
+    // `deal_p1` is reachable to an ORG_B session under `single`, where the
+    // driver carries no organization scope (ADR-0131 D8); the record has
+    // nothing to give, the session does.
     await sharing.grant(
       { object: OBJECT, recordId: 'deal_p1', recipientId: 'u_x' },
       { userId: 'u_p', tenantId: ORG_B } as never,
@@ -377,8 +380,8 @@ describe("[#14484] a record read that FAILS never stamps the acting session's or
   // precondition for a wrong stamp — is decided before the stamp, by the
   // pre-flight's visibility read under the CALLER's context
   // (`assertCanManageShares` → `isRecordVisible`), which the driver scopes to
-  // `organization_id = :active OR IS NULL` whenever the context carries an
-  // organization. So a plain `{ userId, tenantId: ORG_B }` session never sees
+  // `organization_id = :active` whenever the context carries an organization
+  // under a wall. So a plain `{ userId, tenantId: ORG_B }` session never sees
   // `deal_a1` (ORG_A) on any posture, `single` included — measured: the first
   // spelling of these pins died there with `NOT_FOUND`. Two shapes DO reach it:
   //
@@ -441,9 +444,9 @@ describe('[#14484] the scoped UPDATE half cannot reach a row stamped with a DIFF
   // re-home case below).
   //
   // `SqlDriver.applyTenantScope` scopes the update half to
-  // `organization_id = ? OR organization_id IS NULL`: a legacy NULL row is
-  // reachable (pinned above), a row carrying ANOTHER organization is not —
-  // the wall, not a defect. The review's note 3 read the consequence as a
+  // `organization_id = ?`: a row carrying ANOTHER organization is not
+  // reachable — the wall, not a defect — and since 18.x neither is a row with
+  // none (ADR-0131 D1, D14). The review's note 3 read the consequence as a
   // SILENT no-op (`grant` returning `{ ...row, ...patch }`, `reconcile`
   // counting `updated += 1`). Measured on the real engine, it is not: the
   // engine's update reports the unreachable row as `RECORD_NOT_FOUND` (404),
@@ -453,9 +456,10 @@ describe('[#14484] the scoped UPDATE half cannot reach a row stamped with a DIFF
   // `evaluateAllRulesForObject` catches per RULE and logs). Loud beats a
   // wrong count, so the behaviour stands; these pins hold the measured shape
   // so the next reader does not inherit the note's reading. Reachable through
-  // an organization-less record that two organizations' rules both match (the
-  // upsert key excludes `source_id`), or a record re-homed after a
-  // platform-global rule granted it.
+  // a grant that names a record another organization's grant already holds
+  // (the upsert key excludes `source_id`). An organization-less record that two
+  // organizations' rules both matched was the other road in; no walled sweep
+  // reaches such a record any more, so each pass completes (pinned below).
 
   const allShares = async (driver: SqlDriver) => (await driver.find('sys_record_share', {} as never)) as any[];
   const brief = (rows: any[]) => Object.fromEntries(
@@ -481,14 +485,14 @@ describe('[#14484] the scoped UPDATE half cannot reach a row stamped with a DIFF
     expect(rows[0]).toMatchObject({ id: 'shr_org_a', access_level: 'read', organization_id: ORG_A, source_id: 'rule_org_a' });
   });
 
-  it("reconcile: two organizations' rules on one organization-less record — the second's pass aborts at that record; grants before it stay, its stale revocation never runs", async () => {
+  it("reconcile: two organizations' rules no longer meet on an organization-less record — neither walled sweep reaches it, so the second pass completes", async () => {
     const { driver, rules, shares } = await boot('isolated');
     const ruleA = await rules.defineRule(
       { name: 'os14484_note3_a', label: 'ORG_A won', object: OBJECT, criteria: WON, recipientType: 'user', recipientId: 'u_x', accessLevel: 'read' } as never,
       ORG_A_ADMIN,
     );
     await rules.evaluateRule(ruleA.id, ORG_A_ADMIN);
-    expect(byRecord(await shares())).toEqual({ deal_a1: ORG_A, deal_p1: ORG_A });
+    expect(byRecord(await shares())).toEqual({ deal_a1: ORG_A });
 
     const ORG_B_ADMIN = { ...ORG_A_ADMIN, tenantId: ORG_B } as unknown as ExecutionContext;
     const ruleB = await rules.defineRule(
@@ -497,26 +501,22 @@ describe('[#14484] the scoped UPDATE half cannot reach a row stamped with a DIFF
     );
     // A stale rule-B row on a record the rule does not match (`deal_a2` is
     // `lost`): a completed pass revokes it. It is the witness that the pass
-    // never reached its revoke loop.
+    // reached its revoke loop.
     await driver.create('sys_record_share', {
       id: 'shr_stale_b', object_name: OBJECT, record_id: 'deal_a2', recipient_type: 'user', recipient_id: 'u_x',
       access_level: 'edit', source: 'rule', source_id: ruleB.id, organization_id: ORG_B, created_at: '2026-01-01T00:00:00Z',
     } as never);
 
-    // The ORG_B sweep matches deal_b1, deal_b2 and — through the driver's
-    // compatibility arm — deal_p1, in that order. The evaluator keys its
-    // existing set by its OWN rule id, so all three are "new" to it; inside
-    // `grant`, deal_p1's upsert lookup (no `source_id` in the key) finds rule
-    // A's ORG_A row and takes the update half, which the ORG_B scope cannot
-    // reach — and that is where the pass dies.
-    await expect(rules.evaluateRule(ruleB.id, ORG_B_ADMIN)).rejects.toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
+    // [ADR-0131 D1, D14] The ORG_B sweep matches deal_b1 and deal_b2 only: the
+    // driver's scope carries no `IS NULL` arm, so `deal_p1` — where the v17
+    // reading made both rules meet, and the second pass died on the first's
+    // row — is reached by neither.
+    await rules.evaluateRule(ruleB.id, ORG_B_ADMIN);
 
     expect(brief(await allShares(driver))).toEqual({
       deal_a1: { organization_id: ORG_A, access_level: 'read', source_id: ruleA.id },
-      deal_p1: { organization_id: ORG_A, access_level: 'read', source_id: ruleA.id }, // rule A's row, untouched
-      deal_b1: { organization_id: ORG_B, access_level: 'edit', source_id: ruleB.id }, // written before the abort
-      deal_b2: { organization_id: ORG_B, access_level: 'edit', source_id: ruleB.id }, // written before the abort
-      deal_a2: { organization_id: ORG_B, access_level: 'edit', source_id: ruleB.id }, // stale, NOT revoked
+      deal_b1: { organization_id: ORG_B, access_level: 'edit', source_id: ruleB.id },
+      deal_b2: { organization_id: ORG_B, access_level: 'edit', source_id: ruleB.id },
     });
   });
 

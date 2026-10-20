@@ -96,3 +96,64 @@ describe('PositionGraphService (ADR-0090 D3 — flat expansion)', () => {
     expect(calls).toBe(before); // second hit served from cache
   });
 });
+
+describe('PositionGraphService.holdsPosition — the user-scoped twin of the expansion', () => {
+  const past = '2000-01-01T00:00:00Z';
+  const future = '2999-01-01T00:00:00Z';
+  const ASSIGN = [
+    { position: 'rep', user_id: 'u_a', organization_id: 'org_a' },
+    { position: 'rep', user_id: 'u_b', organization_id: 'org_b' },
+    { position: 'rep', user_id: 'u_global', organization_id: null },
+    { position: 'rep', user_id: 'u_expired', organization_id: 'org_a', valid_until: past },
+    { position: 'rep', user_id: 'u_pending', organization_id: 'org_a', valid_from: future },
+    { position: 'rep', user_id: 'u_mixed', organization_id: 'org_a', valid_until: past },
+    { position: 'rep', user_id: 'u_mixed', organization_id: 'org_a', valid_from: past, valid_until: future },
+    { position: 'mgr', user_id: 'u_a', organization_id: 'org_a' },
+  ];
+  const MEMBER = [
+    { role: 'rep', user_id: 'u_role_a', organization_id: 'org_a' },
+    { role: 'rep', user_id: 'u_role_b', organization_id: 'org_b' },
+  ];
+  /** Honours every predicate key both reads send: position / role, organization_id, user_id. */
+  const engine = {
+    async find(object: string, options: any) {
+      const f = options?.filter ?? options?.where ?? {};
+      const rows: any[] = object === 'sys_user_position' ? ASSIGN : object === 'sys_member' ? MEMBER : [];
+      const matches = (row: any, where: any): boolean => {
+        for (const [k, v] of Object.entries(where)) {
+          if (k.startsWith('$')) throw new Error('test double: unsupported logical operator ' + k);
+          if (row[k] !== v) return false;
+        }
+        return true;
+      };
+      return rows.filter((r) => matches(r, f)).slice(0, options?.limit ?? rows.length);
+    },
+  } as any;
+  const USERS = ['u_a', 'u_b', 'u_global', 'u_expired', 'u_pending', 'u_mixed', 'u_role_a', 'u_role_b', 'u_none'];
+
+  it('answers exactly expandPositionUsers(...).includes(user) for every user, position and organization scope', async () => {
+    const verdicts = { holds: 0, not: 0 };
+    for (const org of [undefined, 'org_a', 'org_b']) {
+      for (const position of ['rep', 'mgr', 'nope']) {
+        const expanded = await new PositionGraphService({ engine, organizationId: org ?? null }).expandPositionUsers(position, org);
+        for (const user of USERS) {
+          const g = new PositionGraphService({ engine, organizationId: org ?? null });
+          const holds = await g.holdsPosition(user, position, org);
+          expect({ org, position, user, holds }).toEqual({ org, position, user, holds: expanded.includes(user) });
+          verdicts[holds ? 'holds' : 'not'] += 1;
+        }
+      }
+    }
+    // Both answers occur, so the matrix cannot pass by answering one of them.
+    expect(verdicts.holds).toBeGreaterThan(5);
+    expect(verdicts.not).toBeGreaterThan(5);
+  });
+
+  it('reads one user, never the position\'s whole holder list', async () => {
+    const seen: any[] = [];
+    const spy = { async find(object: string, options: any) { seen.push({ object, f: options?.filter ?? options?.where }); return engine.find(object, options); } } as any;
+    await new PositionGraphService({ engine: spy, organizationId: 'org_a' }).holdsPosition('u_role_a', 'rep', 'org_a');
+    expect(seen.map((s) => s.object)).toEqual(['sys_user_position', 'sys_member']);
+    expect(seen.every((s) => s.f.user_id === 'u_role_a')).toBe(true);
+  });
+});

@@ -6,10 +6,15 @@
  * `sys_webhook` is RECORD-AUTHORITATIVE: a row — including any admin tuning such
  * as flipping a noisy webhook to `active: false` — is the authority. A
  * `package` row is a copy of a declared webhook the 18.0 seeder
- * (`bootstrapDeclaredWebhooks`, retired: ADR-0131 D2) wrote; the dispatcher
- * ignores a pristine one in favour of its declaration and lets one marked
- * `customized` answer as itself (`classifyDeclaredNameHolder`), so this hook is
- * the half that DETECTS the admin edit: any non-system update touching a
+ * (`bootstrapDeclaredWebhooks`, retired: ADR-0131 D2) wrote. The dispatcher no
+ * longer reads `customized`: any row holding a declared name answers as itself
+ * (regime C, `declared-webhooks.ts`). Its reader is the ownership ceremony
+ * (18.x step 5a), which settles a seeded row under a declared name by this
+ * column — a pristine copy is deleted, an edited one kept as a clone — and
+ * which runs again from the start when a reviewed plan supersedes its
+ * checkpoint. A seeded row the ceremony leaves (its name declared by no
+ * package) can be edited and then declared later, so this hook stays the half
+ * that DETECTS the admin edit: any non-system update touching a
  * `package`/`platform`-seeded row stamps `customized: true` onto the payload.
  *
  * Why a data hook (and not a write gate or the REST layer), verbatim to the
@@ -43,11 +48,13 @@
  * stamp to the rest - which is what makes a row-conditioned rewrite safe to
  * leave here.
  *
- * Declining on a predicate write was weighed and REJECTED (#15302): the seeder
- * skips only rows marked `customized`, so the rows left unstamped would be
- * exactly the ones the next boot clobbers - discarding the operator edit this
+ * Declining on a predicate write was weighed and REJECTED (#15302): the
+ * ceremony keeps only rows marked `customized`, so the rows left unstamped
+ * would be exactly the ones it deletes - discarding the operator edit this
  * stamp exists to remember.
  */
+
+import { isSeededProvenance } from './declared-webhooks.js';
 
 interface MinimalEngine {
   registerHook(event: string, handler: (ctx: any) => any, options?: Record<string, any>): void;
@@ -80,7 +87,7 @@ export function bindWebhookProvenanceStamp(engine: MinimalEngine, logger?: Minim
       // had just read.
       const previous = ctx?.previous as Record<string, any> | undefined;
       if (!previous || typeof previous !== 'object') return;
-      if ((previous.managed_by === 'package' || previous.managed_by === 'platform') && previous.customized !== true) {
+      if (isSeededProvenance(previous.managed_by) && previous.customized !== true) {
         (data as any).customized = true;
       }
     },

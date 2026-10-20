@@ -245,6 +245,34 @@ const ATTRIBUTION_PARTITION_COLUMNS: Readonly<Record<string, string>> = Object.f
 interface TenantPartition {
   column: string;
   windows: Array<{ tenantId: string; maxAge?: string; expireAfter?: string }>;
+  /**
+   * Whether a row with no value in `column` is a live row the global pass must
+   * still cover: `true` for an attribution field only (see
+   * {@link globalPassSelector}).
+   */
+  nullIsLive: boolean;
+}
+
+/**
+ * The global pass's selector over a partitioned object: every row no override
+ * claimed. Which reading applies is decided once, by `tenantWindowsFor`, as
+ * {@link TenantPartition.nullIsLive}.
+ *
+ * - On `organization_id`, the rows of every other organization. [ADR-0131 D1,
+ *   D14] NULL is not an owner, and after the 18.x upgrade ceremony no row of a
+ *   tenant-scoped table carries one: a certified database holds none and a
+ *   fresh install never writes one. The v17 `OR organization_id IS NULL` arm is
+ *   retired with the driver's, so this is the bare `$nin`.
+ * - On an attribution field ({@link ATTRIBUTION_PARTITION_COLUMNS}), also the
+ *   rows about no organization. There NULL is a live value, not a pre-ceremony
+ *   one: a deployment-level row of the ledger leaves the field NULL by design
+ *   (ADR-0131 D7), and a bare `$nin` would skip it, since a value that is not
+ *   there satisfies no positive comparison (#5298/#5299). That NULL arm stays.
+ */
+function globalPassSelector(partition: TenantPartition): Record<string, unknown> {
+  const { column, windows, nullIsLive } = partition;
+  const others = { [column]: { $nin: windows.map((t) => t.tenantId) } };
+  return nullIsLive ? { $or: [others, { [column]: null }] } : others;
 }
 
 /**
@@ -1482,9 +1510,7 @@ export class LifecycleService {
 
     // [commit 7d483e1e5] Per-tenant windows (ADR-0057 §3.2), in the shape `reap()` uses:
     // each overriding tenant gets its own cutoff on its own rows, then one
-    // global pass covers everyone else INCLUDING rows with no organization —
-    // a bare `$nin` would silently skip NULL-org rows, since a value that is
-    // not there satisfies no positive comparison (#5298/#5299).
+    // global pass covers everyone else ({@link globalPassSelector}).
     //
     // Only genuinely tenant-scoped overrides reach `tenantOverrides` (see
     // `loadGovernance`), so an object nobody has tuned per tenant still runs
@@ -1518,13 +1544,7 @@ export class LifecycleService {
         const tCutoff = new Date(this.now() - tMs).toISOString();
         archived += await archivePass({ [dueField]: { $lt: tCutoff }, [column]: t.tenantId });
       }
-      archived += await archivePass({
-        [dueField]: { $lt: cutoff },
-        $or: [
-          { [column]: { $nin: windows.map((t) => t.tenantId) } },
-          { [column]: null },
-        ],
-      });
+      archived += await archivePass({ [dueField]: { $lt: cutoff }, ...globalPassSelector(partition) });
     }
 
     // Cold-side retention: `keep` bounds the archive itself.
@@ -1591,7 +1611,9 @@ export class LifecycleService {
    * organization they are ABOUT in an attribution field the author declared
    * ({@link ATTRIBUTION_PARTITION_COLUMNS}): that field is then the partition,
    * and a tenant's override selects the rows about that tenant. The global
-   * pass's NULL arm keeps the rows about no organization in the global window.
+   * pass's NULL arm, kept for an attribution field only
+   * ({@link globalPassSelector}), keeps the rows about no organization in the
+   * global window.
    *
    * Answers `null` when there is no partition: no override, or no column.
    */
@@ -1607,11 +1629,11 @@ export class LifecycleService {
       !isFederatedUnprovisionedInjectedColumn(obj, 'organization_id')
       && resolveInjectedColumnProvenance(obj, 'organization_id') !== 'absent'
     ) {
-      return { column: 'organization_id', windows };
+      return { column: 'organization_id', windows, nullIsLive: false };
     }
     const attribution = ATTRIBUTION_PARTITION_COLUMNS[obj.name];
     if (attribution !== undefined && resolveInjectedColumnProvenance(obj, attribution) === 'author') {
-      return { column: attribution, windows };
+      return { column: attribution, windows, nullIsLive: true };
     }
     return null;
   }
@@ -1688,18 +1710,8 @@ export class LifecycleService {
         const tCutoff = new Date(this.now() - tMs).toISOString();
         accumulate(await reapWhere({ [field]: { $lt: tCutoff }, [column]: t.tenantId, ...scope }));
       }
-      // …and the global pass covers everyone else, INCLUDING rows with no
-      // organization (a bare `$nin` would silently skip NULL-org rows).
-      accumulate(
-        await reapWhere({
-          [field]: { $lt: cutoff },
-          $or: [
-            { [column]: { $nin: windows.map((t) => t.tenantId) } },
-            { [column]: null },
-          ],
-          ...scope,
-        }),
-      );
+      // …and the global pass covers everyone else ({@link globalPassSelector}).
+      accumulate(await reapWhere({ [field]: { $lt: cutoff }, ...globalPassSelector(partition), ...scope }));
     }
 
     report.swept.push({ object, class: lc.class, policy, cutoff, deleted: total });

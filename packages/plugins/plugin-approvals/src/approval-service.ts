@@ -2582,8 +2582,8 @@ export class ApprovalService implements IApprovalService {
    *       ⇒ the tenancy fact is ABSENT ⇒ leave routing exactly as it was.
    *
    * The `organization_id = null` limb is not timidity — it is the reading
-   * {@link businessUnitOrgScope} settled on one screen below, for the identical
-   * shape: null on a platform object means "owned by no organization", which is
+   * {@link businessUnitOrgScope} held for the identical shape until ADR-0131
+   * D8 retired its NULL arm: null on a platform object meant "owned by no organization", which is
    * what a seed writes because a seed cannot know the organization id the
    * runtime mints at boot. Treating null as "not mine" would delete every
    * seeded team approver at once — a larger behaviour change than the hole
@@ -2734,43 +2734,39 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
-   * Tenant scope for a `sys_business_unit` read that may legitimately be
-   * env-wide (#3807).
+   * Tenant scope for a `sys_business_unit` read: the request's organization,
+   * a STRICT equality.
    *
-   * `organization_id = null` on a platform object means "owned by no
-   * organization" — a row written by a seed, the file layer, or bootstrap,
-   * i.e. before (or outside) any org exists. A strict
-   * `organization_id = <request org>` equality made every such row invisible:
-   * the seed check below found nothing, the whole expansion returned `[]`, and
-   * the approver fell back to the dead `department:<id>` literal that routes to
-   * nobody. That is not an edge case — an app's org tree is normally seeded
-   * (a seed cannot know the org id the runtime mints at boot) while the
-   * approval request always carries one, so EVERY department approver a
-   * designer could pick resolved to nobody.
+   * [ADR-0131 D1/D8] This was "this org ∪ env-wide" (#3807): an `$or` with an
+   * `organization_id = null` arm, because an app's org tree was seeded before
+   * the runtime minted the organization id, so every seeded unit carried no
+   * organization and a strict equality resolved every department approver to
+   * nobody. The organization-ownership ceremony attributes `sys_business_unit`
+   * before a deployment is certified (D10), and from then on a write with no
+   * organization is stamped with the derivable one or refused (D9) — a fresh
+   * install's seed included. No layer keeps a NULL arm (D8), so the unit
+   * screen is the same equality as the member screen below.
    *
-   * Widen to "this org ∪ env-wide", the same predicate `sys_metadata`'s
-   * pending-draft listing settled on for the identical reason. Another org's
-   * unit still fails the match, so the wall between two organizations is
-   * unchanged — only rows belonging to no org at all become visible.
+   * No `organizationId` (a request with no directory organization) keeps the
+   * unfiltered read: there is no organization to screen by.
    */
   private businessUnitOrgScope(
     filter: Record<string, unknown>,
     organizationId?: string | null,
   ): Record<string, unknown> {
     if (!organizationId) return filter;
-    return { ...filter, $or: [{ organization_id: organizationId }, { organization_id: null }] };
+    return { ...filter, organization_id: organizationId };
   }
 
   /**
-   * Tenant scope for the `sys_business_unit_member` read — a STRICT equality,
-   * deliberately NOT {@link businessUnitOrgScope} (#14946).
+   * Tenant scope for the `sys_business_unit_member` read — a STRICT equality
+   * (#14946).
    *
-   * The two screens answer different questions. The UNIT is the anchor the
-   * approver NAMES, and a seeded unit carries `organization_id = null` by
-   * construction (a seed cannot know the id the runtime mints at boot), so
-   * #3807 admits the null there on purpose. The MEMBER rows are the SET BEING
-   * ROUTED TO — enumerated by the platform, never named by anyone — and a
-   * seeded unit id exists identically in every tenant. Before this screen the
+   * The two screens answer different questions, and both are strict now. The
+   * UNIT is the anchor the approver NAMES ({@link businessUnitOrgScope}, which
+   * admitted a NULL organization until ADR-0131 retired that arm). The MEMBER
+   * rows are the SET BEING ROUTED TO — enumerated by the platform, never named
+   * by anyone — and a seeded unit id exists identically in every tenant. Before this screen the
    * member read carried no organization predicate at all, under
    * {@link SYSTEM_CTX} which carries no tenant either, so tenant A's request
    * resolved the shared unit and then collected EVERY tenant's membership rows
@@ -2794,9 +2790,9 @@ export class ApprovalService implements IApprovalService {
    * see. That is not silent — the graph-type fallback in `expandApprover`
    * warns `expanded to nobody` (#3807) and `onEmptyApprovers` governs the
    * request as for any unstaffed target — and the repair is to stamp the
-   * membership rows, never to widen this screen. ⛔ Do not "unify" the two
-   * screens: one method serving both re-opens whichever half it does not
-   * implement.
+   * membership rows, never to widen this screen. ⛔ Keep the two screens two
+   * methods: they guard different reads, and a change to one must not
+   * silently move the other.
    */
   private businessUnitMemberScope(
     filter: Record<string, unknown>,
@@ -2809,9 +2805,8 @@ export class ApprovalService implements IApprovalService {
   /**
    * Recursive department — walks `sys_business_unit.parent_business_unit_id`.
    *
-   * Two tenant screens, and they are different on purpose: the UNIT rows
-   * (seed check and descent) go through the null-inclusive
-   * {@link businessUnitOrgScope}; the MEMBER read goes through the strict
+   * Two tenant screens, both strict: the UNIT rows (seed check and descent)
+   * go through {@link businessUnitOrgScope}; the MEMBER read goes through
    * {@link businessUnitMemberScope}. `organizationId` is the DIRECTORY
    * organization the approver resolves in (ADR-0105 D9), for both.
    */
@@ -2851,7 +2846,7 @@ export class ApprovalService implements IApprovalService {
       rows = await this.engine.find('sys_business_unit_member', {
         // #14946: tenant-screened — {@link businessUnitMemberScope} is STRICT
         // on purpose and is not {@link businessUnitOrgScope}. The units above
-        // proved their tenancy (or are seeded); these rows have not, and the
+        // proved their tenancy; these rows have not, and the
         // shared seeded unit id is exactly where other tenants' rows sit.
         where: this.businessUnitMemberScope({ business_unit_id: { $in: Array.from(seen) } }, organizationId),
         fields: ['user_id'],
@@ -3450,6 +3445,13 @@ export class ApprovalService implements IApprovalService {
       flowLabel?: string;
       /** Authored node label, snapshotted for inbox display. */
       nodeLabel?: string;
+      /**
+       * Who submitted the run this step belongs to — the approval node passes
+       * its trigger user. `null` is an answer: the trigger resolved no user, so
+       * the step has no submitter. Only an OMITTED value falls back to the
+       * acting context's user: on a later step that context is the previous
+       * step's decider, who did not submit the run.
+       */
       submitterId?: string | null;
       record?: any;
       organizationId?: string | null;
@@ -3730,12 +3732,13 @@ export class ApprovalService implements IApprovalService {
       const n = Array.isArray(prior) ? prior.length : 0;
       if (n > 0) configSnapshot.__round = n + 1;
     } catch { /* round display is best-effort */ }
+    const submitterId = input.submitterId !== undefined ? input.submitterId : (context.userId ?? null);
     const row: any = {
       id,
       process_name: processName,
       object_name: input.object,
       record_id: input.recordId,
-      submitter_id: input.submitterId ?? context.userId ?? null,
+      submitter_id: submitterId,
       status: 'pending',
       // [#23889] The display snapshots the approval lists show: the flow's and
       // the node's authored labels as the flow engine handed them over, and
@@ -3762,7 +3765,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', await this.actionRow(row, {
       id: uid('aact'), request_id: id, organization_id: requestOrg,
       step_name: input.nodeId, step_index: 0, action: 'submit',
-      actor_id: input.submitterId ?? context.userId ?? null, comment: null, created_at: now,
+      actor_id: submitterId, comment: null, created_at: now,
     }), { context: SYSTEM_CTX });
 
     // [#22824] The request's display says why it is with the administrators:
@@ -4477,11 +4480,35 @@ export class ApprovalService implements IApprovalService {
    * reached. `decideNode`'s pre-flight means the common case (the run died
    * before the decision) never gets this far; what survives here is a genuine
    * race, and it names the stranded run.
+   *
+   * [#24753] A decision that ends the approval process tells the submitter its
+   * outcome (`approval.approved` / `approval.rejected`,
+   * {@link ApprovalService.notifyDecisionOutcome}).
    */
   async decide(
     requestId: string,
     input: ApprovalDecisionInput,
     context: ExecutionContext,
+  ): Promise<ApprovalDecisionResult> {
+    return this.decideAndResume(requestId, input, context, 'outcome');
+  }
+
+  /**
+   * {@link ApprovalService.decide}'s body, with WHO TELLS THE SUBMITTER named by
+   * the caller (#24753). `'outcome'` — every human door: the decision tells the
+   * submitter itself, once the resume has shown whether it ended the process.
+   * `'escalation'` — the SLA sweep's auto-decision only: the escalation's own
+   * submitter notice tells them, under the node's declared
+   * `escalation.notifySubmitter` switch ({@link ApprovalService.escalateRequest}),
+   * so `notifySubmitter: false` keeps meaning that the submitter hears nothing
+   * about it. A parameter rather than a reading of the actor: the sweep's
+   * {@link SLA_ACTOR_ID} is an acting identity, never a discriminator.
+   */
+  private async decideAndResume(
+    requestId: string,
+    input: ApprovalDecisionInput,
+    context: ExecutionContext,
+    submitterToldBy: 'outcome' | 'escalation',
   ): Promise<ApprovalDecisionResult> {
     const result = await this.decideNode(requestId, input, context);
 
@@ -4521,6 +4548,14 @@ export class ApprovalService implements IApprovalService {
       resumeFailure = outcome.resumeFailure;
     }
 
+    // [#24753] After the resume, never before it: only the continuation shows
+    // whether this decision ended the process or moved it to a further
+    // approval step. A resume that strands has thrown above, so — as on the
+    // send-back — a stranded decision tells no one.
+    if (result.finalized && submitterToldBy === 'outcome') {
+      await this.notifyDecisionOutcome(result.request, result.decision, input.comment, context);
+    }
+
     return {
       request: result.request,
       finalized: result.finalized,
@@ -4534,6 +4569,80 @@ export class ApprovalService implements IApprovalService {
       // in result` reads presence correctly.
       ...(resumeFailure ? { resumeFailure } : {}),
     };
+  }
+
+  /**
+   * [#24753] Tell the submitter how their approval ended. A send-back
+   * (`approval.returned`) and a question (`approval.request_info`) already
+   * reached them; the decision itself reached no one, so a submitter learned
+   * their request was approved or rejected only by opening the inbox.
+   *
+   * ONE TOPIC PER OUTCOME — `approval.approved`, `approval.rejected`. Every
+   * topic in the `approval.*` vocabulary names what happened to the request
+   * (`requested`, `returned`, `reassigned`, `escalated`), and these two are the
+   * request's own terminal statuses, as `returned` is. So the payload stays the
+   * closed {@link ApprovalNotificationPayload} with no outcome field, and the
+   * preference matrix — matched on the exact topic or `*` — can mute one
+   * outcome and keep the other.
+   *
+   * The shape is the sibling notices': addressed to the request's own
+   * `submitter_id`, the record named by {@link ApprovalService.nameSubjectRecord}
+   * (#23556), a non-empty body (#21847), deep-linked to the request by
+   * `notify()`, the decider as the actor. The body is one English sentence,
+   * like every approval notification — none of them reads the caller's locale;
+   * the decider's comment, when they wrote one, follows it as its own paragraph.
+   *
+   * Told nothing:
+   *  - a submitter who made the decision themselves — they already know;
+   *  - anyone, when the decision ENDS A STEP and not the process: a resume that
+   *    opened a further approval step on the same run (the next approval node
+   *    down the edge this decision took) leaves the outcome to that step's
+   *    decision. Measured after the resume, never read off the graph, because a
+   *    decision gateway can skip a later step and only the run knows whether it
+   *    did. A co-sign vote that leaves the request pending never gets here;
+   *  - anyone, for the SLA sweep's auto-decision ({@link ApprovalService.decideAndResume}).
+   *
+   * Best-effort like every `notify()`: the decision is durable before this runs,
+   * so nothing here can fail it.
+   */
+  private async notifyDecisionOutcome(
+    request: ApprovalRequestRow,
+    decision: 'approve' | 'reject',
+    comment: string | undefined,
+    context: ExecutionContext,
+  ): Promise<void> {
+    const submitter = request.submitter_id != null ? String(request.submitter_id) : '';
+    if (!submitter || recordedActor(context) === submitter) return;
+    if (request.flow_run_id) {
+      let nextStepOpened: boolean;
+      try {
+        const next = await this.engine.find('sys_approval_request', {
+          where: { flow_run_id: request.flow_run_id, status: 'pending' }, limit: 1, context: SYSTEM_CTX,
+        });
+        nextStepOpened = Array.isArray(next) && next.length > 0;
+      } catch (err: any) {
+        this.logger?.warn?.('[approvals] could not tell whether a decision ended its approval process — its submitter is not told the outcome', {
+          request: request.id, run: request.flow_run_id, error: err?.message ?? String(err),
+        });
+        return;
+      }
+      if (nextStepOpened) return;
+    }
+    const approved = decision === 'approve';
+    const sentence = `Your ${this.nameSubjectRecord(request.object_name, request.record_id)} was ${approved ? 'approved' : 'rejected'}.`;
+    const note = comment?.trim();
+    await this.notify({
+      topic: approved ? 'approval.approved' : 'approval.rejected',
+      organizationId: request.organization_id,
+      audience: [submitter],
+      actorContext: context,
+      source: { object: 'sys_approval_request', id: request.id },
+      payload: {
+        title: approved ? 'Request approved' : 'Request rejected',
+        body: note ? `${sentence}\n\n${note}` : sentence,
+        actionUrl: '/system/approvals',
+      },
+    });
   }
 
   /**
@@ -5376,9 +5485,19 @@ export class ApprovalService implements IApprovalService {
     // approver: a reminder names no channel, messaging's default materializes
     // it in the in-app inbox, and the inbox row carries the title, the body and
     // the deep link below, never links. The deep link is the approver's way in.
+    //
+    // [#24751] Each address once — the opening's rule (`openedOn`). A slate
+    // lists a person once per group they resolved into (per_group tagging), and
+    // `pending_approvers` keeps every one of those slots until the first vote,
+    // so one id can stand there twice. Messaging delivers that person ONE
+    // reminder (both emits carry the same dedup key), so counting per slot
+    // answered a `notified` the inbox contradicts. `notified` is the number of
+    // reminders handed over: one per distinct address. A user id and the same
+    // account's email are two addresses here, exactly as at the opening — two
+    // slots the person takes separately, and two reminders delivered.
     const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
     let notified = 0;
-    const concrete = pending.filter(a => a && !a.includes(':'));
+    const concrete = new Set(pending.filter(a => a && !a.includes(':')));
     const literals = pending.filter(a => a && a.includes(':'));
     for (const approver of concrete) {
       notified += await this.notify({
@@ -6770,11 +6889,14 @@ export class ApprovalService implements IApprovalService {
         },
       });
     } else if (action === 'auto_approve' || action === 'auto_reject') {
-      await this.decide(raw.id, {
+      // [#24753] The submitter hears this outcome from the submitter notice
+      // below (`notifySubmitter`), which names the action taken — not a second
+      // time from the decision's `approval.approved` / `approval.rejected`.
+      await this.decideAndResume(raw.id, {
         decision: action === 'auto_approve' ? 'approve' : 'reject',
         actorId: SLA_ACTOR_ID,
         comment: 'SLA escalation',
-      }, SYSTEM_CTX);
+      }, SYSTEM_CTX, 'escalation');
     } else {
       // 'notify' (and the reassign-without-target fallback)
       await this.notify({

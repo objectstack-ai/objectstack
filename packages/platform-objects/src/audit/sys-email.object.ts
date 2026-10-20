@@ -100,10 +100,12 @@ export const SysEmail = ObjectSchema.create({
     // on read for a caller without it). An 18.0 install wrote its identity
     // mail — password reset, account invitation, verification, magic link,
     // email-change notice — into this log, stamped with the organization, and
-    // those bodies carry sign-in and reset links. The rows stay here until the
-    // 18.x ceremony moves them, and no column tells them apart from tenant mail
-    // reliably: a magic link carries no `related_object`, and the log has no
-    // template column. So the gate is on the columns, for every row: an
+    // those bodies carry sign-in and reset links. The 18.x ceremony moves them
+    // to `sys_identity_email` before the database is certified, selected by
+    // shape — and no column tells them apart from tenant mail reliably (a
+    // magic link carries no `related_object`, and the log has no template
+    // column), so a row the shape misses stays here. So the gate is on the
+    // columns, for every row: an
     // organization administrator keeps the row (envelope, subject, delivery
     // state, linkage) and loses only the body. The same field-level answer
     // closes every door that serves a row through the engine — the data API,

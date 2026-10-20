@@ -693,14 +693,17 @@ const uniqueScopeError: z.core.$ZodErrorMap = (issue) => {
  * (`stripe_customer_id`), a DNS hostname, a globally reserved slug, a device
  * identity. Global uniqueness is the special case and has to say so.
  *
- * NULL-safety of the per-organization scope (ADR-0120 D3, #5030): the kernel
- * injects `organization_id` unconditionally, so on single-organization stacks
- * the column exists and is NULL on every row — and SQL UNIQUE is
- * NULL-distinct, so a raw-column composite `(organization_id, field)` enforces
- * NOTHING there. The organization key part therefore materializes NULL-safe as
+ * NULL-safety of the per-organization scope (ADR-0120 D3, #5030): SQL UNIQUE
+ * is NULL-distinct, so a raw-column composite `(organization_id, field)`
+ * enforces nothing between rows whose `organization_id` is NULL — and under
+ * 17.x a single-organization stack wrote every row that way. The organization
+ * key part therefore materializes NULL-safe as
  * `COALESCE(organization_id, '__global__')` (driver-side, #5030): NULL-org
- * rows collapse into one platform bucket, unique among themselves; non-NULL
- * rows are untouched. On an object with no tenant column at all
+ * rows collapse into one bucket, unique among themselves; non-NULL rows are
+ * untouched. Since ADR-0131 D9 every write on a tenant-column object carries
+ * its organization or is refused wherever the organization object is
+ * registered, so there a NULL-org row is residue an earlier release wrote,
+ * never a new one. On an object with no tenant column at all
  * (`tenancy.enabled: false`) both per-organization spellings degrade to the
  * listed column alone.
  *
@@ -1472,10 +1475,23 @@ export const FieldSchema = lazySchema(() => {
    * engine's object registry for a definition that reaches it unparsed, so every
    * reader of the target — the delete walk that honours `deleteBehavior`,
    * `$expand`, the write-time reference check — sees an ordinary self-reference.
+   *
+   * [#24677] A `lookup` / `master_detail` never targets a stored-metadata-body
+   * table (`STORED_METADATA_BODY_OBJECTS`: `sys_metadata`,
+   * `sys_metadata_history`). Its rows are served only through the metadata
+   * protocol's own door, so the engine never hydrates a reference into one
+   * (`$expand` keeps the stored id; a master-detail `parent` root stays
+   * unbound). The refusal is the authoring rules', beside the refusal of a
+   * formula or validation rule reading through such a field
+   * (`@objectstack/lint`'s expression rule), so `os validate`, `os build` and
+   * the object save door refuse it alike.
    */
   reference: z.string().optional().describe(
     'Target object name (snake_case) for lookup/master_detail fields. '
     + 'Required for relationship types. Used by $expand to resolve foreign key IDs into full objects. '
+    + 'Never a stored-metadata table (`sys_metadata`, `sys_metadata_history`): their rows are served only '
+    + 'through the metadata API, so the engine never hydrates a reference into one, and `os validate`, '
+    + '`os build` and the object save door refuse it. '
     + 'On a `tree` field it is optional and, if given, must be the declaring object\'s own name — '
     + 'the object schema refuses any other target, and writes the own name when it is left out.'
   ),

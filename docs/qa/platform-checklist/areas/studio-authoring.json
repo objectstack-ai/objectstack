@@ -96,7 +96,7 @@
       "title": "Object designer round-trip: field add/edit/reorder persists to metadata, identifiers derive and survive typing",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -113,7 +113,7 @@
         "open the object designer on the writable package: /_console/apps/setup/metadata/object/new?package=PKG (PKG = the writable package's id; note its namespace NS, from GET /api/v1/packages). ⛔ Not /_console/apps/com.objectstack.studio/…: the studio app is not loaded on a stock boot (RUNNER.md environment facts), so that route renders inside another app's chrome",
         "TYPE the object name NS_repair_asset character by character (never .fill — the F2 per-keystroke-sanitisation bug only reproduces when typed) and confirm both underscores survive. The NS_ prefix is required: in a namespaced writable package the publish gate refuses an unprefixed object name (NAMESPACE_PREFIX). Type the name after the label, or re-check it before saving — objectui#12680: typing the Label after a hand-typed name overwrites it and drops the prefix",
         "add a Text field, set its label to 'Asset Code', blur — the API name input must derive asset_code (F3)",
-        "add a Picklist field and author its 3 real options, THEN add one EMPTY option row; wait out the debounced live validation — no validation banner may appear for the empty row (F4). ⚠ Order matters: with NO real option yet the select-needs-options banner fires, legitimately — the empty rows ARE dropped, so the field has no options — which collides with a literal 'no banner' (and with objectui F4's toHaveCount(0) the same way). Assert the empty-row half with real options present",
+        "add a Picklist field and author its 3 real options, THEN add one EMPTY option row; wait out the debounced live validation — no validation banner may appear for the empty row (F4). ⚠ Order matters: with NO real option yet the select-needs-options banner fires, legitimately — the empty rows ARE dropped, so the field has no options — which collides with a literal 'no banner' (objectui F4, as repaired at 0b36ffa, gives its picklist one real option first for this reason). Assert the empty-row half with real options present",
         "Save (the first save; the editor then autosaves every later edit — its Auto-save toggle defaults on, objectui ResourceEditPage.tsx metadata-admin:autosave — so later 'Save draft' steps are implicit), Publish; GET /api/v1/meta/object/NS_repair_asset and record the full field list and its order",
         "reopen the designer: rename one picklist value, drag-reorder the fields (native HTML5 drag-and-drop: Playwright's dragTo moves a row, raw mouse moves do not — automation-input), let the autosave land, and Publish again",
         "GET /api/v1/meta/object/NS_repair_asset again — the rename AND the new field order must be in the persisted metadata, not just the canvas",
@@ -149,16 +149,7 @@
         "an API name frozen at field_N after its label was set pre-save is audit finding 2 regressed — FAIL, but confirm against a fresh objectui build first: the vendored /_console bundle may predate the derive-on-blur fix the e2e now pins"
       ],
       "traps": ["stale-console-bundle", "automation-input"],
-      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/studio-object-designer.spec.ts",
-      "stale": {
-        "since": "2026-10-19",
-        "observedIn": "#24598",
-        "ref": "#24579 §2",
-        "partial": "objectui: e2e/live/studio-object-designer.spec.ts cases F1 and F4 ONLY — F2 and F3 passed",
-        "why": "RED AT THE PIN, AS STALE CASES — not a product defect. Tier 1 run #24598 ran the spec at the sweep's console pin 4016370af3c9: 2 passed (F2, F3), 2 failed (F1, F4); the round-1 record #24571 names the causes. F4 adds a picklist and one empty option row with no real option and expects no metadata-validation banner, which contradicts acceptance[3]'s own judging order: a select with no option source is refused at parse (packages/spec/src/data/field.zod.ts, options), so that banner is correct. F1 opens /apps/com.objectstack.studio, an app no stock boot loads (RUNNER.md environment facts). Re-read at the shipped pin 12dc7b47c340: the spec's bytes are unchanged and both causes hold — field.zod.ts is unchanged between the objectstack builds the two pins consume (2c9bf9430a11 and f4755a68a797), and the studio app is still not default-loaded at objectstack 92ce3af404.",
-        "runnerRule": "Cite F3 for acceptance[1]'s designer half (the derived API-name input) and F2 for acceptance[2]. Do NOT cite F4 or F1, and do NOT score their failure as this item's FAIL: drive acceptance[3] by hand in the clause's order (the 3 real options first, then the empty row), and acceptance[0] and acceptance[1]'s stored-column half by hand as before. F1 asserts no clause of this item.",
-        "ownedBy": "objectui — re-pointing F1 and F4 at the current surface is objectui's half, recorded on wave anchor #24579 §2; this repository reports it and does not edit the spec"
-      } },
+      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/studio-object-designer.spec.ts — F3 pins acceptance[1]'s designer half (the API-name input derives asset_code from the label on blur) and F2 pins acceptance[2] (a name typed character by character keeps its underscore). F4 pins acceptance[3]'s banner half ONLY: it gives the picklist one real option, not three, adds an empty row and finds no metadata-validation banner after the debounce, but it never publishes or reads the stored options, so 'the PUBLISHED picklist carries exactly the 3 authored options' is driven by hand. F1 (a package created from the Studio surface's switcher appears in it without a reload) asserts no clause of this item. No pin covers acceptance[0] or acceptance[1]'s stored-column half" },
       "source": [
         "objectui: e2e/live/studio-object-designer.spec.ts (F1–F4, the objectui#1926 regression classes: per-keystroke sanitisation, label→api-name derivation, empty picklist row, switcher refresh)",
         "docs/audits/2026-07-studio-package-create-ux-dogfood.md (finding 2 — field API name did not follow the label at audit time)",
@@ -195,6 +186,12 @@
           "date": "2026-10-20",
           "change": "automated.stale added — §2 theme \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 ran studio-object-designer.spec.ts at the sweep's console pin 4016370af3c9: F2 and F3 passed, F1 and F4 failed as stale cases (causes from QA run #24571; #24604 drove acceptance[0], acceptance[3] and negative[0] by hand). Re-read at the shipped pin 12dc7b47c340: the spec is byte-identical and both causes hold. The ref keeps the spec, F2 and F3 still citable. No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "automated.stale removed, automated.ref scoped per case, and steps[3]'s note on F4 corrected — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired studio-object-designer.spec.ts, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. The spec's blob is 5967807df335 at the old pin 12dc7b47c340 and 58a7f1cbf024 at both 0b36ffa and 616df6598b42: F1 now creates the package through the Studio surface's switcher (/studio/PKG/data) and F4 gives the picklist one real option before the empty row, so both stale causes are gone, and the stale record, which named only F1 and F4, goes with them. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the ref keeps only the clauses this record let a runner cite or sent to hand-driving: F3 for acceptance[1]'s designer half, F2 for acceptance[2], and F4 for acceptance[3]'s banner half only (one real option, no publish, no meta read). F1 asserts no clause here. No clause changed",
+          "ref": "#24857"
         }
       ]
     },
@@ -275,7 +272,7 @@
       "title": "Record-page authoring round-trip: created bound to its object, seeded from the default layout, block-edited, published, rendered",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors)", "end user (opens the record). On stock no non-admin persona reads showcase_contact (auditor.demo is refused 'You don't have access to Contact records', QA run #24604), so the viewer is the admin unless a grant is provisioned — e.g. a member bound to the `manager` position, whose showcase_manager set reads showcase_contact (examples/app-showcase/src/security/permission-sets.ts); record which"],
@@ -290,7 +287,7 @@
         "open /_console/apps/showcase_app/metadata/page/new and fill the create form: Label 'Invoice Page <uniq>' (slugifies into Name), set Page type = record (the create form defaults Page type to list — objectui metadata-admin anchors.ts, the page createSchema), Object showcase_contact (fixtures.requires[0]); Save",
         "capture the PUT /api/v1/meta/page/<name> request the save issues",
         "assert the draft body: type:'record', object:'showcase_contact', and regions seeded NON-empty from the object's synthesized default detail page (the page resource's createSeed hook) including a record:highlights block — never a blank canvas (ADR-0034 / objectui#1541)",
-        "open the page editor (/apps/showcase_app/metadata/page/<name>): the Basics, Data Context and Advanced panels render (the layout is edited on the canvas, not in a Layout section — see acceptance[1]'s stale-pin note), and 'Add block' opens the block-type picker",
+        "open the page editor (/apps/showcase_app/metadata/page/<name>): the Basics, Data Context and Advanced panels render (the layout is edited on the canvas, not in a Layout section — see acceptance[1].verify), and 'Add block' opens the block-type picker",
         "add a block (e.g. Card), Save draft, Publish through the ResourceEditPage draft/publish chrome",
         "GET /api/v1/meta/page/<name>: the published regions must include the added block",
         "open a showcase_contact record as the end user (personas[1]): the page assignment (usePageAssignment) renders the authored page over the synthesized default",
@@ -300,13 +297,13 @@
         {
           "clause": "the created page persists bound to its object with PRE-SEEDED regions — record:highlights present, regions non-empty",
           "oracle": "network",
-          "verify": "the captured PUT body has type:'record', object:'showcase_contact', Array.isArray(regions) with blocks including record:highlights. ⚠ Drive this by hand: the pin (objectui e2e/live/studio-record-page.spec.ts) is STALE against the current surface — it fills the Object control as an input when it is now a role=combobox button — see automated.stale",
+          "verify": "the captured PUT body has type:'record', object:'showcase_contact', Array.isArray(regions) with blocks including record:highlights (pinned carrier-neutrally by objectui e2e/live/studio-record-page.spec.ts, which binds showcase_invoice — see automated.ref)",
           "evidence": "the captured PUT payload"
         },
         {
           "clause": "the page editor exposes block authoring: the picker offers schema-backed block kinds (Card, Section, Record details)",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the editor rendered, the Add-block dialog lists the three kinds. ⚠ Drive this by hand: the pin (objectui e2e/live/studio-editor.spec.ts) is STALE — it targets a 'Layout' heading that no longer exists and a shipped page the editor correctly locks — see automated.stale",
+          "verify": "after a screenshot confirms the editor rendered, the Add-block dialog lists the three kinds. No pin in automated.ref covers this clause: objectui e2e/live/studio-editor.spec.ts asserts the same picker (Card, Section, Record details) on an editable copy of the shipped showcase_project_workspace page, and is not in the ref. Until objectui 0b36ffa that spec was stale: it looked for a 'Layout' section heading the page form no longer renders (the layout is edited on the canvas) and opened a shipped page the editor correctly locks",
           "evidence": "screenshot + dialog DOM read"
         },
         {
@@ -328,20 +325,11 @@
       "traps": ["stale-console-bundle", "hydration-race", "automation-input"],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/studio-record-page.spec.ts",
-        "stale": {
-          "since": "2026-08-11",
-          "observedIn": "#24598",
-          "ref": "#7753 item 6",
-          "why": "STALE, NOT RED — the spec fails against the CURRENT surface, not against a product defect. `studio-record-page.spec.ts` fills the Object control as an input when it is now a `role=combobox` button; `studio-editor.spec.ts` (cited in source, and the pin behind the Add-block clause) targets a 'Layout' heading that no longer exists, plus a SHIPPED page the editor correctly locks. Neither is reporting a regression. Re-measured at the 18.0 sweep: Tier 1 run #24598 ran it at the sweep's console pin 4016370af3c9, 0 passed / 1 failed; re-read at the shipped pin 12dc7b47c340, the spec's bytes are unchanged and nothing on the page create path changed between the pins (the only ResourceEditPage change is the declaration-only gate for sharing rules), so it is still stale there. First observed by #7695 on 2026-08-11; #7753 closed without the objectui half landing.",
-          "runnerRule": "Do NOT satisfy this item by citing these specs' output, and do NOT score their failure as a FAIL of this item — drive the clauses by hand (browser + the captured PUT) until the specs are re-pointed. A stale ref left unmarked costs a red run every time the area is exercised, which is how a stale ref turns into ignored signal.",
-          "ownedBy": "objectui — re-pointing the specs at the current surface is a cross-repo half of #7753, reported not edited from this repo",
-          "seeAlso": "the same class, already repaired: object-designer-roundtrip's 4th automated ref failed only because package-create moved to /_console/studio; that contract passes on the current surface"
-        }
+        "ref": "objectui: e2e/live/studio-record-page.spec.ts — acceptance[0] ONLY, carrier-neutrally: it creates a record page bound to showcase_invoice (not this item's showcase_contact) and asserts the captured PUT body's type 'record', its object, and regions seeded with a record:highlights block. It covers no other clause. objectui e2e/live/studio-editor.spec.ts, which drives the Add-block picker acceptance[1] scores, is cited in source[1] and has never been in this ref"
       },
       "source": [
-        "objectui: e2e/live/studio-record-page.spec.ts (#1541, ADR-0034 — create bound + seeded regions, asserted off the PUT payload) — ⚠ STALE against the current surface, see automated.stale",
-        "objectui: e2e/live/studio-editor.spec.ts (page editor sections + Add-block picker contract) — ⚠ STALE against the current surface, see automated.stale"
+        "objectui: e2e/live/studio-record-page.spec.ts (#1541, ADR-0034 — create bound + seeded regions, asserted off the PUT payload)",
+        "objectui: e2e/live/studio-editor.spec.ts (page editor sections + Add-block picker contract)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: record-page authoring round-trip pinned to the two objectui live e2e specs (create-seeded draft, block picker) and extended to the publish + end-user render sides they do not cover", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -369,6 +357,12 @@
           "date": "2026-10-20",
           "change": "automated.stale.observedIn and automated.stale.why refreshed — §2 theme \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 re-measured studio-record-page.spec.ts red at the sweep's console pin 4016370af3c9 (0 passed / 1 failed; QA runs #24571 / #24604 drove the clauses by hand), and a re-read at the shipped pin 12dc7b47c340 finds the spec byte-identical and its create path unchanged, so the marker first written from #7695 still holds. No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "automated.stale removed, automated.ref scoped to acceptance[0], and the stale notes in acceptance[0].verify, acceptance[1].verify, steps[3], source[0] and source[1] rewritten — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired both specs the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. studio-record-page.spec.ts: blob 181b2562c18d at the old pin 12dc7b47c340, 3844a60ccd79 at both 0b36ffa and 616df6598b42; it now sets Page type to record and picks the object from the Object combobox. studio-editor.spec.ts: blob e442b4c1a29e, then 19f9cc131654 at both; it now edits a copy of showcase_project_workspace and reads the layout on the canvas. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, studio-record-page.spec.ts asserts acceptance[0], the one clause the ref claims (carrier-neutrally, on showcase_invoice). studio-editor.spec.ts was never in the ref, so acceptance[1] stays driven by hand rather than widening the ref. No clause changed",
+          "ref": "#24857"
         }
       ]
     },
@@ -589,7 +583,7 @@
       "title": "The metadata type registry gates runtime writes: allowEnvironmentOverlay=false kinds refuse overlay (403 not_overridable), allowRuntimeCreate=false kinds refuse creation — both sides",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin"],
@@ -662,12 +656,13 @@
         "packages/metadata-protocol/src/protocol.ts#isRuntimeCreateAllowed (isRuntimeCreateAllowed — the write-gate authority)",
         "ADR-0005 (metadata customization opt-in), ADR-0049 (enforce-or-remove — the job rationale)",
         "packages/spec/src/api/protocol.zod.ts#overrideSource (overrideSource registry|env — how GET /meta reports an OS_METADATA_WRITABLE-granted override, the read that made the #7637 correction checkable)",
-        "objectui packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx, 1311-1323 (the artifact-backed heuristic behind the read-only banner; cross-linked to objectui#4308)"
+        "objectui packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx (its isArtifactItem test, the artifact-backed heuristic behind the read-only banner; cross-linked to objectui#4308)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the registry's runtime-write gates (not_overridable / not_creatable vs accepted overlay / accepted create), variants sampled straight from DEFAULT_METADATA_TYPE_REGISTRY and pinned to the overlay-precedence suite", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "recorded two notes from run #7695 — (a) the CORRECTION to run #7637: with OS_METADATA_WRITABLE=permission the Studio read-only badge clears and the editor is fully writable (GET /meta reports overrideSource:'env'), so the earlier 'badge asserts a lock the server is not applying' observation does not reproduce and must not be acted on as written; (b) the route note that a metadata-API-authored flow opens read-only in Studio (ResourceEditPage's artifact-backed heuristic + flow's allowOrgOverride:false) — correct for this kind, with the polarity-reversed defect filed at objectui#4308. Notes only; no clause, variant or oracle changed", "ref": "#7753" },
-        { "revision": 3, "date": "2026-10-16", "change": "variants[1] corrected (checklist-accuracy finding 1 of QA run #23942, wave #23878). The field variant still read 'create open', but DEFAULT_METADATA_TYPE_REGISTRY has declared field allowRuntimeCreate:false since #7893 (a standalone field row reached no object's fields), so its create side is locked like job's and answers 403 NOT_CREATABLE. The variant now states the expectation the registry declares; step[0] already tells the runner to read the flags first", "ref": "#24036" }
+        { "revision": 3, "date": "2026-10-16", "change": "variants[1] corrected (checklist-accuracy finding 1 of QA run #23942, wave #23878). The field variant still read 'create open', but DEFAULT_METADATA_TYPE_REGISTRY has declared field allowRuntimeCreate:false since #7893 (a standalone field row reached no object's fields), so its create side is locked like job's and answers 403 NOT_CREATABLE. The variant now states the expectation the registry declares; step[0] already tells the runner to read the flags first", "ref": "#24036" },
+        { "revision": 4, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[5] cited lines 1311-1323 of objectui ResourceEditPage.tsx in the comma-range spelling, written with a space (authored in 3bb9340974 as the list 951-955 and 1311-1323). At the objectui pin that commit shipped, 6314e87f2d49, 1311-1323 was the isArtifactItem test; at the shipped pin 12dc7b47c340 it has moved and also excludes provenance 'org'. source[5] now names isArtifactItem. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" }
       ]
     },
     {
@@ -1357,7 +1352,7 @@
       "title": "The metadata governance sweep: GET /meta/diagnostics reports every STORED item failing spec validation with located errors, refuses outages and bad spellings loudly instead of answering '0 problems', and the Studio diagnostics page + directory tile badges paint the same numbers",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (the governance surface is Studio's)"],
@@ -1452,7 +1447,7 @@
         "packages/metadata-protocol/src/protocol.ts#getMetaDiagnostics (getMetaDiagnostics: registry-derived type set filtered to registered schemas; reuses the _diagnostics read decoration; stats { count, locked, packages } computed in the same sweep 'so the Studio directory page can render tile counts and a package filter in one round-trip'; 503 outage rethrown #8855 / ADR-0110 D3; 400 unrecognised-spelling rethrown #8924; warnings 'reserved for a future lint layer')",
         "packages/metadata-protocol/src/metadata-diagnostics.ts#computeMetadataDiagnostics (computeMetadataDiagnostics — errors only, undefined = no opinion for schema-less types; zodIssuesToMetadataIssues names union branches #5598 so Studio has a path to highlight)",
         "packages/spec/src/api/protocol.zod.ts#GetMetaDiagnosticsResponseSchema (GetMetaDiagnosticsResponseSchema — entries[].diagnostics is the canonical MetadataValidationResultSchema the save path's 422 also speaks)",
-        "objectui packages/app-shell/src/views/metadata-admin/DiagnosticsPage.tsx (groups by type descending, per-row deep link../<type>/<name>, severity tabs, the summary badge, the clean Empty state, the loadFailed banner) + useMetadata.ts (useGlobalDiagnostics: strict error count vs warn-only count, counts/locked/packages from stats, older-server catch degrades to empty-not-fatal) + DirectoryPage.tsx,242-254 (package-scoped sweep drives tile badges; diagnostics link only when total > 0) + console/AppContent.tsx,982 (the metadata/_diagnostics route)",
+        "objectui packages/app-shell/src/views/metadata-admin/DiagnosticsPage.tsx (groups by type descending, per-row deep link../<type>/<name>, severity tabs, the summary badge, the clean Empty state, the loadFailed banner) + useMetadata.ts (useGlobalDiagnostics: strict error count vs warn-only count, counts/locked/packages from stats, older-server catch degrades to empty-not-fatal) + DirectoryPage.tsx (MetadataDirectoryPage: the package-scoped useGlobalDiagnostics sweep drives tile badges; the diagnostics link renders only when diagSummary.total > 0) + console/AppContent.tsx (the AppContent component's metadata/_diagnostics route)",
         "studio-authoring.authoring-validation-not-persisted (why stock stores are clean — the save-time gate; also the known spurious _diagnostics banner on the DESIGNER, which is that item's business, not this sweep's)"
       ],
       "history": [
@@ -1460,7 +1455,8 @@
         { "revision": 2, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 17). A7 was blocked(fixture): an invalid stored row cannot be planted, because every authoring door validates at save. Disposition: recorded knownGap. The leg cannot be reached on a stock environment by design. The knownGap now names the environment it needs (a store already holding a stale row), says no CI job builds one, and points at the producer-level pin as mechanism-only. No clause changed", "ref": "#22017" },
         { "revision": 3, "date": "2026-10-13", "change": "acceptance[1].verify compares stats.locked against the served envelope lock (stale spec, #23166 A1; parked on #23121, carried by #23169). getMetaDiagnostics counts an item as locked when its read envelope reports a lock other than 'none' — the same derivation getMetaItem publishes (#21694) — not when its declared _lock is set. QA run #23166 compared against the envelope lock and passed. Read from source at 6d7f4df3c (protocol.ts getMetaDiagnostics docblock and loop). The A6 row of the same run, the unplantable invalid stored row, is already recorded in full in knownGaps[0] and needs no edit", "ref": "#23169" },
         { "revision": 4, "date": "2026-10-16", "change": "acceptance[1].verify names the read that carries the envelope lock (checklist-accuracy finding 2 of QA run #23942, wave #23878). It told the runner to compare stats.locked against the lock GET /api/v1/meta/TYPE/NAME publishes, but that default read is the cached arm and carries no `lock` by design; the envelope lock is on GET /api/v1/meta/TYPE/NAME/layers, which is where #23942 read it (object 107, view 0, flow 32 locked, matching stats). The comparison itself is unchanged", "ref": "#24036" },
-        { "revision": 5, "date": "2026-10-19", "change": "fixtures.knownGaps[0], steps[6], steps[8] and acceptance[6] (clause, verify) corrected from QA run #24604 (18.0 sweep round 2, ba4afcc2), the round-2 §3 note that knownGaps[0] is wrong. The invalid stored row is plantable in-run on an isolated scratch file DB: save a valid view through the door with ?package=, rewrite its sys_metadata.metadata, and the next sweep lists it — the run scored acceptance[6] pass that way, deep link and badge included. The directory always repairs ?package= to a project package, so the red button is judged per package scope; rootless union-parent entries may ride beside the located leaf. Wave anchor #24579 round 2 §3 (6272314386)", "ref": "#24671" }
+        { "revision": 5, "date": "2026-10-19", "change": "fixtures.knownGaps[0], steps[6], steps[8] and acceptance[6] (clause, verify) corrected from QA run #24604 (18.0 sweep round 2, ba4afcc2), the round-2 §3 note that knownGaps[0] is wrong. The invalid stored row is plantable in-run on an isolated scratch file DB: save a valid view through the door with ?package=, rewrite its sys_metadata.metadata, and the next sweep lists it — the run scored acceptance[6] pass that way, deep link and badge included. The directory always repairs ?package= to a project package, so the red button is judged per package scope; rootless union-parent entries may ride beside the located leaf. Wave anchor #24579 round 2 §3 (6272314386)", "ref": "#24671" },
+        { "revision": 6, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[5] cited lines 242-254 of objectui DirectoryPage.tsx and line 982 of app-shell's console AppContent.tsx in the comma-range spelling (authored in 45397edf53 as the lists 133-158 and 242-254, and 882 and 982). At the objectui pin that commit shipped, 9602dc820450, 242-254 was the diagnostics link that renders only when diagSummary.total is above 0, 133-158 the package-scoped useGlobalDiagnostics sweep, and 982 the nested metadata route block that holds _diagnostics; at the shipped pin 12dc7b47c340 all have moved. source[5] now names the MetadataDirectoryPage component's sweep and link, and the AppContent component's metadata/_diagnostics route. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" }
       ]
     },
     {

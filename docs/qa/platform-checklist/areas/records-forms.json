@@ -419,7 +419,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -493,7 +493,7 @@
         {
           "clause": "inline edit persists through the API — the PATCH carries only the edited cell and a post-reload re-read shows it, with untouched fields unchanged",
           "oracle": "api",
-          "verify": "diff full-row reads before/after the cell edit (same contract objectui e2e/live/inline-edit-polish-2572.spec.ts pins on Project)",
+          "verify": "diff full-row reads before/after the cell edit (objectui e2e/live/inline-edit-polish-2572.spec.ts pins the PATCH half only, on a Project record page's inline edit — see automated.ref)",
           "evidence": "the two reads + the PATCH body"
         },
         {
@@ -533,16 +533,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/saved-view-filter.spec.ts, e2e/live/user-filters.spec.ts, e2e/live/inline-edit-polish-2572.spec.ts; packages/qa/dogfood/test/showcase-search.dogfood.test.ts (scores NO clause of this item: it pins search.cross-field-object-search's matching — Northwind / retail — not acceptance[2]'s CJK 'huaning' recall, QA runs #24572 and #24598)",
-        "stale": {
-          "since": "2026-10-19",
-          "observedIn": "#24598",
-          "ref": "#24579 §2",
-          "partial": "objectui: e2e/live/user-filters.spec.ts (4 of its 6 cases) and e2e/live/inline-edit-polish-2572.spec.ts ONLY — saved-view-filter.spec.ts passed",
-          "why": "RED AT THE PIN, AS STALE SPECS — not product defects. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: user-filters.spec.ts 2 passed / 4 failed, inline-edit-polish-2572.spec.ts 0 / 1, saved-view-filter.spec.ts 1 / 0; the round-1 record #24572 names the causes. user-filters' filter-tabs, visualization-switcher and lookup-quick-filter cases assert pre-ADR-0053 showcase metadata — the default All Tasks list carries no in-view tab row (status presets are named views), its switcher offers six visualizations including timeline and gantt, and the tabular view declares no userFilters (examples/app-showcase/src/ui/views/task.view.ts) — and its hollow-view case asks for a cell role where the grid exposes gridcell. inline-edit-polish-2572 expects the approval lock after its budget edit, but the budget flow's manager_review step is deliberately unlocked (lockRecord false, examples/app-showcase/src/automation/flows/index.ts), and the spec consumes its own fixture (it needs a fresh database). Re-read at the shipped pin 12dc7b47c340: both specs' bytes are unchanged and the showcase metadata they contradict is unchanged at objectstack 92ce3af404, so both are still stale there.",
-          "runnerRule": "Cite saved-view-filter.spec.ts for acceptance[1] as before. Do NOT cite user-filters.spec.ts or inline-edit-polish-2572.spec.ts, and do NOT score their failures as this item's FAIL: drive acceptance[5] (inline edit) and acceptance[7] (the six-entry switcher) by hand, with every other clause.",
-          "ownedBy": "objectui — re-pointing both specs at the current surface is objectui's half, recorded on wave anchor #24579 §2; this repository reports it and does not edit the spec"
-        }
+        "ref": "objectui: e2e/live/saved-view-filter.spec.ts (acceptance[1]), e2e/live/user-filters.spec.ts (acceptance[7]'s whitelist half ONLY: its visualization-switcher case reads exactly Grid, Kanban, Gallery, Calendar, Timeline and Gantt in the All Tasks Display popover, then switches to Kanban and reads only the trigger's label, so 'each re-renders the SAME task records' is driven by hand. Its lookup quick-filter case, which this item's stale record named, is retired: objectui 0b36ffa deleted it because the shipped showcase declares no lookup user filter, so no ref here cites it), e2e/live/inline-edit-polish-2572.spec.ts (acceptance[5]'s PATCH half ONLY, carrier-neutrally on a Project record page's inline edit, not this item's grid cell: the PATCH carries the edited budget and not the untouched spent. It never re-reads the row, so the re-read half is driven by hand); packages/qa/dogfood/test/showcase-search.dogfood.test.ts (scores NO clause of this item: it pins search.cross-field-object-search's matching — Northwind / retail — not acceptance[2]'s CJK 'huaning' recall, QA runs #24572 and #24598)"
       },
       "source": [
         "examples/app-showcase/src/ui/views/task.view.ts#inlineEdit (saved views, sort string form, inlineEdit, exportOptions, bulk/row actions, allowedVisualizations)",
@@ -581,6 +572,12 @@
           "date": "2026-10-20",
           "change": "automated.stale added — §2 theme \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 at the sweep's console pin 4016370af3c9: user-filters.spec.ts 2 passed / 4 failed and inline-edit-polish-2572.spec.ts 0 / 1, both stale against the shipped showcase (causes from QA run #24572; #24616 drove the item by hand); saved-view-filter.spec.ts passed and stays cited. Re-read at the shipped pin 12dc7b47c340: both specs are byte-identical and the metadata they contradict is unchanged. No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "automated.stale removed, automated.ref scoped per objectui spec, and acceptance[5].verify narrowed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired both specs the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. user-filters.spec.ts: blob aa52b2b8de2a at the old pin 12dc7b47c340, ab50146bcfd0 at both 0b36ffa and 616df6598b42; the tabs case moved to the Task Triage page, the switcher is read through the Display popover, the grid's cells are gridcells, and the lookup quick-filter case is retired (the shipped showcase declares no lookup user filter). inline-edit-polish-2572.spec.ts: blob 84e0677df02e, then 4cc1557d475f at both; it creates its own project and asserts the lock at exec_review. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, both repaired specs assert less than the clauses the stale record sent to hand-driving: the switcher case reads the six entries but switches only to Kanban and reads no records (acceptance[7]'s whitelist half), and inline-edit-polish asserts the PATCH's keys on a Project record page but never re-reads the row (acceptance[5]'s PATCH half). So the ref and acceptance[5].verify narrow to those halves. saved-view-filter.spec.ts (blob 94a201c63a0a at all three) keeps acceptance[1]. No clause changed",
+          "ref": "#24857"
         }
       ]
     },
@@ -812,7 +809,7 @@
       "title": "Header-level conditional rules: visibleWhen / requiredWhen / readonlyWhen on invoice fields, enforced on BOTH ends",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -888,16 +885,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/required-when-submit.spec.ts (acceptance[0]: a requiredWhen-required Issued On blocks submit with its field error) + e2e/live/field-conditional-rules.spec.ts (acceptance[0]'s required marker, acceptance[2]'s client lock and acceptance[3] — stale at the pin, see automated.stale). No pin covers acceptance[1], [4] or [5]: e2e/live/list-row-action-cel.spec.ts, cited here until revision 3, gates the task list's Mark Done row action, not the paid invoice's Edit / Delete gating acceptance[4] scores, so it was dropped",
-        "stale": {
-          "since": "2026-10-19",
-          "observedIn": "#24598",
-          "ref": "#24579 §2",
-          "partial": "objectui: e2e/live/field-conditional-rules.spec.ts ONLY — required-when-submit.spec.ts passed",
-          "why": "RED AT THE PIN, AS A STALE SPEC — not a product defect. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: field-conditional-rules.spec.ts failed, required-when-submit.spec.ts passed. The spec expects tax_rate to be a disabled input once Status is paid; the form renders a readonlyWhen-locked field as read-only text, so no disabled input is there to find (round-1 record #24572). Re-read at the shipped pin 12dc7b47c340: the spec's bytes are unchanged, objectui packages/fields is unchanged, and the form renderer's only change between the pins is the fail-closed field-group gate (objectui#13055), so it is still stale there.",
-          "runnerRule": "Cite required-when-submit.spec.ts for acceptance[0]. Do NOT cite field-conditional-rules.spec.ts or score its failure as this item's FAIL: drive acceptance[2]'s client half and acceptance[3] by hand, with every other clause.",
-          "ownedBy": "objectui — re-pointing field-conditional-rules.spec.ts at the current surface is objectui's half, recorded on wave anchor #24579 §2; this repository reports it and does not edit the spec"
-        }
+        "ref": "objectui: e2e/live/required-when-submit.spec.ts (acceptance[0]: a requiredWhen-required Issued On blocks submit with its field error) + e2e/live/field-conditional-rules.spec.ts (acceptance[0]'s required marker, acceptance[2]'s client lock and acceptance[3], on the New Invoice dialog as Status flips: Issued On's required marker, tax_rate's input giving way to the read-only field group at paid, and paid_on mounted, and required, only at paid). No pin covers acceptance[1], [4] or [5]: e2e/live/list-row-action-cel.spec.ts, cited here until revision 3, gates the task list's Mark Done row action, not the paid invoice's Edit / Delete gating acceptance[4] scores, so it was dropped"
       },
       "source": [
         "examples/app-showcase/src/data/objects/invoice.object.ts#userActions (the B2 rules + userActions gating, with server-semantics comments)",
@@ -922,6 +910,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed, automated.stale added and acceptance[4].verify corrected — §2 themes \"pins that cover no full clause\" and \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 at the sweep's console pin 4016370af3c9: required-when-submit.spec.ts passed (acceptance[0]); field-conditional-rules.spec.ts failed as a stale spec (cause from QA run #24572; #24616 drove the item by hand); list-row-action-cel.spec.ts passed but gates the task list's Mark Done, not the invoice's Edit / Delete, so it is dropped and acceptance[4].verify no longer says it pins the clause. Re-read at the shipped pin 12dc7b47c340: the stale spec is byte-identical and its cause holds. No clause text changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "automated.stale removed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired field-conditional-rules.spec.ts, the one spec the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is c37a93cdc839 at the old pin 12dc7b47c340 and 4e8c3d6ebec3 at both 0b36ffa and 616df6598b42: at paid it now expects tax_rate's input gone and the read-only field group shown, and an editable input again at sent and draft. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the spec asserts all three clauses the ref claims for it (acceptance[0]'s required marker, acceptance[2]'s client lock and acceptance[3]), so the ref keeps them and its stale note gives way to what the spec drives. required-when-submit.spec.ts keeps acceptance[0]. No clause changed",
+          "ref": "#24857"
         }
       ]
     },
@@ -930,7 +924,7 @@
       "title": "Grid-level conditional rules: row-scoped requiredWhen and parent-scoped readonlyWhen in the inline line-item grid",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -971,13 +965,13 @@
         {
           "clause": "parent-scoped readonlyWhen re-evaluates live against the header record: setting status to paid locks the three cells, reverting unlocks them — without a page reload",
           "oracle": "dom",
-          "verify": "after screenshots at each state, assert cell editability (pinned by objectui e2e/live/grid-parent-rules.spec.ts)",
+          "verify": "after screenshots at each state, assert the editability of all three cells. objectui e2e/live/grid-parent-rules.spec.ts pins Qty and Unit Price only (disabled at paid, enabled at draft, on the New Invoice dialog's first line); the Product cell carries the same readonlyWhen and no pin asserts it, so read it by hand",
           "evidence": "lock/unlock screenshots"
         },
         {
           "clause": "the receipt upload cell stores a real managed file: the API re-read of the line carries the sys_file reference and the file is retrievable",
           "oracle": "api",
-          "verify": "GET the line post-save; the receipt field holds the file id, not an inline blob (ADR-0104 stored form; pinned by objectui e2e/live/grid-file-upload.spec.ts)",
+          "verify": "GET the line post-save; the receipt field holds the file id, not an inline blob (ADR-0104 stored form). No pin covers this clause: objectui e2e/live/grid-file-upload.spec.ts, cited here until revision 8, asserts only the receipt the outgoing batch carries; it never re-reads the line or fetches the file",
           "evidence": "line read + fetched file"
         },
         {
@@ -997,16 +991,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/grid-conditional-rules.spec.ts (acceptance[0]'s inline-flag half ONLY — on the New Invoice dialog's first line, Description carries no required flag at Qty 2, is flagged at Qty 100 and clears once filled; the spec adds no second row and never saves, so neither the unflagged sibling row nor the blocked save is pinned), e2e/live/grid-parent-rules.spec.ts, e2e/live/grid-file-upload.spec.ts (stale at the pin, see automated.stale). No pin covers acceptance[1] or acceptance[4]",
-        "stale": {
-          "since": "2026-10-19",
-          "observedIn": "#24598",
-          "ref": "#24579 §2",
-          "partial": "objectui: e2e/live/grid-file-upload.spec.ts ONLY — grid-conditional-rules.spec.ts and grid-parent-rules.spec.ts passed",
-          "why": "RED AT THE PIN, AS A STALE SPEC — not a product defect. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: grid-file-upload.spec.ts failed; the other two passed. Its 'Line Items' text locator also matches the master-detail dialog's screen-reader-only description (\"Enter the record and its line items, then save.\", objectui packages/plugin-form/src/ModalForm.tsx), so Playwright's strict mode refuses the locator before the form is driven (round-1 record #24572). Re-read at the shipped pin 12dc7b47c340: the spec's bytes and that description are unchanged, so it is still stale there.",
-          "runnerRule": "Cite grid-conditional-rules.spec.ts for acceptance[0]'s inline flag and grid-parent-rules.spec.ts for acceptance[2] as before. Do NOT cite grid-file-upload.spec.ts or score its failure as this item's FAIL: drive acceptance[3] by hand, with every clause no passing spec covers.",
-          "ownedBy": "objectui — re-pointing grid-file-upload.spec.ts at the current surface is objectui's half, recorded on wave anchor #24579 §2; this repository reports it and does not edit the spec"
-        }
+        "ref": "objectui: e2e/live/grid-conditional-rules.spec.ts (acceptance[0]'s inline-flag half ONLY — on the New Invoice dialog's first line, Description carries no required flag at Qty 2, is flagged at Qty 100 and clears once filled; the spec adds no second row and never saves, so neither the unflagged sibling row nor the blocked save is pinned), e2e/live/grid-parent-rules.spec.ts (acceptance[2] for Qty and Unit Price ONLY — on the New Invoice dialog's first line, with Qty filled, both inputs are enabled at status draft, disabled at paid with the typed quantity kept, and enabled again at draft; it never asserts the Product cell, which declares the same parent-scoped readonlyWhen). No pin covers acceptance[1], acceptance[3] or acceptance[4]. Dropped at revision 8: e2e/live/grid-file-upload.spec.ts, which uploads a file into the first line's Receipt cell and asserts only that the submitted /api/v1/batch carries a receipt with a name and an http(s) url; it never re-reads the saved line or fetches the file, so even green it would score no clause of this item (seat ruling 6281811723). Its stale-spec repair stays on objectstack-ai/objectui#13104 for the items it serves"
       },
       "source": [
         "examples/app-showcase/src/data/objects/invoice.object.ts (row/parent-scoped rules on the line object; ADR-0036 / #1581)",
@@ -1055,6 +1040,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep), one of the leftovers round 6 (#24697) named. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: grid-conditional-rules.spec.ts passed, but it flags the Description cell on one row and never saves, so #24598 scored acceptance[0] not-run (round 1's QA run #24572 had scored it pass on that spec). The ref now says the spec claims acceptance[0]'s inline-flag half only, and that no pin covers acceptance[1] or [4]; QA run #24616 drove acceptance[1], [3] and [4] by hand. The spec is byte-identical at the shipped pin 12dc7b47c340. grid-parent-rules.spec.ts and grid-file-upload.spec.ts stay cited as they were, and the automated.stale record (grid-file-upload.spec.ts) is unchanged. No clause changed",
           "ref": "#24723"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "automated.ref, acceptance[2].verify and acceptance[3].verify narrowed, and automated.stale removed — the seat ruling 6281811723 (on #24723) and round 8's finding (i) for wave anchor #24579 (18.0 sweep; round 8's report 6281776167). Tier 1 run #24598 at the sweep's console pin 4016370af3c9 ran grid-file-upload.spec.ts red as a stale spec (cause from QA run #24572). Even green it asserts only the receipt the outgoing /api/v1/batch carries and never re-reads the line or fetches the file, so it scores no clause here: it is dropped from the ref and named there, and the stale record, which named only it, goes with it. grid-parent-rules.spec.ts asserts that Qty and Unit Price lock at paid and unlock at draft, and never the Product cell that the clause's 'three cells' include (#24598 scored acceptance[2] pass on it): acceptance[2].verify and the ref now say so. QA run #24616 drove acceptance[1], [3] and [4] by hand. Both specs are byte-identical at 4016370af3c9 and at the shipped pin 12dc7b47c340. No clause changed",
+          "ref": "#24752"
         }
       ]
     },
@@ -1063,7 +1054,7 @@
       "title": "Cascading and gated select options: dependsOn + per-option visibleWhen, client narrows / server rejects",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1094,7 +1085,7 @@
         {
           "clause": "dependsOn gates the dependent field until its driver has a value, and changing the driver re-filters the offered set live, clearing a now-invalid selection",
           "oracle": "dom",
-          "verify": "after screenshots, enumerate the offered options at each country state (pinned by objectui e2e/live/cascading-options.spec.ts: 'province options re-filter live as country changes, and the stale value clears')",
+          "verify": "after screenshots, enumerate the offered options at each country state (the re-filter and the clear are pinned by objectui e2e/live/cascading-options.spec.ts: 'province options re-filter live as country changes, and the stale value clears'; the state before any country is chosen is not — see automated.ref)",
           "evidence": "option enumerations + screenshots"
         },
         {
@@ -1133,16 +1124,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/cascading-options.spec.ts",
-        "stale": {
-          "since": "2026-10-19",
-          "observedIn": "#24598",
-          "ref": "#24579 §2",
-          "partial": "objectui: e2e/live/cascading-options.spec.ts, its re-filter case ONLY — the server out-of-set case passed",
-          "why": "RED AT THE PIN, AS A STALE CASE — not a product defect. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: cascading-options.spec.ts 1 passed / 1 failed. Its re-filter case (the one that also proves the stale value clears) waits for md-form-submit, a test id only MasterDetailForm renders, but showcase_cascade has no child object, so its New form is a flat ModalForm (round-1 record #24572). Re-read at the shipped pin 12dc7b47c340: the spec's bytes are unchanged, md-form-submit is still MasterDetailForm-only, and no showcase object references showcase_cascade at objectstack 92ce3af404, so the case is still stale there.",
-          "runnerRule": "Cite the server out-of-set case for acceptance[1]. Do NOT cite the re-filter case or score its failure as this item's FAIL: drive acceptance[0] by hand, with every other clause.",
-          "ownedBy": "objectui — re-pointing the re-filter case at the current surface is objectui's half, recorded on wave anchor #24579 §2; this repository reports it and does not edit the spec"
-        }
+        "ref": "objectui: e2e/live/cascading-options.spec.ts — its re-filter case pins acceptance[0]'s re-filter and clear halves ONLY (on the New form, country cn offers gd and zj, us offers ca and tx, and the chosen Zhejiang leaves the province trigger). It never reads the province before a country is chosen, so 'gates the dependent field until its driver has a value' is driven by hand. Its server case pins acceptance[1] (the out-of-set POST answers 400 VALIDATION_FAILED naming province with invalid_option, the in-set one 201). No pin covers acceptance[2], [3] or [4]"
       },
       "source": [
         "examples/app-showcase/src/data/objects/cascading-select.object.ts (the B3 / #1583 fixture, with both-sides contract in its header comment)",
@@ -1173,6 +1155,12 @@
           "date": "2026-10-20",
           "change": "automated.stale added — §2 theme \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 at the sweep's console pin 4016370af3c9: cascading-options.spec.ts's re-filter case failed as a stale case (cause from QA run #24572; #24616 drove the item by hand) and its server out-of-set case passed and stays cited. Re-read at the shipped pin 12dc7b47c340: byte-identical, still stale. No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "automated.stale removed, automated.ref scoped per case and acceptance[0].verify narrowed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired the re-filter case the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. cascading-options.spec.ts: blob 648d5c917d19 at the old pin 12dc7b47c340, 5f65228948b7 at both 0b36ffa and 616df6598b42; the case now waits for the flat ModalForm's modal-form-footer instead of md-form-submit. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the case asserts less than acceptance[0], which the stale record sent to hand-driving: it enumerates province under cn and under us and sees Zhejiang leave the trigger, but never reads the province before a country is chosen. So the ref and acceptance[0].verify narrow to the re-filter and clear halves. The server case keeps acceptance[1]. No clause changed",
+          "ref": "#24857"
         }
       ]
     },
@@ -1181,7 +1169,7 @@
       "title": "Master + line items save as one atomic batch, with server-side roll-up",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1210,7 +1198,7 @@
         {
           "clause": "the happy-path save lands master + children in ONE atomic batch request (not N sequential writes), with the child ops referencing the parent",
           "oracle": "network",
-          "verify": "the save issues a single batch call whose payload contains the parent and both line ops (pinned by objectui e2e/live/master-detail.spec.ts: 'Create submits the populated parent in one atomic batch' / 'includes the child op referencing the parent')",
+          "verify": "the save issues a single batch call whose payload contains the parent and both line ops. objectui e2e/live/master-detail.spec.ts pins the clause carrier-neutrally, not on this invoice: on the showcase 'New Project + Tasks' page (showcase_project_workspace), 'Create submits the populated parent in one atomic batch' asserts that the first POST /api/v1/batch the save sends opens with the populated showcase_project op, and 'Create with a task line includes the child op referencing the parent' asserts that the same batch carries one showcase_task op whose project is {$ref: 0}. It stages one child through the per-row form, not two lines in this item's invoice grid, and it reads the first batch rather than counting them, so read this run's two-line invoice payload from the network trace",
           "evidence": "the batch request payload"
         },
         {
@@ -1254,16 +1242,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/master-detail.spec.ts, e2e/live/form-view-subforms.spec.ts. Dropped at revision 5: e2e/live/summary-rollup.spec.ts, which rolls showcase_task's estimate_hours up into showcase_project (total_estimate as a SUM, task_count as a COUNT) through a direct POST /api/v1/batch, reading both back after that create and again after a child delete. It never opens the invoice form and never reads invoice.total, the roll-up acceptance[2] scores, so it asserts no clause of this item (Tier 1 run #24598 scored acceptance[2] not-run on it for that carrier mismatch)",
-        "stale": {
-          "since": "2026-10-19",
-          "observedIn": "#24598",
-          "ref": "#24579 §2",
-          "partial": "objectui: e2e/live/form-view-subforms.spec.ts ONLY — master-detail.spec.ts and summary-rollup.spec.ts passed",
-          "why": "RED AT THE PIN, AS A STALE SPEC — not a product defect. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: form-view-subforms.spec.ts failed; the other two passed. Its 'Line Items' text locator also matches the master-detail dialog's screen-reader-only description (\"Enter the record and its line items, then save.\", objectui packages/plugin-form/src/ModalForm.tsx), so Playwright's strict mode refuses the locator before the form is driven (round-1 record #24572). Re-read at the shipped pin 12dc7b47c340: the spec's bytes and that description are unchanged, so it is still stale there.",
-          "runnerRule": "Cite master-detail.spec.ts for acceptance[0] as before. Do NOT cite form-view-subforms.spec.ts or score its failure as this item's FAIL: drive acceptance[4] by hand, with every clause no passing spec covers.",
-          "ownedBy": "objectui — re-pointing form-view-subforms.spec.ts at the current surface is objectui's half, recorded on wave anchor #24579 §2; this repository reports it and does not edit the spec"
-        }
+        "ref": "objectui: e2e/live/master-detail.spec.ts (acceptance[0], carrier-neutrally: the showcase 'New Project + Tasks' page, one showcase_task child staged through the per-row form, not this item's invoice grid with two lines), e2e/live/form-view-subforms.spec.ts (acceptance[4] ONLY: the stock New Invoice dialog renders the relationship-derived Line Items section, found by its heading, and its line grid). Dropped at revision 5: e2e/live/summary-rollup.spec.ts, which rolls showcase_task's estimate_hours up into showcase_project (total_estimate as a SUM, task_count as a COUNT) through a direct POST /api/v1/batch, reading both back after that create and again after a child delete. It never opens the invoice form and never reads invoice.total, the roll-up acceptance[2] scores, so it asserts no clause of this item (Tier 1 run #24598 scored acceptance[2] not-run on it for that carrier mismatch)"
       },
       "source": [
         "#3358 §4",
@@ -1300,6 +1279,18 @@
           "date": "2026-10-20",
           "change": "automated.ref and acceptance[2].verify corrected — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep), one of the leftovers round 6 (#24697) named. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: summary-rollup.spec.ts passed 2/2, but it rolls showcase_task up into showcase_project through a direct batch and never reads invoice.total, so #24598 scored acceptance[2] not-run on it (round 1's QA run #24572 had scored acceptance[2] pass on it). It asserts no clause of this item, so it is dropped from the ref and named there, and acceptance[2].verify no longer says it pins the clause. The spec is byte-identical at the shipped pin 12dc7b47c340. QA run #24616 drove the invoice.total roll-up by hand. master-detail.spec.ts and form-view-subforms.spec.ts stay cited, and the automated.stale record (form-view-subforms.spec.ts) is unchanged. No clause text changed",
           "ref": "#24723"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "acceptance[0].verify and automated.ref narrowed to what master-detail.spec.ts asserts — round 8's finding (iii) for wave anchor #24579 (18.0 sweep; round 8's report 6281776167, carried by the seat's ACCEPT 6281811723). The spec drives showcase_project_workspace ('New Project + Tasks') with one task child staged through the per-row form, not the invoice grid with two lines that steps[1] and [2] drive. Tier 1 run #24598 at the sweep's console pin 4016370af3c9 ran it 2/2 green and scored acceptance[0] pass on it. The clause names no carrier (master and children in one atomic batch, the child ops referencing the parent), and the spec's two tests assert exactly that on their own carrier: the first batch the save sends opens with the populated parent op and carries the child op whose project is {$ref: 0}. So, under round 6's theme-B rule, a pin that asserts a full clause is kept and narrowed, not dropped. The spec is byte-identical at 4016370af3c9 and at the shipped pin 12dc7b47c340. No clause changed",
+          "ref": "#24752"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "automated.stale removed and automated.ref scoped for form-view-subforms.spec.ts — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired form-view-subforms.spec.ts, the one spec the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is 4f2a95b529f3 at the old pin 12dc7b47c340 and 9485f378abd7 at both 0b36ffa and 616df6598b42: it now finds the Line Items section by its heading role, so the dialog's screen-reader-only description no longer collides with the locator. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, it asserts acceptance[4], the clause the stale record sent to hand-driving, and the ref now names that scope and no wider one. master-detail.spec.ts keeps acceptance[0]. No clause changed",
+          "ref": "#24857"
         }
       ]
     },
@@ -1308,7 +1299,7 @@
       "title": "Related lists derive from the relationship and page on the server — never fetch every child row — and are read-gated on both ends",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1387,15 +1378,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/detail-related-list.spec.ts — acceptance[2] ONLY (the relationship-derived Projects related list on the Account detail page), and stale at the pin (automated.stale). No pin covers the paging, pager-total, relatedList-config, row-navigation or read-gate clauses (acceptance[0], [1], [3], [4], [5])",
-        "stale": {
-          "since": "2026-10-19",
-          "observedIn": "#24598",
-          "ref": "#24579 §2",
-          "why": "RED AT THE PIN, AS A STALE SPEC — not a product defect. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: detail-related-list.spec.ts 0 passed / 1 failed. It clicks an Accounts row and waits for a ?recordId= query, but the row now opens the full record page at /record/ID (round-1 record #24572). Re-read at the shipped pin 12dc7b47c340: the spec's bytes are unchanged, and the row-navigation path did not change between the pins (ObjectView's navigation-mode code is unchanged, and the record-surface derivation it calls, packages/spec/src/data/record-surface.ts, is unchanged since the sweep subject), so it is still stale there.",
-          "runnerRule": "Do NOT cite this spec or score its failure as this item's FAIL: drive every clause by hand, acceptance[2] included (QA run #24616 did).",
-          "ownedBy": "objectui — re-pointing detail-related-list.spec.ts at the current surface is objectui's half, recorded on wave anchor #24579 §2; this repository reports it and does not edit the spec"
-        }
+        "ref": "objectui: e2e/live/detail-related-list.spec.ts — acceptance[2] ONLY (the relationship-derived Projects related list on the Account detail page: Northwind's detail renders a Projects tab whose panel shows the projects' status labels). No pin covers the paging, pager-total, relatedList-config, row-navigation or read-gate clauses (acceptance[0], [1], [3], [4], [5])"
       },
       "source": [
         "#3358 §4 (evidence run captured exactly this trace)",
@@ -1440,6 +1423,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed and automated.stale added — §2 themes \"pins that cover no full clause\" and \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 at the sweep's console pin 4016370af3c9: detail-related-list.spec.ts, the only pin, failed as a stale spec (cause from QA run #24572; #24616 passed the item by hand). When green it pins acceptance[2] alone, so the ref now says so. Re-read at the shipped pin 12dc7b47c340: byte-identical, still stale. No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "automated.stale removed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired detail-related-list.spec.ts, the only pin, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is 48a1d10e59da at the old pin 12dc7b47c340 and f12f7237fd6f at both 0b36ffa and 616df6598b42: it now reads the record id from the /record/ID route a Northwind row opens, and finds the primary Projects list in its own tab. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, it asserts acceptance[2], the one clause the ref claims, so the ref keeps it and loses its stale note. No clause changed",
+          "ref": "#24857"
         }
       ]
     },
@@ -1909,7 +1898,7 @@
       "title": "All six validation-rule types enforce on the write path with their exact per-type error codes — and advisory severities flag without blocking",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1919,10 +1908,12 @@
         "app": "showcase",
         "requires": [
           "the seeded per-type rules: showcase_account account_lifecycle (state_machine, events [update] only — transitions, no create-time check), tax_id_format + billing_email_format (format), support_config_shape (json_schema), churn_reason_consistency (conditional); showcase_project end_after_start (cross_field), spent_within_budget (script), project_status_flow (state_machine)",
-          "the seeded ADVISORY rule: showcase_project project_health_progression — state_machine on `health` with severity:'warning' (green↔yellow↔red one step at a time; a jump is flagged, not blocked — examples/app-showcase/src/data/objects/project.object.ts)"
+          "the seeded ADVISORY rule: showcase_project project_health_progression — state_machine on `health` with severity:'warning' (green↔yellow↔red one step at a time; a jump is flagged, not blocked — examples/app-showcase/src/data/objects/project.object.ts)",
+          "for the UNEVALUABLE legs (negative[0], negative[1], acceptance[5]): two runtime-authored scratch objects, each carrying one script rule whose condition `int(record.title) > 1` cannot be evaluated over a non-numeric title — no seeded rule is unevaluable, so the stock doors author them. As admin: PUT /api/v1/meta/object/qa_vr_probe {name: qa_vr_probe, label: QA, sharingModel: public_read_write, fields: {title: {type: text}}, validations: [{type: script, name: qa_unevaluable_warn, severity: warning, message: x, condition: \"int(record.title) > 1\"}]} → 200, and the same body as qa_vr_probe_err with the rule named qa_unevaluable_err at severity: error → 200 (the recipe of QA run #24779 / #24782). A write with title \"abc\" then drives each rule"
         ],
         "knownGaps": [
-          "no showcase rule declares severity:'info' — it shares the identical non-error branch with 'warning' (rule-validator.ts tests `severity === 'error'` and logs everything else), so the warning leg is the driven proof; author a scratch info rule only if a distinct observation is wanted, and record which severities were actually driven"
+          "no showcase rule declares severity:'info' — it shares the identical non-error branch with 'warning' (rule-validator.ts tests `severity === 'error'` and logs everything else), so the warning leg is the driven proof; author a scratch info rule only if a distinct observation is wanted, and record which severities were actually driven",
+          "acceptance[5] stays red until #24782 lands: the unevaluable warning rule's write answers 201 and persists (correct), but the server log prints two lines naming the rule that both say \"write rejected\" — the predicate evaluator's fail-closed sentence, emitted before severity is consulted, and the advisory branch's warn, which embeds that violation message (packages/objectql/src/validation/rule-validator.ts). Measured at 580fd4ed (QA run #24779) and again at a43405d596 (#24802). When #24782's fix merges, re-run the clause and drop this line"
         ]
       },
       "variants": [
@@ -1940,7 +1931,8 @@
         "for each variant: send the happy-path twin (same shape, satisfying values) and capture success",
         "after every rejection, re-read the row set to confirm nothing persisted",
         "for state_machine additionally: create with a legal initial state, walk one legal transition, then attempt the illegal one",
-        "severity probe: PATCH a showcase_project's `health` from green straight to red (skipping yellow — a jump project_health_progression matches); capture the response, re-read the row, and read the server log for the warning line"
+        "severity probe: PATCH a showcase_project's `health` from green straight to red (skipping yellow — a jump project_health_progression matches); capture the response, re-read the row, and read the server log for the warning line",
+        "unevaluable probe (the scratch objects of fixtures.requires[2]): POST /api/v1/data/qa_vr_probe {title: \"abc\"} and capture the response, re-read the row, and capture EVERY server-log line naming qa_unevaluable_warn; then POST /api/v1/data/qa_vr_probe_err {title: \"abc\"} and capture the refusal and a re-read showing no row"
       ],
       "acceptance": [
         {
@@ -1972,12 +1964,19 @@
           "oracle": "log",
           "verify": "the 2xx response with its `warnings` entry naming the rule (the write answer reports the write's own advisory hits — packages/metadata-protocol/src/protocol.ts, #22726), the persisted re-read, and the logger.warn line (packages/objectql/src/validation/rule-validator.ts — non-error severities route to opts.logger.warn, never into `errors`). Score the entry's rule, severity, field and code (packages/objectql/src/validation/rule-validator.ts#advisoryEvent copies field and code from the violation, so a state_machine advisory reports invalid_transition), not its message wording; a run wanting a UI-visible advisory is asking for a feature, not verifying this one",
           "evidence": "response + re-read + the captured log line"
+        },
+        {
+          "clause": "an UNEVALUABLE severity:'warning' rule lets the write land, and no log line beside it reports a rejection: the write answers 2xx, the row persists, and no server-log line naming the rule says the write was rejected or that the rule failed closed — the log must not state the opposite of what the server did. Red until #24782 lands",
+          "oracle": "log",
+          "verify": "step-7 qa_vr_probe write: status 201 and a re-read finding the row; then every log entry naming qa_unevaluable_warn, read to its end — the predicate evaluator's entry spans lines (it embeds the CEL source with a caret) and its verdict sits after the caret — none may contain \"write rejected\" or \"fails closed\" (the fail-closed sentence belongs to the error-severity path; rule-validator.ts header: an unevaluable warning/info rule is logged, never thrown). Score the absence of the rejection wording, not whichever replacement sentence #24782 picks; a line saying the rule could not be evaluated is expected and passes. Control: the qa_vr_probe_err write answers 400 VALIDATION_FAILED naming qa_unevaluable_err and persists nothing — there the rejection wording is true",
+          "evidence": "both responses + both re-reads + every log line naming either rule, quoted"
         }
       ],
       "negative": [
-        "an unevaluable CEL expression must fail CLOSED (rule_violation), never fail-open silently accepting the write — the rule-validator's documented posture",
+        "an unevaluable CEL expression must fail CLOSED (rule_violation), never fail-open silently accepting the write — the rule-validator's documented posture; driven on the qa_vr_probe_err scratch object (fixtures.requires[2], steps[6])",
         "the fail-closed posture is SEVERITY-SCOPED: an unevaluable 'warning'/'info' rule stays non-blocking (logged, never thrown — rule-validator.ts 'advisory rules stay advisory'); a warning rule that BLOCKS a write, evaluable or not, is a FAIL in the other direction",
-        "a matching warning rule that leaves NO log line is a FAIL of the surfacing half — flagged-not-blocked means flagged"
+        "a matching warning rule that leaves NO log line is a FAIL of the surfacing half — flagged-not-blocked means flagged",
+        "an unevaluable advisory rule whose log line says the write was REJECTED while the write landed is a FAIL of the surfacing half in the other direction: an operator reading the log for a disputed write is told it was refused when it was stored (#24782)"
       ],
       "traps": [
         "wrong-persona"
@@ -1986,7 +1985,8 @@
         "packages/spec/src/data/validation.zod.ts#ValidationRuleSchema (ValidationRuleSchema, 6 discriminated variants; severity enum ['error','warning','info'] default 'error')",
         "packages/objectql/src/validation/rule-validator.ts#evaluateRule (evaluateRule switch + per-type codes; 'only error blocks', unevaluable-advisory stays non-blocking, the severity fork)",
         "examples/app-showcase/src/data/objects/{account,project,task}.object.ts (the seeded rules; project.object.ts the advisory project_health_progression)",
-        "#1475 (declared ≠ enforced history: 9 declared → 6 declared+enforced)"
+        "#1475 (declared ≠ enforced history: 9 declared → 6 declared+enforced)",
+        "QA-source: #24779 · records-forms.validation-rule-type-matrix · negative[1] (observed beside the clauses — the write did not block, the log beside it said it did; #24782)"
       ],
       "history": [
         {
@@ -2012,6 +2012,12 @@
           "date": "2026-10-19",
           "change": "variants[0] and fixtures.requires[0] corrected from QA run #24572 (18.0 sweep, 5b14b7f3), re-read at objectstack f89d29e382: account_lifecycle binds `events: ['update']` only (examples/app-showcase/src/data/objects/account.object.ts), so the create-with-non-initial-status leg raises invalid_initial_state from project_status_flow alone (events insert + update, initialStates ['planned'], project.object.ts). The since:v18 run #24558's note that this item describes the advisory hit as server-log only is already on main (revision 3 reads the write answer's warnings) and is not repeated. No clause changed. Wave anchor #24579 §3",
           "ref": "#24671"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "acceptance[5], steps[6], negative[3], fixtures.requires[2] and knownGaps[1] added for #24782, which QA run #24779 found beside the clauses (round 3 of the 18.0 sweep, 580fd4ed): an unevaluable warning rule lets the write land, as negative[1] requires, but its log says the write was rejected, and no clause read the log of the unevaluable path. The clause stays red until #24782's fix lands. fixtures.requires[2] is round 3's recipe — a scratch object authored through PUT /api/v1/meta/object carries an unevaluable script rule — and closes round 2's fixture gap (QA run #24616: negative[0] blocked(fixture), 'an unevaluable CEL validation cannot be authored through any door'); negative[0] now names its scratch object. No existing clause changed",
+          "ref": "#24802"
         }
       ]
     },
@@ -2335,7 +2341,7 @@
       "title": "User-built FilterBuilder/SortBuilder toolbar merges with the view filter, restores across nav, and reproduces rows from the URL",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2407,16 +2413,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/user-filters.spec.ts — acceptance[4] ONLY: its dropdown-selection case pins the uf_<field> half (a uf_priority selection survives a reload), and the uf__tab half rests on its filter-tabs case, stale at the pin (automated.stale). No pin covers acceptance[0]–[3]: e2e/live/saved-view-filter.spec.ts, cited here until revision 5, pins a saved view's stored filter alone, not the toolbar merge acceptance[0] scores, so it was dropped",
-        "stale": {
-          "since": "2026-10-19",
-          "observedIn": "#24598",
-          "ref": "#24579 §2",
-          "partial": "objectui: e2e/live/user-filters.spec.ts, 4 of its 6 cases — the dropdown-selection case passed",
-          "why": "RED AT THE PIN, AS A STALE SPEC — not a product defect. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: user-filters.spec.ts 2 passed / 4 failed. The failing filter-tabs case asserts pre-ADR-0053 metadata — an in-view tab row on the default All Tasks list, which carries none because status presets are named views (examples/app-showcase/src/ui/views/task.view.ts) — so acceptance[4]'s uf__tab half has no green pin; the round-1 record #24572 names the causes. Re-read at the shipped pin 12dc7b47c340: the spec's bytes and that metadata are unchanged at objectstack 92ce3af404, so it is still stale there.",
-          "runnerRule": "Cite the dropdown-selection case for acceptance[4]'s uf_<field> half only. Do NOT cite the failing cases or score them as this item's FAIL: drive acceptance[4]'s uf__tab half and acceptance[0]–[3] by hand.",
-          "ownedBy": "objectui — re-pointing the filter-tabs case at the current surface is objectui's half, recorded on wave anchor #24579 §2; this repository reports it and does not edit the spec"
-        }
+        "ref": "objectui: e2e/live/user-filters.spec.ts — acceptance[4] ONLY: its dropdown-selection case pins the uf_<field> half (a uf_priority selection survives a reload), and its filter-tabs case, now on the Task Triage interface page, pins the uf__tab half (picking the urgent tab writes uf__tab=urgent, and it survives a reload). No pin covers acceptance[0]–[3]: e2e/live/saved-view-filter.spec.ts, cited here until revision 5, pins a saved view's stored filter alone, not the toolbar merge acceptance[0] scores, so it was dropped"
       },
       "source": [
         "objectui: packages/plugin-list/src/ListView.tsx (buildEffectiveFilter, convertFilterGroupToAST, mergeFilterNodes; $filter + $orderby assembly)",
@@ -2455,6 +2452,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed and automated.stale added — §2 themes \"pins that cover no full clause\" and \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 scored every clause not-run on its pins at the sweep's console pin 4016370af3c9 (QA run #24616 then passed the item by hand; #24572 names the stale causes): saved-view-filter.spec.ts pins a saved view's filter alone, not the toolbar merge acceptance[0] scores, so it is dropped; user-filters.spec.ts pins acceptance[4]'s uf_<field> half, and its uf__tab half rests on the stale filter-tabs case. Re-read at the shipped pin 12dc7b47c340: the spec is byte-identical and still stale. No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "automated.stale removed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired user-filters.spec.ts, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is aa52b2b8de2a at the old pin 12dc7b47c340 and ab50146bcfd0 at both 0b36ffa and 616df6598b42: the filter-tabs case now drives the tabs element on the Task Triage interface page (ADR-0053), and the lookup quick-filter case is retired. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the two cases the ref claims assert acceptance[4]'s two halves as it says (uf_priority=urgent and uf__tab=urgent each survive a reload), so the ref keeps acceptance[4] and loses its stale note. No case this item cites was retired. No clause changed",
+          "ref": "#24857"
         }
       ]
     },
@@ -2683,7 +2686,7 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2694,7 +2697,8 @@
         "app": "showcase",
         "requires": [
           "a showcase object with feeds enabled (default — enable.feeds !== false) so the discussion panel mounts and sys_comment writes are accepted (packages/spec/src/data/object.zod.ts feeds default true; plugin-audit enforceFeedsCapability)",
-          "a record to comment on (e.g. a seeded showcase_task or showcase_account)"
+          "a record to comment on (e.g. a seeded showcase_task or showcase_account)",
+          "for the recipient read-gate clause (acceptance[9]) on a stock `single` boot: the knownGaps[0] second user, a member of the same organization, and two admin-owned records — a showcase_private_note (sharingModel 'private', owner-only, examples/app-showcase/src/data/objects/private-note.object.ts), which the member cannot read, and a showcase_account (public_read_write), which the member can. The cross-organization leg needs a walled boot (RUNNER.md 'A walled boot is a fixture of its own') holding two organizations, with the comment's record in one and the mentioned user a member of the other only"
         ],
         "provisioning": {
           "use": "qa-feeds-disabled",
@@ -2702,7 +2706,8 @@
         },
         "knownGaps": [
           "the @mention TARGET and the bell/notification clauses need a SECOND signed-up user — a fresh single-user boot cannot exercise them; record those clauses blocked(fixture) and run the optimistic-reconcile + sys_comment + activity-interleave clauses as the single author",
-          "CLOSED by the qa-feeds-disabled recipe (#12118) for the two FEEDS_DISABLED clauses: before it, no showcase object declared enable.feeds:false and there was no scratch recipe for this area, so the code appeared only in `negative`. Fall back to the pinned engine/API suites named in `automated` ONLY if the recipe cannot be replayed on the boot under test — and when you do, record WHICH of the two the verdict rests on, because the pins run against their own fixtures (cmt_nofeeds / lead_walled) and not against the showcase surface this item otherwise drives."
+          "CLOSED by the qa-feeds-disabled recipe (#12118) for the two FEEDS_DISABLED clauses: before it, no showcase object declared enable.feeds:false and there was no scratch recipe for this area, so the code appeared only in `negative`. Fall back to the pinned engine/API suites named in `automated` ONLY if the recipe cannot be replayed on the boot under test — and when you do, record WHICH of the two the verdict rests on, because the pins run against their own fixtures (cmt_nofeeds / lead_walled) and not against the showcase surface this item otherwise drives.",
+          "acceptance[9]'s cross-organization leg runs live only on a walled boot (isolated or group), which the stock showcase does not provision. A run without one records that leg blocked(fixture) citing RUNNER.md's walled entry. Its pin (automated.ref, packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts) reaches the ENGINE layer, not HTTP: a real kernel, ObjectQL engine and SQLite driver with AuditPlugin and the real core grant resolver, while plugin-security's read layer is played by one middleware composing the posture's tenant clause and an owner-only rule, and messaging is played by an emit() recorder. Under RUNNER rule 6 the pin scores the clause partial at most, naming the HTTP layer and the real plugin-security as missing; the stock `single` leg is driven live"
         ]
       },
       "steps": [
@@ -2718,7 +2723,8 @@
         "RE-THREAD (UPDATE-SIDE) FEEDS_DISABLED probe — take the sys_comment row posted earlier against the feeds-ENABLED record and PATCH /api/v1/data/sys_comment/<its id> with { thread_id: 'qa_nofeeds:<the throwaway record id>' } as admin, capturing the refusal. This is the UPDATE half of the #10170 gate (enforceFeedsCapability registered on beforeUpdate as well as beforeInsert, packages/plugins/plugin-audit/src/audit-writers.ts): re-read the comment afterward and confirm its thread_id is UNCHANGED",
         "control for both probes — repeat the same two calls against a feeds-ENABLED parent (the seeded showcase record used above) and confirm they SUCCEED. A 403 that also fires on the enabled parent is measuring access, not the capability gate, and neither clause may be scored from it",
         "FEED FILTER — on a record whose feed now holds at least one comment (posted above) and one field-change activity (the attributable edit above), cycle the filter control through all four FeedFilterMode values, screenshotting each state before reading the rendered rows",
-        "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the objectui pin (recordActivityFeed.test.ts) and record the substitution"
+        "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the objectui pin (recordActivityFeed.test.ts) and record the substitution",
+        "RECIPIENT READ GATE (acceptance[9]) — on a stock `single` boot with fixtures.requires[2]. The stock boot's audience posture is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the member with POST /api/v1/auth/admin/create-user (it lands in the default organization with mustChangePassword true), and the member signs in, calls POST /api/v1/auth/change-password and signs in again. First prove the member's access as the member (GET /api/v1/data/showcase_private_note/ID answers 404, GET /api/v1/data/showcase_account/ID answers 200) and read the member's and the admin's GET /api/v1/notifications. As admin, POST /api/v1/data/sys_comment on the note's thread (thread_id 'showcase_private_note:ID') with mentions naming the member by user id, then a second comment there naming the member by email, then one on the account's thread naming the member by user id and the admin itself. Re-read both inboxes and count the rows of type collab.mention per comment (each row's body is the comment's preview). On a walled boot, repeat the note-shaped leg with the record in organization A and the mentioned user a member of organization B only"
       ],
       "acceptance": [
         {
@@ -2774,6 +2780,12 @@
           "oracle": "dom",
           "verify": "the planted custom-type row appears in the 'all' feed with the generic presentation (objectui recordActivityFeed.ts: ACTIVITY_TYPE_TO_FEED_TYPE is a SUPERSET pin over built-ins, unmapped values route to UNMAPPED_ACTIVITY_FEED_TYPE 'system' — objectui#5840/#5969 history); where the milestone channel is unavailable, the pin recordActivityFeed.test.ts is the fallback oracle — record which the verdict rests on",
           "evidence": "the 'all' feed screenshot showing the custom-type row (or the pin output + the substitution note)"
+        },
+        {
+          "clause": "an @mention notification reaches a mentioned user only when that user can READ the comment's record — whether the mention names them by user id or by email — and the author is never notified: the collab.mention notification carries the comment's preview and a deep link to the record, so it reaches exactly the readers the thread itself reaches. The gate sits at the producer (plugin-audit's mention writer), judged in each mentioned user's own envelope by the same grant resolver, organization-claim vetting and parent-read evaluator a request uses, so the tenant wall, sharing, RLS and object CRUD decide (#24785, fixed by #24794)",
+          "oracle": "api",
+          "verify": "step-14 inbox reads: the member gains NO collab.mention for either comment on the private note (by id, by email), gains exactly one for the account comment (data.notifications[] row of type collab.mention, actionUrl '/showcase_account/ID'), unreadCount up by one, with that deep link naming the account record and that record readable by the member (200); the admin's inbox gains none for any of the three, though the account comment named the admin. Each recipient reads only their own inbox, so the count is taken per user over GET /api/v1/notifications, never from sys_notification as admin alone. Each mentioned user withheld for want of read access is logged once at warn — '[audit] mention notification withheld' with reason cannot_read_source, the user id (the email mention resolved to it) and the comment id, never the comment text — record both lines; the author is dropped without a line. On a walled boot the cross-organization user's inbox is unchanged. Score the presence or absence of a collab.mention row per recipient and comment, not the notification's wording",
+          "evidence": "both users' inbox reads before and after, the member's two access reads, the three comment create responses, and the withheld-recipient log lines"
         }
       ],
       "negative": [
@@ -2782,7 +2794,8 @@
         "feeds:false must HIDE the panel, SKIP the sys_comment fetch, AND the server must reject new comments with 403 FEEDS_DISABLED — a silent no-op that accepts a comment nowhere-readable is a FAIL. The two server halves are now DRIVEN by acceptance clauses 6 and 7 against the qa-feeds-disabled recipe's qa_nofeeds parent; until #12118 this bullet was the only place the code appeared in this area, which made it read as covered while nothing provoked it",
         "a re-thread that is refused but LEAVES the row moved (or is accepted outright) is a FAIL — #10170 registered the gate on beforeUpdate precisely because a caller barred from creating a comment on a feeds-disabled object could otherwise re-point an existing one into it",
         "scoring either FEEDS_DISABLED clause from the ENABLED control alone is a FAIL — the control exists to prove the refusal is attributable to the capability gate rather than to record access (RECORD_NOT_ACCESSIBLE, comment-access-hooks.ts), so a run that reports the 403 without the 2xx control has not measured the gate",
-        "a filter mode showing a row of another mode's type — or dropping one of its own — is a FAIL; and an unknown activity type absent from the 'all' feed is a FAIL (the objectui#5840 shape: stored, queryable, invisible), while its absence from the three NARROWING modes is correct behavior a run must not file as the drop"
+        "a filter mode showing a row of another mode's type — or dropping one of its own — is a FAIL; and an unknown activity type absent from the 'all' feed is a FAIL (the objectui#5840 shape: stored, queryable, invisible), while its absence from the three NARROWING modes is correct behavior a run must not file as the drop",
+        "a collab.mention notification reaching a mentioned user who cannot read the comment's record is a FAIL in either spelling of the mention (user id or email): the notification is a copy of what the thread shows, preview and deep link included (#24785). A notification withheld from a mentioned user who CAN read the record is a FAIL the other way: the gate is read access, not organization membership or the author's own view"
       ],
       "variants": [
         "all — the full merged comment + activity feed",
@@ -2808,11 +2821,13 @@
         "framework: packages/spec/src/data/object.zod.ts#enable.feeds (enable.feeds default true → FEEDS_DISABLED — re-pointed #18104: FEEDS_DISABLED is named in this file only inside a describe() string and a comment; the key this item means is enable.feeds, 'a new comment and an update that re-threads an existing one alike'); PENDING-GAPS §B record-discussion-mentions",
         "framework: packages/plugins/plugin-audit/src/audit-writers.ts#enforceFeedsCapability (enforceFeedsCapability, registered on beforeInsert AND beforeUpdate per #10170), packages/plugins/plugin-audit/src/comment-access-hooks.ts#RECORD_NOT_ACCESSIBLE (RECORD_NOT_ACCESSIBLE — the sibling refusal the probes isolate against), packages/plugins/plugin-audit/src/objects/sys-comment.object.ts#thread_id (thread_id is conventionally `{object}:{record_id}`)",
         "framework: packages/spec/src/data/feed.zod.ts#FeedFilterMode (FeedFilterMode, 4 members — pinned above),+ (SYS_ACTIVITY_BUILTIN_TYPES + the #11507 open-vocabulary ruling: built-ins are the floor, never the ceiling); packages/plugins/plugin-audit/src/objects/sys-activity.object.ts#apiMethods (apiMethods ['get','list'] — why the probe cannot direct-POST)",
-        "objectui: packages/plugin-detail/src/RecordActivityTimeline.tsx (FeedFilterMode imported from the spec), (the four filter options), (filterItems); packages/plugin-detail/src/renderers/recordActivityFeed.ts (ACTIVITY_TYPE_TO_FEED_TYPE superset map + UNMAPPED_ACTIVITY_FEED_TYPE fallback + its diagnostic; drift held by the objectui#5969 two-directional pin, recordActivityFeed.test.ts)"
+        "objectui: packages/plugin-detail/src/RecordActivityTimeline.tsx (FeedFilterMode imported from the spec), (the four filter options), (filterItems); packages/plugin-detail/src/renderers/recordActivityFeed.ts (ACTIVITY_TYPE_TO_FEED_TYPE superset map + UNMAPPED_ACTIVITY_FEED_TYPE fallback + its diagnostic; drift held by the objectui#5969 two-directional pin, recordActivityFeed.test.ts)",
+        "framework: packages/plugins/plugin-audit/src/mention-recipient-gate.ts (the @mention recipient gate: each mentioned user judged by resolveUserAuthzGrants, vetOrganizationClaim and resolveReadableParentIds; fail-closed; #24794)",
+        "QA-source: #24783 · records-forms.record-discussion-mentions · acceptance[4]"
       ],
       "automated": {
         "kind": "api",
-        "ref": "The FEEDS_DISABLED clauses (6, 7) have engine/API pins that predate this item's coverage of them: packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts (describe '[#10170] enable.feeds is asked on the UPDATE verb too' — by-id and predicate re-thread onto `lead_walled`, plus the insert-verb control and the absent-thread_id boundary) and packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts (the create side over real REST against the `cmt_nofeeds` fixture, packages/qa/dogfood/test/fixtures/comments-fixture.ts). ⚠️ Those pins run against their OWN fixtures and the objectql/REST seams — they do NOT reach the console half of the negative (panel hidden, sys_comment fetch skipped), and they never exercised the showcase surface, which is why clauses 6 and 7 still carry their own steps and the qa-feeds-disabled recipe. The remaining clauses (1-5: optimistic reconcile, activity interleave, mention bell) are browser-only and have no pin."
+        "ref": "The FEEDS_DISABLED clauses (6, 7) have engine/API pins that predate this item's coverage of them: packages/plugins/plugin-audit/src/capability-gate-update-verb.test.ts (describe '[#10170] enable.feeds is asked on the UPDATE verb too' — by-id and predicate re-thread onto `lead_walled`, plus the insert-verb control and the absent-thread_id boundary) and packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts (the create side over real REST against the `cmt_nofeeds` fixture, packages/qa/dogfood/test/fixtures/comments-fixture.ts). ⚠️ Those pins run against their OWN fixtures and the objectql/REST seams — they do NOT reach the console half of the negative (panel hidden, sys_comment fetch skipped), and they never exercised the showcase surface, which is why clauses 6 and 7 still carry their own steps and the qa-feeds-disabled recipe. The remaining clauses (1-5: optimistic reconcile, activity interleave, mention bell) are browser-only and have no pin. The recipient read gate (acceptance[9]) is pinned by packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts (#24794: isolated, group and single cases, id and email spellings, author exclusion, the withheld-recipient log line), which reaches the ENGINE layer with plugin-security's read layer played by a middleware (knownGaps[2]); it scores that clause partial at most under RUNNER rule 6."
       },
       "history": [
         {
@@ -2838,6 +2853,12 @@
           "date": "2026-10-19",
           "change": "steps[3], steps[6], acceptance[3].verify, acceptance[4] (clause, verify) and source[2] corrected from QA run #24616 (18.0 sweep round 2, ba4afcc2), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. The bell is server-backed: plugin-audit's audit-writers.ts writes a collab.mention sys_notification per mentioned user and the console bell reads it through useInboxBell.ts (GET /api/v1/notifications); objectui's useMentionNotifications, which the item cited as the bell, has no console consumer. And no feed refetch follows a post within ~6 s, so the reconcile step reloads. Clause substance unchanged. Wave anchor #24579 round 2 §3 (6272314386)",
           "ref": "#24671"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "acceptance[9], steps[13], negative[6], fixtures.requires[2] and knownGaps[2] added, and automated.ref names the recipient-gate pin and the layer it drives — the clause #24802 deferred under RUNNER rule 2 until #24785's fix merged. #24785 (found by the walled pass of round 3, QA run #24783) let a collab.mention notification reach a mentioned user who could not read the comment's record; its fix #24794 (merged e5b3de06a6) gates recipients on read access at the producer. The clause asserts that gate: read access decides, by id or email alike, and the author is never notified. Its live legs are the stock `single` sharing-excluded member and, on a walled boot, the cross-organization user; the pin reaches the engine layer only (RUNNER rule 6). acceptance[4] is unchanged: it scores who else's bell gains the row, this clause who among the mentioned may",
+          "ref": "#24864"
         }
       ]
     },
@@ -3479,7 +3500,7 @@
       "title": "Object lifecycle hooks fire on the write path with the right timing, gate, async and error semantics — driven over /api/v1/data/*, oracled by the record effect and the log line",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3488,7 +3509,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the five seeded showcase hooks (examples/app-showcase/src/data/hooks/index.ts, bound via defineStack({ hooks: allHooks })) — the four this item drives, plus showcase_guard_task_reopen (showcase_task, beforeUpdate, condition previous.done == true && record.done != true, body throws a user-facing sentence, onError:'abort', priority 60), the refusal fixture records-forms.script-action-hook-refusal-toast drives; showcase_normalize_task_title (showcase_task, events ['beforeInsert','beforeUpdate'], trims title, priority 50, onError:'abort'); showcase_stamp_inquiry_defaults (showcase_inquiry, beforeInsert, stamps status='new'/source='web', onError:'abort'); showcase_audit_task_completion (showcase_task, afterUpdate, condition previous.done!=true && record.done==true, async, retryPolicy {maxRetries:3,backoffMs:1000}, capabilities:['log'], onError:'log', priority 90); showcase_warn_over_budget (showcase_project, afterUpdate, condition record.spent!=null && record.budget!=null && record.spent>record.budget, async, capabilities:['log'], onError:'log')",
+          "the eight seeded showcase hooks (examples/app-showcase/src/data/hooks/index.ts, bound via defineStack({ hooks: allHooks })) — the four this item drives, plus showcase_guard_task_reopen (showcase_task, beforeUpdate, condition previous.done == true && record.done != true, body throws a user-facing sentence, onError:'abort', priority 60), the refusal fixture records-forms.script-action-hook-refusal-toast drives, plus the three paid-invoice line guards on showcase_invoice_line, which this item does not drive: showcase_guard_paid_invoice_line_add (beforeInsert), showcase_guard_paid_invoice_line_move (beforeUpdate, condition record.invoice != previous.invoice) and showcase_guard_paid_invoice_line_remove (beforeDelete), each reading the header invoice under runAs:'system' and throwing a user-facing sentence when it is paid (onError:'abort', priority 60; a system write and a cascade delete pass); showcase_normalize_task_title (showcase_task, events ['beforeInsert','beforeUpdate'], trims title, priority 50, onError:'abort'); showcase_stamp_inquiry_defaults (showcase_inquiry, beforeInsert, stamps status='new'/source='web', onError:'abort'); showcase_audit_task_completion (showcase_task, afterUpdate, condition previous.done!=true && record.done==true, async, retryPolicy {maxRetries:3,backoffMs:1000}, capabilities:['log'], onError:'log', priority 90); showcase_warn_over_budget (showcase_project, afterUpdate, condition record.spent!=null && record.budget!=null && record.spent>record.budget, async, capabilities:['log'], onError:'log')",
           "showcase_task (title required text + done boolean, defaultValue false), showcase_inquiry (status select whose 'new' option is default:true + source plain text with NO default), showcase_project (budget/spent currency + the spent_within_budget script rule that REJECTS spent > budget*1.2)",
           "seeded rows: not-done task 'Build homepage' (done:false) for the transition PATCH; already-done tasks 'Audit current IA' and 'App wireframes' (done:true) for the non-transition proof; projects 'Data Platform' (budget 600000 / spent 420000) and 'Website Relaunch' (budget 150000 / spent 60000)",
           "server log capture — the async audit/warn bodies call ctx.log.info/warn, routed to the engine logger (packages/runtime/src/sandbox/body-runner.ts log: engineCtx.logger); AND the ability to register a scratch hook (throwing / ordered) for the variants the four fixtures cannot observe. Run-proven recipe (QA run #24616): on a scratch app copy, put every scratch hook on showcase_inquiry behind a name-prefix condition (record.name.startsWith('qa-…')) so it touches only the probe rows; for the fail-closed probe, `record.name.startsWith('qa-fc') && int(record.name) > 0` compiles and faults only for a 'qa-fc…' row",
@@ -3496,9 +3517,9 @@
         ],
         "knownGaps": [
           "afterInsert and afterDelete have NO fixture hook — the four seeded hooks cover beforeInsert, beforeUpdate and afterUpdate only. Exercise these two events with a scratch log hook or record the variant knownGap; do not fake coverage.",
-          "beforeDelete has NO seeded showcase hook — the abort-blocks-delete contract is pinned only by the dogfood hef_ref_guard fixture (packages/qa/dogfood/test/hook-error-format.dogfood.test.ts), a test-only stack, not the showcase app; drive beforeDelete via a scratch hook or cite that pin.",
+          "beforeDelete's one seeded showcase hook is showcase_guard_paid_invoice_line_remove, an abort fixture that refuses removing a line under a paid invoice; it logs nothing and this item does not drive it, so for this item the abort-blocks-delete contract is pinned by the dogfood hef_ref_guard fixture (packages/qa/dogfood/test/hook-error-format.dogfood.test.ts), a test-only stack, not the showcase app; drive beforeDelete via a scratch hook or cite that pin.",
           "priority ordering (lowest-first on the SAME object+event) is not fixture-covered: showcase_normalize_task_title (priority 50) and showcase_guard_task_reopen (priority 60) do share showcase_task/beforeUpdate, but neither logs and the guard fires only on a reopening write it then refuses, so their order is not observable from outside; ordering needs a scratch pair of logging hooks on one object+event with distinct priorities.",
-          "onError:'abort' ROLLBACK and onError:'log' SUPPRESSION are only observable with a hook that THROWS — the four hooks this item drives never throw (their trim/stamp/log bodies always succeed). The one seeded hook that throws, showcase_guard_task_reopen, is a beforeUpdate abort and does not stand in for this item's beforeInsert abort-rollback clause. The abort-rollback, log-tolerate and fail-closed-condition clauses each require a scratch throwing hook (or the cited dogfood abort pin).",
+          "onError:'abort' ROLLBACK and onError:'log' SUPPRESSION are only observable with a hook that THROWS — the four hooks this item drives never throw (their trim/stamp/log bodies always succeed). The seeded hooks that throw are showcase_guard_task_reopen (beforeUpdate) and the three paid-invoice line guards on showcase_invoice_line; they are refusal fixtures this item does not drive, and the abort-rollback clause's verify names a scratch throwing beforeInsert, so none stands in for it here. The abort-rollback, log-tolerate and fail-closed-condition clauses each require a scratch throwing hook (or the cited dogfood abort pin).",
           "the async audit/warn lines land AFTER the HTTP write resolves (fire-and-forget runs once the engine has moved on) — a log read taken before the async body executes shows no line; settle before judging any no-fire."
         ]
       },
@@ -3507,7 +3528,7 @@
         "beforeUpdate — FIXTURE: showcase_normalize_task_title (trims title on every task update)",
         "afterUpdate — FIXTURE: showcase_audit_task_completion (task done-transition audit) and showcase_warn_over_budget (project over-budget warn)",
         "afterInsert — SCRATCH/knownGap: no showcase hook targets afterInsert; add a scratch afterInsert log hook or record knownGap",
-        "beforeDelete — SCRATCH/knownGap: no seeded showcase hook; the abort-blocks-delete shape is pinned only by the dogfood hef_ref_guard fixture (hook-error-format.dogfood.test.ts)",
+        "beforeDelete — SCRATCH/knownGap: the one seeded showcase hook (showcase_guard_paid_invoice_line_remove) is an abort fixture this item does not drive; the abort-blocks-delete shape is pinned by the dogfood hef_ref_guard fixture (hook-error-format.dogfood.test.ts)",
         "afterDelete — knownGap: no showcase hook and no dogfood pin; add a scratch afterDelete log hook to exercise",
         "multi-event targeting — FIXTURE: showcase_normalize_task_title lists events ['beforeInsert','beforeUpdate'] — ONE hook fires on two write kinds (hook-binder registers per-event × per-object)",
         "CEL condition — two-root transition semantics (#4770/#4784) — FIXTURE: showcase_audit_task_completion `previous.done != true && record.done == true`; since #4770 `record` is the record's STATE (stored ⊕ payload, total over declared fields), so `record.done == true` alone is true on every edit of an already-done row — `previous` is what makes 'just became done' expressible",
@@ -3612,7 +3633,7 @@
         "ref": "packages/qa/dogfood/test/showcase-public-form.dogfood.test.ts (pins the beforeInsert stamp: status='new'/source='web' on an anonymous inquiry submit); packages/qa/dogfood/test/hook-error-format.dogfood.test.ts (pins the beforeDelete onError:'abort' throw → REST error body). Declarative-wrapper MECHANISMS are unit-pinned in packages/objectql (each file run at objectstack f89d29e382, 83 tests, 0 failed): hook-condition-previous-scope.test.ts (acceptance[3]'s two-root transition — 'fires on the update that FLIPS the field, not on later updates of a done record'), hook-condition-merged-record.test.ts (acceptance[5]'s stored ⊕ payload record — 'fires on a declared field the update payload does NOT carry'), hook-binder.test.ts (acceptance[7] — 'swallows errors when onError=log', 'runs async after-events fire-and-forget'; plus retry, timeout and async-ignored-on-before*) and hook-condition-fail-loud.test.ts (acceptance[8] — a HookConditionError that onError:'log' does not swallow, retryPolicy does not retry and an async after* hook still raises). They score the mechanism only: acceptance[2]–[5]'s LOG oracles, the scratch variants' API reads and acceptance[8]'s wire envelope stay the run's. The transition audit / over-budget warn / priority-ordering LOG oracles and the abort/log/priority SCRATCH variants are NOT yet dogfood-pinned — drive them by hand."
       },
       "source": [
-        "examples/app-showcase/src/data/hooks/index.ts#allHooks (the four fixture hooks this item drives, the showcase_guard_task_reopen refusal fixture beside them, + allHooks export; header comments spell out the two-root #4784 transition and the != null / not has() #4770 rationale verbatim)",
+        "examples/app-showcase/src/data/hooks/index.ts#allHooks (the four fixture hooks this item drives, the showcase_guard_task_reopen refusal fixture and the three showcase_guard_paid_invoice_line_* guards beside them, + allHooks export; header comments spell out the two-root #4784 transition and the != null / not has() #4770 rationale verbatim)",
         "packages/spec/src/data/hook.zod.ts#HookSchema (HookSchema + HookEvent enum beforeFind/afterFind/beforeInsert/afterInsert/beforeUpdate/afterUpdate/beforeDelete/afterDelete; defineHook; async 'after* only'; onError default 'abort'; empty-target refusal #4001)",
         "packages/objectql/src/hook-wrappers.ts#wrapDeclarativeHook (wrapDeclarativeHook wrapping order condition→async→retry→timeout→onError; pickRecordPayload #4770 record = stored ⊕ payload total over declared fields; pickPreviousPayload #4784 previous binding; HookConditionError #4775 fail-closed, raised OUTSIDE onError; fireAndForget = async && isAfterEvent)",
         "packages/objectql/src/hook-binder.ts#bindHooksToEngine (bindHooksToEngine: per-event × per-object engine.registerHook with priority; unresolved-body / empty-target skips)",
@@ -3664,6 +3685,12 @@
           "date": "2026-10-19",
           "change": "acceptance[8] (verify, evidence) follow the shipped envelope. An unevaluable hook condition's refusal is now a coded 400 VALIDATION_ERROR whose error text names the hook and the CEL fault, and no '[REST] Unhandled error' line is logged for it (#24662, split from #24619 row (b)). The 500 INTERNAL_ERROR that revision 6 recorded is retired and is now a FAIL; the server-log evidence goes with it. The clause is unchanged: the write is still refused and the row still absent",
           "ref": "#24662"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "fixture roster only, no clause moved — the showcase gained three hooks, the paid-invoice line guards on showcase_invoice_line (beforeInsert, beforeUpdate, beforeDelete; each throws a user-facing refusal when the line's invoice is paid). Three stated facts they made false ('the five seeded showcase hooks', 'beforeDelete has NO seeded showcase hook', 'the one seeded hook that throws') now name them, and say why they do not close this item's beforeDelete variant or abort-rollback clause: this item does not drive them, and the clauses' verify steps name scratch hooks.",
+          "ref": "#24684"
         }
       ]
     },
@@ -3672,7 +3699,7 @@
       "title": "Per-type CONSTRAINT enforcement on the write path (not just widget render): length/range/option/reference/computed limits, and where the platform deliberately does NOT enforce",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3685,7 +3712,7 @@
           "showcase_invoice (invoice.object.ts): status select {draft,sent,paid,void} required; account lookup with lookupFilters status!=churned; total summary(sum showcase_invoice_line.amount) — the summary carrier the zoo lacks"
         ],
         "knownGaps": [
-          "precision/scale is DECLARED but NOT enforced on the write path — record-validator.ts validateOne's number branch checks only min/max/finite, no runtime reads field.scale/precision for rounding (grep clean across objectql/rest/runtime), and the SQL driver stores number/currency/percent as table.float (REAL affinity), not DECIMAL(p,s) (sql-driver.ts createColumn ~7354-7368). A currency value with more decimals than `scale` is stored verbatim, unrounded. Record it as a gap; do NOT tick 'scale enforced'.",
+          "precision/scale is DECLARED but NOT enforced on the write path — record-validator.ts validateOne's number branch checks only min/max/finite, no runtime reads field.scale/precision for rounding (grep clean across objectql/rest/runtime), and the SQL driver stores number/currency/percent as table.float (REAL affinity), not DECIMAL(p,s) (packages/drivers/driver-sql/src/sql-driver.ts#createColumn). A currency value with more decimals than `scale` is stored verbatim, unrounded. Record it as a gap; do NOT tick 'scale enforced'.",
           "autonumberFormat TOKEN expansion ({0000}/{YYYY}/{MM}/{DD}/{YYYYMMDD}/{field}, per-rendered-prefix scope+reset) has NO showcase fixture — no showcase object declares autonumberFormat (f_autonumber uses the default bare 4-width global counter). Token expansion is pinned instead by packages/spec/src/data/autonumber-format.test.ts + packages/drivers/driver-sql/src/sql-driver-autonumber.test.ts; only server-assignment + client-value-ignored is driveable on the zoo.",
           "the #4441 reference gate is EXISTENCE-only and deliberately unscoped (engine.ts assertReferencesResolve) — an id that exists but lies outside the field's lookupFilters/dependsOn scope is accepted; scope enforcement is client-only (drilled in records-forms.cascading-multilevel-and-clear).",
           "summary is a runtime-MAINTAINED cache, not a write-rejected readonly field — a caller-supplied initial total is a SUPPORTED import path and is kept, then self-heals to the child aggregate on the next child write (rule-validator.ts RUNTIME_OWNED_FIELD_TYPES note, #6014). Only `formula` is strictly read-only-on-write; do NOT assert 'summary rejects direct writes'."
@@ -3773,7 +3800,7 @@
         {
           "clause": "formula is read-only/computed: a direct write to f_formula is ignored and the read equals f_number*f_percent/100 (42*75/100 = 31.5); summary is a runtime-MAINTAINED cache (invoice.total = Σ line.amount server-side) and is NOT write-rejected — a caller's initial total is a supported import path that self-heals on the next child write",
           "oracle": "api",
-          "verify": "GET f_formula after a direct write shows 31.5 (write ignored); GET showcase_invoice.total equals the seeded line sum (objectui e2e/live/summary-rollup.spec.ts). The formula/summary distinction: rule-validator.ts note (formula computed-on-read; summary maintained cache, deliberately NOT in RUNTIME_OWNED)",
+          "verify": "GET f_formula after a direct write shows 31.5 (write ignored); GET showcase_invoice.total equals the seeded line sum. No pin reads invoice.total: objectui e2e/live/summary-rollup.spec.ts, cited here until revision 2, asserts a server roll-up on another carrier (showcase_project's total_estimate and task_count over showcase_task, written through a direct /api/v1/batch) and never reads showcase_invoice.total. The formula/summary distinction: rule-validator.ts note (formula computed-on-read; summary maintained cache, deliberately NOT in RUNTIME_OWNED)",
           "evidence": "the formula re-read + the invoice total re-read"
         }
       ],
@@ -3809,6 +3836,12 @@
           "date": "2026-08-08",
           "change": "initial — drills the field-type-matrix's shallow 'reject invalid' clause into per-type CONSTRAINT enforcement on the write path (length reject-not-truncate, numeric range, option server-boundary on two carriers, multiselect array shape, dangling-reference gate + its unscoped boundary, autonumber server-assignment, formula read-only) and records the deliberate non-enforcement gaps (scale/precision, autonumberFormat tokens, summary maintained-not-rejected)",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "acceptance[7].verify corrected — round 8's carried finding for wave anchor #24579 (18.0 sweep; round 8's report 6281776167, out_of_scope_findings[1], carried by the seat's ACCEPT 6281811723). It cited objectui e2e/live/summary-rollup.spec.ts for showcase_invoice.total, which that spec never reads: it rolls showcase_task up into showcase_project (byte-identical at the sweep's console pin 4016370af3c9 and at the shipped pin 12dc7b47c340). Tier 1 run #24598 scored acceptance[7] not-run (its summary half unpinned), and round 1's QA run #24572 scored the item pass on its API pins. The verify now says that no pin reads invoice.total. The spec was never in automated.ref, which names API pins only, so the ref is unchanged. Beside it, fixtures.knownGaps[0]'s line citation 'createColumn ~7354-7368', a tilde range no gate reads, became the sql-driver.ts#createColumn anchor that its own text already named. No clause changed",
+          "ref": "#24752"
         }
       ]
     },
@@ -3817,7 +3850,7 @@
       "title": "Cascade clear-semantics and the server boundary: stale-child clear on parent change, the WRITTEN-value server gate, and where cascade scope is client-only",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3854,7 +3887,7 @@
         {
           "clause": "SELECT server WRITTEN-value gate: a directly-POSTed child inconsistent with its parent (both in the payload) is rejected with code 'invalid_option' naming province; the consistent one is accepted — the objectql rule-validator, not the picker, is the boundary",
           "oracle": "api",
-          "verify": "{country:'cn',province:'ca'} → invalid_option (message key option_unavailable) on province; {country:'cn',province:'zj'} → 200. rule-validator.ts evaluateOptionVisibility re-evaluates the picked option's visibleWhen over the merged record. Pinned by packages/objectql/src/validation/rule-validator.option-visibility.test.ts",
+          "verify": "{country:'cn',province:'ca'} → invalid_option (message key option_unavailable) on province; {country:'cn',province:'zj'} → 200. rule-validator.ts evaluateOptionVisibility re-evaluates the picked option's visibleWhen over the merged record. Pinned at the HTTP door by objectui e2e/live/cascading-options.spec.ts 'the server rejects an out-of-set option value, and accepts an in-set one' ({country:'us', province:'zj'} → 400 VALIDATION_FAILED with invalid_option on province; {country:'cn', province:'zj'} → 201). packages/objectql/src/validation/rule-validator.option-visibility.test.ts calls evaluateValidationRules directly: validator-layer evidence only, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives)",
           "evidence": "both responses"
         },
         {
@@ -3895,16 +3928,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/cascading-options.spec.ts (client clear-on-change); packages/objectql/src/validation/rule-validator.option-visibility.test.ts (server WRITTEN-value gate)",
-        "stale": {
-          "since": "2026-10-19",
-          "observedIn": "#24598",
-          "ref": "#24579 §2",
-          "partial": "objectui: e2e/live/cascading-options.spec.ts, its re-filter case (the client clear-on-change half this ref names) ONLY — its server out-of-set case and the objectql pin passed",
-          "why": "RED AT THE PIN, AS A STALE CASE — not a product defect. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: cascading-options.spec.ts 1 passed / 1 failed, rule-validator.option-visibility.test.ts passed. Its re-filter case (the one that also proves the stale value clears) waits for md-form-submit, a test id only MasterDetailForm renders, but showcase_cascade has no child object, so its New form is a flat ModalForm (round-1 record #24572). Re-read at the shipped pin 12dc7b47c340: the spec's bytes are unchanged, md-form-submit is still MasterDetailForm-only, and no showcase object references showcase_cascade at objectstack 92ce3af404, so the case is still stale there.",
-          "runnerRule": "Cite rule-validator.option-visibility.test.ts for acceptance[1] and acceptance[2] as before. Do NOT cite the re-filter case or score its failure as this item's FAIL: drive acceptance[0] by hand, with every clause no passing pin covers.",
-          "ownedBy": "objectui — re-pointing the re-filter case at the current surface is objectui's half, recorded on wave anchor #24579 §2; this repository reports it and does not edit the spec"
-        }
+        "ref": "objectui: e2e/live/cascading-options.spec.ts (acceptance[0]'s client clear-on-change, through its re-filter case: country cn offers gd and zj, us offers ca and tx, and the chosen Zhejiang leaves the province trigger. It never submits, so 'the stale province is not carried into the submit' is driven by hand. Its second case, 'the server rejects an out-of-set option value, and accepts an in-set one', is acceptance[1] at the HTTP door: it POSTs {country:'us', province:'zj'} to the live backend and asserts 400 VALIDATION_FAILED with an invalid_option field on province, then {country:'cn', province:'zj'} and asserts 201); packages/objectql/src/validation/rule-validator.option-visibility.test.ts (scores NO clause of this item: it calls evaluateValidationRules directly, so its written-value rejection and its 'does not check a field the patch never wrote' case are validator-layer evidence for acceptance[1] and acceptance[2], which score the POST and PATCH answers — RUNNER rule 6)"
       },
       "source": [
         "packages/objectql/src/validation/rule-validator.ts#evaluateOptionVisibility (evaluateOptionVisibility — WRITTEN-value only via `!(name in data) continue`; a predicate that cannot be evaluated refuses the write as rule_violation / unevaluable (ADR-0137 D2), except a system write with no acting user whose predicate reads one; invalid_option/option_unavailable)",
@@ -3938,6 +3962,18 @@
           "date": "2026-10-20",
           "change": "automated.stale added — §2 theme \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 at the sweep's console pin 4016370af3c9: cascading-options.spec.ts's re-filter case, the clear-on-change half this ref names, failed as a stale case (cause from QA run #24572; #24616 drove the item by hand); the objectql pin passed and stays cited. Re-read at the shipped pin 12dc7b47c340: byte-identical, still stale. No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "automated.stale removed and automated.ref scoped per pin — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired the cascading-options.spec.ts re-filter case the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is 648d5c917d19 at the old pin 12dc7b47c340 and 5f65228948b7 at both 0b36ffa and 616df6598b42; the case now waits for the flat ModalForm's modal-form-footer instead of md-form-submit. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the case asserts acceptance[0]'s re-filter and cleared trigger but never submits, so the ref says the submit half is driven by hand. The objectql pin's scope (acceptance[1] and acceptance[2]), which only the stale record's runnerRule carried, moves into the ref unchanged. No clause changed",
+          "ref": "#24857"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "automated.ref and acceptance[1].verify re-scored per RUNNER rule 6 — the sweep-wide rule-6 contradiction QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4) names at cascading-multilevel acceptance[1], round 15 of wave anchor #24579. acceptance[1] scores the direct POST's answer. Its verify and the ref (round 14 moved the objectql pin's scope into it) scored it, and acceptance[2], from rule-validator.option-visibility.test.ts, which calls evaluateValidationRules directly. By the rule (a pin scores only the layer it drives) that pin scores neither clause. Re-read at the console pin 616df6598b42 (blob 5f65228948b7 of cascading-options.spec.ts, unchanged since round 14), the ref's own objectui spec carries a second case, 'the server rejects an out-of-set option value, and accepts an in-set one', which POSTs to the live backend and asserts the out-of-set 400 VALIDATION_FAILED with invalid_option on province and the in-set 201. That is acceptance[1] at the HTTP door, so the ref and the verify cite it; no live run exists at that pin, so its verdict there is NOT MEASURED. acceptance[2] needs the run. No clause changed",
+          "ref": "#24891"
         }
       ]
     },
@@ -3946,7 +3982,7 @@
       "title": "Secret/encrypted field: ciphertext at rest, masked on every read, no-op mask re-submit, and fail-CLOSED without an ICryptoProvider (ADR-0100)",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3960,7 +3996,7 @@
         ],
         "knownGaps": [
           "f_secret is NOT seeded (the Specimen rows omit it) — drive a live UI/API write to exercise the encrypt path.",
-          "the fail-CLOSED path is PIN-ONLY of necessity (QA run #21784, parked on #22017 row 22). Every stock boot wires LocalCryptoProvider. The 'no OS_SECRET_KEY under the production guard' boot this note once suggested never comes up: LocalCryptoProvider refuses to start in production without a stable key, and serve.ts rethrows that refusal. A boot without @objectstack/service-settings is not a stock composition. Score acceptance[3] from packages/objectql/src/secret-fields.test.ts ('fail-closed: writing a secret field with no CryptoProvider throws': the write throws and neither store holds a row). The field-type-matrix's 'seed deliberately omits it' note is about SEEDING, not serve-time wiring.",
+          "the fail-CLOSED path has NO live leg on stock, of necessity (QA run #21784, parked on #22017 row 22). Every stock boot wires LocalCryptoProvider. The 'no OS_SECRET_KEY under the production guard' boot this note once suggested never comes up: LocalCryptoProvider refuses to start in production without a stable key, and serve.ts rethrows that refusal. A boot without @objectstack/service-settings is not a stock composition. So acceptance[3] is recorded blocked(fixture) on stock, citing this gap. packages/objectql/src/secret-fields.test.ts ('fail-closed: writing a secret field with no CryptoProvider throws': the write throws and neither store holds a row) is engine-layer evidence beside that verdict, never its pass (RUNNER rule 6, a pin scores only the layer it drives). The field-type-matrix's 'seed deliberately omits it' note is about SEEDING, not serve-time wiring.",
           "inspecting the raw business-row column / sys_secret ciphertext needs DB access (file:/tmp/<run>/data.db) — where the API is the only surface, assert the mask on read + the absence of plaintext in any API response instead."
         ]
       },
@@ -3995,7 +4031,7 @@
         {
           "clause": "fail-CLOSED without a provider: with no ICryptoProvider registered, a non-empty f_secret write is REFUSED ('Refusing to store cleartext … fail-closed') and NOTHING is persisted — cleartext never reaches the business row; a `password` write needs no provider (plaintext at rest, masked on read)",
           "oracle": "api",
-          "verify": "the unwired-boot POST throws the fail-closed error and the row is absent/unset; engine.ts encryptSecretFields (`if (!this.cryptoProvider) throw`). Pinned by packages/objectql/src/secret-fields.test.ts. No stock boot runs without a provider (fixtures.knownGaps), so this is a unit-pin verdict",
+          "verify": "the unwired-boot POST throws the fail-closed error and the row is absent/unset; engine.ts encryptSecretFields (`if (!this.cryptoProvider) throw`). No stock boot runs without a provider (fixtures.knownGaps[1]), so on stock this clause is recorded blocked(fixture); packages/objectql/src/secret-fields.test.ts 'fail-closed: writing a secret field with no CryptoProvider throws' is engine-layer evidence beside that verdict, never its pass (RUNNER rule 6, a pin scores only the layer it drives)",
           "evidence": "the refusal + a GET/list confirming no persisted cleartext"
         },
         {
@@ -4018,7 +4054,7 @@
       ],
       "automated": {
         "kind": "api",
-        "ref": "packages/objectql/src/secret-fields.test.ts (encrypt/mask/fail-closed); packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts masked vectors for f_secret & f_password)"
+        "ref": "packages/qa/dogfood/test/field-zoo-roundtrip.dogfood.test.ts (+ field-zoo.matrix.ts masked vectors for f_secret & f_password) — acceptance[0] (its API oracle, the masked GET: knownGaps[2] makes the raw-column read the DB-inspectable extra), acceptance[1] and negative[0], at the HTTP door: the showcase is booted in-process, POST /data/showcase_field_zoo writes both fields, and GET /data/showcase_field_zoo/ID reads them back as SECRET_MASK, never the written value. packages/objectql/src/secret-fields.test.ts drives a real ObjectQL engine over a stub driver, with no HTTP, so it scores NO api clause of this item: it is engine-layer evidence beside acceptance[0]'s DB-inspectable leg ('encrypts on write: row stores a ref, sys_secret holds ciphertext, no cleartext on the row'), and for acceptance[2] ('update: echoing the read mask back does NOT overwrite the stored secret'), acceptance[3] ('fail-closed: writing a secret field with no CryptoProvider throws'), acceptance[4] (the 'objectql aggregate() rejects credential fields (ADR-0100 / #3171)' describe) and negative[1]–[3]. acceptance[2] and [4] are driven over the API; acceptance[3] is blocked(fixture) on every stock composition (knownGaps[1])"
       },
       "source": [
         "packages/objectql/src/secret-fields.ts#SECRET_REF_PREFIX (SECRET_MASK, SECRET_REF_PREFIX, collectSecretFields/collectMaskedReadFields/collectCredentialFields)",
@@ -4040,6 +4076,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 22). A4 was pin-only of necessity: an unwired-crypto boot refuses to start. Disposition: pin. The knownGap had offered a production boot without OS_SECRET_KEY as the unwired path; LocalCryptoProvider refuses to start there (serve.ts rethrows 'Refusing to start in production'), so the knownGap and A4's verify now name secret-fields.test.ts ('fail-closed: writing a secret field with no CryptoProvider throws') as the leg's only oracle",
           "ref": "#22017"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause; acceptance[3].verify and fixtures.knownGaps[1] rewritten — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: the acceptance[2] and [4] guards are pinned at the engine only), round 15 of wave anchor #24579. secret-fields.test.ts drives a real ObjectQL engine over a stub driver, with no HTTP. By RUNNER rule 6 (a pin scores only the layer it drives) it scores none of this item's api clauses, so the ref names it engine-layer evidence for acceptance[2]–[4] and negative[1]–[3], and names the dogfood pin's own clauses (acceptance[0]'s API oracle, acceptance[1], negative[0]). The same rule makes acceptance[3]'s 'unit-pin verdict' (the #22017 row 22 disposition) a rule-6 contradiction, located here beyond #24840's list: no stock composition runs without a provider, so the clause is now recorded blocked(fixture) with the pin beside it. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ]
     },
@@ -4156,7 +4198,7 @@
       "title": "Field-level `unique` on the write path: colliding writes refused 409 UNIQUE_VIOLATION on both driver families, NULL-distinct, organization-scoped by default, whole-batch refusal, autonumber resync converges",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4180,7 +4222,7 @@
         "POST /api/v1/data/qa_unique {name:'r1', sku:'A-1'} → 2xx; POST {name:'r2', sku:'A-1'} → capture the refusal; count rows",
         "POST two rows with sku absent → both land (NULL-distinct)",
         "PATCH r2 to sku:'A-1' → capture the refusal and re-read r2; PATCH r1 touching only `nick` → 2xx (no self-collision)",
-        "predicate update stamping ONE value onto BOTH rows (the updateMany path — client data.updateMany / the batch door where exposed; otherwise score clause 4 from its unit pin and say so) → capture the refusal and prove neither row changed",
+        "predicate update stamping ONE value onto BOTH rows (the updateMany path — client data.updateMany / the batch door where exposed; otherwise record clause 4 blocked(fixture) naming the missing door — its unit pin is driver-level evidence beside that verdict, never its pass (RUNNER rule 6, a pin scores only the layer it drives)) → capture the refusal and prove neither row changed",
         "run the pinned suites: memory-unique-constraint.test.ts (driver-memory), sql-driver-8577-tenant-scoped-declared-unique.test.ts + sql-driver-declared-index-organization-respelling.test.ts (SQL family)"
       ],
       "acceptance": [
@@ -4193,19 +4235,19 @@
         {
           "clause": "NULLs are NULL-DISTINCT, exactly as under SQL UNIQUE: two rows whose unique field carries no value both land — an optional unique column does not refuse its second row",
           "oracle": "api",
-          "verify": "both no-sku POSTs return 2xx and both rows read back (module note memory-unique-constraint.ts; pin)",
+          "verify": "both no-sku POSTs return 2xx and both rows read back (module note memory-unique-constraint.ts). The memory-driver case 'NULL stays NULL-DISTINCT, exactly as under SQL UNIQUE' in memory-unique-constraint.test.ts is driver-level evidence beside that answer, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives)",
           "evidence": "the two creates + the list read"
         },
         {
           "clause": "the update paths are constrained too: an update onto a taken value is refused and the row keeps its old value; a row never collides with ITSELF (an update leaving the unique field alone passes)",
           "oracle": "api",
-          "verify": "the PATCH refusal + the unchanged re-read; the self-update 2xx (pins memory-unique-constraint.test.ts,141)",
+          "verify": "the PATCH refusal + the unchanged re-read; the self-update 2xx (driver-level evidence beside those answers, never this clause's pass, RUNNER rule 6, a pin scores only the layer it drives: packages/drivers/driver-memory/src/memory-unique-constraint.test.ts, the cases 'update onto a taken value is refused and the row keeps its old value' and 'a row does not collide with ITSELF — an update that leaves the unique field alone passes')",
           "evidence": "both responses + the re-read"
         },
         {
           "clause": "updateMany refuses the WHOLE batch BEFORE mutating anything — a predicate update stamping one value onto two rows leaves zero rows changed, never a half-applied batch",
           "oracle": "api",
-          "verify": "post-refusal re-reads of every matched row are byte-identical to before (memory-driver.ts,627-631 'Prepare and CHECK every row before mutating any of them'; pin). If no REST surface reaches updateMany on the boot under test, score from the pin and record the substitution",
+          "verify": "post-refusal re-reads of every matched row are byte-identical to before (packages/drivers/driver-memory/src/memory-driver.ts#updateMany 'Prepare and CHECK every row before mutating any of them'). The pin's 'updateMany refuses BEFORE mutating anything — no half-applied batch' is memory-driver evidence only, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives): if no REST door reaches a predicate update on the boot under test, record the clause blocked(fixture) naming the missing door, with the pin's output beside it",
           "evidence": "the refusal + full before/after row reads"
         },
         {
@@ -4232,7 +4274,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/drivers/driver-memory/src/memory-unique-constraint.test.ts (refusal shape, NULL-distinct, every write path, scope matrix, autonumber converge, boundary cases); packages/drivers/driver-sql/src/sql-driver-8577-tenant-scoped-declared-unique.test.ts + sql-driver-declared-index-organization-respelling.test.ts (SQL family, 409 UNIQUE_VIOLATION over real REST)"
+        "ref": "packages/drivers/driver-memory/src/memory-unique-constraint.test.ts — acceptance[4]'s memory-family legs (the \"[#13197] scoping matches driver-sql's ADR-0120 D1/D3 rule\" describe), acceptance[5] ('the refusal is recognisable to the ENGINE, so the autonumber resync converges'), negative[2] ('updateMany refuses BEFORE mutating anything — no half-applied batch') and negative[3]'s memory-family half, at the memory driver; + packages/drivers/driver-sql/src/sql-driver-8577-tenant-scoped-declared-unique.test.ts + packages/drivers/driver-sql/src/sql-driver-declared-index-organization-respelling.test.ts — acceptance[4]'s SQL-family legs and negative[3]'s SQL-family half, at SqlDriver over better-sqlite3. NO pin drives a REST door: the SQL pins map each driver refusal through a test-local createAsApi helper to the { status: 409, code: 'UNIQUE_VIOLATION' } envelope rest-server.ts derives, so acceptance[4]'s 'same 409 UNIQUE_VIOLATION over REST' wording rests on that mapping, and every pin is driver-level evidence for acceptance[0]–[3], never their pass: those clauses score the REST answer on the stock SQLite boot"
       },
       "source": [
         "packages/drivers/driver-memory/src/memory-unique-constraint.ts#scope (#13197/#13249, commit 56c093c — single judgment point; scope table read off driver-sql, arm for arm)",
@@ -4260,6 +4302,18 @@
           "date": "2026-10-16",
           "change": "acceptance[0] (clause, verify) re-pointed (checklist-accuracy finding of QA run #23949, wave #23878): on the SQLite leg the object-naming sentences are in the envelope's developerMessage, and the user-facing `error` is the generic 'A record with this value already exists' — #23949 read them so. The clause now reads the naming where it lives. Not loosened: the object must still be named, no driver text may appear in either field, and nothing may be written",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[2].verify cited line 141 of memory-unique-constraint.test.ts and acceptance[3].verify lines 627-631 of memory-driver.ts in the comma-range spelling (authored in 45397edf53 as the lists 135 and 141, and 611 and 627-631). Lines 135 and 141 are unchanged at this base: the cases 'update onto a taken value is refused and the row keeps its old value' and 'a row does not collide with ITSELF — an update that leaves the unique field alone passes', which acceptance[2].verify now names. Lines 627-631 held findOne even at that commit; the comment the verify quotes, 'Prepare and CHECK every row before mutating any of them', sat in updateMany then and does now, so acceptance[3].verify anchors memory-driver.ts#updateMany. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#24752"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause; acceptance[1].verify, acceptance[2].verify, acceptance[3].verify and steps[4] rewritten — checklist-accuracy findings of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4), round 15 of wave anchor #24579. (1) The ref said the two SQL pins assert '409 UNIQUE_VIOLATION over real REST'. They drive SqlDriver over better-sqlite3 and map its refusal to that envelope through a test-local createAsApi helper, so no REST door is driven. (2) The sweep-wide rule-6 contradiction #24840 names at acceptance[1]–[3]: those clauses score the REST answer, and their verifies and steps[4] told the runner to score them from the memory-driver pin ('score from the pin'). By RUNNER rule 6 (a pin scores only the layer it drives) the pins are now cited as driver-level evidence only, and an updateMany door the boot does not expose is recorded blocked(fixture). The ref names the clauses each pin scores: acceptance[4] (test oracle) and [5], and negative[2] and [3]. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ]
     },
@@ -4268,7 +4322,7 @@
       "title": "deleteBehavior matrix: set_null clears / member-removes, master_detail cascades, restrict answers 409 DELETE_RESTRICTED with the cascade remedy, required-FK set_null escalates to restrict",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4360,7 +4414,7 @@
       "source": [
         "packages/spec/src/data/field.zod.ts#deleteBehavior (deleteBehavior inline enum; #9689 parse rejection, #9784 default materialization)",
         "packages/objectql/src/engine.ts#required (defaults, coercion + [cascade-delete] log, required-FK escalation incl. #9688 multi-value deferral), (DELETE_RESTRICTED envelope, #12166 count disclosure, cascade recursion)",
-        "examples/app-showcase/src/data/objects/invoice.object.ts,184; contact.object.ts; field-zoo.object.ts; expense-report.object.ts (the four stock arms)"
+        "examples/app-showcase/src/data/objects/invoice.object.ts#InvoiceLine (its invoice master_detail, deleteBehavior 'cascade') + examples/app-showcase/src/data/objects/invoice.object.ts#Invoice (its required account lookup, the required-FK escalation); contact.object.ts; field-zoo.object.ts; expense-report.object.ts (the four stock arms)"
       ],
       "history": [
         {
@@ -4368,6 +4422,12 @@
           "date": "2026-08-30",
           "change": "initial — sweep gap (spec-enums angle): all three deleteBehavior members plus the escalation/coercion seams were enforced and pinned engine-side but never driven over HTTP by any item. Register corrected against source: restrict is NOT fixture-blocked on stock seeds — invoice.account (required lookup) reaches the same DELETE_RESTRICTED refusal via the #9688 escalation, so only the authored-restrict spelling needs a scratch child",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[2] cited line 184 of the showcase invoice.object.ts in the comma-range spelling (authored in 45397edf53 as the list 69-71 and 184). At that commit 184 was deleteBehavior 'cascade' on the invoice line's invoice master_detail, and 69-71 the invoice's required account lookup, the required-FK escalation arm fixtures.requires names; at this base both have moved. source[2] now anchors invoice.object.ts#InvoiceLine and #Invoice. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#24752"
         }
       ]
     },
@@ -4466,7 +4526,7 @@
       "title": "Per-field trackHistory: a tracked edit lands the ADR-0052 §5b old→new timeline summary with display values, an untracked edit does not, and object-level enable.trackHistory gates the History tab and derived history op both ways",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4476,7 +4536,7 @@
         "app": "showcase",
         "requires": [
           "showcase_account: enable.trackHistory:true (account.object.ts) + per-field trackHistory on industry/status — the BOTH-halves fixture",
-          "showcase_task: per-field trackHistory on status/priority (task.object.ts,60) with NO object-level enable block — the natural negative for the tab/op gating"
+          "showcase_task: per-field trackHistory on status/priority (examples/app-showcase/src/data/objects/task.object.ts#Task: its status and priority fields declare trackHistory) with NO object-level enable block — the natural negative for the tab/op gating"
         ],
         "knownGaps": [
           "no showcase object declares trackHistory:true on a REFERENCE field, so the referenced-record-title rendering (clause 5) is a unit-pin verdict (audit-lookup-summary.test.ts) unless a scratch tracked lookup is authored — record which the verdict rests on"
@@ -4533,22 +4593,13 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); objectui e2e/live/record-history-display.spec.ts (tab display contract, cited by crud-roundtrip)",
-        "stale": {
-          "since": "2026-10-19",
-          "observedIn": "#24598",
-          "ref": "#24579 §2",
-          "partial": "objectui e2e/live/record-history-display.spec.ts ONLY — the two plugin-audit pins passed",
-          "why": "SKIPPED AT THE PIN, AS A STALE SPEC — not a product defect. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: record-history-display.spec.ts 0 passed / 0 failed / 1 skipped. It skips unless the live backend serves app-todo's todo_task, on the premise that the showcase declares no object with enable.trackHistory; the showcase now does (showcase_account, examples/app-showcase/src/data/objects/account.object.ts), so against this item's fixture app it never runs. Re-read at the shipped pin 12dc7b47c340: the spec's bytes are unchanged, so it still skips there. Even run against app-todo it pins the History tab's display contract, which negative[3] assigns to records-forms.crud-roundtrip, not a clause of this item.",
-          "runnerRule": "Cite the two plugin-audit pins as before. Do NOT cite record-history-display.spec.ts here: drive acceptance[2]'s tab gating by hand.",
-          "ownedBy": "objectui — re-pointing record-history-display.spec.ts at the current surface is objectui's half, recorded on wave anchor #24579 §2; this repository reports it and does not edit the spec"
-        }
+        "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); objectui e2e/live/record-history-display.spec.ts (the History tab's display contract, which negative[3] assigns to records-forms.crud-roundtrip. It claims no clause of this item: it opens showcase_account's History tab but never reads the task detail, so acceptance[2]'s gating is driven by hand)"
       },
       "source": [
         "packages/plugins/plugin-audit/src/audit-writers.ts#planTrackedLookupReads (planTrackedLookupReads), (renderTrackedChangeSummary — ADR-0052 §5b, #7230/#7289 localization), (zero-reads-by-default plan)",
         "packages/spec/src/data/object.zod.ts#trackHistory (history derives from get ∧ trackHistory), (opt-in default false); packages/spec/src/data/api-derivation.ts",
         "objectui: packages/app-shell/src/views/RecordDetailView.tsx (History tab three-precondition gate)",
-        "examples/app-showcase/src/data/objects/account.object.ts (the deliberate both-halves fixture + its comment ruling the tab gate), task.object.ts,60"
+        "examples/app-showcase/src/data/objects/account.object.ts (the deliberate both-halves fixture + its comment ruling the tab gate), examples/app-showcase/src/data/objects/task.object.ts#Task (its status and priority fields declare trackHistory)"
       ],
       "history": [
         {
@@ -4568,6 +4619,18 @@
           "date": "2026-10-20",
           "change": "automated.stale added — §2 theme \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 at the sweep's console pin 4016370af3c9: record-history-display.spec.ts skipped (it runs only against app-todo, on the stale premise that the showcase has no enable.trackHistory object; QA runs #24572 / #24616); the two plugin-audit pins passed and stay cited. Re-read at the shipped pin 12dc7b47c340: byte-identical, still skips. No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.requires[1] and source[3] cited line 60 of the showcase task.object.ts in the comma-range spelling (authored in 45397edf53 as the list 49 and 60). At that commit 49 and 60 were the trackHistory flags of the task's status and priority fields; at this base both have moved by a line. Both citations now anchor task.object.ts#Task and name the two fields. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#24752"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "automated.stale removed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired record-history-display.spec.ts, the one spec the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is 2c4d8a674f81 at the old pin 12dc7b47c340 and 7ebc45106cff at both 0b36ffa and 616df6598b42: it now targets showcase_account, the showcase's enable.trackHistory object, with no app-todo skip guard. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, it asserts the History tab's display values on showcase_account (crud-roundtrip's contract, per negative[3]) and opens no task detail, so it still claims no clause here, and the ref now says so. The two plugin-audit pins keep their scope. No clause changed",
+          "ref": "#24857"
         }
       ]
     },

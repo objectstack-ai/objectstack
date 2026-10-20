@@ -1,5 +1,1008 @@
 # @objectstack/cloud-connection
 
+## 18.0.0
+
+### Minor Changes
+
+- 4806b18: Under a walled posture a package that carries security catalog items is the platform operator's: tenants are refused installing, upgrading, uninstalling or deleting it
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered walled-catalog-package-writes-retired -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D3: "Shared-DB multi-tenant (`group` / `isolated`): tenant admins cannot create or edit catalog items; the operator defines the catalog for every tenant (managed packages, Studio).").
+  
+  **Why.** A package registers its positions, permission sets and capabilities environment-wide, and every organization resolves them by name. Measured on a booted `isolated` and `group` stack, with an organization owner granted `manage_metadata` inside their own organization (never the platform operator):
+  - the owner re-installed an operator-installed package at a new version through `install-local`, adding `manage_users` to a permission set another organization's member holds, and that member's next resolution carried `manage_users`;
+  - the owner's `install-local` uninstall of that package took the set away from that member;
+  - the owner's `DELETE /api/v1/packages/:id` of a runtime package the operator had saved a permission set into did the same.
+  
+  The existing name-conflict refusal stops only a package that shadows a name another holder has, never a write by the package that holds it.
+  
+  **FROM → TO**, on a `group` or `isolated` deployment, for a caller below the platform operator (the `PLATFORM_ADMIN` rung: the deployment's declared `OS_PLATFORM_OWNER_EMAIL` owner):
+  
+  - `POST /api/v1/marketplace/install-local` (`@objectstack/cloud-connection`) of a package whose incoming version declares a position, permission set or capability, or, on an upgrade, whose installed version does: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN`, before the package is registered or the ledger written. The whole package is refused, since a package installs whole. The message names the posture, and `error.details.catalogItems` lists the items.
+  - `DELETE /api/v1/marketplace/install-local/:id` of a package whose installed version declares one: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN`, before the ledger is touched.
+  - `DELETE /api/v1/packages/:id` on the runtime dispatcher, of a writable package holding stored positions or permission sets: **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before anything is deleted.
+  
+  **Unchanged.** A package with no catalog item installs, upgrades and uninstalls as before, for the same callers. The platform operator does all of the above as before. Under `single` (and with no `tenancy` service) nothing changes. Disabling a package is unchanged: it was measured not to change what any organization resolves.
+  
+  **The remedy.** The platform operator installs, upgrades and removes catalog-carrying packages. `@objectstack/spec` registers the change as the ADR-0087 semantic entry `walled-catalog-package-writes-retired`. Both doors ask the one predicate the catalog's other write doors ask, `walledCatalogWriteVerdict` (`@objectstack/metadata-core`), once per catalog type the package declares. `@objectstack/objectql` now exports `declaredSecurityCatalogNames`, the engine's own reading of what a manifest declares, so a package door judges the declarations the engine registers.
+- c7d6037: A package declares how it may be installed — `installModes: ['managed', 'unmanaged']` — and `os package install --install-mode unmanaged` copies it once into the environment as the environment's own metadata (ADR-0131 D6)
+  
+  Clause-②: yes (widening: the new optional manifest key `installModes`; the new exports `INSTALL_MODES`, `InstallModeSchema`, `InstallMode`, `DEFAULT_INSTALL_MODES`, `resolveInstallModes`, `UNMANAGED_INSTALL_KEY_DISPOSITIONS`, `UNMANAGED_INSTALL_REFUSING_DISPOSITIONS`, `UnmanagedInstallKeyDisposition`, `unmanagedInstallValueCarries` and `unmanagedInstallPostureRefusal`; the install-local body field `installMode`; the CLI option `--install-mode`; the error codes `STACK_UNMANAGED_INSTALL_UNCOPYABLE` and `INSTALL_MODE_NOT_PERMITTED`)
+  
+  A package installs one of two ways. **Managed**: it is registered as code, stays the authority, upgrades, and nothing it ships is edited in place. **Unmanaged**: its metadata is copied once into this environment under a new writable base; the copy's items are this environment's own metadata, the next save edits them, and it follows no upgrade. This entry adds the manifest key that declares the modes a package permits, and the install door that honours it; the copy itself is the companion entry `15213-unmanaged-import-verb`.
+  
+  - **`installModes`** (`@objectstack/spec`, `ManifestSchema`). Optional, a non-empty list of `'managed'` / `'unmanaged'`. Absent means `['managed']`, read through one resolver, `resolveInstallModes(manifest)`; there is no parse-time default, so no existing manifest changes by a byte. A package may permit `unmanaged` alone.
+  - **Refused at authoring.** `defineStack` — so `os validate` and `os build` — refuses a package that permits `unmanaged` while it carries what the copy cannot write as environment metadata: a non-empty collection of a type the metadata-type registry declares runtime-uncreatable (`agents`, `apis`, `capabilities`, `jobs`, `picklists`), code (`functions`, `onEnable`, `plugins`, a plugin artifact's `main` / `runtime` / `packaging` / `integrity`), or an extension of another package's items (`objectExtensions`, `picklistExtensions`, `navigationContributions`, `contributes`). The refusal is `STACK_UNMANAGED_INSTALL_UNCOPYABLE` (422), one `issues` entry per key. Fix: remove `'unmanaged'` from `manifest.installModes`, or move what cannot be copied out of the package. The install door judges the same body with the same key classification (`UNMANAGED_INSTALL_KEY_DISPOSITIONS`), so a package that passes `os validate` is not refused at install for a key nobody named.
+  - **The install door** (`@objectstack/cloud-connection`, `POST /api/v1/marketplace/install-local`). The body takes `installMode: 'managed' | 'unmanaged'`; absent means `managed`, so every existing caller is unchanged. Before anything is written, on the catalog and the air-gapped source alike:
+    - a mode the package's `installModes` does not permit answers `422 INSTALL_MODE_NOT_PERMITTED`, with `details.permitted`;
+    - `unmanaged` on a deployment whose requested tenancy posture walls organizations (`group`, `isolated`, or an unrecognised value) answers `409 UNMANAGED_INSTALL_WALLED_POSTURE`, naming the posture;
+    - a managed install of a package whose namespace a writable base holds — its unmanaged copy — answers `409 RESOURCE_CONFLICT`, naming that base: a managed install would otherwise take the namespace and stop serving the edited copies.
+    An unmanaged install writes no install-ledger entry, registers nothing under the package's id and does not load its sample data (the answer says so under `seeded`). The answer names the new base, the items copied and `installedFrom` (the source package id and version, for information only). The package's translation bundles are copied as `translation` items, so they reload at every boot with the environment's own translations.
+  - **`os package install --install-mode managed|unmanaged`** (`@objectstack/cli`). Without the option, nothing is sent and the runtime installs managed. An unmanaged answer prints the base, the item count and the source. A runtime that predates the install mode ignores the option and installs managed; the command then exits 1 and says so. The command's help now calls the catalog and the air-gapped artifact the two *sources*, so "mode" means one thing.
+  - **Copy semantics** (`@objectstack/metadata-protocol`). `importUnmanagedPackage` copies `translations` (each locale of each bundle as one `translation` item named `<namespace>_<locale>`, bundles merged in order), reads `installModes` without writing it onto the base, and no longer refuses an empty code container (`functions: {}`, `plugins: []`). `unmanagedInstallPostureRefusal` is exported, so the door and the import answer the walled posture with one sentence.
+  
+  Nothing existing is removed: every new key, field and option is optional, and an install that does not name a mode is managed, as before, with one stricter answer. That answer is the refusal above: a managed install of a package whose namespace a writable base holds now answers `409 RESOURCE_CONFLICT` before anything is written, where a catalog install of it answered `200`.
+- 2d21b9c: An unmanaged install no longer copies a package's protection lock, in either spelling: every copied item is editable, and the install's answer names each lock it dropped with the package's reason (ADR-0131 D6, ADR-0010)
+  
+  Clause-②: yes (widening: the new response field `strippedLocks` on `ImportUnmanagedPackageResponseSchema`, relayed on the install-local answer for `installMode: 'unmanaged'`)
+  
+  An unmanaged install copies a package into this environment as the environment's own metadata. A package can lock an item in two spellings: the `_lock` envelope (`_lock`, with `_lockReason`, `_lockSource` and `_lockDocsUrl`), or the author-facing `protection: { lock, reason, docsUrl }` block that a managed install translates into it. Until now an item locked with `_lock` was copied with that lock, so the next save of the copy answered `403 ITEM_LOCKED`; an item locked with `protection` was copied with an inert block that bound nothing, so the vendor's lock vanished without a word. The package permitted the unmanaged install through its `installModes`, so it chose to let environments take editable copies; a lock whose source is the package does not survive the copy.
+  
+  - **The copy** (`@objectstack/metadata-protocol`). `importUnmanagedPackage` writes every item without `_lock`, `_lockReason`, `_lockSource` and `_lockDocsUrl`, and, on a type whose schema declares one, without its `protection` block. Its answer gains `strippedLocks`: one entry per lock that bound (`no-overlay`, `no-delete` or `full`), in the order the items were written — `{ type, name, lock, reason? }`, with `reason` the package's reason verbatim and absent when it gave none. Each entry is the lock a managed install of the same item would have bound: an item carrying both spellings is reported once, with the `protection` block's lock and reason, because that is the one a managed install binds. A package that locks nothing answers `strippedLocks: []`.
+  - **Refusals are unchanged.** A lock the spec's declarations refuse (an unknown `_lock` value, a reason that is not a string, a malformed `protection` block) is not stripped: the save door refuses that item as before, `422 INVALID_METADATA`, and the install is rolled back. So is a `protection` block on a type whose schema does not declare one (`action`, `hook`, `page`). A managed install is unchanged: the package stays the authority, and its locks bind.
+  - **The declaration** (`@objectstack/spec`). `ImportUnmanagedPackageResponseSchema` declares `strippedLocks`; `lock` takes the three binding values of `MetadataLockSchema`.
+  - **The install door** (`@objectstack/cloud-connection`, `POST /api/v1/marketplace/install-local` with `installMode: 'unmanaged'`). The answer carries the import's `strippedLocks` as the import states it.
+  - **`os package install --install-mode unmanaged`** (`@objectstack/cli`). Each dropped lock prints as one line under `Locks removed`, spelled `<type>.<name>: <lock> — <reason>`, so the installer reads why the vendor locked an item before editing it. An answer from a runtime that states no list prints no lock line.
+  
+  Nothing is removed or narrowed: the answer gains a field, and every refusal of the unmanaged install is unchanged.
+- d9d7edd: fix(runtime,rest,cloud-connection)!: the declared-endpoint fallback, REST's direct-mounted publish and federation routes, and cloud-connection's session doors refuse a session the ADR-0069 authentication policy holds
+  
+  Clause-②: no (narrowing) — a session ADR-0069 holds out of protected resources is refused by doors that answered it; core's existing exports only, no published schema or export moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at three groups of doors, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped, and a session the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which sessions these doors serve: a session whose user carries the ADR-0069 posture (an expired password, or enforced MFA not yet enrolled) is now refused with the gate's 403 before the door's own logic runs. The other categories are closed on facts: the three packages publish (not unpublished); no ADR-0087 id covers these doors and this diff adds none (not registered / already-registered); and no published interface or type changes, the new fields living on package-internal types only (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 holds a signed-in user out of every protected resource while their password has expired or while enforced MFA is not yet enrolled, until they remediate. REST's `enforceAuth` and the runtime dispatcher already refuse such a session. Three groups of doors that resolve a session on their own never asked, so they served it as an ordinary signed-in caller:
+  
+  - **`@objectstack/runtime`**: the declared-endpoint fallback (app-declared `apis:` endpoints, served by the dispatcher plugin's fallback seam). Its policy chain now asks the shared decision (`evaluateAuthGate`, `@objectstack/core`) before `authRequired` and before the endpoint's target runs, on every declared endpoint, an `authRequired: false` one included, because the target runs as the caller. While a gate feature is active the chain reads the session for this, and when an active gate cannot read the session the request is answered `503` (`SERVICE_UNAVAILABLE`), as REST answers it. No declared path is handed to the allow-list, so no endpoint can exempt itself through the prefix it sits under.
+  - **`@objectstack/rest`**: the direct-mounted package publish door (`registerPackageRoutes`) and the external-datasource federation family (`registerExternalDatasourceRoutes`). Each refuses on the `authGate` the REST resolver already puts on the execution context it hands them.
+  - **`@objectstack/cloud-connection`**: `CloudConnectionPlugin`'s seven session doors (bind, poll, unbind, install, and the three installed-state reads) and all five `MarketplaceInstallLocalPlugin` doors (install, list, uninstall, reseed, purge). Each plugin asks the gate once, where it resolves the session, and every door that resolves one refuses on it.
+  
+  - **Refused now:** a held session gets `403` with the gate's own `code` (`PASSWORD_EXPIRED` or `MFA_REQUIRED`) and `message`, in each door's declared error envelope, before the door does anything else. This is the answer REST gives the same session.
+  - **Unchanged:** a session the policy does not hold is served exactly as before, an API-key caller is unaffected because it has no session to hold, and an anonymous caller gets the same `401`. `CloudConnectionPlugin`'s status read and `MarketplaceProxyPlugin`'s catalog proxy resolve no session and answer every caller alike, so they are unchanged.
+  
+  What changes for you. A user the policy holds must remediate (change the password, or enroll an authenticator) before these doors answer them, as on every other protected route. Nothing needs configuring: the posture comes from the kernel's `auth` service, as it does for REST and the dispatcher.
+- 430e5f5: fix(security)!: under a walled posture every environment-metadata write is the platform operator's, whatever its type (ADR-0131 D12 items 7–8, D11)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered walled-environment-metadata-writes-retired -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes. ADR-0131 D12 item 7: a walled deployment is "one environment, one schema, one catalog … The metadata-authoring capability (`manage_metadata` / `studio.access`) is what headquarters IT holds and plant admins do not." Item 8: a plant "cannot create a position, a permission set, a capability, a template or any metadata … A plant that needs its own catalog is given its own environment." D11: the rules are identical in every posture; only whether the wall is enforced differs.
+  
+  **Why.** The environment definition ledger carries no organization column, so a write lands for every organization. Measured on booted `isolated` and `group` stacks before this change: an organization owner granted `manage_metadata` inside their own organization created an object, a view and a flow at `/api/v1/meta`, edited, published, rolled back and reset the operator's view, ran `POST /api/v1/meta/_migrate-stored`, passed all thirteen `/api/v1/packages` write doors, installed, upgraded and uninstalled packages through `install-local`, and created a flow at `/api/v1/automation`, each with `2xx`; another organization's owner read every result. The security catalog was refused at these doors already; every other type was not.
+  
+  **FROM → TO**, on a `group` or `isolated` deployment, for a caller below the platform operator (the `PLATFORM_ADMIN` rung: the deployment's declared `OS_PLATFORM_OWNER_EMAIL` owner):
+  
+  - `PUT`, `DELETE`, `POST …/publish` and `POST …/rollback` of `/api/v1/meta/:type/:name` on `@objectstack/rest`, and `PUT /meta/:type/:name` on the runtime dispatcher, for a type outside the security catalog (`object`, `view`, `flow`, `app`, `dashboard`, `translation` and every other type): **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN` (the dispatcher answers `403 PERMISSION_DENIED`).
+  - Every `/api/v1/packages` write on the runtime dispatcher — create, the manifest `PATCH`, enable, disable, publish, publish-drafts, discard-drafts, revert, rollback, `commits/:commitId/revert`, duplicate, adopt-orphans and delete — for a package carrying no position, permission set or capability: **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before anything is read or written. The refusal no longer reads the package's items.
+  - `POST /api/v1/marketplace/install-local` (install and upgrade) and `DELETE /api/v1/marketplace/install-local/:id` (uninstall) on `@objectstack/cloud-connection`, for a package carrying no catalog item: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN`. The refusal's `error.details` no longer carries `catalogItems`; it carries `manifestId`.
+  - `POST /api/v1/automation`, `PUT /api/v1/automation/:name`, `DELETE /api/v1/automation/:name` and `POST /api/v1/automation/:name/clone`: **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before the automation service is touched.
+  - `POST /api/v1/meta/_migrate-stored`, the install-wide rewrite of the stored metadata, preview and apply alike: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN` on `@objectstack/rest` and `403 PERMISSION_DENIED` on the runtime dispatcher, before a row is read.
+  - Every one of these refusals carries one sentence: it names the written type (`a package` at the package doors, `the environment's stored metadata` at the rewrite), the posture and "ADR-0131 D3, D12 items 7–8, D11", and points at an environment of the organization's own. The catalog refusals that shipped before keep their envelopes and now read the same sentence.
+  - The activation refusals under a wall (`POST /api/v1/automation/:name/toggle`, `POST /api/v1/actions/_activation/…`, `POST /api/v1/security/_activation/permission/…`) no longer recommend cloning a flow or a permission set, or authoring a sibling action, since those writes are the operator's under a wall too; they name the platform operator.
+  
+  **Unchanged.** Reads. Assignments: `sys_user_position` and `sys_user_permission_set` rows stay organization rows. The platform operator and the engine's own writes (seeders, installers, migrations) write as before. Under `single` (and with no `tenancy` service), a `manage_metadata` holder writes exactly as before.
+  
+  **The remedy.** The platform operator authors the environment's metadata, in Studio or through a managed package; an organization that needs metadata of its own is given an environment of its own. `@objectstack/spec` registers the change as the ADR-0087 semantic entry `walled-environment-metadata-writes-retired`. `walledCatalogWriteVerdict` (`@objectstack/metadata-core`) now judges every type alike: a custom door that writes environment metadata asks it after its capability gate, with no `isSecurityCatalogType` pre-filter.
+- 1d79556: feat(spec,core,runtime,plugin-auth)!: API keys get a lifecycle: a 90-day default expiry, a one-year ceiling, a 90-day inactivity expiry, a one-year grace for keys created with none, and distinct refusal codes
+  
+  Clause-②: yes (narrowing) — the published contract widens (four `auth` settings keys, the `IAuthService.resolveApiKeyLifecyclePolicy` member and its `ApiKeyLifecyclePolicy` type, four registered error codes, new `@objectstack/core` exports) and the API-key doors narrow (a signing past the ceiling is refused; an inactive key, a key past its grace, and a revoked or expired key sent beside a session are refused where they were served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key signing door and the shared key-admission seam, not a metadata change. No authorable spec key, stored shape or metadata surface is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite: the four new `auth` settings keys are additive and defaulted, `sys_api_key` gains no column (its existing `expires_at` and `last_used_at` are written by the platform), and `ResolveAuthzInput.apiKeyLifecycle` / the sixth parameter of `resolveApiKeyAdmission` and `resolveApiKeyPrincipal` are server-side wiring no author writes. What narrows is which API keys are served and which signings are accepted; the remedy is a new key or a nearer date, never a rewrite of a package source or a stored row. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key doors), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling A on #23367: the key store stays `sys_api_key`, and the policy is auth configuration.
+  
+  - **The policy (`@objectstack/plugin-auth`, `IAuthService.resolveApiKeyLifecyclePolicy`).** Three `auth` settings keys, bound by `bindAuthSettings`: `api_key_default_expiry_days` (90), `api_key_max_expiry_days` (365) and `api_key_inactivity_days` (90; `0` turns it off). A fourth, `api_key_policy_started_at`, is recorded once — on the first boot that runs the policy, at `kernel:bootstrapped` — and anchors the two clocks below; it survives restarts and is never overwritten by the platform.
+  - **The signing door (`POST /api/v1/keys`).** A signing that names no `expires_at` gets the default life and the response echoes it. An `expires_at` further away than the ceiling is refused `400 API_KEY_EXPIRY_TOO_LONG`, naming the latest date allowed; exactly the ceiling is accepted. A kernel with no auth service signs as before.
+  - **The key-admission seam (`resolveApiKeyAdmission`, `@objectstack/core`).** A real key its own state refuses is a new outcome, `lifecycle`, with one of three distinct codes: `API_KEY_REVOKED`, `API_KEY_EXPIRED` (past `expires_at`, or past the grace of a key created with none) or `API_KEY_INACTIVE` (no recorded use for longer than the window). `resolveAuthzContext` raises it as the branded `ApiKeyLifecycleRefusalError` (`403`, a located message naming the key's prefix, the date and the remedy). An unknown key is still `none`.
+  - **`last_used_at` is written.** Its description promised "Automatically updated on each API call", and nothing wrote it. The seam now stamps it on an admitted (or held) call, at most once an hour per key, and the inactivity judgment reads the value as it was BEFORE that call's stamp, so a key's own use cannot revive it. A stamp that fails never fails the request; it is said once, at `error`.
+  - **Keys created before the policy.** A key with no expiry gets one year from `api_key_policy_started_at`; the date is stamped onto its `expires_at` the first time it is admitted, so the keys page shows it, and the refusal after it names it. A key with no recorded use counts its inactivity from the same anchor (or from its own creation, when later) — never from an earlier `created_at`, since no use was ever recorded before the policy.
+  - **Every face that admits keys** passes the policy source (`apiKeyLifecyclePolicySourceOf(authService)`, a required input beside `userAuthGates`). Every one of them answers the refusal's `403` and code: the runtime dispatcher (the MCP HTTP endpoint among its routes), the REST data API, the settings routes, the storage download routes, the datasource admin routes, the share-link routes, the marketplace install-local routes and the MCP stdio transport. Each relays the refusal by its brand, so every other identity fault at those doors keeps its existing answer.
+  - **`OS_CLOUD_API_KEY` is untouched.** It is the runtime's outbound credential to the control plane, never admitted by this seam.
+  
+  What changes for you:
+  
+  - **A key created without an expiry now expires.** It used to live until revoked; it now lives 90 days (or the configured default). Pass `expires_at` to choose, and create a new key before it ends.
+  - **A signing asking for more than a year is refused** `400 API_KEY_EXPIRY_TOO_LONG`, where it used to be accepted. Ask for the date the message names, or an earlier one.
+  - **A key unused for 90 days is refused** `403 API_KEY_INACTIVE`, where it used to be served. It is not revoked; the remedy is a new key.
+  - **A key that already existed with no expiry keeps working for one year** from the date the policy took effect on your deployment (`auth.api_key_policy_started_at`), then answers `403 API_KEY_EXPIRED` naming that date. Replace such keys within the year.
+  - **A revoked or expired key answers its own code** (`403 API_KEY_REVOKED` / `API_KEY_EXPIRED`) on every face that accepts a key, where it used to answer the generic `401`; and a session cookie sent beside such a key no longer answers for it.
+  - **Hosts calling `resolveAuthzContext`, `resolveApiKeyAdmission` or `resolveApiKeyPrincipal` directly** pass `apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService)` (or the sixth argument), or an explicit `undefined` where no auth service exists. A caller of `resolveAuthzContext` that wants the located answer re-raises `ApiKeyLifecycleRefusalError` (`isApiKeyLifecycleRefusalError`) the way it re-raises the store outage. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `lifecycle` outcome.
+- daafae6: fix(core,cloud-connection,mcp)!: every API-key admission names its owner-posture source, so a held owner's key is refused at the marketplace install-local doors and on every MCP stdio call
+  
+  Clause-②: no (narrowing) — no published accept-set widens; two more seams refuse a key whose owner holds an account-scope posture, the owner-posture input of the shared key-admission seam becomes required, and `resolveApiKeyPrincipal` no longer answers a held owner's key with a principal.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/resolve-authz-context.ts#ResolveAuthzInput) An authentication-policy change at runtime TypeScript call sites, not a metadata change. No authorable spec key, stored shape or metadata surface moves, so `objectstack migrate meta` has nothing to rewrite. The input that becomes required lives on a runtime interface and on two runtime functions of `@objectstack/core` (`resolveApiKeyAdmission`, `resolveApiKeyPrincipal`), none of them a metadata surface; the affected party is a TypeScript caller, and the compiler names its call site. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at two API-key doors, and a required input on the shared key-admission seam), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling C′ on #23287, item 1: "a held user's API key is refused at every seam with the same code". Item 4: "The refusal is not a revocation: the key resumes the moment the user enrols (or the account posture clears)". `AUTH_GATE_SCOPES` decides which posture holds a key: `MFA_REQUIRED` (scope `account`) holds it; `PASSWORD_EXPIRED` and `PASSWORD_RESET_REQUIRED` (scope `credential`) do not.
+  
+  - **The marketplace install-local doors (`@objectstack/cloud-connection`).** The resolver behind all five doors now hands the shared resolver the auth service's per-user posture computation and refuses on the posture it decided for whichever credential admitted the caller. A key whose owner holds `MFA_REQUIRED` gets `403 MFA_REQUIRED` with the session's message, before any effect. It used to be served there.
+  - **The MCP stdio transport (`@objectstack/mcp`).** `OS_MCP_STDIO_API_KEY` is resolved with the owner's posture on every call of a live session, and a held owner's call is refused before any read or write with the envelope REST answers (`code` `MFA_REQUIRED`, `status` 403, the session's remediation message). A data tool's error and the record resource carry that message, as they carry every other refusal on this transport. A held key still starts the transport and says so once in a warning: the key is valid, and the next call after the owner enrols is served with no restart.
+  - **The owner-posture input is required (`@objectstack/core`).** `ResolveAuthzInput.userAuthGates`, and the `tenancyPosture` and `userAuthGates` parameters of `resolveApiKeyAdmission` and `resolveApiKeyPrincipal`, are now required; `undefined` is a value passed on purpose. A seam that forgets the source no longer compiles, which is how the two seams above were missed. `@objectstack/runtime` re-exports these, so its importers see the same change.
+  - **`resolveApiKeyPrincipal` collapses a held owner's key to no principal.** A principal-or-nothing answer cannot carry the posture's code, so a host that answers requests should read `resolveApiKeyAdmission` and refuse its `held` outcome with `gate.code`.
+  - **The storage download authorizer (`@objectstack/service-storage`)** names the same source. The storage family's door already refused a held owner's key on the same request, so nothing changes on the wire.
+  
+  What changes for you:
+  
+  - **Refused now:** an API key whose owner owes MFA enrolment past the grace window gets `403 MFA_REQUIRED` at the install-local doors, and every principal-bound MCP stdio call it makes is refused with the same code and message. It works again the moment the owner enrols, with nothing reissued.
+  - **Unchanged:** a key whose owner's password expired, or whose administrator forced a password change, keeps working on both.
+  - **Code that calls `resolveAuthzContext`, `resolveApiKeyAdmission` or `resolveApiKeyPrincipal` directly** now passes the owner-posture source explicitly: `userAuthGates: userAuthGateSourceOf(authService)` wherever the kernel's `auth` service is reachable, or `undefined` on a kernel composed without `plugin-auth`. The two positional functions also take `tenancyPosture` explicitly (`undefined` when no `tenancy` service is registered).
+- 75ced06: fix(cloud-connection)!: the cloud-connection and install-local routes refuse a declared JSON body that does not parse with `400 INVALID_REQUEST`, instead of answering as if no body was sent
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, no stored row is rewritten or deleted, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of four of this package's own routes for one input: a body declared as JSON that does not parse, which used to be read as no body. The remedy is in the requests a client sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `POST /api/v1/cloud-connection/bind/start`, `/bind/poll`, `/install` and `POST /api/v1/marketplace/install-local` read their bodies as `try { body = await c.req.json() } catch { body = {} }`, so a truncated body was answered as if the client had sent none: `/bind/poll` answered `400 "device_code is required"` for a body that carried `device_code` and lacked a closing brace.
+  
+  What changes for an integrator. A body sent as `application/json` (matched case-insensitively) that is not blank and does not parse: FROM the route's answer for an empty body, TO `400` with `{ "success": false, "error": { "code": "INVALID_REQUEST", "message": "The request body could not be parsed as JSON (it was sent as application/json). It was refused rather than read as an empty body: send a well-formed JSON document, or no body at all." } }`. Install-local refuses it after its sign-in and capability checks and before anything is fetched, registered or written.
+  
+  **Remedy, in one line.** Send a JSON body as well-formed JSON with `Content-Type: application/json`, or send no body.
+  
+  **Unchanged.** An empty or whitespace-only JSON body is still no body, and every route answers it as before (for `/bind/poll`, `400 "device_code is required"`). A body that parses, and a body that does not declare JSON, are read as before.
+- a237d7f: feat(cloud-connection)!: Setup's "Installed Apps" entry opens Setup › Packages filtered to marketplace installs, and the separate Installed Apps page is no longer shipped
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/cloud-connection#MARKETPLACE_INSTALLED_UI_BUNDLE.pages) The retired operand is a member of a published runtime export of `@objectstack/cloud-connection`, and its break reaches a TypeScript consumer through the compiler at their own call site. The page it carried was plugin-registered in-memory metadata, registered by `MarketplaceInstallLocalPlugin` at `kernel:ready`, never a stored row. No spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  - `MARKETPLACE_INSTALLED_UI_BUNDLE.pages` -> delete (the bundle carries no page; its entry is read from `navigationContributions`)
+  
+  Setup › Packages is now the one list of what is installed: every row says where the package came from (Source: code, marketplace or authored), and the rows whose Source is marketplace carry the actions the Installed Apps page had, Details and Uninstall.
+  
+  - **What changes.** The "Installed Apps" entry in Setup's Apps group, which the install-local plugin (`MarketplaceInstallLocalPlugin`) contributes, now opens Packages with the Source filter set to marketplace. Its label and icon are unchanged. In `MARKETPLACE_INSTALLED_UI_BUNDLE` the entry `nav_marketplace_installed` is a `component` entry on `developer:packages` with `params: { source: 'marketplace' }`, which the console opens as `/apps/setup/component/developer/packages?source=marketplace`.
+  - **What is no longer shipped.** The bundle no longer carries the `marketplace_installed` page, so `GET /api/v1/meta/page` stops listing it and `MARKETPLACE_INSTALLED_UI_BUNDLE` has no `pages` key. In the console that page only redirected to the filtered Packages list. The `pages.marketplace_installed` entries leave the Setup translation bundle in `@objectstack/platform-objects` (en, zh-CN, ja-JP, es-ES). The Setup nav label `nav_marketplace_installed` keeps its translations.
+  - **Unchanged.** The entry still appears only when the install-local plugin is mounted, so a runtime without it shows no Installed Apps entry. "Browse Marketplace" and its route are not touched. The marketplace's own package page still carries Update and the sample-data Re-seed / Purge menu, and Details on a Packages row opens it.
+  
+  What to do. Nothing in a normal deployment. If you linked to the `marketplace_installed` page directly, link to Setup › Packages with `?source=marketplace` instead.
+- c7168ac: Clause-②: yes (widening)
+  
+  fix(service-package,cloud-connection): a stored or installed package body converts forward under ADR-0087 D2 at the `sys_packages` boot hydration and at the marketplace install, and one refused `sys_packages` record no longer stops the hydration of the rest
+  
+  The registration door (`ObjectQL.convertPackageBodyForward`, `@objectstack/objectql`) already replays the versioned forward conversion for a package body that declares its `engines.protocol` range. Two more doors that load a body at rest now go through that same entry point, before the registry judges the body:
+  
+  - **`sys_packages` boot hydration** (`PackageServicePlugin.start`). A stored record whose range admits this runtime, built before a retirement (for example a `type: 'home'` page with `isDefault: true`), now hydrates converted, with the engine's named warning, where the registry used to refuse it. The stored row is not rewritten, so it converts again at every boot.
+    - A record the registry still refuses is reported **by name** at `error`, with the refusal attached, and the records after it keep hydrating. Before, the first refusal threw out of the whole loop to a `debug` line, and every durable package after it was absent from the registry with nothing saying so.
+    - `Hydrated N package(s) from sys_packages into registry` counts the records the registry accepted in that pass.
+    - The ADR-0087 D1 handshake still runs first: a record whose declared range excludes this runtime's major is refused by it, named, as before.
+  - **The marketplace install** (`MarketplaceInstallLocalPlugin`, install and boot rehydrate). The body is converted once per load, and that one converted body is what `manifest.register`, the handler binder, the side effects (translations, seed datasets) and the rehydrate's sample-data heal read. Before, `register` converted its own copy while the side readers read the raw ledger entry. The ledger keeps the body as installed.
+  
+  Nothing is narrowed. A body with no declared range (a manifest built in code) meets the registry's refusals exactly as before at both doors. The install primitive `protocol.installPackage` (`POST /api/v1/packages`) is authoring-side and stays strict: the registry judges the manifest as handed.
+- 8692a08: fix(cloud-connection)!: the marketplace `reseed-sample-data` door converts the installed package body forward once, as the install and the rehydrate do, so it reloads the translations those two doors load
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered translation-per-app-settings-removed, translation-validation-messages-removed, translation-component-submit-label-removed, translation-widget-sub-caption-removed) the reseed door now replays the conversion chain the install and the rehydrate already replay on the same stored body; the translation shapes it stops reloading are exactly the ones these four existing entries retire, and no spec key, export, option or stored shape is added, removed or renamed -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data` handed its side effects (the translations it reloads into the i18n service, and the seed datasets it runs) the package body exactly as the install ledger stores it. The install and the boot rehydrate hand the same side effects that body converted forward, through the ADR-0087 window the body's own `engines.protocol` opens (`ObjectQL.convertPackageBodyForward`). So for a package built before a translation retirement, a reseed reloaded a retired translation shape that the other two doors strip. The reseed now converts the body once, through the same entry point, after the protocol handshake has judged the entry as stored.
+  
+  - **Served less now:** for a package whose body declares a range this runtime admits, from a floor that predates a retirement, a reseed no longer reloads the translation shapes that the four translation conversions remove (`translation-per-app-settings-removed`, `translation-validation-messages-removed`, `translation-component-submit-label-removed` and `translation-widget-sub-caption-removed`). For example, a pre-17.4 per-app `settings` group is no longer loaded into the i18n service on reseed. After a reseed the i18n service holds what it holds after the install or a restart.
+  - **Refused now:** a stored body the converter throws on is no longer reloaded. The reseed raises the converter's error, as the install does, and loads nothing. Before, it reloaded the raw body. The protocol handshake that runs first throws on the same malformed range at every door, so this arises only for a body whose range reads differently to the handshake and to the converter.
+  - **Unchanged:** a body that declares no range is handed back as stored, so it reloads exactly as before. The handshake still runs first: a range that excludes this runtime is still answered `422 OS_PROTOCOL_INCOMPATIBLE`, before anything is converted or loaded. No conversion touches seed `data`, so a reseed seeds the same rows and answers the same counts. The ledger keeps the body as installed.
+  
+  What changes for you: nothing to rewrite. For such a package the install and every restart already log the conversion warning, once per conversion per process, and it names the remedy: rebuild the package with `os build` and republish it.
+- 6973014: fix(cloud-connection)!: `bind/start`, `bind/poll` and `unbind` require `setup.access`, and `GET /status` serves the connection's details only to a caller who holds it
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a runtime authorization narrowing at four of CloudConnectionPlugin's same-origin routes, not a metadata change: no spec key, export, option, config field or stored shape is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite; a caller who holds Setup Access is served exactly as before, and one who does not is refused or served less -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The Console's Cloud Connection page sits on the Setup app, which requires the Setup Access permission (`setup.access`). The routes behind that page did not ask for it: the three that change this runtime's cloud connection checked only that the caller was signed in, and `GET /api/v1/cloud-connection/status` served the connection record the control plane reports to every caller. Both now follow the page's rule.
+  
+  - **Refused now:** `POST /api/v1/cloud-connection/bind/start`, `POST /api/v1/cloud-connection/bind/poll` and `POST /api/v1/cloud-connection/unbind` answer a signed-in caller who does not hold `setup.access` with `403` and the standard `PERMISSION_DENIED` code, and the message names the capability. The refusal comes before any call to the control plane and before the stored credential is touched. What the caller holds is read through `resolveAuthzContext`, the platform's one authorization resolver, for the session these routes already read: a grant bound through a position, or scoped to the session's active organization, counts as it does everywhere else, and an API key sent beside the session lends its owner's grants to nobody.
+  - **Narrowed now:** `GET /api/v1/cloud-connection/status` still answers every caller `200`, so a probe can still tell that the plugin is mounted. A caller without `setup.access` (anonymous, signed in without it, or a session the ADR-0069 policy holds) is served `bound`, `runtimeId` and `provider` only. `environmentId` and `connection` are served to a caller who holds it.
+  - **Unchanged:** a caller who holds `setup.access` is served exactly as before, so the Console panel's connected view, its "Approved by" row included, keeps working for an administrator. An anonymous caller of the three connection-changing routes still gets `401`, and a held session still gets the ADR-0069 `403`. The other four session routes (`install`, `installation`, `installed`, `org-packages`) are not touched.
+  - **An unreadable permission store is not a denial.** When the grants cannot be read, the three connection-changing routes raise the platform's `SERVICE_UNAVAILABLE` outage (`503` through the host's error render) instead of answering a `403` that reads like a real refusal. `status` keeps answering, withholds the details, and logs the outage.
+  
+  What changes for you. Whoever manages this runtime's cloud connection needs Setup Access, which the default platform-administrator and organization-administrator permission sets already carry. A script that reads `connection` or `environmentId` from `GET /status` has to call it as a signed-in user who holds Setup Access.
+
+### Patch Changes
+
+- c8a9783: feat(plugin-security)!: no seeder or materializer writes a `sys_permission_set` row — the declared-permission seeder, the platform-default materialization and the `permission` publish materializer are deleted
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime change on a platform object's rows and on TypeScript surfaces, not on any metadata schema: no key of any spec schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The rows the retired seeders wrote stay in the table until a later ADR-0131 stage; nothing reads them for authorization. The package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `SecurityPlugin` no longer writes a `sys_permission_set` row for any permission set: not for the platform defaults (`admin_full_access`, `member_default`, …), not for a set a package declares, not for an organization's copy, and not on a metadata reload or an organization's creation. Permission sets are served by the security catalog (ADR-0131 D3), and since the grant names its set (`sys_user_permission_set.permission_set`), no grant path needs a row. A fresh database still promotes its first platform administrator, grants organization administrators and self-registered members, and grants every principal what it was granted before. On a database that was already seeded, the existing rows stay as they are; they are no longer refreshed at boot. Until a later stage retires the ADR-0094 projector, publishing a permission set (a package-door publish, or a writable base's direct publish) still has it write a projection row, `managed_by: 'admin'` with no `package_id` (a package-door publish wrote `managed_by: 'package'` before this release); no authorization path reads it, and uninstalling the package removes it.
+  
+  - **Accepted package defaults follow every publish.** The `everyone` anchor is derived again after every landed `permission` mutation (publish, direct save or delete, through any door), so an accepted set whose new body no longer qualifies stops granting at once. Before this release the re-derivation ran only inside the publish materializer, and only when the published body carried an `isDefault` key.
+  - **`drift_status` and `drift_detail` are gone from `sys_permission_set`**, with the **Needs Attention** list view that listed them. Nothing computes them any more: the declared-versus-enforced diagnostic retired with the rows it compared. A Studio overlay that shadows a packaged set is still named at boot.
+  - **Uninstalling a package still revokes every grant of its permission sets** (ADR-0090 D5, "no ghost grants"). With no row standing for a package's set, both uninstall doors (`deletePackage` and `DELETE /api/v1/marketplace/install-local/:id`) capture the set names the package held just before they withdraw it from the registry, and the `security.package-permissions` cleanup revokes every `sys_user_permission_set` grant naming them. The withdrawal still runs before the cleanups. A grant naming such a set would otherwise survive the uninstall and be live again on reinstall. Grants written before the name column, and position bindings, are still reached through a legacy `sys_permission_set` row where an already-seeded database holds one.
+  - `bootstrapPlatformAdmin` no longer takes the `resync` option and no longer reports `seeded`, `resynced` or `resyncSkipped`. A refused read of the legacy `admin_full_access` row (the restrict-only reach to a grant written before the name column existed) withholds the promotion and says so once.
+  
+  Added (additive, nothing an author writes changes):
+  
+  - `@objectstack/metadata-protocol`: the optional `declared?: UninstallDeclared` argument of `UninstallCleanup` (and of `runUninstallCleanups`' request), the `UninstallDeclared` type, and `captureUninstallDeclared(registry, packageId, stored?)`, the one capture both doors call. A cleanup that ignores `declared` behaves as before.
+  - `@objectstack/objectql`: `SchemaRegistry.securityCatalogNamesHeldBy(packageId, type)`.
+  - `@objectstack/plugin-security`: `cleanupPackagePermissions` takes an optional fourth argument, the captured names.
+  
+  Removed from `@objectstack/plugin-security`'s public exports, with no replacement:
+  
+  - `bootstrapDeclaredPermissions`
+  - `normalizeManagedByVocab`
+  - `computePermissionSetDriftDiagnostics`, `persistPermissionSetDriftDiagnostics`, `runPermissionSetDriftDiagnostics`, and the types `PermissionSetDriftStatus`, `PermissionSetDriftDiagnostic`, `DriftDiagnosticsOptions`
+  - `CAPABILITY_DECLARATION_UNOWNED`, `CAPABILITY_PLATFORM_NAME_REFUSED`, `PERMISSION_SET_DECLARATION_UNOWNED`, `capabilityDeclarationUnownedDiagnostic`, `capabilityPlatformNameRefusedDiagnostic`, `permissionSetDeclarationUnownedDiagnostic`, `reportCapabilityDeclarationUnowned`, `reportCapabilityPlatformNameRefused`, `reportPermissionSetDeclarationUnowned`, and the types `CapabilityDeclarationUnownedDiagnostic`, `CapabilityPlatformNameRefusedDiagnostic`, `PermissionSetDeclarationUnownedDiagnostic`
+- 8601526: `RuntimeConfigPluginConfig.controlPlaneUrl`'s published docblock no longer says that an empty string declares "this runtime IS the cloud". It now says what the constructor does: `''` keeps marketplace and install requests on this origin, and that is all it says.
+  
+  Clause-②: no
+  
+  - The runtime that passes `''` may serve the catalog itself or proxy a control plane it does not name. The CLI's cloud-connected `os serve` passes `''` while its marketplace proxy forwards to the control plane `resolveCloudUrl()` answers. So `''` reads neither as "this runtime is the cloud" nor as "there is no upstream". This matches the `AppShellRuntimeConfig.cloudUrl` doc in `@object-ui/app-shell`.
+  - A runtime with no control plane says so with a decline spelling (`'off'` / `'none'` / `'local'` / `'disabled'`), in `controlPlaneUrl` or in `OS_CLOUD_URL`. The docblock now says this too.
+  - ⛔ No code, type, export or default change. The served `cloudUrl` and the telemetry posture do not change.
+- a45d5d8: fix(auth): a server-side session read no longer renews a browser session behind its cookie (#22258)
+  
+  **What was wrong.** better-auth's `getSession` renews a session older than `session.updateAge`: it moves `sys_session.expires_at` to `now + expiresIn` and stages the renewed session cookie on that call's own response. Ten doors read the session in-process (`auth.api.getSession`) and answer with their own response, so the renewal landed in the database and its cookie was discarded. The browser kept its old cookie, later `GET /api/v1/auth/get-session` calls found a fresh row and re-issued nothing, and the cookie expired first: a dead cookie beside a live bearer, and every cookie-only path then saw a signed-out user. Measured on a fresh dev stack (better-auth 1.7.3, `expiresIn` 604800 s, `updateAge` 86400 s, a session aged to `now + expiresIn − updateAge − 60 s`): `GET /api/v1/data/:object`, `GET /api/v1/auth/me/permissions`, `GET /api/v1/meta/object`, `GET /api/v1/i18n/locales`, `GET /api/v1/packages`, `GET /api/v1/marketplace/install-local` and the MCP door each moved `expires_at` by +86460 s and set no session cookie.
+  
+  **The rule now, decided by what the request carries.**
+  
+  - **A session cookie** (a browser, including a console that sends its cookie beside its bearer): the in-process read passes `query.disableRefresh`. The session renews only through `GET /api/v1/auth/get-session`, which re-issues the cookie with `Max-Age = expiresIn`, so cookie and session expire together. Measured after the change: every door above leaves `expires_at` unchanged on a cookie request and sets no cookie.
+  - **No session cookie** (a bearer-only client: `@objectstack/client` outside a browser, the `os` CLI): unchanged. A data read past `updateAge` still renews the session (+86460 s, measured on the same doors), so an active bearer client keeps sliding forward without calling `get-session`. No cookie is ever set on a response to a request that sent none.
+  
+  **Upgrading.** Nothing to change. A browser session renews whenever the app calls `GET /api/v1/auth/get-session`; a tab that never calls it now signs out at the session's real expiry instead of keeping a live bearer beside a dead cookie.
+  
+  `@objectstack/types` gains `inProcessSessionReadInput(headers)` (the `getSession` input for an in-process read: the request's own headers, plus `query: { disableRefresh: true }` when they carry a better-auth session cookie), `carriesSessionCookie(headers)` and the `InProcessSessionReadInput` type. A host that calls `auth.api.getSession` itself should read through `inProcessSessionReadInput` for the same reason.
+  
+  The same rule is applied to the in-process `auth.api.getSession` readers in `@objectstack/plugin-auth`, `@objectstack/plugin-webhooks`, `@objectstack/plugin-sharing`, `@objectstack/service-storage`, `@objectstack/service-settings` and `@objectstack/service-datasource` by their own changeset.
+- a360cee: fix(cloud-connection): install-local's `hotLoaded` reports whether the running kernel loaded the package (#22695)
+  
+  Clause-②: no
+  
+  - **What was wrong.** `POST /api/v1/marketplace/install-local` always answered `hotLoaded: true`. When the manifest came from the cloud catalog and `manifest.register` threw, the install still wrote the package to its ledger and answered `200` (the lenient path). The package loads at the next restart, but the answer said the running kernel held it already, and its `note` said the app was "now available in this runtime".
+  - **What it answers now.** On that path the answer carries `hotLoaded: false` and a new string key, `hotLoadError`, holding the register error's message. The `note` says the package is installed and cached, that the running kernel could not load it, and that the runtime registers it again at its next restart. A reader can then say "installed, loads at the next restart" instead of reporting a false success.
+  - **What did not change.** An install whose register succeeds answers exactly as before: `hotLoaded: true`, and no `hotLoadError` key. An inline (file-import) manifest whose register throws is still refused with `422 PLUGIN_REGISTER_FAILED`, and nothing is written. The lenient path still installs: the ledger entry is written, and the package loads at the next restart.
+- 66d2757: feat(spec)!: every installed-package row declares where it came from, a closed `source: 'code' | 'marketplace' | 'authored'`, and the `GET /packages` rows declare the `writable` verdict they already served (#23972)
+  
+  Clause-②: yes (narrowing — the served row gains two declared keys, and the record schema, the served-row union and the registry's installPackage signature each refuse what they accepted before)
+  
+  **BREAKING** — three published accept sets narrow. `InstalledPackageSchema` refuses a row without `source`, or with a value outside `code` / `marketplace` / `authored`. The served-row union `InstalledPackageAtEitherStageSchema` refuses a row without a boolean `writable`. `SchemaRegistry.installPackage` and `EngineSchemaRegistryView.installPackage` take `source` as their second argument and refuse a call without it. The migration is below. None of it is mechanically convertible, because only the door that registers a package knows where it came from.
+  
+  **What is new on the wire.** `GET /api/v1/packages` and `GET /api/v1/packages/:id` serve two declared keys on every row:
+  
+  - `source` names the package's origin. `code` means the deployment's own code registered it (a `defineStack()` host, a plugin's bundled manifest, a platform package). `marketplace` means the marketplace install-local plugin installed it, and that holds after a restart too, when the plugin rehydrates it from its ledger. `authored` means it is a database-authored package (a Studio base, a duplicate, an HTTP install), including after the restart that rehydrates it from `sys_packages`. The door that registers the package stamps the value. No reader derives it.
+  - `writable` is the server's own writability verdict (ADR-0070 D2), served on these rows since #14375 and now declared. It is computed per read and never stored, so it is declared on the served row (`InstalledPackageAtEitherStageSchema`) and not on the registry record.
+  
+  FROM → TO for a reader of these rows:
+  
+  | you did | do instead |
+  | --- | --- |
+  | treated `writable: true` as authored, and looked up each non-writable row in the marketplace's installed list (the control plane's, else install-local's) to tell marketplace from code | read `row.source` |
+  | read the undeclared `writable` | read the declared `writable` (unchanged value) |
+  
+  The two keys are separate statements: `source` says where the package came from, and `writable` says what this server lets an org do to it.
+  
+  **`InstalledPackageSchema` requires `source`.** It is `InstalledPackageSourceSchema`, exported from `@objectstack/spec/kernel`. A row without it, or with a value outside the closed set, is refused at the `source` key.
+  
+  **API change for code that registers packages (`@objectstack/objectql`).** The registry records the origin and never infers it:
+  
+  | you wrote | write instead |
+  | --- | --- |
+  | `registry.installPackage(manifest)` | `registry.installPackage(manifest, 'code')` (or `'marketplace'` / `'authored'`, whichever is where the package came from) |
+  | `registry.installPackage(manifest, settings, scope)` | `registry.installPackage(manifest, source, settings, scope)` |
+  | `ctx.getService('manifest').register(artifact)` for a marketplace install | `ctx.getService('manifest').register(artifact, { source: 'marketplace' })` |
+  
+  `SchemaRegistry.installPackage` throws a `TypeError` naming the closed set when `source` is missing or unknown, before anything is recorded. `ObjectQL.registerApp(body, scope?, source?)` and the `manifest` service record `'code'` when no source is given. They accept `'code'` or `'marketplace'` and refuse `'authored'`. The `IObjectQLEngine` registry contract (`@objectstack/spec/contracts`) declares the same `installPackage(manifest, source, settings?)`.
+  
+  **The one-line fix:** pass the package's origin as `installPackage`'s second argument.
+  
+  Readers: objectui's Setup → Packages Source column and its `?source=` filter (it switches from the two-read join to `source` in its own follow-up), and the client SDK's `packages.list()` / `packages.get()` row types.
+  
+  <!-- adr-0087: registered installed-package-row-source-required, registry-install-package-source-argument -->
+- 2bcaefb: Clause-②: no
+  
+  fix(cloud-connection): an install-local uninstall takes the package's objects out of `GET /api/v1/meta/object` and `GET /api/v1/meta/object/NAME` at once, not at the next restart
+  
+  - **What was wrong.** An install-local install registers the package through the `manifest` service, and that register does two things: it puts the package in the engine's registry, and it copies each of the package's objects into the `metadata` service, stamped with the package's id. `DELETE /api/v1/marketplace/install-local/:manifestId` withdrew the registry half only. The object listing merges the `metadata` service into its answer and the by-name read asks that service first, so both kept serving every object of the uninstalled package, with its `_packageId`, until the runtime restarted, while `GET /api/v1/data/OBJECT` already answered `404`. The console's object pickers and Studio's object list offered objects that no longer existed.
+  - **What changes.** Right after the registry withdrawal, the DELETE removes from the `metadata` service each object copy stamped with the package's id whose name the registry no longer serves. The object listing and the by-name read stop serving the package's objects in the same process, as its data route, `GET /api/v1/meta/app` and `GET /api/v1/meta/permission` already did.
+  - **Not touched.** A same-name object the package did not copy there (one without its stamp) stays. The package's tables and rows are untouched, as before. A refused registry withdrawal still leaves the whole package loaded until the next restart, its copies included.
+  - **A copy the service refuses to remove** is reported on the DELETE answer as a failed `cleanups` entry named `metadata.unregister`, the way a refused registry withdrawal is reported, and the operator log names the objects kept and the remedy: restart the runtime. The uninstall cleanups still run, and the answer is still `200`. When nothing is refused, `cleanups` is unchanged.
+- 669296b: fix(cloud-connection): with `OS_RUNTIME_VERSION` unset, the server reports to the cloud the release `GET /api/v1/discovery` reports, not the Cloud Connection plugin's own `0.3.0`
+  
+  Clause-②: no
+  
+  `CloudConnectionPlugin` sends the server's version to the cloud in two places: as `runtime_version` on the approval links `POST /api/v1/cloud-connection/bind/start` returns, which the cloud's approval page shows next to the server's name, and as `runtime_version` in the registration request `POST /api/v1/cloud-connection/bind/poll` sends to the cloud's `/bind`. With `OS_RUNTIME_VERSION` unset, both carried the plugin's own `version` field, `0.3.0`. That string names the plugin, not the release the server runs, so an approver was shown `0.3.0` while discovery on the same server reported `18.0.0-next.*`.
+  
+  - **Unset now:** both places carry the `version` the server's discovery document reports. The plugin reads it from the discovery document itself, through the `protocol` service, each time it builds the approval links or the registration request, so the two answers cannot drift.
+  - **Set:** a set `OS_RUNTIME_VERSION` is sent verbatim, as before.
+  - **No discovery document:** on a server with no `protocol` service, or when reading it fails, neither place carries a version. The approval links have no `runtime_version` parameter and the registration request has no `runtime_version` key. Before, both carried `0.3.0`.
+  
+  What changes for you: nothing to rewrite. `OS_RUNTIME_VERSION` is now only needed to report a version other than the release, such as an image tag or a commit.
+- aa31569: Clause-②: no
+  
+  fix(objectql): withdrawing a package that extends another package's object puts the owner's definition back at `GET /api/v1/meta/object/NAME` at once, not at the next restart
+  
+  - **What was wrong.** When a package whose content is an `objectExtensions` field on another package's object is registered on a started kernel, the ObjectQL bridge rewrites the OWNER's copy of that object in the `metadata` service with the merged body, extension included. `DELETE /api/v1/marketplace/install-local/:manifestId` of the extender withdrew its contribution from the registry, so the object listing and the data plane dropped the field, but nothing rewrote the owner's copy. The by-name read asks that copy first, so `GET /api/v1/meta/object/NAME` kept serving the withdrawn field until the runtime restarted.
+  - **What changes.** The ObjectQL bridge remembers which owners' copies each package's extensions rewrote, and the `manifest` service gains `restoreExtendedObjectCopies(packageId)`: once the registry no longer holds the package, it re-registers each such copy with the registry's current definition. The install-local DELETE calls it right after the registry withdrawal. The by-name read then serves the owner's body without the extension's fields, as the listing and the data plane already did.
+  - **Not touched.** Only a copy stamped with the registry owner's id is rewritten, the same rule the bridge overwrites by, so an authored copy stays. The DELETE answer is unchanged. A copy that cannot be restored is logged once at `error`, naming the objects and the remedy: restart the runtime.
+- af284b0: feat(spec): the remaining `getSession` readers read `AuthSessionApi`'s declared result, and none reads a top-level `activeOrganizationId`
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec/contracts` — `AuthSessionApi.getSession`'s result gains three optional `user` members**, each declared for a named reader: `isPlatformAdmin` (`boolean`, the ADR-0068 D2 rung plugin-auth's `customSession` derives) and `role` (`string | null`, better-auth's `admin` plugin scalar), both read by `judgePlatformAdmin` in `@objectstack/plugin-auth`; and `name` (`string`), read by the runtime dispatcher's AI-route `req.user` resolver as the display name. Every member is optional, so every implementer and caller typechecks unchanged.
+  - **The readers read through the declared type instead of `any` or a cast** (types only, runtime behaviour unchanged): `judgePlatformAdmin` and the four platform-admin mounts in `@objectstack/plugin-auth` (better-auth's own session type now has to fit the declaration at those reads), the REST server's two session reads (`@objectstack/rest`), the dispatcher's posture read, `resolveSessionData` and both `HttpDispatcher` reads (`@objectstack/runtime`), the cloud-connection and install-local session reads (`@objectstack/cloud-connection`), the webhook redeliver door (`@objectstack/plugin-webhooks`), and the storage session bridge (`@objectstack/service-storage`).
+  - **Fix — the top-level `activeOrganizationId` fallback is removed** from the storage upload stamp (`@objectstack/service-storage`) and from install-local's `resolveActiveOrgId` (`@objectstack/cloud-connection`). The active organization is read from `session.activeOrganizationId` alone, where the contract declares it. No in-process producer answers a top-level `activeOrganizationId` (better-auth's read is `{ user, session }`), so for the shipped auth plugin nothing changes. An auth service that answered only the flattened shape now gets no organization: the upload is not stamped, and install-local reports no active organization. To fix it, answer the active organization on `session.activeOrganizationId`, as `AuthSessionApi` declares it.
+- 3a734e0: feat(spec)!: a page region named `main` takes only `width: 'full'` — `'small'`, `'medium'` and `'large'` there are refused at publish (#24326)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered page-main-region-width-refused, page-main-region-width-removed -->
+  
+  **BREAKING** — an accept-set narrowing on a published authoring surface, shipped as `minor` under the repo's launch-window convention.
+  
+  `PageRegionSchema.width` is one enum shared by every region, so a `main` region accepted `'small'`, `'medium'` and `'large'`. The console never read them: every layout draws `main` at the width the layout leaves it (the flexible column beside `sidebar` and `aside`; one grid cell on `dashboard`), and the only reader of `main.width` is the page itself, for `'full'`, which lifts the page's max-width cap. A three-column page that asked for a `large` main got the space the two rails left, and every door reported success.
+  
+  - `PageSchema` now refuses `width: 'small' | 'medium' | 'large'` on a region named `main` (matched case-insensitively, as the console matches it), at `regions.N.width`, on every page kind and template. The message names the region and `'full'` as the one width it takes. The doors are `definePage`, `defineStack` (so `os validate` and `os build`, `STACK_SCHEMA_INVALID` 422) and the metadata save door (422 `INVALID_METADATA`).
+  - `'full'` on `main` is unchanged, with its page-wide meaning. Every other region accepts the same widths as before.
+  - The check is exported as `checkPageMainRegionWidth` from `@objectstack/spec/ui`, so a mirror built from `PageSchema.shape` can attach the same rule.
+  - Data at rest keeps loading: the retired ADR-0087 conversion `page-main-region-width-removed` deletes those widths on read: a stored page row, a compiled artifact inside the window its declared protocol range opens, and a package body registered with its declared range. The page renders exactly as before.
+  - `@objectstack/mcp` (the Connect an Agent page) and `@objectstack/cloud-connection` (the Cloud Connection page) drop `width: 'large'` from their `main` region. Both render the same.
+  
+  ### Migration: FROM → TO
+  
+  | Wrote | Write instead |
+  | :--- | :--- |
+  | `width: 'small' \| 'medium' \| 'large'` on a region named `main` | drop it; `'full'` stays |
+  
+  Deleting the key changes nothing on screen. Write `width: 'full'` only when you want a full-bleed page, which drops the page's max-width cap.
+- 71fa166: Clause-②: no
+  
+  fix(cloud-connection): the sign-in refusals and the unmanaged-install copy no longer call the running system "this environment"
+  
+  - **What changed.** Inside the running system, user-facing copy names the system the user is in as "this system", or drops the noun. The seven `401 UNAUTHENTICATED` answers on `/api/v1/cloud-connection/*` now read "Sign in to connect a cloud account." (`bind/start`), "Sign in to install apps." (`install`) and "Sign in." (`bind/poll`, `unbind`, `installation`, `installed`, `org-packages`), where each used to say "Sign in to this environment …". On `/api/v1/marketplace/install-local`, the `409 RESOURCE_CONFLICT` that refuses a managed install over an unmanaged copy now names the holder as "the writable base 'BASE' — an unmanaged install of this package, or a base authored in this system — whose items are this system's own metadata", and the unmanaged install's success `note` reads "The package's metadata is now this system's own, in the base 'BASE' …".
+  - **Unchanged.** Every HTTP status, error code (`UNAUTHENTICATED`, `RESOURCE_CONFLICT`), `details` object and response shape. Server log lines are not touched.
+- Updated dependencies [5a871e4]
+- Updated dependencies [5a871e4]
+- Updated dependencies [f8ef144]
+- Updated dependencies [fc34d00]
+- Updated dependencies [ffba02e]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [1b40780]
+- Updated dependencies [78b1a63]
+- Updated dependencies [d11fa8c]
+- Updated dependencies [ca426cb]
+- Updated dependencies [4ad3ce5]
+- Updated dependencies [8016a9d]
+- Updated dependencies [df9d07e]
+- Updated dependencies [3ae0b77]
+- Updated dependencies [913fd6d]
+- Updated dependencies [8eac321]
+- Updated dependencies [de43524]
+- Updated dependencies [a5a781b]
+- Updated dependencies [04669a4]
+- Updated dependencies [073b1b2]
+- Updated dependencies [9a7838e]
+- Updated dependencies [191e043]
+- Updated dependencies [b12e16a]
+- Updated dependencies [fbafb85]
+- Updated dependencies [35450f0]
+- Updated dependencies [6464df3]
+- Updated dependencies [c395405]
+- Updated dependencies [0b4be0b]
+- Updated dependencies [1e8b628]
+- Updated dependencies [4ff18d3]
+- Updated dependencies [3566c08]
+- Updated dependencies [12d1476]
+- Updated dependencies [7c2eab9]
+- Updated dependencies [3b8e2b1]
+- Updated dependencies [14ccb1d]
+- Updated dependencies [7879391]
+- Updated dependencies [c0803b0]
+- Updated dependencies [758c77d]
+- Updated dependencies [0ca8180]
+- Updated dependencies [4bc3bec]
+- Updated dependencies [1f949da]
+- Updated dependencies [ecb7b44]
+- Updated dependencies [41edf73]
+- Updated dependencies [1c1144f]
+- Updated dependencies [014863d]
+- Updated dependencies [f7005cb]
+- Updated dependencies [3983965]
+- Updated dependencies [9b2953d]
+- Updated dependencies [3230d66]
+- Updated dependencies [0c910d5]
+- Updated dependencies [25e16ab]
+- Updated dependencies [317cddd]
+- Updated dependencies [b2e7870]
+- Updated dependencies [fec87e7]
+- Updated dependencies [34dba5a]
+- Updated dependencies [34dba5a]
+- Updated dependencies [34dba5a]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [dac99c2]
+- Updated dependencies [0d3ea29]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [45e206e]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [cd3d391]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [c8a9783]
+- Updated dependencies [9e9e6f9]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [66949b7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [8c105e3]
+- Updated dependencies [e02833c]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [f9b4217]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [c7d6037]
+- Updated dependencies [240890c]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [7958bdf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [b88c356]
+- Updated dependencies [a3bcbcf]
+- Updated dependencies [1abfc58]
+- Updated dependencies [db87a02]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [6befe19]
+- Updated dependencies [8caa131]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [1fb274e]
+- Updated dependencies [1fb274e]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [f85a83b]
+- Updated dependencies [f85a83b]
+- Updated dependencies [2015c54]
+- Updated dependencies [73a0a6b]
+- Updated dependencies [f2a45db]
+- Updated dependencies [aa9447c]
+- Updated dependencies [3d91885]
+- Updated dependencies [8fc50b7]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [ae97841]
+- Updated dependencies [c8d06a9]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [a543e24]
+- Updated dependencies [a543e24]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [d0bb78e]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [fe98cc6]
+- Updated dependencies [3aa0c7b]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [bb4f5cc]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [fbcbcf1]
+- Updated dependencies [c512c25]
+- Updated dependencies [0b997ea]
+- Updated dependencies [35afb15]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [f4069c5]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [b15f8a1]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [b1f7a7a]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [e87070e]
+- Updated dependencies [3f80f17]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [c8c803c]
+- Updated dependencies [f05649f]
+- Updated dependencies [e030d43]
+- Updated dependencies [ca135dc]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [746637e]
+- Updated dependencies [fdfdd7e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [9af0005]
+- Updated dependencies [46692c1]
+- Updated dependencies [440bed6]
+- Updated dependencies [c572fe2]
+- Updated dependencies [3ca71b6]
+- Updated dependencies [b53b949]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [194a42d]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [da989bb]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [018b077]
+- Updated dependencies [0fea05f]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [26aa999]
+- Updated dependencies [874a38d]
+- Updated dependencies [cb3bb93]
+- Updated dependencies [ad14957]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [87cd458]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [1bb1da1]
+- Updated dependencies [5081090]
+- Updated dependencies [5081090]
+- Updated dependencies [c63028e]
+- Updated dependencies [615cba8]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [3b5475a]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [b62260c]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [8558668]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [8532783]
+- Updated dependencies [eb20c33]
+- Updated dependencies [9432bac]
+- Updated dependencies [6373952]
+- Updated dependencies [3caae97]
+- Updated dependencies [3f69471]
+- Updated dependencies [87e902d]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [777eed2]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [5677add]
+- Updated dependencies [8d8f965]
+- Updated dependencies [147a0d1]
+- Updated dependencies [21914c3]
+- Updated dependencies [1959aac]
+- Updated dependencies [ed03834]
+- Updated dependencies [e1deaef]
+- Updated dependencies [117817e]
+- Updated dependencies [4663801]
+- Updated dependencies [d294951]
+- Updated dependencies [6a6a4d3]
+- Updated dependencies [0cbfb7c]
+- Updated dependencies [7f2f081]
+- Updated dependencies [4267484]
+- Updated dependencies [1badd31]
+- Updated dependencies [58f5c90]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [4216796]
+- Updated dependencies [a22e67b]
+- Updated dependencies [5f37d36]
+- Updated dependencies [62ce45d]
+- Updated dependencies [c5b43b6]
+- Updated dependencies [6662e3f]
+- Updated dependencies [39e93ef]
+- Updated dependencies [0a29bec]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [8464380]
+- Updated dependencies [8c10776]
+- Updated dependencies [8024e12]
+- Updated dependencies [252a582]
+- Updated dependencies [abf8655]
+- Updated dependencies [f931e76]
+- Updated dependencies [1912af4]
+- Updated dependencies [a3d47c2]
+- Updated dependencies [21c8644]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [aa5bfdf]
+- Updated dependencies [d4aaeaf]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [c6139f2]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [87d0619]
+- Updated dependencies [917b1a0]
+- Updated dependencies [d9d7edd]
+- Updated dependencies [78c13bd]
+- Updated dependencies [9543e9c]
+- Updated dependencies [4e0838d]
+- Updated dependencies [d45d0e9]
+- Updated dependencies [cb9841a]
+- Updated dependencies [60f9baf]
+- Updated dependencies [f5ef054]
+- Updated dependencies [584e737]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [01d5034]
+- Updated dependencies [f24574a]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [5d3018d]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [3d231ba]
+- Updated dependencies [301eec6]
+- Updated dependencies [572ecfb]
+- Updated dependencies [5547ad4]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [24e064f]
+- Updated dependencies [0f05907]
+- Updated dependencies [47d569e]
+- Updated dependencies [2de9c03]
+- Updated dependencies [5b68524]
+- Updated dependencies [5e725b8]
+- Updated dependencies [086fa46]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [28e294f]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [c980d11]
+- Updated dependencies [0ecac96]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [3b28905]
+- Updated dependencies [1baf976]
+- Updated dependencies [222293f]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [daafae6]
+- Updated dependencies [650933e]
+- Updated dependencies [7cb33cf]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [cac0be8]
+- Updated dependencies [1f3ac4f]
+- Updated dependencies [57994c3]
+- Updated dependencies [70d4c06]
+- Updated dependencies [989aa48]
+- Updated dependencies [56147a8]
+- Updated dependencies [23e689d]
+- Updated dependencies [a869ea6]
+- Updated dependencies [7b64a3d]
+- Updated dependencies [9fcea20]
+- Updated dependencies [8226755]
+- Updated dependencies [cdc42eb]
+- Updated dependencies [7ffc578]
+- Updated dependencies [bc0538a]
+- Updated dependencies [f606ba2]
+- Updated dependencies [d176b0a]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c263588]
+- Updated dependencies [ee0e115]
+- Updated dependencies [c2bb302]
+- Updated dependencies [e67ac4b]
+- Updated dependencies [7c6b7f4]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [7dc7d22]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [954bf72]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [0a052e6]
+- Updated dependencies [30c33e3]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [cad343e]
+- Updated dependencies [cbe7712]
+- Updated dependencies [cd86e41]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [c03077e]
+- Updated dependencies [3bc407d]
+- Updated dependencies [395ca21]
+- Updated dependencies [76560a1]
+- Updated dependencies [9bb9370]
+- Updated dependencies [9e0945c]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [14aff67]
+- Updated dependencies [7428da0]
+- Updated dependencies [069fd40]
+- Updated dependencies [6ee483c]
+- Updated dependencies [b55be42]
+- Updated dependencies [abb6df0]
+- Updated dependencies [941c78a]
+- Updated dependencies [8776119]
+- Updated dependencies [f7a5ebe]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9d4fb3c]
+- Updated dependencies [c5cf546]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [cf07168]
+- Updated dependencies [f846cc2]
+- Updated dependencies [34b740f]
+- Updated dependencies [30ce56e]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [ae4dfaf]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2e15620]
+- Updated dependencies [0cb45e9]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [605aa01]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [6e18016]
+- Updated dependencies [d050a8f]
+- Updated dependencies [9e797a8]
+- Updated dependencies [b25d98a]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [6e43b7b]
+- Updated dependencies [6dede7a]
+- Updated dependencies [727091c]
+- Updated dependencies [077b75f]
+- Updated dependencies [62f959d]
+- Updated dependencies [d6bd98a]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [45e6001]
+- Updated dependencies [f3174ef]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [d702b18]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [9f024d8]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [5a9a80b]
+- Updated dependencies [1489952]
+- Updated dependencies [8eccf51]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [58a2faa]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [cbfa5e4]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [9822b05]
+- Updated dependencies [889bf12]
+- Updated dependencies [7a8733f]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [d79dc48]
+- Updated dependencies [1173017]
+- Updated dependencies [51ad8e4]
+- Updated dependencies [ec749fb]
+- Updated dependencies [ec749fb]
+- Updated dependencies [c4526a7]
+- Updated dependencies [fa26308]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [01fafde]
+- Updated dependencies [41c7405]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [6868514]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [26501ae]
+- Updated dependencies [9112bcd]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [94e60c0]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [1827571]
+- Updated dependencies [adb7910]
+- Updated dependencies [f573976]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [45bec43]
+- Updated dependencies [33a45cc]
+- Updated dependencies [964a237]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [325a92e]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+- Updated dependencies [cdf3777]
+  - @objectstack/core@18.0.0
+  - @objectstack/metadata-protocol@18.0.0
+  - @objectstack/objectql@18.0.0
+  - @objectstack/spec@18.0.0
+  - @objectstack/metadata-core@18.0.0
+  - @objectstack/runtime@18.0.0
+  - @objectstack/types@18.0.0
+
 ## 18.0.0-next.5
 
 ### Patch Changes

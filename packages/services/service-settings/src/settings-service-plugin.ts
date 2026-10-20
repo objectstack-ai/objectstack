@@ -46,6 +46,8 @@ import {
   smsTestActionHandler,
   storageTestActionHandler,
   aiTestActionHandler,
+  aiTestEmbedderActionHandler,
+  knowledgeTestActionHandler,
 } from './manifests/index.js';
 import { settingsBuiltinTranslations } from './translations/index.js';
 
@@ -79,8 +81,12 @@ export interface SettingsServicePluginOptions {
   env?: Record<string, string | undefined>;
   /**
    * Action handlers to register at boot, keyed by namespace and action
-   * id. The bundled `mail.test` handler is registered automatically
-   * unless this object is provided.
+   * id. When omitted, the bundled handler of every `action_button` the
+   * builtin manifests declare is registered (`mail.test`, `sms.test`,
+   * `storage.test`, `ai.test`, `ai.test_embedder`, `knowledge.test`;
+   * `reset` is served by the service for every namespace). Providing this
+   * object replaces that whole default map. A plugin may still replace any
+   * one handler later with `SettingsService.registerAction`.
    */
   actionHandlers?: Record<string, Record<string, import('./settings-service.types.js').SettingsActionHandler>>;
 }
@@ -121,11 +127,16 @@ export class SettingsServicePlugin implements Plugin {
     this.opts = {
       ...opts,
       manifests: opts.manifests ?? builtinSettingsManifests,
+      // One entry per `action_button` a builtin manifest declares against the
+      // settings action route — a declared button with no entry here answers
+      // "No handler registered" (#24769). `settings-default-action-handlers.pin.test.ts`
+      // enumerates the manifests and holds this map to them.
       actionHandlers: opts.actionHandlers ?? {
         mail: { test: mailTestActionHandler },
         sms: { test: smsTestActionHandler },
         storage: { test: storageTestActionHandler },
-        ai: { test: aiTestActionHandler },
+        ai: { test: aiTestActionHandler, test_embedder: aiTestEmbedderActionHandler },
+        knowledge: { test: knowledgeTestActionHandler },
       },
     };
   }
@@ -564,9 +575,10 @@ export const PLATFORM_SETTING_AUDIT_OBJECT = 'sys_platform_setting_audit';
  * `sys_setting_audit` — the split `sys_setting` / `sys_platform_setting` makes
  * for the values themselves.
  *
- * An 18.0 install wrote global-rung rows into `sys_setting_audit`; they stay
- * there until the upgrade ceremony moves them, so a reader of the global rung's
- * history reads both tables.
+ * An 18.0 install wrote global-rung rows into `sys_setting_audit`; the upgrade
+ * ceremony moves them to the sibling before the database is certified, so the
+ * global rung's history is the sibling alone, and `sys_setting_audit` declares
+ * no `global` scope.
  */
 export function settingAuditObjectFor(scope: string): string {
   return scope === 'global' ? PLATFORM_SETTING_AUDIT_OBJECT : SETTING_AUDIT_OBJECT;

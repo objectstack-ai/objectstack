@@ -17,10 +17,11 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *     webhooks })` / `defineWebhook()`), written by the 18.0 boot seeder
  *     `bootstrapDeclaredWebhooks`. That seeder is retired: a declared webhook
  *     is read from the registry (`declared-webhooks.ts`) and no boot writes
- *     such a row any more. The rows an 18.0 install left stay until the
- *     ownership ceremony deletes them; meanwhile a pristine one is ignored in
- *     favour of its declaration, and one an administrator edited (`customized:
- *     true`) answers as itself.
+ *     such a row any more. The ownership ceremony settles the copies an 18.0
+ *     install left under a declared name before the database is certified;
+ *     what stays is a row whose name no package declares, which dispatches as
+ *     itself. A row holding a declared name answers as itself, and the
+ *     declaration is withheld (regime C).
  *
  * One row per `name`. This plugin's {@link AutoEnqueuer} loads active rows,
  * and the declared webhooks, on boot + on `sys_webhook:changed` events, and turns matching `data.record.*`
@@ -271,8 +272,9 @@ export const SysWebhook = ObjectSchema.create({
     // engine strips them from non-system payloads (forge/clear-proof), while
     // the provenance stamp hook writes with isSystem (as the retired 18.0 seeder
     // did). Deliberately NOT a write gate: webhooks are a first-class admin
-    // authoring/tuning surface — admins may edit or deactivate a package row,
-    // which then answers as itself rather than for its declaration.
+    // authoring/tuning surface — admins may edit or deactivate a package row;
+    // `customized` records that for the ownership ceremony, which settles an
+    // edited copy of a declaration as a clone rather than deleting it.
     managed_by: Field.select(
       ['platform', 'package', 'admin'],
       {

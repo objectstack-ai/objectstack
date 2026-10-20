@@ -1,5 +1,474 @@
 # @objectstack/formula
 
+## 18.0.0
+
+### Minor Changes
+
+- ca426cb: **Shipped in 18.0.0-next.5**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  feat(formula): `current_user.hasCapability(name)` — a page predicate can ask whether the viewer holds a system capability, from the same list the action gate reads
+  
+  Clause-②: yes (widening)
+  
+  - **The predicate.** The CEL standard library registers `hasCapability` beside `can`, receiver-only, so the one spelling is `current_user.hasCapability('<name>')` (the `user` / `ctx.user` / `os.user` aliases work too). It answers `true` when the name is in the acting subject's held system capabilities and `false` when it is not. A name no action declares is just a string: there is no registry lookup.
+  - **The data.** `EvalContext` gains `systemPermissions` (type `EvalSystemPermissions`, a list of capability names): the `systemPermissions` array of the published `/auth/me/permissions` response, unchanged — the list an action's `requiredPermissions` is checked against (ADR-0066 D4). `PermissionBinding` gains the same field, optional. Pass it beside `permissions`:
+  
+    ```ts
+    celEngine.evaluate(expr, { user, permissions: toEvalPermissions(me.objects), systemPermissions: me.systemPermissions });
+    ```
+  
+  - **Loud, like `can`.** With no `systemPermissions` on the context the call fails (`ok: false`, `kind: 'runtime'`) rather than answering; an empty list is a real answer and evaluates to `false`. A non-list, a non-string or empty name, or a receiver that is not the acting subject fails the same way. A bare `hasCapability(name)` does not resolve.
+  - **The authoring gate.** The visibility-predicate rule's function-existence check reads the evaluation environment, so a page `visibleWhen` calling `current_user.hasCapability(…)` now passes `os validate`, `os lint` and `os build`, where before it was refused as an unknown function (`visibility-predicate-unknown-function`). An invented sibling (`hasCapabilities`) is still refused.
+  - **`can` points at it.** `current_user.can(object, verb)` with a verb outside the object-permission vocabulary still fails, and its message now names `current_user.hasCapability('<name>')` for a capability question.
+  - **Docs.** The page component `visibleWhen` describe names `current_user.hasCapability('<name>')` as the way to gate a component on a capability: `visibleWhen` hides, `requiredPermissions` refuses.
+  - **Hosts.** A host that evaluates page predicates supplies the list for the predicate to answer; one that does not makes it fail, and a failing page `visibleWhen` renders the component.
+- 2b61f2d: A flow TEXT slot — a `notify` node's `title` and `message`, a `screen` node's `title` and `description`, a refusing `end` node's `message` — reads ADR-0032 §3's `{{ }}` template holes, rendered by the formula template engine over the flow's variables. A single-brace `{…}` token in one is refused at `objectstack validate`, at `registerFlow` and by the node's contract, with the `{{ }}` spelling of each token.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered flow-text-slot-single-brace-refused -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** ADR-0032 Decision 3 fixes one template delimiter: "One delimiter, `{{ }}`; single `{ }` deleted." The notify pair was already typed as `template` slots, while the executor read the single brace, so a flow carried two template dialects and an author who met both mixed them.
+  
+  **What changes.**
+  
+  - **The renderer.** The text slots render through one renderer inside `@objectstack/service-automation` (package-internal; the package's public exports do not change): `{{ path }}` and `{{ path | formatter[:arg] }}` holes, every other character literal. A hole reads a flow variable by name (`{{ record.name }}`, a node output `{{ lookup.result }}`, an index `{{ rows.0.subject }}` or `{{ rows[0].subject }}`, and a `$`-named one: `{{ $error.message }}`). `null` and an absent path render nothing, an object or array renders as JSON, a `Date` as its ISO text; the ADR-0032 formatters make the rest explicit (`{{ amount | currency }}`, `{{ due | date:long }}`). A hole holds no logic.
+  - **The refusal.** One judge in `@objectstack/spec/automation` (`textSlotTemplateRefusal`, `flowNodeTextSlotSources`, `FLOW_NODE_TEXT_SLOTS`, `TEXT_SLOT_TEMPLATE_REFUSAL`): `NotifyConfigSchema`, `ScreenConfigSchema` and `EndConfigSchema` refuse a single-brace token at the slot's key; `registerFlow` and `objectstack validate` (`expression-invalid`, `error`) refuse it with the same words and also compile every slot's holes, so `{{ a + b }}` or an unknown formatter is refused before a run. A stored flow carrying one is skipped at boot with a warn naming it. Past the doors, a hole that does not compile fails the node with a guard refusal, which a `fault` edge does not route.
+  - **`@objectstack/formula`.** A template hole's path may contain `$` (`{{ $error.message }}`): a widening of the hole grammar, so a host scope's `$`-named variable has a template spelling. An unbound one renders nothing, like any unknown path.
+  - **`flow-double-brace-interpolation`** no longer flags `{{ }}` on the text slots, and its hint names them as the only `{{ }}` positions; a bare `$ref.x` outside the holes of a text slot is flagged with the hole spelling.
+  - **Unchanged:** the value slots are CEL's.
+  
+  **Not converted.** No ADR-0087 D2 conversion rewrites `{x}` to `{{ x }}`. The two renderers were run over the same variables: a path renders the same text for a string, a number, a boolean, `null`, an absent key or variable, an ISO date string, an object or an array, but a `Date` value rendered JSON-quoted under the 17.x interpolator (`"2026-10-08T09:30:00.000Z"`, quotes included) and as its ISO text now, and a screen or `end` text that was one token holding an object, an array or a `Date` rendered `String(value)` (`[object Object]`). So the rewrite is the author's to check; the D3 record is the semantic entry `flow-text-slot-single-brace-refused`.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `title: 'Deal won: {record.name}'` | `title: 'Deal won: {{ record.name }}'` |
+  | `message: 'Failed: {$error.message}'` | `message: 'Failed: {{ $error.message }}'` |
+  | `message: 'Total {amount * 2}'`, `'{round(x)}'` | compute it first — `assignments: { v: { dialect: 'cel', source: 'amount * 2' } }` — then `'Total {{ v }}'` (a number format is a formatter: `{{ v \| number:2 }}`) |
+  | `message: 'Due {TODAY() + 7}'`, `'By {$User.Id}'` | compute it first with an `assignment` node's CEL value envelope — `assignments: { due: { dialect: 'cel', source: 'isoDate(daysFromNow(7))' }, by: { dialect: 'cel', source: 'current_user.id' } }` — then `'Due {{ due }}'`, `'By {{ by }}'` |
+  
+  **The one-line fix: double the braces of every path token in a text slot (`{x}` → `{{ x }}`), and compute anything else into a variable first.**
+  
+  **Who is affected, measured.** This repository's in-tree text-slot sites — `examples/app-showcase` (24 strings, 30 tokens) and `examples/app-todo` (5 strings, 7 tokens), all of them paths — are rewritten in this change, with the docs pages that taught the single brace (`content/docs/automation/flows.mdx`, `content/docs/getting-started/common-patterns.mdx`). Other repositories and deployed metadata were not measured here.
+- 345d3f3: feat(formula): `isoDate(t)` and `isoDatetime(t)`, the string form of a CEL timestamp
+  
+  Clause-②: yes (widening)
+  
+  - **What is new.** Two CEL stdlib functions that turn a timestamp into ISO text on the UTC calendar. `isoDate(t)` returns `YYYY-MM-DD` and `isoDatetime(t)` returns `YYYY-MM-DDTHH:mm:ss.sssZ`, always with three-digit milliseconds and a `Z`. Both are in `CEL_STDLIB_FUNCTIONS`, so `introspectScope` advertises them and the build check accepts them.
+  - **The bytes the flow template dialect wrote.** `isoDate(today())` is the text `{TODAY()}` wrote, `isoDatetime(now())` is the text `{NOW()}` wrote, and `isoDate(daysFromNow(n))` / `isoDate(daysAgo(n))` are the text `{TODAY() + n}` / `{TODAY() - n}` wrote, in a flow value envelope. This holds at month, year, leap-day and DST-transition instants, whatever the host's zone.
+  - **`isoDate(today())` is the reference-timezone day.** `today()` is that day at UTC midnight, and `isoDate` reads the UTC calendar. Under a non-UTC reference zone, `isoDate(now())` can be a different day: it is the UTC day of the instant.
+  - **Only a timestamp is accepted.** Text, a number or `null` is refused, at build when the argument's type is known and at run otherwise. It is never coerced or rendered. For ISO text, parse it first: `isoDate(date(s))`. An invalid timestamp, or one outside 0001-01-01 to 9999-12-31, is refused at run.
+  - **`string(timestamp)` is still refused.** CEL defines that conversion as RFC 3339 text that drops a zero fraction, which is not the template's `.000Z`, so each shape has one spelling.
+  - **No write path changes.** An envelope that returns a timestamp (`today()`, `now()`, `daysFromNow(n)`, `addDays(…)`) still evaluates to a `Date` and writes what it wrote before.
+- 9af0005: The shared build validator (`@objectstack/lint`'s expression rule over `@objectstack/formula`) judges `record.<block>.<leaf>` against an object's declared read attachments (`ObjectSchema.attachedOnRead`)
+  
+  - **`@objectstack/lint`.** The field index the expression rule builds now adds each block an object declares under `attachedOnRead` to the names `record.<x>` resolves to, and hands the shared validator the block's declared leaves. A predicate such as `record.viewer.can_act` on an object that declares the `viewer` block is accepted where it was refused as an unknown field.
+  - **`@objectstack/formula`.** `ExprSchemaHint` gains an optional `attachedOnRead` (block name → declared leaf keys). When a `record.` or `previous.` reference names a declared block, its next segment must be a leaf the block declares. Anything else is refused with the existing `unknown-field` code: `field` is the dotted path as written (`viewer.can_actt`), `suggestion` the nearest declared leaf (`viewer.can_act`), and the new optional `block` and `leaves` params carry the leaves the block declares, which the message names. No new refusal code.
+  - **`@objectstack/metadata-core`.** The ADR-0106 field-level-security masker classifies the new top-level key as passed through unchanged (`OBJECT_REFERENCE_POSITIONS.attachedOnRead`): a block name and its leaf keys never name a field, so no caller's served object definition loses or gains anything.
+  - **Unchanged.** An object that declares no block keeps every verdict it had, and a second segment off any other field is not judged. Index access, a method call on a block and a third segment stay unjudged.
+- 94379f4: fix(formula)!: the unknown-field check judges every spelling of a `record` / `previous` member, not only the dot, so `os build` and the object save door refuse `record['typo']`, `previous['typo']`, `record.?typo` and `record[?'typo']` (#22428)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A refusal at `os build` and at the object save door of an expression that names an undeclared field in a non-dot member spelling: no authorable key, spelling, export or stored shape moves, and no stored row is read, rewritten or converted. A stored object whose expression is refused keeps loading until it is next saved, and the repair is the author's own (declare the field or fix the typo), which no ledger entry can derive. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this verdict and this diff adds none (not registered / already-registered); and no exported TypeScript declaration changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING**: an accept-set change, in both directions, of the `os build`, `os validate` and `os lint` verdicts and of the object save door, shipped as `minor` under the launch-window convention for accept-set narrowings. It narrows: an expression that names an undeclared field of its object in a non-dot member spelling (`record['FIELD']`, `record["FIELD"]`, `record.?FIELD`, `record[?'FIELD']`, or any of those on `previous`), or an undeclared leaf of a declared read attachment in such a spelling, is now refused where it was accepted. It widens: three shapes the dot-only regex misread as a member of the root, and refused as unknown fields, are now accepted, because none of them names a member. They are text inside a string literal (`record.name == 'record.typo'`), a root name after another root (`vars.record.x`), and a method call on the root itself (`record.size()`). No refusal code is added.
+  
+  `validateExpression`'s field-existence pass judges each member an expression reads on `record` or `previous` against the object's fields, and refuses an undeclared one with the `unknown-field` code. It found those members with a regex over the dot spelling, so it judged `record.typo` and `has(record.typo)` and nothing else. `record['typo']`, `record["typo"]`, `previous['typo']`, `record.?typo` and `record[?'typo']` name the same column, and they reached the evaluator with no verdict at every slot the pass judges, among them a select option's `visibleWhen`, a field's `requiredWhen` and a validation rule's condition. There the expression faults on a key the record never carries, or reads a value that never exists.
+  
+  The pass now reads members through the same AST member reader the relationship-traversal analysis is built on, so every spelling gets the dot spelling's verdict, did-you-mean included:
+  
+  - `os build`, `os validate` and `os lint` refuse an expression that names an undeclared field of its object as `record['FIELD']`, `record["FIELD"]`, `record.?FIELD`, `record[?'FIELD']` or any of those on `previous`, at `error`, with the message they already give for `record.FIELD`.
+  - The object save door runs the same pass, so an object write in publish mode that carries such an expression is now refused with an `expression-invalid` issue located at the slot, the build's own finding.
+  - A declared read attachment's leaf (`ObjectSchema.attachedOnRead`) is judged in the same spellings: `record.viewer['can_actt']` and `record.viewer.?can_actt` are refused like `record.viewer.can_actt`. An earlier entry in this release says index access on a read attachment stays unjudged; that describes the check before this change.
+  
+  **Remedy.** Declare the field on the object, or fix the typo to the field the message suggests. The spelling itself is not the defect: `record['status']`, `record.?status` and `record[?'status']` on a declared `status` are accepted, as before.
+  
+  **Unchanged.**
+  
+  - A computed key (`record[record.kind]`, `record[someVar]`) names no member before evaluation, so it is not judged.
+  - A method call on a member (`record.name.startsWith('A')`) still judges the member (`name`).
+  - Stored rows are not migrated or refused on read; an object stored before this change keeps loading until it is next saved, and that save is judged. Drafts are not gated.
+  - Measured before crossing: the stacks this repository ships give the same expression findings before and after the change. That covers `examples/app-todo`, `examples/app-crm`, both `examples/app-multi-package` sub-stacks, the objects, actions, flows, views and pages of `examples/app-showcase`, the 51 objects `@objectstack/platform-objects` exports, and `plugin-approvals`' `sys_approval_request`, whose eight action predicates read the leaves of its declared `viewer` read attachment and pass. No in-repo producer writes a non-dot spelling of an undeclared field.
+  - No public export or signature moves; only the doc comments of `ExprSchemaHint.fields` and `ExprSchemaHint.attachedOnRead` change. `analyzeRelationshipTraversals` answers exactly what it answered before: measured identical, set order included, on 4,528 analyses of the 2,264 `record` / `previous` expressions in this repository's TypeScript sources.
+- e865300: A formula field can declare a currency result: `returnType: 'currency'`, with its currency in its own `currencyConfig`
+  
+  Clause-②: yes (widening)
+  
+  - **What is new in `@objectstack/spec`.** `FieldSchema.returnType` accepts `'currency'` beside `'number'`, `'text'`, `'boolean'` and `'date'`. A `currency` result is an amount of money. Its value is a bare number, as a currency field's is. Its currency is the formula field's own `currencyConfig`, the same `CurrencyConfigSchema` a currency field carries, with the same defaults and the same refusals: no `currencyConfig` means dynamic mode (the tenant default currency), and `{ currencyMode: 'fixed', defaultCurrency: 'USD' }` fixes it. Nothing is read at display time from the fields the expression references: the currency is a declaration on the formula.
+  - **Readers.** The filter doors judge a formula returning `currency` as the currency field it reads like: a text operator on it is refused (`INVALID_FILTER`), and the number door judges its comparands. A formula is still not title-eligible unless it returns `text`, and is still refused for `sum` / `avg` / `min` / `max` (it has no stored column).
+  - **Designer forms.** The field designer and the object designer's field grid both offer Currency as a return type. The field designer shows its Currency Config row for a formula whose return type is Currency, as it does for a currency field.
+  - **What is new in `@objectstack/formula`.** `inferFormulaReturn(expression, fields)` returns the declaration authoring stamps onto a formula field, judged over the host object's declared field map: `{ returnType: 'currency' }` when the expression is provably an amount of money, plus `currencyConfig: { currencyMode: 'fixed', defaultCurrency }` when its source amounts are in one fixed currency. "Provably money" is unit checking over the expression: amounts in one currency added, subtracted, scaled by a number or a percent, divided by a number, rounded, or picked by `min` / `max` / `coalesce` / a ternary. Two different currencies, an amount multiplied by an amount, or an amount plus a plain quantity are not money. For everything it cannot prove to be money it answers exactly what `inferExpressionType` answers, so a numeric formula stays `number`. Its types `FormulaReturnDeclaration` and `FormulaSourceField` are exported with it. `inferExpressionType` is unchanged.
+  - **`@objectstack/platform-objects`.** The designer help text for the return type and the currency config rows names the currency result, in all four locales.
+  - **Nothing to migrate.** Every value accepted before is accepted now. To declare a formula over money as money, declare `returnType: 'currency'` and copy the source currency field's `currencyConfig` onto the formula, or run `inferFormulaReturn` and write what it returns.
+- d537a31: feat(formula)!: `validateExpression` judges relationship traversal in the `value` role when the caller opts in, with formula wording
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, stored shape or authorable spelling is added, removed or renamed. `validateExpression('value', …)` with `traversalHydration: true` now reports the two traversal conflicts it already reported for `predicate`; a caller that does not pass the flag sees no change. Nothing stored changes, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  - `validateExpression('value', source, { fieldTypes, traversalHydration: true, … })` now refuses a second hop through a reference (`traversal-multi-hop`) and a reference read both through and as a plain value (`traversal-bare-and-traversed`). The messages say the formula reads null, and the repair for an empty reference is the optional read `record.LOOKUP.?FIELD.orValue('…')`. Before, the `value` role ignored the flag.
+  - `findTraversalConflicts` takes an optional fourth argument, `subject` (`'predicate'`, the default, or `'formula'`), which selects that wording. The `TraversalSubject` type is exported.
+  
+  Without the flag, every role behaves as before.
+
+### Patch Changes
+
+- 4840720: perf(formula): a CEL evaluation reuses one environment instead of building the stdlib on every call, and compiles reuse the canonical parse environment
+  
+  Clause-②: no (an internal cache: no accept set moves, no evaluation result moves, no exported signature changes; owes the seat's review of record before the queue)
+  
+  - **`celEngine.evaluate` reuses one environment.** It used to build a new cel-js `Environment` and register the whole stdlib into it on every call, which objectql's formula fields reach once per row per field. The stdlib now reads `now()`, the timezone and the permission binding of `current_user.can` / `current_user.hasCapability` from a per-evaluation slot. `evaluate` saves the slot, sets it and restores it in a `finally`, so a nested or a thrown evaluation leaves the outer binding as it was. Evaluations also run a bounded per-source cache of parsed programs, keyed on the source after its row-dependent rewrites.
+  - **`celEngine.compile` reuses the canonical parse environment** that `parseCelToAst` already shares.
+  - Results, error kinds and error messages are unchanged. `registerStdLib`, `registerPermissionPredicate` and `registerCapabilityPredicate` keep their signatures and their behaviour.
+  - Measured on one source evaluated 20,000 times: about 142 µs per evaluation before, about 3 µs after. A 25-row read of an object with three formula fields built 78 environments before and builds none after.
+- Updated dependencies [ffba02e]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [1b40780]
+- Updated dependencies [ca426cb]
+- Updated dependencies [4ad3ce5]
+- Updated dependencies [8016a9d]
+- Updated dependencies [df9d07e]
+- Updated dependencies [8eac321]
+- Updated dependencies [a5a781b]
+- Updated dependencies [191e043]
+- Updated dependencies [b12e16a]
+- Updated dependencies [fbafb85]
+- Updated dependencies [35450f0]
+- Updated dependencies [1e8b628]
+- Updated dependencies [12d1476]
+- Updated dependencies [14ccb1d]
+- Updated dependencies [c0803b0]
+- Updated dependencies [4bc3bec]
+- Updated dependencies [1f949da]
+- Updated dependencies [ecb7b44]
+- Updated dependencies [41edf73]
+- Updated dependencies [1c1144f]
+- Updated dependencies [3983965]
+- Updated dependencies [0c910d5]
+- Updated dependencies [317cddd]
+- Updated dependencies [fec87e7]
+- Updated dependencies [dac99c2]
+- Updated dependencies [0d3ea29]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [66949b7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [f9b4217]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [7958bdf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [b15f8a1]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [194a42d]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [e5899a6]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [777eed2]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [4216796]
+- Updated dependencies [a22e67b]
+- Updated dependencies [5f37d36]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [1912af4]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [60f9baf]
+- Updated dependencies [584e737]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [301eec6]
+- Updated dependencies [572ecfb]
+- Updated dependencies [5547ad4]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [0f05907]
+- Updated dependencies [5e725b8]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [f606ba2]
+- Updated dependencies [d176b0a]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [ee0e115]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [0a052e6]
+- Updated dependencies [462dff3]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [c03077e]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [45e6001]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [9f024d8]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [fa26308]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [01fafde]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [26501ae]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [94e60c0]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [adb7910]
+- Updated dependencies [f573976]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [325a92e]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+  - @objectstack/spec@18.0.0
+
 ## 18.0.0-next.5
 
 ### Patch Changes

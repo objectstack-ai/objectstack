@@ -327,6 +327,8 @@ import { registerUiEndpoints, type UiRouteHost } from './ui-routes.js';
 import { registerFormEndpoints, type FormRouteHost } from './form-routes.js';
 // [#23050 slice 12] The CRUD routes' body moved to its own module — see its header.
 import { registerCrudEndpoints, type CrudRouteHost } from './crud-routes.js';
+// [#24715] A `/data` write's NOT NULL refusal, named by the field's label.
+import { labelNotNullRefusal as labelNotNullRefusalAnswer } from './not-null-refusal-label.js';
 // [#23050 slice 13a] The `/meta` type list, whole-store maintenance and per-type list
 // groups moved to their own module — see its header. That module is also the home of the
 // meta doors' request envelope `TransportScopedMetaRequest` and of `MetaRouteScope`.
@@ -2529,6 +2531,71 @@ export class RestServer {
     }
 
     /**
+     * The by-name OBJECT read the `/data` doors make, or `undefined` for a
+     * protocol with no by-name read. Answers the protocol's `{ item, … }`
+     * envelope. Same env-scoped request shape the list read sends
+     * (`metaListSource`).
+     *
+     * [#24535] On the protocol's EXECUTION face where it has one: neither
+     * reader serves a byte of the item (the exposure gate reads `enable`, the
+     * NOT NULL relabel a field's `label` and `storage`), and the served face's
+     * decoration was a full diagnostic `safeParse` of the object's definition on
+     * every `/data` request. Same sources, overlay cache and governance either
+     * way; a protocol without it is asked `getMetaItem`.
+     */
+    private objectItemReader(
+        p: RestProtocol,
+        environmentId: string | undefined,
+    ): ((name: string) => Promise<unknown>) | undefined {
+        const byName = typeof p.getMetaItemForExecution === 'function'
+            ? p.getMetaItemForExecution
+            : typeof p.getMetaItem === 'function' ? p.getMetaItem : undefined;
+        if (!byName) return undefined;
+        return (name) => {
+            const itemRequest: TransportScopedMetaRequest<GetMetaItemRequest> = {
+                type: 'object',
+                name,
+                ...(environmentId ? { environmentId } : {}),
+            };
+            return byName.call(p, itemRequest);
+        };
+    }
+
+    /**
+     * [#24715] Name a `/data` write's NOT NULL refusal by the field's label, in
+     * the caller's locale (`./not-null-refusal-label.ts` carries the rule, the
+     * localization and every case it leaves alone).
+     *
+     * Every other answer is handed back before anything is read. For a NOT NULL
+     * refusal this door resolves the protocol again (the handler's own was
+     * scoped to its `try`), reads the object by name ({@link objectItemReader},
+     * the read the exposure gate makes on every `/data` request) and resolves
+     * the i18n service. `context` is the execution context the handler handed
+     * the write, so its `locale` is the one the engine's validator was given;
+     * it is absent when the handler threw before resolving it.
+     */
+    private async labelNotNullRefusal(
+        answer: { status: number; body: Record<string, unknown> },
+        req: any,
+        environmentId: string | undefined,
+        context: { locale?: unknown } | undefined,
+    ): Promise<{ status: number; body: Record<string, unknown> }> {
+        const locale = context?.locale;
+        return labelNotNullRefusalAnswer(answer, {
+            object: typeof req?.params?.object === 'string' ? req.params.object : undefined,
+            readObject: async (name) => {
+                const read = this.objectItemReader(await this.resolveProtocol(environmentId, req), environmentId);
+                const item = ((read ? await read(name) : undefined) as { item?: unknown } | undefined)?.item;
+                return item !== null && typeof item === 'object' && (item as { name?: unknown }).name === name
+                    ? item
+                    : undefined;
+            },
+            locale: typeof locale === 'string' && locale.length > 0 ? locale : undefined,
+            resolveI18nService: () => this.resolveI18nService(environmentId, req),
+        });
+    }
+
+    /**
      * Enforce object-level API exposure (ObjectSchema `enable.apiEnabled` /
      * `enable.apiMethods`) on the REST data surface — the *external* API boundary
      * only. Internal callers (hooks, flows, raw objectql) are unaffected, which is
@@ -2580,31 +2647,11 @@ export class RestServer {
         if (!objectName) return false;
         // [#24031] The ONE object this gate judges, read by name — never the
         // whole object list, whose decoration diagnosed every object on every
-        // request. Same env-scoped request shape the list read sends
-        // (`metaListSource`); a protocol with no by-name read is asked the list.
-        // [#24535] …and on the protocol's EXECUTION face where it has one: this
-        // gate reads `enable` and serves no byte of the item, and the served
-        // face's decoration was a full diagnostic `safeParse` of the object's
-        // definition on every `/data` request. Same sources, overlay cache and
-        // governance either way; a protocol without it is asked `getMetaItem`.
+        // request. A protocol with no by-name read is asked the list.
         const listSource = this.metaListSource(p, environmentId);
-        const byName = typeof p.getMetaItemForExecution === 'function'
-            ? p.getMetaItemForExecution
-            : typeof p.getMetaItem === 'function' ? p.getMetaItem : undefined;
+        const getObjectItem = this.objectItemReader(p, environmentId);
         const obj = await metaReadGate.loadObjectItem(
-            byName
-                ? {
-                    ...listSource,
-                    getObjectItem: (name) => {
-                        const itemRequest: TransportScopedMetaRequest<GetMetaItemRequest> = {
-                            type: 'object',
-                            name,
-                            ...(environmentId ? { environmentId } : {}),
-                        };
-                        return byName.call(p, itemRequest);
-                    },
-                }
-                : listSource,
+            getObjectItem ? { ...listSource, getObjectItem } : listSource,
             objectName,
         );
         // [#3770] Unknown object → no declared exposure policy to enforce here;
@@ -5448,6 +5495,7 @@ export class RestServer {
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
             enforceApiAccess: (...a) => this.enforceApiAccess(...a),
+            labelNotNullRefusal: (...a) => this.labelNotNullRefusal(...a),
         };
         registerCrudEndpoints.call(host, basePath);
     }

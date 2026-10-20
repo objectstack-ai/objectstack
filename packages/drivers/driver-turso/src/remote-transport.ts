@@ -981,7 +981,7 @@ export type JsonColumnResolver = (object: string, field: string) => JsonColumnFi
  *
  * The driver builds it, and this class never decides it. `TursoDriver` asks the
  * local face's own chokepoint, `SqlDriver.applyTenantScope`, for the predicate
- * and hands over what that compiles to: the NULL-organization arm, the `group`
+ * and hands over what that compiles to: the organization equality, the `group`
  * posture's membership set, and the no-tenant-context exit are all that
  * method's. This class is told WHICH rows, not WHY, as with the upsert `fence`
  * (#21185). Absent means the call carries no scope (no tenant context, or no
@@ -1038,6 +1038,16 @@ function isRemoteReadableIdsSemiJoin(value: unknown): value is RemoteReadableIds
  */
 export class RemoteTransport {
   private client: Client | null = null;
+  /**
+   * The tables this transport's schema doors created, and the ones they found
+   * already present (one not created here first), since construction — the
+   * remote face's answer to `IDataDriver.getSchemaSyncStats`, counted from the
+   * `sqlite_master` probe each door already makes, exactly as
+   * `SqlDriver.initObjects` counts from its `hasTable` probe. A table counts as
+   * created only once its DDL was applied.
+   */
+  private readonly tablesCreatedHere = new Set<string>();
+  private readonly tablesFoundExisting = new Set<string>();
 
   /**
    * Factory function for lazy (re)connection.
@@ -2084,9 +2094,11 @@ export class RemoteTransport {
       args: [tableName],
     });
     const exists = checkResult.rows.length > 0;
+    if (exists) this.noteFoundExisting(tableName);
 
     if (!exists) {
       await this.client!.execute(this.buildCreateTableSQL(tableName, objectDef));
+      this.tablesCreatedHere.add(tableName);
       // [#8413 · #17609] The table was created empty microseconds ago, so its
       // declared indexes cannot fail on existing data — no isolation needed,
       // and any error here is a real DDL fault that should surface.
@@ -2253,6 +2265,9 @@ export class RemoteTransport {
     if (ddlStatements.length > 0) {
       await this.client!.batch(ddlStatements, 'write');
     }
+    // The batch is one transaction: its CREATE TABLEs landed together, or none did.
+    for (const { object } of newSchemas) this.tablesCreatedHere.add(object);
+    for (const { object } of existingSchemas) this.noteFoundExisting(object);
 
     // Phase 4 [#8413 · #17609]: retrofit the existing tables' missing declared
     // indexes, outside the batch above for the blast-radius reason stated at
@@ -2264,6 +2279,21 @@ export class RemoteTransport {
   async dropTable(object: string): Promise<void> {
     await this.ensureConnected();
     await this.client!.execute(`DROP TABLE IF EXISTS "${object}"`);
+  }
+
+  /**
+   * Tables the schema doors created vs found since construction — the remote
+   * face's `IDataDriver.getSchemaSyncStats` (`TursoDriver` answers with it).
+   * `existing === 0 && created > 0` is the observation that the remote
+   * database was empty when this process reached it.
+   */
+  schemaSyncStats(): { created: number; existing: number } {
+    return { created: this.tablesCreatedHere.size, existing: this.tablesFoundExisting.size };
+  }
+
+  /** A table found present, unless this transport created it itself (a re-sync is not a find). */
+  private noteFoundExisting(table: string): void {
+    if (!this.tablesCreatedHere.has(table)) this.tablesFoundExisting.add(table);
   }
 
   // ===================================

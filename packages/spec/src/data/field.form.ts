@@ -337,7 +337,7 @@ export const fieldForm = defineForm({
       collapsible: true,
       collapsed: true,
       fields: [
-        { field: 'expression', widget: 'textarea', helpText: 'CEL expression to calculate this field (makes it read-only)' },
+        { field: 'expression', widget: 'textarea', helpText: 'CEL expression the field\'s value is computed from. On a formula field: computed on read, no stored column. On any other field: computed by the engine from the row each write stores, and stored, so a client-sent value never stands.' },
         // The five members are what FieldSchema declares — an explicit list, not
         // the derived enum, so this row cannot pick up a member the formula
         // return type does not have. `currency` joined with #22727; its currency

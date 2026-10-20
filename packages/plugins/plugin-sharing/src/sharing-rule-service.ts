@@ -41,7 +41,7 @@ import type { SharingEngine } from './sharing-service.js';
 import type { SharingService } from './sharing-service.js';
 import { normalizeAccessLevel, normalizeStoredAccessLevel } from './access-level.js';
 import { parseCriteria, isMatchAllCriteria, MATCH_ALL_CRITERIA_MESSAGE } from './rule-criteria.js';
-import { TeamGraphService } from './team-graph.js';
+import { TeamGraphService, teamHasMember } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
 import type { DeclaredSharingRule, DeclaredSharingRuleSource } from './declared-sharing-rules.js';
@@ -56,6 +56,9 @@ import type { DeclaredSharingRule, DeclaredSharingRuleSource } from './declared-
  * provoked it.
  */
 const SYSTEM_CTX: ExecutionContext = { isSystem: true, positions: [], permissions: [] };
+
+/** The organization object, whose registration tells a lean embedding from a deployment with organizations. */
+const ORGANIZATION_OBJECT = 'sys_organization';
 
 /**
  * [ADR-0131 D6 regime C] The `sys_metadata_activation.metadata_type` a declared
@@ -144,10 +147,54 @@ function rowFromRule(row: any): SharingRuleRow {
 }
 
 /**
+ * [ADR-0131 D2/D8] The one scope a declared rule is served in under `single`:
+ * the deployment. A typed marker, never an organization id and never NULL —
+ * "no organization" is not a state (D1), and no layer has a NULL arm (D8).
+ */
+const DEPLOYMENT_WIDE_SCOPE: unique symbol = Symbol('sharing-rule.deployment-wide');
+
+/** [ADR-0131 D2] Where a declared rule is served: the deployment, or one organization. */
+type DeclaredRuleScope = string | typeof DEPLOYMENT_WIDE_SCOPE;
+
+/**
+ * [ADR-0131 D2] A declared rule's projection that sweeps the deployment — the
+ * typed marker that replaced the organization-less (`organization_id: null`)
+ * projection, in the shape of the declared webhooks' `deploymentWide` (the
+ * epic's ruling A on the walled shape of a declared webhook, record
+ * 6278609968). It carries no `organization_id` at all. The marker itself is
+ * declared on the spec contract (`SharingRuleRow.deploymentWide`); this type
+ * narrows it to present.
+ */
+export interface DeploymentWideSharingRule extends SharingRuleRow {
+  readonly deploymentWide: true;
+}
+
+/**
+ * Does `rule` sweep the whole deployment? Only a declared rule's `single`
+ * projection does ({@link projectDeclaredRule}); a stored row is never one,
+ * because {@link rowFromRule} builds its fields one by one and the marker is
+ * not a column.
+ */
+export function isDeploymentWideSharingRule(rule: SharingRuleRow): rule is DeploymentWideSharingRule {
+  return (rule as Partial<DeploymentWideSharingRule>).deploymentWide === true && isDeclaredSharingRule(rule);
+}
+
+/**
  * [ADR-0131 D2] A DECLARED rule as the rule set serves it: the declaration
  * (read from the registry, {@link DeclaredSharingRuleSource}) projected into
- * the runtime row shape for ONE scope — `null` under `single`, one
- * organization under a wall. It is not a row: nothing is written for it.
+ * the runtime row shape for ONE scope. It is not a row: nothing is written for
+ * it.
+ *
+ * A declaration is deployment-wide under every posture — every organization
+ * runs the same code (D2). How it is SERVED follows the wall:
+ *
+ * - under `single`, ONE projection marked {@link DeploymentWideSharingRule}:
+ *   its criteria sweep carries no tenant, which is the predicate D8 computes
+ *   there (none), and each grant is stamped with its record's organization;
+ * - under a wall, one projection PER ORGANIZATION, stamped with it: the sweep
+ *   runs inside that organization's one predicate, recipients expand inside
+ *   it, and its grants carry it. A deployment-wide sweep under a wall would
+ *   be a second predicate beside Layer 0's, which D8 forbids.
  *
  * Its `id` is its NAME. That is what its grants carry as
  * `sys_record_share.source_id` (ruling β item 5 (c) on the C3 epic: the
@@ -156,10 +203,10 @@ function rowFromRule(row: any): SharingRuleRow {
  * reconcile below reads and writes a declared rule's grants by name with no
  * second code path. An organization-authored rule keeps its row id.
  */
-function projectDeclaredRule(rule: DeclaredSharingRule, organizationId: string | null): SharingRuleRow {
+function projectDeclaredRule(rule: DeclaredSharingRule, scope: DeclaredRuleScope): SharingRuleRow {
   return {
     id: rule.name,
-    organization_id: organizationId,
+    ...(scope === DEPLOYMENT_WIDE_SCOPE ? { deploymentWide: true } : { organization_id: scope }),
     name: rule.name,
     label: rule.label,
     description: rule.description,
@@ -310,7 +357,7 @@ export function bindSharingRuleActivationReconcile(
  */
 function ruleGrantScope(rule: SharingRuleRow): Record<string, unknown> {
   const where: Record<string, unknown> = { source: 'rule', source_id: rule.id };
-  if (isDeclaredSharingRule(rule) && rule.organization_id != null) where.organization_id = rule.organization_id;
+  if (isDeclaredSharingRule(rule) && !isDeploymentWideSharingRule(rule)) where.organization_id = rule.organization_id;
   return where;
 }
 
@@ -453,9 +500,9 @@ export class SharingRuleService implements ISharingRuleService {
   /** [ADR-0131 D2] Where declared rules are read. */
   private readonly declaredSource?: DeclaredSharingRuleSource;
   /**
-   * [ADR-0131 D2] The scopes a declared rule is served in: `[null]` under
-   * `single` (one organization-less projection, the platform-global class),
-   * every organization under a wall. Set by the plugin from the posture
+   * [ADR-0131 D2] The scopes a declared rule is served in: the deployment
+   * under `single` (one {@link DeploymentWideSharingRule} projection), every
+   * organization under a wall. Set by the plugin from the posture
    * ({@link setDeclaredRuleScopes}).
    *
    * `null` is UNKNOWN — the organizations could not be read
@@ -464,11 +511,13 @@ export class SharingRuleService implements ISharingRuleService {
    * rule", and the orphaned-grant sweep would revoke every declared rule's
    * grants on that reading. Unknown serves no declared rule and revokes none.
    */
-  private declaredScopes: ReadonlyArray<string | null> | null = [null];
+  private declaredScopes: ReadonlyArray<DeclaredRuleScope> | null = [DEPLOYMENT_WIDE_SCOPE];
   /** [ADR-0131 D2] The held-back sweep under unknown scopes says so once per process. */
   private unknownScopesSweepWarned = false;
   /** [ADR-0131 D6 regime C] The declaration-over-row conflicts already reported, `name::scope`. */
   private readonly declarationOverRowReported = new Set<string>();
+  /** [ADR-0131 D1/D8] Stored rules refused for carrying no organization, reported once each. */
+  private readonly organizationlessRuleReported = new Set<string>();
 
   constructor(opts: SharingRuleServiceOptions) {
     this.engine = opts.engine;
@@ -478,13 +527,17 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   /**
-   * [ADR-0131 D2] Serve declared rules in these scopes — `[null]` under
+   * [ADR-0131 D2] Serve declared rules in these scopes — the deployment under
    * `single`, the organizations under a wall. The same passes the retired
-   * seeder made, as reads instead of rows: one organization-less pass under
+   * seeder made, as reads instead of rows: one deployment-wide pass under
    * `single`, one per organization under a wall (#10103).
+   *
+   * `null` is how the plugin's posture read (`resolveDeclaredRuleScopes`)
+   * spells `single`. It is translated here, at the one door, into the
+   * deployment-wide scope, so no NULL travels past this line.
    */
   setDeclaredRuleScopes(scopes: ReadonlyArray<string | null>): void {
-    this.declaredScopes = [...new Set(scopes)];
+    this.declaredScopes = [...new Set(scopes.map((s): DeclaredRuleScope => (s === null ? DEPLOYMENT_WIDE_SCOPE : s)))];
   }
 
   /**
@@ -506,7 +559,9 @@ export class SharingRuleService implements ISharingRuleService {
    */
   addDeclaredRuleScope(organizationId: string): void {
     const scopes = this.declaredScopes;
-    if (!organizationId || scopes === null || scopes.includes(null) || scopes.includes(organizationId)) return;
+    if (!organizationId || scopes === null || scopes.includes(DEPLOYMENT_WIDE_SCOPE) || scopes.includes(organizationId)) {
+      return;
+    }
     this.declaredScopes = [...scopes, organizationId];
   }
 
@@ -559,16 +614,18 @@ export class SharingRuleService implements ISharingRuleService {
   /**
    * [#8158] PLATFORM authority — the two spellings, one predicate.
    *
-   * Extracted from {@link assertCanDeletePlatformGlobalRule} (#7795), whose
-   * doc block is the authority on WHY both spellings are accepted and why
-   * accepting either is the fail-safe reading: they are two independent
-   * channels by which the same unscoped `admin_full_access` grant reaches an
+   * Both spellings are accepted because they are two independent channels by
+   * which the same unscoped `admin_full_access` grant reaches an
    * `ExecutionContext` (a `scope: 'platform'` capability on
-   * `systemPermissions`; the ADR-0095 posture RUNG).
+   * `systemPermissions`; the ADR-0095 posture RUNG): a context built by the
+   * shared authz resolver carries both, a hand-built one may carry only one,
+   * so accepting either is the fail-safe reading.
    *
-   * It is asked TWICE now — once to authorize destroying a platform-global
-   * rule, once to decide whether an org-less caller may read across tenants —
-   * so it is one predicate rather than two spellings that can drift apart.
+   * It decides whether an org-less caller may read across tenants. Its other
+   * question — may this caller DELETE a platform-global (`organization_id =
+   * null`) rule (#7795) — retired with that rule class (ADR-0131 D1/D2): a
+   * stored rule belongs to the organization that authored it, and a declared
+   * rule is code, which no caller deletes.
    *
    * ⛔ [#15981] The second spelling is the RUNG, never
    * `positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)`. The two stopped
@@ -640,8 +697,8 @@ export class SharingRuleService implements ISharingRuleService {
    *
    * Asserted in {@link assertCanManageRules}, which every verb already calls
    * first — so `defineRule` is covered too, and an org-less caller can no
-   * longer mint an `organization_id: null` rule (a platform-global one, whose
-   * grants reach every tenant and which #7795 then forbids them to delete).
+   * longer write a rule with no organization of its own (the engine stamps or
+   * refuses such a write, ADR-0131 D9).
    *
    * ## Two classes keep the unfiltered read, deliberately
    *
@@ -668,110 +725,6 @@ export class SharingRuleService implements ISharingRuleService {
         'unscoped would expose every tenant’s rules. Select an active organization and ' +
         'retry. Platform operators (manage_platform_settings or the platform_admin position) and ' +
         'system contexts are unaffected.',
-    );
-  }
-
-  /**
-   * [#7795] DELETING a platform-global (`organization_id = null`) rule requires
-   * PLATFORM authority. Org-scoped `manage_sharing` does not authorize it.
-   *
-   * Maintainer ruling, 2026-08-12 (方向 B), quoted verbatim and untranslated:
-   *
-   * > **裁定:方向 B —— read/evaluate 保持开放,delete 需要平台级权限。**
-   * >
-   * > - `deleteRule` 对 `organization_id = null` 的行,要求调用者持有平台级权限
-   * >   (`manage_platform_settings` 或 `platform_admin` 位置);仅持 org 级
-   * >   `manage_sharing` 者拒绝。
-   * > - 错误面用 **403 `PERMISSION_DENIED`**,不是 404 —— 该行是有意可见的,
-   * >   404 会撒谎。
-   * > - #7760 开放的能力(列出、查看、评估种子规则)全部保持不动。
-   *
-   * ## Why only DELETE, and only this row class
-   *
-   * `manage_sharing` is declared `scope: 'org'` in the spec's capability
-   * registry, but a null-org rule belongs to no organization: its criteria
-   * query runs unscoped under {@link SYSTEM_CTX}, so {@link deleteRule}'s
-   * grant purge revokes EVERY tenant's `sys_record_share` rows, not just the
-   * caller's. That is the one act on this surface an org-level capability
-   * should not reach, and the two measurements the ruling rests on say why —
-   * both re-verified against this build before the guard was written:
-   *
-   * 1. **The delete is a revocation wearing removal's clothes.**
-   *    `bootstrapDeclaredSharingRules` re-seeds declared rules on every boot,
-   *    and {@link defineRule}'s existence lookup under a null org is `{name}` —
-   *    which matches nothing once the row is deleted, so the insert branch
-   *    mints a fresh `uid('srule')`. Measured: the rule returns after a
-   *    restart under a DIFFERENT id, with its grants re-materialised. The
-   *    profile of an outage, not of an administrative change.
-   * 2. **The safe lever is unavailable while the destructive one is not.**
-   *    An org admin cannot deactivate this row: `defineRule`'s existence
-   *    lookup is deliberately strict (`{name, organization_id: orgId}`, held
-   *    that way by #7676 so one org cannot upsert over a row other orgs read),
-   *    so `active: false` from an org admin creates a SECOND, org-stamped row
-   *    and leaves the shared one running. Measured: two rows, the null-org one
-   *    still `active: true`. Scoped + reversible refused, cross-tenant +
-   *    irreversible-until-reboot permitted — the inverse of the safe
-   *    arrangement, and closing the destructive lever is the structural fix.
-   *
-   * ## Two spellings of platform authority, and why BOTH are accepted
-   *
-   * They are not synonyms — they are two independent channels by which the
-   * SAME underlying grant (an unscoped `admin_full_access`) reaches an
-   * `ExecutionContext`:
-   *
-   * - `manage_platform_settings` — a `scope: 'platform'` CAPABILITY, arriving
-   *   on `context.systemPermissions`. `admin_full_access` carries it;
-   *   `organization_admin` deliberately withholds it (it gets only
-   *   `manage_org_users` / `setup.access` / `setup.write`), which is exactly
-   *   what makes it a discriminator between a platform operator and a tenant
-   *   admin — the same reasoning plugin-security's
-   *   `PLATFORM_ADMIN_ONLY_CAPABILITIES` probe encodes.
-   * - `platform_admin` — a built-in POSITION (ADR-0068 D2), arriving on
-   *   `context.positions`, DERIVED by the shared resolver from the unscoped
-   *   `admin_full_access` user grant (never a stored boolean).
-   *
-   * A context built by the shared authz resolver carries both. A HAND-BUILT
-   * context — the population ADR-0096 D3 is still eliminating, and which
-   * plugin-security's probe comment names the sharing service as part of —
-   * may carry only one. Accepting either is therefore the fail-safe reading of
-   * a ruling that names both, and refusing on the absence of both cannot
-   * silently over-refuse a genuine platform operator.
-   *
-   * ## The error surface is 403 `PERMISSION_DENIED`, deliberately not 404
-   *
-   * The row is DELIBERATELY visible: #7760 opened listing, reading and
-   * evaluating seeded rules to org admins on purpose, and this guard leaves
-   * all three untouched. A 404 here would be the platform lying about a row
-   * the caller could list and read one call earlier. The message prefix is
-   * what `rest-server.ts`'s sharing-rule `handleError` maps to HTTP 403 +
-   * `{code: 'PERMISSION_DENIED'}`, which is also the pairing the spec's own
-   * `HttpStatusErrorCodeMap[403]` records. ⛔ Do not "harden" this into a 404
-   * or a silent no-op — both re-open the lie this shape exists to avoid.
-   *
-   * Placed AFTER {@link getRule} resolves, so a row the caller cannot see at
-   * all keeps its existing silent-no-op behaviour rather than gaining a new
-   * refusal that would disclose the row's existence.
-   *
-   * ⚠️ Recorded consequence, accepted by the ruling: with delete closed, an org
-   * admin has NO lever at all over a platform-global rule. The ruling
-   * explicitly declines to pre-build a per-org suppression mechanism
-   * (「⛔ 不做 D」) absent measured demand — do not add one here.
-   */
-  private assertCanDeletePlatformGlobalRule(row: SharingRuleRow, context: ExecutionContext): void {
-    // Only the platform-global class is gated — an org's own rows are
-    // untouched, and so is every read verb.
-    if (row.organization_id != null) return;
-    // Boot seeding, hooks, backfills and the plugin machinery, as everywhere else.
-    if (context?.isSystem) return;
-    // [#8158] Both spellings, now through the shared predicate — see
-    // {@link hasPlatformAuthority}, which carries this block's reasoning.
-    if (this.hasPlatformAuthority(context)) return;
-    throw new Error(
-      'PERMISSION_DENIED: deleting a platform-global sharing rule requires platform authority — ' +
-        'the manage_platform_settings capability or the platform_admin position. Org-scoped ' +
-        'manage_sharing does not authorize it, because this rule belongs to no organization and ' +
-        'deleting it revokes every tenant’s grants under it. It remains listable, ' +
-        'readable and evaluable.',
     );
   }
 
@@ -811,11 +764,11 @@ export class SharingRuleService implements ISharingRuleService {
     }
 
     // [#7136 / #8158] One spelling of this read for the whole service — see
-    // {@link callerOrgId}. `null` (not `undefined`) is what a null-org row is
-    // STAMPED with, and only a system context or a platform operator reaches
-    // this line without an org id (`assertCanManageRules` above refuses the
-    // authenticated org-less caller, so a `manage_sharing` holder can no
-    // longer mint a platform-global rule by accident).
+    // {@link callerOrgId}. Only a system context or a platform operator
+    // reaches this line without an org id (`assertCanManageRules` above
+    // refuses the authenticated org-less caller). Their insert carries no
+    // organization, and the engine stamps it with the derivable one under
+    // `single` or refuses it under a wall (ADR-0131 D9) — it never lands NULL.
     const orgId = this.callerOrgId(context) ?? null;
     const now = new Date().toISOString();
     // Authoring path — `full` normalises to `edit`, anything unrecognised is a
@@ -903,41 +856,26 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   /**
-   * [#7676] Tenant scope for a sharing-rule ADMIN read: "this org ∪
-   * platform-global".
+   * Tenant scope for a sharing-rule ADMIN read: the caller's OWN organization.
    *
-   * `organization_id = null` on `sys_sharing_rule` means "owned by no
-   * organization" — a row the package/app seeder wrote
-   * (`bootstrapDeclaredSharingRules`, which defined under `SYSTEM_CTX` and so
-   * stamped `organization_id: null`) before any org id existed, or, since that
-   * seeder retired (ADR-0131 D2), a declared rule's `single`-posture
-   * projection ({@link projectDeclaredRule}). A strict
-   * `organization_id = <request org>` equality made every such row invisible to
-   * the admin API while enforcement kept reading them under `SYSTEM_CTX`: on a
-   * stock boot `GET /api/v1/sharing/rules` answered `{data: []}` over four
-   * active seeded rules, by-name GET and evaluate 404'd `RULE_NOT_FOUND`, and
-   * only the org-unfiltered by-id branch of {@link getRule} still worked. Rules
-   * that grant access but cannot be listed, inspected or deactivated are the
-   * worst half of both properties.
+   * [ADR-0131 D1/D8] This was "this org ∪ platform-global" (#7676): a
+   * `$or` with an `organization_id = null` arm, because the retired boot
+   * seeder (`bootstrapDeclaredSharingRules`) defined declared rules under the
+   * system context and so stamped them with no organization, and a strict
+   * equality made those rows invisible to the admin API while enforcement
+   * kept reading them. Both halves of that reason are gone: declared rules are
+   * read from the registry and never written (D2, {@link declaredRules}, which
+   * serves them beside the rows below), and the organization-ownership
+   * ceremony attributes every stored row before the deployment is certified
+   * (D10), after which a write with no organization is stamped or refused
+   * (D9). No layer keeps a NULL arm (D8), so this one is an equality.
    *
-   * Widening the READ leaks nothing across tenants: another org's row still
-   * fails the match, and a null-org row is platform-global by construction —
-   * every org already receives the grants it materialises. This is the same
-   * predicate, for the same reason, that `sys_business_unit` approver expansion
-   * settled on in #3807 and that `sys_metadata`'s pending-draft listing uses.
+   * ⚠️ {@link defineRule}'s existence lookup is the same equality, and must
+   * stay one: it decides UPSERT-or-insert, so a wider lookup would let one
+   * organization's admin overwrite a row another organization reads.
    *
-   * ⚠️ It is deliberately NOT applied to {@link defineRule}'s existence lookup.
-   * That lookup decides UPSERT-or-insert, so widening it would let one org's
-   * admin overwrite the label, criteria, recipient and access level of a row
-   * every OTHER org reads — a cross-tenant WRITE, which is a different act from
-   * a cross-tenant read of a platform-global row. A same-named POST therefore
-   * still creates an org-stamped row of the tenant's own, and
-   * {@link findRuleRowByName} prefers it.
-   *
-   * [#7761] It IS applied to {@link getRule}'s by-**id** branch, which the
-   * second paragraph above records as the one read that still worked while
-   * everything else was over-scoped. That was never a feature: unfiltered
-   * meant an org admin could resolve — and, through {@link deleteRule},
+   * [#7761] It IS applied to {@link getRule}'s by-**id** branch. Unfiltered,
+   * that branch let an org admin resolve — and, through {@link deleteRule},
    * destroy — another organization's rule from its id alone.
    *
    * [#8158] Takes the CONTEXT, not a bare org id. The unfiltered branch is
@@ -952,7 +890,7 @@ export class SharingRuleService implements ISharingRuleService {
   private adminOrgScope(where: Record<string, unknown>, context: ExecutionContext): Record<string, unknown> {
     const orgId = this.callerOrgId(context);
     if (!orgId) return where; // system context / platform operator — asserted upstream
-    return { ...where, $or: [{ organization_id: orgId }, { organization_id: null }] };
+    return { ...where, organization_id: orgId };
   }
 
   async listRules(
@@ -1008,7 +946,7 @@ export class SharingRuleService implements ISharingRuleService {
     if (off.size > 0) rules = rules.filter((r) => !off.has(r.name));
     if (rules.length === 0) return [];
 
-    const single = this.declaredScopes?.includes(null) === true;
+    const single = this.declaredScopes?.includes(DEPLOYMENT_WIDE_SCOPE) === true;
     const holders = await this.engine.find('sys_sharing_rule', {
       where: { name: { $in: rules.map((r) => r.name) } },
       fields: ['name', 'organization_id'],
@@ -1017,12 +955,12 @@ export class SharingRuleService implements ISharingRuleService {
     });
     const held = new Set<string>();
     for (const row of (Array.isArray(holders) ? holders : []) as any[]) {
-      held.add(single ? String(row.name) : `${String(row.name)}::${String(row.organization_id ?? '')}`);
+      held.add(single ? String(row.name) : `${String(row.name)}::${String(row.organization_id)}`);
     }
     const out: SharingRuleRow[] = [];
     for (const scope of scopes) {
       for (const rule of rules) {
-        if (held.has(single ? rule.name : `${rule.name}::${scope}`)) {
+        if (held.has(single ? rule.name : `${rule.name}::${String(scope)}`)) {
           this.reportDeclarationOverAuthoredRow(rule, scope);
           continue;
         }
@@ -1042,17 +980,18 @@ export class SharingRuleService implements ISharingRuleService {
    * re-grant what a customised copy switched off — and that is said loudly,
    * once per name and scope per process, with the remedy.
    */
-  private reportDeclarationOverAuthoredRow(rule: DeclaredSharingRule, scope: string | null): void {
-    const key = `${rule.name}::${scope ?? ''}`;
+  private reportDeclarationOverAuthoredRow(rule: DeclaredSharingRule, scope: DeclaredRuleScope): void {
+    const organization = scope === DEPLOYMENT_WIDE_SCOPE ? undefined : scope;
+    const key = `${rule.name}::${organization ?? ''}`;
     if (this.declarationOverRowReported.has(key)) return;
     this.declarationOverRowReported.add(key);
     const message =
       `[sharing-rule] declared sharing rule '${rule.name}' arrives over a stored sys_sharing_rule row of the same ` +
-      `name${scope ? ` in organization '${scope}'` : ''}, so the declared rule is NOT in force there and grants nothing ` +
+      `name${organization ? ` in organization '${organization}'` : ''}, so the declared rule is NOT in force there and grants nothing ` +
       'while the row keeps answering as its own rule. Remedy: rename the stored rule, which makes it a clone of its ' +
       `own, and switch the declared rule off (POST /api/v1/security/_activation/sharing_rule/${rule.name} with ` +
       '{ "enabled": false }) if it must not grant.';
-    const meta = { rule: rule.name, organization: scope };
+    const meta = organization ? { rule: rule.name, organization } : { rule: rule.name, deploymentWide: true };
     if (this.logger?.error) this.logger.error(message, meta);
     else this.logger?.warn?.(message, meta);
   }
@@ -1088,16 +1027,15 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   /**
-   * [ADR-0131 D2] Which scopes a caller reads declared rules in: the one
-   * organization-less scope under `single` (platform-global, every
-   * organization reads it — the {@link adminOrgScope} reasoning); under a wall,
-   * the caller's own organization, or every organization for a system context
-   * or a platform operator.
+   * [ADR-0131 D2] Which scopes a caller reads declared rules in: the
+   * deployment under `single` (every organization reads the one
+   * deployment-wide projection); under a wall, the caller's own organization,
+   * or every organization for a system context or a platform operator.
    */
-  private declaredScopesFor(context: ExecutionContext): ReadonlyArray<string | null> {
+  private declaredScopesFor(context: ExecutionContext): ReadonlyArray<DeclaredRuleScope> {
     const scopes = this.declaredScopes;
     if (scopes === null) return []; // unknown: served nowhere
-    if (scopes.includes(null)) return [null];
+    if (scopes.includes(DEPLOYMENT_WIDE_SCOPE)) return [DEPLOYMENT_WIDE_SCOPE];
     const orgId = this.callerOrgId(context);
     if (!orgId) return scopes;
     return scopes.includes(orgId) ? [orgId] : [];
@@ -1174,8 +1112,7 @@ export class SharingRuleService implements ISharingRuleService {
     // `manage_sharing` is an org-level capability (`scope: 'org'` in the spec's
     // capability registry) and an id is not a tenant boundary: ids leak through
     // logs, exports, support tickets and the evaluate response's `{ruleId}`.
-    // A platform-global (`organization_id = null`) row stays reachable, for
-    // symmetry with the by-name path — see {@link adminOrgScope}.
+    // Own organization only, like the by-name path — see {@link adminOrgScope}.
     const byId = await this.engine.find('sys_sharing_rule', {
       where: this.adminOrgScope({ id: idOrName }, context),
       limit: 1,
@@ -1188,15 +1125,15 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   /**
-   * [#7676] Resolve a rule by NAME for an admin read: this org first, the
-   * platform-global (`organization_id IS NULL`) row second.
+   * Resolve a rule by NAME for an admin read: the caller's own organization's
+   * row of that name.
    *
-   * Two sequenced lookups rather than one `$or` with `limit: 1`, because when
-   * BOTH rows exist the answer must be the caller's own: a single disjunctive
-   * query with a row cap picks whichever row the driver happened to reach
-   * first, so an org that had authored its own `share_red_projects_with_execs`
-   * could get the platform row back on one dialect and its own on another.
-   * Preference is a decision, so it is written as one.
+   * [ADR-0131 D1/D8] It used to fall back to the platform-global
+   * (`organization_id IS NULL`) row of that name (#7676) — the seeded copy of
+   * a declared rule. Declared rules are read from the registry now
+   * ({@link getRule} resolves them by name after this lookup misses), and a
+   * certified deployment holds no organization-less row, so the fallback is
+   * gone: the one row this caller can name is its organization's.
    *
    * No `orgId` (SYSTEM_CTX — boot seeding, hooks, backfills) keeps the
    * unfiltered by-name lookup it has always had.
@@ -1215,7 +1152,7 @@ export class SharingRuleService implements ISharingRuleService {
       return Array.isArray(rows) && rows[0] ? rows[0] : null;
     };
     if (!orgId) return first({ name }); // system context / platform operator — asserted upstream
-    return (await first({ name, organization_id: orgId })) ?? (await first({ name, organization_id: null }));
+    return first({ name, organization_id: orgId });
   }
 
   async deleteRule(idOrName: string, context: ExecutionContext): Promise<void> {
@@ -1236,9 +1173,6 @@ export class SharingRuleService implements ISharingRuleService {
       }
       return;
     }
-    // [#7795] A platform-global row is visible to an org admin by design
-    // (#7760) but is NOT theirs to destroy — 403, never 404.
-    this.assertCanDeletePlatformGlobalRule(row, context);
     // Drop materialised grants first so we don't orphan them.
     //
     // [#4434] This used to be a predicate-shaped `engine.delete` on
@@ -1344,13 +1278,14 @@ export class SharingRuleService implements ISharingRuleService {
     const live = new Set<string>();
     for (const r of (ruleRows ?? [])) live.add(String((r as any).id));
     // [ADR-0131 D2] A declared rule's grants carry its NAME, and they are live
-    // exactly where it is served: organization-less (every organization's
-    // records) under `single`, its organization's own grants under a wall. A
-    // declaration removed from the code, or answered in an organization by a
-    // row of its name, leaves grants no projection claims — swept here.
+    // exactly where it is served: deployment-wide (every organization's
+    // records — {@link DeploymentWideSharingRule}) under `single`, its
+    // organization's own grants under a wall. A declaration removed from the
+    // code, or answered in an organization by a row of its name, leaves grants
+    // no projection claims — swept here.
     const liveDeclared = new Set<string>();
     for (const rule of await this.declaredRules(SYSTEM_CTX, {})) {
-      if (rule.organization_id == null) live.add(rule.id);
+      if (isDeploymentWideSharingRule(rule)) live.add(rule.id);
       else liveDeclared.add(`${rule.id}::${rule.organization_id}`);
     }
     // Unknown scopes: where a declared rule is served is not known, so none of
@@ -1383,7 +1318,7 @@ export class SharingRuleService implements ISharingRuleService {
       // A `source: 'rule'` row with no `source_id` names no rule that could
       // ever re-grant it — equally unreachable, equally void.
       if (sourceId != null && live.has(String(sourceId))) continue;
-      if (sourceId != null && liveDeclared.has(`${String(sourceId)}::${String((g as any).organization_id ?? '')}`)) continue;
+      if (sourceId != null && liveDeclared.has(`${String(sourceId)}::${String((g as any).organization_id)}`)) continue;
       await this.sharing.revoke(String((g as any).id), SYSTEM_CTX);
       revoked += 1;
     }
@@ -1614,7 +1549,130 @@ export class SharingRuleService implements ISharingRuleService {
     return stale.length;
   }
 
+  /**
+   * Reconcile ONE rule's grants for ONE user — the user-scoped pass a
+   * recipient-membership write runs (`recipient-membership-recompute.ts`): a
+   * position assignment, a membership role, or a team membership row naming
+   * `userId` was inserted, changed or removed.
+   *
+   * ## What it guarantees
+   *
+   * The outcome equals the whole-rule pass ({@link evaluateRule}) restricted to
+   * `userId`. When the rule reaches the user, the user's grants of this rule
+   * become exactly one per matched record at the rule's access level; when it
+   * does not — the rule is inactive, its position is switched off, or the user
+   * no longer holds its recipient — the user keeps none. A new holder gains the
+   * rule's grants and a former holder loses them in the write that changed the
+   * holding, with nobody re-evaluating the rule by hand. Every other user's
+   * grants of the rule are untouched.
+   *
+   * ## Why per user, and why that is cheap enough to be synchronous
+   *
+   * The `bu-tree-recompute.ts` design refuses to recompute every rule on every
+   * graph write, and queues its grant half, because a BU write can move many
+   * recipients at once and the re-grant fans out to (matched records × moved
+   * members). A membership row moves exactly ONE user. Scoped to that user the
+   * pass costs one recipient check ({@link ruleReachesUser} — an indexed lookup
+   * per source, never the recipient's whole member list), one read of that
+   * user's grants of the rule, and — only when the rule reaches the user — one
+   * criteria read plus a write per grant the user lacks. Nothing in it grows
+   * with how many OTHER users hold the recipient, so a bulk import of N rows
+   * costs N user-scoped passes, never N whole-rule passes.
+   *
+   * Withdrawal goes through `SharingService.revoke`, one grant at a time, as
+   * the whole-rule pass's own withdrawal does ({@link reconcile}); a user holds
+   * at most one grant per matched record, so the count is bounded by the
+   * rule's matched set.
+   *
+   * A `field` rule has no rule-wide recipient to check a user against; its
+   * recipients live on each record and are re-derived by that record's write
+   * ({@link evaluateAllForRecord}), so it is declined here, as it is at
+   * {@link revokeRuleGrantsForRetiredRecipients}' door.
+   */
+  async reconcileRuleForUser(rule: SharingRuleRow, userId: string): Promise<SharingRuleReconcilePassResult> {
+    const pass: SharingRuleReconcilePassResult = {
+      ruleId: rule?.id,
+      matchedRecords: 0,
+      expandedUsers: 0,
+      grantsCreated: 0,
+      grantsUpdated: 0,
+      grantsRevoked: 0,
+      grantsRefused: 0,
+    };
+    if (!rule?.id || !userId || rule.recipient_type === 'field') return pass;
+
+    const scope = { ...ruleGrantScope(rule), recipient_id: userId };
+    const existing = await this.engine.find('sys_record_share', {
+      where: scope,
+      fields: ['id', 'record_id', 'access_level'],
+      limit: 100000,
+      context: SYSTEM_CTX,
+    });
+    const held = new Map<string, any>();
+    for (const row of (existing ?? [])) held.set(String((row as any).record_id), row);
+
+    if (!(await this.ruleReachesUser(rule, userId, {}))) {
+      for (const [, row] of held.entries()) {
+        await this.sharing.revoke(String(row.id), SYSTEM_CTX);
+        pass.grantsRevoked += 1;
+      }
+      return pass;
+    }
+
+    pass.expandedUsers = 1;
+    const matchedIds = await this.findMatchingRecords(rule);
+    pass.matchedRecords = matchedIds.length;
+    for (const recordId of matchedIds) {
+      const cur = held.get(recordId);
+      if (cur) {
+        // Out of the stale set BEFORE the attempt — the twin of the note in
+        // {@link reconcile}: a refused level update leaves the desired row.
+        held.delete(recordId);
+        if (cur.access_level === rule.access_level) continue;
+        if (await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId)) pass.grantsUpdated += 1;
+        else pass.grantsRefused += 1;
+      } else if (await this.grantOrAbsorbOrganizationRefusal(rule, recordId, userId)) {
+        pass.grantsCreated += 1;
+      } else {
+        pass.grantsRefused += 1;
+      }
+    }
+    // The user's grants on records the rule no longer matches — what the
+    // whole-rule pass would revoke for this user too.
+    for (const [, stale] of held.entries()) {
+      await this.sharing.revoke(String(stale.id), SYSTEM_CTX);
+      pass.grantsRevoked += 1;
+    }
+    return pass;
+  }
+
   // ── internals ─────────────────────────────────────────────────────
+
+  /**
+   * Is `userId` among the users `rule` expands to? The user-scoped twin of
+   * {@link expandRecipient}, used by {@link reconcileRuleForUser}.
+   *
+   * `position` and `team` — the two kinds a membership write moves — are
+   * answered by the graph services' user-scoped checks
+   * (`PositionGraphService.holdsPosition`, `teamHasMember`), which read the
+   * same rows the expansion reads, narrowed to one user. A `position` passes
+   * the same activation gate first ({@link positionConfersAccess}): a
+   * switched-off position reaches nobody. Every other kind is answered from the
+   * rule-wide expansion itself.
+   */
+  private async ruleReachesUser(rule: SharingRuleRow, userId: string, pass: RuleEvaluationPass): Promise<boolean> {
+    if (!rule.active) return false;
+    if (rule.recipient_type === 'position') {
+      if (!(await this.positionConfersAccess(rule.recipient_id, pass))) return false;
+      const positionGraph = new PositionGraphService({
+        engine: this.engine,
+        organizationId: rule.organization_id ?? null,
+      });
+      return positionGraph.holdsPosition(userId, rule.recipient_id, rule.organization_id ?? undefined);
+    }
+    if (rule.recipient_type === 'team') return teamHasMember(this.engine, rule.recipient_id, userId);
+    return (await this.expandRecipient(rule, pass)).includes(userId);
+  }
 
   /**
    * [#3896] ADR-0049 backstop, evaluated on EVERY pass rather than only at
@@ -1646,7 +1704,8 @@ export class SharingRuleService implements ISharingRuleService {
 
   /**
    * [#10119] The context the rule's CRITERIA query runs under — system
-   * elevation, plus the rule's OWN organization when it has one.
+   * elevation, plus the rule's OWN organization when it has one; `null` when
+   * the rule may sweep nowhere.
    *
    * ## What was wrong
    *
@@ -1670,22 +1729,35 @@ export class SharingRuleService implements ISharingRuleService {
    *
    * `tenantId` is the platform's ONE spelling of tenant scope on a read: the
    * engine threads it to `DriverOptions.tenantId` and the driver's own
-   * chokepoint (`SqlDriver.applyTenantScope`) emits
-   * `(organization_id = ? OR organization_id IS NULL)`. Open-coding an
-   * `organization_id` equality into `filter` would be a second, worse copy —
-   * it would collide with a rule whose criteria already name that column, it
-   * would not know the object's declared tenant field, and it would drop the
-   * NULL arm that keeps platform-seeded rows visible to every tenant (#2734).
+   * chokepoint (`SqlDriver.applyTenantScope`) applies the posture's one
+   * predicate (ADR-0131 D8). Open-coding an `organization_id` equality into
+   * `filter` would be a second, worse copy — it would collide with a rule
+   * whose criteria already name that column, and it would not know the
+   * object's declared tenant field.
    *
-   * ## The null-org rule keeps its unscoped sweep
+   * ## [ADR-0131 D2/D8] Deployment-wide is a typed marker, never a NULL
    *
-   * `organization_id = null` means "owned by no organization" — the
-   * platform-global class documented at
-   * {@link assertCanDeletePlatformGlobalRule} (#7795), whose whole point is
-   * that it grants across every tenant. It gets {@link SYSTEM_CTX} unchanged.
-   * ⛔ Do not "simplify" this into scoping every rule: that silently retires a
-   * declared behaviour, and a one-directional test suite would not notice.
-   * Both directions are pinned in `rule-criteria-org-scope.test.ts`.
+   * The organization-less branch that answered "no organization ⇒ unscoped
+   * sweep" is retired. What it served is now one of three named cases:
+   *
+   * - **The rule has an organization** — an organization-authored row, or a
+   *   declared rule's projection under a wall: the sweep runs inside that
+   *   organization's one predicate.
+   * - **A {@link DeploymentWideSharingRule}** — a declared rule under
+   *   `single`: no tenant, which is exactly the predicate D8 computes under
+   *   `single` (none), so Layer 0 is not widened by a single row. Under a wall
+   *   no projection carries the marker ({@link projectDeclaredRule}).
+   * - **A composition with no organization object** (a lean embedding,
+   *   `resolveSystemWriteOrganization`'s `no-organization-object`): there are
+   *   no organizations to scope by, so every rule is the deployment's.
+   *
+   * Anything else is a STORED row with no organization in a deployment that
+   * has organizations. Certification leaves none and the engine stamps or
+   * refuses every new one (D9/D10), so it is invalid state: `null` here, and
+   * the caller sweeps nothing and grants nothing ({@link sweepContextOrReport}
+   * says so once). ⛔ Never default it to the deployment-wide sweep — that is
+   * the NULL arm this replaced, and it is how one row came to grant across
+   * every organization.
    *
    * `isSystem` is retained either way. The elevation and the tenant are
    * different axes (`ObjectQLEngine.buildDriverOptions` reads them separately):
@@ -1699,13 +1771,53 @@ export class SharingRuleService implements ISharingRuleService {
    * from it (ruled 2026-09-02: a rule-materialised grant carries the rule's
    * organization). One context for the sweep and for the write is what keeps
    * the two agreeing — the grant lands in the organization whose records the
-   * rule was allowed to sweep. A platform-global rule threads none, and its
+   * rule was allowed to sweep. A deployment-wide rule threads none, and its
    * grants belong where each record does; `grant` derives that from the record.
+   *
+   * Both postures of a declared rule, and the refused row, are pinned in
+   * `rule-criteria-org-scope.test.ts`.
    */
-  private criteriaContext(rule: SharingRuleRow): ExecutionContext {
+  private criteriaContext(rule: SharingRuleRow): ExecutionContext | null {
     const orgId = rule.organization_id;
-    if (orgId == null || orgId === '') return SYSTEM_CTX;
-    return { ...SYSTEM_CTX, tenantId: String(orgId) };
+    if (typeof orgId === 'string' && orgId !== '') return { ...SYSTEM_CTX, tenantId: orgId };
+    if (isDeploymentWideSharingRule(rule) || !this.organizationsComposed()) return SYSTEM_CTX;
+    return null;
+  }
+
+  /**
+   * Does this composition register the organization object? Read from the
+   * engine's schema registry — the same fact `resolveSystemWriteOrganization`
+   * separates `no-organization-object` by. An engine that cannot answer is
+   * read as composing organizations: the reading that refuses, never the one
+   * that sweeps every organization.
+   */
+  private organizationsComposed(): boolean {
+    if (typeof this.engine.getSchema !== 'function') return true;
+    return !!this.engine.getSchema(ORGANIZATION_OBJECT);
+  }
+
+  /**
+   * {@link criteriaContext}, or `null` with the refusal reported — once per
+   * rule per process, at `error`: the rule looks configured and grants
+   * nothing, which is the degradation an operator cannot see otherwise.
+   */
+  private sweepContextOrReport(rule: SharingRuleRow): ExecutionContext | null {
+    const ctx = this.criteriaContext(rule);
+    if (ctx) return ctx;
+    const key = String(rule.id ?? rule.name);
+    if (!this.organizationlessRuleReported.has(key)) {
+      this.organizationlessRuleReported.add(key);
+      const message =
+        `[sharing-rule] sharing rule '${rule.name ?? rule.id}' is a stored row with no organization, so its ` +
+        'criteria are not swept and it grants nothing: a stored rule belongs to the organization that authored ' +
+        'it, and only a rule declared in the application is deployment-wide. Remedy: run the organization-' +
+        'ownership upgrade ceremony, which attributes the row to its organization, or delete the row and ' +
+        'author the rule in its organization.';
+      const meta = { rule: rule.name ?? rule.id, id: rule.id, object: rule.object_name };
+      if (this.logger?.error) this.logger.error(message, meta);
+      else this.logger?.warn?.(message, meta);
+    }
+    return null;
   }
 
   private async findMatchingRecords(rule: SharingRuleRow): Promise<string[]> {
@@ -1721,14 +1833,17 @@ export class SharingRuleService implements ISharingRuleService {
    */
   private async findMatchingRows(rule: SharingRuleRow, fields: string[]): Promise<Record<string, unknown>[]> {
     if (this.isInertMatchAll(rule)) return [];
+    // [#10119] The rule's own organization, when it has one — and nowhere
+    // when it may sweep nowhere (ADR-0131 D8, {@link criteriaContext}).
+    const context = this.sweepContextOrReport(rule);
+    if (!context) return [];
     const filter = (rule.criteria ?? {}) as any;
     try {
       const rows = await this.engine.find(rule.object_name, {
         filter,
         fields,
         limit: 5000,
-        // [#10119] The rule's own organization, when it has one.
-        context: this.criteriaContext(rule),
+        context,
       });
       return Array.isArray(rows) ? rows : [];
     } catch (err: any) {
@@ -1748,6 +1863,8 @@ export class SharingRuleService implements ISharingRuleService {
    */
   private async matchRecord(rule: SharingRuleRow, recordId: string): Promise<Record<string, unknown> | null> {
     if (this.isInertMatchAll(rule)) return null;
+    const context = this.sweepContextOrReport(rule);
+    if (!context) return null;
     const filter = { ...((rule.criteria ?? {}) as any), id: recordId };
     const fields = rule.recipient_type === 'field' ? ['id', rule.recipient_id] : ['id'];
     try {
@@ -1759,7 +1876,7 @@ export class SharingRuleService implements ISharingRuleService {
         // {@link criteriaContext}. A per-record hook pass that stayed
         // unscoped would re-mint, one write at a time, exactly the cross-org
         // rows the sweep no longer creates.
-        context: this.criteriaContext(rule),
+        context,
       });
       return Array.isArray(rows) && rows[0] ? (rows[0] as Record<string, unknown>) : null;
     } catch (err: any) {
@@ -2133,9 +2250,9 @@ export class SharingRuleService implements ISharingRuleService {
    * `sys_record_share` is tenant-scoped in the #13491 ledger (commit 3f64fe6c6), so on a
    * walled install an organization-less system insert on it is refused loudly
    * with {@link SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE}. `SharingService.grant`
-   * resolves the organization on every path that can; a platform-global rule
-   * (`organization_id = null`, its sweep unscoped) materialising onto an
-   * organization-less record resolves none, and meets the refusal.
+   * resolves the organization on every path that can; a rule whose sweep
+   * carries no tenant (a {@link DeploymentWideSharingRule}) materialising
+   * onto an organization-less record resolves none, and meets the refusal.
    *
    * Without this catch the refusal propagated out of the reconcile loop and
    * that rule's pass ABORTED mid-loop. The grants already written stayed; the
@@ -2169,6 +2286,10 @@ export class SharingRuleService implements ISharingRuleService {
     recordId: string,
     recipientId: string,
   ): Promise<boolean> {
+    // A rule that may sweep nowhere matched nothing, so it never asks for a
+    // grant; refused here too, so no caller can write one around the sweep.
+    const context = this.sweepContextOrReport(rule);
+    if (!context) return false;
     try {
       await this.sharing.grant(
         {
@@ -2181,7 +2302,7 @@ export class SharingRuleService implements ISharingRuleService {
           sourceId: rule.id,
           reason: `rule:${rule.name}`,
         } as any,
-        this.criteriaContext(rule),
+        context,
       );
       return true;
     } catch (err: any) {

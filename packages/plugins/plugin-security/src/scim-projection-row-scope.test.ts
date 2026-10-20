@@ -1,10 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The seven `@better-auth/scim` projection tables are row-scoped in every
- * shipped permission set that holds the managed-object read grant — so no
- * principal below platform admin reads a row another organization's identity
- * provider provisioned.
+ * The seven `@better-auth/scim` projection tables are row-scoped for every
+ * holder of a shipped permission set that holds the managed-object read grant
+ * — so no principal below platform admin reads a row another organization's
+ * identity provider provisioned. The scope was first a policy in each such set;
+ * it is now each table's own declared `defaultRowScope`, which the security
+ * plugin's collection applies wherever a holder's sets carry no row policy for
+ * the table (#24164 ruling E′ item 3's follow-up removed the sets' copies).
  *
  * The class (see the header of `objects/default-permission-sets.ts`): every
  * object on `BETTER_AUTH_MANAGED_OBJECTS` gets an object-level `allowRead` from
@@ -32,8 +35,7 @@
  * path. Three deployment shapes:
  *   - `isolated` with the platform baseline composed — the stock walled shape;
  *   - `isolated` with NO baseline — each persona resolves only the set it
- *     names, so a set that carried no scope of its own would read every row
- *     here even while the stock shape stayed green through `member_default`;
+ *     names, so the table's declared scope is the only one in force;
  *   - `single` — the policies carry no tenant token, so the posture's strip of
  *     the platform's tenant policies (ADR-0105 D3) must leave them in force.
  */
@@ -157,8 +159,9 @@ type Table = (name: string) => { insert(rows: Array<Record<string, unknown>>): P
 /**
  * One deployment shape. `composedBaseline: false` boots with no platform
  * baseline (`fallbackPermissionSet: null`), so each persona resolves ONLY the
- * set it names — which is what proves every shipped set carries the scope
- * itself, rather than borrowing it from `member_default`.
+ * set it names — which is what proves the scope reaches every shipped set's
+ * holder through the table's own declaration, rather than borrowed from
+ * `member_default`.
  */
 interface Shape {
   label: string;
@@ -264,9 +267,9 @@ const PERSONAS = {
   // own by design (ADR-0090 D10), so its bound is the delegating member's sets.
   // Those resolve from the baseline, so this persona runs where one is composed.
   // Shaped as its one producer shapes it (core's `assembleExecutionContext`):
-  // `userId` stays the delegating human, so `current_user.*` resolves to them on
-  // the ceiling's leg too, where each SCIM table's declared default row scope
-  // applies because the ceiling carries no policy (#24164 ruling E′ item 2).
+  // `userId` stays the delegating human. The ceiling's own leg collects no
+  // object default (ruling of record 6278784335 on #24341, letter B); the
+  // delegating member's leg reads each SCIM table under its declared scope.
   mcp_agent_data_write: {
     userId: PEOPLE.member, tenantId: 'org_x', positions: [], permissions: ['mcp_agent_data_write'],
     principalKind: 'agent', onBehalfOf: { userId: PEOPLE.member }, org_user_ids: ORG_X_USERS,

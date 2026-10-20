@@ -710,7 +710,10 @@ beforeEach(async () => {
   await driver.initObjects([AUDITED_OBJECT]);
   await driver.create('sys_file', { id: 'own', key: 'a', status: 'pending', organization_id: 'org_A' }, { tenantId: 'org_A' });
   await driver.create('sys_file', { id: 'other', key: 'b', status: 'pending', organization_id: 'org_B' }, { tenantId: 'org_B' });
-  await driver.create('sys_file', { id: 'legacy', key: 'c', status: 'pending', organization_id: null }, { tenantId: 'org_A' });
+  // No tenant on the call: a tenant on it would stamp the NULL column
+  // (`injectTenantOnInsert` fills an absent value), and the row would not be
+  // organization-less at all.
+  await driver.create('sys_file', { id: 'legacy', key: 'c', status: 'pending', organization_id: null }, { bypassTenantAudit: true });
   warns = [];
 });
 
@@ -769,18 +772,20 @@ describe('[#13178] the driver leg: what the threaded tenantId actually buys', ()
     expect(await readStatus('own')).toBe('committed');
   });
 
-  it('an organization-less row stays reachable — the pre-#12928 population is NOT stranded', async () => {
-    // This is the load-bearing one. #12928 was ruled FORWARD STAMP ONLY, so
-    // every session row written before it carries NULL by decision, and #12745's
-    // backfill did not claim to reach every `sys_file` row either. Strict
-    // equality here would have stranded exactly those rows mid-upload; the
-    // driver's `OR … IS NULL` arm (#2734's global-row fail-open) is why it does
-    // not. ⛔ This asserts that behaviour, it does not change or re-decide it.
+  it('an organization-less row is not reachable either — NULL is not an owner (ADR-0131 D1)', async () => {
+    // #12928 was ruled FORWARD STAMP ONLY, so the session rows written before
+    // it carried NULL, and the driver's v17 `OR … IS NULL` arm kept them
+    // reachable mid-upload. [ADR-0131 D14] 18.x retired that arm after the
+    // upgrade ceremony, which stamps each such `sys_file` / `sys_upload_session`
+    // row from its holder and holds certification on any it cannot attribute:
+    // a certified database carries none. So a scoped write reaches only its
+    // own organization's rows.
+    expect(await readStatus('legacy')).toBe('pending');
     await driver.update('sys_file', 'legacy', { status: 'committed' }, { tenantId: 'org_A' });
-    expect(await readStatus('legacy')).toBe('committed');
+    expect(await readStatus('legacy')).toBe('pending');
 
     await driver.delete('sys_file', 'legacy', { tenantId: 'org_A' });
-    expect(await readStatus('legacy')).toBeNull();
+    expect(await readStatus('legacy')).toBe('pending');
   });
 });
 
@@ -898,9 +903,9 @@ describe('[#21908] D2. ⛔ under the opt-in, a door tenant still cannot reach an
 
   beforeEach(async () => {
     // Seeded under the default posture: an organization-less row is exactly
-    // what the walled posture refuses to WRITE now, and exactly the legacy
-    // population the driver's `OR … IS NULL` arm keeps reachable. The doors
-    // then run walled.
+    // what the walled posture refuses to WRITE now, and the legacy population
+    // the driver's retired v17 `OR … IS NULL` arm used to keep reachable. The
+    // doors then run walled.
     delete process.env.OS_TENANCY_POSTURE;
     sql = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
     driverWrites = [];
@@ -1003,20 +1008,31 @@ describe('[#21908] D2. ⛔ under the opt-in, a door tenant still cannot reach an
     for (const w of driverWrites) expect(w.options?.tenantId).toBe('org_A');
   });
 
-  it('still works: the caller’s own row and an organization-less row are reached', async () => {
+  it('still works: the caller’s own row is reached', async () => {
     // A refusal that refused everything would score green above; this is the
     // other half.
     expect(await store.updateFile('own', { status: 'committed' }, { organizationId: 'org_A' })).toBeTruthy();
-    expect(await store.updateSession('legacy', { status: 'completed' }, { organizationId: 'org_A' })).toBeTruthy();
-    await store.deleteFile('legacy', { organizationId: 'org_A' });
     await store.deleteSession('own', { organizationId: 'org_A' });
 
     expect((await stored('sys_file', 'own'))?.status).toBe('committed');
-    expect((await stored('sys_upload_session', 'legacy'))?.status).toBe('completed');
-    expect(await stored('sys_file', 'legacy')).toBeNull();
     expect(await stored('sys_upload_session', 'own')).toBeNull();
     // …and the stored tenant column is the one the row already had.
     expect((await stored('sys_file', 'own'))?.organization_id).toBe('org_A');
+  });
+
+  it('an organization-less row is refused like a foreign one — NULL is not an owner (ADR-0131 D1, D14)', async () => {
+    // The pre-#12928 population the v17 `OR … IS NULL` arm kept reachable is
+    // stamped by the upgrade ceremony before a database boots; a stray one is
+    // no organization's, so the door's scope does not reach it.
+    await expect(
+      store.updateSession('legacy', { status: 'completed' }, { organizationId: 'org_A' }),
+    ).rejects.toMatchObject(notFound('sys_upload_session', 'update'));
+    await expect(store.deleteFile('legacy', { organizationId: 'org_A' })).rejects.toMatchObject(
+      notFound('sys_file', 'delete'),
+    );
+
+    expect((await stored('sys_upload_session', 'legacy'))?.status).toBe('in_progress');
+    expect(await stored('sys_file', 'legacy')).not.toBeNull();
     expect((await stored('sys_upload_session', 'legacy'))?.organization_id ?? null).toBeNull();
   });
 });

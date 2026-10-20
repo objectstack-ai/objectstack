@@ -4,17 +4,17 @@
  * System-context write organization resolution (#8844) — the RUNTIME twin of
  * #8686's seed-path fix, one layer up.
  *
- * ## The defect
+ * ## The defect (17.x)
  *
  * A session write carries the caller's active organization
  * (`ExecutionContext.tenantId`), and the driver stamps it onto the row
  * (`injectTenantOnInsert`) before the autonumber counter reads it
  * (`fillAutoNumberFields`, which resolves `row[tenantField] ?? options.tenantId
  * ?? null`). A SYSTEM-context write — a hook, a scheduled job, a custom
- * endpoint, a `runAs: system` flow — carries no organization at all, so the
- * column lands NULL and the counter files the row under the `__global__`
- * pseudo-tenant. One object then runs TWO counters that cannot see each other,
- * each correct within its own scope, and both hand out the same number:
+ * endpoint, a `runAs: system` flow — carried no organization at all, so the
+ * column landed NULL and the counter filed the row under the `__global__`
+ * pseudo-tenant. One object then ran TWO counters that cannot see each other,
+ * each correct within its own scope, and both handed out the same number:
  *
  *     _objectstack_sequences, one object, one scope key:
  *       tenant_id = 'org_msokm9oaz0cal87q'   last_value = 2   <- REST / Console
@@ -57,12 +57,21 @@
  * and (since the Default Organization became a boot invariant, D3) zero
  * organizations alike. ⛔ Nothing defaults to any owner but the derivable one.
  *
- * ## The three exclusions, and why the refusal is not broader
+ * Stage 8d closed the counter half from below as well: the SQL driver refuses
+ * an organization-less row on a tenant table under this module's code
+ * (`OrganizationlessCounterRefusal`, `@objectstack/driver-sql`) wherever it
+ * registered the organization object, so no writer — the engine or a direct
+ * driver caller — can reach the `__global__` counter for a tenant table any
+ * more. `__global__` stays the counter key of an object with no tenant
+ * column, and of a composition that registers no organization object (the
+ * `no-organization-object` decision below), where no organization can exist.
+ *
+ * ## The exclusions, and why the refusal is not broader
  *
  * A refusal that fires too widely breaks every system write on a walled install
  * — including the hooks and cron that run unattended, where a loud failure
  * surfaces as a stalled automation rather than as a 4xx someone reads. So the
- * decision runs only where the harm is real, and three populations are outside
+ * decision runs only where the harm is real, and these populations are outside
  * it BY CONSTRUCTION rather than by exemption:
  *
  *  - **Objects with no organization column, `tenancy.enabled: false` objects
@@ -71,28 +80,19 @@
  *    org-less rows is `tenancy: { enabled: false }` — a metadata declaration,
  *    loud and checkable — never a per-write bypass flag, which is exactly the
  *    lenient-consumer accommodation Prime Directive #12 forbids.
- *  - **Under a WALLED posture only, platform-namespace objects the inventory
- *    did not admit** ({@link isPlatformObjectOutOfTenantAuditScope},
- *    `platform-object-tenancy.ts`). Under `single` this exclusion is gone
- *    (ADR-0131 C8 stage 8b): a platform object with a tenant column takes the
- *    Default Organization or is refused, like every other object.
  *
- *    ⚠️ This exclusion used to be the whole `sys_` / `cloud_` / `ai_`
- *    NAMESPACE, on the reasoning commit ff08691e6 recorded, that "an org-less row is defensible for
- *    `sys_permission_set`". The maintainer WITHDREW the wholesale form on
- *    2026-08-31 (#13491, 联案 #13497): that reasoning inherits **per object**,
- *    and the same namespace also holds objects whose org-less rows are a
- *    defect — five instances (#12745, #12928, #10673, #8617, cloud#1239, one a
- *    credentials table), every one found by a person reading call sites and
- *    none by this control. So the exclusion is now a per-object verdict, and an
- *    object nobody has adjudicated stays excluded and stays ON THE LIST.
- *
- *    ⚠️ C8 stage 8b lifted this exclusion under `single` only. Under a wall it
- *    stands in 18.0 (epic ruling record 6259899486 on #15194, item 4) and
- *    retires with the ledger in 18.x (D13). C1 withdrew the seed loader's
- *    namespace exemption. #8686's backfill (`seed-tenancy-backfill.ts`) still
- *    carries the NAMESPACE form; its residue attribution is C7's. Read the
- *    three together before changing any of them.
+ *    ⚠️ Platform-namespace objects used to be a fourth population: first the
+ *    whole `sys_` / `cloud_` / `ai_` NAMESPACE, then (#13491) the per-object
+ *    verdict of `PLATFORM_OBJECT_TENANCY`. ADR-0131 C8 stage 8b retired that
+ *    write-path reader — under `single` first, then under the walled postures
+ *    in 18.x — so a platform object with a tenant column takes the derived
+ *    organization or is refused, like every other object. The ledger keeps
+ *    its other reader, the tenant-audit mute in `Engine.buildDriverOptions`
+ *    ({@link isPlatformObjectOutOfTenantAuditScope}). C1 withdrew the seed
+ *    loader's namespace exemption. #8686's backfill
+ *    (`seed-tenancy-backfill.ts`) still carries the NAMESPACE form; its
+ *    residue attribution is C7's. Read the three together before changing any
+ *    of them.
  *  - **Writes that already carry an organization** — on the execution context
  *    or on the row itself. That IS "carrying an explicit organization"; the
  *    ruling asks for nothing more.
@@ -120,14 +120,6 @@ import {
  * the one protocol-level name, not a re-spelling (`SystemObjectName`).
  */
 export const ORGANIZATION_OBJECT = SystemObjectName.ORGANIZATION;
-
-/**
- * The NULL-organization sentinel the SQL driver's counter and partitioned
- * unique index collapse a missing organization to (`GLOBAL_TENANT` in
- * `driver-sql`, ADR-0120 D3). Named here only to make the refusal message say
- * what it is refusing to write; nothing in this module produces the value.
- */
-export const GLOBAL_TENANT = '__global__';
 
 /**
  * The tenant column the kernel injects into every tenant-scoped object
@@ -160,13 +152,9 @@ export const DEFAULT_TENANT_FIELD = 'organization_id';
  * #13491's re-ruling (2026-08-31, 联案 #13497) withdrew the wholesale namespace
  * reading — but its scope was the RUNTIME control only. So today:
  *
- *  - **the runtime write path** no longer cuts under `single` (C8 stage 8b).
- *    Under a walled posture it cuts PER OBJECT, by the hand-adjudicated
- *    classification in `platform-object-tenancy.ts` — the
- *    `PLATFORM_OBJECT_TENANCY` ledger, read through
- *    {@link classifyPlatformObjectTenancy} and
- *    {@link isPlatformObjectOutOfTenantAuditScope}, which is what
- *    `Engine.resolveSystemInsertOrganization` calls.
+ *  - **the runtime write path** no longer cuts under any posture (C8 stage
+ *    8b: `single` first, the walled postures in 18.x).
+ *    `Engine.resolveSystemInsertOrganization` reads no platform ledger.
  *  - **`seed-loader.ts`** no longer cuts at all: ADR-0131 D3 withdrew its
  *    namespace exemption (C1), so every seed row is stamped with the resolved
  *    organization — `sys_` / `cloud_` / `ai_` seeds included — or refused.
@@ -281,14 +269,13 @@ function buildRefusalMessage(
   return (
     `Insert on '${object}' was REFUSED: a system-context write on a tenant-scoped object must carry an ` +
     `organization, and ${condition}. Writing it anyway would store ` +
-    `${DEFAULT_TENANT_FIELD} = NULL, which the autonumber counter and the partitioned unique index ` +
-    `(COALESCE(${DEFAULT_TENANT_FIELD}, '${GLOBAL_TENANT}'), <field>) both collapse to the ` +
-    `'${GLOBAL_TENANT}' pseudo-tenant — a second counter that cannot see the organization's own, so a ` +
-    `field declared unique silently gets the same value twice. Nothing was written. Fix it by ` +
+    `${DEFAULT_TENANT_FIELD} = NULL — a row no organization owns, whose autonumber has no counter to ` +
+    `draw from, and which a field declared unique per organization cannot compare with the ` +
+    `organization's own rows (ADR-0131 D9). Nothing was written. Fix it by ` +
     `carrying the organization the way a session write does: pass it on the execution context ` +
     `({ context: { isSystem: true, tenantId: '<organization id>' } }), or set ${DEFAULT_TENANT_FIELD} ` +
     `on the record itself. If rows of '${object}' are genuinely platform-global and belong to no ` +
-    `organization, declare that on the OBJECT — tenancy: { enabled: false } (ADR-0066) — so it is ` +
+    `organization, declare that on the OBJECT — systemFields: { tenant: false } (ADR-0131) — so it is ` +
     `stated once and checkable, rather than decided per write.`
   );
 }

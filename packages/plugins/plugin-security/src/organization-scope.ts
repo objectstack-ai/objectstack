@@ -17,9 +17,9 @@
  *
  * Under a walled posture that row is invalid state. It was measured to be
  * unreadable by anyone: plugin-security's Layer 0 composes a STRICT
- * `organization_id = :tenant` and the middleware ANDs it over the driver's
- * `(organization_id = :tenant OR organization_id IS NULL)`, and the conjunction
- * of the two is the strict equality alone — so on a walled deployment every
+ * `organization_id = :tenant` and the middleware ANDed it over the driver's
+ * v17 predicate `(organization_id = :tenant OR organization_id IS NULL)`, and
+ * the conjunction of the two is the strict equality alone — so on a walled deployment every
  * principal, at every rung, listed ZERO positions, permission sets and sharing
  * rules while the tables held rows.
  *
@@ -32,11 +32,14 @@
  *
  * An organization-less row is INVALID STATE under a walled posture — refuse or
  * warn loudly, never treat it as a platform-wide default. The older reading, in
- * which a NULL organization marked a platform row visible to every tenant,
- * survives only as DRIVER-LEVEL COMPATIBILITY BEHAVIOUR: `applyTenantScope`
- * still emits the `OR organization_id IS NULL` arm, and this module depends on
- * that arm being there — it is precisely how a per-organization pass can still
- * SEE a pre-fix organization-less row and therefore say something about it.
+ * which a NULL organization marked a platform row visible to every tenant, is
+ * retired at every layer: ADR-0131 D8 removed the driver's
+ * `OR organization_id IS NULL` arm from `applyTenantScope`, and
+ * `check-tenant-chokepoint` refuses it. A per-organization pass therefore no
+ * longer SEES an organization-less row at all — the tenant predicate is
+ * `organization_id = :tenant` and nothing else — and the 18.x upgrade ceremony
+ * (ADR-0131 D10) attributes or retires such rows before a walled deployment
+ * boots.
  *
  * ## What replaces a reap
  *
@@ -69,10 +72,11 @@
  * So the pass said so instead. Its guard (retired with the seeder) named the
  * rows and named the remedy, and — this is the load-bearing half — the pass
  * still CREATES the organization's own copy. The failure shape it exists to
- * prevent is the silent no-op: a tenant-threaded pass sees the pre-fix
- * organization-less row through the driver's compatibility arm, reads the name
- * as already represented, takes the update branch and creates nothing, leaving
- * the deployment exactly as broken as before while reporting success.
+ * prevent is the silent no-op: a tenant-threaded pass that saw the pre-fix
+ * organization-less row through the driver's v17 NULL arm (retired by ADR-0131
+ * D8) read the name as already represented, took the update branch and created
+ * nothing, leaving the deployment exactly as broken as before while reporting
+ * success.
  * {@link resolveOwnOrganizationRow} is the one read that distinguishes "this
  * organization has its row" from "somebody's organization-less row is visible
  * here", and every seeder in this catalog routes through it.
@@ -111,13 +115,15 @@ export function rowOrganizationId(row: any): string | null {
  * Resolve THIS organization's own row for a name, out of what a tenant-scoped
  * read returned.
  *
- * A scoped read passes through `applyTenantScope`, whose compatibility arm
- * returns the caller's rows AND any organization-less ones. Those two are not
- * interchangeable and the seeders must never treat them as such:
+ * A scoped read passes through `applyTenantScope`, which since ADR-0131 D8
+ * returns the caller's rows only — the driver's NULL arm is retired. A row
+ * set can still mix the two classes when it comes from a driver with no
+ * native tenant scoping or from an unscoped read, and they are not
+ * interchangeable; the seeders must never treat them as such:
  *
  * - a row stamped with `organizationId` is this organization's — update it;
  * - an organization-less row is a PRE-FIX residue that merely happens to be
- *   visible here. Reading it as "already seeded" is the silent no-op this
+ *   in the row set. Reading it as "already seeded" is the silent no-op this
  *   catalog exists to prevent, so it is reported separately and never returned
  *   as the organization's own row.
  *

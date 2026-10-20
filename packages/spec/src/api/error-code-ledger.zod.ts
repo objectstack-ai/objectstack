@@ -604,6 +604,7 @@ export const ERROR_CODE_LEDGER = {
     'PASSWORD_REUSE',
     'OAUTH_REGISTER_FAILED',       // better-auth rejected the client registration
     'PHONE_NOT_ENABLED',
+    'ROLE_NOT_FOUND',             // [#24750] 400 on /organization/invite-member and /organization/update-member-role: the requested membership role is outside the closed vocabulary, refused before any invitation or membership row is written; better-auth's code, stamped by plugin-auth on the invite door (`invite-role-not-found-code.ts`), pass-through from better-auth on update-member-role
     'SAML_REGISTER_FAILED',
     'SELF_REGISTRATION_CLOSED',   // [#11739] audience posture invite_only: self-registration is closed (no pending invitation for this address)
     'SSO_REGISTER_FAILED',
@@ -1454,6 +1455,17 @@ export const ERROR_CODE_LEDGER = {
     // connector, plugin or host calling the driver directly, and that is why
     // it ships in `dist` and is registered (#16404, "Door or no door").
     'UNIQUE_VIOLATION',
+    // [ADR-0131 D9, stage 8d] The autonumber counter refuses an organization-
+    // less row on a tenant table wherever this driver registered the
+    // organization object, instead of filing it under the retired
+    // organization-less counter. Stamped through
+    // `ORGANIZATIONLESS_COUNTER_REFUSAL_CODE`
+    // (`packages/drivers/driver-sql/src/organizationless-counter-refusal.ts`);
+    // `TursoDriver`'s remote face throws through the same
+    // `resolveSequenceTenantId`, so `@objectstack/driver-turso` carries no row.
+    // Provenance ONLY: the engine refuses the same write under this code
+    // (`@objectstack/objectql` above), and one condition keeps one name.
+    'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
   ],
   '@objectstack/driver-turso': [
     // [#14287] Provenance for the Turso REMOTE transport's unsafe-identifier

@@ -1,5 +1,989 @@
 # @objectstack/service-storage
 
+## 18.0.0
+
+### Minor Changes
+
+- 29527f2: fix(service-storage): the single-shot upload commit refuses a file whose bytes the storage backend does not hold
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) What narrows is the single-shot upload commit door: a completion naming a file whose bytes the storage backend does not hold, or holds at another size than the upload declared, used to answer 200 and commit the row, and is now refused 409 with the row left pending. Nothing migrates: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten or converted, so there is nothing for `objectstack migrate meta` to rewrite. A refused client finishes the upload by sending its bytes, not by rewriting code or metadata. -->
+  
+  **What was wrong.** `POST /api/v1/storage/upload/complete` set the `sys_file` row to `committed` without asking the storage backend. A presigned upload whose byte `PUT` failed, or was never sent, therefore committed with the size it declared. The download doors serve any `committed` file, so `GET /api/v1/storage/files/:fileId/url` handed out a signed URL, and fetching it failed with `500`.
+  
+  **What the commit door does now.** Before it commits, it asks the backend through two members every adapter implements: `exists(key)`, and `getInfo(key).size` compared with the size the upload declared. When the backend holds no bytes for the file, or holds a different number of bytes, the door answers `409` with the standard code `RESOURCE_CONFLICT`. The row stays `pending`, so nothing is served for it. This is the answer the chunked completion already gives an upload that does not hold its declared bytes.
+  
+  **What changes for you.** Nothing, if your client sends the bytes before it completes, as the SDK's `storage.upload` and the console's upload provider do. A client that completes first now receives the `409`: send the file to its upload URL (start a new upload if that URL has expired), then complete again. If the storage adapter reports a fault while the door asks, the door answers `500`. The local adapter does not report an unreadable storage root as a fault: it reports it as holding no bytes, so on the local adapter the door answers `409`.
+  
+  The `eTag` a completion may carry is still stored as sent and not compared: no adapter reports the stored object's ETag.
+  
+  **The local adapter's download link.** `GET /api/v1/storage/_local/raw/:token` answers `404` `FILE_NOT_FOUND` when no file is stored under the link's key. Before, it answered `500` `INTERNAL` ("Download failed"). Every other read failure still answers `500`.
+- 7c7741d: The `sys_attachment` parent gate and the `sys_comment` moderation gate give the answer a by-id update of the parent record gets
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime accept set: the attachment parent gate and the comment moderation gate admit only where a by-id update of the parent record would be admitted. The remedy for a refused caller is an access decision on the parent record, not a rewrite. The exported port types AttachmentSecurityLike and CommentSecurityLike gain one optional member, which no caller has to supply. The other categories are closed on facts: both bumped packages publish (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered, not already-registered); the port types stay concretely typed (not type-surface-only). -->
+  
+  - Every limb that asks whether the caller may edit the parent record (attaching a file, editing or removing another user's attachment or comment, moving an attachment to another record, and `assertMayAttach`) now admits only where a by-id update of that parent admits. After record sharing and the master-detail check, the gate asks the security service's judgement of that update: its record-grained `explain` verdict for `update` on the parent, `allowed` and `record.visible` both.
+  - The step only adds refusals, with each limb's existing envelope (`ATTACHMENT_PARENT_ACCESS`, `ATTACHMENT_DELETE_DENIED`, `RECORD_NOT_ACCESSIBLE`, or the not-visible `PERMISSION_DENIED` for a caller who cannot read the parent). A store fault keeps its own status, and an attach naming a parent object the registry does not hold answers what a by-id update of it answers (`404 OBJECT_NOT_FOUND`).
+  - Posting a comment is unchanged: it stays a read rule on the parent.
+- 1f949da: feat(service-storage, plugin-audit): the attachment and comment gates judge "may edit the parent record" by the parent's own by-id update alone
+  
+  Clause-②: yes (widening)
+  
+  A caller who can update the parent record by id can also attach files to it and moderate its comments; a caller who cannot, still cannot. The gates only stop refusing what the CRUD path already admits.
+  
+  - **What widens.** The `sys_attachment` parent gate (`@objectstack/service-storage`: attaching, detaching or editing another user's attachment, re-pointing one, and `assertMayAttach`) and the `sys_comment` moderation gate (`@objectstack/plugin-audit`: editing or removing another person's comment) now ask one question about the parent record: the security service's record-grained judgement of a by-id `update` of it (`security.explain` for `update` on the parent, admitting only `allowed === true` and `record.visible === true`). They no longer ask record sharing at owner-only depth first, nor the master-detail check: both are part of that judgement already. So a caller whose write depth on the parent object is `unit`, `unit_and_below` or `org` may now attach and moderate wherever that depth lets them update the parent, and so may a caller an app-authored row-level update policy admits.
+  - **What does not move.** A caller the parent's by-id update refuses is refused, with the same codes as before (`ATTACHMENT_PARENT_ACCESS`, `ATTACHMENT_DELETE_DENIED`, `RECORD_NOT_ACCESSIBLE`, all 403), and a caller who cannot read the parent still gets the not-visible refusal. A `controlled_by_parent` parent is still judged through its master. Uploaders keep their own attachments and authors their own comments. Posting a comment stays a read rule on the parent. A store fault keeps its own status.
+  - **Kernels that judge no by-id update.** Where the security service serves no `explain` (or there is none), both gates keep exactly the composition they had: record sharing's tri-state edit verdict at owner-only depth, then the master-detail check. With no sharing service, a caller-scoped read of the parent is still asked first.
+  - **`@objectstack/spec`.** The `ISharingService` contract prose ("Write DEPTH is an input the CALLER supplies") now records that the parent-record gates ask the security service's by-id update judgement instead of this service, and why they never resolve the parent's depth themselves. No type, member or export changes.
+- 29678f2: fix(service-storage)!: the upload commit, chunked-completion and progress doors act only for the user who started the upload
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authorization narrowing at three storage upload doors, not a metadata change: no spec key, export, option, response field or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which callers those doors act for: a caller who is not the file's uploader is now refused, while the uploader is answered as before. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers these doors and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `POST /api/v1/storage/upload/complete`, `POST /api/v1/storage/upload/chunked/:uploadId/complete` and `GET /api/v1/storage/upload/chunked/:uploadId/progress` now act only for the user who started the upload. The rule is declared once and each of the three doors consults it: the signed-in user must be the file's `owner_id`, which both upload-start doors already stamp from the session. A chunked upload reaches its uploader through its file.
+  
+  - **Refused now:** every other caller, with `403 PERMISSION_DENIED`. The answer is the same whichever organization the caller acts in, and it comes before anything is written or returned. There is no administrator exception. A file with no recorded uploader, or a chunked upload whose file is gone, is refused the same way rather than given a guessed owner.
+  - **Unchanged:** the uploader's own calls, who may start an upload, who may download a file (the download doors' own authorization), the organization the doors stamp and scope by, and the not-found answers. A deployment with no `auth` service, whose upload routes run without a session resolver, keeps them open as before.
+  
+  What changes for you: complete and poll an upload as the same signed-in user who started it. An upload left pending with no recorded uploader cannot be committed; start it again.
+- b15f8a1: feat(service-print): print a record's print page to a PDF in headless Chromium, as the requesting user, and archive it as a file attached to the record
+  
+  Clause-②: yes (widening)
+  
+  A new package, `@objectstack/service-print`. `PrintServicePlugin` registers the in-process `print` service (`IPrintService`): `status()` and `printRecordToFile({ app, object, recordId, page, filename? }, context)`. It adds no route, no metadata key and no error code. Compose it explicitly:
+  
+  ```ts
+  import { PrintServicePlugin } from '@objectstack/service-print';
+  plugins: [new PrintServicePlugin()]
+  ```
+  
+  - **One engine, headless Chromium, in one of two placements.** A local executable (`OS_PRINT_CHROMIUM_PATH`, option `chromiumPath`), or a remote browser's DevTools WebSocket endpoint (`OS_PRINT_BROWSER_ENDPOINT`, option `browserEndpoint`). Either one needs `OS_PRINT_CONSOLE_URL` (option `consoleUrl`): the console's URL as that browser reaches it, `/_console` included. Configuring both placements is refused. `playwright-core` is pinned exact on this package only.
+  - **Loud at startup.** `start()` probes the engine and logs its placement and Chromium version. An engine that is not configured, is misconfigured or does not answer is reported once, with the setting to fix, and `status()` says why. A remote endpoint is never logged beyond its scheme and host.
+  - **As the requesting user.** The page is rendered through a short-lived session minted for the caller's own principal by the auth service (`mintPrincipalSession`), and revoked in a `finally`. There is no system principal.
+  - **Refusals first, each with `code` and `status`, before any session is minted or browser started** (an engine that failed its last probe is re-probed only after them all): a caller that is not a human user acting for themselves (`PERMISSION_DENIED` / 403); an engine that is not ready (`SERVICE_UNAVAILABLE` / 503); an unknown page (`RESOURCE_NOT_FOUND` / 404); a page that is not the object's default record page or declares no `print` (`VALIDATION_ERROR` / 400); a record the caller cannot read (`RECORD_NOT_FOUND` / 404); an object without `enable: { files: true }` (`FILES_DISABLED` / 403).
+  - **The archive runs as the requesting user.** `@objectstack/service-storage`'s `file-attachments` service gains a caller-scoped face, `ICallerFileAttachmentService` (exported type), on the same slot and the same writer: `assertMayAttach(parentObject, parentId, context)` throws the insert's own refusal without writing (`PERMISSION_DENIED` / 403 when the caller may not create attachments, `ATTACHMENT_PARENT_ACCESS` / 403 when the attach rule refuses), and `attachFileAs(input, context)` writes one `sys_file` owned by the caller and one `sys_attachment` inserted under the caller's context, so every insert gate judges the caller and the row is stamped `uploaded_by` the caller. The print service asks `assertMayAttach` in its files step, before any session is minted or browser started. `attachFileAs` acts only in the caller's own organization: an `organizationId` other than the context's `tenantId` (or `null` when it names none) is refused `PERMISSION_DENIED` / 403. `attachFile` (the system verb) is unchanged.
+  
+  `@objectstack/spec`'s `llms.txt` counts the new package: the workspace publishes 72 packages.
+- 59d993c: fix(service-storage)!: the storage settings' Limits group (`max_upload_mb`, `presigned_ttl`, `session_ttl`) is enforced at the upload doors
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime upload door: an upload larger than the resolved max_upload_mb, which used to be stored, is refused with 413 before anything is stored. The other categories are closed on facts: the one bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and nothing exported is removed or narrowed — the diff only adds an optional route option, two type exports and two methods — so it is neither runtime-interface-only nor type-surface-only. -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Setup's File Storage page has always rendered a "Limits" group — "Max upload size (MB)", "Presigned URL TTL (seconds)" and "Upload session TTL (seconds)" — and saved it, but nothing read it. `StorageServicePlugin` now reads the group on every settings pass and its upload doors honour it, on the plugin's own mount and on a host's `mountStorageRoutes` mount alike.
+  
+  **What stops being accepted.** Where the plugin is bound to the `storage` settings namespace (its default, `bindToSettings: true`, with a settings service present), an upload larger than the resolved `max_upload_mb` is refused with `413` and the registered code `PAYLOAD_TOO_LARGE`, in the usual error envelope, with a message naming the limit and the setting. Nothing is stored: no `sys_file` or `sys_upload_session` row is written and no byte reaches the adapter. The doors that judge it:
+  
+  - `POST /storage/upload/presigned` — the declared `size`;
+  - `POST /storage/upload/chunked` — the declared `totalSize`;
+  - `PUT /storage/_local/raw/:token` (the local adapter's presigned upload) — the body, by its `content-length` before it is read and by the bytes actually read;
+  - `PUT /storage/upload/chunked/:uploadId/chunk/:chunkIndex` — the bytes the session has received so far plus this chunk, the same two ways.
+  
+  With nothing saved, the limit is the setting's declared default, **100 MB** (counted as MiB: 104,857,600 bytes). Uploads above it used to be stored and are now refused. The largest value the setting accepts is 10240 MB.
+  
+  **What else changes.** A saved `presigned_ttl` is now the lifetime of every presigned upload URL and of every non-gated download URL; a saved `session_ttl` is the lifetime of every new chunked upload session. URLs and sessions issued before a save keep the lifetime they were issued with. With nothing saved both are unchanged — 3600 s and 86400 s, the declared defaults and the built-in ones being the same numbers. A save reaches the doors without a restart.
+  
+  **Precedence, per key.** A saved value (an admin save or an env override) wins over the host's `presignedTtl` / `sessionTtl` option (the plugin constructor's, or `mountStorageRoutes`'), and the host's option wins over the namespace's declared default — the precedence the adapter keys already had.
+  
+  **What stays accepted.**
+  
+  - A mount with no settings namespace bound — no settings service, `bindToSettings: false`, or a `mountStorageRoutes` kernel whose `storage` service is not this plugin's — keeps no size limit and its option TTLs.
+  - On the S3 adapter, a presigned upload is judged by its declared size only: the bytes go straight to the bucket, so the platform never sees them.
+  - The gated download URL keeps its own short lifetime (`downloadTtl`, 300 s); `presigned_ttl` does not apply to it.
+  
+  **What changes for you.** If your deployment accepts uploads larger than 100 MB, set "Max upload size (MB)" in the File Storage settings to the size you need before upgrading; a larger upload receives the `413` above.
+  
+  **New API (additive).** `StorageRoutesOptions.limitsSnapshot`, the `StorageLimitsSnapshot` and `StorageLimitReading` types, and `SwappableStorageService.setLimitsSnapshot()` / `getLimitsSnapshot()` — the Limits group as the plugin last read it, which the route composition hands to the doors.
+- e36ee53: fix(service-storage)!: a chunked upload completes with the file it was sent — the completion door assembles the parts the upload holds, and a re-sent chunk is counted once
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime upload door: a chunked completion whose upload does not hold its declared bytes, which used to answer 200 with a short or empty file, is refused with 409 before anything is assembled. The other categories are closed on facts: the one bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and nothing exported is removed or narrowed — the diff changes no export, type or route option — so it is neither runtime-interface-only nor type-surface-only. -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  **What was wrong.** `POST /storage/upload/chunked/:uploadId/complete` assembled the parts the *request* listed. The SDK's `resumeUpload` lists only the chunks its own pass sent, so an upload whose first chunks were stored before an interruption completed with `200` and the declared `size`, while the stored file held only the resumed chunks. And `PUT …/chunk/:chunkIndex` added a re-sent chunk to the session's progress a second time, so `GET …/progress` overstated `uploadedSize`, `uploadedChunks` and `percentComplete` — the counts `resumeUpload` resumes from.
+  
+  **What the completion door does now.** It assembles the upload's own record of the chunks it holds — every chunk the chunk door stored, with the eTag the backend answered for it — and checks the request's `parts` against that record. A resumed upload therefore completes with the whole file, whatever subset of parts the client lists, and the SDK's `resumeUpload` needs no change.
+  
+  **What stops being accepted.** The door refuses with `409` and the standard code `RESOURCE_CONFLICT`, before anything is assembled, when:
+  
+  - the upload does not hold every chunk it declared (chunk indexes `0` to `totalChunks - 1`), or holds one beyond them;
+  - the chunks it holds do not add up to the declared `totalSize`;
+  - the request lists a chunk the upload does not hold, or lists one with an eTag other than the one the upload holds for it.
+  
+  `error.details` carries `missingChunks`, `unexpectedChunks`, `unheldListedChunks` and `mismatchedChunks` (zero-based chunk indexes), with `totalChunks`, `totalSize` and `heldBytes`. The session stays `in_progress` and the file stays `pending`: upload the missing chunks with `PUT …/chunk/:chunkIndex`, then complete again. A `parts` value that is not a list of `{ chunkIndex, eTag }` is refused `400 INVALID_REQUEST`; an absent `parts` is still an empty list.
+  
+  **What changes for you.** A client that completed an upload before sending all of its bytes — including a completion with no chunks at all, which used to commit an empty file — now receives the `409` above. Send every chunk first.
+  
+  **Progress.** A chunk index sent again replaces its slot, as it replaces its bytes in the backend: `uploadedChunks` counts distinct chunks and `uploadedSize` is the sum of each chunk's latest size. A session started before chunk sizes were recorded keeps its running byte total until it ends, and is completed only when that total reaches `totalSize`.
+- dd986d8: fix(service-storage)!: downloading a file with no attachments scope and no field owner requires a signed-in caller
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authorization narrowing at the two storage download routes, not a metadata change: no spec key, export, option, response field or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which callers those routes serve for one file class: a caller with no session is now refused a file that has neither an attachments scope nor a field owner, while a signed-in caller is served as before. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers these routes and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The storage download routes, both the one that answers a signed URL and the stable one that redirects to the bytes, now require a signed-in caller for a file that has neither an attachments scope nor a field owner: an upload no record has claimed. That is the class an avatar or an organization logo stored as a URL belongs to, and so is a picked file not yet saved to its record. ADR-0104 made the anonymous capability URL an opt-in, `acl: 'public_read'`; this was the one class still served anonymously by default.
+  
+  - **Refused now:** a caller with no session, with `401 AUTH_REQUIRED`, the answer the upload routes and the attachments gate already give an unauthenticated caller. No signed URL is minted for the refused caller.
+  - **Unchanged:** a signed-in caller is served exactly as before, including the signed URL's lifetime. A browser's `<img src>` and `<a href>` send the session cookie the sign-in set, so a signed-in page keeps rendering these files. A file marked `acl: 'public_read'` stays anonymous. Attachments-scope and field-owned files keep their parent-record verdicts. A deployment with no `auth` service, whose storage routes run without a session resolver, keeps these downloads open as before and says so once in its log.
+  
+  What changes for you. Before this release, anyone holding such a file's id could download it; now, sign in first. A file that must render before sign-in (on a sign-in page, in an email, on a public page) needs `acl: 'public_read'` on its `sys_file` row.
+- ee8751d: feat(storage)!: the storage scope `public` is retired — no scope ever made a file publicly readable, and `acl: 'public_read'` stays the one opt-in for anonymous download (#22443)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered storage-scope-public-retired -->
+  
+  **BREAKING** — an accept-set narrowing on two published surfaces, shipped as `minor` under the launch-window convention for accept-set narrowings.
+  
+  `StorageScopeSchema` described `public` as "publicly accessible static assets", and the upload doors stored a caller's `scope: 'public'` on the new file. Neither ever made a file public. The download doors judge a file by its `acl`, the `attachments` scope and field ownership alone, so a file uploaded with scope `public` and the default acl was stored private, needed a signed-in caller, and nobody was told (ADR-0049 enforce-or-remove). ADR-0104 makes `acl: 'public_read'` the one opt-in for anonymous download, so the scope is retired, not enforced: enforcing it would have let any uploader make a file anonymous at upload.
+  
+  ### What now refuses `public`
+  
+  - **The presigned upload door and the chunked upload door** (`@objectstack/service-storage`) answer an upload naming `scope: 'public'` with `400 INVALID_REQUEST`, before any file row, session row, upload URL or backend upload exists. The message names the remedy. Every other scope, and an omitted one, is taken exactly as before.
+  - **`StorageScopeSchema`** (`@objectstack/spec`): `public` left the enum. Writing it fails `tsc`, and parsing it, on its own or as `ObjectStorageConfig.scope`, fails with the prescription instead of zod's generic enum message.
+  
+  ### FROM → TO
+  
+  | before | what to write instead |
+  | --- | --- |
+  | an upload with `scope: 'public'` | another scope, or no `scope` for the default `user`; then set `acl: 'public_read'` on the stored file record of each file that must be readable before sign-in |
+  | `ObjectStorageConfig` with `scope: 'public'` | another scope, or no `scope` for the default `global` |
+  
+  **The one-line fix: stop naming scope `public`, and mark each file that must render before sign-in `acl: 'public_read'` on its stored file record.** The upload request carries no `acl`: every upload is stored `acl: 'private'`, so adding an `acl` to the upload request changes nothing.
+  
+  **Files already stored with scope `public`** download exactly as they did: a signed-in caller gets them, an anonymous one gets `401`, unless the file is `acl: 'public_read'`. Their stored file records are rewritten to scope `user` by the one-time operator sweep `@objectstack/service-storage` exports, which changes no access: the storage key and the bytes stay as they are.
+  
+  ### The retirement kit
+  
+  - **Schema.** `StorageScopeSchema` retires the member with `enumWithRetiredValues`. No D2 conversion: no metadata type carries this schema or the upload request, so `os migrate meta` has no authored source to rewrite.
+  - **D3 entry `storage-scope-public-retired`** carries the judgement no rewrite can make: whether a file that was uploaded as `public` must really be readable before sign-in.
+  - **Upload request contract.** The `scope` description on the presigned and chunked request schemas no longer offers `public` as an example, and says what the scope is and is not.
+  - **Liveness.** No ledger row: the liveness ledger walks metadata types, and no metadata type carries `StorageScope`.
+  
+  **Measured producers: none.** At origin/main da159f74e6, nothing in `packages/`, `examples/`, `apps/`, `skills/` or `content/docs/` uploads with scope `public` or declares an `ObjectStorageConfig` with it. The one hit was a `@objectstack/spec` request-schema test fixture, changed to `tenant` here. The same search finds 29 `scope: 'attachments'` writes, which is its control. At the `.objectui-sha` pin f0268ad784 and at objectui main 2063f7a, the upload adapter forwards a caller's scope and no caller names `public`: the console passes none, and the record attachments panel passes `attachments` (the control). Deployed callers and stored rows NOT MEASURED.
+- 96e4be4: feat(service-storage)!: the `sys_file` scope option `public` is retired, and rows already stored with it are rewritten to `user` by a one-time operator sweep (#22443)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered storage-scope-public-retired) the retirement of the storage scope public is that step-18 entry; this changeset retires the same value from the stored sys_file vocabulary and rewrites its stored rows through an operator sweep -->
+  
+  **BREAKING** — an accept-set narrowing on the `sys_file` object's `scope` select, shipped as `minor` under the launch-window convention for accept-set narrowings. It completes the retirement registered as `storage-scope-public-retired`: `StorageScopeSchema` and both upload doors already refuse `public`, and now the stored vocabulary does too.
+  
+  ### What changes
+  
+  - **`sys_file.scope` no longer lists `public`.** Its options are `user`, `tenant`, `private`, `temp` and `attachments`. The engine refuses a write of `public` to the column as it refuses any undeclared option: `VALIDATION_FAILED`, `invalid_option` on `scope`. No access behaviour changes: the only scope value any code reads is `attachments`, and whether a file can be read before sign-in is decided by `acl: 'public_read'` alone.
+  - **Rows already stored with scope `public` are rewritten to `user`**, by a one-time sweep the operator runs (below), never at boot. `user` is the scope the upload doors and the field-reference copy path default to, and no reader tells it apart from `public`. One column moves: the storage key keeps its `public/` prefix, the acl and ownership columns are untouched, and no byte moves in the storage backend.
+  
+  ### FROM → TO
+  
+  | before | write instead |
+  | --- | --- |
+  | a `sys_file` row written with `scope: 'public'` | `scope: 'user'`, or no scope; and `acl: 'public_read'` on the row if the file must be readable before sign-in |
+  | rows already stored with `scope: 'public'` | nothing by hand: the sweep below rewrites them to `user` |
+  
+  **The one-line fix: stop writing scope `public` on `sys_file`, and run the sweep once on each deployment that stored it.**
+  
+  ### The operator step: run the sweep once after upgrading
+  
+  Until the sweep has run on a deployment that stored `public` rows, a record write that names a `public` file another field already owns is refused. The field-reference copy path copies the file into a new row with the source row's scope, the engine refuses `public` there, and the write fails with `ERR_FILE_REFERENCE_COPY`. The data REST doors answer that `500 INTERNAL_ERROR` ("Internal server error"); the server log carries the full sentence, which ends `Scope must be one of: user, tenant, private, temp, attachments`. Reads, downloads and updates that do not write `scope` are unaffected.
+  
+  The sweep ships in `@objectstack/service-storage` itself: `planSysFilePublicScopeBackfill`, `applySysFilePublicScopeBackfill`, `runSysFilePublicScopeBackfill` and `formatSysFilePublicScopeBackfillReport` are exported from the package, with their report types. It has the shape of the `sys_file` organization backfill: an operator step, never a boot hook. Import it from the package you upgraded to and run it server-side, from a context that holds the engine. It is a dry run first, and by default:
+  
+  ```ts
+  import {
+    planSysFilePublicScopeBackfill,
+    applySysFilePublicScopeBackfill,
+    formatSysFilePublicScopeBackfillReport,
+  } from '@objectstack/service-storage';
+  
+  const plan = await planSysFilePublicScopeBackfill(engine);            // counts, writes nothing
+  console.log(formatSysFilePublicScopeBackfillReport(plan));
+  const applied = await applySysFilePublicScopeBackfill(engine, plan);  // one scope write per row
+  console.log(formatSysFilePublicScopeBackfillReport(applied));         // keep it: it is the rollback list
+  ```
+  
+  It counts before it writes (`scanned`), writes nothing where the count is zero, and is idempotent: every write moves its row out of `scope = 'public'`, so a second run scans and writes zero. A row whose write fails is reported, never retried, and is picked up by the next run.
+  
+  ### Rollback
+  
+  The inverse is `user` back to `public` on exactly the ids the applied report lists. This release cannot write it through the engine, which refuses `public` like any undeclared option. So the inverse goes with a code rollback: on the previous release, which still declares the option, write `scope = 'public'` back to those ids, through the engine there or as one raw driver statement against `sys_file` filtered to them.
+  
+  ### The step-18 entry says so too (`@objectstack/spec`)
+  
+  The D3 entry `storage-scope-public-retired`, which the protocol upgrade guide is built from, said that files already stored with scope `public` are not touched. That no longer holds for the `scope` column: after the sweep they read `user`. Its reason now names the `sys_file` option's retirement and the operator sweep above, and says that the rewrite changes no access: the storage key and the bytes stay as they are, and those files still download exactly as before. Its acceptance criteria add the sweep's end state: a dry run on each deployment scans zero `sys_file` records with scope `public`.
+- ce3d0ad: fix(service-storage,plugin-audit)!: the `sys_attachment` and `sys_comment` parent gates judge a `controlled_by_parent` parent through its master, so a member can no longer attach files to, or delete other people's files or comments from, a child record they may not edit
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime accept set: the attachment parent gate (attach, the update and delete row rule, the re-point) and the comment moderation gate now refuse a write on a controlled_by_parent parent whose master the caller may not edit. The remedy is an access decision the app owner makes on the master record, not a rewrite. The two exported port types (AttachmentSharingLike, CommentSharingLike) now pick the sharing service's tri-state member instead of its two-state projection; the registered sharing service serves both, and a hand-written double meets the compiler at its own call site. The other categories are closed on facts: both bumped packages publish (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and the port types were concretely typed before, not erased (not type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes. It follows ADR-0055.
+  
+  **What stops being accepted.**
+  
+  - A `controlled_by_parent` record takes its access from its MASTER. Record sharing does not enforce on it, so the sharing service's edit verdict abstains on every such record, and both gates used to take that abstention as permission. A member holding the `sys_attachment` create or delete bit, or the `sys_comment` delete bit, could therefore attach files to, and delete other people's files and comments from, every master-detail child record of the organization. That included records whose own `PATCH` refuses the member, and records the member cannot read.
+  - Both gates now ask the sharing service's tri-state `checkEdit`. `allow` admits and `deny` refuses, as before. On an abstention they ask the security service's master-detail write check (`ISecurityService.checkControlledByParentWrite`), which is the answer a by-id update of the parent gets. Its `allow` and `not_applicable` admit. Its `deny` refuses, and so does an `unresolvable` outcome: a broken master-detail declaration, a record that does not exist, or an empty master reference. A datasource fault propagates with its `503`.
+  - The refusals keep today's envelopes. An attach or a re-point answers `403 ATTACHMENT_PARENT_ACCESS`. A delete of another user's file answers `403 ATTACHMENT_DELETE_DENIED`, and an update of it answers `403 RECORD_NOT_ACCESSIBLE`. A delete or update of another user's comment answers `403 RECORD_NOT_ACCESSIBLE`. A caller who cannot read the parent still gets the not-visible `403 PERMISSION_DENIED`.
+  
+  **What is unchanged.** An uploader still deletes their own file, and an author still deletes their own comment. Posting a comment still needs only read access to the record. A parent that is not `controlled_by_parent` is judged exactly as before, and a `public_read_write` parent still admits every member. A kernel whose security service does not serve the master-detail write check composes no master check, and there the gates admit on the abstention as before, which is also what the parent's own update gets.
+  
+  **What changes for you.** A member who was attaching or moderating on a child record through this gap now gets the refusal above. To give them that access, grant them edit access on the MASTER record: ownership of it, an `edit`-level record share, the `modifyAllRecords` bypass on the master object, or an app-authored `update` row-level security policy on the master that admits the row. Then their `PATCH` of the child and their attachment and moderation rights on it agree. The port types `AttachmentSharingLike` and `CommentSharingLike` now pick `checkEdit` rather than `canEdit`. The registered sharing service serves both, so a caller passing it is unaffected. `installAttachmentAccessHooks` and `installCommentAccessHooks` take an optional trailing resolver for the security service (new port types `AttachmentSecurityLike` and `CommentSecurityLike`). The two plugins pass it themselves.
+- 1bb1da1: A reader refused `sys_file` read now sees the name, size and type of a file the record they are reading owns, whenever the download door would serve them its bytes
+  
+  Clause-②: yes
+  
+  The download door already judges a field-owned file by the record that owns it (ADR-0104 D3): a declared `fileAccessDelegate` decides where the owner object names one, otherwise the caller's read of that record. Record file-field hydration judged the same file by `sys_file` object read instead, which the default member grants do not include. So one reader could download a contract's signed PDF but saw the field as `{ id, metadataRefused: true }`: the bytes yes, the name no.
+  
+  - **From.** A reader with read on `contract` and no `sys_file` read gets `{ "signed_pdf": { "id": "f_7cQx2Lm90a", "metadataRefused": true } }` for every file id the record holds.
+  - **To.** For a file whose `ref_object` / `ref_id` name the record being read, that reader gets the hydrated `{ "id": "f_7cQx2Lm90a", "name": "signed.pdf", "size": 2048, "mimeType": "application/pdf", "url": "/api/v1/storage/files/f_7cQx2Lm90a" }`, exactly as a `sys_file` reader does, when the door's field-owned verdict allows it. A delegate-governed object (for example `sys_approval_action`, delegate `approvals`) gets its delegate's answer, not the raw record read.
+  - **Unchanged.** Every other id keeps `{ id, metadataRefused: true }`: an id copied in from another record, an attachment-only or unclaimed file, a `public_read` file the record does not own, and an owned file the delegate or the record read refuses. `sys_file`'s own read rule is unchanged, so a direct `sys_file` query by the same reader is still refused. A reader with `sys_file` read is served by their own read, as before. The download door's verdict for every request is unchanged.
+  
+  **One verdict, two callers.** `@objectstack/service-storage` moves the download door's field-owned arm into one module-private function (not exported) and hands it to the engine through a new seam, `ObjectQL.registerFieldOwnedFileReadAuthorizer` (type `FieldOwnedFileReadAuthorizer`, exported from `@objectstack/objectql`), the same handover `registerHeldFileResolver` already makes. The engine never re-derives it. An engine with nothing registered keeps the refused marker for every id. On a refused hydration the engine makes one more `sys_file` read under the caller's tenant (it reads only ids whose ownership pair names a record in the result) and asks the verdict once per read.
+  
+  **For consumers.** Nothing to change. A refused reader may now receive the full file object where it used to receive the marker, and code that already handles all three `expanded` read forms handles this.
+- 08b38cb: fix(services)!: the datasource admin, share-link, webhook redeliver and storage families refuse a session the ADR-0069 authentication policy holds
+  
+  Clause-②: no (narrowing) — a session ADR-0069 holds out of protected resources is refused by families that answered it; core's existing exports only, no published schema or export moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at four families of routes mounted directly on the host server, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped, and a session the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which sessions these families serve: a session whose user carries the ADR-0069 posture (an expired password, or enforced MFA not yet enrolled) is now refused with the gate's 403 before any of the family's logic runs. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers these routes and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 holds a signed-in user out of every protected resource while their password has expired or while enforced MFA is not yet enrolled, until they remediate. REST and the runtime dispatcher already refuse such a session. Four families of routes mounted straight on the host server never asked, so they served it as an ordinary signed-in caller:
+  
+  - **`@objectstack/service-datasource`**: the datasource admin family (`registerDatasourceAdminRoutes`). Its door now asks the shared decision (`evaluateAuthGate`, `@objectstack/core`) about the session it already reads, before the anonymous floor and the capability check.
+  - **`@objectstack/plugin-sharing`**: the share-link family (`registerShareLinkRoutes`). Every route, the two capability-token routes included, is now mounted through one door that refuses a context carrying `authGate`. `SharingServicePlugin`'s resolver now puts the session's posture on that context, as REST does.
+  - **`@objectstack/plugin-webhooks`**: the redeliver door (`WebhookOutboxPlugin`), on both of its faces: the route the plugin mounts, and the `webhooks` service's `handleRedeliver`.
+  - **`@objectstack/service-storage`**: the storage family, the two capability-token raw-transfer routes included. Every route is now mounted through one door. The posture is bound where every other storage gate is bound, so both the plugin's own mount and the host door `mountStorageRoutes` carry it. When a gate feature is active, the door reads the session and refuses a held one. When the gate is active but the session cannot be read, the door answers the declared `503` (`SERVICE_UNAVAILABLE`), as REST does. A direct call of `registerStorageRoutes` mounts the family exactly as before, because like the other storage gates this one is bound by the package's composition. No exported declaration changes.
+  
+  - **Refused now:** a held session gets `403` with the gate's own `code` (`PASSWORD_EXPIRED` or `MFA_REQUIRED`) and `message`, in each family's declared error envelope, before the family does anything else. This is the answer REST gives the same session.
+  - **Unchanged:** a session the policy does not hold is served exactly as before, and an API-key caller is unaffected because it has no session to hold. A CORS preflight is answered as before.
+  
+  What changes for you. A user the policy holds must remediate (change the password, or enroll an authenticator) before these routes answer them, as on every other protected route. If you mount the storage routes through `mountStorageRoutes`, the gate is bound from the kernel's `auth` service with nothing to configure. If you mount `registerShareLinkRoutes` yourself with your own `contextFromRequest`, set `authGate` on the context it returns for a held session; the door refuses on that field.
+- 0f05907: feat(spec,core,plugin-auth)!: an API key answers as its owner's session does when the ADR-0069 policy holds the account, the forced reset gets its own code and an explicit revocation switch
+  
+  Clause-②: yes (narrowing) — the published contract widens (the posture codes become a closed vocabulary with a declared scope, a new `PASSWORD_RESET_REQUIRED` code, a per-user posture member on the auth service contract, new `@objectstack/core` exports) and the API-key door narrows (a key whose owner holds an account-scope posture is refused where it was served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key admission seam plus one new error code, not a metadata change. No authorable spec key, stored shape or metadata surface is removed or renamed, so `objectstack migrate meta` has nothing to rewrite. `ExecutionContext.authGate.code` narrows from a bare string to the closed posture vocabulary, but that field is server-constructed only and never authored; its one producer already wrote only members of it. What narrows is which API keys are served (a key whose owner owes MFA enrolment is refused with 403 MFA_REQUIRED), and the administrator-forced password change answers its own code. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key door, and a changed code for the administrator-forced password change), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling C′ on #23287: posture codes are a closed vocabulary, and each code declares what it holds.
+  
+  - **The vocabulary and its scope (`@objectstack/spec/kernel`).** `AuthGateCodeSchema` is the closed set of codes an `authGate` may carry: `PASSWORD_EXPIRED`, `PASSWORD_RESET_REQUIRED` and `MFA_REQUIRED`. `AUTH_GATE_SCOPES` declares each code's scope once: `MFA_REQUIRED` holds the **account** (every credential of the user); `PASSWORD_EXPIRED` and `PASSWORD_RESET_REQUIRED` hold the **credential** (password sign-in alone). `ExecutionContext.authGate.code` is typed against the vocabulary, and `PASSWORD_RESET_REQUIRED` is registered for `@objectstack/plugin-auth` in the error-code ledger.
+  - **One per-user posture computation (`@objectstack/plugin-auth`, `IAuthService.resolveUserAuthGates`).** It answers every posture a user holds, most urgent first, keyed by user id and the organization the credential operates in. The session gate shows its first entry, as before.
+  - **One judgment at the shared key-admission seam (`@objectstack/core`).** `resolveApiKeyAdmission` asks that computation for the key's owner and holds the key on an account-scope posture (a new `held` outcome). `resolveAuthzContext` resolves a held key as a held principal: the owner, `credential: 'api_key'`, and the posture on `authGate`. Both new inputs are optional (`userAuthGates`), and `userAuthGateSourceOf(authService)` binds one from an auth service.
+  - **REST and the runtime dispatcher** judge a key-admitted request by the key's answer, and re-read the session cookie for the gate only when a session admitted the caller. The declared-endpoint fallback does the same.
+  - **The raw-host families** take the same answer through the shared seam: datasource admin, share links, settings, and the storage family's door. The webhook-redeliver door admits no API key at all, and still does not.
+  - **The forced reset (`POST /api/v1/auth/admin/set-user-password`, the `set_user_password` action).** `must_change_password` now answers `PASSWORD_RESET_REQUIRED` instead of reusing `PASSWORD_EXPIRED`. The act carries `revokeSessionsAndKeys`, **on by default**: it ends every live session of the user and revokes every API key they own, and the response reports what landed (`revoked: { sessions, apiKeys, failed, complete }`).
+  
+  What changes for you:
+  
+  - **Refused now:** an API key whose owner owes MFA enrolment past the grace window gets `403 MFA_REQUIRED`, with the message the session gets, on every face that admits keys. It works again the moment the owner enrols, with nothing reissued: the refusal is not a revocation.
+  - **Unchanged:** a key whose owner's password expired, or whose administrator forced a password change, keeps working. A session sent beside an API key no longer answers for the key.
+  - **A forced password change answers `PASSWORD_RESET_REQUIRED`.** A client that recognises `PASSWORD_EXPIRED` to show its change-password flow should recognise `PASSWORD_RESET_REQUIRED` the same way.
+  - **An administrator's password reset now signs the user out everywhere and revokes their API keys by default.** For a routine reset, pass `revokeSessionsAndKeys: false` (or clear the switch in the Set Password dialog). Revoked keys stay revoked after the password change; an administrator can restore a key a routine reset revoked with the Restore API Key action, or the owner mints a replacement.
+  - **Hosts calling `resolveAuthzContext` or `resolveApiKeyAdmission` directly** pass `userAuthGates: userAuthGateSourceOf(authService)` to have the key's owner asked. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `held` outcome.
+- 5e725b8: A server-side producer can store a file and attach it to a record: `IFileAttachmentService.attachFile`, registered by `StorageServicePlugin` as the kernel service `file-attachments` (`FILE_ATTACHMENT_SERVICE`), writes the bytes, one `sys_file` row and one `sys_attachment` row linking it to the parent, under the checks every other attachment of that parent meets
+  
+  Clause-②: yes (widening: `@objectstack/spec/contracts` gains `IFileAttachmentService`, `AttachFileInput`, `AttachedFile` and `FILE_ATTACHMENT_SERVICE`, and `StorageServicePlugin` registers and declares one more service)
+  
+  - **The call.** `attachFile({ parentObject, parentId, organizationId, filename, mimeType, data })` answers `{ fileId, attachmentId, size }`. `organizationId` is required: the organization the caller acts in, or `null` for none. It acts as the system, for a producer with no browser upload in front of it (inbound mail first). Reach it with `ctx.getService(FILE_ATTACHMENT_SERVICE)` once the kernel has bootstrapped.
+  - **What it runs.** Each check is the one the rest of the platform already runs, not a copy:
+    - The `max_upload_mb` storage setting, through the same verdict the REST upload doors ask. Over it, the call is refused `413 PAYLOAD_TOO_LARGE` before anything is stored.
+    - The parent's organization. A parent walled into another organization than `organizationId` is refused `404 RECORD_NOT_FOUND`, as a missing parent is. Both rows are written in the parent's organization, or in the caller's for a global parent.
+    - Every gate on the `sys_attachment` insert, among them the `enable.files` opt-in: a parent object without it is refused `403 FILES_DISABLED`.
+    - Before the kernel has bootstrapped, or with no data engine, the call is refused `503 SERVICE_UNAVAILABLE`. A malformed input is refused `400 VALIDATION_ERROR`.
+  - **No refusal leaves a committed `sys_file`.** The row is written `pending` before the bytes, and turns `committed` only in the same transaction as the `sys_attachment` insert. A refused call removes the bytes and the row before it throws. If the process dies mid-call, the pending-upload retention reclaims both.
+  - `@objectstack/service-storage`: the upload doors' size refusal moved from the route module into `storage-limits.ts`, beside the limit it enforces, so the doors and the verb read one status, one code and one sentence. The doors answer exactly as before.
+- 1d79556: feat(spec,core,runtime,plugin-auth)!: API keys get a lifecycle: a 90-day default expiry, a one-year ceiling, a 90-day inactivity expiry, a one-year grace for keys created with none, and distinct refusal codes
+  
+  Clause-②: yes (narrowing) — the published contract widens (four `auth` settings keys, the `IAuthService.resolveApiKeyLifecyclePolicy` member and its `ApiKeyLifecyclePolicy` type, four registered error codes, new `@objectstack/core` exports) and the API-key doors narrow (a signing past the ceiling is refused; an inactive key, a key past its grace, and a revoked or expired key sent beside a session are refused where they were served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key signing door and the shared key-admission seam, not a metadata change. No authorable spec key, stored shape or metadata surface is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite: the four new `auth` settings keys are additive and defaulted, `sys_api_key` gains no column (its existing `expires_at` and `last_used_at` are written by the platform), and `ResolveAuthzInput.apiKeyLifecycle` / the sixth parameter of `resolveApiKeyAdmission` and `resolveApiKeyPrincipal` are server-side wiring no author writes. What narrows is which API keys are served and which signings are accepted; the remedy is a new key or a nearer date, never a rewrite of a package source or a stored row. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key doors), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling A on #23367: the key store stays `sys_api_key`, and the policy is auth configuration.
+  
+  - **The policy (`@objectstack/plugin-auth`, `IAuthService.resolveApiKeyLifecyclePolicy`).** Three `auth` settings keys, bound by `bindAuthSettings`: `api_key_default_expiry_days` (90), `api_key_max_expiry_days` (365) and `api_key_inactivity_days` (90; `0` turns it off). A fourth, `api_key_policy_started_at`, is recorded once — on the first boot that runs the policy, at `kernel:bootstrapped` — and anchors the two clocks below; it survives restarts and is never overwritten by the platform.
+  - **The signing door (`POST /api/v1/keys`).** A signing that names no `expires_at` gets the default life and the response echoes it. An `expires_at` further away than the ceiling is refused `400 API_KEY_EXPIRY_TOO_LONG`, naming the latest date allowed; exactly the ceiling is accepted. A kernel with no auth service signs as before.
+  - **The key-admission seam (`resolveApiKeyAdmission`, `@objectstack/core`).** A real key its own state refuses is a new outcome, `lifecycle`, with one of three distinct codes: `API_KEY_REVOKED`, `API_KEY_EXPIRED` (past `expires_at`, or past the grace of a key created with none) or `API_KEY_INACTIVE` (no recorded use for longer than the window). `resolveAuthzContext` raises it as the branded `ApiKeyLifecycleRefusalError` (`403`, a located message naming the key's prefix, the date and the remedy). An unknown key is still `none`.
+  - **`last_used_at` is written.** Its description promised "Automatically updated on each API call", and nothing wrote it. The seam now stamps it on an admitted (or held) call, at most once an hour per key, and the inactivity judgment reads the value as it was BEFORE that call's stamp, so a key's own use cannot revive it. A stamp that fails never fails the request; it is said once, at `error`.
+  - **Keys created before the policy.** A key with no expiry gets one year from `api_key_policy_started_at`; the date is stamped onto its `expires_at` the first time it is admitted, so the keys page shows it, and the refusal after it names it. A key with no recorded use counts its inactivity from the same anchor (or from its own creation, when later) — never from an earlier `created_at`, since no use was ever recorded before the policy.
+  - **Every face that admits keys** passes the policy source (`apiKeyLifecyclePolicySourceOf(authService)`, a required input beside `userAuthGates`). Every one of them answers the refusal's `403` and code: the runtime dispatcher (the MCP HTTP endpoint among its routes), the REST data API, the settings routes, the storage download routes, the datasource admin routes, the share-link routes, the marketplace install-local routes and the MCP stdio transport. Each relays the refusal by its brand, so every other identity fault at those doors keeps its existing answer.
+  - **`OS_CLOUD_API_KEY` is untouched.** It is the runtime's outbound credential to the control plane, never admitted by this seam.
+  
+  What changes for you:
+  
+  - **A key created without an expiry now expires.** It used to live until revoked; it now lives 90 days (or the configured default). Pass `expires_at` to choose, and create a new key before it ends.
+  - **A signing asking for more than a year is refused** `400 API_KEY_EXPIRY_TOO_LONG`, where it used to be accepted. Ask for the date the message names, or an earlier one.
+  - **A key unused for 90 days is refused** `403 API_KEY_INACTIVE`, where it used to be served. It is not revoked; the remedy is a new key.
+  - **A key that already existed with no expiry keeps working for one year** from the date the policy took effect on your deployment (`auth.api_key_policy_started_at`), then answers `403 API_KEY_EXPIRED` naming that date. Replace such keys within the year.
+  - **A revoked or expired key answers its own code** (`403 API_KEY_REVOKED` / `API_KEY_EXPIRED`) on every face that accepts a key, where it used to answer the generic `401`; and a session cookie sent beside such a key no longer answers for it.
+  - **Hosts calling `resolveAuthzContext`, `resolveApiKeyAdmission` or `resolveApiKeyPrincipal` directly** pass `apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService)` (or the sixth argument), or an explicit `undefined` where no auth service exists. A caller of `resolveAuthzContext` that wants the located answer re-raises `ApiKeyLifecycleRefusalError` (`isApiKeyLifecycleRefusalError`) the way it re-raises the store outage. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `lifecycle` outcome.
+- 0b1179f: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  feat(service-storage): the `sys_attachment` read gate writes one `ReadableIds` leaf per parent object and does no pre-scan, so a broad read is judged over every row, not a 2,000-row window (ADR-0139 D4, D5)
+  
+  Clause-②: yes
+  
+  The gate serves an attachment only when the caller may read the record it is attached to. Until now each read first scanned at most 2,000 candidate rows as the system, then asked which of those rows' parent records the caller could read. Past that window the gate failed closed: the unscanned rows were left out, the list's `total` agreed with the short answer, and a warning said so.
+  
+  The gate now writes one branch per object the metadata registry holds (except `sys_attachment` itself): `{ parent_object: P, parent_id: { $in: ReadableIds.of(P) } }`. The engine composes the leaf from the security service's `canReadObject` and `getReadFilter` for `P`, and the SQL drivers evaluate it as one subquery against `P`'s table, inside their own tenant wall. A list, its `total` and a grouped count are each one statement over every row the caller may read. A parent object the caller may not read is answered with no rows, without reading it as the caller, so no denial is logged for it.
+  
+  What a reader sees:
+  
+  - A broad read of `sys_attachment` is served every attachment whose parent record the caller may read, with a true `total`, whatever the table size. An attachment whose parent the caller may not read, whose parent no longer exists, or that names no parent is still never served. A read scoped to one record (the attachments panel) is unchanged.
+  - Three classes still read through the bounded probe, chosen before any leaf is written: a delegated (on-behalf-of) caller; a parent an object-scoped read middleware narrows (for example `sys_comment`, `sys_comment_reaction`, `sys_activity` and `sys_audit_log`); and a parent bound to another datasource than `sys_attachment`. The whole read also stays on the probe when the security service offers no `canReadObject`, or when none is registered.
+  - A read whose probe finds no candidate row is now narrowed to no rows rather than left unfiltered. It served nothing before either.
+  - On a driver that does not compile the leaf (`driver-mongodb`), a read of `sys_attachment` now fails with `INTERNAL_ERROR` / 500 naming the driver and the leaf, instead of serving a capped list. The gate does not turn that refusal into an empty answer. This is ADR-0139's ruled behaviour until a pipeline form is measured for that driver.
+  
+  For a host that installs the gate itself: `installAttachmentReadVisibility(engine, logger, getAdmission?)` takes an optional third argument that resolves the security service on every read. `StorageServicePlugin` passes it. A call without it keeps every read on the bounded probe and says so once.
+- d8e11b5: fix(service-storage)!: the storage family gate and the route judge the same credential
+  
+  Clause-②: no (narrowing) — a session the ADR-0069 policy holds is refused on every storage route whatever else the request carries; no published schema, export or option moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at the storage route family mounted directly on the host server, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped, and a session the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which requests the family serves: a session whose user carries the ADR-0069 posture is now refused with the gate's 403 whatever else the request carries. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers these routes and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 holds a signed-in user out of every protected resource while their password has expired or while enforced MFA is not yet enrolled, until they remediate, and every route of the storage family is one. The family's gate and its routes now judge the same credential: the gate judges every credential a route of the family can serve.
+  
+  - **Refused now:** a session the policy holds gets `403` with the gate's own `code` (`PASSWORD_EXPIRED`, `PASSWORD_RESET_REQUIRED` or `MFA_REQUIRED`) and `message` on every storage route, whatever else the request carries, before the family does anything else. While a gate is active, a session that cannot be read is the family's declared `503` (`SERVICE_UNAVAILABLE`), whatever else the request carries.
+  - **Unchanged:** a session the policy does not hold is served exactly as before, apart from that outage answer; an API key whose owner holds an `account`-scope posture is refused with that posture, as before; and while no gate feature is active nothing changes.
+  
+  What changes for you. A user the policy holds must remediate (change the password, or enroll an authenticator) before any storage route answers them, whatever else their request carries. There is nothing to configure.
+
+### Patch Changes
+
+- a7a48b7: The storage store's by-id methods and the HTTP outbox's `redeliver` now pass the explicit system opt-in (`{ isSystem: true }`) on their data-engine calls. Until now they reached the engine with no principal and no opt-in, and the security middleware let that through only because of its principal-less hand-off.
+  
+  Clause-②: no
+  
+  - **service-storage.** `StorageMetadataStore.getFile`, `updateFile`, `deleteFile`, `getSession`, `updateSession` and `deleteSession` take the opt-in inside the store. Access stays by id, and the reads stay unscoped by organization, as before. On update and delete the acting organization still reaches the driver beside the opt-in, so a row stamped for another organization is still out of reach of these doors. The doors keep the authorization they already ran.
+  - **service-storage, the update payload.** `updateFile` and `updateSession` now send the caller's patch alone, where they used to send the whole row read back merged with it. The engine's read-only strip, which does not run for a system write, used to take `organization_id` and the four audit columns out of that row; now the store never sends them. The stored row is the same as before, and a column another writer changed between the read and the write is no longer reverted by it.
+  - **service-messaging.** `SqlHttpOutbox.redeliver` takes the opt-in on both of its reads and on its reset write. The caller's `tenantId` stays on every call as the driver-level scope, so a delivery in another organization is still not found. The reset write states `bypassTenantAudit: false`, so a redelivery from a caller with no organization is still reported by the driver's tenant audit.
+  - None of the gates the security middleware runs before its hand-off applies to these calls. ⛔ No new export on either package entry, and no new elevation API.
+- b88c356: The remaining platform producers in these four packages now pass the explicit system opt-in (`{ isSystem: true }`) on their data-engine calls. Until now they reached the engine with no principal and no opt-in, and the security middleware let that through only because of its principal-less hand-off.
+  
+  Clause-②: no
+  
+  - **service-messaging, the inbox read state.** `listInbox` (and its unread total), the receipt read behind it, and mark-read / mark-all-read take the opt-in inside the service. Their scope is unchanged: every read of a user's rows is keyed on the user id the door derived from the session, the receipt a mark-read inserts is stamped with it, and the receipt it updates is one a user-keyed read returned.
+  - **service-messaging, `owner_of:` audiences.** The record read takes the opt-in, the same posture as the email lookup beside it. It reads only `id` and the owner fields, and only the owner id leaves the resolver. An `owner_of:` audience on an object whose sharing model is `private` now resolves its owner; before, it resolved to nobody.
+  - **service-messaging, the rest of the fan-out and the outboxes.** The `role:` and `team:` membership reads, the email and SMS recipient reads, the notification template read, the dedup lookup in `emit()`, and both outboxes' enqueue, ack and list.
+  - **service-storage.** `StorageMetadataStore.createFile` and `createSession` insert under the opt-in. The organization still reaches the driver beside it, so the stored organization is unchanged, and the file's `owner_id` is still the uploading user.
+  - **service-settings.** The `sys_secret` store the plugin builds (insert, get, update), and the read that verifies a rotation before the old secret is reaped. A store `update` now writes the `ciphertext` it is given; without a context the engine's read-only strip dropped it. No caller in this repository uses `update`.
+  - **metadata-protocol.** `SysMetadataRepository.getByHash`, `list`, `history` and the history replay of `watch()`.
+  - None of the gates the middleware runs before its hand-off applies to these calls. ⛔ No new export on any package entry, and no new elevation API.
+- 7ebbc01: fix(service-storage): finishing an upload after switching active organization answers `409 RESOURCE_CONFLICT` naming the change, not a `500` that reads as a data-engine outage
+  
+  Clause-②: no
+  
+  `POST /api/v1/storage/upload/complete` and `POST /api/v1/storage/upload/chunked/:uploadId/complete` write by id under the caller's active organization, and that write is scoped to it. When the uploader's active organization is no longer the one the upload was started in, the write cannot reach the upload's row. Both doors used to answer that with `500 INTERNAL` and a message diagnosing a data-engine outage ("Restore the data engine …").
+  
+  - **Now:** before writing anything, each door answers `409 RESOURCE_CONFLICT` in the standard error envelope. The message says the upload was started in a different organization than the active one, and that switching back finishes it. The server log carries one warning naming the upload, the organization it was started in and the active one.
+  - **Unchanged:** which organization an upload belongs to (switching back finishes it there); a commit or completion from the starting organization; a real data-engine failure, which still answers `500` with its consequence and fix; the uploader-only rule, which runs first, so a caller who did not start the upload is still refused `403 PERMISSION_DENIED` and learns nothing about organizations; uploads stamped with no organization; routes with no session resolver; a store with no data engine wired; and the progress door.
+  
+  What changes for you: when either door answers `409 RESOURCE_CONFLICT`, switch the active organization back to the one the upload was started in and retry the same call.
+- 3513ac7: fix(service-storage): sending a chunk, or polling an expired upload's progress, after switching active organization answers `409 RESOURCE_CONFLICT` naming the change, not a `500` that reads as a data-engine outage
+  
+  Clause-②: no
+  
+  `PUT /api/v1/storage/upload/chunked/:uploadId/chunk/:chunkIndex` records each chunk on the upload session, and `GET /api/v1/storage/upload/chunked/:uploadId/progress` stamps a session past its `expires_at` as `expired`. Both writes go by id under the caller's active organization, and they are scoped to it. When the uploader's active organization is no longer the one the upload was started in, the write cannot reach the session row. Both doors used to answer that with `500 INTERNAL` and a message diagnosing a data-engine outage ("Restore the data engine …").
+  
+  - **Now:** each door answers `409 RESOURCE_CONFLICT` in the standard error envelope, with the same message the commit and chunked-completion doors give: the upload was started in a different organization than the active one, and switching back finishes it. The chunk door answers it before the chunk reaches the storage backend and before any write. The progress door answers it only when the expiry stamp is due, before stamping. The server log carries one warning naming the door, the upload, the organization it was started in and the active one.
+  - **Unchanged:** which organization an upload belongs to (switching back finishes it there); a chunk or a progress read from the starting organization; the progress of a live session, or of one already `expired`, which is a read and still answers `200` from any organization; a real data-engine failure, which still answers `500` with its consequence and fix; the resume-token check on the chunk door and the uploader-only rule on the progress door, which run first, so a caller who cannot act on the upload learns nothing about organizations; sessions stamped with no organization; routes with no session resolver; and a store with no data engine wired.
+  
+  What changes for you: when either door answers `409 RESOURCE_CONFLICT`, switch the active organization back to the one the upload was started in and retry the same call.
+- 4f4c4ed: fix(auth,services): the remaining in-process session reads no longer renew a browser session behind its cookie (#22258)
+  
+  **What was wrong.** better-auth's `getSession` renews a session older than `session.updateAge`: it moves `sys_session.expires_at` to `now + expiresIn` and stages the renewed session cookie on that call's own response. Nine doors in these packages read the session in-process (`auth.api.getSession({ headers })`) and answer with their own response, so the renewal landed in the database and its cookie was discarded. The browser kept its old cookie, which then expired before the session: a dead cookie beside a live bearer, after which every cookie-only path saw a signed-out user. The doors: `POST /api/v1/auth/admin/oauth2/toggle-disabled`, every `/api/v1/auth/admin/*` mount behind the shared platform-admin gate, `POST /api/v1/auth/admin/unlock-user` and `POST /api/v1/auth/admin/has-permission` (`@objectstack/plugin-auth`); `POST /api/v1/webhooks/redeliver`; the storage upload and download doors (`/api/v1/storage/*`); the share-link management routes (`/api/v1/share-links`); the settings routes (`/api/settings`); and the datasource-admin routes (`/api/v1/datasources/*`).
+  
+  **The rule now** is the one the REST, dispatcher, current-user and cloud-connection doors already follow. Each of these reads goes through `inProcessSessionReadInput(headers)` from `@objectstack/types`:
+  
+  - **A request carrying a session cookie** (a browser, including a console that sends its cookie beside its bearer) reads with `query.disableRefresh`. The session renews only through `GET /api/v1/auth/get-session`, which re-issues the cookie with `Max-Age = expiresIn`, so cookie and session expire together.
+  - **A bearer-only request** (`@objectstack/client` outside a browser, the `os` CLI) is unchanged: a read past `updateAge` still renews the session, and no cookie is set on a response to a request that sent none.
+  
+  **Upgrading.** Nothing to change. `@objectstack/plugin-webhooks` now depends on `@objectstack/types` directly; it already reached it through `@objectstack/core`.
+- 54c3ce1: fix(service-storage): chunks sent in parallel to one chunked upload each record their part
+  
+  Clause-②: no
+  
+  `PUT /storage/upload/chunked/:uploadId/chunk/:chunkIndex` merges its chunk into the upload session's record of the chunks it holds (`parts`, `uploaded_chunks`, `uploaded_size` on `sys_upload_session`). It read that record, merged in memory and wrote the whole record back, so two chunk PUTs to one upload at the same time both answered `200` while the record kept only one of them: `GET …/progress` undercounted, and the completion was refused `409 RESOURCE_CONFLICT` naming the chunk the record had lost until the client sent it again.
+  
+  The record is now written with a compare-and-set: the write lands only while the row still holds the progress the chunk door read, and when another chunk's write landed first the door reads the record again and merges again. On a wired data engine this is the engine's own conditional update, evaluated in the same statement that writes, so it holds across server processes. Every chunk sent in parallel is recorded, and a parallel upload completes on its first completion. A sequential upload is unchanged.
+  
+  A chunk whose record write loses to another write on 16 attempts in a row is refused `409 RESOURCE_CONFLICT`, with `error.details` `{ chunkIndex, attempts }`: its bytes are stored, but the upload does not hold it. Send that chunk again.
+- f782f17: fix(service-storage): an attach the attachment gate refuses no longer leaves the uploaded file stored forever — the caller's own never-attached file is tombstoned and reclaimed by the sweep
+  
+  Clause-②: no
+  
+  Attaching a file is two writes: the upload commits a `sys_file` (scope `attachments`), and then a `sys_attachment` insert attaches it to a record. When the attachment gate refused that insert with `403 ATTACHMENT_PARENT_ACCESS`, the file stayed `committed` with no attachment pointing at it. Nothing ever reclaimed it: files were tombstoned only when they lost their last attachment, and this one never had one.
+  
+  - **Now:** when the attachment gate refuses an attach, the file is tombstoned (`status: 'deleted'`, `deleted_at` set), the same way a file is tombstoned when its last attachment is removed. This covers every way the gate refuses: sharing denies edit on the parent, the parent's master record denies it (`controlled_by_parent`), or the parent cannot be read. From there the file follows the existing path. The lifecycle sweep reclaims the row and its bytes 30 days after `deleted_at`. At sweep time it checks again that nothing holds the file.
+  - **Only the caller's own unheld upload:** the file must be an `attachments`-scope, `committed` file. The refused caller must be its uploader (`sys_file.owner_id`). It must have no attachment and no field owner (`ref_*`). A refused attach that names someone else's file, a file another record still holds, or a field file changes nothing.
+  - **It survives a rollback:** the tombstone is written after the refusal, outside the refused write's transaction. If the attach ran inside a caller's own transaction, an `atomic` batch for example, rolling that transaction back does not undo the tombstone.
+  - **Unchanged:** the refusal itself (status, code, message), which does not depend on the file and says nothing about it; an admitted attach; and a retry. Retrying the same `file_id` within the 30 days is admitted or refused like any attach. An admitted retry attaches the file and brings it back to `committed`, as re-attaching a detached file always has.
+  - **Not covered:** an attach refused before the attachment gate runs still leaves the uploaded file `committed`. That is an attach with no `sys_attachment` create grant (`403 PERMISSION_DENIED`), or one to a parent with `enable.files` off (`403 FILES_DISABLED`). This is tracked in #22547.
+  
+  What changes for you: nothing to do. When the attachment gate refuses an attach, the uploaded file no longer uses storage indefinitely.
+- 6a3fe25: feat(spec,service-storage,client)!: one upload-scope list — the upload requests' `scope` and the SDK's `storage.upload` close to the new `UploadScope` enum, the `sys_file` scope select is built from it, and the upload doors answer any other scope with `400` naming the allowed values instead of `500 INTERNAL` (#22470)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered upload-request-scope-closed -->
+  
+  **BREAKING** — an accept-set narrowing on a published request contract and on the SDK method that sends it, shipped as `minor` under the launch-window convention for accept-set narrowings, plus one new export.
+  
+  The presigned and chunked upload requests declared `scope` an open string, while the stored file record (`sys_file.scope`, a closed select) only ever took `user`, `tenant`, `private`, `temp` and `attachments`. Any other value reached the `sys_file` insert, the data engine refused it as an invalid option, and the upload door answered that caller error as `500 INTERNAL`, with a message telling the operator to restore the data engine.
+  
+  ### What changes
+  
+  - **`UploadScopeSchema` / `UploadScope`** (`@objectstack/spec`, new, exported from `@objectstack/spec/api`): the upload-scope vocabulary, declared once — `user`, `tenant`, `private`, `temp`, `attachments`. It is a different list from `StorageScopeSchema`, which classifies a storage configuration and is not read by any upload.
+  - **`GetPresignedUrlRequestSchema.scope` and `InitiateChunkedUploadRequestSchema.scope`** read it. The default stays `user`. A literal outside the list fails `tsc`, and a parse refuses it on the `scope` key.
+  - **`client.storage.upload(file, scope)`** (`@objectstack/client`): the `scope` parameter is typed `UploadScope` instead of `string`, default `user` unchanged, so a scope outside the list fails `tsc` at the SDK call. `client.storage.getPresignedUrl` and `client.storage.initChunkedUpload` take the request types above and narrow with them.
+  - **The `sys_file` scope select** (`@objectstack/service-storage`) takes its options from the enum, in its order, with the same labels. The stored values do not change.
+  - **The presigned upload door and the chunked upload door** answer a scope outside the list — any string, a case variant, `null`, a number — with `400 INVALID_REQUEST`, naming the allowed values, before a file record, a session record, an upload URL or a backend upload exists. `public` is refused by the same gate and keeps its remedy (`acl: 'public_read'` on the stored file record). An omitted scope is the default `user`, as before. A real data-engine fault still answers `500`.
+  
+  ### FROM → TO
+  
+  | before | what to write instead |
+  | --- | --- |
+  | an upload naming a scope outside the list (a key prefix such as `avatars`, a folder, a record path) | one of `user`, `tenant`, `private`, `temp`, `attachments`, or no `scope` for the default `user` |
+  | `client.storage.upload(file, scope)` called with a `scope` typed `string` (`@objectstack/client`) | pass one of the five, or type the value `UploadScope` (`import type { UploadScope } from '@objectstack/spec/api'`) |
+  | a caller passing a scope typed `string` into either upload request | type it `UploadScope` |
+  
+  **The one-line fix: send one of the five upload scopes, or none.** `attachments` is for a file whose referrers are record attachment rows (it is what orphan tombstoning reads); `temp` for a scratch file; otherwise `user` or `tenant`.
+  
+  **No stored file record moves**: no upload naming another scope ever succeeded, so no stored record carries one.
+  
+  ### The kit
+  
+  - **D3 entry `upload-request-scope-closed`** carries the judgement no rewrite can make: which scope a file that was sent under a free name really belongs under. No D2 conversion: no metadata type carries the upload request, so `os migrate meta` has no authored source to rewrite.
+  - **Liveness.** No ledger row: the liveness ledger walks metadata types, and no metadata type carries the upload request.
+- 1e62f71: Inbound mail lands as a capability: `requires: ['mailbox']` registers the mirrored message `sys_mail_message`, its record links `sys_mail_association` and the mailbox directory `sys_mailbox`, with an unassociated pool restricted to mailbox owners and the new `manage_mailboxes` capability
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec`.** Two closed vocabularies each gain one entry; every stack and permission set that parsed before parses unchanged.
+    - **`mailbox`** is a platform capability token (`PLATFORM_CAPABILITY_TOKENS`, provider `@objectstack/service-mailbox`, open edition). It is not on the always-on slate: an app that wants mailboxes declares `requires: ['mailbox']`.
+    - **`manage_mailboxes`** is a curated organization capability (`PLATFORM_CAPABILITIES`), held by default by platform administrators (`ADMIN_FULL_ACCESS_CAPABILITIES`). Its holder reads the mailbox directory, and every mirrored message and association of its organization past the mail read gates, the unassociated pool included. Object grants and field-level security still apply to a holder.
+  - **`@objectstack/service-mailbox`** (new). `MailboxServicePlugin` owns the three objects (ADR-0029 D1/D2: registered only where the capability is required) and installs two read gates on the data middleware, so a list's `total` agrees with its rows:
+    - `sys_mail_message`, the RFC 5322 mirror of one inbound message (participants, Message-ID and threading headers, subject, text and HTML bodies, attachments as `sys_attachment` rows). A row is served to a caller who can read a record one of its associations names, to the owner of the mailbox it arrived in, or to a `manage_mailboxes` holder. A message no record matched (`association_state: 'unassociated'`) is therefore refused to an ordinary member as not found (`404 RECORD_NOT_FOUND`), never shown organization-wide.
+    - `sys_mail_association`, one row per (message, record) link with the participant address and email field that matched. A row is served to a caller who can read the record it names, or to a `manage_mailboxes` holder.
+    - `sys_mailbox`, the mailbox's address and owner, served only to a `manage_mailboxes` holder (`requiredPermissions`).
+    - All three are `engine-owned` and the data API serves `get` and `list` only. The HTML body is plain text (`textarea`), never rendered markup. Nothing writes these rows yet: the IMAP connector and the ingest engine, which stamp associations from the email fields an app flags with `mailAssociation`, ship next in this package.
+  - **`@objectstack/core`.** `resolveReadableParentIds` ("which of these parent records can the caller read", one caller-scoped engine read per parent object) is exported, so every parent-derived read gate asks the one evaluator. `CAPABILITY_PROVIDERS` gains the `mailbox` row.
+  - **`@objectstack/plugin-security`.** `organization_admin` (and its derived no-bypass variant) holds `manage_mailboxes`: an organization administrator reads its own organization's mailboxes and pool.
+  - **`@objectstack/plugin-audit`, `@objectstack/service-storage`.** The comment, activity, ledger and attachment gates import `resolveReadableParentIds` from `@objectstack/core` instead of carrying their own copies. The two copies were byte-identical, so no gate's answer changes.
+  - **`@objectstack/cli`, `@objectstack/verify`.** Both depend on `@objectstack/service-mailbox`, so `objectstack serve` and `bootStack` mount the provider an app's `requires: ['mailbox']` names. The ADR-0131 organization-ownership inventory carries a row for each new object.
+- 3d6392f: fix(service-storage): a presigned token the local adapter refuses answers `401 INVALID_TOKEN` on both raw byte routes, never a `500`
+  
+  Clause-②: no
+  
+  `PUT` and `GET /api/v1/storage/_local/raw/:token` are the local adapter's presigned byte routes. Each now answers every token it will not honour with `401 INVALID_TOKEN`, the status, code and message (`Invalid or expired token`) the error catalog already published for this code. The four cases are a malformed token, a forged one, one minted for the other verb, and an expired one.
+  
+  - **Before:** a malformed token, or one minted for the other verb, answered `500 INTERNAL`, which reads as a server fault. A forged or an expired token answered `403`, with a message naming which check failed. A genuine fault whose text happened to contain "expired" or "signature" was answered as a refused token.
+  - **Now:** every refusal gets the same status, code and message, so the answer never tells a forger whether the signature or the expiry failed. Any other failure behind a valid token is still `500 INTERNAL`, whatever its text says.
+  - **A 5xx withholds its message text.** Per the platform rule, a 5xx on the raw byte routes answers with the route's generic text and not the fault's own; the original error stays in the server log.
+  - **Token signatures are compared in constant time.**
+  - **Unchanged:** a valid token's upload or download, the `501 NOT_IMPLEMENTED` answer when no adapter can verify tokens, and every other storage route.
+  
+  What changes for you: a stale or tampered signed URL now answers `401` where it answered `403` or `500`. To recover, request a fresh URL (`GET /api/v1/storage/files/:fileId/url`, or a new presigned upload). The SDK's `storage.upload` and the console's upload adapter only check that the response is OK, so neither needs a change.
+- 3c1a046: fix: a route's catch-all `500` answers its own generic text, never the caught error's message, and `@objectstack/types` exports the writer that does it, `sendServerFault`
+  
+  Clause-②: yes (widening) — `@objectstack/types` gains one export, `sendServerFault`; nothing is removed, renamed or narrowed, and no response field changes shape.
+  
+  A declared 5xx does not carry the text of the error it caught: that text can name server internals, such as a path, a host or a table. The REST layer already withheld it. The storage, settings and i18n route families and the share-link routes answer in the nested `{ success: false, error: { code, message } }` envelope and did not: their catch-all `500` sent the caught error's message to the caller.
+  
+  - **What a caller now reads.** The same `status` and `code` as before, with the route's own generic text as `error.message`: `Internal error` on the storage and i18n routes, the route's message on the settings routes (`Failed to list manifests`, `Failed to read namespace`, `Failed to write namespace`, `Action failed`), and the route's `Failed to …` message on the share-link routes. On the storage routes this includes the metadata store's outage sentence, which an operator now reads in the server log.
+  - **What the operator reads.** The original error, stack included, in one `[5xx]` server-fault line. The storage byte routes, which already withheld the text, logged two lines per fault and now log one. A line names the mounted route pattern when the route passes one, never the request URL.
+  - **Unchanged.** Every `4xx` answer. The settings `SETTINGS_CRYPTO_UNAVAILABLE` refusal, which keeps its prescription. The authorization-store outage `503`, which keeps its declared code and message. The storage `501 NOT_IMPLEMENTED` answers. On the share-link routes, any error that declares its own `status` keeps the envelope it declares.
+  - **`sendServerFault(res, status, code, message, thrown, request?)`** (new, `@objectstack/types`): writes `message` in the declared envelope, and hands `thrown` to the server-fault log with its stack, as the fault's one line. Use it for an arm that answers a caught fault. Keep `sendError` for a `4xx` and for a `5xx` whose text you wrote for the reader. `request` is the mounted route pattern, never the request URL.
+- 8d3dd6f: The storage download door resolves its caller through `@objectstack/core`'s `resolveRequestExecutionContext`, the one request-to-`ExecutionContext` composition
+  
+  Clause-②: no
+  
+  - The download authorizer that `StorageServicePlugin` and `mountStorageRoutes` bind for parent-governed files resolves the caller by calling `resolveRequestExecutionContext` with this door's differences as named parameters: `anonymous: 'fail-closed'`, `authGate: 'resolved'`, `credentials: 'api-key-and-session'`, `sessionApi: 'optional'`, `session: 'request'`, its own way to reach the `tenancy` service, `localization: 'withhold'`, no request locale, `accessToken: 'carry'`, and no OAuth provenance or admission channel. The auth-service lookup, the header normalisation, the tenancy wiring, the verdict reads and the fail-closed `catch` stay at the door. The family's ADR-0069 gate reader, which runs before every storage route, is unchanged.
+  - The answers are the ones the door gave before: an anonymous caller, an unrecognised cookie, a failed session read with no gate active and a refused API key get `401 AUTH_REQUIRED`; a session or an API key owner the authentication policy holds gets `403` with its code and message from the family's gate; an unreadable permission store or tenancy service gets `503 SERVICE_UNAVAILABLE`; and an API key its own lifecycle refuses gets its `403` and code. A one-off probe of 47 fault wirings through the download route read the same answer on both sides of the change.
+  - The context the door hands to the owner-record read and to a file-access delegate is now the assembled `ExecutionContext` envelope rather than the resolver's raw output: it also states `isSystem: false` and `principalKind: 'human'`, and no longer carries the internal `credential` marker, which no reader of that context consumes.
+  - Nothing to do for a consumer: no export, route, configuration key or response shape changed.
+- daafae6: fix(core,cloud-connection,mcp)!: every API-key admission names its owner-posture source, so a held owner's key is refused at the marketplace install-local doors and on every MCP stdio call
+  
+  Clause-②: no (narrowing) — no published accept-set widens; two more seams refuse a key whose owner holds an account-scope posture, the owner-posture input of the shared key-admission seam becomes required, and `resolveApiKeyPrincipal` no longer answers a held owner's key with a principal.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/resolve-authz-context.ts#ResolveAuthzInput) An authentication-policy change at runtime TypeScript call sites, not a metadata change. No authorable spec key, stored shape or metadata surface moves, so `objectstack migrate meta` has nothing to rewrite. The input that becomes required lives on a runtime interface and on two runtime functions of `@objectstack/core` (`resolveApiKeyAdmission`, `resolveApiKeyPrincipal`), none of them a metadata surface; the affected party is a TypeScript caller, and the compiler names its call site. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at two API-key doors, and a required input on the shared key-admission seam), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling C′ on #23287, item 1: "a held user's API key is refused at every seam with the same code". Item 4: "The refusal is not a revocation: the key resumes the moment the user enrols (or the account posture clears)". `AUTH_GATE_SCOPES` decides which posture holds a key: `MFA_REQUIRED` (scope `account`) holds it; `PASSWORD_EXPIRED` and `PASSWORD_RESET_REQUIRED` (scope `credential`) do not.
+  
+  - **The marketplace install-local doors (`@objectstack/cloud-connection`).** The resolver behind all five doors now hands the shared resolver the auth service's per-user posture computation and refuses on the posture it decided for whichever credential admitted the caller. A key whose owner holds `MFA_REQUIRED` gets `403 MFA_REQUIRED` with the session's message, before any effect. It used to be served there.
+  - **The MCP stdio transport (`@objectstack/mcp`).** `OS_MCP_STDIO_API_KEY` is resolved with the owner's posture on every call of a live session, and a held owner's call is refused before any read or write with the envelope REST answers (`code` `MFA_REQUIRED`, `status` 403, the session's remediation message). A data tool's error and the record resource carry that message, as they carry every other refusal on this transport. A held key still starts the transport and says so once in a warning: the key is valid, and the next call after the owner enrols is served with no restart.
+  - **The owner-posture input is required (`@objectstack/core`).** `ResolveAuthzInput.userAuthGates`, and the `tenancyPosture` and `userAuthGates` parameters of `resolveApiKeyAdmission` and `resolveApiKeyPrincipal`, are now required; `undefined` is a value passed on purpose. A seam that forgets the source no longer compiles, which is how the two seams above were missed. `@objectstack/runtime` re-exports these, so its importers see the same change.
+  - **`resolveApiKeyPrincipal` collapses a held owner's key to no principal.** A principal-or-nothing answer cannot carry the posture's code, so a host that answers requests should read `resolveApiKeyAdmission` and refuse its `held` outcome with `gate.code`.
+  - **The storage download authorizer (`@objectstack/service-storage`)** names the same source. The storage family's door already refused a held owner's key on the same request, so nothing changes on the wire.
+  
+  What changes for you:
+  
+  - **Refused now:** an API key whose owner owes MFA enrolment past the grace window gets `403 MFA_REQUIRED` at the install-local doors, and every principal-bound MCP stdio call it makes is refused with the same code and message. It works again the moment the owner enrols, with nothing reissued.
+  - **Unchanged:** a key whose owner's password expired, or whose administrator forced a password change, keeps working on both.
+  - **Code that calls `resolveAuthzContext`, `resolveApiKeyAdmission` or `resolveApiKeyPrincipal` directly** now passes the owner-posture source explicitly: `userAuthGates: userAuthGateSourceOf(authService)` wherever the kernel's `auth` service is reachable, or `undefined` on a kernel composed without `plugin-auth`. The two positional functions also take `tenancyPosture` explicitly (`undefined` when no `tenancy` service is registered).
+- abb6df0: Clause-②: no
+  
+  fix(cli): `os storage orphans`, the `os secret rewrap` dry run and the `os migrate summary-nulls` dry run say they write no row or table, and that opening a SQLite file can still switch its journal mode, instead of saying nothing was written
+  
+  **What was wrong.** Each of these runs boots through the SQL driver before it prints, and the driver's connect switches a SQLite file to the journal mode it asks for (WAL, unless `OS_DATABASE_SQLITE_JOURNAL_MODE=delete` is set in the command's own environment or the project's `.env`). Measured on a file still on a rollback journal, each run moved the header's journal-mode bytes (18 and 19, from 1,1 to 2,2) and its change counter, and changed no row or table, while printing "nothing was written". Nothing was lost.
+  
+  **What changed.** Each sentence below now claims no row or table. Where the run opened a SQLite file, the report's line is followed by the note the other read-only arms already carry: "Opening a SQLite file can still switch its journal mode (to WAL by default), which changes its header only." On PostgreSQL or MySQL the line ends without it.
+  
+  - `os storage orphans` (`formatStrandedOrphanInventory`, `@objectstack/service-storage`). FROM: "This pass is READ-ONLY: nothing was written, tombstoned or deleted." TO: "This pass is READ-ONLY: no row or table was written, tombstoned or deleted." and the note.
+  - `os secret rewrap` (the dry run's note, `REWRAP_NOTES.dryRun`, also in `--json` `report.notes`). FROM: "Dry run: every attributed row was opened, re-sealed and verified in memory, and nothing was written. Re-run with --apply to write." TO: "… and no row or table was written. Re-run with --apply to write." The note already follows the dry run's closing line on a SQLite file, so this sentence carries none.
+  - `os migrate summary-nulls` (the dry run that found NULL roll-ups, `formatSummaryBackfillReport`, `@objectstack/objectql`). FROM: "Dry run — nothing was written. Re-run with --apply to backfill." TO: "Dry run — no row or table was written. Re-run with --apply to backfill." and the note.
+  
+  **Unchanged.** No exit code, flag, prompt, refusal or export signature changes, and no `--json` document gains a field; the note is printed in the text output only. What the driver does on connect is unchanged: once a file is in the mode the driver asks for, these runs leave it byte-identical.
+- af284b0: feat(spec): the remaining `getSession` readers read `AuthSessionApi`'s declared result, and none reads a top-level `activeOrganizationId`
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec/contracts` — `AuthSessionApi.getSession`'s result gains three optional `user` members**, each declared for a named reader: `isPlatformAdmin` (`boolean`, the ADR-0068 D2 rung plugin-auth's `customSession` derives) and `role` (`string | null`, better-auth's `admin` plugin scalar), both read by `judgePlatformAdmin` in `@objectstack/plugin-auth`; and `name` (`string`), read by the runtime dispatcher's AI-route `req.user` resolver as the display name. Every member is optional, so every implementer and caller typechecks unchanged.
+  - **The readers read through the declared type instead of `any` or a cast** (types only, runtime behaviour unchanged): `judgePlatformAdmin` and the four platform-admin mounts in `@objectstack/plugin-auth` (better-auth's own session type now has to fit the declaration at those reads), the REST server's two session reads (`@objectstack/rest`), the dispatcher's posture read, `resolveSessionData` and both `HttpDispatcher` reads (`@objectstack/runtime`), the cloud-connection and install-local session reads (`@objectstack/cloud-connection`), the webhook redeliver door (`@objectstack/plugin-webhooks`), and the storage session bridge (`@objectstack/service-storage`).
+  - **Fix — the top-level `activeOrganizationId` fallback is removed** from the storage upload stamp (`@objectstack/service-storage`) and from install-local's `resolveActiveOrgId` (`@objectstack/cloud-connection`). The active organization is read from `session.activeOrganizationId` alone, where the contract declares it. No in-process producer answers a top-level `activeOrganizationId` (better-auth's read is `{ user, session }`), so for the shipped auth plugin nothing changes. An auth service that answered only the flattened shape now gets no organization: the upload is not stamped, and install-local reports no active organization. To fix it, answer the active organization on `session.activeOrganizationId`, as `AuthSessionApi` declares it.
+- Updated dependencies [5a871e4]
+- Updated dependencies [ffba02e]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [1b40780]
+- Updated dependencies [d11fa8c]
+- Updated dependencies [ca426cb]
+- Updated dependencies [4ad3ce5]
+- Updated dependencies [8016a9d]
+- Updated dependencies [df9d07e]
+- Updated dependencies [8eac321]
+- Updated dependencies [a5a781b]
+- Updated dependencies [9a7838e]
+- Updated dependencies [191e043]
+- Updated dependencies [b12e16a]
+- Updated dependencies [fbafb85]
+- Updated dependencies [35450f0]
+- Updated dependencies [1e8b628]
+- Updated dependencies [12d1476]
+- Updated dependencies [bd6dab0]
+- Updated dependencies [14ccb1d]
+- Updated dependencies [c0803b0]
+- Updated dependencies [d117382]
+- Updated dependencies [4bc3bec]
+- Updated dependencies [1f949da]
+- Updated dependencies [ecb7b44]
+- Updated dependencies [41edf73]
+- Updated dependencies [1c1144f]
+- Updated dependencies [014863d]
+- Updated dependencies [3983965]
+- Updated dependencies [3230d66]
+- Updated dependencies [0c910d5]
+- Updated dependencies [9d13b5f]
+- Updated dependencies [317cddd]
+- Updated dependencies [b2e7870]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [dac99c2]
+- Updated dependencies [0d3ea29]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [0253192]
+- Updated dependencies [48cca4a]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [66949b7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [f9b4217]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [7958bdf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [4e4111c]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [0b7ba4d]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [b15f8a1]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [746637e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [194a42d]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [31b5a5f]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [87e902d]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [777eed2]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [ed03834]
+- Updated dependencies [e1deaef]
+- Updated dependencies [3071d3e]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [4216796]
+- Updated dependencies [a22e67b]
+- Updated dependencies [5f37d36]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [1912af4]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [60f9baf]
+- Updated dependencies [f5ef054]
+- Updated dependencies [584e737]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [301eec6]
+- Updated dependencies [572ecfb]
+- Updated dependencies [5547ad4]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [0f05907]
+- Updated dependencies [5e725b8]
+- Updated dependencies [086fa46]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [f606ba2]
+- Updated dependencies [d176b0a]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [ee0e115]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [0a052e6]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [c03077e]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [f7af839]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [a237d7f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [45e6001]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [9f024d8]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [fa26308]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [01fafde]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [26501ae]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [94e60c0]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [adb7910]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [b7a688e]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [8311650]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [325a92e]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/core@18.0.0
+  - @objectstack/spec@18.0.0
+  - @objectstack/platform-objects@18.0.0
+  - @objectstack/types@18.0.0
+  - @objectstack/observability@18.0.0
+
 ## 18.0.0-next.5
 
 ### Patch Changes

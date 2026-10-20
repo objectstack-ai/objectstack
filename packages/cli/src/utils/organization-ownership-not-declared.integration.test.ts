@@ -27,7 +27,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isExitSignal } from './format.js';
-import { OrganizationOwnershipCeremony as MigrateOrganizationOwnership } from '../commands/migrate/organization-ownership.js';
+import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
 
 import '@objectstack/runtime';
 import '@objectstack/objectql';

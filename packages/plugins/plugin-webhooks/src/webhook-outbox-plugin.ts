@@ -19,8 +19,11 @@ import { AutoEnqueuer, type AutoEnqueuerOptions } from './auto-enqueuer.js';
 /** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 import { SysWebhook } from './sys-webhook.object.js';
-import { DeclaredWebhookSource } from './declared-webhooks.js';
-import { normalizeTenancyPosture, postureEnforcesWall } from '@objectstack/spec/security';
+import {
+    DeclaredWebhookSource,
+    DECLARED_WEBHOOK_NAME_GUARD_PACKAGE,
+    bindDeclaredWebhookNameGuard,
+} from './declared-webhooks.js';
 import { migrateLegacyWebhookSecrets } from './migrate-webhook-secrets.js';
 import { createWebhookRedeliverGuard } from './redeliver-guard.js';
 import { bindWebhookProvenanceStamp, unbindWebhookProvenanceStamp } from './webhook-provenance.js';
@@ -275,6 +278,7 @@ export class WebhookOutboxPlugin implements Plugin {
             try { unbindWebhookProvenanceStamp(this.boundEngine); } catch { /* best effort */ }
             try { unbindWebhookHeadersShapeGate(this.boundEngine); } catch { /* best effort */ }
             try { unbindWebhookLegacyCleartextGate(this.boundEngine); } catch { /* best effort */ }
+            try { (this.boundEngine as any).unregisterHooksByPackage?.(DECLARED_WEBHOOK_NAME_GUARD_PACKAGE); } catch { /* best effort */ }
             this.boundEngine = undefined;
         }
     }
@@ -303,8 +307,9 @@ export class WebhookOutboxPlugin implements Plugin {
      * `sys_webhook` row for one, and the dispatcher, the redelivery veto and the
      * activation door read the declaration through one
      * {@link DeclaredWebhookSource}, bound here to the `declaredWebhooks` slot.
-     * The 18.0 seeder's rows stay until the ownership ceremony deletes them;
-     * `declared-webhooks.ts` says how they are read meanwhile.
+     * The ownership ceremony settles the 18.0 seeder's rows before a database
+     * is certified; `declared-webhooks.ts` says how a row holding a declared
+     * name is read.
      *
      * Gated on the DATA ENGINE alone — deliberately independent of the
      * auto-enqueue dispatch prerequisites (realtime + messaging): the write
@@ -318,9 +323,9 @@ export class WebhookOutboxPlugin implements Plugin {
             ctx.logger.warn?.('[webhook] sys_webhook write doors and the declared-webhook reader not bound — no data engine available');
             return;
         }
-        // Bind the provenance stamp so an admin edit freezes a seeded row: an
-        // 18.0 mirror an administrator edits stops being one, and answers as
-        // itself rather than for its declaration (`classifyDeclaredNameHolder`).
+        // Bind the provenance stamp so an admin edit of a seeded row is
+        // recorded: the ownership ceremony keeps an edited copy as a clone
+        // rather than deleting it (`webhook-provenance.ts`).
         this.boundEngine = engine;
         bindWebhookProvenanceStamp(engine as any, ctx.logger as any);
         // [#8566] And the headers_secret shape gate, BEFORE the sweep below
@@ -339,9 +344,13 @@ export class WebhookOutboxPlugin implements Plugin {
         try { metadataService = ctx.getService<IMetadataService>('metadata'); } catch { /* optional */ }
         this.declaredSource = new DeclaredWebhookSource(engine, metadataService, ctx.logger as any);
         ctx.registerService(DECLARED_WEBHOOKS_SLOT, this.declaredSource);
-        // [#7799] Then heal the rows that still hold a key in cleartext: the
-        // ones an administrator authored or edited, and any 18.0 seeded row the
-        // seeder had not yet rewritten.
+        // And the declared-name guard: a row that took a declared name would
+        // withhold the declaration for the whole deployment, so no non-system
+        // write may take one (409 `RESOURCE_CONFLICT`).
+        bindDeclaredWebhookNameGuard(engine as any, this.declaredSource);
+        // [#7799] Then heal the rows that still hold a key in cleartext — the
+        // rows the ownership ceremony leaves: authored ones, clones, and seeded
+        // rows no package declares.
         try {
             await migrateLegacyWebhookSecrets(engine, ctx.logger as any);
         } catch (err: any) {
@@ -384,12 +393,7 @@ export class WebhookOutboxPlugin implements Plugin {
             (input) => messaging.enqueueHttp(input),
             {
                 ...enqOpts,
-                ...(this.declaredSource
-                    ? {
-                        declaredWebhooks: this.declaredSource,
-                        declaredWebhooksDeploymentWide: () => this.postureBuildsNoWall(ctx),
-                    }
-                    : {}),
+                ...(this.declaredSource ? { declaredWebhooks: this.declaredSource } : {}),
                 logger: ctx.logger,
             },
         );
@@ -477,23 +481,6 @@ export class WebhookOutboxPlugin implements Plugin {
         );
         ctx.logger.debug?.('[webhook-outbox] redeliver guard installed for source=webhook');
         return true;
-    }
-
-    /**
-     * [ADR-0131 D9] Whether the deployment's tenancy posture builds no
-     * organization wall — the `tenancy` service's posture, read as the sharing
-     * plugin reads it for its declared rules: an absent or unreadable service
-     * is read as walled, never as open.
-     */
-    private postureBuildsNoWall(ctx: PluginContext): boolean {
-        try {
-            const probe = ctx.getService<{ posture?: unknown; isolationActive?: boolean }>('tenancy');
-            const posture = normalizeTenancyPosture(probe?.posture);
-            if (posture) return !postureEnforcesWall(posture);
-            return probe?.isolationActive === false;
-        } catch {
-            return false;
-        }
     }
 
     private tryGetService<T>(ctx: PluginContext, names: string[]): T | undefined {
