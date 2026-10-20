@@ -1160,7 +1160,13 @@ export async function selfTest() {
           stamps.push({ call: `${init?.method ?? 'GET'} ${new URL(url).pathname}`, at: nowMs });
           return inner(url, init);
         };
-        const r = await executeFleetWrite({ payload: { ...base(actions), repo }, sender: 'os-support-ai', token: TOKEN }, { fetch: fetchImpl, pace, log: (l) => logs.push(l) });
+        let r;
+        try {
+          r = await executeFleetWrite({ payload: { ...base(actions), repo }, sender: 'os-support-ai', token: TOKEN }, { fetch: fetchImpl, pace, log: (l) => logs.push(l) });
+        } catch (e) {
+          if (e?.throttleExit === undefined) throw e;
+          r = { exit: e.throttleExit, rows: [], summary: '', lines: [], throttled: true };
+        }
         const w = stamps.filter((s) => !s.call.startsWith('GET '));
         return { ...r, stamps, writes: w, gaps: w.slice(1).map((s, i) => s.at - w[i].at), logs, paceLines, file };
       };
