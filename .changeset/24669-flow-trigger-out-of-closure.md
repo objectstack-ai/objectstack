@@ -24,7 +24,6 @@ Clause-②: yes (narrowing)
 - A write that names no package (an overlay write), a write naming a package the registry cannot produce, and the `sys_metadata` sentinel state no closure: an object the whole collection does not carry is still a `flow-trigger-unknown-object` save advisory, byte-identical to before.
 - `os validate`, `os build` and `os lint`: no closure is stated, so the rule's verdict, severity and wording are unchanged.
 - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.
-- This supersedes the line "The flow door: `flow-trigger-unknown-object` stays an advisory." in the #24563 entry of this release: under a package closure it now refuses.
 - Measured before the change: every record-triggered or time-relative start node shipped in this repository (21, all in `examples/app-showcase` and `examples/app-todo`; no flow in `packages/apps`, `packages/platform-objects` or the `create-objectstack` template) triggers on an object its own stack defines, and objectui ships no such flow. Deployed rows were not measured.
 
 **API.**
