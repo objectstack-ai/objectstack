@@ -64,6 +64,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { RecordChangeTriggerPlugin } from './plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** See `record-change-integration.test.ts` for why this shape is named. */
 type TestObjectQLEngine = IObjectQLEngine & {
@@ -271,6 +272,9 @@ describe("a record-change flow's start condition is evaluated on its own write-b
       objectql.registry.registerObject(o.def as never, o.owner);
     }
     await objectql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(objectql);
     automation.registerFlow('esc_escalation', escalationFlow('esc_escalation', 'esc_case') as never);
 
     // Created OUTSIDE the condition (`priority` is not critical). The flow is

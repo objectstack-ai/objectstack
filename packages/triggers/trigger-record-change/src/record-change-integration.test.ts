@@ -39,6 +39,7 @@ import { RecordChangeTriggerPlugin } from './plugin.js';
 // `packages/runtime/src/**` (which is what `plugin-auth` and `dogfood`
 // declare) because the helper imports nothing — it is the whole read.
 import { captureExpectedReadRefusals } from '../../../runtime/src/expected-read-refusal-noise.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /**
  * `check:slot-lookup` (#4251) — a NEW `kernel.getService(...)` site must carry
@@ -417,6 +418,9 @@ describe('a system write must not fire a record-change flow UNSCOPED (#3760)', (
     await attachSqlite(objectql);
     objectql.registry.registerObject(objectDef('sysw'), 'test', 'test');
     await objectql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(objectql);
     // No `runAs` — the spec default 'user'. This is the shape an author (very
     // often an AI) writes without realising it can run without a user.
     automation.registerFlow('sysw_stamp', stampFlow('sysw_stamp', 'sysw') as any);
@@ -462,6 +466,9 @@ describe('a system write must not fire a record-change flow UNSCOPED (#3760)', (
     await attachSqlite(objectql);
     objectql.registry.registerObject(objectDef('sysw2'), 'test', 'test');
     await objectql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(objectql);
     automation.registerFlow('sysw2_stamp', stampFlow('sysw2_stamp', 'sysw2') as any);
 
     const created = await data.insert('sysw2', { status: 'new' }, { context: { userId: 'u_trigger' } });
@@ -490,6 +497,9 @@ describe('record-change trigger — end-to-end (#1491)', () => {
     await attachSqlite(objectql);
     objectql.registry.registerObject(objectDef('wid'), 'test', 'test');
     await objectql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(objectql);
     automation.registerFlow('stamp_flow', stampFlow('stamp_flow', 'wid') as any);
 
     // The flow bound to the trigger…
@@ -525,6 +535,9 @@ describe('record-change trigger — end-to-end (#1491)', () => {
         ql.registry.registerObject(objectDef('wid2'), 'test', 'test');
         ql.registry.registerItem('flow', flowDef, 'name', 'test');
         await ql.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(ql);
       },
     };
 
@@ -566,6 +579,9 @@ describe('record-change trigger — end-to-end (#1491)', () => {
     await attachSqlite(objectql);
     objectql.registry.registerObject(objectDef('wid3'), 'test', 'test');
     await objectql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(objectql);
     automation.registerFlow('mirror_write', mirrorWriteFlow('mirror_write', 'wid3') as any);
 
     expect((automation as any).getActiveTriggerBindings()).toContainEqual({
@@ -600,6 +616,9 @@ describe('record-change trigger — end-to-end (#1491)', () => {
     await attachSqlite(objectql);
     objectql.registry.registerObject(objectDef('wid5'), 'test', 'test');
     await objectql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(objectql);
     automation.registerFlow('urgent_alert', urgentAlertFlow('urgent_alert', 'wid5') as any);
 
     // Create leg — a brand-new URGENT record: `previous == null` makes the
@@ -662,6 +681,9 @@ describe('record-change trigger — end-to-end (#1491)', () => {
       'test', 'test',
     );
     await objectql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(objectql);
 
     automation.registerFlow('before_write_probe', {
       name: 'before_write_probe', label: 'Before-update probe', type: 'record_change',
@@ -812,6 +834,9 @@ describe('hydration schema gate — real ObjectQL engine findOne count (#8482)',
     objectql.registry.registerObject(plainObjectDef('gate_plain'), 'test', 'test');
     objectql.registry.registerObject(auditObjectDef('gate_plain_audit'), 'test', 'test');
     await objectql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(objectql);
     automation.registerFlow(
       'gate_plain_audit_flow',
       afterUpdateAuditFlow('gate_plain_audit_flow', 'gate_plain', 'gate_plain_audit') as any,
@@ -848,6 +873,9 @@ describe('hydration schema gate — real ObjectQL engine findOne count (#8482)',
     objectql.registry.registerObject(formulaObjectDef('gate_calc'), 'test', 'test');
     objectql.registry.registerObject(auditObjectDef('gate_calc_audit'), 'test', 'test');
     await objectql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(objectql);
     automation.registerFlow(
       'gate_calc_audit_flow',
       afterUpdateAuditFlow('gate_calc_audit_flow', 'gate_calc', 'gate_calc_audit') as any,

@@ -109,6 +109,7 @@ import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 // whole module graph measures loading, not behaviour.
 import { SqlDriver } from '@objectstack/driver-sql';
 import { RecordChangeTriggerPlugin } from './plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /**
  * `registerObject` / `registerHook` / `registerFunction` are concrete-engine
@@ -899,6 +900,9 @@ describe('[#15356/#14744] S5 on the real SQL driver — the mutation reaches no 
       (objectql.registry as unknown as TestObjectRegistry).registerObject(o.def as never, o.owner);
     }
     await objectql.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(objectql);
 
     objectql.registerFunction('sq_mutate_nested', async (args: any) => {
       const tags = (args.automation?.record as any)?.tags;
