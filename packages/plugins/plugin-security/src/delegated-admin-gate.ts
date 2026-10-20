@@ -7,11 +7,20 @@
  * write the RBAC link tables can manage ALL permissions; this gate turns
  * those writes into a governed operation:
  *
- * - TENANT-LEVEL ADMINS (a resolved set carries the ADR-0066 superuser
- *   wildcard `objects['*'].modifyAllRecords`) keep the status quo — the gate
- *   passes and the ordinary CRUD/RLS checks decide (note the built-in
- *   `organization_admin` also passes here but is still denied downstream by
- *   its explicit per-table `allowEdit:false` overrides — unchanged).
+ * - TENANT-LEVEL ADMINS (a resolved set OTHER than the two organization-
+ *   administrator sets carries the ADR-0066 superuser wildcard
+ *   `objects['*'].modifyAllRecords` — the platform administrator's
+ *   `admin_full_access`) keep the status quo — the gate passes and the
+ *   ordinary CRUD/RLS checks decide.
+ * - ORGANIZATION-LEVEL ADMINS (the D12 amendment of 2026-10-17, ruling of
+ *   record 6228728551: a holder of `organization_admin` /
+ *   `organization_admin_no_bypass` for the active organization who is not
+ *   tenant-level) create and remove assignment rows of THEIR organization
+ *   when every permission set the row distributes is inside the organization
+ *   boundary ({@link organizationBoundaryFailure}): no wildcard superuser bit,
+ *   no `adminScope`, only `scope: 'org'` capabilities, and not one of the sets
+ *   the ADR keeps outside by name. Nothing else — no edit in place, no
+ *   organization-less or foreign-organization row, no membership row.
  * - DELEGATES (non-tenant-admins holding ≥1 `adminScope`) may write ONLY
  *   what one of their scopes fully approves: the right kind of action
  *   (manageAssignments), inside their BU subtree, handing out only
@@ -30,8 +39,9 @@
  *
  * `sys_member` (organization membership) is likewise tenant-level only: no
  * `adminScope` axis expresses membership, and an admin-grade membership row is
- * auto-elevated to `organization_admin` — writing one mints a tenant admin
- * (#3697 follow-up). The delegable way to add people is an INVITATION, whose
+ * auto-elevated to `organization_admin` — writing one mints an administrator
+ * (#3697 follow-up), which is why an organization administrator may not write
+ * one either: administrator status comes from the membership grade alone. The delegable way to add people is an INVITATION, whose
  * placement this gate authorizes and whose role the framework caps at the
  * issuer's own grade.
  *
@@ -42,6 +52,16 @@
 
 import { isGrantActive, securityCatalogReaderOf, type SecurityCatalogReader } from '@objectstack/core';
 import type { AdminScope, AdminScopeParsed, PermissionSet } from '@objectstack/spec/security';
+import {
+  ADMIN_FULL_ACCESS,
+  ORGANIZATION_ADMIN,
+  ORGANIZATION_ADMIN_NO_BYPASS,
+} from '@objectstack/spec';
+import {
+  MCP_AGENT_PERMISSION_SET_READ,
+  MCP_AGENT_PERMISSION_SET_RESTRICTED,
+  MCP_AGENT_PERMISSION_SET_WRITE,
+} from '@objectstack/spec/ai';
 import { PermissionDeniedError } from './errors.js';
 import {
   resolveOwnOrganizationRow,
@@ -49,6 +69,7 @@ import {
   seedCtx as organizationScopedCtx,
 } from './organization-scope.js';
 import { grantSetNameOf } from './grant-permission-set-name.js';
+import { isReservedIdentityName } from './objects/reserved-identity-names.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 /**
@@ -262,6 +283,53 @@ export function isTenantAdmin(sets: PermissionSet[]): boolean {
   return false;
 }
 
+/**
+ * [ADR-0090 D12, amended 2026-10-17] The two sets that make their holder an
+ * organization-level administrator — granted by `auto-org-admin-grant.ts` from
+ * an owner or admin membership, for the organization of that membership. The
+ * caller's sets are resolved for its active organization, so holding one here
+ * means administering THAT organization.
+ */
+const ORGANIZATION_ADMIN_SETS: ReadonlySet<string> = new Set([ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS]);
+
+/**
+ * [ADR-0090 D12, amended 2026-10-17] The sets outside the organization boundary
+ * BY NAME, whatever the three conditions say of them: `admin_full_access` and
+ * both organization-administrator sets (administrator status is conferred by
+ * membership grade only, never copied by an assignment), and the ADR's
+ * denylist — the three D10 agent ceilings, whose bound is the delegating
+ * principal's grants and not the organization wall.
+ */
+const ORGANIZATION_BOUNDARY_DENYLIST: ReadonlySet<string> = new Set([
+  ADMIN_FULL_ACCESS,
+  ORGANIZATION_ADMIN,
+  ORGANIZATION_ADMIN_NO_BYPASS,
+  MCP_AGENT_PERMISSION_SET_READ,
+  MCP_AGENT_PERMISSION_SET_WRITE,
+  MCP_AGENT_PERMISSION_SET_RESTRICTED,
+]);
+
+/** Does the caller hold an organization-administrator set for its active organization? */
+function holdsOrganizationAdmin(sets: PermissionSet[]): boolean {
+  return sets.some((ps) => ORGANIZATION_ADMIN_SETS.has(String((ps as any)?.name ?? '')));
+}
+
+/**
+ * D12's tenant-level administrator: a superuser wildcard from any set but the
+ * two organization-administrator sets. `organization_admin` carries the
+ * wildcard too, bounded by the organization wall — under the 2026-10-17
+ * amendment its holder is organization-level, judged by the boundary below.
+ */
+function isTenantLevelAdmin(sets: PermissionSet[]): boolean {
+  return isTenantAdmin(sets.filter((ps) => !ORGANIZATION_ADMIN_SETS.has(String((ps as any)?.name ?? ''))));
+}
+
+/** A refusal reason from the organization-level branch, and the subject it names. */
+interface OrganizationFailure {
+  reason: string;
+  meta: Record<string, unknown>;
+}
+
 /** Single scalar id from an update/delete opCtx (mirrors the engine's single-id rule). */
 function extractSingleId(opCtx: any): string | number | null {
   const isScalar = (v: unknown): v is string | number =>
@@ -329,7 +397,7 @@ export class DelegatedAdminGate {
       sets = []; // resolution failure → treated as no authority (fail closed)
     }
 
-    if (isTenantAdmin(sets)) return; // status quo — downstream CRUD/RLS decide
+    if (isTenantLevelAdmin(sets)) return; // status quo — downstream CRUD/RLS decide
 
     // ── [#3697 follow-up] Organization membership is NOT delegable ────────
     // Every other governed object has an adminScope axis that can approve part
@@ -367,7 +435,25 @@ export class DelegatedAdminGate {
       return this.assertSelfDelegation(opCtx, ctx, organizationId);
     }
 
+    // ── [ADR-0090 D12, amended 2026-10-17] Organization-level administration ──
+    // An organization administrator creates and removes its own organization's
+    // assignment rows inside the organization boundary. A caller who is also a
+    // delegate and fails the boundary is still judged by its adminScope below;
+    // one who is not is refused with the boundary's own reason.
+    let organizationFailure: OrganizationFailure | null = null;
+    if (holdsOrganizationAdmin(sets)) {
+      organizationFailure = await this.organizationAdminFailure(opCtx, organizationId);
+      if (organizationFailure === null) return;
+    }
+
     const held = await this.resolveHeldScopes(sets, organizationId);
+    if (held.length === 0 && organizationFailure) {
+      throw new PermissionDeniedError(
+        `[Security] Access denied: organization administrator '${opCtx.operation}' on '${opCtx.object}' ` +
+          `rejected — ${organizationFailure.reason} (ADR-0090 D12, the organization boundary).`,
+        { operation: opCtx.operation, object: opCtx.object, ...organizationFailure.meta },
+      );
+    }
     if (held.length === 0) {
       throw new PermissionDeniedError(
         `[Security] Access denied: '${opCtx.operation}' on '${opCtx.object}' requires tenant-level ` +
@@ -456,13 +542,16 @@ export class DelegatedAdminGate {
    *
    * A tenant-level admin (ADR-0066 superuser wildcard) is unconstrained;
    * the report says so AND enumerates everything, so a consumer can render
-   * one uniform picker instead of special-casing.
+   * one uniform picker instead of special-casing. An organization
+   * administrator (D12 as amended 2026-10-17) is not: `isTenantAdmin` is
+   * false, every unit of its organization is placeable and the positions
+   * inside the organization boundary are assignable — on the same report
+   * shape, beside any delegated scopes it also holds.
    */
   async describeDelegableScope(
     sets: PermissionSet[],
     callerContext?: any,
   ): Promise<DelegableScopeReport> {
-    const ql = this.deps.ql;
     const organizationId = callerOrganizationId(callerContext);
     // [ADR-0131 D3/D4] Every position the security catalog holds — the
     // environment registry, one namespace per deployment — never the
@@ -481,29 +570,14 @@ export class DelegatedAdminGate {
       }
     };
 
-    if (isTenantAdmin(sets)) {
-      let businessUnitIds: string[] = [];
-      if (ql?.find) {
-        try {
-          const rows = await ql.find('sys_business_unit', {
-            limit: 5000,
-            context: organizationScopedCtx(organizationId),
-          });
-          businessUnitIds = (Array.isArray(rows) ? rows : [])
-            // A tenant admin is unconstrained INSIDE their organization, never
-            // across organizations: the picker this feeds must not name a unit
-            // the caller could not place anyone in.
-            .filter((r: any) => !organizationId || rowOrganizationId(r) === organizationId)
-            .map((r: any) => String(r?.id ?? ''))
-            .filter(Boolean);
-        } catch {
-          businessUnitIds = [];
-        }
-      }
+    if (isTenantLevelAdmin(sets)) {
       return {
         isTenantAdmin: true,
         scopes: [],
-        placeableBusinessUnitIds: businessUnitIds,
+        // A tenant admin is unconstrained INSIDE their organization, never
+        // across organizations: the picker this feeds must not name a unit
+        // the caller could not place anyone in.
+        placeableBusinessUnitIds: await this.organizationBusinessUnitIds(organizationId),
         assignablePositions: await allPositions(),
       };
     }
@@ -546,12 +620,261 @@ export class DelegatedAdminGate {
       }
     }
 
+    // [ADR-0090 D12, amended 2026-10-17] An organization administrator places
+    // into every unit of its organization and assigns every position inside
+    // the organization boundary — `organizationAdminFailure`'s own test, so an
+    // option offered here is one the write path admits. The ADR-0068 D2
+    // identity names carry no sets, so the boundary does not settle them, but
+    // `sys_user_position.position` refuses them from every writer: they are
+    // not offered either.
+    if (holdsOrganizationAdmin(sets) && organizationId) {
+      for (const id of await this.organizationBusinessUnitIds(organizationId)) {
+        if (!placeableBusinessUnitIds.includes(id)) placeableBusinessUnitIds.push(id);
+      }
+      for (const positionName of await allPositions()) {
+        if (assignablePositions.includes(positionName) || isReservedIdentityName(positionName)) continue;
+        let failure: unknown;
+        try {
+          failure = await this.positionBoundaryFailure(positionName);
+        } catch {
+          continue; // a position whose sets cannot be read is not offered
+        }
+        if (failure === null) assignablePositions.push(positionName);
+      }
+    }
+
     return {
       isTenantAdmin: false,
       scopes,
       placeableBusinessUnitIds,
       assignablePositions,
     };
+  }
+
+  /**
+   * [ADR-0090 D6 × D12, amended 2026-10-17] Is the caller an organization
+   * administrator of its active organization, and `targetUserId` a member of
+   * it? Used by the explain API: an administrator who may assign a member's
+   * positions and sets may also read why that member's access resolves as it
+   * does. Fail-closed: no active organization, or an unreadable membership,
+   * covers nobody.
+   */
+  async organizationAdminCoversUser(
+    sets: PermissionSet[],
+    targetUserId: string,
+    callerContext?: any,
+  ): Promise<boolean> {
+    if (!holdsOrganizationAdmin(sets)) return false;
+    const organizationId = callerOrganizationId(callerContext);
+    const ql = this.deps.ql;
+    if (!organizationId || !targetUserId || !ql?.find) return false;
+    try {
+      const rows = await ql.find('sys_member', {
+        where: { user_id: targetUserId, organization_id: organizationId },
+        limit: 1,
+        context: SYSTEM_CTX,
+      });
+      return (Array.isArray(rows) ? rows : []).some((r: any) => rowOrganizationId(r) === organizationId);
+    } catch {
+      return false;
+    }
+  }
+
+  // ── [ADR-0090 D12, amended 2026-10-17] Organization-level administration ──
+
+  /**
+   * Why the organization administrator of `organizationId` may NOT perform this
+   * write — or `null` when the organization boundary admits it.
+   *
+   * The right is to create and remove `sys_user_position` /
+   * `sys_user_permission_set` rows of the caller's own organization: an insert,
+   * or a delete of one row by id. A row inserted with no organization is
+   * stamped with the caller's here, once admitted, so the right never mints an
+   * organization-less grant (one that applies in every organization); a row
+   * naming another organization, or a removal of an organization-less or
+   * foreign row, is refused. That the row's user is a member of the
+   * organization is judged for every writer by the grant-holder membership
+   * hooks (`grant-holder-membership-refusal.ts`), not again here.
+   *
+   * Every permission set the row distributes must be inside the boundary
+   * ({@link organizationBoundaryFailure}); for a position, every set it carries
+   * ({@link setsCarriedByPosition}). One set outside puts the row outside.
+   */
+  private async organizationAdminFailure(
+    opCtx: any,
+    organizationId?: string,
+  ): Promise<OrganizationFailure | null> {
+    const op = String(opCtx.operation);
+    if (!organizationId) {
+      return { reason: 'the request carries no active organization to administer', meta: {} };
+    }
+    if (op !== 'insert' && op !== 'delete') {
+      return {
+        reason: `'${op}' is not part of the right — an assignment row is created and removed, never edited in place`,
+        meta: {},
+      };
+    }
+    if (op === 'delete' && extractSingleId(opCtx) == null) {
+      return {
+        reason: 'a removal must target one assignment row by id — a filter delete cannot be checked against the organization boundary',
+        meta: {},
+      };
+    }
+
+    for (const t of await this.materializeTargets(opCtx, opCtx.object)) {
+      const row = t.next ?? t.prev;
+      if (!row) return { reason: 'the assignment row to remove could not be read', meta: {} };
+
+      const rowOrg = rowOrganizationId(row);
+      if (t.next ? rowOrg !== null && rowOrg !== organizationId : rowOrg !== organizationId) {
+        return {
+          reason: rowOrg
+            ? `the row belongs to organization '${rowOrg}', not the one you administer`
+            : 'the existing row carries no organization — it applies in every organization, so only a platform administrator may remove it',
+          meta: { organizationId: rowOrg },
+        };
+      }
+
+      if (opCtx.object === 'sys_user_position') {
+        const bu = t.next?.business_unit_id;
+        if (bu != null && bu !== '' && !(await this.businessUnitInOrganization(String(bu), organizationId))) {
+          return {
+            reason: `business unit '${bu}' is not a unit of the organization you administer`,
+            meta: { businessUnitId: bu },
+          };
+        }
+        const positionName = String(row.position ?? '');
+        const failure = await this.positionBoundaryFailure(positionName);
+        if (failure) return { reason: failure.reason, meta: { position: positionName, permissionSet: failure.permissionSet } };
+      } else {
+        const setName = grantSetNameOf(row) ?? '';
+        const reason = setName
+          ? await this.organizationBoundaryFailure(setName)
+          : 'the grant names no permission set';
+        if (reason) return { reason, meta: { permissionSet: setName } };
+      }
+    }
+
+    // Admitted: an insert that named no organization lands in the caller's.
+    if (op === 'insert') {
+      for (const row of rowsOf(opCtx)) {
+        if (row && typeof row === 'object' && rowOrganizationId(row) === null) row.organization_id = organizationId;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Is position `positionName` inside the organization boundary? `null` when
+   * every set it carries is; otherwise the first failure, naming the set.
+   * A position the catalog does not hold cannot be shown inside, and is not.
+   */
+  private async positionBoundaryFailure(
+    positionName: string,
+  ): Promise<{ reason: string; permissionSet?: string } | null> {
+    if (!positionName) return { reason: 'the assignment names no position' };
+    const carried = await this.setsCarriedByPosition(positionName);
+    if (carried === null) {
+      return { reason: `position '${positionName}' is not in the security catalog, so it cannot be shown to be inside the organization boundary` };
+    }
+    for (const setName of carried) {
+      const reason = await this.organizationBoundaryFailure(setName);
+      if (reason) return { reason: `position '${positionName}' carries ${reason}`, permissionSet: setName };
+    }
+    return null;
+  }
+
+  /**
+   * [ADR-0090 D12, amended 2026-10-17] Every permission set an assignment of
+   * `positionName` grants: the names its definition's `permissionSets` lists,
+   * and — while the resolver folds held position names into the requested set
+   * names (`security-plugin.ts`, `[...positions, ...explicitPermissionSets]`) —
+   * the set of the position's own name, when the catalog holds one. `null`
+   * when the catalog does not hold the position. An unreadable catalog throws
+   * (`AuthzStoreUnavailableError`) and the write is refused with it.
+   */
+  private async setsCarriedByPosition(positionName: string): Promise<string[] | null> {
+    const catalog = this.catalog();
+    if (!catalog) return null;
+    const position = await catalog.resolve('position', positionName);
+    if (!position) return null;
+    const listed = Array.isArray(position.definition.permissionSets)
+      ? (position.definition.permissionSets as unknown[]).filter((n): n is string => typeof n === 'string' && n !== '')
+      : [];
+    const ownName = (await catalog.resolve('permission', positionName)) ? [positionName] : [];
+    return [...new Set([...listed, ...ownName])];
+  }
+
+  /**
+   * [ADR-0090 D12, amended 2026-10-17] Is permission set `setName` inside the
+   * organization boundary? `null` when it is; otherwise the reason, naming the
+   * set and the condition it fails:
+   *
+   * - by name — {@link ORGANIZATION_BOUNDARY_DENYLIST};
+   * - (a) its `objects['*']` entry carries `viewAllRecords` or `modifyAllRecords`;
+   * - (b) it carries an `adminScope`;
+   * - (c) a name in its `systemPermissions` is not a capability declared
+   *   `scope: 'org'` in the security catalog (a name no declaration carries is
+   *   not an organization capability).
+   *
+   * A set the catalog does not hold cannot be shown inside, and is not.
+   */
+  private async organizationBoundaryFailure(setName: string): Promise<string | null> {
+    if (ORGANIZATION_BOUNDARY_DENYLIST.has(setName)) {
+      return `permission set '${setName}', which is outside the organization boundary by name (platform and organization administration and the agent ceilings are never assigned by an organization administrator)`;
+    }
+    const catalog = this.catalog();
+    const entry = catalog ? await catalog.resolve('permission', setName) : undefined;
+    if (!catalog || !entry) {
+      return `permission set '${setName}', which is not in the security catalog, so it cannot be shown to be inside the organization boundary`;
+    }
+    const definition: any = entry.definition;
+    const wildcard = (parseMaybeJson(definition.objects) ?? {})?.['*'];
+    for (const bit of ['viewAllRecords', 'modifyAllRecords'] as const) {
+      if (wildcard?.[bit] === true) {
+        return `permission set '${setName}', which fails condition (a) of the organization boundary: its objects['*'] entry carries the superuser bit '${bit}'`;
+      }
+    }
+    if (parseMaybeJson(definition.adminScope ?? definition.admin_scope)) {
+      return `permission set '${setName}', which fails condition (b) of the organization boundary: it carries an adminScope`;
+    }
+    const capabilities = parseMaybeJson(definition.systemPermissions);
+    for (const capability of Array.isArray(capabilities) ? capabilities : []) {
+      const declared = await catalog.resolve('capability', String(capability));
+      if (declared?.definition.scope !== 'org') {
+        return `permission set '${setName}', which fails condition (c) of the organization boundary: its capability '${String(capability)}' is ${declared ? "not declared scope 'org'" : "declared nowhere, so it is not an organization capability"}`;
+      }
+    }
+    return null;
+  }
+
+  /** Is business unit `id` a unit of `organizationId`? Fail-closed on an unreadable unit. */
+  private async businessUnitInOrganization(id: string, organizationId: string): Promise<boolean> {
+    return (await this.organizationBusinessUnitIds(organizationId, id)).includes(id);
+  }
+
+  /**
+   * The ids of `organizationId`'s business units (narrowed to `onlyId` when
+   * given) — never another organization's, whatever a driver returns. An
+   * organization-less caller (`single` posture without an organization) is not
+   * filtered, as before. Fail-closed: an unreadable table yields none.
+   */
+  private async organizationBusinessUnitIds(organizationId: string | undefined, onlyId?: string): Promise<string[]> {
+    const ql = this.deps.ql;
+    if (!ql?.find) return [];
+    try {
+      const rows = await ql.find('sys_business_unit', {
+        ...(onlyId !== undefined ? { where: { id: onlyId } } : {}),
+        limit: 5000,
+        context: organizationScopedCtx(organizationId),
+      });
+      return (Array.isArray(rows) ? rows : [])
+        .filter((r: any) => !organizationId || rowOrganizationId(r) === organizationId)
+        .map((r: any) => String(r?.id ?? ''))
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
   }
 
   // ── [ADR-0091 D3] Self-service delegation of duty ────────────────────

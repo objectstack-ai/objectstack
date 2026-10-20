@@ -155,17 +155,17 @@ interface CachedSubscription {
      */
     organizationId?: string;
     /**
-     * [ADR-0131 D2/D9] Set on a DECLARED webhook when the deployment's posture
-     * builds no organization wall (`single`). A declared webhook is the
-     * application's, not one organization's, so it has no `organizationId` of
-     * its own — and under `single` every record event is stamped with the
-     * Default Organization (D9), so the org-less refusal below would make it
-     * receive nothing at all. Deployment-wide, it receives every organization's
-     * events and each delivery row is stamped with the EVENT's organization:
-     * exactly what the 18.0 seeded copy did, whose row the boot stamped with
-     * that same Default Organization. Never set under a wall, where the
-     * ruling's org-less refusal ({@link AutoEnqueuer.admitsOrganization})
-     * stands.
+     * [ADR-0131 D2/D9] Set on every DECLARED webhook, under every posture. A
+     * declared webhook is the application's, not one organization's, so it has
+     * no `organizationId` of its own, and the org-less refusal below would make
+     * it receive nothing on any posture where events carry an organization
+     * (every one, since D9). Deployment-wide, it receives every organization's
+     * events and each delivery row is stamped with the EVENT's organization,
+     * so its delivery history is walled like any other organization-stamped
+     * row. Under `single` that is what the 18.0 seeded copy did; under `group`
+     * and `isolated` it is the epic's ruling A on the walled shape of a
+     * declared webhook (record 6278609968 on #24580). Its one switch is the
+     * deployment-level activation-ledger row, operator-gated under a wall.
      */
     deploymentWide?: boolean;
     /**
@@ -205,14 +205,6 @@ export interface AutoEnqueuerOptions {
      * declared name is read. Absent: rows only.
      */
     declaredWebhooks?: DeclaredWebhookReader;
-
-    /**
-     * Whether the deployment's tenancy posture builds no organization wall,
-     * read on every refresh. True makes each declared webhook deployment-wide
-     * (see `CachedSubscription.deploymentWide`); absent or false keeps it
-     * org-less, refused for an organization-walled event.
-     */
-    declaredWebhooksDeploymentWide?: () => boolean;
 
     logger?: OptionalLogger;
 }
@@ -318,7 +310,6 @@ export class AutoEnqueuer {
     private readonly organizationRefusalReported = new Set<string>();
     /** [ADR-0131 D2/D6] The declared-webhook reader, when the host binds one. */
     private readonly declared?: DeclaredWebhookReader;
-    private readonly declaredDeploymentWide?: () => boolean;
     /** Self-heal subscription on the activation ledger — bound only with {@link declared}. */
     private subIdLedger: string | undefined;
     /**
@@ -338,7 +329,6 @@ export class AutoEnqueuer {
         this.refreshIntervalMs = opts.refreshIntervalMs ?? 60_000;
         this.logger = opts.logger;
         this.declared = opts.declaredWebhooks;
-        this.declaredDeploymentWide = opts.declaredWebhooksDeploymentWide;
     }
 
     /**
@@ -578,12 +568,6 @@ export class AutoEnqueuer {
             else heldByRow.add(String(row.name));
         }
 
-        let deploymentWide = false;
-        try {
-            deploymentWide = this.declaredDeploymentWide?.() === true;
-        } catch {
-            /* an unreadable posture is not an open one: org-less, as under a wall */
-        }
         const subscriptions: CachedSubscription[] = [];
         for (const d of declared) {
             const name = d.webhook.name;
@@ -595,7 +579,8 @@ export class AutoEnqueuer {
             if (!d.active) continue;
             const sub = this.projectDeclared(d);
             if (!sub) continue;
-            if (deploymentWide) sub.deploymentWide = true;
+            // Deployment-wide under every posture (`CachedSubscription.deploymentWide`).
+            sub.deploymentWide = true;
             subscriptions.push(sub);
         }
         return { subscriptions, mirrorIds };
@@ -1417,9 +1402,9 @@ export class AutoEnqueuer {
      *
      * **A deployment-wide declared webhook — deliver, whatever the event names.**
      * Checked first ({@link CachedSubscription.deploymentWide}): a declared
-     * webhook on a posture with no wall belongs to the deployment, so every
-     * organization's event is its own. Without it the `none` × `org A` row
-     * above would refuse every event on a `single` install.
+     * webhook belongs to the deployment on every posture (ruling A, record
+     * 6278609968 on #24580), so every organization's event is its own. Without
+     * it the `none` × `org A` row above would refuse every event it matches.
      *
      * Both refusals are said ONCE per subscription (the #8022 say-once rule,
      * ledger {@link organizationRefusalReported}): the first refused event is
@@ -1433,8 +1418,8 @@ export class AutoEnqueuer {
         eventOrganizationId: string | undefined,
         event: RealtimeEventPayload,
     ): boolean {
-        // [ADR-0131 D2/D9] A declared webhook on a deployment with no wall
-        // belongs to the deployment, so every organization's event is its own.
+        // [ADR-0131 D2/D9, ruling A] A declared webhook belongs to the
+        // deployment on every posture, so every organization's event is its own.
         if (sub.deploymentWide) return true;
         // org A × org A, and none × absent.
         if (sub.organizationId === eventOrganizationId) return true;

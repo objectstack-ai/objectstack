@@ -63,6 +63,8 @@
   "devDependencies": {
     "@objectstack/driver-mongodb": "workspace:*",
     "@objectstack/driver-sqlite-wasm": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
+    "@objectstack/platform-objects": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
     "@types/node": "^26.6.3",
     "tsup": "^8.5.1",

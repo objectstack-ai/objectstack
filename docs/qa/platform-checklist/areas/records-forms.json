@@ -930,7 +930,7 @@
       "title": "Grid-level conditional rules: row-scoped requiredWhen and parent-scoped readonlyWhen in the inline line-item grid",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -971,13 +971,13 @@
         {
           "clause": "parent-scoped readonlyWhen re-evaluates live against the header record: setting status to paid locks the three cells, reverting unlocks them — without a page reload",
           "oracle": "dom",
-          "verify": "after screenshots at each state, assert cell editability (pinned by objectui e2e/live/grid-parent-rules.spec.ts)",
+          "verify": "after screenshots at each state, assert the editability of all three cells. objectui e2e/live/grid-parent-rules.spec.ts pins Qty and Unit Price only (disabled at paid, enabled at draft, on the New Invoice dialog's first line); the Product cell carries the same readonlyWhen and no pin asserts it, so read it by hand",
           "evidence": "lock/unlock screenshots"
         },
         {
           "clause": "the receipt upload cell stores a real managed file: the API re-read of the line carries the sys_file reference and the file is retrievable",
           "oracle": "api",
-          "verify": "GET the line post-save; the receipt field holds the file id, not an inline blob (ADR-0104 stored form; pinned by objectui e2e/live/grid-file-upload.spec.ts)",
+          "verify": "GET the line post-save; the receipt field holds the file id, not an inline blob (ADR-0104 stored form). No pin covers this clause: objectui e2e/live/grid-file-upload.spec.ts, cited here until revision 8, asserts only the receipt the outgoing batch carries; it never re-reads the line or fetches the file",
           "evidence": "line read + fetched file"
         },
         {
@@ -997,16 +997,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/grid-conditional-rules.spec.ts (acceptance[0]'s inline-flag half ONLY — on the New Invoice dialog's first line, Description carries no required flag at Qty 2, is flagged at Qty 100 and clears once filled; the spec adds no second row and never saves, so neither the unflagged sibling row nor the blocked save is pinned), e2e/live/grid-parent-rules.spec.ts, e2e/live/grid-file-upload.spec.ts (stale at the pin, see automated.stale). No pin covers acceptance[1] or acceptance[4]",
-        "stale": {
-          "since": "2026-10-19",
-          "observedIn": "#24598",
-          "ref": "#24579 §2",
-          "partial": "objectui: e2e/live/grid-file-upload.spec.ts ONLY — grid-conditional-rules.spec.ts and grid-parent-rules.spec.ts passed",
-          "why": "RED AT THE PIN, AS A STALE SPEC — not a product defect. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: grid-file-upload.spec.ts failed; the other two passed. Its 'Line Items' text locator also matches the master-detail dialog's screen-reader-only description (\"Enter the record and its line items, then save.\", objectui packages/plugin-form/src/ModalForm.tsx), so Playwright's strict mode refuses the locator before the form is driven (round-1 record #24572). Re-read at the shipped pin 12dc7b47c340: the spec's bytes and that description are unchanged, so it is still stale there.",
-          "runnerRule": "Cite grid-conditional-rules.spec.ts for acceptance[0]'s inline flag and grid-parent-rules.spec.ts for acceptance[2] as before. Do NOT cite grid-file-upload.spec.ts or score its failure as this item's FAIL: drive acceptance[3] by hand, with every clause no passing spec covers.",
-          "ownedBy": "objectui — re-pointing grid-file-upload.spec.ts at the current surface is objectui's half, recorded on wave anchor #24579 §2; this repository reports it and does not edit the spec"
-        }
+        "ref": "objectui: e2e/live/grid-conditional-rules.spec.ts (acceptance[0]'s inline-flag half ONLY — on the New Invoice dialog's first line, Description carries no required flag at Qty 2, is flagged at Qty 100 and clears once filled; the spec adds no second row and never saves, so neither the unflagged sibling row nor the blocked save is pinned), e2e/live/grid-parent-rules.spec.ts (acceptance[2] for Qty and Unit Price ONLY — on the New Invoice dialog's first line, with Qty filled, both inputs are enabled at status draft, disabled at paid with the typed quantity kept, and enabled again at draft; it never asserts the Product cell, which declares the same parent-scoped readonlyWhen). No pin covers acceptance[1], acceptance[3] or acceptance[4]. Dropped at revision 8: e2e/live/grid-file-upload.spec.ts, which uploads a file into the first line's Receipt cell and asserts only that the submitted /api/v1/batch carries a receipt with a name and an http(s) url; it never re-reads the saved line or fetches the file, so even green it would score no clause of this item (seat ruling 6281811723). Its stale-spec repair stays on objectstack-ai/objectui#13104 for the items it serves"
       },
       "source": [
         "examples/app-showcase/src/data/objects/invoice.object.ts (row/parent-scoped rules on the line object; ADR-0036 / #1581)",
@@ -1055,6 +1046,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep), one of the leftovers round 6 (#24697) named. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: grid-conditional-rules.spec.ts passed, but it flags the Description cell on one row and never saves, so #24598 scored acceptance[0] not-run (round 1's QA run #24572 had scored it pass on that spec). The ref now says the spec claims acceptance[0]'s inline-flag half only, and that no pin covers acceptance[1] or [4]; QA run #24616 drove acceptance[1], [3] and [4] by hand. The spec is byte-identical at the shipped pin 12dc7b47c340. grid-parent-rules.spec.ts and grid-file-upload.spec.ts stay cited as they were, and the automated.stale record (grid-file-upload.spec.ts) is unchanged. No clause changed",
           "ref": "#24723"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "automated.ref, acceptance[2].verify and acceptance[3].verify narrowed, and automated.stale removed — the seat ruling 6281811723 (on #24723) and round 8's finding (i) for wave anchor #24579 (18.0 sweep; round 8's report 6281776167). Tier 1 run #24598 at the sweep's console pin 4016370af3c9 ran grid-file-upload.spec.ts red as a stale spec (cause from QA run #24572). Even green it asserts only the receipt the outgoing /api/v1/batch carries and never re-reads the line or fetches the file, so it scores no clause here: it is dropped from the ref and named there, and the stale record, which named only it, goes with it. grid-parent-rules.spec.ts asserts that Qty and Unit Price lock at paid and unlock at draft, and never the Product cell that the clause's 'three cells' include (#24598 scored acceptance[2] pass on it): acceptance[2].verify and the ref now say so. QA run #24616 drove acceptance[1], [3] and [4] by hand. Both specs are byte-identical at 4016370af3c9 and at the shipped pin 12dc7b47c340. No clause changed",
+          "ref": "#24752"
         }
       ]
     },
@@ -1181,7 +1178,7 @@
       "title": "Master + line items save as one atomic batch, with server-side roll-up",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1210,7 +1207,7 @@
         {
           "clause": "the happy-path save lands master + children in ONE atomic batch request (not N sequential writes), with the child ops referencing the parent",
           "oracle": "network",
-          "verify": "the save issues a single batch call whose payload contains the parent and both line ops (pinned by objectui e2e/live/master-detail.spec.ts: 'Create submits the populated parent in one atomic batch' / 'includes the child op referencing the parent')",
+          "verify": "the save issues a single batch call whose payload contains the parent and both line ops. objectui e2e/live/master-detail.spec.ts pins the clause carrier-neutrally, not on this invoice: on the showcase 'New Project + Tasks' page (showcase_project_workspace), 'Create submits the populated parent in one atomic batch' asserts that the first POST /api/v1/batch the save sends opens with the populated showcase_project op, and 'Create with a task line includes the child op referencing the parent' asserts that the same batch carries one showcase_task op whose project is {$ref: 0}. It stages one child through the per-row form, not two lines in this item's invoice grid, and it reads the first batch rather than counting them, so read this run's two-line invoice payload from the network trace",
           "evidence": "the batch request payload"
         },
         {
@@ -1254,7 +1251,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/master-detail.spec.ts, e2e/live/form-view-subforms.spec.ts. Dropped at revision 5: e2e/live/summary-rollup.spec.ts, which rolls showcase_task's estimate_hours up into showcase_project (total_estimate as a SUM, task_count as a COUNT) through a direct POST /api/v1/batch, reading both back after that create and again after a child delete. It never opens the invoice form and never reads invoice.total, the roll-up acceptance[2] scores, so it asserts no clause of this item (Tier 1 run #24598 scored acceptance[2] not-run on it for that carrier mismatch)",
+        "ref": "objectui: e2e/live/master-detail.spec.ts (acceptance[0], carrier-neutrally: the showcase 'New Project + Tasks' page, one showcase_task child staged through the per-row form, not this item's invoice grid with two lines), e2e/live/form-view-subforms.spec.ts. Dropped at revision 5: e2e/live/summary-rollup.spec.ts, which rolls showcase_task's estimate_hours up into showcase_project (total_estimate as a SUM, task_count as a COUNT) through a direct POST /api/v1/batch, reading both back after that create and again after a child delete. It never opens the invoice form and never reads invoice.total, the roll-up acceptance[2] scores, so it asserts no clause of this item (Tier 1 run #24598 scored acceptance[2] not-run on it for that carrier mismatch)",
         "stale": {
           "since": "2026-10-19",
           "observedIn": "#24598",
@@ -1300,6 +1297,12 @@
           "date": "2026-10-20",
           "change": "automated.ref and acceptance[2].verify corrected — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep), one of the leftovers round 6 (#24697) named. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: summary-rollup.spec.ts passed 2/2, but it rolls showcase_task up into showcase_project through a direct batch and never reads invoice.total, so #24598 scored acceptance[2] not-run on it (round 1's QA run #24572 had scored acceptance[2] pass on it). It asserts no clause of this item, so it is dropped from the ref and named there, and acceptance[2].verify no longer says it pins the clause. The spec is byte-identical at the shipped pin 12dc7b47c340. QA run #24616 drove the invoice.total roll-up by hand. master-detail.spec.ts and form-view-subforms.spec.ts stay cited, and the automated.stale record (form-view-subforms.spec.ts) is unchanged. No clause text changed",
           "ref": "#24723"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "acceptance[0].verify and automated.ref narrowed to what master-detail.spec.ts asserts — round 8's finding (iii) for wave anchor #24579 (18.0 sweep; round 8's report 6281776167, carried by the seat's ACCEPT 6281811723). The spec drives showcase_project_workspace ('New Project + Tasks') with one task child staged through the per-row form, not the invoice grid with two lines that steps[1] and [2] drive. Tier 1 run #24598 at the sweep's console pin 4016370af3c9 ran it 2/2 green and scored acceptance[0] pass on it. The clause names no carrier (master and children in one atomic batch, the child ops referencing the parent), and the spec's two tests assert exactly that on their own carrier: the first batch the save sends opens with the populated parent op and carries the child op whose project is {$ref: 0}. So, under round 6's theme-B rule, a pin that asserts a full clause is kept and narrowed, not dropped. The spec is byte-identical at 4016370af3c9 and at the shipped pin 12dc7b47c340. No clause changed",
+          "ref": "#24752"
         }
       ]
     },
@@ -3479,7 +3482,7 @@
       "title": "Object lifecycle hooks fire on the write path with the right timing, gate, async and error semantics — driven over /api/v1/data/*, oracled by the record effect and the log line",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3488,7 +3491,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the five seeded showcase hooks (examples/app-showcase/src/data/hooks/index.ts, bound via defineStack({ hooks: allHooks })) — the four this item drives, plus showcase_guard_task_reopen (showcase_task, beforeUpdate, condition previous.done == true && record.done != true, body throws a user-facing sentence, onError:'abort', priority 60), the refusal fixture records-forms.script-action-hook-refusal-toast drives; showcase_normalize_task_title (showcase_task, events ['beforeInsert','beforeUpdate'], trims title, priority 50, onError:'abort'); showcase_stamp_inquiry_defaults (showcase_inquiry, beforeInsert, stamps status='new'/source='web', onError:'abort'); showcase_audit_task_completion (showcase_task, afterUpdate, condition previous.done!=true && record.done==true, async, retryPolicy {maxRetries:3,backoffMs:1000}, capabilities:['log'], onError:'log', priority 90); showcase_warn_over_budget (showcase_project, afterUpdate, condition record.spent!=null && record.budget!=null && record.spent>record.budget, async, capabilities:['log'], onError:'log')",
+          "the eight seeded showcase hooks (examples/app-showcase/src/data/hooks/index.ts, bound via defineStack({ hooks: allHooks })) — the four this item drives, plus showcase_guard_task_reopen (showcase_task, beforeUpdate, condition previous.done == true && record.done != true, body throws a user-facing sentence, onError:'abort', priority 60), the refusal fixture records-forms.script-action-hook-refusal-toast drives, plus the three paid-invoice line guards on showcase_invoice_line, which this item does not drive: showcase_guard_paid_invoice_line_add (beforeInsert), showcase_guard_paid_invoice_line_move (beforeUpdate, condition record.invoice != previous.invoice) and showcase_guard_paid_invoice_line_remove (beforeDelete), each reading the header invoice under runAs:'system' and throwing a user-facing sentence when it is paid (onError:'abort', priority 60; a system write and a cascade delete pass); showcase_normalize_task_title (showcase_task, events ['beforeInsert','beforeUpdate'], trims title, priority 50, onError:'abort'); showcase_stamp_inquiry_defaults (showcase_inquiry, beforeInsert, stamps status='new'/source='web', onError:'abort'); showcase_audit_task_completion (showcase_task, afterUpdate, condition previous.done!=true && record.done==true, async, retryPolicy {maxRetries:3,backoffMs:1000}, capabilities:['log'], onError:'log', priority 90); showcase_warn_over_budget (showcase_project, afterUpdate, condition record.spent!=null && record.budget!=null && record.spent>record.budget, async, capabilities:['log'], onError:'log')",
           "showcase_task (title required text + done boolean, defaultValue false), showcase_inquiry (status select whose 'new' option is default:true + source plain text with NO default), showcase_project (budget/spent currency + the spent_within_budget script rule that REJECTS spent > budget*1.2)",
           "seeded rows: not-done task 'Build homepage' (done:false) for the transition PATCH; already-done tasks 'Audit current IA' and 'App wireframes' (done:true) for the non-transition proof; projects 'Data Platform' (budget 600000 / spent 420000) and 'Website Relaunch' (budget 150000 / spent 60000)",
           "server log capture — the async audit/warn bodies call ctx.log.info/warn, routed to the engine logger (packages/runtime/src/sandbox/body-runner.ts log: engineCtx.logger); AND the ability to register a scratch hook (throwing / ordered) for the variants the four fixtures cannot observe. Run-proven recipe (QA run #24616): on a scratch app copy, put every scratch hook on showcase_inquiry behind a name-prefix condition (record.name.startsWith('qa-…')) so it touches only the probe rows; for the fail-closed probe, `record.name.startsWith('qa-fc') && int(record.name) > 0` compiles and faults only for a 'qa-fc…' row",
@@ -3496,9 +3499,9 @@
         ],
         "knownGaps": [
           "afterInsert and afterDelete have NO fixture hook — the four seeded hooks cover beforeInsert, beforeUpdate and afterUpdate only. Exercise these two events with a scratch log hook or record the variant knownGap; do not fake coverage.",
-          "beforeDelete has NO seeded showcase hook — the abort-blocks-delete contract is pinned only by the dogfood hef_ref_guard fixture (packages/qa/dogfood/test/hook-error-format.dogfood.test.ts), a test-only stack, not the showcase app; drive beforeDelete via a scratch hook or cite that pin.",
+          "beforeDelete's one seeded showcase hook is showcase_guard_paid_invoice_line_remove, an abort fixture that refuses removing a line under a paid invoice; it logs nothing and this item does not drive it, so for this item the abort-blocks-delete contract is pinned by the dogfood hef_ref_guard fixture (packages/qa/dogfood/test/hook-error-format.dogfood.test.ts), a test-only stack, not the showcase app; drive beforeDelete via a scratch hook or cite that pin.",
           "priority ordering (lowest-first on the SAME object+event) is not fixture-covered: showcase_normalize_task_title (priority 50) and showcase_guard_task_reopen (priority 60) do share showcase_task/beforeUpdate, but neither logs and the guard fires only on a reopening write it then refuses, so their order is not observable from outside; ordering needs a scratch pair of logging hooks on one object+event with distinct priorities.",
-          "onError:'abort' ROLLBACK and onError:'log' SUPPRESSION are only observable with a hook that THROWS — the four hooks this item drives never throw (their trim/stamp/log bodies always succeed). The one seeded hook that throws, showcase_guard_task_reopen, is a beforeUpdate abort and does not stand in for this item's beforeInsert abort-rollback clause. The abort-rollback, log-tolerate and fail-closed-condition clauses each require a scratch throwing hook (or the cited dogfood abort pin).",
+          "onError:'abort' ROLLBACK and onError:'log' SUPPRESSION are only observable with a hook that THROWS — the four hooks this item drives never throw (their trim/stamp/log bodies always succeed). The seeded hooks that throw are showcase_guard_task_reopen (beforeUpdate) and the three paid-invoice line guards on showcase_invoice_line; they are refusal fixtures this item does not drive, and the abort-rollback clause's verify names a scratch throwing beforeInsert, so none stands in for it here. The abort-rollback, log-tolerate and fail-closed-condition clauses each require a scratch throwing hook (or the cited dogfood abort pin).",
           "the async audit/warn lines land AFTER the HTTP write resolves (fire-and-forget runs once the engine has moved on) — a log read taken before the async body executes shows no line; settle before judging any no-fire."
         ]
       },
@@ -3507,7 +3510,7 @@
         "beforeUpdate — FIXTURE: showcase_normalize_task_title (trims title on every task update)",
         "afterUpdate — FIXTURE: showcase_audit_task_completion (task done-transition audit) and showcase_warn_over_budget (project over-budget warn)",
         "afterInsert — SCRATCH/knownGap: no showcase hook targets afterInsert; add a scratch afterInsert log hook or record knownGap",
-        "beforeDelete — SCRATCH/knownGap: no seeded showcase hook; the abort-blocks-delete shape is pinned only by the dogfood hef_ref_guard fixture (hook-error-format.dogfood.test.ts)",
+        "beforeDelete — SCRATCH/knownGap: the one seeded showcase hook (showcase_guard_paid_invoice_line_remove) is an abort fixture this item does not drive; the abort-blocks-delete shape is pinned by the dogfood hef_ref_guard fixture (hook-error-format.dogfood.test.ts)",
         "afterDelete — knownGap: no showcase hook and no dogfood pin; add a scratch afterDelete log hook to exercise",
         "multi-event targeting — FIXTURE: showcase_normalize_task_title lists events ['beforeInsert','beforeUpdate'] — ONE hook fires on two write kinds (hook-binder registers per-event × per-object)",
         "CEL condition — two-root transition semantics (#4770/#4784) — FIXTURE: showcase_audit_task_completion `previous.done != true && record.done == true`; since #4770 `record` is the record's STATE (stored ⊕ payload, total over declared fields), so `record.done == true` alone is true on every edit of an already-done row — `previous` is what makes 'just became done' expressible",
@@ -3612,7 +3615,7 @@
         "ref": "packages/qa/dogfood/test/showcase-public-form.dogfood.test.ts (pins the beforeInsert stamp: status='new'/source='web' on an anonymous inquiry submit); packages/qa/dogfood/test/hook-error-format.dogfood.test.ts (pins the beforeDelete onError:'abort' throw → REST error body). Declarative-wrapper MECHANISMS are unit-pinned in packages/objectql (each file run at objectstack f89d29e382, 83 tests, 0 failed): hook-condition-previous-scope.test.ts (acceptance[3]'s two-root transition — 'fires on the update that FLIPS the field, not on later updates of a done record'), hook-condition-merged-record.test.ts (acceptance[5]'s stored ⊕ payload record — 'fires on a declared field the update payload does NOT carry'), hook-binder.test.ts (acceptance[7] — 'swallows errors when onError=log', 'runs async after-events fire-and-forget'; plus retry, timeout and async-ignored-on-before*) and hook-condition-fail-loud.test.ts (acceptance[8] — a HookConditionError that onError:'log' does not swallow, retryPolicy does not retry and an async after* hook still raises). They score the mechanism only: acceptance[2]–[5]'s LOG oracles, the scratch variants' API reads and acceptance[8]'s wire envelope stay the run's. The transition audit / over-budget warn / priority-ordering LOG oracles and the abort/log/priority SCRATCH variants are NOT yet dogfood-pinned — drive them by hand."
       },
       "source": [
-        "examples/app-showcase/src/data/hooks/index.ts#allHooks (the four fixture hooks this item drives, the showcase_guard_task_reopen refusal fixture beside them, + allHooks export; header comments spell out the two-root #4784 transition and the != null / not has() #4770 rationale verbatim)",
+        "examples/app-showcase/src/data/hooks/index.ts#allHooks (the four fixture hooks this item drives, the showcase_guard_task_reopen refusal fixture and the three showcase_guard_paid_invoice_line_* guards beside them, + allHooks export; header comments spell out the two-root #4784 transition and the != null / not has() #4770 rationale verbatim)",
         "packages/spec/src/data/hook.zod.ts#HookSchema (HookSchema + HookEvent enum beforeFind/afterFind/beforeInsert/afterInsert/beforeUpdate/afterUpdate/beforeDelete/afterDelete; defineHook; async 'after* only'; onError default 'abort'; empty-target refusal #4001)",
         "packages/objectql/src/hook-wrappers.ts#wrapDeclarativeHook (wrapDeclarativeHook wrapping order condition→async→retry→timeout→onError; pickRecordPayload #4770 record = stored ⊕ payload total over declared fields; pickPreviousPayload #4784 previous binding; HookConditionError #4775 fail-closed, raised OUTSIDE onError; fireAndForget = async && isAfterEvent)",
         "packages/objectql/src/hook-binder.ts#bindHooksToEngine (bindHooksToEngine: per-event × per-object engine.registerHook with priority; unresolved-body / empty-target skips)",
@@ -3664,6 +3667,12 @@
           "date": "2026-10-19",
           "change": "acceptance[8] (verify, evidence) follow the shipped envelope. An unevaluable hook condition's refusal is now a coded 400 VALIDATION_ERROR whose error text names the hook and the CEL fault, and no '[REST] Unhandled error' line is logged for it (#24662, split from #24619 row (b)). The 500 INTERNAL_ERROR that revision 6 recorded is retired and is now a FAIL; the server-log evidence goes with it. The clause is unchanged: the write is still refused and the row still absent",
           "ref": "#24662"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "fixture roster only, no clause moved — the showcase gained three hooks, the paid-invoice line guards on showcase_invoice_line (beforeInsert, beforeUpdate, beforeDelete; each throws a user-facing refusal when the line's invoice is paid). Three stated facts they made false ('the five seeded showcase hooks', 'beforeDelete has NO seeded showcase hook', 'the one seeded hook that throws') now name them, and say why they do not close this item's beforeDelete variant or abort-rollback clause: this item does not drive them, and the clauses' verify steps name scratch hooks.",
+          "ref": "#24684"
         }
       ]
     },
@@ -3672,7 +3681,7 @@
       "title": "Per-type CONSTRAINT enforcement on the write path (not just widget render): length/range/option/reference/computed limits, and where the platform deliberately does NOT enforce",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3685,7 +3694,7 @@
           "showcase_invoice (invoice.object.ts): status select {draft,sent,paid,void} required; account lookup with lookupFilters status!=churned; total summary(sum showcase_invoice_line.amount) — the summary carrier the zoo lacks"
         ],
         "knownGaps": [
-          "precision/scale is DECLARED but NOT enforced on the write path — record-validator.ts validateOne's number branch checks only min/max/finite, no runtime reads field.scale/precision for rounding (grep clean across objectql/rest/runtime), and the SQL driver stores number/currency/percent as table.float (REAL affinity), not DECIMAL(p,s) (sql-driver.ts createColumn ~7354-7368). A currency value with more decimals than `scale` is stored verbatim, unrounded. Record it as a gap; do NOT tick 'scale enforced'.",
+          "precision/scale is DECLARED but NOT enforced on the write path — record-validator.ts validateOne's number branch checks only min/max/finite, no runtime reads field.scale/precision for rounding (grep clean across objectql/rest/runtime), and the SQL driver stores number/currency/percent as table.float (REAL affinity), not DECIMAL(p,s) (packages/drivers/driver-sql/src/sql-driver.ts#createColumn). A currency value with more decimals than `scale` is stored verbatim, unrounded. Record it as a gap; do NOT tick 'scale enforced'.",
           "autonumberFormat TOKEN expansion ({0000}/{YYYY}/{MM}/{DD}/{YYYYMMDD}/{field}, per-rendered-prefix scope+reset) has NO showcase fixture — no showcase object declares autonumberFormat (f_autonumber uses the default bare 4-width global counter). Token expansion is pinned instead by packages/spec/src/data/autonumber-format.test.ts + packages/drivers/driver-sql/src/sql-driver-autonumber.test.ts; only server-assignment + client-value-ignored is driveable on the zoo.",
           "the #4441 reference gate is EXISTENCE-only and deliberately unscoped (engine.ts assertReferencesResolve) — an id that exists but lies outside the field's lookupFilters/dependsOn scope is accepted; scope enforcement is client-only (drilled in records-forms.cascading-multilevel-and-clear).",
           "summary is a runtime-MAINTAINED cache, not a write-rejected readonly field — a caller-supplied initial total is a SUPPORTED import path and is kept, then self-heals to the child aggregate on the next child write (rule-validator.ts RUNTIME_OWNED_FIELD_TYPES note, #6014). Only `formula` is strictly read-only-on-write; do NOT assert 'summary rejects direct writes'."
@@ -3773,7 +3782,7 @@
         {
           "clause": "formula is read-only/computed: a direct write to f_formula is ignored and the read equals f_number*f_percent/100 (42*75/100 = 31.5); summary is a runtime-MAINTAINED cache (invoice.total = Σ line.amount server-side) and is NOT write-rejected — a caller's initial total is a supported import path that self-heals on the next child write",
           "oracle": "api",
-          "verify": "GET f_formula after a direct write shows 31.5 (write ignored); GET showcase_invoice.total equals the seeded line sum (objectui e2e/live/summary-rollup.spec.ts). The formula/summary distinction: rule-validator.ts note (formula computed-on-read; summary maintained cache, deliberately NOT in RUNTIME_OWNED)",
+          "verify": "GET f_formula after a direct write shows 31.5 (write ignored); GET showcase_invoice.total equals the seeded line sum. No pin reads invoice.total: objectui e2e/live/summary-rollup.spec.ts, cited here until revision 2, asserts a server roll-up on another carrier (showcase_project's total_estimate and task_count over showcase_task, written through a direct /api/v1/batch) and never reads showcase_invoice.total. The formula/summary distinction: rule-validator.ts note (formula computed-on-read; summary maintained cache, deliberately NOT in RUNTIME_OWNED)",
           "evidence": "the formula re-read + the invoice total re-read"
         }
       ],
@@ -3809,6 +3818,12 @@
           "date": "2026-08-08",
           "change": "initial — drills the field-type-matrix's shallow 'reject invalid' clause into per-type CONSTRAINT enforcement on the write path (length reject-not-truncate, numeric range, option server-boundary on two carriers, multiselect array shape, dangling-reference gate + its unscoped boundary, autonumber server-assignment, formula read-only) and records the deliberate non-enforcement gaps (scale/precision, autonumberFormat tokens, summary maintained-not-rejected)",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "acceptance[7].verify corrected — round 8's carried finding for wave anchor #24579 (18.0 sweep; round 8's report 6281776167, out_of_scope_findings[1], carried by the seat's ACCEPT 6281811723). It cited objectui e2e/live/summary-rollup.spec.ts for showcase_invoice.total, which that spec never reads: it rolls showcase_task up into showcase_project (byte-identical at the sweep's console pin 4016370af3c9 and at the shipped pin 12dc7b47c340). Tier 1 run #24598 scored acceptance[7] not-run (its summary half unpinned), and round 1's QA run #24572 scored the item pass on its API pins. The verify now says that no pin reads invoice.total. The spec was never in automated.ref, which names API pins only, so the ref is unchanged. Beside it, fixtures.knownGaps[0]'s line citation 'createColumn ~7354-7368', a tilde range no gate reads, became the sql-driver.ts#createColumn anchor that its own text already named. No clause changed",
+          "ref": "#24752"
         }
       ]
     },
@@ -4156,7 +4171,7 @@
       "title": "Field-level `unique` on the write path: colliding writes refused 409 UNIQUE_VIOLATION on both driver families, NULL-distinct, organization-scoped by default, whole-batch refusal, autonumber resync converges",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4199,13 +4214,13 @@
         {
           "clause": "the update paths are constrained too: an update onto a taken value is refused and the row keeps its old value; a row never collides with ITSELF (an update leaving the unique field alone passes)",
           "oracle": "api",
-          "verify": "the PATCH refusal + the unchanged re-read; the self-update 2xx (pins memory-unique-constraint.test.ts,141)",
+          "verify": "the PATCH refusal + the unchanged re-read; the self-update 2xx (pins: packages/drivers/driver-memory/src/memory-unique-constraint.test.ts, the cases 'update onto a taken value is refused and the row keeps its old value' and 'a row does not collide with ITSELF — an update that leaves the unique field alone passes')",
           "evidence": "both responses + the re-read"
         },
         {
           "clause": "updateMany refuses the WHOLE batch BEFORE mutating anything — a predicate update stamping one value onto two rows leaves zero rows changed, never a half-applied batch",
           "oracle": "api",
-          "verify": "post-refusal re-reads of every matched row are byte-identical to before (memory-driver.ts,627-631 'Prepare and CHECK every row before mutating any of them'; pin). If no REST surface reaches updateMany on the boot under test, score from the pin and record the substitution",
+          "verify": "post-refusal re-reads of every matched row are byte-identical to before (packages/drivers/driver-memory/src/memory-driver.ts#updateMany 'Prepare and CHECK every row before mutating any of them'; pin). If no REST surface reaches updateMany on the boot under test, score from the pin and record the substitution",
           "evidence": "the refusal + full before/after row reads"
         },
         {
@@ -4260,6 +4275,12 @@
           "date": "2026-10-16",
           "change": "acceptance[0] (clause, verify) re-pointed (checklist-accuracy finding of QA run #23949, wave #23878): on the SQLite leg the object-naming sentences are in the envelope's developerMessage, and the user-facing `error` is the generic 'A record with this value already exists' — #23949 read them so. The clause now reads the naming where it lives. Not loosened: the object must still be named, no driver text may appear in either field, and nothing may be written",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[2].verify cited line 141 of memory-unique-constraint.test.ts and acceptance[3].verify lines 627-631 of memory-driver.ts in the comma-range spelling (authored in 45397edf53 as the lists 135 and 141, and 611 and 627-631). Lines 135 and 141 are unchanged at this base: the cases 'update onto a taken value is refused and the row keeps its old value' and 'a row does not collide with ITSELF — an update that leaves the unique field alone passes', which acceptance[2].verify now names. Lines 627-631 held findOne even at that commit; the comment the verify quotes, 'Prepare and CHECK every row before mutating any of them', sat in updateMany then and does now, so acceptance[3].verify anchors memory-driver.ts#updateMany. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#24752"
         }
       ]
     },
@@ -4268,7 +4289,7 @@
       "title": "deleteBehavior matrix: set_null clears / member-removes, master_detail cascades, restrict answers 409 DELETE_RESTRICTED with the cascade remedy, required-FK set_null escalates to restrict",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4360,7 +4381,7 @@
       "source": [
         "packages/spec/src/data/field.zod.ts#deleteBehavior (deleteBehavior inline enum; #9689 parse rejection, #9784 default materialization)",
         "packages/objectql/src/engine.ts#required (defaults, coercion + [cascade-delete] log, required-FK escalation incl. #9688 multi-value deferral), (DELETE_RESTRICTED envelope, #12166 count disclosure, cascade recursion)",
-        "examples/app-showcase/src/data/objects/invoice.object.ts,184; contact.object.ts; field-zoo.object.ts; expense-report.object.ts (the four stock arms)"
+        "examples/app-showcase/src/data/objects/invoice.object.ts#InvoiceLine (its invoice master_detail, deleteBehavior 'cascade') + examples/app-showcase/src/data/objects/invoice.object.ts#Invoice (its required account lookup, the required-FK escalation); contact.object.ts; field-zoo.object.ts; expense-report.object.ts (the four stock arms)"
       ],
       "history": [
         {
@@ -4368,6 +4389,12 @@
           "date": "2026-08-30",
           "change": "initial — sweep gap (spec-enums angle): all three deleteBehavior members plus the escalation/coercion seams were enforced and pinned engine-side but never driven over HTTP by any item. Register corrected against source: restrict is NOT fixture-blocked on stock seeds — invoice.account (required lookup) reaches the same DELETE_RESTRICTED refusal via the #9688 escalation, so only the authored-restrict spelling needs a scratch child",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[2] cited line 184 of the showcase invoice.object.ts in the comma-range spelling (authored in 45397edf53 as the list 69-71 and 184). At that commit 184 was deleteBehavior 'cascade' on the invoice line's invoice master_detail, and 69-71 the invoice's required account lookup, the required-FK escalation arm fixtures.requires names; at this base both have moved. source[2] now anchors invoice.object.ts#InvoiceLine and #Invoice. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#24752"
         }
       ]
     },
@@ -4466,7 +4493,7 @@
       "title": "Per-field trackHistory: a tracked edit lands the ADR-0052 §5b old→new timeline summary with display values, an untracked edit does not, and object-level enable.trackHistory gates the History tab and derived history op both ways",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4476,7 +4503,7 @@
         "app": "showcase",
         "requires": [
           "showcase_account: enable.trackHistory:true (account.object.ts) + per-field trackHistory on industry/status — the BOTH-halves fixture",
-          "showcase_task: per-field trackHistory on status/priority (task.object.ts,60) with NO object-level enable block — the natural negative for the tab/op gating"
+          "showcase_task: per-field trackHistory on status/priority (examples/app-showcase/src/data/objects/task.object.ts#Task: its status and priority fields declare trackHistory) with NO object-level enable block — the natural negative for the tab/op gating"
         ],
         "knownGaps": [
           "no showcase object declares trackHistory:true on a REFERENCE field, so the referenced-record-title rendering (clause 5) is a unit-pin verdict (audit-lookup-summary.test.ts) unless a scratch tracked lookup is authored — record which the verdict rests on"
@@ -4548,7 +4575,7 @@
         "packages/plugins/plugin-audit/src/audit-writers.ts#planTrackedLookupReads (planTrackedLookupReads), (renderTrackedChangeSummary — ADR-0052 §5b, #7230/#7289 localization), (zero-reads-by-default plan)",
         "packages/spec/src/data/object.zod.ts#trackHistory (history derives from get ∧ trackHistory), (opt-in default false); packages/spec/src/data/api-derivation.ts",
         "objectui: packages/app-shell/src/views/RecordDetailView.tsx (History tab three-precondition gate)",
-        "examples/app-showcase/src/data/objects/account.object.ts (the deliberate both-halves fixture + its comment ruling the tab gate), task.object.ts,60"
+        "examples/app-showcase/src/data/objects/account.object.ts (the deliberate both-halves fixture + its comment ruling the tab gate), examples/app-showcase/src/data/objects/task.object.ts#Task (its status and priority fields declare trackHistory)"
       ],
       "history": [
         {
@@ -4568,6 +4595,12 @@
           "date": "2026-10-20",
           "change": "automated.stale added — §2 theme \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 at the sweep's console pin 4016370af3c9: record-history-display.spec.ts skipped (it runs only against app-todo, on the stale premise that the showcase has no enable.trackHistory object; QA runs #24572 / #24616); the two plugin-audit pins passed and stay cited. Re-read at the shipped pin 12dc7b47c340: byte-identical, still skips. No clause changed",
           "ref": "#24697"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.requires[1] and source[3] cited line 60 of the showcase task.object.ts in the comma-range spelling (authored in 45397edf53 as the list 49 and 60). At that commit 49 and 60 were the trackHistory flags of the task's status and priority fields; at this base both have moved by a line. Both citations now anchor task.object.ts#Task and name the two fields. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#24752"
         }
       ]
     },

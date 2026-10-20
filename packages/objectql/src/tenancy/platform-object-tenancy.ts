@@ -5,23 +5,19 @@
  *
  * ## ⚠️ What still reads this ledger (ADR-0131 C8 stage 8b)
  *
- * Under the `single` posture the ledger no longer decides any write: ADR-0131
- * D9 made the system-insert rule structural there — a platform object with a
- * tenant column is in scope like any other, so its organization-less system
- * insert takes the Default Organization or is refused
- * (`Engine.resolveSystemInsertOrganization`). Two readers remain, and they
- * are why the ledger has not retired yet (D13):
+ * Under no posture does the ledger decide a write any more: ADR-0131 D9 made
+ * the system-insert rule structural — a platform object with a tenant column
+ * is in scope like any other, so its organization-less system insert takes
+ * the derived organization or is refused
+ * (`Engine.resolveSystemInsertOrganization`). Stage 8b lifted the exemption
+ * under `single` first and under the walled postures (`group` / `isolated`)
+ * in 18.x. One reader remains, and it is why the ledger has not retired yet
+ * (D13): the engine's `bypassTenantAudit` isSystem mute
+ * (`Engine.buildDriverOptions`), a diagnostics-only reading in every posture
+ * that changes nothing a write touches.
  *
- *  1. the system-insert exemption under a WALLED posture (`group` /
- *     `isolated`), which stands in 18.0 by epic ruling record 6259899486 on
- *     #15194, item 4 — the walled half of the lift lands in 18.x;
- *  2. the engine's `bypassTenantAudit` isSystem mute
- *     (`Engine.buildDriverOptions`), a diagnostics-only reading in every
- *     posture that changes nothing a write touches.
- *
- * ⛔ Do not add an entry to make a `single` write behave: under `single` an
- * entry changes nothing but the mute. The ledger retires with its walled
- * reader.
+ * ⛔ Do not add an entry to make a write behave: an entry changes nothing but
+ * the mute.
  *
  * ## The ruling this implements
  *
@@ -97,14 +93,14 @@
  *
  * ## What admission actually changes, per object
  *
- * A `tenant-scoped` classification lets the object reach
- * `resolveSystemInsertOrganization` (#8844) on a walled posture
- * (`group` / `isolated`), where an org-less write is REFUSED loudly
- * ({@link SystemWriteOrganizationRequiredError}). Under `single` every
+ * A `tenant-scoped` classification stops the engine auto-muting the
+ * driver's tenant-audit warning for elevated writes on the object. It no
+ * longer decides whether an org-less write reaches
+ * `resolveSystemInsertOrganization` (#8844): under every posture every
  * platform object with a tenant column reaches it whatever its entry says
- * (stage 8b, above). It also stops the engine
- * auto-muting the driver's tenant-audit warning for elevated writes on it.
- * Both directions are the ruled one — a refusal or a warning, never a silent
+ * (stage 8b, above), and an org-less write no organization is derivable for
+ * is REFUSED loudly ({@link SystemWriteOrganizationRequiredError}). Both
+ * directions are the ruled one — a refusal or a warning, never a silent
  * rewrite of what the write touches (execution point 3).
  */
 

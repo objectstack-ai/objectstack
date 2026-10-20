@@ -57,12 +57,12 @@
  * and (since the Default Organization became a boot invariant, D3) zero
  * organizations alike. ⛔ Nothing defaults to any owner but the derivable one.
  *
- * ## The three exclusions, and why the refusal is not broader
+ * ## The exclusions, and why the refusal is not broader
  *
  * A refusal that fires too widely breaks every system write on a walled install
  * — including the hooks and cron that run unattended, where a loud failure
  * surfaces as a stalled automation rather than as a 4xx someone reads. So the
- * decision runs only where the harm is real, and three populations are outside
+ * decision runs only where the harm is real, and these populations are outside
  * it BY CONSTRUCTION rather than by exemption:
  *
  *  - **Objects with no organization column, `tenancy.enabled: false` objects
@@ -71,28 +71,22 @@
  *    org-less rows is `tenancy: { enabled: false }` — a metadata declaration,
  *    loud and checkable — never a per-write bypass flag, which is exactly the
  *    lenient-consumer accommodation Prime Directive #12 forbids.
- *  - **Under a WALLED posture only, platform-namespace objects the inventory
- *    did not admit** ({@link isPlatformObjectOutOfTenantAuditScope},
- *    `platform-object-tenancy.ts`). Under `single` this exclusion is gone
- *    (ADR-0131 C8 stage 8b): a platform object with a tenant column takes the
- *    Default Organization or is refused, like every other object.
  *
- *    ⚠️ This exclusion used to be the whole `sys_` / `cloud_` / `ai_`
- *    NAMESPACE, on the reasoning commit ff08691e6 recorded, that "an org-less row is defensible for
- *    `sys_permission_set`". The maintainer WITHDREW the wholesale form on
- *    2026-08-31 (#13491, 联案 #13497): that reasoning inherits **per object**,
- *    and the same namespace also holds objects whose org-less rows are a
- *    defect — five instances (#12745, #12928, #10673, #8617, cloud#1239, one a
- *    credentials table), every one found by a person reading call sites and
- *    none by this control. So the exclusion is now a per-object verdict, and an
- *    object nobody has adjudicated stays excluded and stays ON THE LIST.
- *
- *    ⚠️ C8 stage 8b lifted this exclusion under `single` only. Under a wall it
- *    stands in 18.0 (epic ruling record 6259899486 on #15194, item 4) and
- *    retires with the ledger in 18.x (D13). C1 withdrew the seed loader's
- *    namespace exemption. #8686's backfill (`seed-tenancy-backfill.ts`) still
- *    carries the NAMESPACE form; its residue attribution is C7's. Read the
- *    three together before changing any of them.
+ *    ⚠️ Platform-namespace objects used to be a fourth population: first the
+ *    whole `sys_` / `cloud_` / `ai_` NAMESPACE, then (#13491) the per-object
+ *    verdict of `PLATFORM_OBJECT_TENANCY`. ADR-0131 C8 stage 8b retired that
+ *    write-path reader — under `single` first, then under the walled postures
+ *    in 18.x — so a platform object with a tenant column takes the derived
+ *    organization or is refused, like every other object. The ledger keeps
+ *    its other reader, the tenant-audit mute in `Engine.buildDriverOptions`
+ *    ({@link isPlatformObjectOutOfTenantAuditScope}). C1 withdrew the seed
+ *    loader's namespace exemption. #8686's backfill
+ *    (`seed-tenancy-backfill.ts`) still carries the NAMESPACE form; its
+ *    residue attribution is C7's. Read the three together before changing any
+ *    of them.
+ *  - **Under a walled posture only, `sys_secret` and `sys_flow_credential`** —
+ *    a cited, temporary bridge ({@link WALLED_ORGANIZATION_LESS_BRIDGE}) until
+ *    the steps 5+6 landing flips both tables column-less.
  *  - **Writes that already carry an organization** — on the execution context
  *    or on the row itself. That IS "carrying an explicit organization"; the
  *    ruling asks for nothing more.
@@ -160,13 +154,9 @@ export const DEFAULT_TENANT_FIELD = 'organization_id';
  * #13491's re-ruling (2026-08-31, 联案 #13497) withdrew the wholesale namespace
  * reading — but its scope was the RUNTIME control only. So today:
  *
- *  - **the runtime write path** no longer cuts under `single` (C8 stage 8b).
- *    Under a walled posture it cuts PER OBJECT, by the hand-adjudicated
- *    classification in `platform-object-tenancy.ts` — the
- *    `PLATFORM_OBJECT_TENANCY` ledger, read through
- *    {@link classifyPlatformObjectTenancy} and
- *    {@link isPlatformObjectOutOfTenantAuditScope}, which is what
- *    `Engine.resolveSystemInsertOrganization` calls.
+ *  - **the runtime write path** no longer cuts under any posture (C8 stage
+ *    8b: `single` first, the walled postures in 18.x).
+ *    `Engine.resolveSystemInsertOrganization` reads no platform ledger.
  *  - **`seed-loader.ts`** no longer cuts at all: ADR-0131 D3 withdrew its
  *    namespace exemption (C1), so every seed row is stamped with the resolved
  *    organization — `sys_` / `cloud_` / `ai_` seeds included — or refused.
@@ -180,6 +170,34 @@ export const DEFAULT_TENANT_FIELD = 'organization_id';
  * to it. Read the three together before changing any of them.
  */
 const PLATFORM_NAMESPACE = /^(sys_|cloud_|ai_)/;
+
+/**
+ * [ADR-0131 C8 stage 8b, BRIDGE — delete it with the flips] The two platform
+ * tables whose organization-less SYSTEM inserts keep landing under a walled
+ * posture, as they did before the walled half of the lift.
+ *
+ * Their deployment-level rows (a global-scope encrypted setting's and a
+ * datasource credential's `sys_secret` ciphertext, a flow's
+ * `sys_flow_credential`) are organization-less by ruling until those tables
+ * drop the column: epic ruling record 6270035914 on #15194, item 2, moved the
+ * deferred `sys_secret` / `sys_flow_credential` `systemFields: { tenant: false }`
+ * flips into the steps 5+6 landing (#24582), because declaring them column-less
+ * any earlier refuses every 18.0 database at boot. Until then the walled lift
+ * would turn each of those writes into a 500 `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`.
+ *
+ * It is a walled-posture bridge only: under `single` these inserts take the
+ * Default Organization like any other. ⛔ Add no table here. When the flips
+ * land, the tables have no tenant column, the engine exits on that before this
+ * list is read, and the tripwire pin in `@objectstack/service-automation`
+ * (`walled-organization-less-bridge.test.ts`) turns red until this list, its
+ * reader in `Engine.resolveSystemInsertOrganization` and that pin are deleted.
+ */
+export const WALLED_ORGANIZATION_LESS_BRIDGE: readonly string[] = Object.freeze(['sys_flow_credential', 'sys_secret']);
+
+/** Is `object` one of {@link WALLED_ORGANIZATION_LESS_BRIDGE}'s two tables? */
+export function isWalledOrganizationLessBridgeObject(object: string): boolean {
+  return WALLED_ORGANIZATION_LESS_BRIDGE.includes(object);
+}
 
 /**
  * Is this object in one of the platform namespaces?

@@ -545,6 +545,8 @@ export {
   resolveSystemWriteOrganization,
   resolveTenantFieldName,
   isPlatformNamespaceObject,
+  WALLED_ORGANIZATION_LESS_BRIDGE,
+  isWalledOrganizationLessBridgeObject,
   carriesOrganization,
   isSystemWriteOrganizationRequiredError,
   SystemWriteOrganizationRequiredError,
