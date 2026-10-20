@@ -1644,9 +1644,10 @@ export class SharingRuleService implements ISharingRuleService {
    * with how many OTHER users hold the recipient, so a bulk import of N rows
    * costs N user-scoped passes, never N whole-rule passes.
    *
-   * Withdrawal is one set-based delete, scoped by rule and recipient, for the
-   * reason {@link revokeRuleGrantsForRetiredRecipients} gives: under a system
-   * context `SharingService.revoke` is itself a plain delete by id.
+   * Withdrawal goes through `SharingService.revoke`, one grant at a time, as
+   * the whole-rule pass's own withdrawal does ({@link reconcile}); a user holds
+   * at most one grant per matched record, so the count is bounded by the
+   * rule's matched set.
    *
    * A `field` rule has no rule-wide recipient to check a user against; its
    * recipients live on each record and are re-derived by that record's write
@@ -1676,13 +1677,10 @@ export class SharingRuleService implements ISharingRuleService {
     for (const row of (existing ?? [])) held.set(String((row as any).record_id), row);
 
     if (!(await this.ruleReachesUser(rule, userId, {}))) {
-      if (held.size === 0) return pass;
-      await this.engine.delete('sys_record_share', {
-        where: scope,
-        multi: true,
-        context: SYSTEM_CTX,
-      } as any);
-      pass.grantsRevoked = held.size;
+      for (const [, row] of held.entries()) {
+        await this.sharing.revoke(String(row.id), SYSTEM_CTX);
+        pass.grantsRevoked += 1;
+      }
       return pass;
     }
 

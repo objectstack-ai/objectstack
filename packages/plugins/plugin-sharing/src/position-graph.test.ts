@@ -119,7 +119,7 @@ describe('PositionGraphService.holdsPosition — the user-scoped twin of the exp
     async find(object: string, options: any) {
       const f = options?.filter ?? options?.where ?? {};
       const rows: any[] = object === 'sys_user_position' ? ASSIGN : object === 'sys_member' ? MEMBER : [];
-      return rows.filter((r) => Object.entries(f).every(([k, v]) => r[k] === v));
+      return rows.filter((r) => Object.entries(f).every(([k, v]) => r[k] === v)).slice(0, options?.limit ?? rows.length);
     },
   } as any;
   const USERS = ['u_a', 'u_b', 'u_global', 'u_expired', 'u_pending', 'u_mixed', 'u_role_a', 'u_role_b', 'u_none'];
