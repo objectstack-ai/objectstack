@@ -239,9 +239,9 @@ export const PLATFORM_OBJECT_TENANCY: Readonly<Record<string, PlatformObjectTena
       "carries the granting rule's organization, a direct grant the shared record's. The maintainer ordered " +
       'the rows written before it backfilled from the record they reference on 2026-09-02 ' +
       '(`backfill-sys-record-share-organizations.ts`). A grant table that cannot say which organization ' +
-      'a grant belongs to is a defect, not a design: under a wall, a tenant-scoped read would AND ' +
-      "plugin-security's strict `organization_id = :tenant` over the driver's NULL-tolerant arm and every " +
-      'organization-less grant would silently disappear.',
+      'a grant belongs to is a defect, not a design: under a wall, a tenant-scoped read compiles ' +
+      '`organization_id = :tenant` at both layers, and every organization-less grant would silently ' +
+      'disappear.',
   },
 };
 

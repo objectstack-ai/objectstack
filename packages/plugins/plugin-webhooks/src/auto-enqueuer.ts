@@ -136,7 +136,8 @@ interface CachedSubscription {
      * (`EnqueueHttpInput.organizationId`), which is what makes the
      * cross-organization wall on `redeliver()` (#10740) actually exclude other
      * tenants' rows: a row enqueued without it lands `organization_id = NULL`,
-     * the driver's global-row arm, visible to every organization. There is no
+     * a row of no organization that no tenant-scoped read reaches (ADR-0131
+     * D8 retired the driver's NULL arm). There is no
      * request context to read here — the enqueuer runs fire-and-forget off the
      * write path — so the subscription row is the one honest source. Absent
      * when the row itself carries no organization (a `single`-posture install):
@@ -1175,7 +1176,7 @@ export class AutoEnqueuer {
                 // organization — the one honest tenant in scope on this
                 // fire-and-forget path (no request context exists here).
                 // Absent for an org-less subscription; the row then lands
-                // NULL, the global-row shape. A deployment-wide declared
+                // NULL, a row of no organization. A deployment-wide declared
                 // webhook takes the event's organization instead.
                 organizationId: sub.deploymentWide ? organization.organizationId : sub.organizationId,
                 // [#3946] Envelope keys are written LAST so the event payload

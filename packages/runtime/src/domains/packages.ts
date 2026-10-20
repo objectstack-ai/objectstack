@@ -2690,8 +2690,9 @@ _context: HttpProtocolContext,
         // Read the just-published seed body. The protocol decides the scope,
         // not this call site: [ADR-0131 D6] every metadata read is
         // environment → code, so this read is env-wide by construction:
-        // `organization_id IS NULL`, the partition a workspace seed is stored
-        // in and the only one cold boot hydrates.
+        // `sys_metadata` carries no organization column (ADR-0131 D6/D7), so
+        // the environment's rows are the only partition there is — the one a
+        // workspace seed is stored in and cold boot hydrates.
         //
         // [commit 8744de9e9] This used to be a two-attempt org-then-env ladder, written
         // when resolving the wrong scope here is what silently produced "0

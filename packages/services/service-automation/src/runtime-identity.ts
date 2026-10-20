@@ -293,11 +293,11 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
       // sequences org-scoped. Without it, every row a user-triggered system
       // sweep created was born org-NULL — outside the org partition, where
       // unique indexes don't bite and org-scoped queries don't look. Reads /
-      // updates / deletes org-scope to `(org = trigger-org OR org IS NULL)` at
-      // the driver — the same posture the action-body seam ships for its
-      // `{ ...caller, isSystem: true }` envelope (the hotcrm#548-family fix):
-      // the tenant wall survives elevation for an org-triggered run, while
-      // org-NULL (pre-fix / global) rows stay reachable via the OR-NULL arm.
+      // updates / deletes org-scope to `org = trigger-org` at the driver
+      // (ADR-0131 D8 — no NULL arm) — the same posture the action-body seam
+      // ships for its `{ ...caller, isSystem: true }` envelope (the
+      // hotcrm#548-family fix): the tenant wall survives elevation for an
+      // org-triggered run.
       // A run that must genuinely cross orgs is a user-less one (a schedule
       // carries no org, nothing narrows) or sets explicit fields.
       ...(context.tenantId ? { tenantId: context.tenantId } : {}),

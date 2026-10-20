@@ -260,9 +260,9 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                     // organization, and a wrong value is worse than a null (a
                     // null is visibly missing; a wrong one is silently
                     // authoritative). Without it the sys_http_delivery row
-                    // lands `organization_id = NULL` — the driver's global-row
-                    // arm — visible to and replayable by EVERY organization
-                    // through the redeliver() door (#10740).
+                    // lands `organization_id = NULL` — a row of no
+                    // organization, which no tenant-scoped read or redeliver()
+                    // reaches (ADR-0131 D8 retired the driver's NULL arm).
                     const organizationId =
                         typeof context.tenantId === 'string' && context.tenantId !== ''
                             ? context.tenantId
@@ -277,8 +277,8 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                         // id; see check:doc-authoring.)
                         ctx.logger.warn(
                             `[http] node '${node.id}': no organization in scope for this durable callout — its ` +
-                                `sys_http_delivery row will carry organization_id = NULL, which is a global row ` +
-                                `every organization's redeliver door can reach on a walled deployment. ` +
+                                `sys_http_delivery row will carry organization_id = NULL, a row of no organization ` +
+                                `that no organization's redeliver door can reach on a walled deployment. ` +
                                 `On a multi-organization install the triggering context lost its tenant: give the ` +
                                 `flow's trigger an acting organization (AutomationContext.tenantId). On a ` +
                                 `single-organization install this is expected and can be ignored.`,

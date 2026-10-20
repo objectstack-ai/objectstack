@@ -203,14 +203,16 @@ export class MemoryHttpOutbox implements IHttpOutbox {
      * owes the predicate here") — and `insert()` now stamps
      * {@link HttpDelivery.organizationId}, so the debt is due.
      *
-     * The predicate mirrors the SQL driver's tenant term
+     * The predicate was written to mirror the SQL driver's v17 tenant term
      * `(organization_id = :tenantId OR organization_id IS NULL)`, all three
      * arms deliberately:
      *  - a row in ANOTHER organization is INVISIBLE (`RESOURCE_NOT_FOUND`),
      *    never forbidden — the same non-oracle refusal the contract rules;
-     *  - a row with NO organization is a global row every tenant may reach
-     *    (the driver's deliberate fail-open arm — hiding platform rows from
-     *    every tenant is a different defect);
+     *  - a row with NO organization is reachable by every tenant here. ⚠️ The
+     *    SQL driver no longer does this: ADR-0131 D8 retired its NULL arm, so
+     *    there the term is `organization_id = :tenantId` alone and an
+     *    organization-less row is reached by no tenant. This in-memory store
+     *    still admits it;
      *  - a caller with NO tenant (`tenantId: undefined`) stays unscoped,
      *    which is the honest degraded shape {@link RedeliverOptions} rules
      *    for genuinely tenant-less deployments.
