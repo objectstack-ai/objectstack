@@ -190,7 +190,6 @@ export {
     NotificationReceipt,
     NotificationDelivery,
     NotificationPreference,
-    NotificationSubscription,
     NotificationTemplate,
     HttpDelivery,
     SYS_HTTP_DELIVERY,

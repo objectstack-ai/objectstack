@@ -6,8 +6,7 @@
  * Object label/field/view/action translations for the sys_* objects this
  * service owns (sys_inbox_message / sys_notification_receipt /
  * sys_notification_delivery / sys_notification_preference /
- * sys_notification_subscription / sys_notification_template /
- * sys_http_delivery). Loaded at runtime via the plugin's `kernel:ready`
+ * sys_notification_template / sys_http_delivery). Loaded at runtime via the plugin's `kernel:ready`
  * hook (`i18n.loadTranslations`). Regenerate with `os i18n extract`
  * against `scripts/i18n-extract.config.ts`.
  */
