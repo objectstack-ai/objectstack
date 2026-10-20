@@ -168,11 +168,13 @@ async function disarmMfa(): Promise<void> {
   auth.applyConfigPatch({ mfaRequired: false });
 }
 
-/** The session gate's refusal, as the transport seam renders it (ADR-0112). */
+/**
+ * The session gate's refusal, as the data plane's seam renders it (ADR-0112:
+ * the `403` status and the posture's code nested under `error`).
+ */
 async function expectHeld(res: Response, code: string): Promise<void> {
   expect(res.status).toBe(403);
-  const body = (await res.json()) as { success?: boolean; error?: { code?: string } };
-  expect(body.success).toBe(false);
+  const body = (await res.json()) as { error?: { code?: string } };
   expect(body.error?.code).toBe(code);
 }
 
