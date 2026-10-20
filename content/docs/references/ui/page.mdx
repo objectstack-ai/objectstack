@@ -95,7 +95,7 @@ Interface-level page configuration (Airtable parity)
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: object[]; tabs?: object[]; showAllRecords?: boolean; … }` | optional | End-user quick-filter bar for this page (overrides the source view's userFilters) |
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles |
-| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **addRecord** | `{ enabled: boolean; position?: Enum<'top' \| 'bottom' \| 'both'> }` | optional | Add record entry point configuration |
 | **buttons** | `string[]` | optional | Toolbar buttons — names of the source object's actions to surface in the page toolbar |
 | **recordAction** | `Enum<'drawer' \| 'page' \| 'modal' \| 'none'>` | optional | How clicking a record opens its detail (drawer \| page \| modal \| none). Default: drawer |
 | **showRecordCount** | `boolean` | optional | Show record count at page bottom |
@@ -177,10 +177,10 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | optional (default: `true`) | Show the add record entry point |
-| **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"bottom"`) | Position of the add record button |
-| **mode** | `Enum<'inline' \| 'form' \| 'modal'>` | optional (default: `"inline"`) | How to add a new record |
-| **formView** | `string` | optional | Named form view to use when mode is "form" or "modal" |
+| **enabled** | `boolean` | ✅ | Show the add record entry point — REQUIRED: `true` draws the Add button, `false` declares it off |
+| **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"top"`) | Position of the add record button: `top` (the toolbar, the default), `bottom` (under the list) or `both` |
+| **mode** | `never` | optional | [REMOVED] `addRecord.mode` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button always opens the create form, never an inline row or a mode of its own choosing. Delete the key; the create form opens the way the object list's New opens it. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **formView** | `never` | optional | [REMOVED] `addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button opens the create form chosen by convention, never a named form. Delete the key, and to give the Add button its own form declare it as `formViews.create` on the object's view container (without one, the default form is used). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 ### Nested Shape: `InterfacePageConfig.emptyState`
 
@@ -266,7 +266,7 @@ View filter rule
 | **appearance** | `{ showDescription?: boolean; allowedVisualizations?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>[] }` | optional | Appearance and visualization configuration |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: object[]; tabs?: object[]; showAllRecords?: boolean; … }` | optional | End-user quick-filter bar for this page (overrides the source view's userFilters) |
 | **userActions** | `{ sort?: boolean; search?: boolean; filter?: boolean; refresh?: boolean; … }` | optional | User action toggles |
-| **addRecord** | `{ enabled?: boolean; position?: Enum<'top' \| 'bottom' \| 'both'>; mode?: Enum<'inline' \| 'form' \| 'modal'>; formView?: string }` | optional | Add record entry point configuration |
+| **addRecord** | `{ enabled: boolean; position?: Enum<'top' \| 'bottom' \| 'both'> }` | optional | Add record entry point configuration |
 | **buttons** | `string[]` | optional | Toolbar buttons — names of the source object's actions to surface in the page toolbar |
 | **recordAction** | `Enum<'drawer' \| 'page' \| 'modal' \| 'none'>` | optional | How clicking a record opens its detail (drawer \| page \| modal \| none). Default: drawer |
 | **showRecordCount** | `boolean` | optional | Show record count at page bottom |

@@ -125,6 +125,26 @@ describe('update_record surfaces silently-stripped write fields (#3407)', () => 
         expect(step.warnings![1]).toContain('readonlyWhen');
     });
 
+    it('[#24690] a stored_expression report says the computed value was stored, not that the write went without it', async () => {
+        const engine = new AutomationEngine(makeLogger());
+        const { data } = fakeDataWithDrops([
+            { object: 'invoice_line', fields: ['amount'], reason: 'stored_expression' },
+        ]);
+        registerCrudNodes(engine, ctxWith(data));
+        engine.registerFlow('f_se', updateFlow('f_se'));
+
+        await engine.execute('f_se', { userId: 'u1' });
+        const runs = await engine.listRuns('f_se');
+        const step = runs[0].steps.find((s) => s.nodeId === 'up')!;
+        expect(step.status).toBe('success');
+        expect(step.warnings).toHaveLength(1);
+        expect(step.warnings![0]).toContain('[amount]');
+        expect(step.warnings![0]).toContain('declared expression');
+        expect(step.warnings![0]).toContain('with the computed value');
+        expect(step.warnings![0]).not.toContain('without them');
+        expect(step.warnings![0]).not.toContain('were NOT written');
+    });
+
     it('emits NO warnings and NO droppedFields output when nothing was stripped', async () => {
         const engine = new AutomationEngine(makeLogger());
         const { data } = fakeDataWithDrops([]);

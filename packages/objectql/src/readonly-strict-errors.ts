@@ -87,6 +87,14 @@ const REASON_PHRASE: Record<DroppedFieldsEvent['reason'], string> = {
   computed:
     'a computed `formula` field — the engine computes it on every read, so no driver has a ' +
     'column for a written value',
+  // [#24690] Required by the exhaustive key type, and NOT refused in 18.x:
+  // by the maintainer's ruling 「甲」 a `stored_expression` drop is reported
+  // through `onFieldsDropped` only, under strict too, and its refusal waits
+  // for 19.0. No refusal this module builds carries one today; the row is
+  // the wording that refusal will use.
+  stored_expression:
+    'a stored field the engine computes from its declared `expression` on every write — the ' +
+    'value sent differs from the computed one, so it would have been replaced',
 };
 
 /**

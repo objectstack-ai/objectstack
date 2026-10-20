@@ -148,7 +148,11 @@ describe('a stored field\'s declared expression is computed on write (#24619)', 
       );
       expect(line('line_paid')).toMatchObject({ quantity: 6, unit_price: 49.99, amount: 299.94 });
       expect(total('INV-1003')).toBe(299.94);
-      expect(events).toEqual([{ object: 'showcase_invoice_line', fields: ['quantity'], reason: 'readonly_when' }]);
+      // [#24690] The caller's amount did not stand either, and is now reported.
+      expect(events).toEqual([
+        { object: 'showcase_invoice_line', fields: ['quantity'], reason: 'readonly_when' },
+        { object: 'showcase_invoice_line', fields: ['amount'], reason: 'stored_expression' },
+      ]);
     });
 
     it('the plain PATCH of amount alone stores the computed amount', async () => {

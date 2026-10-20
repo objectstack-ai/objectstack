@@ -56,8 +56,8 @@ export const ContactViews = defineView({
   list: {
     type: 'grid', data,
     columns: [{ field: 'name' }, { field: 'email' }, { field: 'company' }, { field: 'stage' }],
-    // Bind the "+ Add record" entry point to the slim create form:
-    addRecord: { enabled: true, mode: 'form', formView: 'create' },
+    // The "+ Add record" button opens the create form — `formViews.create` below:
+    addRecord: { enabled: true },
   },
 
   // Full edit form — one section per group DECLARED in the object's
@@ -85,7 +85,7 @@ export const ContactViews = defineView({
 });
 ```
 
-The binding is `addRecord.mode: 'form'` + `addRecord.formView: 'create'` ([`AddRecordConfigSchema`](/docs/references/ui/view)). No `formViews.create` → the create entry derives a default. Present → it wins for create.
+The create form is chosen by convention, and nothing on the list names it: every create entry — the list's Add button ([`AddRecordConfigSchema`](/docs/references/ui/view) says only whether it shows and where) and the object's New — opens `formViews.create` when the container declares it, else `form` (or `formViews.default`). No `formViews.create` → the create entry uses the default form. Present → it wins for create.
 
 ## Why
 
@@ -114,7 +114,7 @@ Rule of thumb: **"different field subset" → derive. "different layout or flow"
 ## Runnable example
 
 - Object: [`examples/app-showcase/src/data/objects/contact.object.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/data/objects/contact.object.ts) — flat, intent-tagged field set, with the four `fieldGroups` its `group` tags point at.
-- Views: [`examples/app-showcase/src/ui/views/contact.view.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/ui/views/contact.view.ts) — full edit form + sparse `formViews.create` + `addRecord` binding.
+- Views: [`examples/app-showcase/src/ui/views/contact.view.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/ui/views/contact.view.ts) — full edit form + sparse `formViews.create` + the list's Add button (`addRecord: { enabled: true }`), which opens it by convention.
 
 ## Anti-patterns
 
