@@ -1454,6 +1454,17 @@ export const ERROR_CODE_LEDGER = {
     // connector, plugin or host calling the driver directly, and that is why
     // it ships in `dist` and is registered (#16404, "Door or no door").
     'UNIQUE_VIOLATION',
+    // [ADR-0131 D9, stage 8d] The autonumber counter refuses an organization-
+    // less row on a tenant table wherever this driver registered the
+    // organization object, instead of filing it under the retired
+    // organization-less counter. Stamped through
+    // `ORGANIZATIONLESS_COUNTER_REFUSAL_CODE`
+    // (`packages/drivers/driver-sql/src/organizationless-counter-refusal.ts`);
+    // `TursoDriver`'s remote face throws through the same
+    // `resolveSequenceTenantId`, so `@objectstack/driver-turso` carries no row.
+    // Provenance ONLY: the engine refuses the same write under this code
+    // (`@objectstack/objectql` above), and one condition keeps one name.
+    'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
   ],
   '@objectstack/driver-turso': [
     // [#14287] Provenance for the Turso REMOTE transport's unsafe-identifier

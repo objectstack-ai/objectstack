@@ -94,9 +94,10 @@ import {
 import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToGlobPattern } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { StorageNameMapping } from '@objectstack/spec/system';
+import { StorageNameMapping, SystemObjectName } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
 import { UnsupportedDialectEmissionError } from './dialect-emission-refusal.js';
+import { OrganizationlessCounterRefusal } from './organizationless-counter-refusal.js';
 import {
   isUniqueViolationError,
   isUnbackedConflictTargetError,
@@ -5703,6 +5704,19 @@ export class SqlDriver implements IDataDriver {
    */
   protected tenantOptOutByTable: Set<string> = new Set();
 
+  /**
+   * Has this driver registered the organization object
+   * (`SystemObjectName.ORGANIZATION`)? Set by {@link computeAndRecordTenantField},
+   * the one funnel every registration door (managed, external, remote, shard)
+   * passes through, and never cleared. It is the composition fact
+   * {@link resolveSequenceTenantId} reads: where it holds, an organization-less
+   * row on a tenant table is refused (ADR-0131 D9); where it does not — a lean
+   * embedding with no identity objects — no organization can exist, and the
+   * counter keeps `GLOBAL_TENANT`, as the engine's `no-organization-object`
+   * branch does.
+   */
+  protected organizationObjectRegistered = false;
+
   /** Throttle table for missing-tenantId warnings ({object}:{op}). */
   protected tenantAuditWarned: Set<string> = new Set();
   /** [ADR-0139 D3] Whether this instance has logged its `ReadableIds` refusal (once per driver). */
@@ -7767,13 +7781,29 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * The tenant bucket a counter row is keyed by: the row's tenant when the
-   * object HAS a tenant column and the row carries one, else the platform
-   * bucket `GLOBAL_TENANT`. One spelling for the issue path, the re-seed path
-   * and the counter identity, which used to carry it three times.
+   * The tenant bucket a counter row is keyed by. One spelling for the issue
+   * path, the re-seed path and the counter identity, on both faces:
+   *
+   *  - an object with NO tenant column → `GLOBAL_TENANT`, the installation's
+   *    one counter for it;
+   *  - a tenant column and a row that carries its organization → that
+   *    organization;
+   *  - a tenant column and NO organization → REFUSED
+   *    ({@link OrganizationlessCounterRefusal}, ADR-0131 D9) wherever this
+   *    driver registered the organization object, before any counter row is
+   *    read or written. Only a composition with no organization object (a lean
+   *    embedding) keeps `GLOBAL_TENANT` here — no organization can exist there.
    */
-  protected resolveSequenceTenantId(tenantField: string | null, tenantId: string | null): string {
-    return tenantField && tenantId ? String(tenantId) : GLOBAL_TENANT;
+  protected resolveSequenceTenantId(
+    tenantField: string | null,
+    tenantId: string | null,
+    table: string,
+    field: string,
+  ): string {
+    if (!tenantField) return GLOBAL_TENANT;
+    if (tenantId) return String(tenantId);
+    if (this.organizationObjectRegistered) throw new OrganizationlessCounterRefusal(table, field, tenantField);
+    return GLOBAL_TENANT;
   }
 
   /**
@@ -8130,8 +8160,10 @@ export class SqlDriver implements IDataDriver {
     // transaction ensures the table on the right connection instead of dead-
     // locking on a second one (SQLite pool max=1). `initObjects` normally warms
     // this up front, making the call a no-op — this only bites the lazy path.
+    // The bucket first: an organization-less row on a tenant table is refused
+    // here (ADR-0131 D9), before the lazy DDL below or any counter read.
+    const resolvedTenantId = this.resolveSequenceTenantId(tenantField, tenantId, tableName, field);
     await this.ensureSequencesTable(parentTrx);
-    const resolvedTenantId = this.resolveSequenceTenantId(tenantField, tenantId);
     if (scope !== '' && !this.sequencesHasKeyHash) {
       // The legacy sequences table could not be migrated to the key_hash shape,
       // so it cannot represent per-scope counters. Fail with a clear, actionable
@@ -8391,7 +8423,12 @@ export class SqlDriver implements IDataDriver {
    */
   protected async resyncSequenceToDataMax(reservation: AutoNumberReservation): Promise<void> {
     await this.ensureSequencesTable();
-    const resolvedTenantId = this.resolveSequenceTenantId(reservation.tenantField, reservation.tenantId);
+    const resolvedTenantId = this.resolveSequenceTenantId(
+      reservation.tenantField,
+      reservation.tenantId,
+      reservation.tableName,
+      reservation.field,
+    );
     const key = this.sequencesHasKeyHash
       ? { key_hash: this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope) }
       : { object: reservation.tableName, tenant_id: resolvedTenantId, field: reservation.field };
@@ -8425,7 +8462,12 @@ export class SqlDriver implements IDataDriver {
    * that drew from it. See {@link bulkCreate}.
    */
   protected autoNumberCounterKey(reservation: AutoNumberReservation): string {
-    const resolvedTenantId = this.resolveSequenceTenantId(reservation.tenantField, reservation.tenantId);
+    const resolvedTenantId = this.resolveSequenceTenantId(
+      reservation.tenantField,
+      reservation.tenantId,
+      reservation.tableName,
+      reservation.field,
+    );
     return this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope);
   }
 
@@ -12124,6 +12166,7 @@ export class SqlDriver implements IDataDriver {
     key: string,
     schema: { fields?: Record<string, any>; tenancy?: any },
   ): string | null {
+    if (key === SystemObjectName.ORGANIZATION) this.organizationObjectRegistered = true;
     if (schema?.tenancy != null) {
       if (isTenancyDisabled(schema)) this.tenantOptOutByTable.add(key);
       else this.tenantOptOutByTable.delete(key);
