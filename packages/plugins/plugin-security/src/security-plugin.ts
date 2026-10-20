@@ -390,6 +390,24 @@ function isPrincipalLessContext(context: any): boolean {
 }
 
 /**
+ * [ADR-0090 D10; ruling of record 6278784335 on #24341, letter B] Whether
+ * `context` is a DELEGATED principal's own leg — an agent acting on behalf of
+ * a user, whose sets are its ceiling and whose row bound is the delegator's
+ * leg, AND-ed in beside it. The spelling is the read door's own test for the
+ * delegated case (`onBehalfOf.userId`); the delegator's leg runs on the
+ * context `resolveDelegatorContext` rebuilt, which carries none.
+ *
+ * Read by {@link SecurityPlugin.collectRLSPolicies} alone: a ceiling's silence
+ * is not Layer 1 silence, so the object's declared default row scope is not
+ * collected on that leg. Every row bound comes from the delegator, as before
+ * the identity objects declared their defaults.
+ */
+function isDelegatedPrincipalLeg(context: unknown): boolean {
+  const onBehalfOf = (context as { onBehalfOf?: { userId?: unknown } } | null | undefined)?.onBehalfOf;
+  return typeof onBehalfOf?.userId === 'string' && onBehalfOf.userId !== '';
+}
+
+/**
  * [#21908] ADR-0096 D5 strict mode — the refusal the engine middleware throws
  * for a principal-less, non-system context ({@link isPrincipalLessContext}):
  * `PermissionDeniedError`, `403 PERMISSION_DENIED`, the engine's one deny
@@ -5343,6 +5361,7 @@ export class SecurityPlugin implements Plugin {
       object,
       rlsOperation,
       (context?.positions ?? []) as string[],
+      context,
     ).some(isPlatformOwnershipFloorPolicy);
     if (!floorApplies) return false;
     return (
@@ -5465,6 +5484,7 @@ export class SecurityPlugin implements Plugin {
         object,
         operation,
         (context?.positions ?? []) as string[],
+        context,
       ).filter((p) => !isPlatformOwnershipFloorPolicy(p) && policyDeclaresClause(p, 'using'));
       if (authored.length === 0) return 'abstain';
 
@@ -7234,7 +7254,7 @@ export class SecurityPlugin implements Plugin {
     // longer skip the tenant wall (that is Layer 0's own exemption, below).
     let layer1: Record<string, unknown> | null = null;
     if (!(posturePermits && superuserBypass)) {
-      let collected = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[]);
+      let collected = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[], context);
       // [#8023] An object whose author DECLARED `sharingModel:
       // 'public_read_write'` does not inherit the platform's wildcard `update`
       // ownership floor AT ALL. QA #7637 measured the contradiction it caused
@@ -7381,7 +7401,7 @@ export class SecurityPlugin implements Plugin {
           this.permissionEvaluator.hasSuperuserReadBypass(object, permissionSets, { isPrivate: meta.isPrivate })
         )
       ) {
-        collected = this.collectRLSPolicies(permissionSets, object, 'select', (context?.positions ?? []) as string[]);
+        collected = this.collectRLSPolicies(permissionSets, object, 'select', (context?.positions ?? []) as string[], context);
       }
       // [#5492] Provenance composition: the caller (the by-id write pre-image
       // gate) has already asked the declared write authority — `ISharingService`
@@ -7674,6 +7694,7 @@ export class SecurityPlugin implements Plugin {
         object,
         operation,
         (context?.positions ?? []) as string[],
+        context,
       ),
       { keepOwnershipFloor: !floorReplaced },
     );
@@ -8924,6 +8945,7 @@ export class SecurityPlugin implements Plugin {
         rel.master,
         'update',
         (context?.positions ?? []) as string[],
+        context,
       ).some(isPlatformOwnershipFloorPolicy);
     const dropPlatformOwnershipFloor = masterFloorApplies
       ? (await this.resolveSharingWriteVerdict(
@@ -9028,13 +9050,20 @@ export class SecurityPlugin implements Plugin {
    *    authored policy's do;
    *  - a superuser-bypass principal never reaches this method (the bypass is
    *    decided by the caller, before the collection), and an object that
-   *    declares no default collects exactly what it collected before.
+   *    declares no default collects exactly what it collected before;
+   *  - [ruling 6278784335 on #24341, letter B] a delegated principal's own
+   *    leg ({@link isDelegatedPrincipalLeg} on `principal`, the context the
+   *    collection is for) never collects the default: its sets are a
+   *    capability ceiling carrying no row policy (ADR-0090 D10), and its row
+   *    bound is the delegator's leg, which collects the default as any
+   *    principal's does.
    */
   private collectRLSPolicies(
     permissionSets: PermissionSet[],
     objectName: string,
     operation: string,
-    heldPositions?: string[],
+    heldPositions: string[] | undefined,
+    principal: unknown,
   ): RowLevelSecurityPolicy[] {
     const allPolicies: RowLevelSecurityPolicy[] = [];
     const floorAlternates = this.ownershipFloorAlternates.all();
@@ -9054,7 +9083,7 @@ export class SecurityPlugin implements Plugin {
     }
 
     const held = this.rlsCompiler.getApplicablePolicies(objectName, operation, allPolicies, heldPositions);
-    if (held.length > 0) return held;
+    if (held.length > 0 || isDelegatedPrincipalLeg(principal)) return held;
     // [#24164 ruling E′] The held sets are silent on this object and
     // operation: the object's own `defaultRowScope`, if it declares one. Read
     // from the registry the engine compiles every find against, only here, on

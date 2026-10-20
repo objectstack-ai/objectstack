@@ -39,7 +39,8 @@ import {
   SysTwoFactor,
   SysVerification,
 } from '@objectstack/platform-objects/identity';
-import { SysEmail } from '@objectstack/platform-objects/audit';
+import { SysEmail, SysIdentityEmail } from '@objectstack/platform-objects/audit';
+import { SECRET_MASK } from '@objectstack/objectql/core';
 import { installAuditWriters } from './audit-writers.js';
 import { singlePostureDefaultOrganization } from './__tests__/single-posture-tenancy.js';
 
@@ -287,5 +288,68 @@ describe('[#21197] the ledger CRUD mirror omits `internal` fields from both snap
       expect(atRest).not.toContain(marker(def.name, field, 'create'));
       expect(atRest).not.toContain(marker(def.name, field, 'rotate'));
     });
+  });
+});
+
+/**
+ * [#24625] The mail logs' BODY columns are masked in every ledger copy, like a
+ * credential field: identity-mail bodies carry reset and sign-in links, and no
+ * column tells an 18.0 identity row in `sys_email` apart from tenant mail, so
+ * both logs are masked on every row. Same in-memory boot as above; the control
+ * (`subject`) proves the mirror still records the row.
+ */
+describe('[#24625] the ledger CRUD mirror masks a mail log\'s body columns', () => {
+  const BODY = ['body_text', 'body_html'];
+
+  describe.each([SysEmail, SysIdentityEmail].map((d) => [d.name, d as unknown as ObjectDef] as const))('%s', (_name, def) => {
+    it('create, update and delete record the subject and only the mask of each body', async () => {
+      const { engine, storeFor } = await boot(def);
+      const created = await engine.insert(def.name, seedRow(def, BODY, 'subject', 'create'), SYS);
+      const id = String(created.id);
+      const changed = seedRow(def, BODY, 'subject', 'update');
+      await engine.update(def.name, { subject: changed.subject, body_text: changed.body_text, body_html: changed.body_html }, { where: { id }, ...SYS } as any);
+      await engine.delete(def.name, { where: { id }, ...SYS } as any);
+
+      const rows = ledgerRows(storeFor, def.name);
+      const one = (a: string) => rows.filter((r) => r.action === a)[0];
+      const sides = {
+        createNew: parse(one('create').new_value),
+        updateOld: parse(one('update').old_value),
+        updateNew: parse(one('update').new_value),
+        deleteOld: parse(one('delete').old_value),
+      };
+      expect(sides.createNew.subject).toBe('control-create');
+      expect(sides.updateNew.subject).toBe('control-update');
+      for (const [side, snapshot] of Object.entries(sides)) {
+        for (const field of BODY) expect(snapshot[field], `${def.name}.${field} on ${side}`).toBe(SECRET_MASK);
+      }
+
+      const atRest = JSON.stringify([...rows, ...activityRows(storeFor, def.name)]);
+      for (const field of BODY) {
+        for (const phase of ['create', 'update']) expect(atRest.includes(marker(def.name, field, phase))).toBe(false);
+      }
+      expect(activityRows(storeFor, def.name).length, 'the activity mirror ran').toBeGreaterThan(0);
+    });
+
+    it('an unset body stays null in the copy — the mask never invents a value', async () => {
+      const { engine, storeFor } = await boot(def);
+      const row = seedRow(def, [], 'subject', 'create');
+      await engine.insert(def.name, { ...row, body_text: 'MARKER-plain-only', body_html: null }, SYS);
+      const created = parse(ledgerRows(storeFor, def.name).filter((r) => r.action === 'create')[0].new_value);
+      expect(created.body_text).toBe(SECRET_MASK);
+      expect(created.body_html ?? null).toBeNull();
+    });
+  });
+
+  it('an object that is not a mail log keeps its own textarea in the copy (control)', async () => {
+    const { engine, storeFor } = await boot(SysEmail as unknown as ObjectDef);
+    const other = {
+      name: 'mail_body_control', label: 'Control',
+      fields: { id: f('id', 'text', { primaryKey: true }), body_text: f('body_text', 'textarea') },
+    };
+    engine.registry.registerObject(other as any, 'com.objectstack.test.mail-body-control');
+    await engine.insert('mail_body_control', { body_text: 'control-body' }, SYS);
+    const created = parse(ledgerRows(storeFor, 'mail_body_control').filter((r) => r.action === 'create')[0].new_value);
+    expect(created.body_text).toBe('control-body');
   });
 });

@@ -65,9 +65,11 @@
  *
  * [#23574] Both doors read each object's exposure from the one definition the
  * engine's registry holds: `RestServer` through the protocol's by-name object
- * read beside its object list (`getMetaItem` and `getMetaItems`, which this
- * rig's protocol cannot read without a metadata store, so both are answered
- * from the registry), and the dispatcher through the
+ * read beside its object list (`getMetaItems`, and both by-name faces,
+ * `getMetaItemForExecution`, which the exposure gate reads when the protocol
+ * has it, and `getMetaItem`, which it reads otherwise; this rig's protocol
+ * cannot read without a metadata store, so all three are answered from the
+ * registry), and the dispatcher through the
  * kernel's `metadata` service (`getObject`, answered from the same registry).
  * Without them each door's exposure gate fails open, and every exposure row
  * below would read as an allowed object.
@@ -197,10 +199,16 @@ async function bootRestServer(): Promise<Door> {
     (protocol as any).getMetaItems = async (request: any) => request?.type === 'object'
         ? { type: 'object', items: OBJECTS.map((o) => definition(o.name)) }
         : { type: request?.type, items: [] };
-    const readByName = (protocol as any).getMetaItem.bind(protocol);
-    (protocol as any).getMetaItem = async (request: any) => request?.type === 'object'
-        ? { type: 'object', name: request.name, item: OBJECTS.some((o) => o.name === request.name) ? definition(request.name) : undefined }
-        : readByName(request);
+    // [#24535] ONE registry-backed stub on BOTH by-name faces: `enforceApiAccess`
+    // reads `getMetaItemForExecution` when the protocol has one (this real one
+    // does), and `getMetaItem` otherwise. Stubbing one face alone leaves the
+    // gate on the other, which fails open here.
+    for (const face of ['getMetaItem', 'getMetaItemForExecution'] as const) {
+        const readByName = (protocol as any)[face].bind(protocol);
+        (protocol as any)[face] = async (request: any) => request?.type === 'object'
+            ? { type: 'object', name: request.name, item: OBJECTS.some((o) => o.name === request.name) ? definition(request.name) : undefined }
+            : readByName(request);
+    }
     const noop = () => {};
     const server = { get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} };
     const rest: any = new RestServer(server as any, protocol as any, { api: { requireAuth: false } } as any);
