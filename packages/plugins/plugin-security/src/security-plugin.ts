@@ -9288,7 +9288,35 @@ export class SecurityPlugin implements Plugin {
   ): Promise<void> {
     // Master edit access = CRUD update on the master AND the master row reachable
     // under BOTH halves of its own write gate (write RLS + record sharing).
-    if (!this.permissionEvaluator.checkObjectPermission('update', rel.master, permissionSets)) {
+    //
+    // [ADR-0055 §3] The object-level half asks the question the master's own
+    // write door asks of an `update` on the master, with that door's own
+    // inputs, read from the one source each door reads them from
+    // ({@link getObjectSecurityMeta}): the posture must resolve (#3545 — an
+    // unresolved posture would read as `isPrivate: false`), the capabilities
+    // the master requires for `update` must be held (ADR-0066 D3/⑤), and the
+    // CRUD grant is asked under the master's posture (ADR-0066 D2). The leg
+    // used to ask the CRUD grant alone, with no posture, so a principal the
+    // master's own door refuses at its object gate could still write the
+    // master's details. Every refusal here is this leg's, `object_permission`.
+    // ⛔ Nothing here re-derives a rule: each is the evaluator's or the
+    // posture's own answer, asked as the door asks it.
+    const masterPosture = await this.getObjectSecurityMeta(rel.master);
+    if (masterPosture.unresolved) {
+      denyMasterEdit('object_permission', `the security posture of master '${rel.master}' could not be resolved`, masterId);
+    }
+    const masterUpdateCaps = requiredCapsForOperation(masterPosture.requiredPermissions, 'update');
+    if (masterUpdateCaps.length > 0) {
+      const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+      if (masterUpdateCaps.some((cap) => !held.has(cap))) {
+        denyMasterEdit('object_permission', `master '${rel.master}' requires a capability this user does not hold`, masterId);
+      }
+    }
+    if (
+      !this.permissionEvaluator.checkObjectPermission('update', rel.master, permissionSets, {
+        isPrivate: masterPosture.isPrivate,
+      })
+    ) {
       denyMasterEdit('object_permission', `no edit permission on master '${rel.master}'`, masterId);
     }
     // [commit 498f4e884] The master's own write RLS — composed with the SAME ownership
