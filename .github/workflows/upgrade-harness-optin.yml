@@ -1,0 +1,119 @@
+# Opt-in pre-merge 18.x upgrade harness (#24522, step 0 of the 18.x line).
+#
+# ## The gap this closes
+#
+# Ruling record 6266750393 on #15194 makes `main` the release line: every PR on
+# the 18.x line, once merged, leaves `main` releasable, and its R2 reads "a
+# database an 18.0 install created upgrades to that commit, boots, and keeps
+# its data" — a check each of the line's PRs passes BEFORE it merges. The
+# harness that answers R2 is a dogfood test,
+# `packages/qa/dogfood/test/upgrade-18x-harness.dogfood.test.ts`, and the
+# dogfood jobs in `ci.yml` run only on `main`'s full battery (THE TWO SPEEDS,
+# #22998): they skip `pull_request` and `merge_group`. So without this workflow
+# the line's PRs get their first R2 answer after the merge.
+#
+# This workflow adds the missing TRIGGER for that ONE file, and nothing else.
+# The test, its fixture and its assertions stay where they are, and the full
+# battery keeps running the same file with the rest of dogfood on `main`.
+#
+# ## Opt-in, label-gated — the cheapest wiring measured
+#
+# Measured on the step-0 branch (the card's report carries the readings):
+#
+#   - the harness file alone: ~54 s of vitest wall (one 4-vCPU box, ~43 s of it
+#     module import), against the dogfood suite's ~5 min per shard × 3;
+#   - its build closure is the dogfood package's (`turbo run build
+#     --filter=@objectstack/dogfood`, 66 tasks), which the turbo cache below
+#     replays; cold, it is the step's whole cost.
+#
+# Three shapes were weighed. Running it on every PR taxes the whole repository
+# for one release line. Dispatching `ci.yml` by hand on a line PR's branch needs
+# no diff but runs the entire full battery (three dogfood shards, Temporal
+# Conformance, the console pin) for one file, and is a manual act with no
+# trigger a PR carries. The label lane runs one file, only where asked: the
+# shape `pack-smoke-optin.yml` already ruled for a pre-merge check that most
+# PRs do not need. The epic seat hangs `needs:upgrade-harness` on each 18.x
+# line PR; ⛔ never auto-applied, never in `.github/labeler.yml`.
+#
+# ## Wiring decisions (the `pack-smoke-optin.yml` ones, for the same reasons)
+#
+# `types:` restates GitHub's defaults beside `labeled` (naming `types:`
+# REPLACES the default set). The guard has two limbs: the PR carries the label
+# now, and on a `labeled` event the label just added is OURS — otherwise every
+# size label would start another run of an unchanged tree. `concurrency` sits at
+# JOB level, so a skipped run never cancels a real one. ⛔ No `merge_group:`
+# trigger: a `merge_group` event carries no pull request, so the label cannot be
+# read there, and this context is NOT a required one
+# (`scripts/check-required-contexts.mjs`) — the seat reads it before it queues a
+# line PR, the way the ruling's R2 asks.
+
+name: Upgrade Harness (opt-in)
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade-harness:
+    name: 18.x upgrade harness (opt-in)
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'needs:upgrade-harness')
+      && (github.event.action != 'labeled' || github.event.label.name == 'needs:upgrade-harness')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: upgrade-harness-optin-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      # No `ref:` — the MERGE PREVIEW: what `main` will contain once this PR
+      # lands, which is the commit R2 is a statement about.
+      - name: Checkout the merge preview
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      # Restore-only: the dogfood job's entries (seeded from `main`) replay this
+      # closure; a PR never writes the cache, as in ci.yml.
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-dogfood-1-main-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-dogfood-1-main-
+            ${{ runner.os }}-turbo-dogfood-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the dogfood package's dependency closure
+        run: pnpm turbo run build --filter=@objectstack/dogfood --concurrency=4
+
+      # One file, named: the dogfood config's filter preflight refuses a path
+      # that selects no test, so a renamed harness reds here instead of
+      # passing over nothing.
+      - name: Boot HEAD on the 18.0 fixture (R2) and check the v17 refusal (R3)
+        run: pnpm --filter @objectstack/dogfood exec vitest run test/upgrade-18x-harness.dogfood.test.ts

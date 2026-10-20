@@ -530,10 +530,14 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
       ['metadata-promotion', 'done'],
       ['template-promotion', 'done'],
       ['settings-move', 'done'],
+      ['sibling-moves', 'done'],
+      ['declared-webhooks', 'done'],
+      ['declared-rule-copies', 'done'],
       ['rewrite', 'done'],
       ['mirror-deletion', 'done'],
       ['history-renumber', 'done'],
       ['column-drops', 'done'],
+      ['not-null', 'done'],
     ]);
     expect(report.complete).toBe(true);
     // Ruling C: the fate-4 orphan is the one discrepancy — the marker is not verified.
@@ -781,7 +785,7 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     const again = await apply(c, l);
 
     expect(again.resumedFrom).toEqual([
-      'attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite', 'mirror-deletion', 'history-renumber', 'column-drops',
+      'attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'sibling-moves', 'declared-webhooks', 'declared-rule-copies', 'rewrite', 'mirror-deletion', 'history-renumber', 'column-drops', 'not-null',
     ]);
     expect(again.steps.every((s) => s.status === 'checkpointed')).toBe(true);
     expect(again.complete).toBe(true);
@@ -793,14 +797,14 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     const c = catalog();
     const l = ledger();
     await expect(apply(c, l, { executor: executor({ failOnceOn: /^DELETE FROM "sys_capability"/ }) })).rejects.toThrow(/killed mid-step/);
-    expect(Object.keys(l.checkpoint!.completed)).toEqual(['attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite']);
+    expect(Object.keys(l.checkpoint!.completed)).toEqual(['attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'sibling-moves', 'declared-webhooks', 'declared-rule-copies', 'rewrite']);
     expect(rows('SELECT COUNT(*) AS n FROM sys_position_permission_set')).toEqual([{ n: 3 }]);
     writes = [];
 
     const resumed = await apply(c, l);
 
-    expect(resumed.resumedFrom).toEqual(['attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite']);
-    expect(resumed.steps.map((s) => s.status)).toEqual(['checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'done', 'done', 'done']);
+    expect(resumed.resumedFrom).toEqual(['attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'sibling-moves', 'declared-webhooks', 'declared-rule-copies', 'rewrite']);
+    expect(resumed.steps.map((s) => s.status)).toEqual([...Array(9).fill('checkpointed'), 'done', 'done', 'done', 'done']);
     expect(writes.some((w) => /^UPDATE/.test(w))).toBe(false);
     expect(resumed.complete).toBe(true);
     expect(rows('SELECT COUNT(*) AS n FROM sys_position_permission_set')).toEqual([{ n: 0 }]);
@@ -1067,7 +1071,7 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     // (a declared object the differ proposed no drop for).
     const notProposed = await answering('not-proposed');
     expect(notProposed.resumedFrom).toEqual([
-      'attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite', 'mirror-deletion', 'history-renumber',
+      'attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'sibling-moves', 'declared-webhooks', 'declared-rule-copies', 'rewrite', 'mirror-deletion', 'history-renumber',
     ]);
     const control = notProposed.steps.find((s) => s.step === 'column-drops')!;
     expect(control.status).toBe('blocked');

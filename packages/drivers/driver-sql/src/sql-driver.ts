@@ -13800,6 +13800,9 @@ export class SqlDriver implements IDataDriver {
       // ADR-0104: the media family's column shape is this deployment's fact,
       // not the type's — the differ must ask the arm the emitter just used.
       fileColumnsMoved: this.fileColumnsMoved,
+      // ADR-0131 D10 (ruling record 6269955919, ② A): the tenant column's
+      // NOT NULL is the organization-ownership ceremony's, not drift.
+      ceremonyOwnedNullability: this.resolveTenantField(tableName),
     });
     out.push(...(await this.detectTableIndexDrift(tableName, fields, declaredIndexes, new Set(cols.map((c) => c.name)))));
     return out;

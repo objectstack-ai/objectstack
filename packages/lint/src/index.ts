@@ -493,11 +493,15 @@ export type {
 // [#24563] Its THIRD: a list view judged under a package closure whose bound
 // object is outside that closure — refused (`error`) where skip 1 judged
 // nothing; `ListViewFieldRefOptions` is how the runtime gate states the closure.
+// [#24668] Its FOURTH: a list view judged against the whole collection (a
+// runtime write that names no package) whose bound object exists nowhere —
+// refused the same way; `wholeCollection` is the statement.
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
+  LIST_VIEW_OBJECT_UNKNOWN,
 } from './validate-list-view-field-refs.js';
 export type {
   ListViewFieldRefFinding,

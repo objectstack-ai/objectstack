@@ -4247,6 +4247,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/organization-ownership-boot-guard.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/security/resolve-execution-context.oauth-organization.test.ts",
       "verb": "findOne",
       "pinned": 1

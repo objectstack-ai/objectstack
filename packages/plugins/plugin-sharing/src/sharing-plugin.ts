@@ -63,6 +63,7 @@ import { bindRuleHooks, unbindAllRuleHooks, bindRuleCriteriaGuard, RULE_REBIND_T
 import { bindRuleProvenanceStamp, unbindRuleProvenanceStamp } from './sharing-rule-provenance.js';
 import { bindPrimaryBuHooks, backfillPrimaryBu } from './primary-bu-projection.js';
 import { bindBusinessUnitTreeRecompute } from './bu-tree-recompute.js';
+import { bindRecipientMembershipRecompute } from './recipient-membership-recompute.js';
 import { bindRecordShareCascade } from './record-share-cascade.js';
 import { createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { normalizeTenancyPosture, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
@@ -851,6 +852,15 @@ export class SharingServicePlugin implements Plugin {
             // down. Inside `enforce`, unlike the primary-BU projection next to
             // it: this one IS an access-control surface.
             bindBusinessUnitTreeRecompute(engine, this.ruleService, ctx.logger as any);
+
+            // …and a rule whose recipient is a POSITION or a TEAM changes
+            // audience when a membership row (`sys_user_position`,
+            // `sys_team_member`) is written. Each such write re-evaluates the rules naming that
+            // recipient for the one user the row names, so a new holder gains
+            // the rule's grants and a former holder loses them before the write
+            // returns. Bound outside the rebind seam for the same reason as the
+            // BU recompute above: it reads `listRules()` live on every write.
+            bindRecipientMembershipRecompute(engine, this.ruleService, ctx.logger as any);
 
             // [#3896] Authoring a rule in Setup is a plain INSERT on
             // sys_sharing_rule — it bypasses defineRule's validation, so the

@@ -402,6 +402,27 @@ describe('members whose remote answer is a declaration', () => {
   });
 });
 
+describe('getSchemaSyncStats on the remote face: what its schema doors counted', () => {
+  it('a fresh remote database is observed as created from empty; the same database reached again is found; the local control counts too', async () => {
+    const file = nextFile();
+    expect((await seeded('remote', file)).getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
+    // A second process over the same remote database: every table is found.
+    const again = new TursoDriver({ url: 'libsql://probe.example.turso.io', client: createClient({ url: `file:${file}` }) });
+    open.push({ driver: again, client: null });
+    await again.connect();
+    await again.initObjects([PROBE, TENANT]);
+    expect(again.getSchemaSyncStats()).toEqual({ created: 0, existing: 2 });
+    // A re-sync of the tables this process created is not a find.
+    await again.syncSchemasBatch([{ object: 'probe_t', schema: PROBE }]);
+    expect(again.getSchemaSyncStats()).toEqual({ created: 0, existing: 2 });
+    expect((await seeded('local')).getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
+  });
+
+  it("a remote boot that ran no schema door says nothing: both counts at zero, the contract's \"cannot say\"", () => {
+    expect(bareRemote().getSchemaSyncStats()).toEqual({ created: 0, existing: 0 });
+  });
+});
+
 describe('members inherited unchanged, and true on the remote face', () => {
   it('the deferred-DDL readers report nothing deferred, and arming stays refused', async () => {
     const remote = await seeded('remote');
@@ -411,10 +432,6 @@ describe('members inherited unchanged, and true on the remote face', () => {
     await expect(remote.flushDeferredSchemaDdl()).resolves.toEqual([]);
   });
 
-  it("getSchemaSyncStats: both counts at zero, the contract's \"cannot say\"; the local control counts", async () => {
-    expect((await seeded('remote')).getSchemaSyncStats()).toEqual({ created: 0, existing: 0 });
-    expect((await seeded('local')).getSchemaSyncStats()).toEqual({ created: 2, existing: 0 });
-  });
 
   it('the bookkeeping and dialect members answer as on the local face', async () => {
     const remote = await seeded('remote');

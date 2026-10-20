@@ -271,8 +271,9 @@ async function refusalOf(fn: () => Promise<unknown>): Promise<{ code?: string; s
 const translationBody = (label: string) => ({ locale: 'zh-CN', name: 'zh_cn', label });
 
 /** [#7741] the inline arm requires the object binding pair. */
+// [#24668] Bound to `sys_metadata`, an object this harness registers: the overlay save door refuses a list view bound to an object that exists nowhere (it read `case`).
 const viewBody = (label: string) => ({
-    name: 'case_grid', type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list',
+    name: 'case_grid', type: 'grid', label, columns: ['id'], object: 'sys_metadata', viewKind: 'list',
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ORGANIZATION_OWNERSHIP_MIGRATION_ID } from '@objectstack/spec/system';
+import { randomUUID } from 'node:crypto';
+import { ORGANIZATION_OWNERSHIP_MIGRATION_ID, ORGANIZATION_OWNERSHIP_SHAPE_GENERATION } from '@objectstack/spec/system';
 import {
   convertPositionBindingRows,
   permissionSetDefinitionFromRow,
@@ -27,6 +28,7 @@ import {
   columnNameOf,
   predicateSql,
   PRIMARY_DATABASE,
+  requireColumn,
   Sql,
   underivableDepartureOf,
   type AttributionSink,
@@ -103,6 +105,19 @@ import type { DeclaredSharingRuleSkip } from '@objectstack/plugin-sharing';
  *     copied, by the database itself, into `sys_platform_setting`, read back,
  *     and only then removed from `sys_setting`.
  *     A key the new table already holds with a different value is a blocker.
+ *  2d. `sibling-moves` (18.x step 5b) — the deployment-level rows an 18.0
+ *     database keeps in a tenant table move, id for id, into the sibling this
+ *     release writes them to: the settings audit trail's global rung and
+ *     identity mail, selected by shape, the mail's queued jobs and the rows'
+ *     activity timeline pointed at the sibling first ({@link runSiblingMoves}).
+ *  2e. `declared-webhooks` (18.x step 5a) — each `sys_webhook` copy a seeder
+ *     wrote under a declared name is settled: a pristine one deleted once its
+ *     deliveries name the declaration, a switch-only edit kept as the
+ *     declaration's activation row, any other edit kept as a clone under a new
+ *     name with the declaration switched off ({@link runDeclaredWebhooks}).
+ *  2f. `declared-rule-copies` (18.x step 5c, C3 stage 9c) — each stored
+ *     sharing rule under a declared rule's name becomes a clone under a new
+ *     name, the declaration switched off ({@link runDeclaredRuleCopies}).
  *  3. `rewrite` — the verified id→name rewrite (D4):
  *     `sys_user_permission_set.permission_set` is named from the set row its
  *     `permission_set_id` points at, then EVERY grant is verified to name a set
@@ -137,6 +152,10 @@ import type { DeclaredSharingRuleSkip } from '@objectstack/plugin-sharing';
  *     (C7b), once the rewrite has read it and no two grants hold one set for
  *     one user in one organization (the unique index that replaces the old
  *     one would refuse them; they are reported, never deleted).
+ *  6. `not-null` (18.x step 5d, 8e) — every table the plan now clears
+ *     receives NOT NULL on `organization_id`, through the schema door
+ *     ({@link NotNullPort}); the ceremony owns that nullability and the
+ *     differ reads it as no drift (ruling record 6269955919, ② A).
  *
  * Then the post-check re-runs the plan and reports, per table, what remains.
  * A departure no step of a release can perform — the declared sharing-rule
@@ -189,7 +208,9 @@ import type { DeclaredSharingRuleSkip } from '@objectstack/plugin-sharing';
  *
  * ## What it never does
  *
- * ⛔ Delete a row outside fate 2 and a declared `underivableDeparture`. ⛔ Give an unattributable row an owner:
+ * ⛔ Delete a row outside fate 2, a declared `underivableDeparture`, a moved
+ * row once its copy reads back, a declared webhook's copy, and the grants of a
+ * declaration it switched off. ⛔ Give an unattributable row an owner:
  * owners come only from the plan's anchors and, under `single`, the Default
  * Organization. ⛔ Create any organization but the Default Organization, and
  * that one only under `single` on a database that holds none. ⛔ Run at boot:
@@ -205,10 +226,14 @@ export const CEREMONY_STEPS = [
   'metadata-promotion',
   'template-promotion',
   'settings-move',
+  'sibling-moves',
+  'declared-webhooks',
+  'declared-rule-copies',
   'rewrite',
   'mirror-deletion',
   'history-renumber',
   'column-drops',
+  'not-null',
 ] as const;
 export type CeremonyStep = (typeof CEREMONY_STEPS)[number];
 
@@ -269,7 +294,8 @@ export interface MetadataLockPort {
  * reason.
  */
 export interface DeclaredSharingRulesPort {
-  rules(): Promise<ReadonlyArray<{ name: string; refused: string | null }>>;
+  /** `packageId`: the declaring package, for the switch row a settled copy writes (`declared-rule-copies`). */
+  rules(): Promise<ReadonlyArray<{ name: string; refused: string | null; packageId?: string | null }>>;
 }
 
 /**
@@ -278,14 +304,17 @@ export interface DeclaredSharingRulesPort {
  * {@link DeclaredSharingRulesPort}: a nameless item is no rule to rename onto
  * and is left out.
  */
-export async function judgeDeclaredSharingRules(items: readonly unknown[]): Promise<Array<{ name: string; refused: string | null }>> {
+export async function judgeDeclaredSharingRules(
+  items: readonly unknown[],
+): Promise<Array<{ name: string; refused: string | null; packageId: string | null }>> {
   const { translateDeclaredSharingRule } = await import('@objectstack/plugin-sharing');
-  const out: Array<{ name: string; refused: string | null }> = [];
+  const out: Array<{ name: string; refused: string | null; packageId: string | null }> = [];
   for (const item of items) {
     const name = (item as { name?: unknown } | null)?.name;
     if (typeof name !== 'string' || name === '') continue;
     const { skip } = translateDeclaredSharingRule(item);
-    out.push({ name, refused: skip ? describeDeclaredRuleSkip(skip) : null });
+    const packageId = (item as { _packageId?: unknown })._packageId;
+    out.push({ name, refused: skip ? describeDeclaredRuleSkip(skip) : null, packageId: typeof packageId === 'string' && packageId ? packageId : null });
   }
   return out;
 }
@@ -345,6 +374,13 @@ export interface ColumnDropPort {
 export interface CeremonyCheckpoint {
   ceremony: 'ADR-0131 D10';
   inventoryDigest: string;
+  /**
+   * The organization-ownership shape generation this ceremony's step set
+   * reaches ({@link ORGANIZATION_OWNERSHIP_SHAPE_GENERATION}): what the boot
+   * guard decides on once the marker is verified. A checkpoint an older
+   * ceremony wrote carries none and reads as generation 0.
+   */
+  shapeGeneration?: number;
   completed: Partial<Record<CeremonyStep, { at: string; summary: Record<string, number> }>>;
   /**
    * The `--metadata-choice` rows whose conflict this ceremony resolved, recorded
@@ -596,6 +632,13 @@ export interface ApplyOptions {
    * that finds a declared-rule mirror standing blocks instead of deleting it.
    */
   declaredSharingRules?: DeclaredSharingRulesPort;
+  /**
+   * [18.x step 5a] The declared webhooks, by name. Absent, a run that finds a
+   * seeded `sys_webhook` row blocks instead of settling it.
+   */
+  declaredWebhooks?: DeclaredWebhooksPort;
+  /** [18.x step 5d] The schema door the NOT NULL step applies through. Absent, it applies nothing and says so. */
+  notNull?: NotNullPort;
   /** The served views, for carrying form withdrawals. */
   views: ServedViewsPort;
   /** The door's lock verdict, for the one write the ceremony makes in place. */
@@ -2925,6 +2968,797 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
   };
 }
 
+// ── 18.x, shape generation 1: what an 18.0 database owes too ────────────────
+//
+// The four steps below select their rows BY SHAPE, never by `organization_id
+// IS NULL`: an 18.0 single-posture database stamped every one of them with the
+// Default Organization (line fact F3 of the 18.x plan), so a NULL selector
+// would find nothing there and certify a database that still owes the step.
+
+const WEBHOOKS = 'sys_webhook';
+const DELIVERIES = 'sys_http_delivery';
+const SECRETS = 'sys_secret';
+const ACTIVATIONS = 'sys_metadata_activation';
+const JOB_QUEUE = 'sys_job_queue';
+const ACTIVITY = 'sys_activity';
+/** The provenance a seeded copy of a declaration carries (`managed_by`). */
+const SEEDED_PROVENANCE = ['package', 'platform'] as const;
+/**
+ * How a delivery names a declared webhook: plugin-webhooks'
+ * `declaredWebhookRefId` (`declared:NAME`). Spelled here because the CLI does
+ * not load the plugin to re-source rows; `organization-ownership-apply.declared-webhooks.test.ts`
+ * holds the two equal.
+ */
+export const DECLARED_WEBHOOK_REF_PREFIX = 'declared:';
+/** The `name` column's length on `sys_webhook` and `sys_sharing_rule`. */
+const NAME_MAX = 100;
+/** The stored form of an encrypted field's value: `secret:<sys_secret.id>` (objectql's `SECRET_REF_PREFIX`). */
+const SECRET_REF_PREFIX = 'secret:';
+
+const truthy = (value: unknown): boolean => value === true || value === 1 || value === '1' || value === 'true' || value === 't';
+
+/** The physical tables of `object` the plan this run started from found present. */
+function presentTables(run: Run, object: string): string[] {
+  const table = run.plan.tables.find((t) => t.object === object);
+  return table?.physical === 'present' ? table.tables : [];
+}
+
+const blockedStep = (step: CeremonyStep, summary: Record<string, number>, blockers: string[], notes: string[] = []): StepReport =>
+  ({ step, status: 'blocked', summary, blockers, notes });
+
+/**
+ * Set the deployment's switch for a declared item — the `sys_metadata_activation`
+ * row (ADR-0131 D14) keyed `(metadata_type, name)` — to `active`, read back.
+ * `false` when the row already said so (nothing written).
+ */
+async function setActivation(run: Run, type: string, name: string, packageId: string | null, active: boolean): Promise<boolean> {
+  const [table] = presentTables(run, ACTIVATIONS);
+  if (!table) {
+    throw new Error(
+      `${ACTIVATIONS} does not exist on this database, so the switch of the declared ${type} ${name} cannot be written. ` +
+        'Boot this release against it once (its schema sync creates the table), then re-run --apply.',
+    );
+  }
+  const cols = (await columnsOf(run, table))!;
+  const { sql } = databaseFor(run, table);
+  const q = (c: string): string => sql.q(c, table);
+  const read = (): Promise<Record<string, unknown>[]> =>
+    sql.read(
+      table,
+      `SELECT ${q('id')} AS ${q('id')}, ${q('active')} AS ${q('active')} FROM ${q(table)} WHERE ${q('metadata_type')} = ? AND ${q('name')} = ?`,
+      [type, name],
+    );
+  const [row] = await read();
+  if (row && truthy(row.active) === active) return false;
+  const at = (run.opts.now ?? (() => new Date()))().toISOString();
+  if (row) {
+    await execute(
+      run,
+      table,
+      `UPDATE ${q(table)} SET ${q('active')} = ?${cols.has('updated_at') ? `, ${q('updated_at')} = ?` : ''} WHERE ${q('id')} = ?`,
+      [sql.bind(active), ...(cols.has('updated_at') ? [at] : []), row.id],
+    );
+  } else {
+    const values: Record<string, unknown> = {
+      id: `act_${randomUUID()}`,
+      metadata_type: type,
+      name,
+      package_id: packageId,
+      active: sql.bind(active),
+      created_at: at,
+      updated_at: at,
+    };
+    const keys = Object.keys(values).filter((c) => cols.has(c));
+    await execute(
+      run,
+      table,
+      `INSERT INTO ${q(table)} (${keys.map(q).join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`,
+      keys.map((k) => values[k]),
+    );
+  }
+  const [after] = await read();
+  if (!after || truthy(after.active) !== active) {
+    throw new Error(`The switch of the declared ${type} ${name} did not read back ${active ? 'on' : 'off'} in ${ACTIVATIONS}.`);
+  }
+  return true;
+}
+
+/**
+ * A name for a clone: `<name>_custom`, then `_custom_2`, … — one no row of
+ * `table` holds and no package declares (`taken`), within {@link NAME_MAX}.
+ */
+async function freeName(run: Run, table: string, base: string, taken: Set<string>): Promise<string> {
+  const { sql } = databaseFor(run, table);
+  for (let n = 1; ; n++) {
+    const suffix = n === 1 ? '_custom' : `_custom_${n}`;
+    const name = `${base.slice(0, NAME_MAX - suffix.length)}${suffix}`;
+    if (taken.has(name)) continue;
+    const held = await sql.count(table, `SELECT COUNT(*) AS n FROM ${sql.q(table, table)} WHERE ${sql.q('name', table)} = ?`, [name]);
+    if (held === 0) {
+      taken.add(name);
+      return name;
+    }
+  }
+}
+
+// ── Step 2e: declared webhooks (18.x step 5a; ADR-0131 D2, D10 fate 2) ──────
+
+/**
+ * [ADR-0131 D2] The webhooks the deployment's packages DECLARE, by name, with
+ * the package that declares each — what plugin-webhooks serves from the
+ * registry (the command: the booted engine's registry, else the metadata
+ * service).
+ */
+export interface DeclaredWebhooksPort {
+  list(): Promise<ReadonlyArray<{ name: string; packageId: string | null }>>;
+}
+
+/** A `sys_webhook` row's `definition_json`, parsed, or `null`. */
+function webhookDefinition(row: Record<string, unknown>): Record<string, unknown> | null {
+  const raw = row.definition_json;
+  if (typeof raw !== 'string' || raw === '') return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+const triggerList = (value: unknown): string => {
+  let list: unknown = value;
+  if (typeof value === 'string') {
+    try {
+      list = JSON.parse(value);
+    } catch {
+      list = [value];
+    }
+  }
+  return JSON.stringify(Array.isArray(list) ? list.map(String).sort() : []);
+};
+
+/**
+ * Whether a customized seeded webhook differs from the copy the 18.0 seeder
+ * last wrote ONLY in its switch. `definition_json` is that copy: the seeder
+ * rewrote it on every boot while the row was pristine, and the first edit
+ * stopped it. Every column the seeder mapped from the envelope must still
+ * read as the envelope says. A row holding a credential is never read as
+ * switch-only: a stored secret cannot be compared without decrypting it, so it
+ * is settled as a clone, which keeps it — the conservative reading.
+ */
+function isSwitchOnlyEdit(row: Record<string, unknown>): boolean {
+  const def = webhookDefinition(row);
+  if (!def) return false;
+  if (text(row.headers_secret) !== null || text(row.signing_secret) !== null) return false;
+  const same = (a: unknown, b: unknown): boolean => text(a) === text(b);
+  return (
+    same(row.label, def.label ?? def.name) &&
+    same(row.object_name, def.object ?? null) &&
+    triggerList(row.triggers) === triggerList(def.triggers) &&
+    same(row.url, def.url) &&
+    same(String(row.method ?? 'post').toLowerCase(), String(def.method ?? 'POST').toLowerCase()) &&
+    same(row.description, def.description ?? null)
+  );
+}
+
+const secretIdsOf = (row: Record<string, unknown>): string[] =>
+  [row.headers_secret, row.signing_secret]
+    .map((v) => (typeof v === 'string' && v.startsWith(SECRET_REF_PREFIX) ? v.slice(SECRET_REF_PREFIX.length) : ''))
+    .filter((id) => id !== '');
+
+/**
+ * [18.x step 5a; ADR-0131 D2, D10 fate 2] Settle every `sys_webhook` row a
+ * package's seeder wrote (`managed_by` `package` or `platform`) under a name a
+ * package still declares — plugin-webhooks serves that declaration from the
+ * registry, so the row is a copy:
+ *
+ *  - a PRISTINE copy (not `customized`) is deleted, after every delivery that
+ *    names it (`sys_http_delivery.ref_id` = its row id) is re-sourced to the
+ *    declaration (`declared:NAME`), so history and redelivery follow the
+ *    declaration;
+ *  - a copy customized only in its switch ({@link isSwitchOnlyEdit}) becomes
+ *    the declaration's activation row with that switch (regime C, ruling Q2 A
+ *    on the declared-webhook card: an activation row for an `active` change),
+ *    its deliveries are re-sourced, and it is deleted;
+ *  - a copy customized in anything else becomes a CLONE under a new name —
+ *    renamed in place, `managed_by 'admin'`, so its id, its credentials and
+ *    every delivery naming it stay its own (the deliveries' tail already names
+ *    the clone's row id) — and the declaration is switched off.
+ *
+ * The `sys_secret` rows a deleted copy's credential columns referenced are
+ * deleted with it, once no other webhook row references them. A seeded row
+ * whose name no package declares any more is an ordinary webhook — it
+ * dispatches as itself, as it did in 18.0 — and stays, reported.
+ *
+ * Under a wall the declaration's switch is deployment-wide (there is no
+ * per-organization switch-off), so a customized copy is not settled on the
+ * operator's behalf: it blocks, named, with the remedy. Idempotent: a second
+ * run finds no seeded row under a declared name.
+ */
+async function runDeclaredWebhooks(run: Run): Promise<StepReport> {
+  const step: CeremonyStep = 'declared-webhooks';
+  const summary: Record<string, number> = { mirrorsDeleted: 0, activationRows: 0, clones: 0, deliveriesResourced: 0, secretsDeleted: 0, undeclaredKept: 0 };
+  const notes: string[] = [];
+  const [table] = presentTables(run, WEBHOOKS);
+  const cols = table ? await columnsOf(run, table) : null;
+  if (!table || !cols?.has('managed_by') || !cols.has('name')) return { step, status: 'done', summary, blockers: [], notes };
+  const { sql } = databaseFor(run, table);
+  const q = (c: string): string => sql.q(c, table);
+  const seeded = predicateSql(sql, table, cols, [{ column: 'managed_by', in: SEEDED_PROVENANCE }]);
+  const select = ['name', 'managed_by', 'customized', 'active', 'label', 'object_name', 'triggers', 'url', 'method', 'description', 'definition_json', 'headers_secret', 'signing_secret'];
+  const rows = await readAll(run, table, select.filter((c) => cols.has(c)), seeded);
+  if (rows.length === 0) return { step, status: 'done', summary, blockers: [], notes };
+
+  if (!run.opts.declaredWebhooks) {
+    return blockedStep(step, summary, [
+      `${table} holds ${rows.length} row(s) a package's seeder wrote, settled only against the webhooks the ` +
+        'deployment declares, and this run has no registry to read them from. Run the command against the ' +
+        "deployment's own composition, then re-run.",
+    ]);
+  }
+  const declared = new Map((await run.opts.declaredWebhooks.list()).map((d) => [d.name, d.packageId] as const));
+  const held = rows.filter((r) => declared.has(String(r.name)));
+  summary.undeclaredKept = rows.length - held.length;
+  if (summary.undeclaredKept > 0) {
+    notes.push(
+      `${table}: ${summary.undeclaredKept} seeded row(s) name a webhook no installed package declares any more ` +
+        `(${rows.filter((r) => !declared.has(String(r.name))).map((r) => String(r.id)).sort().join(', ')}). Each is an ` +
+        'ordinary webhook — it dispatches as itself, as it did in 18.0 — and stays.',
+    );
+  }
+  const customized = held.filter((r) => truthy(r.customized));
+  if (customized.length > 0 && run.opts.posture !== 'single') {
+    return blockedStep(step, summary, [
+      `${table} holds ${customized.length} customized copy(ies) of a declared webhook ` +
+        `(${customized.map((r) => `${String(r.id)} ${String(r.name)}`).sort().join(', ')}). Under the ${run.opts.posture} ` +
+        'posture the declaration\'s switch is deployment-wide — there is no per-organization switch-off — so which ' +
+        'organizations keep the declared webhook is not decided on the operator\'s behalf, and nothing was written. ' +
+        'Rename each copy to a name no package declares (it becomes that organization\'s own webhook), or delete it; ' +
+        'switch the declared webhook on or off through the activation door as the deployment wants; then re-run.',
+    ], notes);
+  }
+
+  const deliveryTables: string[] = [];
+  for (const physical of presentTables(run, DELIVERIES)) {
+    const dcols = await columnsOf(run, physical);
+    if (dcols?.has('source') && dcols.has('ref_id')) deliveryTables.push(physical);
+  }
+  const resource = async (from: string, to: string): Promise<number> => {
+    let n = 0;
+    for (const physical of deliveryTables) {
+      const { sql: dsql } = databaseFor(run, physical);
+      const where = `${dsql.q('source', physical)} = ? AND ${dsql.q('ref_id', physical)} = ?`;
+      const count = (): Promise<number> => dsql.count(physical, `SELECT COUNT(*) AS n FROM ${dsql.q(physical, physical)} WHERE ${where}`, ['webhook', from]);
+      const before = await count();
+      if (before === 0) continue;
+      await execute(run, physical, `UPDATE ${dsql.q(physical, physical)} SET ${dsql.q('ref_id', physical)} = ? WHERE ${where}`, [to, 'webhook', from]);
+      const left = await count();
+      if (left !== 0) throw new Error(`${left} delivery(ies) on ${physical} still name the webhook row ${from} after the re-source; nothing was deleted.`);
+      n += before;
+    }
+    return n;
+  };
+  const deleteCopy = async (row: Record<string, unknown>): Promise<void> => {
+    const where = `${q('id')} = ? AND (${seeded.text})`;
+    await execute(run, table, `DELETE FROM ${q(table)} WHERE ${where}`, [row.id, ...seeded.params]);
+    if ((await sql.count(table, `SELECT COUNT(*) AS n FROM ${q(table)} WHERE ${q('id')} = ?`, [row.id])) !== 0) {
+      throw new Error(`The declared-webhook copy ${String(row.id)} on ${table} was not deleted; nothing past it was.`);
+    }
+  };
+
+  const orphaned: string[] = [];
+  const taken = new Set(declared.keys());
+  for (const row of held) {
+    const name = String(row.name);
+    const id = String(row.id);
+    const def = webhookDefinition(row);
+    const packageId = (typeof def?._packageId === 'string' && def._packageId ? def._packageId : null) ?? declared.get(name) ?? null;
+    if (!truthy(row.customized) || isSwitchOnlyEdit(row)) {
+      if (truthy(row.customized) && (await setActivation(run, 'webhook', name, packageId, truthy(row.active)))) summary.activationRows++;
+      summary.deliveriesResourced += await resource(id, `${DECLARED_WEBHOOK_REF_PREFIX}${name}`);
+      await deleteCopy(row);
+      orphaned.push(...secretIdsOf(row));
+      summary.mirrorsDeleted++;
+      continue;
+    }
+    const clone = await freeName(run, table, name, taken);
+    const { _provenance: _p, _packageId: _k, _packageVersion: _v, ...own } = def ?? {};
+    const sets: Array<[string, unknown]> = [
+      ['name', clone],
+      ['managed_by', 'admin'],
+      ...(cols.has('customized') ? [['customized', sql.bind(false)] as [string, unknown]] : []),
+      ...(def && cols.has('definition_json') ? [['definition_json', JSON.stringify({ ...own, name: clone })] as [string, unknown]] : []),
+    ];
+    await execute(
+      run,
+      table,
+      `UPDATE ${q(table)} SET ${sets.map(([c]) => `${q(c)} = ?`).join(', ')} WHERE ${q('id')} = ? AND (${seeded.text})`,
+      [...sets.map(([, v]) => v), row.id, ...seeded.params],
+    );
+    const [landed] = await sql.read(table, `SELECT ${q('name')} AS ${q('name')} FROM ${q(table)} WHERE ${q('id')} = ?`, [row.id]);
+    if (text(landed?.name) !== clone) throw new Error(`The clone of the declared webhook ${name} (${id}) did not read back as ${clone}.`);
+    if (await setActivation(run, 'webhook', name, packageId, false)) summary.activationRows++;
+    summary.clones++;
+    notes.push(
+      `${table} ${id}: customized beyond its switch, so it is now the administrator's own webhook ${clone} (its ` +
+        `credentials and deliveries with it), and the declared ${name} is switched off.`,
+    );
+  }
+
+  // The ciphers the deleted copies referenced, once nothing else does.
+  const [secrets] = presentTables(run, SECRETS);
+  if (secrets && orphaned.length > 0) {
+    const { sql: ssql } = databaseFor(run, secrets);
+    for (const secretId of [...new Set(orphaned)].sort()) {
+      const ref = `${SECRET_REF_PREFIX}${secretId}`;
+      const credentialCols = ['headers_secret', 'signing_secret'].filter((c) => cols.has(c));
+      const still = credentialCols.length === 0
+        ? 0
+        : await sql.count(table, `SELECT COUNT(*) AS n FROM ${q(table)} WHERE ${credentialCols.map((c) => `${q(c)} = ?`).join(' OR ')}`, credentialCols.map(() => ref));
+      if (still > 0) continue;
+      const where = `${ssql.q('id', secrets)} = ?`;
+      const before = await ssql.count(secrets, `SELECT COUNT(*) AS n FROM ${ssql.q(secrets, secrets)} WHERE ${where}`, [secretId]);
+      if (before === 0) continue;
+      await execute(run, secrets, `DELETE FROM ${ssql.q(secrets, secrets)} WHERE ${where}`, [secretId]);
+      summary.secretsDeleted += before;
+    }
+  }
+
+  // Verified: no seeded row holds a declared name any more.
+  const names = [...declared.keys()];
+  for (let i = 0; i < names.length; i += IN_CHUNK) {
+    const chunk = names.slice(i, i + IN_CHUNK);
+    const left = await sql.count(
+      table,
+      `SELECT COUNT(*) AS n FROM ${q(table)} WHERE (${seeded.text}) AND ${q('name')} IN (${chunk.map(() => '?').join(', ')})`,
+      [...seeded.params, ...chunk],
+    );
+    if (left !== 0) throw new Error(`${left} seeded ${table} row(s) still hold a declared webhook's name after the settlement.`);
+  }
+  run.deleted.set(WEBHOOKS, (run.deleted.get(WEBHOOKS) ?? 0) + summary.mirrorsDeleted);
+  if (summary.deliveriesResourced > 0) {
+    notes.push(
+      `${DELIVERIES}: ${summary.deliveriesResourced} delivery(ies) now name their declared webhook (declared:NAME). A ` +
+        'pending one keeps the partition it was enqueued under: it is still claimed and sent, by that partition\'s worker.',
+    );
+  }
+  run.opts.onProgress?.(
+    `declared webhooks: ${summary.mirrorsDeleted} copy(ies) deleted, ${summary.clones} cloned, ` +
+      `${summary.deliveriesResourced} delivery(ies) re-sourced`,
+  );
+  return { step, status: 'done', summary, blockers: [], notes };
+}
+
+// ── Step 2d: the sibling moves (18.x step 5b; ADR-0131 D7) ──────────────────
+
+/** One id-preserving move of deployment-level rows into the sibling that holds them now. */
+interface SiblingMove {
+  /** The inventory departure on `from` that names these rows. */
+  id: string;
+  from: string;
+  to: string;
+  /** The rows that move, by SHAPE — never by a NULL organization (F3). */
+  where(sql: Sql, table: string, cols: ReadonlySet<string>): { text: string; params: unknown[] };
+}
+
+/**
+ * The body of a magic-link mail: the sign-in URL better-auth's magic-link
+ * plugin builds (`/magic-link/verify?token=`). An 18.0 magic-link row carries
+ * no related record and no template column, so its link is the one structural
+ * trace of what it is; every rendering of `auth.magic_link`, customized or
+ * not, carries it, because the mail exists to deliver it.
+ */
+const MAGIC_LINK_BODY = '%/magic-link/verify?token=%';
+
+export const SIBLING_MOVES: readonly SiblingMove[] = [
+  {
+    id: 'global-audit-move',
+    from: 'sys_setting_audit',
+    to: 'sys_platform_setting_audit',
+    where: (sql, table, cols) => predicateSql(sql, table, cols, [{ column: 'scope', equals: 'global' }]),
+  },
+  {
+    // Identity mail: mail ABOUT a person (reset, verification, account
+    // invitation, change-email notice — `related_object = 'sys_user'`, the
+    // four plugin-auth sites that name one) and the magic link, which names no
+    // record. The organization invitation (`related_object = 'sys_invitation'`)
+    // is tenant mail and stays.
+    id: 'identity-mail-move',
+    from: 'sys_email',
+    to: 'sys_identity_email',
+    where: (sql, table, cols) => {
+      requireColumn(table, cols, 'related_object');
+      const c = (name: string): string => sql.q(name, table);
+      const bodies = ['body_text', 'body_html'].filter((b) => cols.has(b));
+      const magic = bodies.length && cols.has('related_id')
+        ? ` OR (${c('related_object')} IS NULL AND ${c('related_id')} IS NULL AND (${bodies.map((b) => `${c(b)} LIKE ?`).join(' OR ')}))`
+        : '';
+      return { text: `(${c('related_object')} = ?${magic})`, params: ['sys_user', ...(magic ? bodies.map(() => MAGIC_LINK_BODY) : [])] };
+    },
+  },
+];
+
+/** The mail queues whose 18.0 jobs name a `sys_email` row by id alone (plugin-email). */
+const MAIL_JOB_QUEUES = ['email.send.async', 'email.attachment.reclaim'] as const;
+
+/**
+ * Before identity mail leaves `sys_email`: point every pending or running mail
+ * job that names a moving row at the sibling. An 18.0 job carries `{ rowId }`
+ * with no `object`, which its consumer reads as `sys_email` — a send would find
+ * no row and never deliver, and an attachment reclaim would take the row-gone
+ * branch and delete the mail's attachment content. The job gains
+ * `object: 'sys_identity_email'`, in its payload and metadata, and its
+ * idempotency key the sibling's spelling (`<object>:<id>`, `<object>_attachments:<id>`).
+ */
+async function rewriteMailJobs(run: Run, from: string, to: string, ids: ReadonlySet<string>): Promise<number> {
+  let rewritten = 0;
+  for (const physical of presentTables(run, JOB_QUEUE)) {
+    const cols = await columnsOf(run, physical);
+    if (!cols?.has('queue') || !cols.has('payload_json')) continue;
+    const { sql } = databaseFor(run, physical);
+    const q = (c: string): string => sql.q(c, physical);
+    const statusClause = cols.has('status') ? ` AND ${q('status')} IN (?, ?)` : '';
+    const jobs = await readAll(
+      run,
+      physical,
+      ['payload_json', ...['metadata_json', 'idempotency_key'].filter((c) => cols.has(c))],
+      {
+        text: `${q('queue')} IN (${MAIL_JOB_QUEUES.map(() => '?').join(', ')})${statusClause}`,
+        params: [...MAIL_JOB_QUEUES, ...(statusClause ? ['pending', 'running'] : [])],
+      },
+    );
+    for (const job of jobs) {
+      const payload = parseJsonObject(job.payload_json);
+      const rowId = payload?.rowId;
+      if (!payload || typeof rowId !== 'string' || !ids.has(rowId) || (payload.object !== undefined && payload.object !== from)) continue;
+      const sets: Array<[string, unknown]> = [['payload_json', JSON.stringify({ ...payload, object: to })]];
+      const metadata = parseJsonObject(job.metadata_json);
+      if (metadata) sets.push(['metadata_json', JSON.stringify({ ...metadata, object: to })]);
+      const key = text(job.idempotency_key);
+      if (key?.startsWith(`${from}:`)) sets.push(['idempotency_key', `${to}:${key.slice(from.length + 1)}`]);
+      else if (key?.startsWith(`${from}_attachments:`)) sets.push(['idempotency_key', `${to}_attachments:${key.slice(from.length + 13)}`]);
+      await execute(run, physical, `UPDATE ${q(physical)} SET ${sets.map(([c]) => `${q(c)} = ?`).join(', ')} WHERE ${q('id')} = ?`, [...sets.map(([, v]) => v), job.id]);
+      rewritten++;
+    }
+  }
+  return rewritten;
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> | null {
+  let parsed: unknown = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+}
+
+/**
+ * [18.x step 5b; ADR-0131 D7] Move the deployment-level rows an 18.0 database
+ * still keeps in a tenant table into the sibling this release writes them to
+ * ({@link SIBLING_MOVES}): the settings audit trail's global rung
+ * (`sys_setting_audit WHERE scope = 'global'` → `sys_platform_setting_audit`)
+ * and identity mail (`sys_email` → `sys_identity_email`). Each row keeps its
+ * id: it is copied (the columns both tables carry — never `organization_id`,
+ * which the sibling does not have), read back, and only then deleted from its
+ * old table, by id with its selector re-asserted. A row already in the sibling
+ * (a run stopped between copy and delete) is not copied twice.
+ *
+ * Before identity mail moves, the mail jobs naming it are pointed at the
+ * sibling ({@link rewriteMailJobs}). After each move, the activity timeline
+ * rows about a moved row (`sys_activity.object_name`, every rotation shard)
+ * name its new object, so the record's history follows it; the audit ledger
+ * (`sys_audit_log`) is a ledger and is not rewritten.
+ */
+async function runSiblingMoves(run: Run): Promise<StepReport> {
+  const step: CeremonyStep = 'sibling-moves';
+  const summary: Record<string, number> = { moved: 0, alreadyMoved: 0, jobsRewritten: 0, activityRepointed: 0 };
+  const blockers: string[] = [];
+  for (const move of SIBLING_MOVES) {
+    const [from] = presentTables(run, move.from);
+    const fromCols = from ? await columnsOf(run, from) : null;
+    if (!from || !fromCols) continue;
+    const { sql } = databaseFor(run, from);
+    const where = move.where(sql, from, fromCols);
+    const ids = (await readAll(run, from, [], where)).map((r) => String(r.id));
+    if (ids.length === 0) continue;
+    const [to] = presentTables(run, move.to);
+    const toCols = to ? await columnsOf(run, to) : null;
+    if (!to || !toCols) {
+      blockers.push(
+        `${ids.length} ${move.from} row(s) move to ${move.to}, which this database does not have. Boot this release ` +
+          'against it once (its schema sync creates the table), then re-run.',
+      );
+      continue;
+    }
+    const { sql: tsql } = databaseFor(run, to);
+    const shared = [...fromCols].filter((c) => toCols.has(c) && c !== ORG);
+    if (move.from === 'sys_email') summary.jobsRewritten += await rewriteMailJobs(run, move.from, move.to, new Set(ids));
+    for (let i = 0; i < ids.length; i += IN_CHUNK) {
+      const chunk = ids.slice(i, i + IN_CHUNK);
+      const inChunk = (s: Sql, table: string): string => `${s.q('id', table)} IN (${chunk.map(() => '?').join(', ')})`;
+      const there = new Set(
+        (await tsql.read(to, `SELECT ${tsql.q('id', to)} AS ${tsql.q('id', to)} FROM ${tsql.q(to, to)} WHERE ${inChunk(tsql, to)}`, chunk))
+          .map((r) => String(r.id)),
+      );
+      const missing = chunk.filter((id) => !there.has(id));
+      summary.alreadyMoved += chunk.length - missing.length;
+      if (missing.length > 0) {
+        const source = await sql.read(
+          from,
+          `SELECT ${shared.map((c) => `${sql.q(c, from)} AS ${sql.q(c, from)}`).join(', ')} FROM ${sql.q(from, from)} ` +
+            `WHERE ${sql.q('id', from)} IN (${missing.map(() => '?').join(', ')})`,
+          missing,
+        );
+        for (const row of source) {
+          await execute(
+            run,
+            to,
+            `INSERT INTO ${tsql.q(to, to)} (${shared.map((c) => tsql.q(c, to)).join(', ')}) VALUES (${shared.map(() => '?').join(', ')})`,
+            shared.map((c) => row[c] ?? null),
+          );
+        }
+      }
+      // The source leaves only once every row reads back in the sibling.
+      const landed = await tsql.count(to, `SELECT COUNT(*) AS n FROM ${tsql.q(to, to)} WHERE ${inChunk(tsql, to)}`, chunk);
+      if (landed !== chunk.length) {
+        throw new Error(`${chunk.length - landed} ${move.from} row(s) did not read back in ${move.to}; they were kept in ${move.from}.`);
+      }
+      summary.activityRepointed += await repointActivity(run, move.from, move.to, chunk);
+      await execute(run, from, `DELETE FROM ${sql.q(from, from)} WHERE (${where.text}) AND ${inChunk(sql, from)}`, [...where.params, ...chunk]);
+      const left = await sql.count(from, `SELECT COUNT(*) AS n FROM ${sql.q(from, from)} WHERE ${inChunk(sql, from)}`, chunk);
+      if (left !== 0) throw new Error(`${left} moved ${move.from} row(s) were not removed after they read back in ${move.to}.`);
+      summary.moved += missing.length;
+      run.movedOut.set(move.from, (run.movedOut.get(move.from) ?? 0) + chunk.length);
+      run.movedIn.set(move.to, (run.movedIn.get(move.to) ?? 0) + missing.length);
+    }
+    run.opts.onProgress?.(`sibling move: ${ids.length} ${move.from} row(s) now in ${move.to}`);
+  }
+  return { step, status: blockers.length ? 'blocked' : 'done', summary, blockers, notes: [] };
+}
+
+/** Point the activity rows about `ids` of `from` at `to` (every rotation shard); the count re-pointed. */
+async function repointActivity(run: Run, from: string, to: string, ids: readonly string[]): Promise<number> {
+  let n = 0;
+  for (const physical of presentTables(run, ACTIVITY)) {
+    const cols = await columnsOf(run, physical);
+    if (!cols?.has('object_name') || !cols.has('record_id')) continue;
+    const { sql } = databaseFor(run, physical);
+    const where = `${sql.q('object_name', physical)} = ? AND ${sql.q('record_id', physical)} IN (${ids.map(() => '?').join(', ')})`;
+    const count = (object: string): Promise<number> =>
+      sql.count(physical, `SELECT COUNT(*) AS n FROM ${sql.q(physical, physical)} WHERE ${where}`, [object, ...ids]);
+    const before = await count(from);
+    if (before === 0) continue;
+    await execute(run, physical, `UPDATE ${sql.q(physical, physical)} SET ${sql.q('object_name', physical)} = ? WHERE ${where}`, [to, from, ...ids]);
+    if ((await count(from)) !== 0) throw new Error(`Activity rows on ${physical} still name ${from} for a moved row after the re-point.`);
+    n += before;
+  }
+  return n;
+}
+
+// ── Step 2f: the declared sharing rules' stored copies (18.x step 5c, 9c) ───
+
+/**
+ * [ADR-0131 C3 stage 9c; ruling A on the sharing-rule regime card, item 3]
+ * Every `sys_sharing_rule` row that holds the name of a rule a package
+ * declares — a CUSTOMIZED copy the retired seeder wrote, or an administrator's
+ * rule a later package declaration collided with — answers for that name
+ * today, while plugin-sharing withholds the declaration and reports it at
+ * load. The regime is a clone under a new name plus the base switched off, so
+ * each becomes exactly that, with what it grants unchanged:
+ *
+ *  - the row is renamed in place to a free name (`<name>_custom`, …) and owned
+ *    by the administrator (`managed_by 'admin'`, not `customized`) — its id is
+ *    unchanged, so every grant naming it (`sys_record_share.source_id`, a row
+ *    id) stays its own;
+ *  - the declaration is switched off: its `sys_metadata_activation` row
+ *    (`sharing_rule`, NAME) says `active: false`, so it does not start granting
+ *    beside its clone — the withholding the row caused, now recorded;
+ *  - grants still naming the declaration itself (`source_id` = NAME) are
+ *    removed, as the switch's own reconcile would remove them.
+ *
+ * The UNCUSTOMIZED copies are not touched here: they are mirrors, deleted by
+ * the mirror-deletion step once their grants name the rule. Under a wall the
+ * switch is deployment-wide (ruling A item 1: no per-organization switch-off),
+ * so the copies block, named, instead of switching a rule off for every
+ * organization on the operator's behalf. Idempotent: a second run finds no
+ * row under a declared name.
+ */
+async function runDeclaredRuleCopies(run: Run): Promise<StepReport> {
+  const step: CeremonyStep = 'declared-rule-copies';
+  const summary: Record<string, number> = { clones: 0, activationRows: 0, grantsRemoved: 0 };
+  const notes: string[] = [];
+  const tables: Array<{ physical: string; cols: ReadonlySet<string> }> = [];
+  for (const physical of presentTables(run, SHARING_RULES)) {
+    const cols = await columnsOf(run, physical);
+    if (cols?.has('name')) tables.push({ physical, cols });
+  }
+  if (tables.length === 0) return { step, status: 'done', summary, blockers: [], notes };
+
+  // A copy is a row that is not a pristine mirror.
+  const copyWhere = (physical: string, cols: ReadonlySet<string>): { text: string; params: unknown[] } => {
+    const { sql } = databaseFor(run, physical);
+    if (!cols.has('managed_by')) return { text: '1 = 1', params: [] };
+    const mirror = predicateSql(sql, physical, cols, cols.has('customized')
+      ? [{ column: 'managed_by', in: SEEDED_PROVENANCE }, { column: 'customized', notTrue: true }]
+      : [{ column: 'managed_by', in: SEEDED_PROVENANCE }]);
+    return { text: `(CASE WHEN ${mirror.text} THEN 1 WHEN NOT (${mirror.text}) THEN 0 ELSE 1 END) = 0`, params: [...mirror.params, ...mirror.params] };
+  };
+  if (!run.opts.declaredSharingRules) {
+    let customized = 0;
+    for (const { physical, cols } of tables) {
+      if (!cols.has('customized') || !cols.has('managed_by')) continue;
+      const { sql } = databaseFor(run, physical);
+      const where = predicateSql(sql, physical, cols, [{ column: 'managed_by', in: SEEDED_PROVENANCE }, { column: 'customized', equals: true }]);
+      customized += await sql.count(physical, `SELECT COUNT(*) AS n FROM ${sql.q(physical, physical)} WHERE ${where.text}`, where.params);
+    }
+    if (customized === 0) return { step, status: 'done', summary, blockers: [], notes };
+    return blockedStep(step, summary, [
+      `${SHARING_RULES} holds ${customized} customized copy(ies) of a declared sharing rule, settled only against the ` +
+        'rules the deployment declares, and this run has no registry to read them from. Run the command against the ' +
+        "deployment's own composition, then re-run.",
+    ]);
+  }
+  const declared = await run.opts.declaredSharingRules.rules();
+  const packageOf = new Map(declared.map((r) => [r.name, r.packageId ?? null] as const));
+  const names = [...packageOf.keys()];
+  if (names.length === 0) return { step, status: 'done', summary, blockers: [], notes };
+
+  const copies: Array<{ physical: string; cols: ReadonlySet<string>; id: string; name: string }> = [];
+  for (const { physical, cols } of tables) {
+    const { sql } = databaseFor(run, physical);
+    const copy = copyWhere(physical, cols);
+    for (let i = 0; i < names.length; i += IN_CHUNK) {
+      const chunk = names.slice(i, i + IN_CHUNK);
+      const rows = await readAll(run, physical, ['name'], {
+        text: `(${copy.text}) AND ${sql.q('name', physical)} IN (${chunk.map(() => '?').join(', ')})`,
+        params: [...copy.params, ...chunk],
+      });
+      for (const row of rows) copies.push({ physical, cols, id: String(row.id), name: String(row.name) });
+    }
+  }
+  if (copies.length === 0) return { step, status: 'done', summary, blockers: [], notes };
+  if (run.opts.posture !== 'single') {
+    return blockedStep(step, summary, [
+      `${SHARING_RULES} holds ${copies.length} stored rule(s) under the name of a rule a package declares ` +
+        `(${copies.map((c) => `${c.id} ${c.name}`).sort().join(', ')}). Under the ${run.opts.posture} posture the ` +
+        'declaration\'s switch is deployment-wide — there is no per-organization switch-off — so it is not switched ' +
+        'off for every organization on the operator\'s behalf, and nothing was written. Rename each row to a name no ' +
+        'package declares (it stays that organization\'s own rule), switch the declared rule on or off through the ' +
+        'activation door as the deployment wants, then re-run.',
+    ]);
+  }
+
+  const shares: string[] = [];
+  for (const physical of presentTables(run, RECORD_SHARES)) {
+    const cols = await columnsOf(run, physical);
+    if (cols?.has('source') && cols.has('source_id')) shares.push(physical);
+  }
+  const taken = new Set(names);
+  for (const copy of copies) {
+    const { sql } = databaseFor(run, copy.physical);
+    const q = (c: string): string => sql.q(c, copy.physical);
+    const clone = await freeName(run, copy.physical, copy.name, taken);
+    const sets: Array<[string, unknown]> = [
+      ['name', clone],
+      ...(copy.cols.has('managed_by') ? [['managed_by', 'admin'] as [string, unknown]] : []),
+      ...(copy.cols.has('customized') ? [['customized', sql.bind(false)] as [string, unknown]] : []),
+    ];
+    await execute(
+      run,
+      copy.physical,
+      `UPDATE ${q(copy.physical)} SET ${sets.map(([c]) => `${q(c)} = ?`).join(', ')} WHERE ${q('id')} = ? AND ${q('name')} = ?`,
+      [...sets.map(([, v]) => v), copy.id, copy.name],
+    );
+    const [landed] = await sql.read(copy.physical, `SELECT ${q('name')} AS ${q('name')} FROM ${q(copy.physical)} WHERE ${q('id')} = ?`, [copy.id]);
+    if (text(landed?.name) !== clone) throw new Error(`The clone of the declared sharing rule ${copy.name} (${copy.id}) did not read back as ${clone}.`);
+    summary.clones++;
+    notes.push(`${SHARING_RULES} ${copy.id}: now the rule ${clone}, its grants with it; the declared ${copy.name} is switched off.`);
+  }
+  for (const name of [...new Set(copies.map((c) => c.name))].sort()) {
+    if (await setActivation(run, 'sharing_rule', name, packageOf.get(name) ?? null, false)) summary.activationRows++;
+    for (const physical of shares) {
+      const { sql } = databaseFor(run, physical);
+      const where = `${sql.q('source', physical)} = ? AND ${sql.q('source_id', physical)} = ?`;
+      const count = (): Promise<number> => sql.count(physical, `SELECT COUNT(*) AS n FROM ${sql.q(physical, physical)} WHERE ${where}`, ['rule', name]);
+      const before = await count();
+      if (before === 0) continue;
+      await execute(run, physical, `DELETE FROM ${sql.q(physical, physical)} WHERE ${where}`, ['rule', name]);
+      if ((await count()) !== 0) throw new Error(`Grants of the switched-off declared rule ${name} were left on ${physical}.`);
+      summary.grantsRemoved += before;
+    }
+  }
+  run.opts.onProgress?.(`declared sharing rules: ${summary.clones} stored copy(ies) now clones, their declarations switched off`);
+  return { step, status: 'done', summary, blockers: [], notes };
+}
+
+// ── Step 6: organization_id NOT NULL (18.x step 5d, 8e) ─────────────────────
+
+/** One NOT NULL the ceremony applies: the tenant column of a table it cleared. */
+export interface NotNullColumn {
+  table: string;
+  column: string;
+  /** The database beside the primary that holds the table (`ApplySibling.name`); absent for the primary. */
+  database?: string;
+}
+
+/** One NOT NULL, as the schema door answered it. */
+export interface NotNullOutcome extends NotNullColumn {
+  /**
+   * `applied`; `not-declared` — the composition this run booted declares no
+   * object for the table, so nothing rebuilds it against a declaration;
+   * `unsupported` — the datasource's transport cannot apply it (the Turso
+   * remote face cannot rebuild a table); `failed`.
+   */
+  outcome: 'applied' | 'not-declared' | 'unsupported' | 'failed';
+  detail?: string;
+}
+
+/**
+ * Applies NOT NULL to a tenant column through the schema-drift ceremony's own
+ * apply (ADR-0120 D4), never a hand `ALTER`: on SQLite the table rebuild, on
+ * PostgreSQL / MySQL `ALTER COLUMN … SET NOT NULL`. The differ owns no
+ * proposal for it — the column's nullability is the ceremony's (ruling record
+ * 6269955919 on the v18 epic, ② A), and the differ reads it as no drift.
+ */
+export interface NotNullPort {
+  apply(columns: readonly NotNullColumn[]): Promise<NotNullOutcome[]>;
+}
+
+/**
+ * [18.x step 5d; ADR-0131 8e; ruling ② A] After the column drops, every table
+ * whose fate keeps `organization_id` and whose post-step plan reads it ready
+ * for NOT NULL (`TablePlan.notNull.willReceive`, zero NULL rows) receives it,
+ * on every physical table (rotation shards included). The ceremony owns that
+ * nullability; no metadata says it.
+ *
+ * A table the plan does not clear — rows still NULL and reported, a fate-4
+ * table whose column is not the tenancy anchor — is not touched and its reason
+ * is reported. A run with no schema door (`notNull` absent) applies nothing
+ * and says so; the command always passes one. A transport that cannot apply
+ * it is reported, never certified as applied; any other failure blocks.
+ */
+async function runNotNull(run: Run): Promise<StepReport> {
+  const step: CeremonyStep = 'not-null';
+  const summary: Record<string, number> = { applied: 0, due: 0, notDeclared: 0, unsupported: 0 };
+  const blockers: string[] = [];
+  const notes: string[] = [];
+  const plan = await planFor(run);
+  const due: NotNullColumn[] = [];
+  for (const table of plan.tables) {
+    if (table.fate !== 'attribution' && table.fate !== 'report') continue;
+    if (table.physical !== 'present' || table.organizationColumn !== 'present' || !table.rows) continue;
+    if (!table.notNull.willReceive || table.rows.organizationNull !== 0) continue;
+    due.push(...table.tables.map((t) => ({ table: t, column: ORG, ...(table.database ? { database: table.database } : {}) })));
+  }
+  summary.due = due.length;
+  if (due.length === 0) return { step, status: 'done', summary, blockers, notes };
+  if (!run.opts.notNull) {
+    notes.push(`${due.length} table(s) are ready for NOT NULL on ${ORG}, and this run has no schema door to apply it: nothing was applied.`);
+    return { step, status: 'done', summary, blockers, notes };
+  }
+  for (const outcome of await run.opts.notNull.apply(due)) {
+    if (outcome.outcome === 'applied') summary.applied++;
+    else if (outcome.outcome === 'not-declared') {
+      summary.notDeclared++;
+      notes.push(
+        `${outcome.table}.${outcome.column} stays nullable: the composition this run booted declares no object for ` +
+          `${outcome.table}. Its rows hold no NULL; re-run the ceremony where the deployment's composition is declared to apply it.`,
+      );
+    } else if (outcome.outcome === 'unsupported') {
+      summary.unsupported++;
+      notes.push(`${outcome.table}.${outcome.column} stays nullable: ${outcome.detail ?? 'this transport cannot apply NOT NULL'}.`);
+    } else {
+      blockers.push(`NOT NULL on ${outcome.table}.${outcome.column} failed: ${outcome.detail ?? 'no detail'}. Re-run once the cause is fixed.`);
+    }
+  }
+  if (summary.applied) run.opts.onProgress?.(`not null: ${summary.applied} table(s) now hold ${ORG} NOT NULL`);
+  return { step, status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
+}
+
 // ── The run ──────────────────────────────────────────────────────────────────
 
 const RUNNERS: Record<CeremonyStep, (run: Run) => Promise<StepReport>> = {
@@ -2933,10 +3767,14 @@ const RUNNERS: Record<CeremonyStep, (run: Run) => Promise<StepReport>> = {
   'metadata-promotion': runMetadataPromotion,
   'template-promotion': runTemplatePromotion,
   'settings-move': runSettingsMove,
+  'sibling-moves': runSiblingMoves,
+  'declared-webhooks': runDeclaredWebhooks,
+  'declared-rule-copies': runDeclaredRuleCopies,
   rewrite: runRewrite,
   'mirror-deletion': runMirrorDeletion,
   'history-renumber': runHistoryRenumber,
   'column-drops': runColumnDrops,
+  'not-null': runNotNull,
 };
 
 /**
@@ -3118,8 +3956,8 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
   const applied = stored?.metadataChoicesApplied?.length ? { metadataChoicesApplied: [...stored.metadataChoicesApplied] } : {};
   const checkpoint: CeremonyCheckpoint =
     stored && stored.ceremony === 'ADR-0131 D10' && stored.inventoryDigest === before.inventoryDigest
-      ? { ceremony: 'ADR-0131 D10', inventoryDigest: before.inventoryDigest, completed: { ...stored.completed }, ...applied }
-      : { ceremony: 'ADR-0131 D10', inventoryDigest: before.inventoryDigest, completed: {}, ...applied };
+      ? { ceremony: 'ADR-0131 D10', inventoryDigest: before.inventoryDigest, shapeGeneration: ORGANIZATION_OWNERSHIP_SHAPE_GENERATION, completed: { ...stored.completed }, ...applied }
+      : { ceremony: 'ADR-0131 D10', inventoryDigest: before.inventoryDigest, shapeGeneration: ORGANIZATION_OWNERSHIP_SHAPE_GENERATION, completed: {}, ...applied };
   await validateMetadataChoices(run, new Set(checkpoint.metadataChoicesApplied ?? []));
   refuseUnreviewedChoices(run.plan, opts);
   run.checkpoint = checkpoint;
@@ -3324,6 +4162,7 @@ export function checkpointFromDetails(details: unknown): CeremonyCheckpoint | nu
   return {
     ceremony: cp.ceremony,
     inventoryDigest: cp.inventoryDigest,
+    ...(typeof cp.shapeGeneration === 'number' ? { shapeGeneration: cp.shapeGeneration } : {}),
     completed: { ...cp.completed },
     ...(applied.length ? { metadataChoicesApplied: applied } : {}),
   };
