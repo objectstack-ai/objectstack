@@ -150,6 +150,20 @@ export const SysAuditLog = ObjectSchema.create({
     },
   },
 
+  // [ADR-0095 D1, 2026-10-18 note; ADR-0131 D7] This object's default row scope: the one
+  // policy plugin-security's shipped permission sets spread for it today
+  // (`auditLedgerRowScope` in `default-permission-sets.ts`), moved here verbatim. Layer
+  // 0 is inert on the ledger (`systemFields: { tenant: false }` above), so Layer 1
+  // silence means this scope, not no filter. The security plugin's row-policy collection
+  // applies it when no set the caller holds carries a row policy for the object and
+  // operation; the shipped sets still carry it, so their holders read as before. An
+  // `extend` contribution cannot set or loosen it (refused at registration).
+  defaultRowScope: {
+    name: 'sys_audit_log_org',
+    operation: 'select',
+    using: 'tenant_id == current_user.organization_id',
+  },
+
   fields: {
     // ── Event ────────────────────────────────────────────────────
     created_at: Field.datetime({
