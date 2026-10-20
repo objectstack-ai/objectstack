@@ -194,7 +194,8 @@ describe('the platform identity objects declare their default row scope (ruling 
     '%s declares its scope, and no shipped set carries a copy of it (ruling E′ item 3\'s follow-up)',
     async (object) => {
       const declared = (await registeredObjects()).get(object)!.defaultRowScope!;
-      expect(declared).toEqual(DROPPED_COPIES[object]);
+      expect(asLiteral(object, declared)).toEqual({ ...DROPPED_COPIES[object], object, enabled: true });
+      expect('object' in declared).toBe(false);
       for (const set of defaultPermissionSets) expect(policiesFor(set.name, object), set.name).toEqual([]);
     },
   );
