@@ -200,8 +200,8 @@ describe('a target the administrator forced to change their password (PASSWORD_R
 
   it('(a) the impersonation session reads the protected route 200, and carries no posture', async () => {
     const token = await impersonateTarget();
-    expect((await sessionOf(token)).authGate).toBeUndefined();
     expect((await stack.apiAs(token, 'GET', PROTECTED_READ)).status).toBe(200);
+    expect((await sessionOf(token)).authGate).toBeUndefined();
   });
 
   it('control: the forced reset\'s revocation (on by default) still ends the impersonation session', async () => {
