@@ -94,9 +94,10 @@ import {
 import { hasDanglingLikeEscape, hasNulInLikePattern, likePatternToGlobPattern } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { StorageNameMapping } from '@objectstack/spec/system';
+import { StorageNameMapping, SystemObjectName } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
 import { UnsupportedDialectEmissionError } from './dialect-emission-refusal.js';
+import { OrganizationlessCounterRefusal } from './organizationless-counter-refusal.js';
 import {
   isUniqueViolationError,
   isUnbackedConflictTargetError,
@@ -5703,6 +5704,19 @@ export class SqlDriver implements IDataDriver {
    */
   protected tenantOptOutByTable: Set<string> = new Set();
 
+  /**
+   * Has this driver registered the organization object
+   * (`SystemObjectName.ORGANIZATION`)? Set by {@link computeAndRecordTenantField},
+   * the one funnel every registration door (managed, external, remote, shard)
+   * passes through, and never cleared. It is the composition fact
+   * {@link resolveSequenceTenantId} reads: where it holds, an organization-less
+   * row on a tenant table is refused (ADR-0131 D9); where it does not — a lean
+   * embedding with no identity objects — no organization can exist, and the
+   * counter keeps `GLOBAL_TENANT`, as the engine's `no-organization-object`
+   * branch does.
+   */
+  protected organizationObjectRegistered = false;
+
   /** Throttle table for missing-tenantId warnings ({object}:{op}). */
   protected tenantAuditWarned: Set<string> = new Set();
   /** [ADR-0139 D3] Whether this instance has logged its `ReadableIds` refusal (once per driver). */
@@ -7616,11 +7630,16 @@ export class SqlDriver implements IDataDriver {
    * are never overwritten), a read scoped to the caller's ACTIVE org would miss
    * a row that really landed. A batch may name several tenants, so the scope is
    * their union through `tenantIds`, which `applyTenantScope` already compiles
-   * as `IN (…) OR IS NULL`; the caller's own `tenantIds` membership set is
-   * replaced, not widened. With no tenant field, or no tenant on the rows and
-   * none on the call, `applyTenantScope` leaves the read unscoped by its own
-   * contract. The ids are this call's own and `id` is the PRIMARY KEY, so the
-   * read cannot answer a row this call did not write, in any organization.
+   * as `IN (…)`; the caller's own `tenantIds` membership set is replaced, not
+   * widened. A row written with no tenant is no tenant's, and no tenant scope
+   * reaches it (ADR-0131 D1), so the rows' union scopes the read only when
+   * every row carries one. Otherwise the call's own options decide, and a call
+   * with no tenant leaves a row unstamped only because it carries none:
+   * `injectTenantOnInsert` fills every absent column on a call that does. With
+   * no tenant field, or no tenant on the call, `applyTenantScope` leaves the
+   * read unscoped by its own contract. The ids are this call's own and `id` is
+   * the PRIMARY KEY, so the read cannot answer a row this call did not write,
+   * in any organization.
    *
    * # A row that is not there
    *
@@ -7646,11 +7665,12 @@ export class SqlDriver implements IDataDriver {
           ),
         ]
       : [];
-    const scopeOptions: DriverOptions = {
-      ...options,
-      tenantId: writtenTenants[0] ?? options?.tenantId,
-      tenantIds: writtenTenants.length > 0 ? writtenTenants : undefined,
-    };
+    const everyRowCarriesTenant =
+      tenantField !== null
+      && written.every((row) => row[tenantField] !== undefined && row[tenantField] !== null && row[tenantField] !== '');
+    const scopeOptions: DriverOptions = everyRowCarriesTenant
+      ? { ...options, tenantId: writtenTenants[0], tenantIds: writtenTenants }
+      : { ...options };
     const builder = this.getBuilder(writeTable, options);
     this.applyTenantScope(builder, object, scopeOptions);
     const stored: Record<string, any>[] = await builder.whereIn(
@@ -7767,13 +7787,29 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * The tenant bucket a counter row is keyed by: the row's tenant when the
-   * object HAS a tenant column and the row carries one, else the platform
-   * bucket `GLOBAL_TENANT`. One spelling for the issue path, the re-seed path
-   * and the counter identity, which used to carry it three times.
+   * The tenant bucket a counter row is keyed by. One spelling for the issue
+   * path, the re-seed path and the counter identity, on both faces:
+   *
+   *  - an object with NO tenant column → `GLOBAL_TENANT`, the installation's
+   *    one counter for it;
+   *  - a tenant column and a row that carries its organization → that
+   *    organization;
+   *  - a tenant column and NO organization → REFUSED
+   *    ({@link OrganizationlessCounterRefusal}, ADR-0131 D9) wherever this
+   *    driver registered the organization object, before any counter row is
+   *    read or written. Only a composition with no organization object (a lean
+   *    embedding) keeps `GLOBAL_TENANT` here — no organization can exist there.
    */
-  protected resolveSequenceTenantId(tenantField: string | null, tenantId: string | null): string {
-    return tenantField && tenantId ? String(tenantId) : GLOBAL_TENANT;
+  protected resolveSequenceTenantId(
+    tenantField: string | null,
+    tenantId: string | null,
+    table: string,
+    field: string,
+  ): string {
+    if (!tenantField) return GLOBAL_TENANT;
+    if (tenantId) return String(tenantId);
+    if (this.organizationObjectRegistered) throw new OrganizationlessCounterRefusal(table, field, tenantField);
+    return GLOBAL_TENANT;
   }
 
   /**
@@ -8130,8 +8166,10 @@ export class SqlDriver implements IDataDriver {
     // transaction ensures the table on the right connection instead of dead-
     // locking on a second one (SQLite pool max=1). `initObjects` normally warms
     // this up front, making the call a no-op — this only bites the lazy path.
+    // The bucket first: an organization-less row on a tenant table is refused
+    // here (ADR-0131 D9), before the lazy DDL below or any counter read.
+    const resolvedTenantId = this.resolveSequenceTenantId(tenantField, tenantId, tableName, field);
     await this.ensureSequencesTable(parentTrx);
-    const resolvedTenantId = this.resolveSequenceTenantId(tenantField, tenantId);
     if (scope !== '' && !this.sequencesHasKeyHash) {
       // The legacy sequences table could not be migrated to the key_hash shape,
       // so it cannot represent per-scope counters. Fail with a clear, actionable
@@ -8391,7 +8429,12 @@ export class SqlDriver implements IDataDriver {
    */
   protected async resyncSequenceToDataMax(reservation: AutoNumberReservation): Promise<void> {
     await this.ensureSequencesTable();
-    const resolvedTenantId = this.resolveSequenceTenantId(reservation.tenantField, reservation.tenantId);
+    const resolvedTenantId = this.resolveSequenceTenantId(
+      reservation.tenantField,
+      reservation.tenantId,
+      reservation.tableName,
+      reservation.field,
+    );
     const key = this.sequencesHasKeyHash
       ? { key_hash: this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope) }
       : { object: reservation.tableName, tenant_id: resolvedTenantId, field: reservation.field };
@@ -8425,7 +8468,12 @@ export class SqlDriver implements IDataDriver {
    * that drew from it. See {@link bulkCreate}.
    */
   protected autoNumberCounterKey(reservation: AutoNumberReservation): string {
-    const resolvedTenantId = this.resolveSequenceTenantId(reservation.tenantField, reservation.tenantId);
+    const resolvedTenantId = this.resolveSequenceTenantId(
+      reservation.tenantField,
+      reservation.tenantId,
+      reservation.tableName,
+      reservation.field,
+    );
     return this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope);
   }
 
@@ -11475,8 +11523,8 @@ export class SqlDriver implements IDataDriver {
     //
     // Placed BESIDE `getBuilder` and above the caller's `where`, which is the
     // position `findRows()` uses: the predicate has to be on the builder before
-    // anything reads it, and `applyTenantScope` is what owns the NULL-org
-    // platform-row and ADR-0105 D2 union semantics. Re-deriving either here
+    // anything reads it, and `applyTenantScope` is what owns the equality and
+    // ADR-0105 D2 union semantics. Re-deriving either here
     // would be a second, worse copy of the wall.
     this.applyTenantScope(builder, object, options);
 
@@ -12131,6 +12179,7 @@ export class SqlDriver implements IDataDriver {
     key: string,
     schema: { fields?: Record<string, any>; tenancy?: any },
   ): string | null {
+    if (key === SystemObjectName.ORGANIZATION) this.organizationObjectRegistered = true;
     if (schema?.tenancy != null) {
       if (isTenancyDisabled(schema)) this.tenantOptOutByTable.add(key);
       else this.tenantOptOutByTable.delete(key);
@@ -15608,27 +15657,19 @@ export class SqlDriver implements IDataDriver {
       ? rawIds.filter((v: unknown) => typeof v === 'string' && v !== '')
       : [];
     if (tenantIds.length > 0) {
-      return builder.where((b) => {
-        void b.whereIn(field, tenantIds.map(String)).orWhereNull(field);
-      });
+      return builder.whereIn(field, tenantIds.map(String));
     }
-    // `(field = :tenantId OR field IS NULL)`. The NULL arm is the v17 reading
-    // (#2734), in which an org-less row stood for platform state (seeded
-    // positions and permission sets, business units, first-boot seeds).
-    // ADR-0131 replaces that reading with three rules. A managed package's
-    // metadata is not in the database: its definitions are sealed, and
-    // customization is environment-level state (D2, D6). A row with an
-    // organization column was written by that organization, and NULL is not
-    // an owner (D1); references to declared items are by machine name (D4). A
-    // table with no organization column is deployment-level or code-level,
-    // protected by permissions rather than by this wall (D7). So on a fresh
-    // 18.0 `single` install, where every insert carries its organization, the
-    // arm matches nothing. The arm is removed on the 18.x line, after the
-    // upgrade ceremony (ADR-0131 D14). Rows stamped with a DIFFERENT tenant
-    // stay invisible either way.
-    return builder.where((b) => {
-      void b.where(field, String(tenantId)).orWhereNull(field);
-    });
+    // `field = :tenantId`, and nothing else. [ADR-0131 D1, D14] NULL is not an
+    // owner: an organization-less row is no tenant's, so no tenant scope reaches
+    // it. The v17 reading (#2734) added an `OR field IS NULL` arm here, under
+    // which such a row stood for platform state; ADR-0131 replaced that reading
+    // (D2, D6, D7) and the 18.x upgrade ceremony retired the rows it served: a
+    // certified database holds no NULL organization, a fresh install never
+    // writes one, and a v17 database is refused at boot until it is certified.
+    // A composition that registers no organization object can still write
+    // organization-less rows, and it never reaches this line with a tenant: no
+    // session, guest or system write there carries an organization.
+    return builder.where(field, String(tenantId));
   }
 
   /**

@@ -24,7 +24,6 @@ import {
     type LegacyDefinitionCredentialKey,
 } from './webhook-legacy-cleartext.js';
 import {
-    classifyDeclaredNameHolder,
     declaredWebhookRefId,
     type DeclaredWebhook,
     type DeclaredWebhookReader,
@@ -457,9 +456,9 @@ export class AutoEnqueuer {
             return;
         }
 
-        // [ADR-0131 D2/D6] The declared webhooks, and the 18.0 mirror rows they
-        // replace. A failed read keeps the previous cache, exactly as a failed
-        // row read above does: neither a double fire nor a silent loss.
+        // [ADR-0131 D2/D6] The declared webhooks no row withholds. A failed read
+        // keeps the previous cache, exactly as a failed row read above does:
+        // neither a double fire nor a silent loss.
         const declared = await this.resolveDeclared();
         if (!declared) return;
 
@@ -472,7 +471,6 @@ export class AutoEnqueuer {
             next.set(key, arr);
         };
         for (const row of rows) {
-            if (declared.mirrorIds.has(String(row?.id))) continue;
             const sub = this.parseRow(row);
             if (!sub) continue;
             // [#7799, #7986] Neither credential is in the row we just read —
@@ -517,22 +515,19 @@ export class AutoEnqueuer {
     }
 
     /**
-     * [ADR-0131 D2/D6] The declared webhooks switched on, as subscriptions,
-     * and the ids of the 18.0 mirror rows they replace. `undefined` when a read
-     * failed, so the caller keeps the cache it has.
+     * [ADR-0131 D2/D6] The declared webhooks switched on, as subscriptions.
+     * `undefined` when a read failed, so the caller keeps the cache it has.
      *
-     * A `sys_webhook` row holding a declared name — any row, active or not — is
-     * read the way the 18.0 seeder would have treated it on this boot
-     * (`classifyDeclaredNameHolder`): a pristine mirror is skipped and the
-     * declaration answers; a customized or administrator-authored row answers
-     * as itself and the declaration is withheld, said once per name. That is
-     * what keeps a declared webhook from firing twice on an upgraded database,
-     * and an administrator's `active: false` on a seeded row in force.
+     * A `sys_webhook` row holding a declared name — any row, active or not,
+     * whatever its provenance — answers as itself and the declaration is
+     * withheld, said once per name (regime C; `declared-webhooks.ts`). That is
+     * what keeps a declared webhook from firing twice beside a row of its name,
+     * and a row's `active: false` in force.
      */
     private async resolveDeclared(): Promise<
-        { subscriptions: CachedSubscription[]; mirrorIds: Set<string> } | undefined
+        { subscriptions: CachedSubscription[] } | undefined
     > {
-        const empty = { subscriptions: [], mirrorIds: new Set<string>() };
+        const empty = { subscriptions: [] };
         if (!this.declared) return empty;
         let declared: DeclaredWebhook[];
         try {
@@ -549,7 +544,7 @@ export class AutoEnqueuer {
                 this.subscriptionsObject,
                 {
                     where: { name: { $in: declared.map((d) => d.webhook.name) } },
-                    fields: ['id', 'name', 'managed_by', 'customized'],
+                    fields: ['id', 'name'],
                 },
                 { context: SYSTEM_CTX },
             );
@@ -561,12 +556,8 @@ export class AutoEnqueuer {
             return undefined;
         }
 
-        const mirrorIds = new Set<string>();
         const heldByRow = new Set<string>();
-        for (const row of Array.isArray(holders) ? holders : []) {
-            if (classifyDeclaredNameHolder(row) === 'mirror') mirrorIds.add(String(row.id));
-            else heldByRow.add(String(row.name));
-        }
+        for (const row of Array.isArray(holders) ? holders : []) heldByRow.add(String(row.name));
 
         const subscriptions: CachedSubscription[] = [];
         for (const d of declared) {
@@ -583,7 +574,7 @@ export class AutoEnqueuer {
             sub.deploymentWide = true;
             subscriptions.push(sub);
         }
-        return { subscriptions, mirrorIds };
+        return { subscriptions };
     }
 
     /**
@@ -613,9 +604,9 @@ export class AutoEnqueuer {
     }
 
     /**
-     * A declared webhook withheld because a `sys_webhook` row holds its name:
-     * a seeded row an administrator edited before this release, or a row an
-     * administrator authored under the name. The row answers; the declaration
+     * A declared webhook withheld because a `sys_webhook` row holds its name —
+     * a row that held the name before a package declared it, seeded or
+     * authored (no write may take a declared name). The row answers; the declaration
      * does not also fire beside it. Said once per name per process at `warn` —
      * the row is in force and dispatching (or switched off on purpose), so
      * nothing claimed is being lost.
@@ -625,8 +616,8 @@ export class AutoEnqueuer {
         this.declarationWithheldReported.add(name);
         this.logger?.warn?.(
             `[webhook-auto-enqueuer] declared webhook '${name}' is not dispatched: a ${this.subscriptionsObject} row ` +
-                'of the same name answers for it (a seeded copy edited before declared webhooks were read from the ' +
-                'registry, or a row authored under the name). The row stays in force as it is. To return to the ' +
+                'of the same name answers for it (a row that held the name before a package declared it). The row ' +
+                'stays in force as it is. To return to the ' +
                 'declaration, delete the row; to change the declared webhook, author a copy under a new name and ' +
                 `switch the declared one off (POST /api/v1/security/_activation/webhook/${name} with ` +
                 '{ "enabled": false }).',
@@ -686,12 +677,23 @@ export class AutoEnqueuer {
      *
      * AGENTS.md decides that with one question — *does the system still look
      * normal from the outside while something it claims is persisted has not
-     * landed?* For a PARKED subscription the answer is unambiguously yes, and
-     * worse than for an ordinary enqueue failure: the durable record is the
+     * landed?* The answer is yes on BOTH branches, so both report at `error`.
+     *
+     * [#24835] The ordinary branch used to log a bare `warn` ("enqueue
+     * failed"), on the reading that the subscription is otherwise healthy. That
+     * reading is the problem: the record write that produced the event already
+     * answered 200, the webhook still reads active, and the `sys_http_delivery`
+     * row — the outbox's whole durability claim — was never written, so the
+     * event is never sent, retried or redeliverable, and nothing else looks
+     * wrong. Measured on PostgreSQL, where every update delivery was lost this
+     * way behind one WARN per event. It is said ONCE per webhook
+     * ({@link writeFailing}), with the consequence and the fix, and re-armed by
+     * the next recorded delivery for that webhook; each further lost event is
+     * kept at `debug` with its `eventId`.
+     *
+     * For a PARKED subscription it is worse still: the durable record is the
      * only trace this event ever existed, so losing the write puts us back
-     * exactly where this issue started, silently. So `error` there, and the
-     * pre-existing `warn` for an ordinary enqueue, where the delivery itself is
-     * the thing that did not happen and the subscription is otherwise healthy.
+     * exactly where #8069 started, silently.
      *
      * The realistic cause of the parked branch is a host that wired
      * {@link HttpEnqueueFn} straight to `IHttpOutbox.enqueue` instead of
@@ -708,7 +710,30 @@ export class AutoEnqueuer {
     ): void {
         const meta = { webhook: sub.name, eventId, err: (err as Error)?.message ?? err };
         if (!sub.parkedReason) {
-            this.logger?.warn?.(`[webhook-auto-enqueuer] ${verb} failed`, meta);
+            if (this.writeFailing.has(sub.id)) {
+                this.logger?.debug?.(
+                    `[webhook-auto-enqueuer] webhook '${sub.name}': ${verb} failed again — this event `
+                        + 'is lost too (reported at error on the first failure)',
+                    meta,
+                );
+                return;
+            }
+            this.writeFailing.add(sub.id);
+            const lost =
+                `[webhook-auto-enqueuer] webhook '${sub.name}': a delivery could not be recorded in `
+                + 'sys_http_delivery, so this event is LOST — it will never be sent, retried or '
+                + 'redelivered, and there is no row for an operator to find. The record write that '
+                + 'produced it already succeeded and the webhook still reads active, so nothing else '
+                + 'looks wrong. Fix: the cause in this record\'s meta says why the outbox write was '
+                + 'refused — make that write succeed (the datasource holding sys_http_delivery '
+                + 'reachable and its schema synced; a payload the outbox cannot store comes from the '
+                + 'event\'s producer, upstream of this webhook). Said once until a delivery for this '
+                + 'webhook is recorded again; each further lost event is logged at debug with its eventId.';
+            if (typeof this.logger?.error === 'function') {
+                this.logger?.error(lost, err, meta);
+            } else {
+                this.logger?.warn?.(lost, meta);
+            }
             return;
         }
         const message =
@@ -725,6 +750,20 @@ export class AutoEnqueuer {
         } else {
             this.logger?.warn?.(message, meta);
         }
+    }
+
+    /**
+     * [#24835] Webhook ids whose outbox write has failed and not yet succeeded
+     * again — the say-once ledger for {@link reportWriteFailure}'s ordinary
+     * branch, the enqueue twin of {@link droppedForSecret}: the loud first
+     * report is said once per outage, and said again if the same webhook breaks
+     * after a delivery for it was recorded.
+     */
+    private readonly writeFailing = new Set<string>();
+
+    /** [#24835] A delivery for `sub` was recorded — a later failure is a new outage. */
+    private recordedWrite(sub: CachedSubscription): void {
+        this.writeFailing.delete(sub.id);
     }
 
     private park(sub: CachedSubscription, err: unknown, credential: DropReason): void {
@@ -1204,7 +1243,10 @@ export class AutoEnqueuer {
                     action,
                     timestamp: event.timestamp,
                 },
-            }).catch((err) => this.reportWriteFailure(sub, eventId, err, 'enqueue'));
+            }).then(
+                () => this.recordedWrite(sub),
+                (err) => this.reportWriteFailure(sub, eventId, err, 'enqueue'),
+            );
         }
     }
 
@@ -1342,7 +1384,10 @@ export class AutoEnqueuer {
                     action,
                     timestamp: event.timestamp,
                 },
-            }).catch((err) => this.reportWriteFailure(sub, eventId, err, 'bulk enqueue'));
+            }).then(
+                () => this.recordedWrite(sub),
+                (err) => this.reportWriteFailure(sub, eventId, err, 'bulk enqueue'),
+            );
         }
     }
 

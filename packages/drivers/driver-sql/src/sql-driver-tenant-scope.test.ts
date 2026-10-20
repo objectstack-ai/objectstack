@@ -134,33 +134,46 @@ describe('SqlDriver tenant scope (organization_id)', () => {
     });
   });
 
-  describe('NULL tenant column = GLOBAL/platform row (#2734)', () => {
+  // [ADR-0131 D1, D14] NULL is not an owner. The v17 reading (#2734) answered
+  // an organization-less row to EVERY tenant's scoped read, as platform state;
+  // 18.x retired that arm with the upgrade ceremony, after which no such row
+  // exists on a certified database. A row written with no organization is
+  // therefore no tenant's: only an unscoped read reaches it.
+  describe('NULL tenant column = no tenant\'s row (ADR-0131 D1)', () => {
     beforeEach(async () => {
-      // A platform-seeded row with no organization (bootstrap positions,
-      // permission sets, business units, pre-org first-boot seeds) — which
-      // exists only on a database built before 18.x (ADR-0131 D1 makes a
-      // fresh tenant column NOT NULL).
+      // An organization-less row exists only on a database built before 18.x
+      // (ADR-0131 D1 makes a fresh tenant column NOT NULL).
       await asPre18TenantColumn(driver, 'account');
-      await driver.create('account', { id: 'g1', name: 'Global', tier: 'global' });
+      await driver.create('account', { id: 'g1', name: 'Orphan', tier: 'none' });
     });
 
-    it('a scoped read still sees the org-less row (any tenant)', async () => {
+    it('a scoped read does not see the organization-less row, under any tenant', async () => {
       const rowsA = await driver.find('account', {}, { tenantId: 'org_a' });
       const rowsB = await driver.find('account', {}, { tenantId: 'org_b' });
-      expect(rowsA.map((r: any) => r.id)).toContain('g1');
-      expect(rowsB.map((r: any) => r.id)).toContain('g1');
-      // …while cross-tenant rows stay hidden exactly as before.
-      expect(rowsA.map((r: any) => r.id).sort()).toEqual(['a1', 'a2', 'g1']);
+      expect(rowsA.map((r: any) => r.id).sort()).toEqual(['a1', 'a2']);
+      expect(rowsB.map((r: any) => r.id).sort()).toEqual(['b1', 'b2']);
     });
 
-    it('a scoped by-id read resolves the global row', async () => {
+    it('a scoped by-id read does not resolve it', async () => {
       const row = await driver.findOne('account', { where: { id: 'g1' } }, { tenantId: 'org_a' });
-      expect(row?.id).toBe('g1');
+      expect(row).toBeNull();
     });
 
-    it('a scoped count includes the global row', async () => {
+    it('a scoped count excludes it', async () => {
       const a = await driver.count!('account', {}, { tenantId: 'org_a' });
-      expect(a).toBe(3); // a1, a2, g1 — never org_b's rows
+      expect(a).toBe(2); // a1, a2
+    });
+
+    it('a scoped update or delete does not reach it', async () => {
+      await driver.update('account', 'g1', { name: 'Touched' }, { tenantId: 'org_a' }).catch(() => undefined);
+      await driver.delete('account', 'g1', { tenantId: 'org_a' }).catch(() => undefined);
+      const row = await driver.findOne('account', { where: { id: 'g1' } });
+      expect(row?.name).toBe('Orphan');
+    });
+
+    it('an unscoped read still sees it — no tenant context is no scope', async () => {
+      const rows = await driver.find('account', {});
+      expect(rows.map((r: any) => r.id)).toContain('g1');
     });
   });
 
@@ -468,16 +481,16 @@ describe('SqlDriver tenant scope (organization_id)', () => {
       expect(rows.map(r => r.id)).not.toContain('c1');
     });
 
-    it('keeps the NULL-tenant global-row carve-out (#2734) on the union path', async () => {
-      // A pre-18 database's row with no organization (ADR-0131 D1).
+    it('the union path does not reach an organization-less row either (ADR-0131 D1)', async () => {
+      // A pre-18 database's row with no organization.
       await asPre18TenantColumn(driver, 'account');
-      await driver.create('account', { id: 'g1', name: 'GLOBAL' });
+      await driver.create('account', { id: 'g1', name: 'ORPHAN' });
       const rows = await driver.find(
         'account',
         {},
-        { tenantId: 'org_a', tenantIds: ['org_a'] } as any,
+        { tenantId: 'org_a', tenantIds: ['org_a', 'org_b'] } as any,
       );
-      expect(rows.map(r => r.id).sort()).toEqual(['a1', 'a2', 'g1']);
+      expect(rows.map(r => r.id).sort()).toEqual(['a1', 'a2', 'b1', 'b2']);
     });
 
     it('an empty or malformed tenantIds falls back to tenantId equality (fail toward isolation)', async () => {

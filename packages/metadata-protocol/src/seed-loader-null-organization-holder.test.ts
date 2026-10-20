@@ -6,20 +6,23 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
- * [#24301] An organization-scoped load refuses a seed row whose natural key a
- * row with NO organization already holds, as a per-row error, instead of
- * inserting a twin of that row; and it never adopts the row.
+ * [ADR-0131 D8] An organization-scoped load reads ITS OWN rows, and only them:
+ * one read per decision, `organization_id = ORG`, with no NULL arm on any of
+ * the three readers of `loadExistingRecords` (its #8896 note):
  *
- * These pins hold the three readers of `loadExistingRecords` (its #8896 note)
- * apart, which a real-driver file cannot reach:
+ *   1. the upsert/ignore/update pre-load;
+ *   2. `writeBatchPartial`'s retry recheck;
+ *   3. `writeOne`'s per-row recheck.
  *
- *   1. the upsert/ignore pre-load sees the unowned holder and refuses;
- *   2. `writeBatchPartial`'s retry recheck, and
- *   3. `writeOne`'s recheck read this organization's rows only: a row an
- *      earlier attempt committed carries the organization, so an unowned row
- *      is never taken for one, and the refused row never reaches either.
+ * Until step 7 of the organization-ownership line the pre-load also read the
+ * keys held by rows with NO organization and refused to twin or adopt them
+ * (#24301). Certification leaves no such row (the ownership ceremony
+ * attributes every one, D10) and a new write without an organization is
+ * stamped or refused (D9), so that second read retired. These pins hold the
+ * retirement: no `{ organization_id: null }` read is issued, whatever the
+ * mode or path, and the scoped load behaves as the organization's own.
  *
- * The real drivers' NULL predicate and the stored rows are pinned in
+ * The real driver's side is pinned in
  * `packages/runtime/src/seed-loader-null-organization-holder-real-driver.integration.test.ts`.
  */
 
@@ -112,76 +115,47 @@ const widgets = (mode: string) => [{
   records: [{ sku: 'W-HELD', label: 'held' }, { sku: 'W-NEW', label: 'new' }],
 }] as any[];
 
-/** A row no organization owns, holding the natural key `W-HELD`. */
-function plantUnowned(store: Record<string, any[]>) {
-  store.tw_widget = [{ id: 'w_unowned', sku: 'W-HELD', label: 'old', organization_id: null }];
+/** This organization's own row, holding the natural key `W-HELD`. */
+function plantOwn(store: Record<string, any[]>) {
+  store.tw_widget = [{ id: 'w_own', sku: 'W-HELD', label: 'old', organization_id: ORG }];
 }
 
-const refusalsOf = <E extends { field: string; sourceObject: string; targetObject: string }>(result: { errors: E[] }) =>
-  result.errors.filter((e) => e.field === 'organization_id' && e.targetObject === e.sourceObject);
+const nullReads = (finds: any[]) => finds.filter((f) => f.where && 'organization_id' in f.where && f.where.organization_id == null);
 
-describe('[#24301] a scoped load over a NULL-organization holder of a natural key', () => {
-  it.each(['upsert', 'ignore'])('%s: refuses the held key by name, inserts the rest, and leaves the holder alone', async (mode) => {
-    const { engine, store } = createFaithfulEngine();
-    plantUnowned(store);
+describe('[ADR-0131 D8] a scoped load reads only its organization\'s rows', () => {
+  it.each(['upsert', 'ignore', 'update'])('%s: one scoped pre-load, no NULL read, its own row matched', async (mode) => {
+    const { engine, store, finds } = createFaithfulEngine();
+    plantOwn(store);
     const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({ seeds: widgets(mode), config: config(ORG) });
 
-    expect(store.tw_widget.map((r) => r.sku).sort()).toEqual(['W-HELD', 'W-NEW']);
-    expect(store.tw_widget[0]).toEqual({ id: 'w_unowned', sku: 'W-HELD', label: 'old', organization_id: null });
-    expect(store.tw_widget.find((r) => r.sku === 'W-NEW')?.organization_id).toBe(ORG);
-    expect(result.summary.totalInserted).toBe(1);
-    expect(result.summary.totalErrored).toBe(1);
-    expect(engine.update).not.toHaveBeenCalled();
-    const [refusal] = refusalsOf(result);
-    expect(refusal).toMatchObject({ sourceObject: 'tw_widget', targetField: 'sku', attemptedValue: 'W-HELD', recordIndex: 0 });
-    expect(refusal.message).toContain("'w_unowned'");
-    // The ceremony is the remedy, with its reviewed plan; the first sentences
-    // (what was refused, and why) stay.
-    expect(refusal.message).toContain('which has no organization (organization_id is NULL)');
-    expect(refusal.message).toContain('decided by the organization-ownership ceremony, not by a seed load.');
-    expect(refusal.message).toContain(
-      'Attribute the unowned rows first (`os migrate organization-ownership --out PLAN`, then the same command with '
-        + '--apply --plan-file PLAN --backup-taken), then re-run this seed',
-    );
-    expect(refusal.message).not.toMatch(/fresh installs only|on a 17\.x release|carries the upgrade path/);
-  });
-
-  it("the organization's own row wins: a key held both by it and by an unowned row is matched, not refused", async () => {
-    const { engine, store } = createFaithfulEngine();
-    plantUnowned(store);
-    store.tw_widget.push({ id: 'w_own', sku: 'W-HELD', label: 'held', organization_id: ORG });
-    const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({ seeds: widgets('upsert'), config: config(ORG) });
-
     expect(result.errors).toEqual([]);
-    expect(result.summary.totalSkipped).toBe(1);
-    expect(store.tw_widget.filter((r) => r.sku === 'W-HELD')).toHaveLength(2);
+    expect(nullReads(finds)).toEqual([]);
+    expect(finds.filter((f) => f.objectName === 'tw_widget').map((f) => f.where)).toEqual([{ organization_id: ORG }]);
+    // The held key is this organization's: matched, never twinned.
+    expect(store.tw_widget.filter((r) => r.sku === 'W-HELD')).toHaveLength(1);
+    if (mode === 'update') {
+      expect(store.tw_widget).toHaveLength(1);
+    } else {
+      expect(store.tw_widget.find((r) => r.sku === 'W-NEW')?.organization_id).toBe(ORG);
+      expect(result.summary.totalInserted).toBe(1);
+    }
   });
 
-  it('update mode writes no new row, so it keeps its behaviour: the held key is skipped, nothing refused', async () => {
+  it('the self-referencing (sequential) path reads the same way', async () => {
     const { engine, store, finds } = createFaithfulEngine();
-    plantUnowned(store);
-    const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({ seeds: widgets('update'), config: config(ORG) });
-
-    expect(result.errors).toEqual([]);
-    expect(result.summary.totalSkipped).toBe(2);
-    expect(store.tw_widget).toHaveLength(1);
-    expect(finds.some((f) => f.where?.organization_id === null)).toBe(false);
-  });
-
-  it('the self-referencing (sequential) path refuses the same way', async () => {
-    const { engine, store } = createFaithfulEngine();
-    store.tw_unit = [{ id: 'u_unowned', code: 'ROOT', parent: null, organization_id: null }];
+    store.tw_unit = [{ id: 'u_own', code: 'ROOT', parent: null, organization_id: ORG }];
     const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({
       seeds: [{ object: 'tw_unit', externalId: 'code', mode: 'upsert', env: ['prod', 'dev', 'test'], records: [{ code: 'ROOT' }, { code: 'LEAF' }] }] as any[],
       config: config(ORG),
     });
+    expect(result.errors).toEqual([]);
     expect(store.tw_unit.map((r) => r.code).sort()).toEqual(['LEAF', 'ROOT']);
-    expect(refusalsOf(result).map((e) => e.attemptedValue)).toEqual(['ROOT']);
+    expect(nullReads(finds)).toEqual([]);
   });
 
-  it('writeBatchPartial retry recheck: reads only the organization\'s rows, and the refused row never reaches an insert', async () => {
+  it('writeBatchPartial retry recheck: reads only the organization\'s rows, and inserts nothing twice', async () => {
     const { engine, store, finds } = createFaithfulEngine();
-    plantUnowned(store);
+    plantOwn(store);
     // The first array insert commits, then loses its response: the retry's
     // recheck must find W-NEW as already written and insert nothing again.
     const realInsert = (engine.insert as any).getMockImplementation();
@@ -195,24 +169,19 @@ describe('[#24301] a scoped load over a NULL-organization holder of a natural ke
     });
     const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({ seeds: widgets('upsert'), config: config(ORG) });
 
+    expect(calls).toBe(1);
     expect(payloads.flat().map((r) => r.sku)).toEqual(['W-NEW']);
     expect(store.tw_widget.map((r) => r.sku).sort()).toEqual(['W-HELD', 'W-NEW']);
-    expect(refusalsOf(result)).toHaveLength(1);
     expect(result.summary.totalInserted).toBe(1);
-    // One NULL read, the pre-load's; every recheck after the first insert is scoped.
-    const nullReads = finds.filter((f) => f.where?.organization_id === null);
-    expect(nullReads).toHaveLength(1);
-    const afterPreload = finds.slice(finds.findIndex((f) => f.where?.organization_id === null) + 1)
-      .filter((f) => f.objectName === 'tw_widget');
-    // The retry happened, and its recheck is the one scoped read after the pre-load.
-    expect(calls).toBe(1);
-    expect(afterPreload.map((f) => f.where)).toEqual([{ organization_id: ORG }]);
+    expect(nullReads(finds)).toEqual([]);
+    // The pre-load and the retry's recheck: both scoped.
+    expect(finds.filter((f) => f.objectName === 'tw_widget').map((f) => f.where))
+      .toEqual([{ organization_id: ORG }, { organization_id: ORG }]);
   });
 
   it('writeOne recheck (an engine with no insertMany, an uncertain batch): the same, per row', async () => {
     const { engine, store, finds } = createFaithfulEngine();
-    plantUnowned(store);
-    store.tw_widget.push({ id: 'w_unowned_2', sku: 'W-HELD-2', label: 'old', organization_id: null });
+    plantOwn(store);
     const realInsert = (engine.insert as any).getMockImplementation();
     const payloads: any[][] = [];
     (engine.insert as any).mockImplementation(async (obj: string, data: any, opts: any) => {
@@ -224,27 +193,26 @@ describe('[#24301] a scoped load over a NULL-organization holder of a natural ke
     const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({
       seeds: [{
         object: 'tw_widget', externalId: 'sku', mode: 'upsert', env: ['prod', 'dev', 'test'],
-        records: [{ sku: 'W-HELD' }, { sku: 'W-NEW' }, { sku: 'W-HELD-2' }, { sku: 'W-NEW-2' }],
+        records: [{ sku: 'W-HELD' }, { sku: 'W-NEW' }, { sku: 'W-NEW-2' }],
       }] as any[],
       config: config(ORG),
     });
 
     // One whole-array attempt, then the per-row degradation: two single inserts.
     expect(payloads.map((p) => p.map((r) => r.sku))).toEqual([['W-NEW', 'W-NEW-2'], ['W-NEW'], ['W-NEW-2']]);
-    expect(store.tw_widget.map((r) => r.sku).sort()).toEqual(['W-HELD', 'W-HELD-2', 'W-NEW', 'W-NEW-2']);
-    expect(refusalsOf(result).map((e) => e.attemptedValue)).toEqual(['W-HELD', 'W-HELD-2']);
+    expect(store.tw_widget.map((r) => r.sku).sort()).toEqual(['W-HELD', 'W-NEW', 'W-NEW-2']);
     expect(result.summary.totalInserted).toBe(2);
-    expect(finds.filter((f) => f.where?.organization_id === null)).toHaveLength(1);
+    expect(nullReads(finds)).toEqual([]);
   });
 
-  it('an unscoped load reads no NULL holders and keeps matching the unowned row', async () => {
+  it('an unscoped load reads no NULL holders either, and matches by key alone', async () => {
     const { engine, store, finds } = createFaithfulEngine();
-    plantUnowned(store);
+    plantOwn(store);
     const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({ seeds: widgets('upsert'), config: config() });
 
-    expect(refusalsOf(result)).toEqual([]);
+    expect(result.errors).toEqual([]);
     expect(store.tw_widget.filter((r) => r.sku === 'W-HELD')).toHaveLength(1);
     expect(store.tw_widget.find((r) => r.sku === 'W-HELD')?.label).toBe('held');
-    expect(finds.some((f) => f.where?.organization_id === null)).toBe(false);
+    expect(nullReads(finds)).toEqual([]);
   });
 });

@@ -29,7 +29,7 @@ import {
 } from '@objectstack/platform-objects/apps';
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
 import { PLATFORM_OWNER_EMAIL_ENV, resolvePlatformOwnerEmail, resolveTenancyPosture } from '@objectstack/types';
-import { inProcessSessionReadInput } from '@objectstack/types';
+import { inProcessSessionReadInput, resolveThrownHttpError } from '@objectstack/types';
 import { postureEnforcesWall, type OrgScopingEntitlement } from '@objectstack/spec/security';
 import type { AuthSessionApi, IDataEngine, IEmailService, II18nService, IObjectQLEngine, ISmsService } from '@objectstack/spec/contracts';
 import {
@@ -3624,7 +3624,17 @@ export class AuthPlugin implements Plugin {
             ...inProcessSessionReadInput(c.req.raw.headers),
           });
         } catch (err: any) {
-          const status = typeof err?.status === 'number' ? err.status : 500;
+          // [#24773] Answer the status the refusal DECLARED, by the repo's one
+          // rule for a thrown error's status (`resolveThrownHttpError`).
+          // better-call's `APIError` — every refusal better-auth raises —
+          // carries its status twice: as the NUMBER `statusCode` (400) and as
+          // the NAME `status` ('BAD_REQUEST'). This door used to read only a
+          // numeric `status`, so each named refusal answered 500 — an
+          // `invalid_redirect_uri` redirect URI, a request with no session
+          // (`UNAUTHORIZED`) — while the body-schema `ValidationError`, whose
+          // `status` is the number 400, answered 400 from the same door. A
+          // throw that declares no status is a server fault and stays 500.
+          const { status } = resolveThrownHttpError(err, 500);
           // better-auth's `body.error` is an arbitrary upstream string, so it
           // cannot be `error.code` — that field is a closed set (ADR-0112) and
           // an unbounded source defeats it. Keep the code ours and carry the

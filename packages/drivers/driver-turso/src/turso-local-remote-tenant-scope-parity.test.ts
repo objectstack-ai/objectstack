@@ -27,9 +27,11 @@
  * For each door, on both faces, a call scoped to one organization against
  * another organization's rows: excluded, `null`, `false`, `0` or untouched on
  * disk, and the scoped call's same-organization control answers as an unscoped
- * call would. A platform row (no organization) is inside the scope on both
- * faces: that is the chokepoint's NULL-organization arm, kept by construction
- * because the remote face compiles the chokepoint's own predicate. The final
+ * call would. A row with no organization is OUTSIDE the scope on both faces:
+ * NULL is not an owner (ADR-0131 D1), and the chokepoint carries no `IS NULL`
+ * arm since 18.x retired it after the upgrade ceremony (D14). Both faces agree
+ * by construction, because the remote face compiles the chokepoint's own
+ * predicate; the orphan row is what holds them to the same answer. The final
  * test runs one script on both faces and requires equal answers, and that the
  * answers they agree on are the scoped ones.
  *
@@ -68,13 +70,14 @@ const SEED = [
   { id: 'other_1', organization_id: OTHER_ORG, title: 'other one', amount: 100 },
   { id: 'other_2', organization_id: OTHER_ORG, title: 'other two', amount: 200 },
   { id: 'third_1', organization_id: THIRD_ORG, title: 'third one', amount: 300 },
-  { id: 'platform_1', organization_id: null, title: 'platform', amount: 1000 },
+  { id: 'orphan_1', organization_id: null, title: 'orphan', amount: 1000 },
 ] as const;
 
-const OTHER_IDS = ['other_1', 'other_2', 'third_1'];
+/** Every row a scoped call to the caller's organization must not reach: no organization is no tenant's. */
+const OTHER_IDS = ['other_1', 'other_2', 'third_1', 'orphan_1'];
 
 /** What a scoped call to the caller's organization may reach. */
-const IN_SCOPE_IDS = ['own_1', 'own_2', 'platform_1'];
+const IN_SCOPE_IDS = ['own_1', 'own_2'];
 
 /** The two scoped option shapes the engine sends with no Layer 0 predicate above the driver. */
 const SCOPED_SHAPES: ReadonlyArray<[string, DriverOptions]> = [
@@ -150,7 +153,7 @@ describe('a tenant-scoped call on BOTH TursoDriver faces answers one row set', (
       });
 
       for (const [shape, options] of SCOPED_SHAPES) {
-        it(`find answers the caller's organization and platform rows only (${shape})`, async () => {
+        it(`find answers the caller's organization rows only, and no organization-less row (${shape})`, async () => {
           const driver = drivers[face];
           expect(ids(await driver.find(LEDGER.name, {}, options))).toEqual(IN_SCOPE_IDS);
           // A filter naming another organization's rows still answers none.
@@ -190,7 +193,7 @@ describe('a tenant-scoped call on BOTH TursoDriver faces answers one row set', (
           { aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }] } as never,
           SCOPED,
         );
-        expect(Number(total[0]?.total)).toBe(10 + 20 + 1000);
+        expect(Number(total[0]?.total)).toBe(10 + 20);
 
         const grouped = await driver.aggregate(
           LEDGER.name,
@@ -200,6 +203,7 @@ describe('a tenant-scoped call on BOTH TursoDriver faces answers one row set', (
         const groups = grouped.map((g) => g.organization_id ?? null);
         expect(groups).not.toContain(OTHER_ORG);
         expect(groups).not.toContain(THIRD_ORG);
+        expect(groups).not.toContain(null);
         expect(groups).toContain(CALLER_ORG);
       });
 

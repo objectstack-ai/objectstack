@@ -155,10 +155,19 @@ function sweepOnce(engine: ObjectQL) {
   }).sweep();
 }
 
-/** The two passes a partitioned sweep issues: the tenant's own window, then everyone else's. */
+/**
+ * The two passes a partitioned sweep issues: the tenant's own window, then
+ * everyone else's. On the attribution field the global pass keeps its NULL arm:
+ * a deployment-level row of the ledger is about no organization by design
+ * (ADR-0131 D7), and a bare `$nin` would never reap it. On `organization_id` it
+ * carries none (ADR-0131 D1, D14): after the upgrade ceremony no tenant-scoped
+ * row is organization-less.
+ */
 const partitioned = (column: string) => [
   { created_at: { $lt: isoCutoff('365d') }, [column]: 'org_reg' },
-  { created_at: { $lt: isoCutoff('90d') }, $or: [{ [column]: { $nin: ['org_reg'] } }, { [column]: null }] },
+  column === 'organization_id'
+    ? { created_at: { $lt: isoCutoff('90d') }, [column]: { $nin: ['org_reg'] } }
+    : { created_at: { $lt: isoCutoff('90d') }, $or: [{ [column]: { $nin: ['org_reg'] } }, { [column]: null }] },
 ];
 const onePass = [{ created_at: { $lt: isoCutoff('90d') } }];
 

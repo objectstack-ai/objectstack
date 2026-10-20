@@ -79,7 +79,7 @@ const TENANT = { name: 'probe_org', fields: { name: { type: 'text' }, organizati
 const TENANT_ROWS = [
   { id: 't1', name: 'A', organization_id: 'org_a' },
   { id: 't2', name: 'B', organization_id: 'org_b' },
-  { id: 't3', name: 'P', organization_id: null },
+  { id: 't3', name: 'P', organization_id: 'org_c' },
 ];
 /** [#21595] A date and a datetime on ISO-week boundary days, and the empty bucket. */
 const BUCKET = { name: 'probe_bucket', fields: { on: { type: 'date' }, at: { type: 'datetime' } } };
@@ -218,7 +218,7 @@ describe('distinct(): answered on the remote face, as the local face answers it'
 
   it('a tenant-scoped call is refused on the remote face, where the local face scopes it', async () => {
     const scoped: Parameters<TursoDriver['distinct']> = ['probe_org', 'name', undefined, { tenantId: 'org_a' }];
-    expect(sorted(await (await seeded('local')).distinct(...scoped))).toEqual(['A', 'P']);
+    expect(sorted(await (await seeded('local')).distinct(...scoped))).toEqual(['A']);
     expectRefused(await refusalOf(async () => (await seeded('remote')).distinct(...scoped)), 'A tenant-scoped `distinct()`');
   });
 });

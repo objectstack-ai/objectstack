@@ -92,7 +92,9 @@ async function bootKernel(opts: { selfHosted: boolean; approvals?: boolean }) {
     const kernel = new ObjectKernel({ logger: { level: 'silent' } } as any);
     liveKernels.push(kernel);
     await kernel.use(new ObjectQLPlugin());
-    if (opts.selfHosted) await kernel.use(new HonoServerPlugin({ port: 0 }));
+    // CORS off at both doors, as on the suite's other parity pins: it is transport
+    // policy each door configures on its own, and not what these pins compare.
+    if (opts.selfHosted) await kernel.use(new HonoServerPlugin({ port: 0, cors: false }));
     await kernel.use(new AutomationStub());
     if (opts.approvals !== false) await kernel.use(new ApprovalsServicePlugin());
     await kernel.bootstrap();
@@ -143,7 +145,7 @@ async function hostedDoor(opts: { approvals?: boolean } = {}) {
     let server: unknown;
     try { server = kernel.getService<unknown>('http.server'); } catch { server = undefined; }
     expect(server, 'the hosted shape owns no socket').toBeUndefined();
-    const app = createHonoApp({ kernel: kernel as any, prefix: PREFIX });
+    const app = createHonoApp({ kernel: kernel as any, prefix: PREFIX, cors: false });
     return {
         kernel,
         openWithTokens,

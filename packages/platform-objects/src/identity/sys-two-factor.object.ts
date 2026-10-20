@@ -82,7 +82,7 @@ export const SysTwoFactor = ObjectSchema.create({
       requiresFeature: 'twoFactor',
       refreshAfter: true,
       params: [
-        { name: 'password', label: 'Current Password', type: 'text', required: true },
+        { name: 'password', label: 'Current Password', type: 'password', required: true },
       ],
       resultDialog: {
         title: 'Two-factor authentication enabled',
@@ -110,7 +110,7 @@ export const SysTwoFactor = ObjectSchema.create({
       successMessage: '2FA disabled',
       refreshAfter: true,
       params: [
-        { name: 'password', label: 'Current Password', type: 'text', required: true },
+        { name: 'password', label: 'Current Password', type: 'password', required: true },
       ],
     },
     {
@@ -126,7 +126,7 @@ export const SysTwoFactor = ObjectSchema.create({
       description: 'Regenerate backup codes? All previous backup codes will stop working immediately.',
       refreshAfter: true,
       params: [
-        { name: 'password', label: 'Current Password', type: 'text', required: true },
+        { name: 'password', label: 'Current Password', type: 'password', required: true },
       ],
       resultDialog: {
         title: 'New backup codes generated',

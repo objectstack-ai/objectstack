@@ -981,7 +981,7 @@ export type JsonColumnResolver = (object: string, field: string) => JsonColumnFi
  *
  * The driver builds it, and this class never decides it. `TursoDriver` asks the
  * local face's own chokepoint, `SqlDriver.applyTenantScope`, for the predicate
- * and hands over what that compiles to: the NULL-organization arm, the `group`
+ * and hands over what that compiles to: the organization equality, the `group`
  * posture's membership set, and the no-tenant-context exit are all that
  * method's. This class is told WHICH rows, not WHY, as with the upsert `fence`
  * (#21185). Absent means the call carries no scope (no tenant context, or no

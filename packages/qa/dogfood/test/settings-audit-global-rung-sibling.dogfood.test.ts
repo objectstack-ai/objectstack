@@ -2,7 +2,8 @@
 //
 // [ADR-0131 D7 · 18.x step 2] The settings audit trail's global rung is the
 // deployment-level `sys_platform_setting_audit` (ruling record 6257510973,
-// Q4 A) — the EXPAND step, on the booted showcase, composed the way `os serve`
+// Q4 A) — the expand step, and step 7's retirement of the old home, on the
+// booted showcase, composed the way `os serve`
 // composes it: the audit plugin and the ownership boot guard.
 //
 // Two boots over one SQLite file:
@@ -12,17 +13,12 @@
 //      the global setting's history row is in the sibling, with no
 //      organization column; the tenant setting's stays in `sys_setting_audit`,
 //      stamped.
-//   B. The same database with an 18.0-shaped row added — what an 18.0 install
-//      wrote: the global setting's history row in `sys_setting_audit`, stamped
-//      with the Default Organization. HEAD boots over it (the boot guard does
-//      not refuse); the global rung's history is served from both tables,
-//      selected by SCOPE in `sys_setting_audit` (the 18.0 row is stamped, so a
-//      NULL-organization selector would miss it); and once the stack stops the
-//      18.0 row is still there, stamped (expand-first: only the upgrade
-//      ceremony moves it).
-//
-// This file builds its own 18.0-shaped row; the 18.x line's upgrade harness
-// boots a whole 18.0 database, and this step runs it once it lands.
+//   B. One home (18.x step 7). The upgrade ceremony moves every global-rung
+//      row an 18.0 install wrote to `sys_setting_audit` before the database is
+//      certified, so that table declares no `global` scope any more. Booted
+//      again over the same file, the engine refuses a global-scope row there
+//      — through the system context, the writer's own — and admits the same
+//      row at the tenant rung (the control).
 //
 // NOT eligible for the shared showcase project: it writes org-wide settings and
 // boots twice over its own file.
@@ -58,7 +54,7 @@ function tableRows(file: string, table: string): Array<Record<string, any>> {
   }
 }
 
-describe('[18.x step 2] the settings audit trail\'s global rung is deployment-level — expand-first', () => {
+describe('[18.x step 2] the settings audit trail\'s global rung is deployment-level', () => {
   const dir = mkdtempSync(join(tmpdir(), 'dogfood-expand-18x-'));
   const file = join(dir, 'expand.db');
   let stack: VerifyStack | undefined;
@@ -108,22 +104,14 @@ describe('[18.x step 2] the settings audit trail\'s global rung is deployment-le
     ]);
   });
 
-  describe('B. the same database with an 18.0-shaped global audit row', () => {
-    const LEGACY_AUDIT = 'expand18x_legacy_global_audit';
+  describe('B. one home: sys_setting_audit refuses a global-scope row', () => {
     let bootError: unknown;
+    const auditRow = (scope: string) => ({
+      namespace: 'ai', key: 'gateway_api_key', scope, action: 'set', source: 'api',
+      new_hash: 'hmac-sha256:18.0', encrypted: true, created_at: '2026-10-19T00:00:00.000Z',
+    });
 
     beforeAll(async () => {
-      // What an 18.0 install wrote: the global rung's history in
-      // sys_setting_audit, stamped with the Default Organization.
-      const db = new DatabaseSync(file);
-      try {
-        db.prepare(
-          'INSERT INTO "sys_setting_audit" ("id", "organization_id", "namespace", "key", "scope", "action", "source", "new_hash", "encrypted", "created_at") '
-            + 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        ).run(LEGACY_AUDIT, organizationId, 'ai', 'gateway_api_key', 'global', 'set', 'api', 'hmac-sha256:18.0', 1, '2026-10-19T00:00:00.000Z');
-      } finally {
-        db.close();
-      }
       try {
         stack = await boot(file);
       } catch (error) {
@@ -131,35 +119,27 @@ describe('[18.x step 2] the settings audit trail\'s global rung is deployment-le
       }
     }, 240_000);
 
-    it('boots: nothing about the sibling reads as the v17 shape', () => {
+    it('boots again over the same file', () => {
       expect(bootError, String((bootError as Error | undefined)?.stack ?? bootError)).toBeUndefined();
       expect(stack).toBeDefined();
     });
 
-    it('the global rung\'s history is served from both tables: the 18.0 row selected by scope, and the new one', async () => {
+    it('control: the same row at the tenant rung lands', async () => {
       const ql = await stack!.kernel.getServiceAsync<any>('objectql');
-      const where = { namespace: 'ai', key: 'gateway_api_key', scope: 'global' };
-      const legacy = rowsOf(await ql.find('sys_setting_audit', { where }, SYSTEM));
-      const current = rowsOf(await ql.find('sys_platform_setting_audit', { where }, SYSTEM));
-      expect(legacy.map((r) => r.id)).toEqual([LEGACY_AUDIT]);
-      expect(legacy[0].organization_id).toBe(organizationId);
-      expect(current).toHaveLength(1);
-
-      // And through the data API, as the platform admin reads each grid.
-      const tok = await stack!.signIn();
-      for (const [object, id] of [['sys_setting_audit', LEGACY_AUDIT], ['sys_platform_setting_audit', String(current[0].id)]] as const) {
-        const res = await stack!.apiAs(tok, 'GET', `/data/${object}`);
-        expect(res.status, object).toBe(200);
-        expect(rowsOf(await res.json()).map((r: any) => r.id), object).toContain(id);
-      }
+      await ql.insert('sys_setting_audit', auditRow('tenant'), SYSTEM);
+      const where = { namespace: 'ai', key: 'gateway_api_key', scope: 'tenant' };
+      expect(rowsOf(await ql.find('sys_setting_audit', { where }, SYSTEM))).toHaveLength(1);
     });
 
-    it('the 18.0 row keeps its place and its organization once the stack stops — nothing moved or re-stamped', async () => {
+    it('a global-scope row is refused on scope, and the table still holds none', async () => {
+      const ql = await stack!.kernel.getServiceAsync<any>('objectql');
+      await expect(ql.insert('sys_setting_audit', auditRow('global'), SYSTEM)).rejects.toMatchObject({
+        code: 'VALIDATION_FAILED',
+        fields: [expect.objectContaining({ field: 'scope' })],
+      });
       await stack?.stop();
       stack = undefined;
-      expect(tableRows(file, 'sys_setting_audit').find((r) => r.id === LEGACY_AUDIT)).toEqual(
-        expect.objectContaining({ organization_id: organizationId, scope: 'global' }),
-      );
+      expect(tableRows(file, 'sys_setting_audit').filter((r) => r.scope === 'global')).toEqual([]);
     });
   });
 });

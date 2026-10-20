@@ -125,7 +125,10 @@ export const jaJP: PlatformTranslationData = {
       },
       keys: {
         email_password_enabled: { label: 'メール/パスワードログインを有効化' },
-        signup_enabled: { label: 'セルフサービス登録を許可' },
+        signup_enabled: {
+          label: 'メールでの新規登録を許可',
+          help: 'メールとパスワードによる新規登録フォームを開きます。誰を受け入れるかは下の「セルフ登録の対象」が決めます。「招待のみ」では保留中の招待を持つアドレスのみ、「メールドメイン」では許可リストのドメインと招待済みのアドレス、「オープン」では誰でも受け入れます。オフにすると、どの対象でもフォームが閉じ、招待済みのアドレスも登録できません。',
+        },
         require_email_verification: { label: 'メール確認を必須にする' },
         membership_policy: {
           label: '新規ユーザーのメンバーシップ',
@@ -234,7 +237,7 @@ export const jaJP: PlatformTranslationData = {
         },
         google_enabled: {
           label: 'Google ログインを有効化',
-          help: 'Google Cloud Console の Google OAuth クライアント ID とシークレットが必要です。',
+          help: 'クライアント ID とクライアントシークレットの両方が解決されると Google サインインを提供します。値は下に保存したもの、またはサーバーの GOOGLE_CLIENT_ID と GOOGLE_CLIENT_SECRET(保存した値より優先)から解決されます。両方が解決されるまでは、オンでもログインページに Google ボタンは表示されません。オフにすると、サーバーが両方を設定していても Google サインインを取り下げます。OAuth クライアントは Google Cloud Console で作成してください。',
         },
         google_client_id: {
           label: 'Google クライアント ID',

@@ -1,7 +1,0 @@
----
-'@objectstack/cli': patch
----
-
-`os serve --no-server` no longer reports an ordering fault for the datasource admin routes or for the unknown-hostname guard. A boot that composes no HTTP server used to print, in its boot diagnostics, `WARN [datasource-admin] route registration failed: [Kernel] Service 'http.server' not found (… a composition/ordering fault; registration order is not a contract.)`, although nothing was at fault. With `OS_ROOT_DOMAIN` set, the same boot also printed `WARN [unknown-hostname-guard] install failed` with the same kernel text. Each now prints its own degrade line, beside the same boot's other "not mounted" lines: `WARN [datasource-admin] http.server unavailable; REST routes not installed`, and `WARN [unknown-hostname-guard] http.server unavailable; guard not installed`.
-
-What still warns: on a boot that does compose an HTTP server, a route registration that throws still prints `[datasource-admin] route registration failed` with the error, and a guard install that throws still prints `[unknown-hostname-guard] install failed` with the error. A composed boot mounts `/api/v1/datasources` and installs the hostname guard as before, including under `--no-server` when the config mounts its own `HonoServerPlugin`. Both plugins now read only the canonical `http.server` service. Their old fallback to the deprecated `http-server` alias never ran: on a boot without `http.server` the canonical read threw first. So every boot that mounted these routes or installed the guard before still does.

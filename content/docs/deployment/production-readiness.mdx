@@ -118,6 +118,11 @@ the [HARDENING.md recipes](https://github.com/objectstack-ai/objectstack/blob/ma
       response `X-Request-Id` header.
 - [ ] better-auth session TTL / refresh / revoke verified (curl
       checklist in HARDENING.md).
+- [ ] CORS admits exactly the cross-origin front-ends you serve. With no
+      `OS_CORS_ORIGIN` none is admitted (same-origin pages, the Console
+      included, need no entry); otherwise it lists each origin explicitly,
+      never `*` — the server refuses `*` at boot while credentials are on.
+      See [HARDENING.md § CORS](https://github.com/objectstack-ai/objectstack/blob/main/docs/HARDENING.md#cors).
 - [ ] Cross-tenant negative tests in CI.
 - [ ] Multi-org deployments: tenant isolation is **active**, not degraded —
       confirm `features.degradedTenancy` is `false` in `/auth/config`. A

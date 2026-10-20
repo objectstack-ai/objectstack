@@ -575,9 +575,10 @@ export const PLATFORM_SETTING_AUDIT_OBJECT = 'sys_platform_setting_audit';
  * `sys_setting_audit` — the split `sys_setting` / `sys_platform_setting` makes
  * for the values themselves.
  *
- * An 18.0 install wrote global-rung rows into `sys_setting_audit`; they stay
- * there until the upgrade ceremony moves them, so a reader of the global rung's
- * history reads both tables.
+ * An 18.0 install wrote global-rung rows into `sys_setting_audit`; the upgrade
+ * ceremony moves them to the sibling before the database is certified, so the
+ * global rung's history is the sibling alone, and `sys_setting_audit` declares
+ * no `global` scope.
  */
 export function settingAuditObjectFor(scope: string): string {
   return scope === 'global' ? PLATFORM_SETTING_AUDIT_OBJECT : SETTING_AUDIT_OBJECT;

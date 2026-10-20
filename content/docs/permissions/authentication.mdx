@@ -564,6 +564,13 @@ so a locked password stage and a locked second factor are independent states. Ea
 counter resets on a success at its own stage, and the admin **Unlock Account**
 action clears both at once.
 
+The password-stage counter and lock belong to the **account**, not to the text
+typed into the sign-in form. Both live on the `sys_user` row that the sign-in's own
+credential check resolves the address to. So every refused sign-in on that account
+counts toward its one lock, whichever spelling of the address it used. A lock refuses
+every sign-in that resolves to the account, the correct password included, and a
+successful sign-in under any spelling clears the counter.
+
 Setting `lockout_threshold` to `0` disables the **password-stage** lockout only.
 Two-factor verification keeps a built-in limit of 10 attempts per 15 minutes,
 because it is the last check before a session is issued. Two-factor verification
@@ -974,7 +981,12 @@ logged. While `mustChangePassword` is set, the user is blocked with
 `403 PASSWORD_RESET_REQUIRED` on every protected route until they complete a
 password change. It is the same gate as password expiry, under its own code,
 and like expiry it holds password sign-in only: the user's API keys are not
-held by it.
+held by it. Nor is an administrator's impersonation session, which is minted
+from the administrator's own session and is not the user's password sign-in:
+an administrator can impersonate the user to verify their access before the
+user has changed the password, while the user's own sign-in stays blocked.
+Enforced MFA (`MFA_REQUIRED`) holds the account, so it still holds an
+impersonation session of that user.
 
 #### Set / Reset a Password
 

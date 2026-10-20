@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext } from '@objectstack/core';
+import { Plugin, PluginContext, isDevelopmentBoot } from '@objectstack/core';
 import { RestServerConfig } from '@objectstack/spec/api';
 import { registerCurrentUserEndpoints } from './current-user-endpoints';
 import {
@@ -13,7 +13,7 @@ import { cors } from 'hono/cors';
 import { serveStatic } from '@hono/node-server/serve-static';
 import * as fs from 'fs';
 import * as path from 'path';
-import { createOriginMatcher, hasWildcardPattern, isLocalhostOrigin } from './pattern-matcher';
+import { createOriginMatcher, isLocalhostOrigin, normalizeOriginPatterns } from './pattern-matcher';
 import type { HttpsListenerMaterial } from './adapter';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import {
@@ -72,7 +72,18 @@ export interface HonoPluginOptions {
 
     /**
      * CORS configuration. Set to `false` to disable entirely.
-     * Enabled by default with origin '*'.
+     *
+     * Mounted by default. It admits the origins it is told about —
+     * {@link HonoCorsOptions.origins}, else `OS_CORS_ORIGIN` — and, with
+     * neither set, **no cross-origin caller**: a same-origin request needs no
+     * CORS answer, and a loopback origin (`localhost` / `127.0.0.1` / `[::1]`,
+     * any port) is admitted on a development boot only (`NODE_ENV` exactly
+     * `development`, which `os dev` and `os serve --dev` set).
+     *
+     * `'*'` together with credentials (on unless turned off) is refused at
+     * init, so the boot fails: name the origins instead, or turn credentials
+     * off to serve `'*'` to anonymous callers.
+     *
      * Can also be controlled via environment variables:
      *   OS_CORS_ENABLED, OS_CORS_ORIGIN, OS_CORS_CREDENTIALS, OS_CORS_MAX_AGE
      *   (legacy CORS_* names still honoured with a deprecation warning).
@@ -357,50 +368,71 @@ export class HonoServerPlugin implements Plugin {
         }
 
         // ─── CORS Middleware ──────────────────────────────────────────────────
-        // Enabled by default. Controlled via options.cors or environment variables.
+        // Mounted by default. Controlled via options.cors or environment variables.
+        //
+        // What it ADMITS is decided here, and the governing text is
+        // `docs/HARDENING.md` § CORS: never `'*'` with credentials, and an origin
+        // list that is explicit. So the answer follows what was configured, and
+        // nothing else:
+        //
+        //  - a list (`cors.origins`, else `OS_CORS_ORIGIN`) — the pattern matcher
+        //    admits exactly that list (its own loopback convenience included);
+        //  - no list — no cross-origin caller. Nothing here needs the host's own
+        //    origin: a browser applies CORS to cross-origin requests only, so the
+        //    Console and every page this server serves are untouched. A loopback
+        //    origin is admitted on a development boot only — `isDevelopmentBoot`,
+        //    the same reading the auth secret's development fallback uses; the
+        //    transport has no `--dev` flag of its own, and `os serve --dev` sets
+        //    `NODE_ENV=development` before any plugin initialises;
+        //  - `'*'` in the list while credentials are on — refused, here, so the
+        //    boot fails (`kernel.bootstrap()` rethrows an `init()` throw, the
+        //    route `@objectstack/plugin-dev`'s production guard takes). It used
+        //    to be turned into "reflect whatever origin asked", silently.
         const corsDisabledByEnv = readEnvWithDeprecation('OS_CORS_ENABLED', 'CORS_ENABLED', { silent: true }) === 'false';
         if (this.options.cors !== false && !corsDisabledByEnv) {
             const corsOpts = typeof this.options.cors === 'object' ? this.options.cors : {};
             const enabled = corsOpts.enabled ?? true;
 
             if (enabled) {
-                let configuredOrigin: string | string[];
+                // `undefined` = nobody named a list: the default described above.
+                let configuredOrigin: string | string[] | undefined;
                 const corsOriginEnv = readEnvWithDeprecation('OS_CORS_ORIGIN', 'CORS_ORIGIN', { silent: true });
                 if (corsOpts.origins) {
                     configuredOrigin = corsOpts.origins;
                 } else if (corsOriginEnv) {
                     const envOrigin = corsOriginEnv.trim();
                     configuredOrigin = envOrigin.includes(',') ? envOrigin.split(',').map(s => s.trim()) : envOrigin;
-                } else {
-                    configuredOrigin = '*';
                 }
 
                 const credentials = corsOpts.credentials ?? (readEnvWithDeprecation('OS_CORS_CREDENTIALS', 'CORS_CREDENTIALS', { silent: true }) !== 'false');
                 const maxAgeEnv = readEnvWithDeprecation('OS_CORS_MAX_AGE', 'CORS_MAX_AGE', { silent: true });
                 const maxAge = corsOpts.maxAge ?? (maxAgeEnv ? parseInt(maxAgeEnv, 10) : 86400);
 
-                // Determine origin handler based on configuration.
-                // Always use a function so that localhost origins are
-                // automatically allowed regardless of the configured
-                // pattern list (handled inside matchOriginPattern /
-                // createOriginMatcher).
-                let origin: string | string[] | ((origin: string) => string | undefined | null);
+                // Always a function, so `hono/cors` never sees a bare `'*'` and
+                // every answer passes through one of the two branches below.
+                let origin: (requestOrigin: string) => string | null;
+                let admits: string | string[];
 
-                // When credentials is true, browsers reject wildcard '*' for Access-Control-Allow-Origin.
-                // For wildcard patterns (like "https://*.example.com"), always use a matcher function.
-                // For exact origins, we can pass them directly as string/array.
-                if (configuredOrigin === '*' && credentials) {
-                    // Credentials mode with '*' - reflect the request origin
-                    origin = (requestOrigin: string) => requestOrigin || '*';
-                } else if (hasWildcardPattern(configuredOrigin)) {
-                    // Wildcard patterns (including better-auth style patterns like "https://*.objectui.org")
-                    // Use pattern matcher to support subdomain and port wildcards
-                    origin = createOriginMatcher(configuredOrigin);
+                if (configuredOrigin === undefined) {
+                    const developmentBoot = isDevelopmentBoot(undefined);
+                    origin = (requestOrigin: string) =>
+                        developmentBoot && isLocalhostOrigin(requestOrigin) ? requestOrigin : null;
+                    admits = developmentBoot ? 'loopback origins only (development boot)' : 'no cross-origin caller';
                 } else {
-                    // Exact origin(s) — wrap in a function so localhost is
-                    // still auto-allowed via the matcher.
-                    const matcher = createOriginMatcher(configuredOrigin);
-                    origin = (requestOrigin: string) => matcher(requestOrigin);
+                    if (credentials && normalizeOriginPatterns(configuredOrigin).includes('*')) {
+                        throw new Error(
+                            "@objectstack/plugin-hono-server refuses CORS origin '*' with credentials: together "
+                            + 'they admit every origin for credentialed cross-origin requests. Name the origins '
+                            + 'that may call with credentials (OS_CORS_ORIGIN=https://app.example.com, '
+                            + 'comma-separated, or the `cors.origins` option), or set OS_CORS_CREDENTIALS=false '
+                            + "(or `cors.credentials: false`) to serve '*' without credentials.",
+                        );
+                    }
+                    // Exact origins and wildcard patterns ("https://*.example.com",
+                    // "http://localhost:*") alike — one matcher, the one the
+                    // serverless preflight short-circuit shares.
+                    origin = createOriginMatcher(configuredOrigin);
+                    admits = configuredOrigin;
                 }
 
                 const rawApp = this.server.getRawApp();
@@ -415,7 +447,7 @@ export class HonoServerPlugin implements Plugin {
                 ]));
 
                 rawApp.use('*', cors({
-                    origin: origin as any,
+                    origin,
                     allowMethods: corsOpts.methods || ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'],
                     allowHeaders,
                     exposeHeaders,
@@ -423,7 +455,7 @@ export class HonoServerPlugin implements Plugin {
                     maxAge,
                 }));
 
-                ctx.logger.debug('CORS middleware enabled', { origin: configuredOrigin, credentials });
+                ctx.logger.debug('CORS middleware enabled', { origin: admits, credentials });
             }
         }
 
