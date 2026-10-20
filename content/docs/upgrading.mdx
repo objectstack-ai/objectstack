@@ -114,7 +114,9 @@ command for this move; it is four steps you run yourself.
 
    The list names every skill the catalog carried during 17.x, and a name that
    is not installed is skipped; `npx skills remove --all` does the same when
-   these are the only skills the project has.
+   these are the only skills the project has. Run `npx skills list` first:
+   `--all` removes every installed skill without asking, so use it only when
+   the list shows nothing but these.
 
 Then run [the loop](#the-loop) below — `os validate` before `os build` — because
 moving the pins can move the gate.
@@ -364,9 +366,18 @@ command.
 6. Apply exactly that plan:
    `os migrate organization-ownership --apply --plan-file plan.json --backup-taken`.
 7. Start the server again.
-8. Clear the orphaned columns the first served boot still reports:
-   `os migrate comment-reactions --apply --yes`, then
-   `os migrate apply --allow-destructive --yes`.
+8. Clear the orphaned columns the first served boot still reports, and only
+   those. Preview the reactions with `os migrate comment-reactions`, then carry
+   them with `os migrate comment-reactions --apply --yes`. Then run
+   `os migrate plan` and check that its destructive entries are only the
+   columns the ceremony left behind (in the walk: `sys_comment.reactions`,
+   `sys_sso_provider.created_by`, `sys_sso_provider.updated_by`). Any other
+   destructive entry is your app's own and is decided separately, not in this
+   step: `os migrate apply --allow-destructive` applies every destructive change
+   in the plan. Then run `os migrate apply --allow-destructive` in a terminal and
+   answer its `[y/N]` prompt after reading the changes it lists. In a
+   non-interactive shell it applies nothing, prints
+   `⚠ Confirmation required. Re-run with --yes to apply …` and still exits `0`.
 
 Each step's measured output, from a walk of a 17.7.0 app to 18.0.0, is in
 [the 18.0.0 upgrade checklist, step 2](/docs/releases/v18/18-0#2-upgrade-the-database).

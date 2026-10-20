@@ -176,6 +176,8 @@ not walked, and no upgrade of a production application was run for this page.
   npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
   ```
 
+  `npx skills list` shows what is installed first — the walk listed the ten
+  `objectstack-*` skills — and the removal deletes only the names it is given.
   Run before the removal, the sync skips every skill a `skills add` installed,
   exits `0`, and leaves the 17.x-era skill text in place:
 
@@ -256,15 +258,29 @@ the lines below are the walk's measured output for each step.
   `org_owner` and `admin_full_access`; the three notes read back with their
   organization, and a fourth was written; an API key minted on 17.7.0 still
   answered `200`. *Measured in the walk.*
-- **Then clear the drift that remains.** The first served boot still logged
-  three orphaned columns (`sys_comment.reactions`,
-  `sys_sso_provider.created_by` / `updated_by`). Carry the stored emoji
+- **Then clear the drift the ceremony leaves, and only that.** The first served
+  boot still logged three orphaned columns (`sys_comment.reactions`,
+  `sys_sso_provider.created_by` / `updated_by`; on the `group` walk's database
+  also the index `idx_sys_sso_provider_organization_id`). Carry the stored emoji
   reactions into `sys_comment_reaction` records first —
   `os migrate comment-reactions` to preview, then
   `os migrate comment-reactions --apply --yes`, which printed
   `✓ Converted 1 reaction(s); … the run is recorded as verified` (`9963322`,
-  `6673c80`) — then `os migrate apply --allow-destructive --yes`, which dropped
-  the three columns. The next boot logged no drift, and the reaction read back
+  `6673c80`); without `--yes` it applies nothing and asks for it. Then run
+  `os migrate plan` and read its destructive entries: ⛔ go on only if they are
+  the ceremony's leftovers listed here. `os migrate apply --allow-destructive`
+  applies **every** destructive change in the plan, drops and tightenings
+  alike, so any other entry is your app's own — a column that may hold data —
+  and is decided separately, not in this step. Then run
+  `os migrate apply --allow-destructive` in a terminal: it prints the changes
+  and asks `Apply 4 change(s) to DATABASE? [y/N]` (four on the `group` walk's copy); answer
+  `y` only when the list is the one you checked (`n` printed
+  `ℹ Aborted — no changes made.`). In a non-interactive shell it applies
+  nothing, prints
+  `⚠ Confirmation required. Re-run with --yes to apply, or use "os migrate plan" to preview.`
+  and still exits `0`: read the output, not the exit code. The walk itself ran
+  `os migrate apply --allow-destructive --yes` after that check, which dropped
+  the three columns; the next boot logged no drift, and the reaction read back
   from `sys_comment_reaction`. *Measured in the walk.*
 
 **A development database (`os dev`).** Measured on a 17.7.0 app whose database

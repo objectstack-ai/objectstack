@@ -111,7 +111,9 @@ every flag is in
   project, `npm install --save-dev` fails (`npm error Cannot read properties of
   null (reading 'edgesOut')`, measured on the [18.0.0 upgrade
   walk](/docs/releases/v18/18-0#1-move-the-pins)). `npx skills remove --all`
-  replaces the first command when these are the only skills the project has.
+  replaces the first command when these are the only skills the project has:
+  run `npx skills list` first, because `--all` removes every installed skill
+  without asking.
 - **18.0.0 ends the prerelease.** It is the GA cut: it leaves pre mode and
   publishes the line to `latest`.
 
