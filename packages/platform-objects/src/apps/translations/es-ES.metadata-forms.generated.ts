@@ -226,7 +226,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.expression": {
         label: "Expresión",
-        helpText: "Expresión de fórmula CEL"
+        helpText: "Expresión CEL con la que se calcula el valor del campo. En un campo de fórmula: se calcula al leer, sin columna almacenada. En cualquier otro campo: el motor lo calcula a partir de la fila que guarda cada escritura y lo almacena, por lo que un valor enviado por el cliente nunca prevalece."
       },
       "fields.returnType": {
         label: "Tipo de retorno",
@@ -763,7 +763,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       expression: {
         label: "Expresión",
-        helpText: "Expresión CEL para calcular este campo (lo hace de solo lectura)"
+        helpText: "Expresión CEL con la que se calcula el valor del campo. En un campo de fórmula: se calcula al leer, sin columna almacenada. En cualquier otro campo: el motor lo calcula a partir de la fila que guarda cada escritura y lo almacena, por lo que un valor enviado por el cliente nunca prevalece."
       },
       returnType: {
         label: "Tipo de retorno",
