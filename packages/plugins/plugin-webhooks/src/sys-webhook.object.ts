@@ -85,8 +85,12 @@ export const SysWebhook = ObjectSchema.create({
       label: 'By Object',
       data: { provider: 'object', object: 'sys_webhook' },
       columns: ['object_name', 'label', 'url', 'active', 'updated_at'],
+      // [#24701] Ordered by the target object, not grouped on it: a group header
+      // draws `object_name` as its stored API name, while the Object cell draws
+      // the object's icon and label (its `object-ref` widget). No column stores
+      // the label, so no grouping key could carry it. The sort keeps one
+      // object's webhooks together (`sys-webhook.by-object.test.ts`).
       sort: [{ field: 'object_name', order: 'asc' }, { field: 'label', order: 'asc' }],
-      grouping: { fields: [{ field: 'object_name', order: 'asc', collapsed: false }] },
       pagination: { pageSize: 100 },
     },
     all_webhooks: {

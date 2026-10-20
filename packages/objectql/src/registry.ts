@@ -6206,18 +6206,29 @@ export class SchemaRegistry {
   }
 
   /**
-   * Merge editable manifest fields (name / description / version) into an
-   * installed package — the in-memory half of `PATCH /packages/:id`.
+   * Merge editable manifest fields (name / description / version /
+   * dependencies) into an installed package — the in-memory half of
+   * `PATCH /packages/:id`.
    *
    * Only the human-editable fields are touched: `id` is identity (never
    * changes here), and lifecycle facets (`status` / `enabled` / `installedAt`)
    * are preserved — this is a metadata edit, NOT a reinstall (which
    * `installPackage` would be, resetting exactly those). Undefined patch
    * fields are ignored so a partial PATCH only overwrites what it sends.
+   *
+   * [#24670] `dependencies` is replaced WHOLE, never deep-merged: the row the
+   * caller sends is the declaration, so an entry it leaves out is removed and
+   * `{}` clears it. The registry keeps its own copy of the row. Replacing the
+   * object (rather than editing the stored one in place) is also what keeps
+   * the protocol's pre-patch snapshot — a shallow copy of the manifest — able
+   * to put the prior row back when the durable write fails. The row is judged
+   * by the door before it gets here (`ManifestSchema`'s `dependencies` row);
+   * the closure the save door reads off it is resolved per write, so the next
+   * save sees the edit with nothing cached to retire.
    */
   updatePackageManifest(
     id: string,
-    patch: { name?: string; description?: string; version?: string },
+    patch: { name?: string; description?: string; version?: string; dependencies?: Record<string, string> },
   ): InstalledPackage | undefined {
     const pkg = this.getPackage(id);
     if (!pkg) return undefined;
@@ -6225,6 +6236,7 @@ export class SchemaRegistry {
     if (patch.name !== undefined) manifest.name = patch.name;
     if (patch.description !== undefined) manifest.description = patch.description;
     if (patch.version !== undefined) manifest.version = patch.version;
+    if (patch.dependencies !== undefined) manifest.dependencies = { ...patch.dependencies };
     pkg.updatedAt = new Date().toISOString();
     this.log(`[Registry] Updated package manifest: ${id}`);
     return pkg;
