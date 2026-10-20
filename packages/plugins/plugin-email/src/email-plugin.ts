@@ -201,7 +201,7 @@ async function resolveMailTestRecipient(
     row = await engine.findOne(
       ACCOUNT_OBJECT,
       { where: { id: userId }, fields: ['email'] },
-      { context: SYSTEM_CTX },
+      { context: { isSystem: true } },
     );
   } catch (err: any) {
     return {
