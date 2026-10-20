@@ -30,6 +30,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import type { EngineCountOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { bindDelegationWriteGuard } from './lifecycle-hooks.js';
 
@@ -63,17 +64,22 @@ const delegatorField = (): Record<string, any> =>
   (SysApprovalDelegation.fields as Record<string, any>).delegator_id;
 
 /**
- * The picker's candidate `where`, from the declared `lookupFilters`. The
+ * The picker's candidate query, from the declared `lookupFilters`. The
  * console lowers each `eq` entry to `{ [field]: value }` and sends it as the
  * `$filter` of its `sys_user` query (objectui `lookupFiltersToRecord`); the
  * declaration test holds that every entry here is `eq`.
  */
-function pickerWhere(): Record<string, unknown> {
+function pickerQuery(): EngineQueryOptions {
   const filters = (delegatorField().lookupFilters ?? []) as LookupFilter[];
   const where: Record<string, unknown> = {};
   for (const f of filters) where[f.field] = f.value;
-  return where;
+  return { where };
 }
+
+/** The delegations that name Priya as delegator. */
+const PRIYA_AS_DELEGATOR: EngineCountOptions = { where: { delegator_id: 'u_priya' } };
+
+const byId = (id: string): EngineQueryOptions => ({ where: { id } });
 
 describe('sys_approval_delegation — the Delegator picker offers only what the write guard admits', () => {
   let engine: ObjectQL;
@@ -112,12 +118,12 @@ describe('sys_approval_delegation — the Delegator picker offers only what the 
   });
 
   it.each(USERS.map((u) => [u.id]))('the picker offers %s themselves and nobody else', async (caller) => {
-    const candidates = await engine.find('sys_user', { where: pickerWhere() } as any, asUser(caller));
+    const candidates = await engine.find('sys_user', pickerQuery(), asUser(caller));
     expect(candidates.map((r: any) => r.id)).toEqual([caller]);
   });
 
   it('every candidate the picker offers is admitted by the guard', async () => {
-    const candidates = await engine.find('sys_user', { where: pickerWhere() } as any, asUser('u_admin'));
+    const candidates = await engine.find('sys_user', pickerQuery(), asUser('u_admin'));
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
       const created = await engine.insert(
@@ -128,11 +134,11 @@ describe('sys_approval_delegation — the Delegator picker offers only what the 
   });
 
   it('the guard is not widened: a create naming anyone else is refused FORBIDDEN / 403 and stores nothing', async () => {
-    const before = await engine.count(OBJECT, { where: { delegator_id: 'u_priya' } } as any, SYSTEM);
+    const before = await engine.count(OBJECT, PRIYA_AS_DELEGATOR, SYSTEM);
     await expect(
       engine.insert(OBJECT, { delegator_id: 'u_priya', delegate_id: 'u_tomas' }, asUser('u_admin')),
     ).rejects.toMatchObject({ code: 'FORBIDDEN', statusCode: 403 });
-    expect(await engine.count(OBJECT, { where: { delegator_id: 'u_priya' } } as any, SYSTEM)).toBe(before);
+    expect(await engine.count(OBJECT, PRIYA_AS_DELEGATOR, SYSTEM)).toBe(before);
   });
 
   it('the guard is not widened: an update relabelling the delegator is refused FORBIDDEN / 403', async () => {
@@ -140,7 +146,7 @@ describe('sys_approval_delegation — the Delegator picker offers only what the 
     await expect(
       engine.update(OBJECT, { id: own.id, delegator_id: 'u_priya' }, asUser('u_admin')),
     ).rejects.toMatchObject({ code: 'FORBIDDEN', statusCode: 403 });
-    const row = await engine.findOne(OBJECT, { where: { id: own.id } } as any, SYSTEM);
+    const row = await engine.findOne(OBJECT, byId(own.id), SYSTEM);
     expect(row?.delegator_id).toBe('u_admin');
   });
 
