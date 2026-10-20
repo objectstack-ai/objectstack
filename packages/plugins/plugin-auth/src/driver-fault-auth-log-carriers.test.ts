@@ -47,6 +47,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /** The caller's value. Synthetic; asserted ABSENT from every carrier. */
 const S = 'SENTINEL-21274-BOUND-VALUE';
@@ -252,6 +253,10 @@ for (const cell of CELLS) {
         engine.registry.registerObject(sysPermissionSet as never, '@objectstack/plugin-security');
         engine.registry.registerObject(sysUserPermissionSet as never, '@objectstack/plugin-security');
         await engine.syncSchemas();
+        // The organization-less rows below (global sets, grants, identities) exist
+        // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column
+        // NOT NULL): this is that store.
+        await relaxEveryRegisteredTenantColumn(engine);
 
         // The seeded holder of the sentinel, then the constraint the two writes
         // below will meet in the DATABASE — not in any check of ours.

@@ -66,6 +66,7 @@ import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js
 import { sqliteEnginePool, type BootedSqliteEngine } from './__tests__/sqlite-engine-pool.testkit.js';
 import { admin } from 'better-auth/plugins/admin';
 import { organization } from 'better-auth/plugins/organization';
+import { relaxEveryRegisteredTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -290,6 +291,10 @@ async function bootEngine(opts: BootOptions, track?: ObjectQL[]): Promise<Booted
     engine.registry.registerObject(o as never);
   }
   await engine.syncSchemas();
+  // The organization-less rows below (global sets, grants, identities) exist
+  // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column
+  // NOT NULL): this is that store.
+  await relaxEveryRegisteredTenantColumn(engine);
   const names = new Set<string>();
   catalogs.set(engine, names);
   const catalog = () => ({ permissions: [...names].map((name) => ({ name })) });
