@@ -68,7 +68,8 @@ import { settingsBuiltinTranslations } from './translations/index.js';
  * "Not offered" is the registry's own answer, so every door agrees without a
  * second rule: the namespace is absent from `GET /api/settings`, a read or
  * write of it is refused `404 UNKNOWN_NAMESPACE` by the path every unknown
- * namespace takes, and the runtime-config door finds nothing to read.
+ * namespace takes, and the runtime-config door finds nothing to read. Its
+ * Setup entry travels with it ({@link UNWALLED_ONLY_SETUP_NAV}).
  *
  * Such a manifest is held back at `init()` and registered from the
  * `kernel:ready` hook once the posture IN FORCE is known: during `init()` the

@@ -535,7 +535,11 @@ describe('AuthPlugin', () => {
     // for an unregistered namespace), so a binding that skipped the listing
     // check would log the warn this pins away.
     it('a walled boot (branding not listed) neither reads it nor warns about it', async () => {
-      const settings = makeSettings(new Error("Unknown settings namespace: 'branding'"), { brandingListed: false });
+      const settings = makeSettings({ value: undefined, source: 'default' }, { brandingListed: false });
+      settings.get.mockImplementation(async (namespace: string) => {
+        if (namespace === 'branding') throw new Error("Unknown settings namespace: 'branding'");
+        return { value: undefined, source: 'default' };
+      });
       await bootWithSettings(settings);
 
       expect(settings.get).not.toHaveBeenCalledWith('branding', 'workspace_name', expect.anything());
