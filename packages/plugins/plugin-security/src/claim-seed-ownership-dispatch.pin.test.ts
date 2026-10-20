@@ -53,6 +53,7 @@ import {
 } from '@objectstack/spec/data';
 
 import { claimSeedOwnership } from './claim-seed-ownership.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as const;
 const ADMIN = 'usr_admin_human';
@@ -115,6 +116,9 @@ async function boot() {
     objects: [PROBE_OBJECT],
   } as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   engines.push(engine);
 
   const metadataHook: Seen[] = [];

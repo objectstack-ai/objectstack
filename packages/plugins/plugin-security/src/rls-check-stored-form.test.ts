@@ -78,6 +78,7 @@ import {
   storedFormCheckJudge,
   storedFormImage,
 } from './rls-check-stored-form.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** A plain object — a filter node or an operator map. */
 function isPlain(value: unknown): value is Record<string, unknown> {
@@ -172,6 +173,9 @@ async function boot(makeDriver: () => Driver, predicate: string, using: string =
     ],
   } as never);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   booted.push(engine);
 
   const set = PermissionSetSchema.parse({

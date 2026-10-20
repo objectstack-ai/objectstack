@@ -43,6 +43,7 @@ import {
   reservedIdentityNameMessage,
 } from './reserved-identity-names.js';
 import { DelegatedAdminGate } from '../delegated-admin-gate.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {
@@ -67,6 +68,9 @@ async function boot(): Promise<ObjectQL> {
     objects: [SysUserPosition],
   } as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   engines.push(engine);
   return engine;
 }

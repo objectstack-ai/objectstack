@@ -39,6 +39,7 @@ import {
   GRANT_HOLDER_MEMBERSHIP_HOOK_PACKAGE,
   registerGrantHolderMembershipRefusal,
 } from './grant-holder-membership-refusal.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -139,6 +140,9 @@ async function boot(opts: BootOptions = {}) {
     ],
   } as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   // `sys_user` stays registered and unprovisioned, as in the sibling suites:
   // the engine's own `user_id` existence probe then cannot run and stands
   // down, so what is measured here is the membership predicate alone.
