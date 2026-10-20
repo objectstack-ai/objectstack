@@ -206,8 +206,8 @@ describe('every step of an approval run names the run\'s original submitter (#24
   let now = Date.parse('2026-10-20T09:00:00.000Z');
   const emits: Emitted[] = [];
 
-  /** Start `flow` on a fresh deal as `userId`; answer the step it paused on. */
-  const submit = async (flow: string, key: string, amount = 100, userId: string | undefined = SUBMITTER): Promise<any> => {
+  /** Start `flow` on a fresh deal as `userId` (`null`: no user); answer the step it paused on. */
+  const submit = async (flow: string, key: string, amount = 100, userId: string | null = SUBMITTER): Promise<any> => {
     const record = { id: `D_${key}`, title: key, amount, organization_id: ORG };
     await engine.insert('crm_deal', record, { context: SYSTEM } as any);
     const run = await automation.execute(flow, {
@@ -316,7 +316,7 @@ describe('every step of an approval run names the run\'s original submitter (#24
   });
 
   it('a run whose trigger resolved no user opens its later step with no submitter, never the decider', async () => {
-    const step1 = await submit('deal_chain', 'userless', 5000, undefined);
+    const step1 = await submit('deal_chain', 'userless', 5000, null);
     expect(step1.submitter_id ?? null).toBeNull();
     await approve(step1, 'u_mgr');
     const step2 = await pendingOn('D_userless');

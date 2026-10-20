@@ -3450,6 +3450,13 @@ export class ApprovalService implements IApprovalService {
       flowLabel?: string;
       /** Authored node label, snapshotted for inbox display. */
       nodeLabel?: string;
+      /**
+       * Who submitted the run this step belongs to — the approval node passes
+       * its trigger user. `null` is an answer: the trigger resolved no user, so
+       * the step has no submitter. Only an OMITTED value falls back to the
+       * acting context's user: on a later step that context is the previous
+       * step's decider, who did not submit the run.
+       */
       submitterId?: string | null;
       record?: any;
       organizationId?: string | null;
@@ -3730,12 +3737,13 @@ export class ApprovalService implements IApprovalService {
       const n = Array.isArray(prior) ? prior.length : 0;
       if (n > 0) configSnapshot.__round = n + 1;
     } catch { /* round display is best-effort */ }
+    const submitterId = input.submitterId !== undefined ? input.submitterId : (context.userId ?? null);
     const row: any = {
       id,
       process_name: processName,
       object_name: input.object,
       record_id: input.recordId,
-      submitter_id: input.submitterId ?? context.userId ?? null,
+      submitter_id: submitterId,
       status: 'pending',
       // [#23889] The display snapshots the approval lists show: the flow's and
       // the node's authored labels as the flow engine handed them over, and
@@ -3762,7 +3770,7 @@ export class ApprovalService implements IApprovalService {
     await this.engine.insert('sys_approval_action', await this.actionRow(row, {
       id: uid('aact'), request_id: id, organization_id: requestOrg,
       step_name: input.nodeId, step_index: 0, action: 'submit',
-      actor_id: input.submitterId ?? context.userId ?? null, comment: null, created_at: now,
+      actor_id: submitterId, comment: null, created_at: now,
     }), { context: SYSTEM_CTX });
 
     // [#22824] The request's display says why it is with the administrators:
