@@ -9,7 +9,7 @@
       "title": "Provider-bound declarative connectors materialize at boot for every installed provider kind (rest/openapi/mcp), list with origin:'declarative' state:'ready', and dispatch end-to-end from connector_action",
       "since": "v15.1",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -82,7 +82,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "packages/qa/dogfood/test/showcase-declarative-mcp.dogfood.test.ts — ⚠️ covers PART of this item, clause by clause: negative[0] whole (showcase_erp_catalog is absent from the runtime listing); acceptance[0]'s mcp variant whole (origin 'declarative', state 'ready'), and of the rest and openapi variants their state 'ready' only — their origin is not asserted; acceptance[1]'s mcp half as containment (echo_upper is among the actions), not the openapi half (getHealth); acceptance[2]'s mcp dispatch (the echo flow's output carries OBJECTSTACK), not the rest ping. acceptance[3]–[5] and negative[1] (the authoring refusals, the unknown-provider boot error, the disabled declaration) rest on no pin — drive them by hand"
+        "ref": "packages/qa/dogfood/test/showcase-declarative-mcp.dogfood.test.ts — negative[0] ONLY: its case 'materializes all three generic-executor instances at boot — mcp included, state ready' asserts that showcase_erp_catalog is absent from the runtime listing. No pin asserts a full acceptance clause, so acceptance[0]–[5] and negative[1] are driven by hand. That case and the dispatch case 'dispatches the MCP tool end-to-end through the flow connector_action' assert halves only: acceptance[0]'s mcp variant (origin 'declarative', state 'ready') and the rest and openapi variants' state 'ready', not their origin, where the clause asks one verdict per variant; acceptance[1]'s mcp half as containment (echo_upper is among the actions), not the openapi half (getHealth); acceptance[2]'s mcp dispatch (the echo flow's output carries OBJECTSTACK), not the rest ping. acceptance[3]–[5] and negative[1] (the authoring refusals, the unknown-provider boot error, the disabled declaration) rest on no pin at all"
       },
       "source": [
         "docs/plans/release-15.1-test-plan.md §B1 (#2994/#3062)",
@@ -110,6 +110,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed clause by clause, in the scope-depth-asymmetry shape — round 2 part 1 of wave anchor #24579 (comment 6272032736: Tier 1 run #24598 named this ref among those that over-claim clause coverage). QA run #24575 scored every clause pass on the pin's 2/2; read against the spec, its two cases cover negative[0], acceptance[0]'s mcp variant and the other two variants' state, and the mcp halves of acceptance[1] and [2] only. No clause changed",
           "ref": "#24717"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed to the one clause its pin asserts whole — checklist-accuracy finding of QA run #24779 (18.0 sweep round 3, 580fd4ed; wave anchor #24579 round 12, round 6's theme-B rule). Re-read at base 307ce4c4b4: the dogfood pin's two cases assert negative[0] whole and halves of acceptance[0]–[2] (the mcp variant; the other two variants' state, not their origin), so no acceptance clause is pin-scored and the ref now says so. `automated` stays, with negative[0]. No clause changed",
+          "ref": "#24824"
         }
       ]
     },
@@ -118,7 +124,7 @@
       "title": "An unreachable connector upstream degrades that ONE instance (CONNECTOR_UPSTREAM_UNAVAILABLE) instead of failing boot, retries on 5s→300s backoff, and recovers atomically — while config faults stay boot-fatal",
       "since": "v15.1",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -135,7 +141,7 @@
         "watch the log through at least three retry cycles; record the intervals",
         "restore the upstream (fix the script path is a config CHANGE — instead restore by making the original path valid again, e.g. re-adding the file) WITHOUT restarting; wait one backoff cycle; re-read the descriptor. At the default `warn` log level the visible sign of the swap is the engine's warn `Connector 'showcase_mcp_tools' replaced`; the '[Automation] recovered connector instance …' line is info-level and prints only on a --log-level info boot (QA run #24575)",
         "separately, boot the config-fault twin and capture that boot's outcome",
-        "trigger a metadata:reloaded reconcile WITHOUT a restart and confirm it retries immediately while the attempt count keeps climbing. A per-item publish announces one: QA run #24575 used PUT /api/v1/meta/view/NAME?mode=draft, then POST /api/v1/meta/view/NAME/publish, and the retry followed 1.2 s later. ⛔ Not by touching or saving the entry's source: under os dev that rebuilds and RESTARTS the server (dev's --restart default), which discards the in-memory retry state instead of reconciling it. Only a config edit to the entry, a changed materialization signature, resets the backoff; this item does not drive that arm live"
+        "trigger a metadata:reloaded reconcile WITHOUT a restart and confirm it retries immediately while the attempt count keeps climbing. A per-item publish announces one: QA run #24575 used PUT /api/v1/meta/view/NAME?mode=draft, then POST /api/v1/meta/view/NAME/publish, and the retry followed 1.2 s later. The PUT body is a current view item (ViewItemSchema, packages/spec/src/ui/view.zod.ts): { name: 'OBJECT.NAME', object, viewKind: 'list', config: { type: 'grid', data: { provider: 'object', object }, columns: [...] } }, its name qualified by the object (QA run #24779 used showcase_task.qa_b_reload_view). A flat { type, columns } body answers 422 unrecognized_keys, and nothing is published. ⛔ Not by touching or saving the entry's source: under os dev that rebuilds and RESTARTS the server (dev's --restart default), which discards the in-memory retry state instead of reconciling it. Only a config edit to the entry, a changed materialization signature, resets the backoff; this item does not drive that arm live"
       ],
       "acceptance": [
         {
@@ -201,6 +207,12 @@
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3; wave anchor #24579 §3, which lists it under automation). acceptance[3].verify and steps[6] said a reload reconcile resets the backoff; it retries at once and keeps counting, and only a config edit (a changed materialization signature) resets it, as degradeConnectorInstance has it. steps[6] said to touch or save the entry, which restarts os dev; it now names a restart-free reload, a per-item publish. fixtures.requires[0] puts every boot in a scratch copy (the stdio path is cwd-relative) and names #24575's file-move break, the one steps[4] can undo with no config change; steps[4] names the warn line that shows the swap at the default log level. Not loosened: every clause keeps its oracle",
           "ref": "#24717"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[6] names the view body its per-item publish needs — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12): a flat { type, columns } body answers 422 unrecognized_keys; the run published a view item carrying viewKind and config. Read at base 307ce4c4b4 against ViewItemSchema (view.zod.ts), which discriminates on viewKind and requires an OBJECT.view name. No clause changed",
+          "ref": "#24824"
         }
       ]
     },

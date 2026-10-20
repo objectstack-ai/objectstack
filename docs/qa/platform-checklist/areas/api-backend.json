@@ -131,7 +131,7 @@
       "title": "Formula runtime fixes hold and date-arithmetic fails at build time",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "build",
       "steps": [
@@ -161,7 +161,7 @@
           "evidence": "error text"
         },
         {
-          "clause": "the gate does not over-fire: os build on the stock showcase (which uses legitimate date comparisons like due_date == today()) exits 0",
+          "clause": "the gate does not over-fire: os build on the stock showcase exits 0. Its one today() use is a legitimate date comparison, the field-zoo predicate `record.f_date < today()` (examples/app-showcase/src/ui/actions/predicate-matrix.action.ts); the showcase holds no `== today()`",
           "oracle": "build",
           "verify": "untouched showcase os build exit code 0",
           "evidence": "build output"
@@ -188,6 +188,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "acceptance[3]'s example corrected — checklist-accuracy finding B3 of QA run #24787 (wave anchor #24579 round 12): the showcase holds no `due_date == today()`; at base 307ce4c4b4 its one today() use is predicate-matrix.action.ts's `record.f_date < today()`. The over-fire guard is unchanged: the untouched showcase still builds with exit 0",
+          "ref": "#24824"
         }
       ]
     },
@@ -196,12 +202,12 @@
       "title": "Removed/retired authoring keys fail at parse/build with located guidance",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "build",
       "steps": [
         "sample retired keys across the ADR-0087 registries, at minimum: a query-surface tombstone (QueryAST cursor / joins / distinct / windowFunctions — retiredKey per #4286), the error-envelope tombstone (EnhancedApiError.fieldErrors, renamed to fields by ADR-0114 D4), and one entry from the retired-filter-operator registry in packages/spec/src/data/filter.zod.ts (RetiredFilterOperatorGuidance)",
-        "author a config/payload using each sampled key: parse the query via the spec schema (QuerySchema.safeParse with cursor: {...}), parse an error envelope carrying fieldErrors; run ObjectSchema.create / os build where the key is config-side. The retired filter operator is DIFFERENT and is driven at runtime: author a stored filter carrying it on a FilterCondition-typed slot — a dashboard widget's `filter`, e.g. { name: { $regex: 'acme' } } (QA run #24541 used an ops-dashboard widget). ⛔ Not a view: a view's `filter` is the ViewFilterRule array [{ field, operator, value }] with a closed operator vocabulary, so the $-object predicate is no view shape at all and confirm parse/build stay GREEN (FilterConditionSchema is an open record keyed by field name — no tombstone can live on it); then send the same predicate as the where of a query request on the running stack (e.g. POST /api/v1/data/<object>/query) and capture the 400 INVALID_FILTER refusal; then run `os migrate meta --from 16` and locate the filter-regex-options-retired advisory",
+        "author a config/payload using each sampled key: parse the query via the spec schema (QuerySchema.safeParse with cursor: {...}), parse an error envelope carrying fieldErrors; run ObjectSchema.create / os build where the key is config-side. The retired filter operator is DIFFERENT and is driven at runtime: author a stored filter carrying it on a FilterCondition-typed slot — a dashboard widget's `filter`, e.g. { name: { $regex: 'acme' } } (QA run #24541 used an ops-dashboard widget). ⛔ Not a view: a view's `filter` is the ViewFilterRule array [{ field, operator, value }] with a closed operator vocabulary, so the $-object predicate is no view shape at all and confirm parse/build stay GREEN (FilterConditionSchema is an open record keyed by field name — no tombstone can live on it); then send the same predicate as the where of a query request on the running stack (e.g. POST /api/v1/data/<object>/query) and capture the 400 INVALID_FILTER refusal; then run `os migrate meta --from 16` and locate the advisory by its headline: the human report prints `⚠ [protocol 17] data.filter $regex / $options — …` (printNotice, packages/cli/src/commands/migrate/meta.ts) and never the id; the id filter-regex-options-retired is in the `--json` output only, as todos[].id",
         "capture each rejection's full text",
         "the documented-strip control: parse an UNKNOWN key on the RestServerConfig `routes` sub-object — RestServerConfigSchema.safeParse({ routes: { someUnknownKey: 1 } }) (or RouteGenerationConfigSchema directly) — and confirm it parses clean with the key gone (routes reads back {}). The behavior is declared in packages/spec/src/api/rest-server.zod.ts: RouteGenerationConfigSchema's docblock states the schemas are not `.strict()`, which is exactly why its retired keys carry tombstones. No spec docblock declares a 'pure display annotation' that is stripped by design — that example is not the control; this documented non-strict sub-object is",
         "record which registry each sampled key came from"
@@ -274,6 +280,12 @@
           "date": "2026-10-19",
           "change": "steps[1] names a slot the $-operator predicate can be stored on — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.enforce-or-remove-authoring-gates step 2; wave anchor #24579 §3): a view filter is the array shape [{field, operator, value}], not a FilterCondition. Re-derived at base 9a7838edf5: ViewFilterRuleSchema (packages/spec/src/ui/view.zod.ts) is a strict rule object, while the widget filter is FilterConditionSchema (ui/dashboard.zod.ts). No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "steps[1] locates the filter advisory by what the report prints — checklist-accuracy finding B2 of QA run #24787 (wave anchor #24579 round 12): the human output of `os migrate meta --from 16` prints the headline `⚠ [protocol 17] data.filter $regex / $options …`, never the id, which is only in `--json` todos[].id (printNotice, migrate/meta.ts at base 307ce4c4b4). No clause changed",
+          "ref": "#24824"
         }
       ]
     },
@@ -1457,7 +1469,7 @@
       "title": "A retired metadata DEFINITION (whole schema type withdrawn) refuses at every authoring door — distinct from a retired key, and the door that must not fall through to 'unknown type, ignored'",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "build",
       "personas": [
@@ -1474,7 +1486,7 @@
         ]
       },
       "steps": [
-        "enumerate packages/spec/src/migrations/entries/retired-defs/ and record the count and the version prefixes present (the registry currently carries entries at both the current major and the next)",
+        "enumerate packages/spec/src/migrations/entries/retired-defs/ and record the count and the version prefixes present (the registry carries entries at the previous major and the current one: prefixes 17 and 18, against PROTOCOL_VERSION '18.0.0' in packages/spec/src/kernel/protocol-version.ts. Read each prefix against PROTOCOL_VERSION; no prefix is staged for a later major)",
         "sample at least four entries spanning BOTH version prefixes and at least three different domains (e.g. data/, system/, identity/, ui/)",
         "for each sampled def, read its entry file and record which ADR-0087 route retired it, whether a prescription was authored, and its CARRIER: the authored key that embedded it, retired as a retiredKey() tombstone (e.g. manifest.loading for kernel/PluginLoadingConfig and its closure; agent.lifecycle for automation/StateMachine and its family), or none — most entries are schema-export definitions with zero consumers: no metadata-type binding, no stack collection, no embedding (e.g. data/ExternalDataSource, automation/ScheduleState). Sample at least one def of each kind",
         "build door, per sampled def, each in its own scratch stack run through os build: for a def WITH a carrier, author the carrier key (e.g. manifest.loading: { strategy: 'lazy' }; an agent carrying lifecycle) — the refusal is the carrier's tombstone. For a def WITHOUT one there is no metadata of that type to author ('a stack that declares metadata of the retired type' could only be an invented key, which is the control below), so drive the door it actually had: import its Zod export from its @objectstack/spec subpath in the config (e.g. ExternalDataSourceSchema from '@objectstack/spec/data') and confirm json-schema/DOMAIN/NAME.json is absent from packages/spec/json-schema",
@@ -1501,7 +1513,7 @@
           "evidence": "the per-door verdict table"
         },
         {
-          "clause": "the sample spans both version prefixes present in the registry, so the mechanism is proven for the retirements already staged for the NEXT major and not only for those of the shipped one",
+          "clause": "the sample spans both version prefixes present in the registry, so the mechanism is proven for the current major's retirements (prefix 18, the protocol this runtime implements) and not only for the previous major's (prefix 17)",
           "oracle": "build",
           "verify": "the run record lists each sampled def with its version prefix; a single-prefix sample does not satisfy this clause",
           "evidence": "the sample table"
@@ -1539,6 +1551,12 @@
           "date": "2026-10-19",
           "change": "steps[4] says what manifest.loading's runtime door is — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.retired-def-refusal step 5; wave anchor #24579 §3): the carrier's type has no runtime write door. Re-derived at base 9a7838edf5: DEFAULT_METADATA_TYPE_REGISTRY (packages/spec/src/kernel/metadata-plugin.zod.ts) has no manifest, package or plugin entry, and the meta door answers an unregistered type 'is not a metadata type' (metadata-protocol protocol.ts). No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] and acceptance[3]'s clause name the registry's prefixes for what they are — checklist-accuracy finding B1 of QA run #24787 (wave anchor #24579 round 12): the prefixes are 17 and 18 and the runtime implements protocol 18, so they are the previous and the current major, and 'staged for the NEXT major' no longer describes prefix 18. Re-measured at base 307ce4c4b4: 224 retired-defs entries (53 at 17, 171 at 18), PROTOCOL_VERSION '18.0.0'. The clause still requires both prefixes",
+          "ref": "#24824"
         }
       ]
     },
@@ -2585,7 +2603,7 @@
       "title": "RestServerConfig.routes is an all-tombstone sub-object: every one of the four retired selectors refuses at construction with the prescription that names where the contract moved, while the empty block still constructs",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "build",
       "personas": [
@@ -2658,7 +2676,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (§E pins all four routes.* refusals, the empty-block control and the plugin-path leg)"
+        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts — per clause. acceptance[1] in full, by §B's case 'rejects `createRestApiPlugin({ api: { routes: { nameTransform: \"none\" } } }).start()` — a #14691 tombstone, through the plugin path' (§E's own plugin-path case drives batch.defaultAtomic, not a routes key). acceptance[0] by §E's 'refuses every `routes.*` key — the whole sub-object is tombstones', for one authored value per key: nameTransform is driven with 'none' only, so its former 'plural' value is driven by hand. acceptance[4]'s empty-block half by §E's 'an empty `routes` sub-object still constructs — the tombstones refuse keys, not the block'; its other half, an unknown key inside `routes` stripped, is pinned for batch and metadata.endpoints only (§C's 'STRIPS an unknown key inside a sub-object rather than refusing it — the schemas are non-strict'), never for routes. No pin covers acceptance[2] (each prescription names a replacement that exists today) or acceptance[3] (the tsc error): drive them by hand"
       },
       "source": [
         "packages/spec/liveness/route_generation.json (the ADR-0049 ledger this item answers: all four properties dead, removed 2026-09-03 — the sub-object ships nothing but its refusals)",
@@ -2674,6 +2692,12 @@
           "date": "2026-09-04",
           "change": "new — `route_generation` was UNCLASSIFIED in coverage.json and is the one of the four kinds with no live property left: all four selectors were retired under ADR-0049 on 2026-09-03. Authored rather than waived because the retirement is itself the shipped behaviour — the sub-object stays declared so an authored key is refused with its prescription instead of silently stripped, and that refusal is exactly what a checklist can drive. The prescription-accuracy clause exists because a correct refusal pointing at a replacement that does not exist would still leave the operator stuck",
           "ref": "#14961"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause — checklist-accuracy finding B4 of QA run #24787 (wave anchor #24579 round 12, round 6's theme-B rule): the ref named one file with no clause qualifier and does not cover acceptance[2] or [3]. Read at base 307ce4c4b4, narrower than the record's '§E covers a0, a1 and a4': acceptance[1] rests on §B's routes case, acceptance[0] on §E for one value per key (not nameTransform 'plural'), and acceptance[4] on §E's empty-block case only, the routes strip being unpinned. No clause changed",
+          "ref": "#24824"
         }
       ]
     },

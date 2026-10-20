@@ -38,9 +38,9 @@
  *
  * Every control below is paired with the case it controls: for each exemption
  * (system context, platform operator, non-tenant object, `single` posture, a
- * non-empty `group` membership set) there is a sibling case differing in that
- * one fact where the refusal DOES fire. A file of controls alone would pass on
- * the pre-fix build.
+ * `group` membership set WITH an active organization) there is a sibling case
+ * differing in that one fact where the refusal DOES fire. A file of controls
+ * alone would pass on the pre-fix build.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -289,14 +289,27 @@ describe('[ADR-0123 D2] tenant-scoped WRITES with no active organization are ref
       expectConformingRefusal(err);
     });
 
-    it('CONTROL: a NON-EMPTY membership set lands, even with no active organization', async () => {
-      // The half a `tenantId`-only test would get wrong: under `group` the
-      // membership set IS the scope, so this caller is fully scoped despite
-      // carrying no active organization.
+    it('a NON-EMPTY membership set with NO active organization: an insert has nowhere to land, and is refused the same way', async () => {
+      // The membership set is the READ scope under `group`, so this caller
+      // passes the scope pre-test; a new row still lands in the ACTIVE
+      // organization (ADR-0105 D5), and there is none. The stored image is
+      // judged — the terminal here runs the seam on the rows as sent. The
+      // real-stack twin, with the engine and a driver, is
+      // `no-active-organization-insert-union-scope.test.ts`.
+      const h = await boot({ posture: 'group' });
+      const err = await refusalFrom(h.run, {
+        object: 'task', operation: 'insert', data: { name: 'A' },
+        context: { ...ORG_LESS, accessible_org_ids: ['org-1', 'org-2'] },
+      });
+      expectConformingRefusal(err);
+    });
+
+    it('CONTROL: the same membership set WITH an active organization lands', async () => {
+      // The single-fact control for the case above: only `tenantId` differs.
       const h = await boot({ posture: 'group' });
       await h.run({
         object: 'task', operation: 'insert', data: { name: 'A' },
-        context: { ...ORG_LESS, accessible_org_ids: ['org-1', 'org-2'] },
+        context: { ...ORG_BOUND, accessible_org_ids: ['org-1', 'org-2'] },
       });
     });
   });
