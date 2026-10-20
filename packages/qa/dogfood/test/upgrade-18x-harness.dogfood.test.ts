@@ -55,7 +55,7 @@ import type { VerifyStack } from '@objectstack/verify';
 import { columnsOf, type FixtureManifest } from './upgrade-harness/fixture-manifest.js';
 import { FIXTURE_NAMES, FIXTURE_PEOPLE, bootFixture } from './upgrade-harness/populate-fixture.js';
 import { loadSqlIntoSqlite } from './upgrade-harness/sqlite-text-dump.js';
-import { OWNERSHIP_MARKER, runOwnershipCeremony } from './upgrade-harness/ceremony.js';
+import { OWNERSHIP_MARKER, runOwnershipCeremony, runSchemaPlan } from './upgrade-harness/ceremony.js';
 
 const FIXTURE = new URL('./upgrade-harness/fixture-18.0/', import.meta.url);
 const MARKER = OWNERSHIP_MARKER;
@@ -292,4 +292,81 @@ describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.s
     expect(refusalIn(booted.error), String((booted.error as Error | undefined)?.message)).toBeUndefined();
     expect(booted.error).toBeUndefined();
   }, 900_000);
+});
+
+// [#24884] R2 from the GA: a database the published 18.0.0 created
+// (`upgrade-harness/fixture-18.0.0/`, generated from the
+// `@objectstack/cli@18.0.0` tag) is birth-marked, so it needs no ceremony.
+// HEAD's schema plan over it holds no destructive change, HEAD boots it with
+// no refusal and serves its people and its task, and once HEAD has stopped
+// every 18.0.0 row of every reshaped table is still there with its key
+// columns. 18.0.0's own shape is the baseline: a tenant column still nullable,
+// and the COALESCE form of a unique index over it. A later step that reshapes
+// either owes this database a migration, and this leg is where it shows.
+const GA_FIXTURE = new URL('./upgrade-harness/fixture-18.0.0/', import.meta.url);
+const gaManifest = JSON.parse(readFileSync(new URL('manifest.json', GA_FIXTURE), 'utf8')) as FixtureManifest;
+const gaFixtureSql = readFileSync(new URL('database.sql', GA_FIXTURE), 'utf8');
+
+describe(`[#24884] an 18.0.0 database (fixture from ${gaManifest.ref} @ ${gaManifest.sha.slice(0, 12)}) boots HEAD with no refusal and no destructive drift`, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dogfood-upgrade-18-0-0-'));
+  const file = join(dir, 'ga.db');
+  let stack: VerifyStack | undefined;
+
+  beforeAll(() => {
+    loadSqlIntoSqlite(gaFixtureSql, file);
+  });
+
+  afterAll(async () => {
+    await stack?.stop();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('the fixture is an 18.0.0 database: birth-marked, and covering every reshaped table', () => {
+    for (const t of gaManifest.reshaped) expect(t.count, `${t.table} holds rows in the fixture`).toBeGreaterThan(0);
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+      const marker = db.prepare('SELECT details FROM sys_migration WHERE id = ?').get(MARKER) as { details?: unknown } | undefined;
+      expect(JSON.parse(String(marker?.details)).birth).toMatchObject({ shapeGeneration: 1, platformVersion: '18.0.0' });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('HEAD\'s schema plan over it holds no destructive change', () => {
+    const plan = runSchemaPlan(file);
+    expect(plan.changes.filter((c) => c.category === 'destructive'), 'destructive drift').toEqual([]);
+  }, 320_000);
+
+  it('HEAD boots it with no refusal, and serves the fixture\'s people and task', async () => {
+    const booted = await tryBoot(file);
+    stack = booted.stack;
+    expect(refusalIn(booted.error), String((booted.error as Error | undefined)?.message)).toBeUndefined();
+    expect(booted.error, String((booted.error as Error | undefined)?.stack ?? booted.error)).toBeUndefined();
+    const adminTok = await stack!.signIn(FIXTURE_PEOPLE.admin.email, FIXTURE_PEOPLE.admin.password);
+    expect(await stack!.signIn(FIXTURE_PEOPLE.memberA.email, FIXTURE_PEOPLE.memberA.password)).toBeTruthy();
+    const res = await stack!.apiAs(adminTok, 'GET', '/data/showcase_task');
+    expect(res.status).toBe(200);
+    expect(rowsOf(await res.json()).map((r) => String(r?.title))).toContain(`${FIXTURE_NAMES.task} — edited`);
+  }, 240_000);
+
+  it('every 18.0.0 row of every reshaped table is still there, with its key columns', async () => {
+    await stack?.stop();
+    stack = undefined;
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+      for (const t of gaManifest.reshaped) {
+        for (const fixtureRow of t.rows) {
+          const id = String(fixtureRow.id);
+          const now = t.physical
+            .map((physical) => db.prepare(`SELECT * FROM "${physical}" WHERE id = ?`).get(id) as Record<string, unknown> | undefined)
+            .find(Boolean);
+          expect(now, `${t.table} row ${id} is kept`).toBeDefined();
+          const kept = Object.fromEntries(t.keyColumns.map((c) => [c, now![c] === null || now![c] === undefined ? null : String(now![c])]));
+          expect(kept, `${t.table} row ${id}`).toEqual(fixtureRow);
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
 });

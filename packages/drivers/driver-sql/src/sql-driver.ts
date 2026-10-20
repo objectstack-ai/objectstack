@@ -8834,11 +8834,19 @@ export class SqlDriver implements IDataDriver {
     };
 
     if (this.stampsUpdatedAt(object) && !this.keepSuppliedUpdatedAt(formatted, options)) {
-      formatted.updated_at = this.updatedAtStamp();
+      // [#24835] A FRESH object, never `formatted`: `formatInput` and
+      // `applyWriteColumnMap` are copy-on-write, so for a patch that needs no
+      // coercion `formatted` IS the caller's `data`. Assigning the stamp onto it
+      // put `updated_at` into the caller's patch — which ObjectQL publishes as
+      // `DataEvent.changes` — and on Postgres/MySQL that value is a knex `Raw`
+      // holding the client, its pool and a timer, so every reader that
+      // serialises the event (the webhook outbox first) threw. `updateMany`'s
+      // shape, below.
+      const stamped = { ...formatted, updated_at: this.updatedAtStamp() };
       if (this.updatedAtStampIsPresumed(object)) {
-        await this.updateWithPresumedTimestamp(object, formatted, options, issue);
+        await this.updateWithPresumedTimestamp(object, stamped, options, issue);
       } else {
-        await issue(formatted, options);
+        await issue(stamped, options);
       }
     } else {
       await issue(formatted, options);
@@ -10262,13 +10270,16 @@ export class SqlDriver implements IDataDriver {
     // fact on the line immediately before that call — so on this path the
     // answer can never come from the declared-shape presumption, and there is
     // nothing speculative to recover from.
-    if (this.stampsUpdatedAt(object) && !this.keepSuppliedUpdatedAt(formatted, options)) {
-      formatted.updated_at = this.updatedAtStamp();
-    }
+    //
+    // [#24835] Stamped into a FRESH object, for the reason {@link update} gives:
+    // `formatted` may be the caller's own `data`.
+    const payload = this.stampsUpdatedAt(object) && !this.keepSuppliedUpdatedAt(formatted, options)
+      ? { ...formatted, updated_at: this.updatedAtStamp() }
+      : formatted;
     for (const shard of shards) {
       const builder = this.getBuilder(shard, options).where('id', id);
       this.applyTenantScope(builder, object, options);
-      const count = await builder.update(formatted);
+      const count = await builder.update(payload);
       if (count > 0) {
         const readback = this.getBuilder(shard, options).where('id', id);
         this.applyTenantScope(readback, object, options);
