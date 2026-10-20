@@ -629,6 +629,10 @@ export default class MigrateApply extends Command {
       // reconciled. Drift was detected against the pre-flush database, and a
       // just-created table matches metadata by construction, so the two sets
       // never overlap.
+      // [ADR-0131 D10] The flush also writes the organization-ownership birth
+      // marker when it created the database from empty — the half this
+      // deferred boot's birth plugin could not run — so the first `os serve`
+      // admits it. A database that was not empty gets none.
       const created = await stack.flushSchemaDdl();
       const { applied, skipped } = await stack.applyMigrationEntries(drift, { allowDestructive });
 
