@@ -87,6 +87,7 @@ import {
   type ActivityTextSources,
 } from './activity-field-redaction.js';
 import type { LedgerRecordWriteAction } from './audit-log-field-redaction.js';
+import type { MentionGateInput } from './mention-recipient-gate.js';
 // [ADR-0139 E6] The ONE derivation of the two writer-stamped columns the
 // withheld-row rule reads, shared with the before-insert hook and the backfill.
 import {
@@ -161,6 +162,15 @@ export interface AuditWriterOptions {
    * (ruling 6257510973 item 3: activity is never a NULL row).
    */
   getDefaultOrganizationId?(): Promise<string | null | undefined>;
+  /**
+   * The `@mention` recipient gate (`mention-recipient-gate.ts`): the mentioned
+   * users who may be notified about a comment — each resolved to a user id,
+   * minus the author, minus everyone who cannot READ the comment's record.
+   * AuditPlugin wires the real gate. Absent → no mention notification is
+   * emitted at all (fail closed, said once): the writer cannot tell on its own
+   * who may see the record a notification would preview.
+   */
+  admitMentionRecipients?(input: MentionGateInput): Promise<string[]>;
 }
 
 /**
@@ -2418,10 +2428,13 @@ export function installAuditWriters(
    * the capability opt-in this card restores.
    */
 
+  /** Said once: a writer composed without the mention gate emits no mention notification. */
+  let warnedNoMentionGate = false;
   /**
    * M10.8: Dedicated hook on `sys_comment` afterInsert that parses the
    * `mentions` JSON field and writes one sys_notification per mentioned
-   * user. Lives outside `writeAudit` because sys_comment is in
+   * user who can read the comment's record (`admitMentionRecipients`).
+   * Lives outside `writeAudit` because sys_comment is in
    * SKIP_OBJECTS (we don't want audit/activity rows for comments —
    * those have their own first-class feed).
    */
@@ -2442,10 +2455,10 @@ export function installAuditWriters(
     }
     if (!Array.isArray(mentions) || mentions.length === 0) return;
 
-    const userIds = mentions
+    const mentioned = mentions
       .map((m: any) => (typeof m === 'string' ? m : m?.id))
       .filter((id: any) => typeof id === 'string' && id.length > 0);
-    if (userIds.length === 0) return;
+    if (mentioned.length === 0) return;
 
     const [source_object, source_id] = String(row.thread_id ?? '').split(':');
     const actorId = row.author_id ?? null;
@@ -2454,6 +2467,36 @@ export function installAuditWriters(
     const sess: any = (ctx as any).session ?? {};
     const tenantId: string | null = sess.organizationId ?? row.organization_id ?? null;
     const commentId = row.id != null ? String(row.id) : null;
+
+    // The notification is a copy of the comment (its preview) and a link to
+    // the record, so it reaches only a mentioned user who can READ that
+    // record — never a raw id or email from the client-written list. The
+    // author is dropped there too.
+    if (!opts.admitMentionRecipients) {
+      if (!warnedNoMentionGate) {
+        warnedNoMentionGate = true;
+        try {
+          (engine as any).logger?.warn?.(
+            '[audit] no @mention recipient gate is composed — mention notifications are not emitted. '
+              + 'AuditPlugin wires one; a host calling installAuditWriters directly passes `admitMentionRecipients`.',
+          );
+        } catch {}
+      }
+      return;
+    }
+    let userIds: string[];
+    try {
+      userIds = await opts.admitMentionRecipients({
+        mentions: mentioned,
+        threadId: row.thread_id,
+        actorId,
+        organizationId: row.organization_id ?? tenantId,
+        commentId,
+      });
+    } catch (err) {
+      try { (engine as any).logger?.warn?.('Mention recipient gate failed; no mention notifications emitted', { commentId, err: String((err as any)?.message ?? err) }); } catch {}
+      return;
+    }
 
     for (const uid of userIds) {
       if (uid === actorId) continue; // don't notify the mention author
