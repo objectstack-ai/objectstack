@@ -41,15 +41,33 @@
  * `os migrate audit-metadata-bodies` takes). No `sys_migration` flag is
  * recorded: nothing gates irreversible behaviour on it. The report holds counts
  * only; no log line names a value.
+ *
+ * ## The archive, through the same runner
+ *
+ * `sys_audit_log` declares `lifecycle.archive`: the `LifecycleService`
+ * Archiver copies its rows past the hot window to the archive datasource
+ * VERBATIM (a driver `find` → `upsert`, no writer and no mask in between),
+ * then deletes them hot. So a copy archived before the writer masked keeps the
+ * body in clear for as long as the archive keeps it, and the engine never
+ * routes `sys_audit_log` there: an engine-driven run cannot reach it.
+ * {@link migrateArchivedMailLogBodyCopies} drives the very same pages and
+ * planners through the archive datasource's DRIVER instead. A hot copy masked
+ * before the Archiver moves it is archived masked, so the hot run and the
+ * archive run together cover the copies already archived and the ones still
+ * to be.
  */
 
-import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
+import { isMissingTableError } from '@objectstack/types';
 import { MAIL_LOG_OBJECTS } from '@objectstack/platform-objects/audit';
 import { maskMailLogBodyCopy } from './mail-log-body-mask.js';
 import type { MigrationLogger } from './stored-metadata-body-migration.js';
 
 /** The two audit-family tables the writer copies a mail-log row into. */
 export const MAIL_LOG_BODY_COPY_OBJECTS = ['sys_audit_log', 'sys_activity'] as const;
+
+/** One of {@link MAIL_LOG_BODY_COPY_OBJECTS}. */
+export type MailLogBodyCopyObject = (typeof MAIL_LOG_BODY_COPY_OBJECTS)[number];
 
 /** Rows read per page. */
 export const MAIL_LOG_BODY_MIGRATION_PAGE_SIZE = 500;
@@ -128,6 +146,26 @@ export function planMailLogBodyActivityRowPatch(row: Record<string, unknown>): {
 /** The engine surface the runner needs — the real data-engine contract's members. */
 export type MailLogBodyMigrationEngine = Pick<IDataEngine, 'find' | 'update'>;
 
+/** The driver surface the archive run needs — the real data-driver contract's members. */
+export type MailLogBodyArchiveDriver = Pick<IDataDriver, 'find' | 'update'>;
+
+/** What the runner options accept, for either store. */
+export interface MailLogBodyMigrationOptions {
+  apply?: boolean;
+  pageSize?: number;
+  /** The copy tables to walk — both by default. */
+  objects?: readonly MailLogBodyCopyObject[];
+}
+
+/**
+ * The two operations a run performs, whatever store it runs on: read one page
+ * of `object`, and write one row's patch keeping its stored `updated_at`.
+ */
+interface CopyStore {
+  readPage(object: string, query: { where: Record<string, unknown>; fields: string[]; orderBy: Array<{ field: string; order: 'asc' }>; limit: number }): Promise<unknown>;
+  write(object: string, id: string, patch: Record<string, unknown>, updatedAt: unknown): Promise<void>;
+}
+
 /** What one migration run did (or would do in dry-run). Counts only. */
 export interface MailLogBodyMigrationReport {
   apply: boolean;
@@ -157,20 +195,85 @@ function asArray(result: unknown): Record<string, unknown>[] {
 export async function migrateMailLogBodyCopies(
   engine: MailLogBodyMigrationEngine,
   logger: MigrationLogger,
-  options: { apply?: boolean; pageSize?: number } = {},
+  options: MailLogBodyMigrationOptions = {},
+): Promise<MailLogBodyMigrationReport> {
+  return runMailLogBodyCopies(
+    {
+      readPage: (object, query) => engine.find(object, query, { context: SYSTEM_CTX }),
+      // A single-id write, as the platform: a system caller is exempt from the
+      // static-readonly strip every audit/activity field carries.
+      // `preserveAudit` with the stored `updated_at` keeps the row's own
+      // timestamp (the shape `comment-parent-pair-backfill.ts` takes): masking
+      // a copy is not an edit of the ledger row.
+      write: async (object, id, patch, updatedAt) => {
+        await engine.update(
+          object,
+          { ...patch, id, ...(updatedAt !== undefined && updatedAt !== null ? { updated_at: updatedAt } : {}) },
+          { context: SYSTEM_PRESERVING_CTX },
+        );
+      },
+    },
+    logger,
+    options,
+    'audit/activity',
+  );
+}
+
+/**
+ * The same mask over an ARCHIVE datasource — the store `sys_audit_log`'s
+ * `lifecycle.archive.to` names, which the Archiver fills with verbatim copies
+ * and the engine never routes the object to. `driver` is that datasource's
+ * registered driver (`engine.datasource(name)`); the run reads and writes
+ * through it directly, as the Archiver itself does: no hook, no audit write,
+ * and the row's stored `updated_at` kept (`preserveAudit`). An archive table
+ * that was never created (nothing archived yet) holds no copy and reads as no
+ * rows; any other refused read is a failure, as on the hot run.
+ */
+export async function migrateArchivedMailLogBodyCopies(
+  driver: MailLogBodyArchiveDriver,
+  logger: MigrationLogger,
+  options: MailLogBodyMigrationOptions = {},
+): Promise<MailLogBodyMigrationReport> {
+  return runMailLogBodyCopies(
+    {
+      readPage: async (object, query) => {
+        try {
+          return await driver.find(object, query as Parameters<MailLogBodyArchiveDriver['find']>[1]);
+        } catch (e) {
+          if (isMissingTableError(e, object)) return [];
+          throw e;
+        }
+      },
+      write: async (object, id, patch, updatedAt) => {
+        const keep = updatedAt !== undefined && updatedAt !== null;
+        await driver.update(object, id, { ...patch, ...(keep ? { updated_at: updatedAt } : {}) }, keep ? { preserveAudit: true } : undefined);
+      },
+    },
+    logger,
+    options,
+    'archived audit',
+  );
+}
+
+async function runMailLogBodyCopies(
+  store: CopyStore,
+  logger: MigrationLogger,
+  options: MailLogBodyMigrationOptions,
+  label: string,
 ): Promise<MailLogBodyMigrationReport> {
   const apply = options.apply === true;
   const pageSize = options.pageSize && options.pageSize > 0 ? options.pageSize : MAIL_LOG_BODY_MIGRATION_PAGE_SIZE;
+  const only = options.objects ? new Set<string>(options.objects) : undefined;
   const report: MailLogBodyMigrationReport = { apply, byObject: {}, scanned: 0, rewritten: 0, failures: 0 };
 
   const tables: ReadonlyArray<{
-    object: (typeof MAIL_LOG_BODY_COPY_OBJECTS)[number];
+    object: MailLogBodyCopyObject;
     fields: readonly string[];
     plan: (row: Record<string, unknown>) => Record<string, unknown> | null;
   }> = [
-    { object: 'sys_audit_log', fields: ['id', 'object_name', 'new_value', 'old_value', 'updated_at'], plan: planMailLogBodyAuditRowPatch },
-    { object: 'sys_activity', fields: ['id', 'object_name', 'metadata', 'updated_at'], plan: planMailLogBodyActivityRowPatch },
-  ];
+    { object: 'sys_audit_log' as const, fields: ['id', 'object_name', 'new_value', 'old_value', 'updated_at'], plan: planMailLogBodyAuditRowPatch },
+    { object: 'sys_activity' as const, fields: ['id', 'object_name', 'metadata', 'updated_at'], plan: planMailLogBodyActivityRowPatch },
+  ].filter((t) => !only || only.has(t.object));
 
   for (const { object, fields, plan } of tables) {
     const stats = (report.byObject[object] = { scanned: 0, rewritten: 0 });
@@ -183,11 +286,7 @@ export async function migrateMailLogBodyCopies(
       let rows: Record<string, unknown>[];
       try {
         rows = asArray(
-          await engine.find(
-            object,
-            { where, fields: [...fields], orderBy: [{ field: 'id', order: 'asc' }], limit: pageSize },
-            { context: SYSTEM_CTX },
-          ),
+          await store.readPage(object, { where, fields: [...fields], orderBy: [{ field: 'id', order: 'asc' }], limit: pageSize }),
         );
       } catch (e) {
         // A table this run could not read is NOT a clean table: counted, so the
@@ -216,16 +315,7 @@ export async function migrateMailLogBodyCopies(
           continue;
         }
         try {
-          // A single-id write, as the platform: a system caller is exempt from
-          // the static-readonly strip every audit/activity field carries.
-          // `preserveAudit` with the stored `updated_at` keeps the row's own
-          // timestamp (the shape `comment-parent-pair-backfill.ts` takes):
-          // masking a copy is not an edit of the ledger row.
-          await engine.update(
-            object,
-            { ...patch, id, ...(row.updated_at !== undefined && row.updated_at !== null ? { updated_at: row.updated_at } : {}) },
-            { context: SYSTEM_PRESERVING_CTX },
-          );
+          await store.write(object, id, patch, row.updated_at);
         } catch (e) {
           report.failures += 1;
           logger.warn(
@@ -242,7 +332,7 @@ export async function migrateMailLogBodyCopies(
 
   logger.info?.(
     `[mail-log-body-migration] ${apply ? 'masked' : 'would mask'} the mail body in ${report.rewritten} of ` +
-      `${report.scanned} audit/activity cop(ies) of a mail-log row` +
+      `${report.scanned} ${label} cop(ies) of a mail-log row` +
       (report.failures > 0 ? ` (${report.failures} failed — re-run to finish)` : ''),
   );
   return report;
