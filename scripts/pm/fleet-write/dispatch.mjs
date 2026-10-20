@@ -118,6 +118,39 @@
  * `write-pace.mjs` counts the dispatch as THE write — one POST, paced and
  * leased like any other; the runner's executor paces its own writes there.
  *
+ * ## The batch gap — rule ⑤ on the runner, and what one stroke may carry
+ *
+ * The runner paces on a log that is fresh every run, so a seat's
+ * `write-pace.mjs --announce-batch` never reaches it: left alone, a stroke of
+ * fifteen `issue_create` actions lands fifteen cards 3 s apart, one identity's
+ * burst. So the executor announces rule ⑤ itself when a stroke carries
+ * `DEFAULT_BATCH_THRESHOLD` or more content-creating actions —
+ * `CONTENT_CREATING_OPS`, read off the op table by `createsContent` (an op
+ * whose first request is a REST `POST` carrying prose, or one that creates or
+ * moves a card), never listed — and `strokePacing` is the one spelling of what
+ * that costs: the writes from the stroke's first through its last
+ * content-creating one, each `DEFAULT_BATCH_GAP_MS` after the one before.
+ *
+ * That pause is the contract, so this side budgets for it:
+ *
+ *   - the run takes that much longer, so `sendFleetWrite` adds the stroke's
+ *     pacing to its completion ceiling and prints one line saying so — a
+ *     batched stroke is waited for, ⛔ never reported UNCONFIRMED for pausing
+ *     as told;
+ *   - the job cannot stretch: `RELAY_JOB_TIMEOUT_MS` (the relay job's
+ *     `timeout-minutes`, pinned to the workflow by the self-test) less
+ *     `DEFAULT_CEILING_MS`, the allowance an ordinary stroke already has from
+ *     dispatch to completion, is what pacing may spend. `packRequest` REFUSES
+ *     a stroke whose pacing is over it — every sender, before anything leaves
+ *     — naming the per-op doors (`BATCH_DOORS`) that pace a batch one card per
+ *     stroke behind one seat-side `--announce-batch`; the executor refuses it
+ *     again, zero writes, for a sender that skipped the packer. ⛔ The gap is
+ *     never shortened to make a stroke fit.
+ *
+ * A landing stroke (`pr_ready` + `automerge_enable`) and every per-op door's
+ * one-card stroke carry fewer content-creating actions than the threshold, so
+ * none of this changes them.
+ *
  * ## The read-back — the run's `success` is the executor's, not the write's
  *
  * A run concluding `success` proves the executor's requests were ANSWERED 2xx.
@@ -333,8 +366,8 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../../invoked-as.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, proxyRoute } from '../check-half-states.mjs';
 import { classifyHttp } from '../label-write.mjs';
-import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
-import { CONTAINER_SESSION_ENV, CONTAINER_SESSION_SHAPE, MAX_REQUEST_ID_CHARS, OPS, OP_NAMES, RELAY_EVENT_TYPE, RELAY_REPO, SESSION_ENV, SESSION_SHAPE, TRANSPORTS, TRANSPORT_ENV } from './ops.mjs';
+import { DEFAULT_BATCH_GAP_MS, DEFAULT_BATCH_THRESHOLD, EXIT_WRITE_PACE_REFUSED, fmtDuration, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
+import { CONTAINER_SESSION_ENV, CONTAINER_SESSION_SHAPE, FIELDS, MAX_REQUEST_ID_CHARS, OPS, OP_NAMES, RELAY_EVENT_TYPE, RELAY_REPO, SESSION_ENV, SESSION_SHAPE, TRANSPORTS, TRANSPORT_ENV } from './ops.mjs';
 import { PAYLOAD_ENV, refusalText, validatePayload } from './validate.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -368,6 +401,14 @@ export const RELAY_LIVE_OVERRIDE_ENV = 'OS_FLEET_RELAY_LIVE';
 export const DEFAULT_START_MS = 90_000;
 export const DEFAULT_CEILING_MS = 5 * 60 * 1000;
 export const DEFAULT_POLL_MS = 5_000;
+
+/**
+ * The relay job's `timeout-minutes` (`RELAY_WORKFLOW_PATH`, job `relay`) in ms — the hard bound on a run: past it
+ * the platform cancels the job mid-stroke, with no summary. Mirrored here because a batched stroke's pacing is
+ * budgeted against it (`strokePacing`, the header's batch-gap section); `--self-test` reads the workflow on disk
+ * and pins the two equal, so the workflow moving is this constant's red, never a silent budget.
+ */
+export const RELAY_JOB_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** The export every sender carries for the no-run conformance (the header's section of that name). */
 const RELAY_MISS_PROBE = 'relayMissProbe';
@@ -556,11 +597,19 @@ export function newRequestId(nowMs = Date.now(), random = () => randomBytes(3).t
   return id;
 }
 
-/** Pack one stroke. The shared validator is the judge; nothing here restates a rule. */
+/**
+ * Pack one stroke. The shared validator is the judge of the payload; nothing here restates a rule of it. The one
+ * rule the packer adds is about the RUN, not the schema: a stroke whose rule ⑤ pacing the relay job cannot hold
+ * (`strokePacing`) is refused here, before anything leaves, with the per-op doors named (the header's batch-gap
+ * section). `pacing` rides along on both answers, for the caller that prints it.
+ */
 export function packRequest({ repo, session, actions, requestId = null, now = Date.now } = {}) {
   const payload = { request_id: requestId ?? newRequestId(now()), repo, session, actions };
   const judged = validatePayload(payload);
-  return judged.ok ? { ok: true, payload: judged.payload, errors: [] } : { ok: false, payload: null, errors: judged.errors };
+  if (!judged.ok) return { ok: false, payload: null, errors: judged.errors };
+  const pacing = strokePacing(judged.payload);
+  if (!pacing.fits) return { ok: false, payload: null, errors: [strokeBudgetRefusal(pacing)], pacing };
+  return { ok: true, payload: judged.payload, errors: [], pacing };
 }
 
 /** Is this workflow run the one a request id names? `run-name` renders as `display_title`; the workflow's own `name` is the fallback. */
@@ -842,6 +891,107 @@ export function checkRunIdOf(job) {
   const m = /\/check-runs\/([1-9][0-9]*)$/.exec(String(job?.check_run_url ?? ''));
   if (m) return Number(m[1]);
   return Number.isInteger(job?.id) && job.id > 0 ? job.id : null;
+}
+
+// ---------------------------------------------------------------------------
+// The batch gap — pure halves (the header's batch-gap section is the authority)
+// ---------------------------------------------------------------------------
+
+/** The `FIELDS` that carry authored prose — what a create of an issue, a pull or a comment sends and a list or a flag does not. */
+const PROSE_KEYS = Object.freeze(['title', 'body']);
+
+/** A value of a field's declared kind, for reading what an op's requests look like — never sent anywhere. */
+function probeValue(spec) {
+  if (spec?.kind === 'int') return 1;
+  if (spec?.kind === 'list') return ['x'];
+  if (spec?.kind === 'enum') return spec.values[0];
+  if (spec?.kind === 'sha') return '0'.repeat(40);
+  if (spec?.kind === 'inputs') return {};
+  return 'x';
+}
+
+/**
+ * Does this op's landing leave NEW content on the board — the burst rule ⑤ exists for? Read off the op table,
+ * never listed: the op's FIRST request is a REST `POST` carrying prose (`title` or `body`) — the create of an
+ * issue, a pull or a comment; an edit is a `PATCH`, and a label, assignee, reviewer or workflow `POST` carries a
+ * list or a ref, not prose — or the op creates or moves a card (`ANNOTATED_OPS`: the transfer, which creates the
+ * card on its target). `spec` defaults to the op's row; the self-test hands in rows of its own. Pure.
+ */
+export function createsContent(op, spec = OPS[op]) {
+  if (!spec || typeof spec.requests !== 'function') return false;
+  if (Object.hasOwn(ANNOTATED_OPS, op)) return true;
+  const probe = { op };
+  for (const key of [...(spec.required ?? []), ...(spec.optional ?? [])]) probe[key] = probeValue(FIELDS[key]);
+  const first = spec.requests(probe, RELAY_REPO)[0];
+  return Boolean(first && !first.graphql && first.verb === 'POST' && first.body && PROSE_KEYS.some((key) => Object.hasOwn(first.body, key)));
+}
+
+/** The content-creating ops — derived from the table by `createsContent`, so a new create is counted the day its row lands. */
+export const CONTENT_CREATING_OPS = Object.freeze(OP_NAMES.filter((op) => createsContent(op)));
+
+/**
+ * What rule ⑤ costs ONE judged stroke on the runner, and whether the relay job can hold it — the one spelling
+ * the packer, the run-poller and the executor all read. Pure; it reads the throttle's DEFAULTS, never this
+ * process's test overrides, because the runner pays the defaults.
+ *
+ *   creating        the actions whose op creates content (`CONTENT_CREATING_OPS`);
+ *   writes          every write request the stroke spells — a pull's assignee and label legs included;
+ *   batched         `creating` at or above write-pace's `DEFAULT_BATCH_THRESHOLD`;
+ *   batchWrites     when batched, the writes from the stroke's first through its last content-creating one — the
+ *                   count the executor announces, so every content-creating write is a batch gap from its neighbour;
+ *   pacingMs        what that adds: (batchWrites − 1) × `DEFAULT_BATCH_GAP_MS`, 0 when not batched;
+ *   budgetMs        what pacing may spend: the job's `RELAY_JOB_TIMEOUT_MS` less `DEFAULT_CEILING_MS`, the allowance
+ *                   an ordinary stroke has from dispatch to completion;
+ *   maxBatchWrites  the most batched writes that budget holds;
+ *   fits            pacingMs ≤ budgetMs.
+ */
+export function strokePacing(payload) {
+  let writes = 0;
+  let creating = 0;
+  let lastCreating = 0;
+  for (const action of Array.isArray(payload?.actions) ? payload.actions : []) {
+    const spec = OPS[action?.op];
+    if (!spec) continue;
+    for (const [i, req] of spec.requests(action, payload.repo).entries()) {
+      if (!isWriteMethod(req.graphql ? 'POST' : req.verb)) continue;
+      writes += 1;
+      if (i === 0 && CONTENT_CREATING_OPS.includes(action.op)) {
+        creating += 1;
+        lastCreating = writes;
+      }
+    }
+  }
+  const threshold = DEFAULT_BATCH_THRESHOLD;
+  const gapMs = DEFAULT_BATCH_GAP_MS;
+  const batched = creating >= threshold;
+  const batchWrites = batched ? lastCreating : 0;
+  const pacingMs = batched ? (batchWrites - 1) * gapMs : 0;
+  const budgetMs = RELAY_JOB_TIMEOUT_MS - DEFAULT_CEILING_MS;
+  return { creating, writes, threshold, gapMs, batched, batchWrites, pacingMs, budgetMs, maxBatchWrites: Math.floor(budgetMs / gapMs) + 1, fits: pacingMs <= budgetMs };
+}
+
+/** The per-op doors that pace a batch across strokes, one card per call — what an over-budget stroke is sent to. */
+export const BATCH_DOORS = Object.freeze(['issue-create.mjs', 'post-stamped.mjs', 'issue-transfer.mjs', 'close-cards.mjs', 'label-write.mjs']);
+
+/** The refusal a stroke over the job's budget gets — at the packer, and again at the executor. Pure. */
+export function strokeBudgetRefusal(p) {
+  return (
+    `this stroke carries ${p.creating} content-creating action(s) (${CONTENT_CREATING_OPS.join(', ')}), at or above write-pace's batch ` +
+    `threshold of ${p.threshold}, so the runner paces its first ${p.batchWrites} write(s) ${fmtDuration(p.gapMs)} apart (rule ⑤): ` +
+    `${fmtDuration(p.pacingMs)} of pacing, over the ${fmtDuration(p.budgetMs)} the relay job can spend on it (its ${fmtDuration(RELAY_JOB_TIMEOUT_MS)} ` +
+    `timeout less the ${fmtDuration(DEFAULT_CEILING_MS)} an ordinary stroke is allowed) — one stroke holds at most ${p.maxBatchWrites} batched ` +
+    `write(s). Send a batch through the per-op doors (${BATCH_DOORS.map((d) => `scripts/pm/${d}`).join(', ')}), one card per call, behind ONE ` +
+    '`node scripts/pm/write-pace.mjs --announce-batch N`; a direct dispatch.mjs stroke is for landing. ⛔ Never a shorter gap to make it fit'
+  );
+}
+
+/** The line a seat reads when its stroke is batched: the pause is the contract, and the wait covers it. Pure. */
+export function batchedStrokeText(p, ceilingMs) {
+  return (
+    `this stroke carries ${p.creating} content-creating action(s), at or above write-pace's batch threshold of ${p.threshold} — the runner ` +
+    `announces a rule ⑤ batch and paces its first ${p.batchWrites} write(s) ${fmtDuration(p.gapMs)} apart (${fmtDuration(p.pacingMs)} of ` +
+    `pacing, the contract and not a hang), so the wait for its run is ${fmtDuration(ceilingMs)}.`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1138,8 +1288,13 @@ export async function sendFleetWrite(payload, deps = {}) {
   const now = deps.now ?? (() => Date.now());
   const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   const log = deps.log ?? ((line) => console.error(line));
-  const { startMs, ceilingMs, pollMs, notes } = deps.ceilings ?? ceilingsFrom(deps.env ?? process.env);
+  const ceilings = deps.ceilings ?? ceilingsFrom(deps.env ?? process.env);
+  const { startMs, pollMs, notes } = ceilings;
   for (const note of notes ?? []) log(`fleet-write: ${note}`);
+  // A batched stroke runs as long as the runner is told to pause (the header's batch-gap section): waited for, never
+  // reported UNCONFIRMED for pausing as told.
+  const pacing = strokePacing(payload);
+  const ceilingMs = ceilings.ceilingMs + pacing.pacingMs;
   const t = { fetch: deps.fetch, token: deps.token, pace: deps.pace };
   const requestId = payload.request_id;
   const base = { requestId, startMs, ceilingMs, run: null };
@@ -1152,6 +1307,7 @@ export async function sendFleetWrite(payload, deps = {}) {
     return { ...base, state: 'refused', ok: false, status: sent.status, verdict, dispatchedAt, detail: sent.detail };
   }
   log(`fleet-write: dispatched request ${requestId} to ${RELAY_REPO} (HTTP 204) — ${payload.actions.length} action(s) for ${payload.repo}; waiting for its run.`);
+  if (pacing.batched) log(`fleet-write: ${batchedStrokeText(pacing, ceilingMs)}`);
 
   // ── find the run ──────────────────────────────────────────────────────────
   const since = new Date(dispatchedAt - 60_000).toISOString();
@@ -1286,8 +1442,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the no-run conformance: every sender — discovered from the source — answers an accepted dispatch with no run, or none completed, UNCONFIRMED (6) after ONE dispatch with ZERO direct writes, under auto and explicit dispatch alike; under direct its write is seen': 27,
   "the started run: an action naming a workflow is read back as the newest workflow_dispatch run of that file created since the dispatch — the target repo's run list, read after the relay run completed and re-read within a bounded window; found is success naming id, url and actor; none in the window or an unreadable list is UNCONFIRMED (6) after ONE dispatch; a stroke naming no workflow reads none": 11,
   "the release.yml refresh at the seat: the stroke packs with inputs refresh_version_pr true and travels in ONE dispatch; its started run is read back from release.yml's own run list; force, false, absent or any other input is refused before anything is sent, exit 2": 6,
+  "the batch gap at the seat: content creation read off the op table; a stroke at or above write-pace's threshold is batched through its last content-creating write and waited for exactly that much longer; a stroke whose pacing the relay job cannot hold is refused before anything is sent, naming the per-op doors; the job's timeout mirrors the workflow's": 13,
 });
-const SELF_TEST_BATTERY_FLOOR = 20;
+const SELF_TEST_BATTERY_FLOOR = 21;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1660,6 +1817,77 @@ export async function selfTest() {
       const listDown = await drive({ runs: () => 'down' });
       t('a run list that cannot be read is `no-run` flagged unreadable, never a silent no', [listDown.state, listDown.listUnreadable, listDown.logs.some((l) => l.includes('could not be read'))], ['no-run', true, true]);
       t('the ceilings read the environment with malformed overrides ignored and said', [ceilingsFrom({ OS_FLEET_DISPATCH_START_MS: '10', OS_FLEET_DISPATCH_TIMEOUT_MS: 'soon' }).startMs, ceilingsFrom({ OS_FLEET_DISPATCH_TIMEOUT_MS: 'soon' }).ceilingMs, ceilingsFrom({ OS_FLEET_DISPATCH_TIMEOUT_MS: 'soon' }).notes.length], [10, DEFAULT_CEILING_MS, 1]);
+    }
+
+    // ── the batch gap at the seat ───────────────────────────────────────────
+    battery("the batch gap at the seat: content creation read off the op table; a stroke at or above write-pace's threshold is batched through its last content-creating write and waited for exactly that much longer; a stroke whose pacing the relay job cannot hold is refused before anything is sent, naming the per-op doors; the job's timeout mirrors the workflow's");
+    {
+      const T = DEFAULT_BATCH_THRESHOLD;
+      const GAP = DEFAULT_BATCH_GAP_MS;
+      const stroke = (actions) => ({ request_id: 'fw-test-1', repo: 'objectstack-ai/objectstack', session: SESSION, actions });
+      const comments = (n) => Array.from({ length: n }, (_, i) => ({ ...ACTIONS[0], body: `${ACTIONS[0].body} ${i + 1}` }));
+      // The board after a batched stroke of comments: each one stored as sent, the batch gap apart — so it reads back clean.
+      const board = (n) => ({ [`GET /repos/objectstack-ai/objectstack/issues/${ACTIONS[0].issue}/comments`]: { status: 200, json: comments(n).map((c, i) => ({ id: 501 + i, created_at: at(8_000 + i * GAP), body: c.body })) } });
+      t(
+        'the content-creating ops, derived from the table: the creates of a comment, an issue and a pull, and the transfer that creates the card on its target — no edit, label, assignee, reviewer, flag, base sync or workflow dispatch',
+        [[...CONTENT_CREATING_OPS].sort(), OP_NAMES.filter((op) => !CONTENT_CREATING_OPS.includes(op)).sort()],
+        [['comment', 'issue_create', 'pr_create', 'transfer'], OP_NAMES.filter((op) => !['comment', 'issue_create', 'pr_create', 'transfer'].includes(op)).sort()],
+      );
+      t('…every op that creates or moves a card (ANNOTATED_OPS) is among them', Object.keys(ANNOTATED_OPS).every((op) => CONTENT_CREATING_OPS.includes(op)));
+      const row = (first) => ({ required: ['title'], optional: [], requests: () => [first] });
+      t(
+        "…by the predicate, on rows of this test's own: a REST POST carrying prose creates; a PATCH carrying prose, a POST carrying a list and a GraphQL POST do not",
+        [
+          createsContent('x_new', row({ verb: 'POST', path: '/repos/o/r/things', body: { title: 't' } })),
+          createsContent('x_edit', row({ verb: 'PATCH', path: '/repos/o/r/things/1', body: { body: 'b' } })),
+          createsContent('x_list', row({ verb: 'POST', path: '/repos/o/r/things/1/labels', body: { labels: ['a'] } })),
+          createsContent('x_flip', row({ verb: 'POST', path: '/graphql', graphql: { mutation: 'm' } })),
+        ],
+        [true, false, false, false],
+      );
+      const atT = strokePacing(stroke(comments(T)));
+      t(`${T} content-creating actions — write-pace's own threshold — are batched: all ${T} writes, (${T} − 1) × the batch gap of pacing, inside the budget`, [atT.creating, atT.batched, atT.batchWrites, atT.pacingMs, atT.fits], [T, true, T, (T - 1) * GAP, true]);
+      const below = strokePacing(stroke(comments(T - 1)));
+      t('one fewer is not batched: no batch writes, no pacing', [below.batched, below.batchWrites, below.pacingMs], [false, 0, 0]);
+      const landing = strokePacing(stroke([{ op: 'pr_ready', pull: 12 }, { op: 'automerge_enable', pull: 12 }]));
+      t('a landing stroke (pr_ready + automerge_enable) carries no content-creating action and is unchanged', [landing.creating, landing.writes, landing.batched, landing.pacingMs], [0, 2, false, 0]);
+      const pulls = Array.from({ length: T }, (_, i) => ({ op: 'pr_create', title: `P${i}`, head: `h${i}`, base: 'main', labels: ['skip-changeset'] }));
+      const mixed = strokePacing(stroke([...pulls, { op: 'labels_add', issue: 1, labels: ['x'] }, { op: 'labels_add', issue: 2, labels: ['x'] }]));
+      t("every write request counts — a pull's label leg included — and the batch runs THROUGH the last content-creating write, not past it", [mixed.creating, mixed.writes, mixed.batchWrites, mixed.pacingMs], [T, 2 * T + 2, 2 * T - 1, (2 * T - 2) * GAP]);
+      t(
+        "the budget is the job's timeout less an ordinary stroke's allowance, and it holds at least a threshold-sized batch — so rule ⑤ on the runner is reachable at all",
+        [atT.budgetMs, atT.maxBatchWrites >= T, strokePacing(stroke(comments(atT.maxBatchWrites))).fits, strokePacing(stroke(comments(atT.maxBatchWrites + 1))).fits],
+        [RELAY_JOB_TIMEOUT_MS - DEFAULT_CEILING_MS, true, true, false],
+      );
+      const over = packRequest({ repo: 'objectstack-ai/objectstack', session: SESSION, actions: comments(atT.maxBatchWrites + 1), requestId: 'fw-test-1' });
+      t(
+        'the packer REFUSES a stroke the job cannot hold — nothing packed, ONE reason naming every per-op door, the announcement, the most one stroke holds, and never a shorter gap',
+        [over.ok, over.payload, over.errors.length, BATCH_DOORS.every((d) => over.errors[0]?.includes(`scripts/pm/${d}`)), over.errors[0]?.includes('--announce-batch N'), over.errors[0]?.includes(`at most ${atT.maxBatchWrites} batched write(s)`), over.errors[0]?.includes('Never a shorter gap')],
+        [false, null, 1, true, true, true, true],
+      );
+      const fits = packRequest({ repo: 'objectstack-ai/objectstack', session: SESSION, actions: comments(atT.maxBatchWrites), requestId: 'fw-test-1' });
+      t('…and packs the largest stroke it can hold, its pacing riding along', [fits.ok, fits.pacing?.batched, fits.pacing?.pacingMs], [true, true, (atT.maxBatchWrites - 1) * GAP]);
+      const { dirname: dirOf, resolve: resolvePath } = await import('node:path');
+      const workflow = readReal(resolvePath(dirOf(SELF_PATH), '../../..', RELAY_WORKFLOW_PATH), 'utf8');
+      const minutes = [...workflow.matchAll(/^\s*timeout-minutes:\s*(\d+)\s*$/gm)].map((m) => Number(m[1]));
+      t(`RELAY_JOB_TIMEOUT_MS mirrors the relay job's timeout-minutes in ${RELAY_WORKFLOW_PATH} — the workflow's one`, [minutes.length, minutes[0] * 60_000], [1, RELAY_JOB_TIMEOUT_MS]);
+      // The wait: a run that completes after the ordinary ceiling but before the ceiling plus the stroke's pacing.
+      const late = 300_000 + atT.pacingMs / 2;
+      const script = { runs: (ms) => (ms >= 10_000 ? [RUN(ms >= late ? 'completed' : 'in_progress', ms >= late ? 'success' : null)] : []), one: (id, ms) => RUN(ms >= late ? 'completed' : 'in_progress', ms >= late ? 'success' : null) };
+      const batchedRun = await drive({ ...script, store: board(T) }, { stroke: stroke(comments(T)) });
+      const plainRun = await drive(script, { stroke: stroke(comments(T - 1)) });
+      t(
+        "a batched stroke is WAITED for: its run, done after the ordinary ceiling but inside the ceiling plus its pacing, is success — the ceiling grew by exactly the pacing, and one line says why; the same run for an unbatched stroke is the ordinary timeout",
+        [batchedRun.state, batchedRun.ceilingMs, batchedRun.logs.filter((l) => l === `fleet-write: ${batchedStrokeText(atT, 300_000 + atT.pacingMs)}`).length, plainRun.state, plainRun.ceilingMs, plainRun.logs.some((l) => l.includes('content-creating'))],
+        ['success', 300_000 + atT.pacingMs, 1, 'timeout', 300_000, false],
+        batchedRun.logs.join(' | '),
+      );
+      writeFileSync(join(dir, 'over.json'), JSON.stringify(comments(atT.maxBatchWrites + 1)), 'utf8');
+      const cli = spawnSync(process.execPath, [SELF_PATH, '--repo', 'objectstack-ai/objectstack', '--actions-file', join(dir, 'over.json'), '--session', SESSION, '--dry-run'], {
+        encoding: 'utf8',
+        env: { ...process.env, GITHUB_TOKEN: '', GH_TOKEN: '', HTTPS_PROXY: '', https_proxy: '', OS_PM_WRITE_PACE_FILE: join(dir, 'over-pace.jsonl') },
+      });
+      t('through the CLI: the over-budget actions file is usage (2), REFUSED on stderr, no payload printed', [cli.status, cli.stderr.includes('REFUSED') && cli.stderr.includes('content-creating'), cli.stdout.includes('"event_type"')], [EXIT_USAGE, true, false], cli.stderr.slice(-300));
     }
 
     // ── the read-back: which actions are read, and where ─────────────────────
@@ -2309,6 +2537,7 @@ export async function selfTest() {
       'and every body read back after a success run — the card\'s 41,699 bytes byte-exact across every 16 KiB boundary, a corrupted read-back NOT STORED (exit 4), an unfound one UNCONFIRMED (6) ' +
       "only after a lagging issue list was re-read on its bounded schedule — unless the run's annotation named the new number, which is read at once and never listed — the create never re-sent; " +
       "a started workflow run read back from the target's run list within a bounded window, UNCONFIRMED (6) when it is not there; " +
+      "a batched stroke waited for as long as the runner is told to pause, and one the relay job cannot hold refused before it leaves; " +
       'and every relay sender, discovered from the source, answering an accepted dispatch with no run, or none completed, UNCONFIRMED (6) with ZERO direct writes, under auto as under dispatch (the no-run conformance).',
   );
   selfTestReachedVerdict = true;
