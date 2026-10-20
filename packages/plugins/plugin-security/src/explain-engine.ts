@@ -36,6 +36,8 @@ import {
 } from '@objectstack/formula';
 import { ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
 import type {
+  AuthoredRowWriteOperation,
+  AuthoredRowWriteVerdict,
   ControlledByParentWriteDenialLeg,
   ControlledByParentWriteOutcome,
   ControlledByParentWriteUnresolvedReason,
@@ -380,6 +382,31 @@ export interface ExplainEngineDeps {
    * explanation for a `delete` must consult this rather than the update gate.
    */
   canDeleteRecord?: (object: string, recordId: string, context: any) => Promise<boolean>;
+  /**
+   * [#5493 / ADR-0105 D3] The by-id write gate's DEFERRAL: whether an
+   * APP-AUTHORED row-level policy admits the row for the refusing gate's verb
+   * (`ISecurityService.checkAuthoredRowWrite`, reached through the sharing
+   * service's own probe). The sharing middleware asks it only after its
+   * per-record gate refused the row, and only the literal `admit` lifts that
+   * refusal: the row then goes on to the pre-image gate, which is the
+   * row-level security this report's `rls` layer explains.
+   *
+   * Asked on the same condition here: for a by-id `update` or `delete` whose
+   * gate above ({@link canEditRecord} / {@link canDeleteRecord}) answered
+   * `false`, with that gate's verb and the context being EXPLAINED. Every
+   * other answer leaves the refusal standing, and so does a rejection: the
+   * door's probe catches its own failure and keeps its refusal, so a failing
+   * probe is not a failing request and is not reported as one.
+   *
+   * Optional: a deps bag wired without it reports the gate's refusal as the
+   * write verdict, as before.
+   */
+  probeAuthoredRowWrite?: (
+    object: string,
+    recordId: string,
+    operation: AuthoredRowWriteOperation,
+    context: any,
+  ) => Promise<AuthoredRowWriteVerdict | string>;
   /**
    * [ADR-0055] The master-detail write check's own answer for a by-id UPDATE
    * of `recordId` by `context`: `ISecurityService.checkControlledByParentWrite`,
@@ -1558,6 +1585,17 @@ async function applyRecordAttribution(
     : undefined;
   const writeGateFault = canEditOrFault === DEPENDENCY_FAULT;
   const canEdit = canEditOrFault === DEPENDENCY_FAULT ? undefined : canEditOrFault;
+  // [#5493 / ADR-0105 D3] The by-id write gate DEFERS before it refuses: when
+  // its per-record gate refuses an `update` or a `delete`, the sharing
+  // middleware asks whether an app-authored row-level policy admits the row
+  // for that verb, and only `admit` lifts the refusal, handing the row to the
+  // pre-image gate (the `rls` layer below). Asked on that condition alone, so
+  // a row the gate admits, abstains on or faulted on is explained as before;
+  // every answer but `admit`, and a rejection, keeps the refusal, as at the door.
+  const authoredRowWriteAdmits = canEdit === false && (engineOp === 'update' || engineOp === 'delete')
+    && deps.probeAuthoredRowWrite
+    ? (await deps.probeAuthoredRowWrite(object, recordId, engineOp, context).catch(() => 'abstain')) === 'admit'
+    : false;
   // [ADR-0055] A by-id write of a `controlled_by_parent` record (an update, a
   // delete, a transfer: {@link MASTER_CHECKED_BY_ID_WRITES}) is judged by the
   // master-detail write check (step 2.8), which the sharing gate above cannot
@@ -1697,7 +1735,11 @@ async function applyRecordAttribution(
                     ? `The write gate admits this record via the Modify All Data bypass [${vamaSets.join(', ')}], ` +
                       'not ownership or a share (see the vama_bypass layer).'
                     : 'The sharing service grants write on this record (ownership or an edit/full share).')
-                : 'No ownership and no edit/full share grants write on this record.')
+                : 'No ownership and no edit/full share grants write on this record.' +
+                  (authoredRowWriteAdmits
+                    ? ` The by-id ${engineOp} does not stop at that refusal: an app-authored row-level ${engineOp} ` +
+                      'policy admits this record, so the write gate defers to row-level security (see the rls layer).'
+                    : ''))
             : depthAdmitsRow
               ? `${shareRules.length} share(s) attached; none grants the caller access to this record — read depth ` +
                 `'${depthScope}' already admits it, so sharing adds nothing here (see the depth layer).`
@@ -1865,7 +1907,7 @@ async function applyRecordAttribution(
   const businessRowAdmits = isRead
     ? owd.effect !== 'private' || ownerIsMe || sharingOutcome === 'admitted' || depthAdmitsRow || vamaAdmitsRow
     : canEdit !== undefined
-      ? canEdit
+      ? canEdit || authoredRowWriteAdmits
       : owd.effect === 'public' || ownerIsMe || sharingOutcome === 'admitted' || vamaAdmitsRow;
 
   // [#4647] Was the bypass DECISIVE? Only where the baseline and the concrete
@@ -1893,6 +1935,9 @@ async function applyRecordAttribution(
   // the same layer.
   else if (masterLegRefusal) { visible = false; decidedBy = 'sharing'; }
   else if (!businessRowAdmits) { visible = false; decidedBy = owd.effect === 'private' ? 'sharing' : 'owd_baseline'; }
+  // [#5493 / ADR-0105 D3] A row the write gate refused and its deferral
+  // admitted was last admitted by the app-authored row-level policy.
+  else if (authoredRowWriteAdmits) { visible = true; decidedBy = 'rls'; }
   else {
     visible = true;
     // `depth` ranks with `sharing`, the other layer that widens a private
