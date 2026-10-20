@@ -706,7 +706,10 @@ function firstFormatMiss(type: string, value: unknown): FormatMiss | null {
   const declared = DECLARED_VALUE_FORMATS.get(type);
   if (!declared) return null;
   if (typeof value !== 'string' || value.trim() === '') return null;
-  if (declared.re.test(value)) return null;
+  // Judged trimmed: both live readers trim before use (`plugin-email`'s
+  // address check, `RuntimeConfigPlugin`'s branding read), so surrounding
+  // whitespace is not a format any reader trips over. Inner whitespace is.
+  if (declared.re.test(value.trim())) return null;
   return {
     type,
     code: declared.code,

@@ -21,6 +21,6 @@ The formats are the platform's existing grammars for the same words:
 - `phone`: digits, spaces and `+ ( ) - .`, at least five characters.
 - `color`: `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`.
 
-Empty values and non-string values are not judged.
+Empty values and non-string values are not judged. Surrounding whitespace is ignored, because the readers trim it before use.
 
 **Unchanged.** Status codes, response bodies, stored values, the `FieldError`s a refused save carries, and which overrides are in force. Under the standing rule 「甲」, refusing these values waits for the next major version.

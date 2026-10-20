@@ -193,6 +193,9 @@ describe('save door — a format miss is accepted and stored, and warned about o
     for (const colour of ['#abc', '#abcd', '#AABBCC', '#aabbccdd']) {
       expect((await put(http, 'branding', { accent_color: colour })).status).toBe(200);
     }
+    // Surrounding whitespace is trimmed by both live readers before use, so it
+    // is not a format miss; inner whitespace still is (the per-type cases above).
+    expect((await put(http, 'company', { primary_contact_email: ' ops@example.com ' })).status).toBe(200);
     expect(warns).toEqual([]);
   });
 
