@@ -139,7 +139,9 @@ async function bootKernel(opts: { selfHosted: boolean; webhooks?: boolean; guard
     const kernel = new LiteKernel({ logger: { level: 'silent' } } as any);
     liveKernels.push(kernel);
     const fixture = new FixturePlugin(opts.guardable !== false);
-    if (opts.selfHosted) kernel.use(new HonoServerPlugin({ port: 0 }));
+    // CORS off at both doors, as on the suite's other parity pins: it is transport
+    // policy each door configures on its own, and not what these pins compare.
+    if (opts.selfHosted) kernel.use(new HonoServerPlugin({ port: 0, cors: false }));
     kernel.use(fixture);
     if (opts.webhooks !== false) kernel.use(new WebhookOutboxPlugin());
     await kernel.bootstrap();
@@ -190,7 +192,7 @@ async function hostedDoor(opts: { webhooks?: boolean; guardable?: boolean } = {}
     let server: unknown;
     try { server = booted.kernel.getService<unknown>('http.server'); } catch { server = undefined; }
     expect(server, 'the hosted shape owns no socket').toBeUndefined();
-    const app = createHonoApp({ kernel: booted.kernel as any, prefix: PREFIX });
+    const app = createHonoApp({ kernel: booted.kernel as any, prefix: PREFIX, cors: false });
     return { ...booted, send: (init: RequestInit, path = PATH) => app.request(`http://tenant.example${path}`, init) };
 }
 

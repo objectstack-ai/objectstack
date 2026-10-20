@@ -15,7 +15,9 @@
  * reader cannot recover from the id is WHICH object holds it, so a durable
  * job carries the object beside the id. A job with no object is one an 18.0
  * process published, when `sys_email` was the only log — it reads
- * `sys_email` (expand-first: those rows and jobs stay where they are).
+ * `sys_email`. The upgrade ceremony points the jobs of the identity mail it
+ * moves at `sys_identity_email` first, so what still reads this way names a
+ * tenant mail row, which stays in `sys_email`.
  */
 
 /** The tenant mail log. */

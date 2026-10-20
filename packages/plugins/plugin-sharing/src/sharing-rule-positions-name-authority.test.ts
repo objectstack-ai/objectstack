@@ -31,7 +31,8 @@
  * expose every tenant's rules". The D4 name-read was the bypass: it satisfied
  * that gate, `adminOrgScope` then returned the UNFILTERED `where`, and
  * `listRules` answered with every organization's rows. The same read also
- * carried `deleteRule` past `assertCanDeletePlatformGlobalRule`.
+ * carried `deleteRule` past the platform-global delete guard, which retired
+ * with that rule class (ADR-0131 D1/D2); the scope gate is what refuses it now.
  *
  * ## POPULATION OF THIS PIN — stated because a pin proves only what it covers
  *
@@ -177,7 +178,7 @@ async function resolve(shape: Shape) {
   return { context, grants, rung: await hasPlatformAdminStanding(ql as any, USER) };
 }
 
-/** Two tenants' rules plus one platform-global row, so a cross-tenant read is VISIBLE. */
+/** Two tenants' rules plus one organization-less row, so a cross-tenant read is VISIBLE. */
 const RULE_ROWS = [
   { id: 'srule_home', name: 'home_rule', object_name: 'account', organization_id: HOME_ORG, active: true },
   { id: 'srule_victim', name: 'victim_rule', object_name: 'account', organization_id: OTHER_ORG, active: true },
@@ -263,7 +264,7 @@ describe('[#15981] a D4 `sys_user_position` row spelling `platform_admin` confer
     expect(engine.finds).toEqual([]);
   });
 
-  it('`deleteRule` refuses to destroy a platform-global rule', async () => {
+  it('`deleteRule` refuses the org-less caller before it reaches any rule — the organization-less row included', async () => {
     const { context } = await resolve('name-only');
     const engine = makeSharingEngine();
     const service = makeService(engine);
