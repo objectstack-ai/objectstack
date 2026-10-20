@@ -140,6 +140,17 @@ export const SysUser = ObjectSchema.create({
     // ⛔ Never `'platform_admin' in current_user.positions`: `EvalUserSchema`
     // rules that standing is read from this key, never from the array. The
     // repo-wide pin is `platform-admin-affordance-standing.test.ts`.
+    //
+    // Ban / Unban / Unlock also read the ROW's state after the standing, in
+    // the form of `sys_oauth_application`'s Disable / Enable pair, so a pair
+    // that undoes each other is never offered together. Display only: no door
+    // reads `visible` (the routes still answer whatever they are sent). On a
+    // list row the console projects every `record.<field>` an object action's
+    // predicate reads (objectui `listViewPredicates`), so the default Users
+    // view carries `banned` without showing it; the record header reads the
+    // whole row. `banned` stays true past `ban_expires` until better-auth
+    // clears it at the user's next sign-in, so Unban is offered while the row
+    // says banned. Pinned in `action-state-visibility.test.ts`.
     {
       name: 'ban_user',
       label: 'Ban User',
@@ -148,8 +159,9 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/ban-user',
-      // Platform-admin standing (ADR-0068 D4) — see the block header above.
-      visible: 'current_user.isPlatformAdmin == true',
+      // Platform-admin standing (ADR-0068 D4), then a user not banned yet —
+      // see the block header above. A null `banned` reads as not banned.
+      visible: 'current_user.isPlatformAdmin == true && has(record.banned) && record.banned != true',
       requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'User banned',
@@ -176,8 +188,9 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/unban-user',
-      // Platform-admin standing (ADR-0068 D4) — see the block header above.
-      visible: 'current_user.isPlatformAdmin == true',
+      // Platform-admin standing (ADR-0068 D4), then a banned user — see the
+      // block header above.
+      visible: 'current_user.isPlatformAdmin == true && has(record.banned) && record.banned == true',
       requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'User unbanned',
@@ -194,8 +207,17 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/unlock-user',
-      // Platform-admin standing (ADR-0068 D4) — see the block header above.
-      visible: 'current_user.isPlatformAdmin == true',
+      // Platform-admin standing (ADR-0068 D4), then an account that can hold
+      // a lock. `unlockUser` clears TWO stages: this row's `locked_until`
+      // (the password check) and `sys_two_factor.locked_until` (the second
+      // factor), which this row does not carry. So the button is offered when
+      // `locked_until` is set, or when the user has two-factor enabled and may
+      // be locked at the second factor; gating on `locked_until` alone would
+      // take away the only early release of a second-factor lock. The stamp is
+      // not compared with now() on purpose: an expired lock leaves
+      // `failed_login_count` at the threshold, so one more failure re-locks,
+      // and Unlock is what resets that counter.
+      visible: 'current_user.isPlatformAdmin == true && ((has(record.locked_until) && record.locked_until != null) || (has(record.two_factor_enabled) && record.two_factor_enabled == true))',
       requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'Account unlocked',
