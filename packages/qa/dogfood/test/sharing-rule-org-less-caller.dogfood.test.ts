@@ -321,7 +321,7 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
     expect((await ql.findOne('sys_sharing_rule', { where: { name: RULE_B }, context: SYS }))?.id).toBeTruthy();
   });
 
-  it('CREATE is refused — no org-less caller mints a platform-global rule', async () => {
+  it('CREATE is refused — no org-less caller writes a rule', async () => {
     const res = await stack.apiAs(orgLess, 'POST', RULES, {
       name: 'rule_8158_minted_by_orgless',
       label: 'Minted with no organization',
