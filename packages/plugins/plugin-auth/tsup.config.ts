@@ -35,9 +35,14 @@ import { dropSourcesContent } from '../../../scripts/tsup-drop-sources-content.m
  * `packages/core/tsup.config.ts`, which ship `./node` and `./logger` this way.
  * The only reason this file exists at all — rather than the shared
  * `../../../tsup.config.ts` — is the second entry.)
+ *
+ * `src/client-address.ts` is the third entry, for the same reason: it is the
+ * client-address trust rule (`resolveClientAddress`) that `@objectstack/runtime`'s
+ * inbound rate limiter and this package's ADR-0069 D5 allow-list share, and the
+ * runtime imports it from `./client-address` rather than through the root.
  */
 export default defineConfig({
-  entry: ['src/index.ts', 'src/rate-limit-storage.ts'],
+  entry: ['src/index.ts', 'src/rate-limit-storage.ts', 'src/client-address.ts'],
   splitting: false,
   sourcemap: true,
   clean: true,

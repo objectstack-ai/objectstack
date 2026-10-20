@@ -1472,10 +1472,23 @@ export const FieldSchema = lazySchema(() => {
    * engine's object registry for a definition that reaches it unparsed, so every
    * reader of the target — the delete walk that honours `deleteBehavior`,
    * `$expand`, the write-time reference check — sees an ordinary self-reference.
+   *
+   * [#24677] A `lookup` / `master_detail` never targets a stored-metadata-body
+   * table (`STORED_METADATA_BODY_OBJECTS`: `sys_metadata`,
+   * `sys_metadata_history`). Its rows are served only through the metadata
+   * protocol's own door, so the engine never hydrates a reference into one
+   * (`$expand` keeps the stored id; a master-detail `parent` root stays
+   * unbound). The refusal is the authoring rules', beside the refusal of a
+   * formula or validation rule reading through such a field
+   * (`@objectstack/lint`'s expression rule), so `os validate`, `os build` and
+   * the object save door refuse it alike.
    */
   reference: z.string().optional().describe(
     'Target object name (snake_case) for lookup/master_detail fields. '
     + 'Required for relationship types. Used by $expand to resolve foreign key IDs into full objects. '
+    + 'Never a stored-metadata table (`sys_metadata`, `sys_metadata_history`): their rows are served only '
+    + 'through the metadata API, so the engine never hydrates a reference into one, and `os validate`, '
+    + '`os build` and the object save door refuse it. '
     + 'On a `tree` field it is optional and, if given, must be the declaring object\'s own name — '
     + 'the object schema refuses any other target, and writes the own name when it is left out.'
   ),

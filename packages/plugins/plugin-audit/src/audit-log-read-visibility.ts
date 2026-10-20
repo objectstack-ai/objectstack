@@ -33,8 +33,10 @@
  *  - **Rows about a record** — they name `object_name` + `record_id`: the CRUD
  *    mirror's `create` / `update` / `delete` (`audit-writers.ts`), record-view
  *    `read` rows (`read-audit.ts`), plugin-auth's administrative `create` /
- *    `update` on a `sys_user`, and the auth-event sink's `login` / `logout`,
- *    which name the session (`auth-event-audit.ts`). Judged by the record gate;
+ *    `update` on a `sys_user`, the auth-event sink's `login` / `logout`,
+ *    which name the session, and its `login_failed` / `account_locked`, which
+ *    name the account's `sys_user` row (`auth-event-audit.ts`). Judged by the
+ *    record gate;
  *    the session is in the audit writer's `AUDIT_EXCLUDED_OBJECTS`, so the gate
  *    names it ({@link LEDGER_NAMED_PARENTS}) to keep judging it.
  *    A record that no longer exists is read by no caller, so its rows are

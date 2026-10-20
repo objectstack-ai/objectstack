@@ -48,7 +48,7 @@
  * either direction**: a row with a misspelled action is accepted silently and
  * no test that merely watches for a throw can see it. The only structural
  * protection available is at authoring time, which is why
- * {@link AuthSessionAuditAction} is a closed literal union rather than
+ * {@link AuthEventAuditAction} is a closed literal union rather than
  * `string`, and why the caller hands over an EVENT (what happened) instead of a
  * row (what to store).
  *
@@ -56,9 +56,28 @@
  *
  * `AuditPlugin` registers this sink under the `audit` service slot; plugin-auth
  * resolves it lazily through a locally-declared structural surface and calls it
- * from better-auth's session lifecycle hooks. Neither package depends on the
- * other — the same shape `audit-writers.ts` uses to reach messaging/i18n
- * without depending on those services.
+ * from better-auth's session lifecycle hooks and from its password sign-in
+ * outcome. Neither package depends on the other — the same shape
+ * `audit-writers.ts` uses to reach messaging/i18n without depending on those
+ * services.
+ *
+ * ## Two classes of auth event, two row targets
+ *
+ *  - **Session events** (`login`, `logout`) are about a SESSION: the row names
+ *    `sys_session` and the session id, and `actor` defaults to the subject,
+ *    who acted for themselves unless an impersonating admin is named.
+ *  - **Account events** (`login_failed`, `account_locked`) are about an
+ *    ACCOUNT and exist without any session: a refused sign-in mints none, and
+ *    a lockout is a state of the `sys_user` row. The row names `sys_user` and
+ *    the account's id, so it is navigable to the account and judged by the
+ *    ledger's record read gate exactly as any row about a user is. `actor` is
+ *    left null: a refused attempt authenticated nobody, so no principal can be
+ *    credited with it, and recording the account holder there would claim
+ *    they made the attempt.
+ *
+ * ⛔ An account event never carries the attempted credential, in any form.
+ * Its `context` is the endpoint, the refusal's machine code and, for a
+ * lockout, the lock's expiry and threshold — nothing the caller typed.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
@@ -73,28 +92,67 @@ import {
 export type AuthSessionAuditAction = 'login' | 'logout';
 
 /**
- * One auth session event, in the vocabulary of what HAPPENED rather than of
- * what to store. Everything but `action` and `userId` is optional: an event
- * missing its client fingerprint is still worth recording, and a partial row
- * beats no row on a compliance ledger.
+ * The two sign-in outcome events on an account (`sys_audit_log.action`): a
+ * password sign-in that was refused, and the transition of an account into
+ * the ADR-0069 D2 lockout.
+ */
+export type AuthAccountAuditAction = 'login_failed' | 'account_locked';
+
+/** Every action this sink writes. */
+export type AuthEventAuditAction = AuthSessionAuditAction | AuthAccountAuditAction;
+
+/**
+ * The account-event actions, as a value — the one place that decides which
+ * actions take the account row target described in the module note.
+ */
+export const AUTH_ACCOUNT_AUDIT_ACTIONS: readonly AuthAccountAuditAction[] = [
+  'login_failed',
+  'account_locked',
+];
+
+const ACCOUNT_ACTIONS = new Set<string>(AUTH_ACCOUNT_AUDIT_ACTIONS);
+
+/** Whether `action` is an account event (module note: "two row targets"). */
+export function isAuthAccountAuditAction(action: unknown): action is AuthAccountAuditAction {
+  return typeof action === 'string' && ACCOUNT_ACTIONS.has(action);
+}
+
+/**
+ * One auth event, in the vocabulary of what HAPPENED rather than of what to
+ * store. Everything but `action` and `userId` is optional: an event missing
+ * its client fingerprint is still worth recording, and a partial row beats no
+ * row on a compliance ledger.
  */
 export interface AuthSessionAuditEvent {
   /** Which event. Closed union — see the module note on the unvalidated enum. */
-  action: AuthSessionAuditAction;
-  /** The session's subject — a real `sys_user` id (the `user_id` lookup). */
+  action: AuthEventAuditAction;
+  /**
+   * The event's subject — a real `sys_user` id (the `user_id` lookup): the
+   * session's owner for a session event, the account the sign-in named for an
+   * account event.
+   */
   userId: string;
-  /** The `sys_session` row this event is about, when known. */
+  /**
+   * The `sys_session` row a SESSION event is about, when known. An account
+   * event names its account instead (module note), so this is not read for
+   * one.
+   */
   sessionId?: string;
   /** Tenant context — the session's active organization, when it has one. */
   organizationId?: string;
-  /** Client fingerprint, as better-auth recorded it on the session row. */
+  /**
+   * Client fingerprint, by better-auth's own rule: the session row's values
+   * for a session event, and the same resolution applied to the sign-in
+   * request for an account event, which has no session row.
+   */
   ipAddress?: string;
   userAgent?: string;
   /**
    * The principal that CAUSED the event, when it is not the subject — an
    * admin's user id on an impersonation session. Lands on `actor`, which the
    * schema defines as "Principal that performed the action", independent of the
-   * `user_id` lookup. Absent → the subject acted for themselves.
+   * `user_id` lookup. Absent → the subject acted for themselves on a session
+   * event, and no principal is recorded on an account event (module note).
    */
   actor?: string;
   /**
@@ -130,9 +188,9 @@ export interface AuthEventAuditLogger {
 /** What {@link createAuthEventAuditSink} registers under the `audit` slot. */
 export interface AuthEventAuditSink {
   /**
-   * Record one auth session event in `sys_audit_log`. Never throws — an audit
-   * write must never turn a valid sign-in into an error — and reports a lost
-   * row loudly (see {@link createAuthEventAuditSink}).
+   * Record one auth event in `sys_audit_log`. Never throws — an audit write
+   * must never change the answer a sign-in gets — and reports a lost row
+   * loudly (see {@link createAuthEventAuditSink}).
    */
   recordAuthEvent(event: AuthSessionAuditEvent): Promise<void>;
 }
@@ -148,8 +206,16 @@ export interface AuthEventAuditSinkOptions {
   logger?: AuthEventAuditLogger;
 }
 
-/** The object the auth-event rows name as their target. */
+/** The object a session event's row names as its target. */
 const SESSION_OBJECT = 'sys_session';
+
+/** The object an account event's row names as its target (module note). */
+const ACCOUNT_OBJECT = 'sys_user';
+
+/** The object the row for `action` is about. */
+function targetObjectFor(action: unknown): string {
+  return isAuthAccountAuditAction(action) ? ACCOUNT_OBJECT : SESSION_OBJECT;
+}
 
 /** JSON that cannot throw on a cyclic/odd value — same rule as the CRUD writer. */
 function safeStringify(v: unknown): string {
@@ -212,12 +278,13 @@ export function createAuthEventAuditSink(opts: AuthEventAuditSinkOptions): AuthE
   const reportAuthEventWriteFailure = (action: string, err: unknown): void => {
     const detail = String((err as any)?.message ?? err);
     try {
-      // The object dimension of the shared key is `sys_session` here — the
-      // object these rows are ABOUT (`object_name`), which is what
-      // `audit-writers.ts` passes too (`ctx.object`). It is constant on this
-      // seam, so the key reduces to the driver's code vocabulary: bounded by
-      // construction, and still the same key shape rather than a second one.
-      const cause = auditFailureCauseKey(SESSION_OBJECT, err);
+      // The object dimension of the shared key is the object these rows are
+      // ABOUT (`object_name`), which is what `audit-writers.ts` passes too
+      // (`ctx.object`). It takes two values on this seam (`sys_session` for a
+      // session event, `sys_user` for an account event), so the key reduces to
+      // the driver's code vocabulary twice over: bounded by construction, and
+      // still the same key shape rather than a second one.
+      const cause = auditFailureCauseKey(targetObjectFor(action), err);
       if (reportedAuthEventFailureCauses.has(cause)) {
         logger?.debug?.('Auth-event audit write failed (already reported)', {
           action,
@@ -231,10 +298,16 @@ export function createAuthEventAuditSink(opts: AuthEventAuditSinkOptions): AuthE
       // question is asked about that one — unlike `persistAuditTrailRow`, which
       // writes the ledger row and its `sys_activity` mirror and asks about both.
       const missingTable = isMissingTableError(err, 'sys_audit_log');
+      // What the caller saw is different for the two classes, and the line
+      // must not tell an operator a refused sign-in "succeeded".
+      const callerSaw = isAuthAccountAuditAction(action)
+        ? 'The sign-in attempt itself was answered exactly as it would have been without the ledger, so ' +
+          'nothing downstream looks broken'
+        : 'The sign-in/sign-out itself SUCCEEDED and the user holds a valid session, so the API returned 200 ' +
+          'and nothing downstream looks broken';
       const message =
         `Auth-event audit write FAILED (${auditFailureCauseSummary(err, detail)}) — the compliance trail is ` +
-          'now INCOMPLETE. The sign-in/sign-out itself SUCCEEDED and the user holds a valid session, so the API ' +
-          'returned 200 and nothing downstream looks broken; only the `sys_audit_log` row recording the ' +
+          `now INCOMPLETE. ${callerSaw}; only the \`sys_audit_log\` row recording the ` +
           `${action} never landed, and nothing retries it. Every subsequent auth event failing THIS WAY is ` +
           'losing its row the same way (this CAUSE is reported ONCE — raise the log level to `debug` to see ' +
           'the rest; a DIFFERENT cause gets its own `error` line). The shipped `auth_events` list view and the ' +
@@ -289,15 +362,18 @@ export function createAuthEventAuditSink(opts: AuthEventAuditSinkOptions): AuthE
       const objectHasField = probe;
 
       const tenantId = event.organizationId ?? null;
+      const accountEvent = isAuthAccountAuditAction(event.action);
       const row: Record<string, unknown> = {
         action: event.action,
         // The whole point of the card: the event names its actor. `user_id` is
         // a strict `sys_user` lookup, and a session always has a real subject.
+        // On an account event it is the account the sign-in named.
         user_id: event.userId,
-        // The session this event is about, so the row is navigable from the
-        // ledger to the session row (and back) rather than being a bare verb.
-        object_name: SESSION_OBJECT,
-        record_id: event.sessionId ?? null,
+        // The record this event is about, so the row is navigable from the
+        // ledger to it (and back) rather than being a bare verb: the session
+        // for a session event, the account for an account event.
+        object_name: targetObjectFor(event.action),
+        record_id: accountEvent ? event.userId : (event.sessionId ?? null),
         // No before/after state: an auth event is not a field diff. Recording
         // `{}` here would be a claim about a record that never changed.
         old_value: null,
@@ -315,8 +391,9 @@ export function createAuthEventAuditSink(opts: AuthEventAuditSinkOptions): AuthE
         // ADR-0014 D2's principal label. For an ordinary sign-in the subject IS
         // the principal; for an impersonation session the admin who started it
         // is, and recording the impersonated user as the sole principal there
-        // would be a WRONG record rather than a vague one.
-        row.actor = event.actor ?? event.userId;
+        // would be a WRONG record rather than a vague one. An account event
+        // authenticated nobody, so it credits no principal (module note).
+        row.actor = event.actor ?? (accountEvent ? null : event.userId);
       }
 
       try {

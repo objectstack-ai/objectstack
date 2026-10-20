@@ -180,10 +180,23 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
     token.admin = await stack.signIn();
     const userIdOf = async (email: string) =>
       String((await ql.findOne('sys_user', { where: { email }, context: { ...SYS } }))?.id ?? '');
+    // A grant is a system write on a tenant-scoped object, so it carries its
+    // holder's organization the way a session write does (ADR-0131 D9): the one
+    // organization the holder is a member of, the Default Organization here.
+    const organizationOf = async (userId: string) => {
+      const memberships: Row[] = await ql.find('sys_member', { where: { user_id: userId }, context: { ...SYS } });
+      const organizations = memberships.map((m) => String(m.organization_id ?? ''));
+      expect(organizations, `the organizations user ${userId} is a member of`).toHaveLength(1);
+      expect(organizations[0], `the organization of user ${userId}`).toBeTruthy();
+      return organizations[0];
+    };
     const grant = async (email: string, setName: string) => {
       const set = await catalogPermissionSet(ql, setName);
       expect(set, `fixture permission set ${setName} served by the security catalog`).toBeTruthy();
-      await ql.insert('sys_user_permission_set', { user_id: await userIdOf(email), permission_set: set.name }, { context: { ...SYS } });
+      const userId = await userIdOf(email);
+      await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: set.name }, {
+        context: { ...SYS, tenantId: await organizationOf(userId) },
+      });
     };
     for (const who of ['holder', 'reader', 'writer'] as const) {
       const email = `alc-${who}@verify.test`;
@@ -429,7 +442,11 @@ describe('[#21260] the ledger audit capability is bounded by its holder’s orga
     }
     const userA = await ql.findOne('sys_user', { where: { email: 'alc-org-a@verify.test' }, context: { ...SYS } });
     expect(await catalogPermissionSet(ql, capOnly.name), 'fixture permission set served by the security catalog').toBeTruthy();
-    await ql.insert('sys_user_permission_set', { user_id: userA.id, permission_set: capOnly.name }, { context: { ...SYS } });
+    // The grant carries its holder's organization: under the wall no
+    // organization is derivable, so a system write names its own (ADR-0131 D9).
+    await ql.insert('sys_user_permission_set', { user_id: userA.id, permission_set: capOnly.name }, {
+      context: { ...SYS, tenantId: org.a },
+    });
     for (const who of ['a', 'b'] as const) {
       const res = await stack.apiAs(tok[who], 'POST', `/data/${OBJ}`, { name: `gone ${who}` });
       expect(res.status).toBeLessThan(300);
