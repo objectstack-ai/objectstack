@@ -284,6 +284,80 @@ describe('#18682 — engine-produced relationship bindings', () => {
     });
   });
 
+  // [#24512] A `conditional` rule's `when` reading one hop through the lookup:
+  // the engine preloads the hop for it and `checkConditional` evaluates `when`
+  // on the related row, so the rule picks its branch instead of refusing every
+  // write it guards as unevaluable.
+  describe('[#24512] a `conditional` rule\'s `when` reads through the lookup', () => {
+    const THEN = 'GATE-THEN: partner deals are capped at 10000.';
+    const OTHERWISE = 'GATE-OTHERWISE: direct deals start at 100.';
+    const gate = (when: string, name = 'partner_gate') => ({
+      name, type: 'conditional', severity: 'error', message: 'unused', when,
+      then: { name: 'gate_cap', type: 'script', severity: 'error', message: THEN, condition: 'record.amount > 10000' },
+      otherwise: { name: 'gate_floor', type: 'script', severity: 'error', message: OTHERWISE, condition: 'record.amount < 100' },
+    });
+    const register = (validations: unknown[]) => {
+      engine.registry.registerObject({
+        name: 'crm_opportunity',
+        fields: {
+          name: { type: 'text' }, amount: { type: 'number' },
+          account: { type: 'lookup', reference: 'crm_account' },
+        },
+        validations,
+      } as any, 'test-package');
+      d.calls.length = 0;
+    };
+    /** The rejection envelope, or `null` when the write is accepted. */
+    const insert = async (data: Record<string, unknown>): Promise<{ code?: string; fields: any[] } | null> => {
+      try {
+        await engine.insert('crm_opportunity', data, { context: ACTING } as any);
+        return null;
+      } catch (e) {
+        const err = e as { code?: string; fields?: any[] };
+        return { code: err.code, fields: err.fields ?? [] };
+      }
+    };
+    const messagesOf = (r: { fields: any[] } | null): string[] => (r?.fields ?? []).map((f) => String(f.message));
+
+    it('picks `then` for a partner account and `otherwise` for any other, on the real related row', async () => {
+      register([gate("record.account.type == 'partner'")]);
+      const partner = await insert({ name: 'A', amount: 50000, account: 'acc_p' });
+      expect(partner?.code).toBe('VALIDATION_FAILED');
+      expect(partner?.fields).toEqual([expect.objectContaining({ field: '_record', code: 'rule_violation', message: THEN })]);
+      const direct = await insert({ name: 'B', amount: 50, account: 'acc_d' });
+      expect(direct?.code).toBe('VALIDATION_FAILED');
+      expect(direct?.fields).toEqual([expect.objectContaining({ field: '_record', code: 'rule_violation', message: OTHERWISE })]);
+      // Each branch admits what it does not refuse, and the other branch is not run.
+      expect(await insert({ name: 'C', amount: 50, account: 'acc_p' })).toBeNull();
+      expect(await insert({ name: 'D', amount: 50000, account: 'acc_d' })).toBeNull();
+    });
+
+    it('preloads the `when` hop: one system read, projecting only the column `when` names', async () => {
+      register([gate("record.account.type == 'partner'")]);
+      await insert({ name: 'A', amount: 10, account: 'acc_d' });
+      expect(relatedReads()).toHaveLength(1);
+      expect([...(relatedReads()[0].ast?.fields ?? [])].sort()).toEqual(['id', 'type']);
+    });
+
+    it('a `when` naming an undeclared related field refuses alone; a sibling `when` through the same lookup keeps its verdict', async () => {
+      register([gate("record.account.type == 'partner'"), gate("record.account.not_a_column == 'x'", 'sneaky_gate')]);
+      const direct = await insert({ name: 'A', amount: 50000, account: 'acc_d' });
+      expect(direct?.code).toBe('VALIDATION_FAILED');
+      expect(direct?.fields).toEqual([expect.objectContaining({
+        field: '_record',
+        code: 'rule_violation',
+        constraint: expect.objectContaining({ rule: 'sneaky_gate', reason: 'unevaluable' }),
+      })]);
+      expect(messagesOf(direct)[0]).toContain("'crm_account' declares no 'not_a_column'");
+      // The valid gate, on a partner account, refuses with its own branch's message.
+      const partner = await insert({ name: 'B', amount: 50000, account: 'acc_p' });
+      expect(messagesOf(partner)).toContain(THEN);
+      expect(partner?.fields.map((f) => f.constraint?.rule ?? null)).toEqual([null, 'sneaky_gate']);
+      // The shared read never names the undeclared column.
+      for (const call of relatedReads()) expect(call.ast?.fields ?? []).not.toContain('not_a_column');
+    });
+  });
+
   // The refusal is about the WRITE, never about the value. A caller can infer a
   // value by observing refusals — an accepted, deliberately narrow channel — so
   // nothing may make the refusal more informative than "this rule refused".

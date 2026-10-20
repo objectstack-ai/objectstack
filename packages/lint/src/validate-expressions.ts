@@ -544,8 +544,6 @@ function celSourceOf(raw: unknown): string | undefined {
 interface RulePredicate {
   label: string;
   raw: unknown;
-  /** `condition` (a `script` / `cross_field` rule's) or `when` (a `conditional` rule's). */
-  slot: 'condition' | 'when';
   /** 0 for the rule itself; 1 inside its `then` / `otherwise`, and so on down. */
   depth: number;
 }
@@ -568,9 +566,9 @@ function rulePredicates(rule: AnyRec, path: string, depth = 0): RulePredicate[] 
   // author who wrote both `condition` and a rejected alias had their canonical
   // predicate short-circuited away and the alias validated instead (#5017).
   const main = rule.condition;
-  if (main != null) out.push({ label: `validation rule ${here}`, raw: main, slot: 'condition', depth });
+  if (main != null) out.push({ label: `validation rule ${here}`, raw: main, depth });
   if (rule.when != null) {
-    out.push({ label: `validation rule ${here} when-predicate`, raw: rule.when, slot: 'when', depth });
+    out.push({ label: `validation rule ${here} when-predicate`, raw: rule.when, depth });
   }
   for (const branch of ['then', 'otherwise'] as const) {
     const nested = rule[branch];
@@ -1946,7 +1944,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   /**
    * [#24316] Refuse a one-hop read through a reference into a
    * stored-metadata-body table, at the two sites that serve a hop: a
-   * validation rule's hydrated `condition` ({@link check} with
+   * validation rule's hydrated `condition` or `when` ({@link check} with
    * `traversalHydration`) and a formula field's `expression`
    * ({@link judgeFieldFormula}). ObjectQL's one-hop loader never reads that
    * hop, so as written the field reads null or the rule refuses every write;
@@ -1984,8 +1982,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    *
    * [#24468] The two sites that serve a hop share it: a formula field's
    * `expression` ({@link judgeFieldFormula}) and a validation rule's hydrated
-   * `condition` ({@link check} with `traversalHydration`), where the rule has
-   * no verdict and refuses every write it judges.
+   * `condition` or `when` ({@link check} with `traversalHydration`), where the
+   * rule has no verdict and refuses every write it judges.
    *
    * Judged against the target's field index — its declared fields and the
    * system columns the platform injects on it, the set the registry carries —
@@ -2163,7 +2161,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     /**
      * [#18682] Opt this ONE site in to the relationship-traversal conflict
      * checks. True only where the traversal is actually SERVED — object
-     * validation rules, which ObjectQL's `checkPredicate` hydrates (a formula
+     * validation rules' `condition` and `when`, which ObjectQL's
+     * `checkPredicate` and `checkConditional` hydrate (#24512) (a formula
      * `expression`, the other served site, is judged by `judgeFieldFormula`,
      * which does not go through this helper). Everywhere
      * else the checks' prescription ("write `record.<fk>.id`") is false,
@@ -2787,15 +2786,13 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // bare refs are flagged (#1928).
       // [#18682] The sites where a relationship traversal is SERVED: these are
       // the `script` / `cross_field` conditions ObjectQL's `checkPredicate`
-      // hydrates. `traversalHydration` is passed here, on a nested
-      // `condition` below (#22042), and on a formula field's `expression`
-      // (`judgeFieldFormula`, #24197), and NOWHERE else.
+      // hydrates, and (#24512) a `conditional` rule's `when`, which
+      // `checkConditional` evaluates on the same hydrated scope.
+      // `traversalHydration` is passed on those two slots here and nested below
+      // (#22042), and on a formula field's `expression` (`judgeFieldFormula`,
+      // #24197), and NOWHERE else.
       check(where, rule.condition, objectName, 'record', undefined, true);
-      // `conditional` rules carry a nested `when` predicate (record-scoped).
-      // ⚠️ `when` is evaluated by `checkConditional` WITHOUT hydration today, so
-      // it is opted OUT: a traversal there faults, and the conflict checks'
-      // prescription would not repair it.
-      check(`${where} when`, (rule as AnyRec).when, objectName, 'record');
+      check(`${where} when`, (rule as AnyRec).when, objectName, 'record', undefined, true);
       const predicates = rulePredicates(rule, '');
       // [#22042] The same verdict one level down, and every level below it: a
       // `conditional` rule's `then` / `otherwise` is a rule the evaluator runs
@@ -2804,15 +2801,13 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // at the label `rulePredicates` builds, the location the null-guard gate
       // below already gives the same predicate. Depth 0 is skipped: the rule's
       // own `condition` / `when` met `check()` above, under their own location.
-      // Hydration follows the evaluator per slot, as at the top level: a
-      // nested `condition` is a `script` / `cross_field` rule's, which
-      // ObjectQL's `collectPredicateRelationships` reaches inside a
-      // `conditional` and `checkPredicate` hydrates; a nested `when` is a
-      // nested `conditional`'s, which `checkConditional` evaluates WITHOUT
-      // hydration, so it is opted out like the top-level `when`.
+      // Hydration follows the evaluator, as at the top level: ObjectQL's
+      // `collectPredicateRelationships` reaches a nested `condition` and a
+      // nested `when` alike, and both are evaluated hydrated, so both slots
+      // meet the traversal checks.
       for (const p of predicates) {
         if (p.depth === 0) continue;
-        check(`object '${objectName}' · ${p.label}`, p.raw, objectName, 'record', undefined, p.slot === 'condition');
+        check(`object '${objectName}' · ${p.label}`, p.raw, objectName, 'record', undefined, true);
       }
       // #4763 — null-guard gate over every predicate the rule carries, nested
       // `then`/`otherwise` branches included.
