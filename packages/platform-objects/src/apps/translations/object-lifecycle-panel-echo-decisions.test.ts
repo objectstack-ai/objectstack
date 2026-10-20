@@ -1204,7 +1204,11 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // its label — authored in all three locales — out of the catalog.
       // 674 since ADR-0131 D6: `sharing_rule` joined the registry, so the catalog
       // gains its type-level display pair — authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(674);
+      // 673 since #24640: the view form's `filterableFields` input left with its
+      // key (retired — declared as the `userFilters.fields` shorthand, read as a
+      // Filter-panel whitelist), taking its label — authored in all three
+      // locales — out of the catalog.
+      expect(translated.length, `${locale} positive control`).toBe(673);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

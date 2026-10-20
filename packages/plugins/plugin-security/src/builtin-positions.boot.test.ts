@@ -530,10 +530,11 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
       }
       // Positive control: the census sees a row — one insert reads back as one.
       // [C8 stage 8b] Under `single` the organization-less system insert takes
-      // the sole organization (ADR-0131 D9); under the wall it stays unstamped,
-      // the exemption 18.0 keeps there.
-      await engine.insert('sys_permission_set', { id: 'ps_census_control', name: 'zz_census_control', label: 'Control' }, { context: SYS } as any);
-      const stamped = scenario.posture === 'single' ? (scenario.organizationAtBoot ? ORG : 'org_default') : '-';
+      // the sole organization (ADR-0131 D9). Under the wall no organization is
+      // derivable, so the control carries its own, as a walled system write must.
+      const controlContext = scenario.posture === 'isolated' ? { ...SYS, tenantId: ORG } : SYS;
+      await engine.insert('sys_permission_set', { id: 'ps_census_control', name: 'zz_census_control', label: 'Control' }, { context: controlContext } as any);
+      const stamped = scenario.posture === 'single' ? (scenario.organizationAtBoot ? ORG : 'org_default') : ORG;
       expect(await permissionSetCensus(engine)).toEqual([`zz_census_control | ${stamped}`]);
       await engine.delete('sys_permission_set', { where: { id: 'ps_census_control' }, context: SYS } as any);
       expect(await permissionSetCensus(engine)).toEqual([]);

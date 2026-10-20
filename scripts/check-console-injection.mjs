@@ -182,6 +182,7 @@ import {
   readBundle,
   readSpecBlob,
   readStamp,
+  uniqueCandidates,
   writeStamp,
 } from './console-spec-probes.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
@@ -216,11 +217,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '13. THE BLIND SPOT (objectstack#20646): the build-time derivation must choose': 6,
   "14. OBJECTUI'S OWN TEXT IS NOT EVIDENCE: a probe the console's own source carries": 23,
   "15. A PIN CARRYING .objectstack-sha: the reference is objectui's own build of it": 17,
+  '16. EVERY DISTINGUISHING LITERAL IS LONG OR ESCAPED (objectstack#24663).': 16,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 14;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1174,6 +1176,95 @@ function selfTest() {
     expect('a pinned build declaring the same descriptions passes as no skew', runAssert(same, sameDist).status, 0);
     const sameReplay = evaluate({ distDir: sameDist, specDir: injected, requireStamp: true });
     expect('and its replay names the commit it was judged against', sameReplay.out.join('\n').includes(`objectstack ${PIN.slice(0, 12)}`), true);
+  }
+
+  // 16. EVERY DISTINGUISHING LITERAL IS LONG OR ESCAPED (objectstack#24663). The
+  //     shape of the 12dc7b47 pin: the reference and this tree differ only in a
+  //     describe literal over 160 characters whose em dash the dist writes as a
+  //     `—` escape. The whole-literal rule skipped it, both pools came out
+  //     empty, the build stamped `freshWitness: null`, and the assertion passed
+  //     the control bundle. The runs between escapes are the candidates now.
+  battery('16. EVERY DISTINGUISHING LITERAL IS LONG OR ESCAPED (objectstack#24663).');
+  {
+    const assert = path.join(ROOT, 'scripts', 'assert-console-spec-injection.mjs');
+    const PIN = 'd'.repeat(40);
+    const host = makeHostTree(path.join(root, 'le-host'), {
+      '.objectstack-sha': `${PIN}\n`,
+      'packages/plugin/src/index.tsx': 'export const d = "Unrelated host text";\n',
+    });
+    const runAssert = (injected, vendored, dist) =>
+      spawnSync(
+        process.execPath,
+        [assert, '--injected', injected, '--vendored', vendored, '--objectui', host, '--assets', path.join(dist, 'assets')],
+        { encoding: 'utf8' },
+      );
+    const stampOf = (dist) => (fs.existsSync(path.join(dist, STAMP_BASENAME)) ? readStamp(dist).packages[0] : null);
+    // A spec dist written as a bundler writes it: each description a JS string
+    // literal, `—` spelled as the six-character escape.
+    const writeDist = (dir, literals) => {
+      makeSpecPkg(dir, []);
+      fs.writeFileSync(path.join(dir, 'dist', 'index.mjs'), `${literals.map((l) => `z.string().describe("${l}")`).join(';\n')}\n`);
+      return dir;
+    };
+    const ESC = '\\u2014';
+    const HEAD = 'Execution identity for the run: system = elevated (bypasses RLS), user = the triggering user';
+    const FRESH_RUN = ' system flows keep system privileges; after a pause the run resumes as the trigger user until a human decision';
+    const STALE_RUN = ' the run keeps that identity across every pause and resume of a long-running flow, whatever its trigger';
+    const LONG_SHARED =
+      'A shared description over one hundred and sixty characters long that both specs carry byte for byte, so no run cut out of it can tell them apart in either direction';
+    const SHARED = 'Shared text in both specs for the long-literal fixtures';
+    const injectedLiteral = `${HEAD} ${ESC}${FRESH_RUN}`;
+    const pinnedLiteral = `${HEAD} ${ESC}${STALE_RUN}`;
+    const injected = writeDist(path.join(root, 'le-injected'), [injectedLiteral, LONG_SHARED, SHARED]);
+    const reference = path.join(root, 'le-cache', 'spec');
+    writeDist(reference, [pinnedLiteral, LONG_SHARED, SHARED]);
+    fs.writeFileSync(path.join(root, 'le-cache', '.stamp.json'), JSON.stringify({ source: 'pin', sha: PIN }));
+
+    // The fixture has the pin's shape: no distinguishing literal the whole-literal
+    // rule accepts — each is over 160 characters AND carries an escape.
+    expect('the injected literal is over 160 characters', injectedLiteral.length > 160, true);
+    expect('the pinned literal is over 160 characters', pinnedLiteral.length > 160, true);
+    expect('the long shared literal has no escape and is over 160 characters', LONG_SHARED.length > 160 && !LONG_SHARED.includes('\\'), true);
+
+    // The candidate source itself: runs between escapes, never the whole literal.
+    const injectedBlob = readSpecBlob(injected, 'injected');
+    const pinnedBlob = readSpecBlob(reference, 'vendored');
+    const candidates = describeCandidates(injectedBlob);
+    expect('the run after the escape is a candidate', candidates.includes(FRESH_RUN), true);
+    expect('the escaped literal is never a candidate whole', candidates.includes(injectedLiteral), false);
+    expect('a 32-to-160 plain literal is still taken whole', candidates.includes(SHARED), true);
+    expect('the unchanged run before the escape is not unique', uniqueCandidates(candidates, pinnedBlob).includes(HEAD), false);
+    expect('a long literal both specs carry yields nothing unique', uniqueCandidates(candidates, pinnedBlob).includes(LONG_SHARED), false);
+    expect(
+      'a quote cuts a run, since a bundler may re-quote it',
+      describeCandidates(`x.describe("${'q'.repeat(40)}\\"${'r'.repeat(40)}${ESC}")`).join('|'),
+      `${'q'.repeat(40)}|${'r'.repeat(40)}`,
+    );
+
+    // GREEN: this tree's bundle, where the bundler emitted the dash raw.
+    const good = makeDist(
+      path.join(root, 'le-good'),
+      `console(${JSON.stringify(`${HEAD} —${FRESH_RUN}`)});console(${JSON.stringify(SHARED)})`,
+      undefined,
+    );
+    const goodRun = runAssert(injected, reference, good);
+    expect('this tree\'s bundle against the pinned build verifies', goodRun.status, 0);
+    const goodStamp = stampOf(good);
+    expect('the stamp carries a non-null witness: the changed run', goodStamp?.freshWitness, FRESH_RUN);
+    expect('the stamp carries the pinned run as its detector', goodStamp?.staleDetector, STALE_RUN);
+    expect('and records skew', goodStamp?.skew, true);
+
+    // RED: the control bundle — objectui's own build of the pin, escape kept.
+    const control = makeDist(
+      path.join(root, 'le-control'),
+      `console("${pinnedLiteral}");console(${JSON.stringify(SHARED)})`,
+      undefined,
+    );
+    const controlRun = runAssert(injected, reference, control);
+    expect('the control bundle fails the build', controlRun.status, 1);
+    expect('the failure names the pinned run it found', controlRun.stderr.includes(STALE_RUN), true);
+    if (goodStamp) fs.copyFileSync(path.join(good, STAMP_BASENAME), path.join(control, STAMP_BASENAME));
+    expect('and the good stamp replayed over it fails too', evaluate({ distDir: control, specDir: injected, requireStamp: true }).code, 1);
   }
 
   fs.rmSync(root, { recursive: true, force: true });

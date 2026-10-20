@@ -147,7 +147,7 @@ import {
   // Layer 0 — see {@link buildDriverOptions}.
   computeTenantLayer0Verdict,
   // [#24497] The ONE grants resolver, the one the request path seeds a
-  // context's grants and peer list through — see `ScopedContext[SEED_USER_GRANTS]`.
+  // context's grants, peer list and email (#24639) through — see `ScopedContext[SEED_USER_GRANTS]`.
   resolveUserAuthzGrants,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
@@ -295,7 +295,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { bindHooksToEngine, type BindHooksOptions } from './hook-binder.js';
 import { declaredHookCondition } from './hook-wrappers.js';
-import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
+import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, type FieldValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { collectPredicateRelationships, collectReferenceTraversals, referenceTraversalConflicts, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
@@ -1677,6 +1677,36 @@ function statesDeleteSemantics(fdef: { type?: unknown } | null | undefined): boo
  * once the read is done, so the caller gets the projection it declared plus
  * the formula's value. `widened` is absent whenever nothing was widened.
  */
+/**
+ * ONE plan entry for a field's declared `expression`: the envelope, the
+ * rounding scale, and the one hop it reads through a reference field. Shared
+ * by the `formula` read plan ({@link planFormulaProjection}) and the stored
+ * computed-field write plan ({@link planStoredExpressions}), so a value
+ * computed on read and a value computed on write are one semantic.
+ */
+function formulaPlanEntry(name: string, def: any, fields: any): FormulaPlanEntry {
+  // Normalize string-shorthand → Expression envelope (M9 transition).
+  const expr: Expression = typeof def.expression === 'string'
+    ? { dialect: 'cel', source: def.expression }
+    : def.expression;
+  const entry: FormulaPlanEntry = { name, expression: expr, scale: formulaRoundingScale(def) };
+  // [#24197] The one hop this formula reads through a reference field, if
+  // any — judged by the validation-rule path's own collector, so the two
+  // seams that serve a hop read the same hops off the same expression.
+  const conflicts = referenceTraversalConflicts(expr, fields, 'formula');
+  if (conflicts.length > 0) {
+    entry.hopConflict = conflicts.map((c) => c.message).join(' ');
+  } else {
+    const hops = collectReferenceTraversals([expr], fields);
+    if (hops.size > 0) entry.hops = hops;
+  }
+  // Pre-compile to surface syntax errors at planning stage rather than
+  // per-row eval. Own-column dependency discovery is not used — CEL reads
+  // the row via `record.<field>`; only the hops above are planned.
+  ExpressionEngine.compile(expr);
+  return entry;
+}
+
 function planFormulaProjection(
   schema: any,
   requestedFields: string[] | undefined
@@ -1694,26 +1724,7 @@ function planFormulaProjection(
   for (const f of targets) {
     const def = (schema.fields as any)[f];
     if (def?.type === 'formula' && def.expression) {
-      // Normalize string-shorthand → Expression envelope (M9 transition).
-      const expr: Expression = typeof def.expression === 'string'
-        ? { dialect: 'cel', source: def.expression }
-        : def.expression;
-      const entry: FormulaPlanEntry = { name: f, expression: expr, scale: formulaRoundingScale(def) };
-      // [#24197] The one hop this formula reads through a reference field, if
-      // any — judged by the validation-rule path's own collector, so the two
-      // seams that serve a hop read the same hops off the same expression.
-      const conflicts = referenceTraversalConflicts(expr, schema.fields, 'formula');
-      if (conflicts.length > 0) {
-        entry.hopConflict = conflicts.map((c) => c.message).join(' ');
-      } else {
-        const hops = collectReferenceTraversals([expr], schema.fields);
-        if (hops.size > 0) entry.hops = hops;
-      }
-      plan.push(entry);
-      // Pre-compile to surface syntax errors at planning stage rather than
-      // per-row eval. Own-column dependency discovery is not used — CEL reads
-      // the row via `record.<field>`; only the hops above are planned.
-      ExpressionEngine.compile(expr);
+      plan.push(formulaPlanEntry(f, def, schema.fields));
     } else if (Array.isArray(requestedFields) && requestedFields.length > 0) {
       projected.add(f);
     }
@@ -2891,6 +2902,124 @@ async function hydrateWriteFormulas(
   const { plan } = planFormulaProjection(schema, undefined);
   if (plan.length === 0) return;
   applyFormulaPlan(plan, records, execCtx, await permissionsFor(plan, records), onFault, await relatedFor?.(plan, records));
+}
+
+/**
+ * [#24619] The stored computed fields: every field that is NOT a `formula`
+ * and declares an `expression`. Such a field has a column, so a summary can
+ * roll it up (a summary aggregates stored columns, never an on-read formula),
+ * and its value is the engine's to compute on every write — the declared
+ * `expression` over the row the write stores. A client-sent value never
+ * stands: it is overwritten by the computed one, the way the console grid
+ * already recomputes the column client-side. Planned with the `formula` read
+ * plan's own entry builder ({@link formulaPlanEntry}), so the scale rounding
+ * and the one hop are the read's.
+ *
+ * An empty plan for an object declaring none — the common case — so a write
+ * on an ordinary object pays a field-name loop and nothing else.
+ */
+function planStoredExpressions(schema: any): FormulaPlanEntry[] {
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
+  const plan: FormulaPlanEntry[] = [];
+  for (const [name, def] of Object.entries(fields as Record<string, any>)) {
+    if (def && typeof def === 'object' && def.type !== 'formula' && def.expression) {
+      plan.push(formulaPlanEntry(name, def, fields));
+    }
+  }
+  return plan;
+}
+
+/** What {@link computeStoredExpressions} reads its permission map, fault sink and hops from. */
+interface StoredExpressionServing {
+  permissionsFor: (plan: FormulaPlanEntry[], records: readonly unknown[]) => Promise<EvalPermissions | undefined>;
+  onFault?: FormulaFaultSink;
+  relatedFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaRelated | undefined>;
+}
+
+/**
+ * [#24619] Compute a stored-expression plan over each IMAGE — the row the
+ * write stores: the stored row merged with the patch on an update, the
+ * defaulted payload on an insert — and answer each image's computed values,
+ * index-aligned. Evaluates against shallow COPIES, so an image is never
+ * mutated; the caller writes the values onto the payload it hands the driver.
+ * An expression that does not evaluate computes `null`, the formula read
+ * path's answer, with the fault reported once through `onFault`.
+ */
+async function computeStoredExpressions(
+  plan: FormulaPlanEntry[],
+  images: ReadonlyArray<Record<string, unknown>>,
+  execCtx: ExecutionContext | undefined,
+  serving: StoredExpressionServing,
+): Promise<Array<Record<string, unknown>>> {
+  if (plan.length === 0 || images.length === 0) return images.map(() => ({}));
+  const scratch = images.map((image) => ({ ...image }));
+  applyFormulaPlan(
+    plan, scratch, execCtx, await serving.permissionsFor(plan, scratch), serving.onFault,
+    await serving.relatedFor?.(plan, scratch),
+  );
+  return scratch.map((row) => {
+    const values: Record<string, unknown> = {};
+    for (const entry of plan) values[entry.name] = row[entry.name];
+    return values;
+  });
+}
+
+/**
+ * [#24619] The one value a PREDICATE update can store for each stored
+ * computed field, judged over every matched row. `updateMany` writes ONE
+ * patch to all of them, so a field is set only when the patch moves it to the
+ * same value on every row; a patch that does not move it at all (it touches
+ * none of the expression's inputs) leaves the column alone, and a caller-sent
+ * value for it is taken out of the patch either way — it never stands. A patch
+ * that moves it to different values on different rows cannot be one
+ * statement, and is refused before anything is written: update those rows by
+ * id, where each is computed from its own stored row.
+ */
+function settleBulkStoredExpressions(
+  plan: FormulaPlanEntry[],
+  patch: Record<string, unknown>,
+  before: ReadonlyArray<Record<string, unknown>>,
+  after: ReadonlyArray<Record<string, unknown>>,
+  object: string,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...patch };
+  const refused: FieldValidationError[] = [];
+  for (const entry of plan) {
+    delete out[entry.name];
+    const moved = after.some((values, i) => !Object.is(values[entry.name], before[i]?.[entry.name]));
+    if (!moved) continue;
+    const first = after[0]?.[entry.name];
+    if (after.every((values) => Object.is(values[entry.name], first))) {
+      out[entry.name] = first;
+      continue;
+    }
+    refused.push({
+      field: entry.name,
+      code: 'invalid_value',
+      message: `'${entry.name}' on '${object}' is computed from its expression on every write, and this `
+        + 'update changes its inputs on rows where it then computes different values, which one update of '
+        + 'all the matched rows cannot store; update those rows by id, so each is computed from its own row',
+    });
+  }
+  if (refused.length > 0) throw new ValidationError(refused);
+  return out;
+}
+
+/**
+ * [#24619] Write a by-id update's computed values onto its patch: a key the
+ * caller (or a hook) sent is overwritten, and a key the patch does not carry
+ * is added only when the computed value differs from the stored one — a patch
+ * that moves none of the expression's inputs writes nothing extra.
+ */
+function applyStoredExpressionsToPatch(
+  patch: Record<string, unknown>,
+  computed: Record<string, unknown>,
+  prior: Record<string, unknown> | null | undefined,
+): void {
+  for (const [name, value] of Object.entries(computed)) {
+    if (Object.prototype.hasOwnProperty.call(patch, name) || !Object.is(prior?.[name], value)) patch[name] = value;
+  }
 }
 
 /**
@@ -6981,8 +7110,9 @@ export class ObjectQL implements IObjectQLEngine {
     const hasTenant = tenantScope !== undefined;
     const hasTz = execCtx?.timezone !== undefined;
     const isSystem = execCtx?.isSystem === true;
-    // [#13491] The object's tenancy classification — the ONE reading both the
-    // mute below and `resolveSystemInsertOrganization` narrow by. An object
+    // [#13491] The object's tenancy classification — the reading the mute
+    // below narrows by (ADR-0131 C8 stage 8b retired its other reader, the
+    // system-insert exemption, under every posture). An object
     // with no tenant field is out by construction; a platform object is out
     // unless the inventory adjudicated it tenant-scoped.
     const isTenantAuditInScope =
@@ -7259,20 +7389,16 @@ export class ObjectQL implements IObjectQLEngine {
     // system write that threaded one. Nothing to resolve; this is the shape the
     // ruling asks every system write to reach.
     if (carriesOrganization(execCtx?.tenantId)) return undefined;
-    // [ADR-0131 D9, C8 stage 8b] Under `single` a platform object has no
+    // [ADR-0131 D9, C8 stage 8b] Under every posture a platform object has no
     // exemption: with a tenant column it is in scope like any other object, so
-    // its organization-less system insert is stamped with the Default
-    // Organization or refused below — never left NULL.
-    //
-    // ⚠️ WALLED POSTURES ONLY: #13491's per-object exemption still stands under
-    // `group` / `isolated` (epic ruling record 6259899486 on #15194, item 4).
-    // 18.0 refuses a walled posture at the operator's boot path, and the walled
-    // half of the lift lands in 18.x, after the stages that give the walled
-    // writers an organization of their own. The cut is a POSTURE condition on
-    // purpose — ⛔ never re-narrow it with a per-table list.
-    if (isPlatformObjectOutOfTenantAuditScope(object) && this.resolveEnginePosture() !== 'single') {
-      return undefined;
-    }
+    // its organization-less system insert is stamped with the derived
+    // organization or refused below — never left NULL. The walled half landed
+    // in 18.x, after the stages that gave the walled writers (identity mail,
+    // global audit, declared webhooks) an organization or a sibling of their
+    // own. ⛔ Never re-introduce a per-table or per-posture cut here: a table
+    // whose rows are deployment-level declares no organization column
+    // (`sys_secret` and `sys_flow_credential` since the steps 5+6 landing,
+    // #24582) and exits below, on the missing tenant field.
     const objectSchema = this._registry.getObject(object) as any;
     // A federated object's schema is the REMOTE's (ADR-0015); the platform's
     // injected column says nothing about it, which is the same reason
@@ -15661,6 +15787,24 @@ export class ObjectQL implements IObjectQLEngine {
             object,
             this.applyFieldDefaults(object, payloadRows[0] as Record<string, unknown>, opCtx.context, nowSnap, defaultPermissions[0]),
           );
+      // [#24619] The stored computed fields ({@link planStoredExpressions}),
+      // computed over the defaulted row BEFORE the beforeInsert hooks run, so
+      // a hook is handed the value the write stores — the #16344 ruling:
+      // 「交给生命周期钩子的记录,就是它打算持久化的那条记录。」 Computed
+      // again after the hooks and the strips (beside validation, below),
+      // because a hook may change an input, and that pass is the one stored.
+      const storedExpressionPlan = planStoredExpressions(this._registry.getObject(object));
+      const storedExpressionServing: StoredExpressionServing = {
+        permissionsFor: (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
+        onFault: this.formulaFaultSink(object),
+        relatedFor: (plan, records) => this.resolveFormulaRelated(this._registry.getObject(object), plan, records, opCtx.context),
+      };
+      if (storedExpressionPlan.length > 0) {
+        const defaultedRows = (isBatch ? defaultedData : [defaultedData]) as Array<Record<string, unknown>>;
+        const live = defaultedRows.filter((row, i) => undeclaredPerRow[i] === undefined && row != null && typeof row === 'object');
+        const computed = await computeStoredExpressions(storedExpressionPlan, live, opCtx.context, storedExpressionServing);
+        live.forEach((row, k) => Object.assign(row, computed[k]));
+      }
       // [#22306] What each withheld key was SHOWN holding — its default, or
       // nothing — read before any hook runs, because the hooks mutate these
       // row objects in place. `handBackWithheldInsertReadonly` reads it to tell
@@ -16255,6 +16399,15 @@ export class ObjectQL implements IObjectQLEngine {
         // has to exist here too. Gated on the schema actually declaring such a
         // predicate, so an object with only `record`-scoped requirements pays
         // nothing; batched, so N rows under M masters cost ONE header read.
+        // [#24619] The stored computed fields, computed over the FINAL rows —
+        // after every hook and strip, before validation judges them and the
+        // driver stores them — so the stored value is the declared expression
+        // over the stored row, whatever the caller or a hook put in the key.
+        if (storedExpressionPlan.length > 0) {
+          const liveForExpressions = rows.filter((row, i) => rowErrors[i] === undefined && row != null && typeof row === 'object');
+          const computed = await computeStoredExpressions(storedExpressionPlan, liveForExpressions, opCtx.context, storedExpressionServing);
+          liveForExpressions.forEach((row, k) => Object.assign(row, computed[k]));
+        }
         const insertParentForRow = hasParentScopedRequiredWhen(schemaForValidation as any)
           ? await this.resolveMasterDetailParents(schemaForValidation, null, rows, opCtx.context)
           : undefined;
@@ -16923,6 +17076,15 @@ export class ObjectQL implements IObjectQLEngine {
        // schema, and ONE lookup answering both is one fact rather than two that
        // can drift.
        const updateSchema = this._registry.getObject(object);
+       // [#24619] The stored computed fields ({@link planStoredExpressions})
+       // and how their expressions are served — the write's own permission
+       // resolution and the read path's one hop, under this write's context.
+       const storedExpressionPlan = planStoredExpressions(updateSchema);
+       const storedExpressionServing: StoredExpressionServing = {
+         permissionsFor: (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
+         onFault: this.formulaFaultSink(object),
+         relatedFor: (plan, records) => this.resolveFormulaRelated(updateSchema, plan, records, opCtx.context),
+       };
        const undeclared = undeclaredWriteFieldErrors(
          object,
          updateSchema as { fields?: unknown } | undefined,
@@ -17268,6 +17430,26 @@ export class ObjectQL implements IObjectQLEngine {
            // permanently true here: it states the invariant, and the invariant
            // outlives this call site.
            if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any) as any;
+           // [#24619] The stored computed fields over the stored row merged
+           // with the caller's patch, BEFORE the beforeUpdate hooks, so a hook
+           // sees the expression's value over the PRE-strip row. That is not
+           // always the stored value: an input the `readonlyWhen` strip takes
+           // back out below still feeds this pass. Pass 2, after the hooks and
+           // both strips, is the value stored.
+           //
+           // Written onto the RAW payload (`opCtx.data`, the recording's
+           // target), never through `hookWrites.payload`: this pass runs
+           // inside the recording window, and an ENGINE write must not be
+           // recorded as a HOOK write (the rule at the hide pass above). And
+           // never onto a key the hide pass withheld: for those the read-only
+           // strips judge the caller's submission, reporting and, under
+           // `strictReadonlyWrites`, refusing it as they always have.
+           if (storedExpressionPlan.length > 0 && opCtx.data && typeof opCtx.data === 'object') {
+               const raw = opCtx.data as Record<string, unknown>;
+               const [computed] = await computeStoredExpressions(storedExpressionPlan, [{ ...priorRecord, ...raw }], opCtx.context, storedExpressionServing);
+               for (const name of Object.keys(readonlyHiddenFromHooks ?? {})) delete computed[name];
+               applyStoredExpressionsToPatch(raw, computed, priorRecord);
+           }
            // [commit 706ad0fcc] All three `beforeUpdate` dispatch sites inside the hide
            // window share one wrapper, so a hook that faults reaching THROUGH a
            // key this pass withheld names that key instead of surfacing the
@@ -17826,6 +18008,15 @@ export class ObjectQL implements IObjectQLEngine {
                // "you sent a read-only field" should not depend on whether some
                // other field also failed a business rule.
                assertNoStrictDrops();
+               // [#24619] The stored computed fields over the stored row merged
+               // with the FINAL payload — after the hooks and both strips, so a
+               // locked input the `readonlyWhen` strip took back out feeds the
+               // stored value, never the caller's — and before the statement.
+               if (storedExpressionPlan.length > 0) {
+                   const patch = hookContext.input.data as Record<string, unknown>;
+                   const [computed] = await computeStoredExpressions(storedExpressionPlan, [{ ...priorRecord, ...patch }], opCtx.context, storedExpressionServing);
+                   applyStoredExpressionsToPatch(patch, computed, priorRecord);
+               }
                // [#21663] The payload is FINAL here (see the seam below), so
                // every readonly value on it is one the driver will store: a
                // system writer's (the strip above never ran for it), a hook's,
@@ -18096,6 +18287,19 @@ export class ObjectQL implements IObjectQLEngine {
                // caller is told before N rows are written with a column missing
                // — the failure mode a bulk write makes N times larger.
                assertNoStrictDrops();
+               // [#24619] The stored computed fields on the predicate path, over
+               // the FINAL payload as on the by-id branch. One patch reaches
+               // every matched row, so {@link settleBulkStoredExpressions} keeps
+               // a computed value only when it is the same on every row, and
+               // refuses a patch that would compute different ones. The rows
+               // are the D7 read (`readPriorRows` is a memo — no second fetch).
+               if (storedExpressionPlan.length > 0) {
+                   const matched = ((await readPriorRows()) ?? []).filter((row) => row != null && typeof row === 'object');
+                   const patch = hookContext.input.data as Record<string, unknown>;
+                   const before = await computeStoredExpressions(storedExpressionPlan, matched, opCtx.context, storedExpressionServing);
+                   const after = await computeStoredExpressions(storedExpressionPlan, matched.map((row) => ({ ...row, ...patch })), opCtx.context, storedExpressionServing);
+                   hookContext.input.data = settleBulkStoredExpressions(storedExpressionPlan, patch, before, after, object) as any;
+               }
                // [#21663] The predicate-path twin of the by-id second pass, at the
                // same point and for the same reason: the readonly values left on
                // the final payload are stored, so their SHAPE is judged — before
@@ -21840,8 +22044,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
 
   /**
    * [#24497] The second half of a hook's `runAs: 'user'` derivation: the
-   * user's grants and peer list, seeded through the one resolver the request
-   * path seeds them through (`resolveUserAuthzGrants`, `@objectstack/core`).
+   * user's grants, peer list and email (#24639), seeded through the one
+   * resolver the request path seeds them through (`resolveUserAuthzGrants`,
+   * `@objectstack/core`).
    * The hook wrapper awaits it on the api {@link withRunAs} derived; it stays
    * a separate, async step so `withRunAs` keeps its synchronous contract.
    *
@@ -21852,13 +22057,31 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * user's request saw their organisation's members too. Ruling A′ puts the
    * contract on the producer: every user context carries `org_user_ids`.
    *
+   * [#24639] The same contract holds for `email`: the RLS compiler binds
+   * `current_user.email` from the context's `email` and nothing else, so a
+   * hand-built context that named a user and carried no email made every
+   * email-keyed row policy (`assignee == current_user.email`) drop out, and
+   * the hook read nothing where the user's own request reads their rows. The
+   * email is the one the same resolution returns (the user's stored
+   * `sys_user.email`, from the user-row read that resolution already makes,
+   * as the request path falls back to it), so a context that resolves for its
+   * grants or peers pays nothing more for it. A context that lacks only the
+   * email pays the one resolution; a user with no stored email (a phone-only
+   * sign-up) pays it on every such dispatch and still carries none, which
+   * fails closed exactly as before.
+   *
    * The same rule as a `runAs: 'user'` flow's run setup (service-automation
    * `resolveRunContext`):
    *  - positions and permission sets the context already carries stay
    *    verbatim, so a narrowed ceiling is never re-broadened; only a context
    *    with no `permissions` takes the resolved ones;
    *  - a context that already carries a peer list keeps it;
-   *  - a context that needs neither resolves nothing and is returned as is.
+   *  - a context that already carries an email keeps it verbatim (the
+   *    session's, on a request-resolved context); only a context with none
+   *    takes the resolved one;
+   *  - a context that needs none of the three resolves nothing and is
+   *    returned as is. One that lacks only the email is NOT that context: it
+   *    resolves, and takes the email alone.
    *
    * The peer list is the members of the context's `tenantId`, the user
    * included; a context with no `tenantId` gets the user alone, as an
@@ -21877,7 +22100,8 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     if (!ctx.userId) return this;
     const needsGrants = !Array.isArray(ctx.permissions);
     const needsPeers = !Array.isArray(ctx.org_user_ids);
-    if (!needsGrants && !needsPeers) return this;
+    const needsEmail = !ctx.email;
+    if (!needsGrants && !needsPeers && !needsEmail) return this;
     const grants = await resolveUserAuthzGrants(
       this.engine,
       ctx.userId,
@@ -21888,6 +22112,7 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
         ...ctx,
         ...(needsGrants ? { positions: grants.positions, permissions: grants.permissions } : {}),
         ...(needsPeers ? { org_user_ids: grants.org_user_ids } : {}),
+        ...(needsEmail && grants.email ? { email: grants.email } : {}),
       },
       this.engine
     );

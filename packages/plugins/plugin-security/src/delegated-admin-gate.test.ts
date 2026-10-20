@@ -1065,3 +1065,287 @@ describe('DelegatedAdminGate — granted_by is the writer on every admitted inse
     expect('granted_by' in member).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// [ADR-0090 D12, amended 2026-10-17] Organization-level administration
+// ---------------------------------------------------------------------------
+
+/**
+ * Organization org_a holds units bu_a1 (and org_b holds bu_b1). The catalog:
+ * `in_set` (inside), `org_cap_set` (an org capability, inside), `wild_set`
+ * (superuser bit — condition a), `scoped_set` (adminScope — condition b),
+ * `plat_cap_set` (a platform capability — condition c), `undeclared_cap_set`
+ * (a capability nobody declares — condition c), and the shipped names the ADR
+ * keeps outside. Positions: `in_pos` → [in_set], `mixed_pos` → [in_set,
+ * wild_set], `ghost_pos` → [missing_set], `self_named` → [in_set] beside a
+ * permission set of the position's own name that carries a platform capability.
+ */
+function makeOrganizationHarness() {
+  const tables: Record<string, any[]> = {
+    sys_business_unit: [
+      { id: 'bu_a1', name: 'a_ops', parent_business_unit_id: null, organization_id: 'org_a' },
+      { id: 'bu_b1', name: 'b_ops', parent_business_unit_id: null, organization_id: 'org_b' },
+    ],
+    sys_user_position: [
+      { id: 'up_a', user_id: 'u_member', position: 'in_pos', organization_id: 'org_a' },
+      { id: 'up_a_mixed', user_id: 'u_member', position: 'mixed_pos', organization_id: 'org_a' },
+      { id: 'up_b', user_id: 'u_member_b', position: 'in_pos', organization_id: 'org_b' },
+      { id: 'up_orgless', user_id: 'u_member', position: 'in_pos', organization_id: null },
+    ],
+    sys_user_permission_set: [
+      { id: 'ups_a', user_id: 'u_member', permission_set: 'in_set', organization_id: 'org_a' },
+      { id: 'ups_a_wild', user_id: 'u_member', permission_set: 'wild_set', organization_id: 'org_a' },
+    ],
+    sys_member: [
+      { id: 'm_a', user_id: 'u_member', organization_id: 'org_a', role: 'member' },
+      { id: 'm_b', user_id: 'u_member_b', organization_id: 'org_b', role: 'member' },
+    ],
+  };
+  const matches = (row: any, where: any): boolean =>
+    Object.entries(where ?? {}).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
+      return row[k] === v;
+    });
+  const ql: any = {
+    tables,
+    async find(object: string, opts: any) {
+      const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
+      return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
+    },
+    async findOne(object: string, opts: any) {
+      return (tables[object] ?? []).find((r) => matches(r, opts?.where)) ?? null;
+    },
+  };
+  bindTestSecurityCatalog(ql, {
+    permissions: [
+      { name: 'in_set', objects: { crm_account: { allowRead: true, allowCreate: true } } },
+      { name: 'org_cap_set', objects: {}, systemPermissions: ['manage_org_users'] },
+      { name: 'wild_set', objects: { '*': { allowRead: true, viewAllRecords: true } } },
+      { name: 'scoped_set', objects: {}, adminScope: { businessUnit: 'a_ops', manageAssignments: true, assignablePermissionSets: ['in_set'] } },
+      { name: 'plat_cap_set', objects: {}, systemPermissions: ['manage_metadata'] },
+      { name: 'undeclared_cap_set', objects: {}, systemPermissions: ['qa_nobody_declares_this'] },
+      { name: 'self_named', objects: {}, systemPermissions: ['manage_users'] },
+      { name: 'admin_full_access', objects: { '*': { allowRead: true, modifyAllRecords: true } } },
+      { name: 'organization_admin', objects: { '*': { allowRead: true, modifyAllRecords: true } } },
+      { name: 'organization_admin_no_bypass', objects: { '*': { allowRead: true } }, systemPermissions: ['manage_org_users'] },
+      { name: 'mcp_agent_data_read', objects: { '*': { allowRead: true } } },
+      { name: 'mcp_agent_data_write', objects: { '*': { allowRead: true, allowCreate: true } } },
+      { name: 'mcp_agent_restricted', objects: {} },
+    ],
+    positions: [
+      { name: 'in_pos', permissionSets: ['in_set'] },
+      { name: 'mixed_pos', permissionSets: ['in_set', 'wild_set'] },
+      { name: 'ghost_pos', permissionSets: ['missing_set'] },
+      { name: 'self_named', permissionSets: ['in_set'] },
+      { name: 'org_owner_like', permissionSets: ['organization_admin'] },
+    ],
+    capabilities: [
+      { name: 'manage_org_users', scope: 'org' },
+      { name: 'manage_metadata', scope: 'platform' },
+      { name: 'manage_users', scope: 'platform' },
+    ],
+  });
+
+  const SETS: Record<string, any[]> = {
+    // The walled variant carries the superuser wildcard; the wall-less one does not.
+    org_admin: [{ name: 'organization_admin', objects: { '*': { allowRead: true, modifyAllRecords: true } } }],
+    org_admin_nb: [{ name: 'organization_admin_no_bypass', objects: { '*': { allowRead: true } } }],
+    platform_admin: [
+      { name: 'admin_full_access', objects: { '*': { allowRead: true, modifyAllRecords: true } } },
+      { name: 'organization_admin', objects: { '*': { allowRead: true, modifyAllRecords: true } } },
+    ],
+    member: [{ name: 'member_default', objects: {} }],
+    org_admin_and_delegate: [
+      { name: 'organization_admin_no_bypass', objects: { '*': { allowRead: true } } },
+      { name: 'scoped_set', objects: {}, adminScope: { businessUnit: 'a_ops', includeSubtree: true, manageAssignments: true, assignablePermissionSets: ['wild_set'] } },
+    ],
+  };
+  const gate = new DelegatedAdminGate({ ql, resolveSets: async (c: any) => SETS[c?.principal ?? ''] ?? [] });
+  const ctxOf = (principal: string, tenantId: string | null = 'org_a') =>
+    ({ principal, userId: `u_${principal}`, ...(tenantId ? { tenantId } : {}) });
+  return { gate, ql, tables, ctxOf };
+}
+
+/** The refusal an HTTP door answers, asserted by its ADR-0112 identity, not by a bare throw. */
+async function deniedOf(run: () => Promise<unknown>): Promise<any> {
+  try {
+    await run();
+  } catch (e) {
+    expect([(e as any).code, (e as any).status]).toEqual(['PERMISSION_DENIED', 403]);
+    return e;
+  }
+  throw new Error('expected the write to be refused, but it was admitted');
+}
+
+describe('DelegatedAdminGate — organization administrators (ADR-0090 D12 as amended 2026-10-17)', () => {
+  let o: ReturnType<typeof makeOrganizationHarness>;
+  beforeEach(() => { o = makeOrganizationHarness(); });
+
+  const write = (ctx: any, object: string, operation: string, data: any) =>
+    o.gate.assert({ object, operation, data, context: ctx });
+
+  for (const principal of ['org_admin', 'org_admin_nb']) {
+    describe(principal === 'org_admin' ? 'organization_admin (walled)' : 'organization_admin_no_bypass (wall-less)', () => {
+      it('inserts an in-boundary position and an in-boundary set for a member; the rows land in its organization', async () => {
+        const pos: any = { user_id: 'u_member', position: 'in_pos', business_unit_id: 'bu_a1' };
+        await expect(write(o.ctxOf(principal), 'sys_user_position', 'insert', pos)).resolves.toBeUndefined();
+        expect(pos).toMatchObject({ organization_id: 'org_a', granted_by: `u_${principal}` });
+        for (const setName of ['in_set', 'org_cap_set']) {
+          const grant: any = { user_id: 'u_member', permission_set: setName };
+          await expect(write(o.ctxOf(principal), 'sys_user_permission_set', 'insert', grant), setName).resolves.toBeUndefined();
+          expect(grant.organization_id).toBe('org_a');
+        }
+      });
+
+      it('self-assignment of an in-boundary set is admitted (the boundary, not the target, decides)', async () => {
+        await expect(write(o.ctxOf(principal), 'sys_user_permission_set', 'insert',
+          { user_id: `u_${principal}`, permission_set: 'in_set' })).resolves.toBeUndefined();
+      });
+
+      it('deletes an in-boundary row of its organization by id', async () => {
+        await expect(write(o.ctxOf(principal), 'sys_user_position', 'delete', { id: 'up_a' })).resolves.toBeUndefined();
+        await expect(write(o.ctxOf(principal), 'sys_user_permission_set', 'delete', { id: 'ups_a' })).resolves.toBeUndefined();
+      });
+
+      it('refuses every out-of-boundary set, naming the set and the condition — to a member and to itself', async () => {
+        const cases: Array<[string, RegExp]> = [
+          ['wild_set', /'wild_set'.*condition \(a\).*'viewAllRecords'/],
+          ['scoped_set', /'scoped_set'.*condition \(b\)/],
+          ['plat_cap_set', /'plat_cap_set'.*condition \(c\).*'manage_metadata'/],
+          ['undeclared_cap_set', /'undeclared_cap_set'.*condition \(c\).*declared nowhere/],
+          ['missing_set', /'missing_set'.*not in the security catalog/],
+          ['admin_full_access', /'admin_full_access'.*by name/],
+          ['organization_admin', /'organization_admin'.*by name/],
+          ['organization_admin_no_bypass', /'organization_admin_no_bypass'.*by name/],
+          ['mcp_agent_data_read', /'mcp_agent_data_read'.*by name/],
+          ['mcp_agent_data_write', /'mcp_agent_data_write'.*by name/],
+          ['mcp_agent_restricted', /'mcp_agent_restricted'.*by name/],
+        ];
+        for (const [setName, why] of cases) {
+          for (const userId of ['u_member', `u_${principal}`]) {
+            const err = await deniedOf(() => write(o.ctxOf(principal), 'sys_user_permission_set', 'insert',
+              { user_id: userId, permission_set: setName }));
+            expect(err.message, `${setName} → ${userId}`).toMatch(why);
+            expect(err.details?.permissionSet, setName).toBe(setName);
+          }
+        }
+      });
+
+      it('a position carrying a mixed bundle is outside whole — one set outside puts the position outside', async () => {
+        const err = await deniedOf(() => write(o.ctxOf(principal), 'sys_user_position', 'insert',
+          { user_id: 'u_member', position: 'mixed_pos' }));
+        expect(err.message).toMatch(/position 'mixed_pos' carries permission set 'wild_set'.*condition \(a\)/);
+        expect(err.details).toMatchObject({ position: 'mixed_pos', permissionSet: 'wild_set' });
+        // …and so is removing it: the right covers in-boundary rows only.
+        await deniedOf(() => write(o.ctxOf(principal), 'sys_user_position', 'delete', { id: 'up_a_mixed' }));
+        await deniedOf(() => write(o.ctxOf(principal), 'sys_user_permission_set', 'delete', { id: 'ups_a_wild' }));
+      });
+
+      it("counts the permission set of the position's own name, which the resolver also grants", async () => {
+        const err = await deniedOf(() => write(o.ctxOf(principal), 'sys_user_position', 'insert',
+          { user_id: 'u_member', position: 'self_named' }));
+        expect(err.message).toMatch(/position 'self_named' carries permission set 'self_named'.*condition \(c\).*'manage_users'/);
+      });
+
+      it('refuses a position that carries organization_admin, and a position the catalog does not hold', async () => {
+        expect((await deniedOf(() => write(o.ctxOf(principal), 'sys_user_position', 'insert',
+          { user_id: 'u_member', position: 'org_owner_like' }))).message).toMatch(/'organization_admin'.*by name/);
+        expect((await deniedOf(() => write(o.ctxOf(principal), 'sys_user_position', 'insert',
+          { user_id: 'u_member', position: 'no_such_pos' }))).message).toMatch(/position 'no_such_pos' is not in the security catalog/);
+        expect((await deniedOf(() => write(o.ctxOf(principal), 'sys_user_position', 'insert',
+          { user_id: 'u_member', position: 'ghost_pos' }))).message).toMatch(/'missing_set'.*not in the security catalog/);
+      });
+
+      it('refuses a row of another organization, and the removal of a foreign or organization-less row', async () => {
+        expect((await deniedOf(() => write(o.ctxOf(principal), 'sys_user_permission_set', 'insert',
+          { user_id: 'u_member_b', permission_set: 'in_set', organization_id: 'org_b' }))).message)
+          .toMatch(/belongs to organization 'org_b'/);
+        expect((await deniedOf(() => write(o.ctxOf(principal), 'sys_user_position', 'delete', { id: 'up_b' }))).message)
+          .toMatch(/belongs to organization 'org_b'/);
+        expect((await deniedOf(() => write(o.ctxOf(principal), 'sys_user_position', 'delete', { id: 'up_orgless' }))).message)
+          .toMatch(/carries no organization/);
+      });
+
+      it("refuses a business unit of another organization as the assignment's anchor", async () => {
+        const err = await deniedOf(() => write(o.ctxOf(principal), 'sys_user_position', 'insert',
+          { user_id: 'u_member', position: 'in_pos', business_unit_id: 'bu_b1' }));
+        expect(err.message).toMatch(/business unit 'bu_b1' is not a unit of the organization you administer/);
+      });
+
+      it('refuses an edit in place, a filter delete, and a caller with no active organization', async () => {
+        expect((await deniedOf(() => write(o.ctxOf(principal), 'sys_user_position', 'update',
+          { id: 'up_a', reason: 'x' }))).message).toMatch(/never edited in place/);
+        expect((await deniedOf(() => o.gate.assert({ object: 'sys_user_position', operation: 'delete',
+          options: { where: { user_id: 'u_member' } }, context: o.ctxOf(principal) }))).message).toMatch(/one assignment row by id/);
+        expect((await deniedOf(() => write(o.ctxOf(principal, null), 'sys_user_permission_set', 'insert',
+          { user_id: 'u_member', permission_set: 'in_set' }))).message).toMatch(/no active organization/);
+      });
+
+      it('still may not write membership rows — administrator status comes from the membership grade alone', async () => {
+        await deniedOf(() => write(o.ctxOf(principal), 'sys_member', 'insert',
+          { user_id: 'u_member', organization_id: 'org_a', role: 'admin' }));
+      });
+
+      it('a refused insert is neither stamped nor given an organization', async () => {
+        const grant: any = { user_id: 'u_member', permission_set: 'wild_set' };
+        await deniedOf(() => write(o.ctxOf(principal), 'sys_user_permission_set', 'insert', grant));
+        expect('organization_id' in grant || 'granted_by' in grant).toBe(false);
+      });
+    });
+  }
+
+  it('a platform administrator keeps the status quo, organization_admin beside it or not', async () => {
+    await expect(write(o.ctxOf('platform_admin'), 'sys_user_permission_set', 'insert',
+      { user_id: 'u_member', permission_set: 'admin_full_access' })).resolves.toBeUndefined();
+    await expect(write(o.ctxOf('platform_admin'), 'sys_user_position', 'update', { id: 'up_a', reason: 'x' })).resolves.toBeUndefined();
+  });
+
+  it('a member is denied as before', async () => {
+    expect((await deniedOf(() => write(o.ctxOf('member'), 'sys_user_permission_set', 'insert',
+      { user_id: 'u_member', permission_set: 'in_set' }))).message).toMatch(/delegated adminScope/);
+  });
+
+  it('an organization administrator that is also a delegate falls back to its adminScope outside the boundary', async () => {
+    // wild_set is outside the organization boundary but on the delegate's allowlist.
+    await expect(write(o.ctxOf('org_admin_and_delegate'), 'sys_user_position', 'insert',
+      { user_id: 'u_member', position: 'mixed_pos', business_unit_id: 'bu_a1' })).rejects.toThrow(/delegated 'insert' on sys_user_position rejected — position 'mixed_pos' distributes permission set 'in_set'/);
+    await expect(write(o.ctxOf('org_admin_and_delegate'), 'sys_user_permission_set', 'insert',
+      { user_id: 'u_member', permission_set: 'in_set' })).resolves.toBeUndefined();
+  });
+
+  describe('the two doors', () => {
+    it('describeDelegableScope: every unit of its organization is placeable and only in-boundary positions are assignable', async () => {
+      for (const principal of ['org_admin', 'org_admin_nb']) {
+        const report = await o.gate.describeDelegableScope(
+          (await (o.gate as any).deps.resolveSets(o.ctxOf(principal))) as any,
+          o.ctxOf(principal),
+        );
+        expect(report, principal).toEqual({
+          isTenantAdmin: false,
+          scopes: [],
+          placeableBusinessUnitIds: ['bu_a1'],
+          assignablePositions: ['in_pos'],
+        });
+      }
+    });
+
+    it('describeDelegableScope: a platform administrator is still reported tenant-level', async () => {
+      const report = await o.gate.describeDelegableScope(
+        (await (o.gate as any).deps.resolveSets(o.ctxOf('platform_admin'))) as any,
+        o.ctxOf('platform_admin'),
+      );
+      expect(report.isTenantAdmin).toBe(true);
+      expect(report.assignablePositions).toContain('mixed_pos');
+    });
+
+    it('organizationAdminCoversUser: a member of its own organization only, and never for a non-administrator', async () => {
+      const sets = async (p: string) => (o.gate as any).deps.resolveSets(o.ctxOf(p));
+      expect(await o.gate.organizationAdminCoversUser(await sets('org_admin'), 'u_member', o.ctxOf('org_admin'))).toBe(true);
+      expect(await o.gate.organizationAdminCoversUser(await sets('org_admin_nb'), 'u_member', o.ctxOf('org_admin_nb'))).toBe(true);
+      expect(await o.gate.organizationAdminCoversUser(await sets('org_admin'), 'u_member_b', o.ctxOf('org_admin'))).toBe(false);
+      expect(await o.gate.organizationAdminCoversUser(await sets('member'), 'u_member', o.ctxOf('member'))).toBe(false);
+      expect(await o.gate.organizationAdminCoversUser(await sets('org_admin'), 'u_member', o.ctxOf('org_admin', null))).toBe(false);
+    });
+  });
+});

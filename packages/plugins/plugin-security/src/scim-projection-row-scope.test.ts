@@ -263,8 +263,12 @@ const PERSONAS = {
   // The MCP write ceiling holds the grant too; it carries no row policy of its
   // own by design (ADR-0090 D10), so its bound is the delegating member's sets.
   // Those resolve from the baseline, so this persona runs where one is composed.
+  // Shaped as its one producer shapes it (core's `assembleExecutionContext`):
+  // `userId` stays the delegating human, so `current_user.*` resolves to them on
+  // the ceiling's leg too, where each SCIM table's declared default row scope
+  // applies because the ceiling carries no policy (#24164 ruling E′ item 2).
   mcp_agent_data_write: {
-    userId: 'agent_x', tenantId: 'org_x', positions: [], permissions: ['mcp_agent_data_write'],
+    userId: PEOPLE.member, tenantId: 'org_x', positions: [], permissions: ['mcp_agent_data_write'],
     principalKind: 'agent', onBehalfOf: { userId: PEOPLE.member }, org_user_ids: ORG_X_USERS,
   },
 } as const;

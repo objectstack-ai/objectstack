@@ -1828,8 +1828,16 @@ export const FieldSchema = lazySchema(() => {
   })])).optional().describe("Declares that this field's available values depend on the value of other field(s) on the same record — the form gates the field until they are set and re-evaluates as they change. For `lookup`/`master_detail` it scopes the candidate query (string = same local/remote key; {field,param} when the remote filter key differs — the {field,param} form is lookup-only). For `select`/`multiselect`/`radio` the actual per-option rule lives in each option's `visibleWhen`; list the referenced fields here (string form) so the option list gates and refreshes with the parent."),
   allowCreate: z.boolean().optional().describe('Allow inline quick-create from the record picker: when no match exists the user can create a record from the typed text (optimistic dataSource.create with the display field). Best for simple objects whose only required field is the display field.'),
 
-  /** Calculation — CEL formula. Plain string accepted for back-compat; build emits canonical envelope. */
-  expression: EvaluatedExpressionInputSchema.optional().describe('Formula expression (CEL). e.g. F`record.amount * 0.1`'),
+  /**
+   * Calculation — CEL formula. Plain string accepted for back-compat; build emits canonical envelope.
+   * On a `formula` field it is computed on read and has no column. On any other (stored) field the
+   * engine computes it from the row the write stores and stores the result, so a `summary` can roll
+   * the column up and a client-sent value never stands: on every insert and every update by id (the
+   * stored row merged with the patch), and on a predicate update only when the patch moves one of the
+   * expression's inputs — the one value is stored when it is the same on every matched row, and the
+   * update is refused when it would differ between rows.
+   */
+  expression: EvaluatedExpressionInputSchema.optional().describe('CEL expression the field\'s value is computed from, e.g. F`record.amount * 0.1`. On a `formula` field: computed on read, no column. On any other (stored) field: computed by the engine from the row the write stores and stored, so a client-sent value never stands and a `summary` can roll the column up — on every insert and every update by id (the stored row merged with the patch), and on a predicate update only when the patch moves an input (one value for every matched row, else the update is refused).'),
   /**
    * The value type a `formula` field computes, declared at authoring (the way
    * Salesforce/Airtable carry a formula's result type). Lets consumers — dataset

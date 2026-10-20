@@ -578,6 +578,46 @@ describe('SchemaRegistry', () => {
         it('updatePackageManifest returns undefined for an unknown package', () => {
             expect(registry.updatePackageManifest('nope', { name: 'x' })).toBeUndefined();
         });
+
+        // [#24670] `dependencies` is the declaration the save door's closure
+        // verdict reads, and its refusal prescribes editing it — so the edit
+        // has to reach the manifest the next save reads.
+        it('[#24670] updatePackageManifest replaces `dependencies` WHOLE — the row as given, never a deep merge', () => {
+            registry.installPackage({
+                id: 'com.test',
+                name: 'Keep',
+                description: 'kept',
+                version: '1.0.0',
+                dependencies: { 'com.acme.core': '^1.0.0', 'com.acme.old': '^1.0.0' },
+            } as any, 'authored');
+            registry.disablePackage('com.test');
+            const row = { 'com.acme.core': '^2.0.0', 'com.acme.new': '^1.0.0' };
+
+            const updated = registry.updatePackageManifest('com.test', { dependencies: row });
+
+            // `com.acme.old` is gone: an entry the row leaves out is removed, not merged back.
+            expect((updated?.manifest as any).dependencies).toEqual(row);
+            // The registry keeps its own copy, not the caller's object.
+            row['com.acme.core'] = 'mutated by the caller';
+            expect((registry.getPackage('com.test')?.manifest as any).dependencies['com.acme.core']).toBe('^2.0.0');
+            // The keys the patch did not name, and the lifecycle, are untouched.
+            expect(updated?.manifest.name).toBe('Keep');
+            expect((updated?.manifest as any).description).toBe('kept');
+            expect(updated?.manifest.version).toBe('1.0.0');
+            expect(updated?.enabled).toBe(false);
+        });
+
+        it('[#24670] an empty `dependencies` row clears the declaration; a patch without the key leaves it', () => {
+            registry.installPackage({
+                id: 'com.test', name: 'Keep', version: '1.0.0', dependencies: { 'com.acme.core': '^1.0.0' },
+            } as any, 'authored');
+
+            registry.updatePackageManifest('com.test', { description: 'no dependencies key' });
+            expect((registry.getPackage('com.test')?.manifest as any).dependencies).toEqual({ 'com.acme.core': '^1.0.0' });
+
+            registry.updatePackageManifest('com.test', { dependencies: {} });
+            expect((registry.getPackage('com.test')?.manifest as any).dependencies).toEqual({});
+        });
     });
 
     // ==========================================

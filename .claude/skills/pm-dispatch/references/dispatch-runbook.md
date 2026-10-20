@@ -134,11 +134,11 @@
 - 该答案与从不存在不可区分,⛔ 永不读作死亡信号。
 - 跨账号接班活性只认 GitHub 产出读数,draft-PR 时点交报正为此存在。
 
-## subagent 批派发前置:先快进本地检出
+## subagent 批派发前置:先把本地检出钉到 main
 
-- subagent 在 PM 容器内运行,agent 定义与技能文本读本地检出,不是 `origin/main`。
-- 派发 subagent 批之前先快进:`git -C <repo-root> pull --ff-only origin main`。
-- 检出过期则整批拿到过期定义;用 `--ff-only` 让脏或分叉的检出大声失败,⛔ 不静默合并。
+- subagent 读 PM 容器本地检出的 agent 定义与技能文本,不读 `origin/main`:过期则整批过期。
+- 每批派发前:`git -C <repo-root> fetch origin main && git -C <repo-root> checkout --detach origin/main`。
+- 游离 HEAD 使停止钩子跳过分支块,⛔ 不快进会话分支;只拒与切换冲突的脏改动,不拒分叉。
 
 ## 接手中断的 dev(worktree 接手协议)
 
@@ -208,9 +208,6 @@
 - 文件面两句原文照抄:预期落点是 X。
 - 若实测表明真正的生产者在别包,直接按生产者侧修,落点与理由写进报告和 PR 正文。
 - 跨包常等于跨车道,PM 事后补跨座位声明。
-- 卡的代码首读 spec 发布 R 首发的键、类型成员或运行时行为,即 R 的首个消费者:
-- 同 PR 把消费包 `@objectstack/spec` 下限抬到 R,认领文件面点名 manifest 与 lockfile specifier。
-- 「不动 pin」只禁 lockfile 解析版本与 `.objectui-sha`/console pin 的移动,⛔ 永不禁下限。
 - 模型标识只禁内容工件:PR 标题与正文、代码注释、文档、changeset、评论。
 - 豁免:`.claude/agents/*` frontmatter 的 `model:`,`check:agent-model-declared` 要求。
 - 新 changeset 文件名用 `<issue>-<slug>.md`,⛔ 不用随机词对名。

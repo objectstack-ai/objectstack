@@ -316,7 +316,7 @@ describe('serve — the posture description an operator reads names the declarat
     if (verdict.ok) return;
     expect(lines(verdict.fatal)).toContain(
       `      • set OS_TENANCY_POSTURE=isolated — organization wall + the ${PKG} runtime `
-      + "(the legacy spelling 'multi' is accepted and normalizes to this); refused at boot in 18.0, which supports single only",
+      + "(the legacy spelling 'multi' is accepted and normalizes to this)",
     );
   });
 

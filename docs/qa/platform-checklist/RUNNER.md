@@ -170,20 +170,25 @@ contradicts it, and correct it here when it does.
   are quoting whenever you cite either.
 
 - **Playwright needs an explicit `executablePath` on these containers.**
-  `@playwright/test` 1.62.1 resolves chromium build **1234**; only **1194** is installed.
-  **Check:** `grep -A2 '"name": "chromium"' node_modules/playwright-core/browsers.json`
+  `@playwright/test` 1.63.0 (the `^1.63.0` `examples/app-showcase/package.json` declares, the
+  only version in the store) resolves chromium build **1243**; only **1194** is installed.
+  Re-measured at `bfc1539fe0`: this entry read 1.62.1 and build 1234 until the tree moved
+  to 1.63.0; `playwright-core` sits only in the pnpm store (there is no root
+  `node_modules/playwright-core`), so the check reads it there.
+  **Check:**
+  `grep -A2 '"name": "chromium"' node_modules/.pnpm/playwright-core@*/node_modules/playwright-core/browsers.json`
   against `ls $PLAYWRIGHT_BROWSERS_PATH` (`/opt/pw-browsers` here, holding
   `chromium-1194` / `chromium_headless_shell-1194` only). The stock
   `examples/app-showcase/playwright.config.ts` sets no `executablePath`, so every test
   dies at browser launch — the error names the **headless-shell** variant it wanted
-  (`Executable doesn't exist at .../chromium_headless_shell-1234/...`), which is the
+  (`Executable doesn't exist at .../chromium_headless_shell-1243/...`), which is the
   signature to recognise. Pass `launchOptions.executablePath=/opt/pw-browsers/chromium`
   (for the smoke, `OS_TEST_CHROMIUM_EXECUTABLE_PATH=/opt/pw-browsers/chromium`, which the
   config reads since #21060) and the same specs pass (verified: Playwright launches through it, reporting Chromium
   141.0.7390.37, and drives a real page). ⚠️ Use that **alias**, not the versioned
   `chromium-1194/chrome-linux/chrome` beneath it: `/opt/pw-browsers/chromium` is a
   symlink maintained by the image build, so it still resolves after the image moves to
-  1234, while the versioned literal stops existing at exactly that moment — and a dead
+  1243, while the versioned literal stops existing at exactly that moment — and a dead
   path copied out of this section is the `absence-inference` trap one level up.
   **The discriminator is uniformity:** a launch/environment failure
   takes down the whole run at once (`showcase-smoke.spec.ts` generates one test per
@@ -333,6 +338,22 @@ contradicts it, and correct it here when it does.
      with `{"email": "EMAIL", "role": "member"}`; a pending, unexpired `sys_invitation`
      row for that address is what admits the following `sign-up/email`
      (`packages/plugins/plugin-auth/src/auth-manager.ts`, `hasPendingInvitationFor`).
+     ⚠️ **The sign-up does not apply the invitation's role.** It binds the new user to the
+     Default Organization as `member` whatever role was invited, and leaves the invitation
+     `pending` (`reconcileMembership` in
+     `packages/plugins/plugin-auth/src/reconcile-membership.ts` writes `role: 'member'`). For
+     any other role (`admin`, `owner`), the persona — signed in as itself — then sends
+     `POST /api/v1/auth/organization/accept-invitation` with `{"invitationId": "ID"}` (the
+     `id` the invite-member call answered, or the row its own
+     `GET /api/v1/auth/organization/list-user-invitations` lists). Acceptance writes the
+     invitation's role onto that membership and the invitation reads `accepted`
+     (`adoptExistingMembership` in `packages/plugins/plugin-auth/src/adopt-membership.ts`,
+     which never lowers a grade; pinned by `accept-invitation-adopt-membership.test.ts`
+     beside it, 6 passed at `bfc1539fe0`). The invitee's email need not be verified: the
+     deployment declares `requireEmailVerificationOnInvitation: false`. QA run #24616 met it:
+     an `admin` invitation signed up as `member`, and the persona held `org_admin` only after
+     the accept. **Check:** read the persona's `sys_member` row (`role`) before scoring a
+     role-gated clause, never the invitation you sent.
   2. **Admin create.** `POST /api/v1/auth/admin/create-user`, which answers
      `mustChangePassword: true` by default
      (`packages/plugins/plugin-auth/src/admin-user-endpoints.ts`, `runAdminCreateUser`);
@@ -410,8 +431,12 @@ contradicts it, and correct it here when it does.
   by name and exits **1**, where it used to exit **0** in silence — the entry point is
   `packages/cli/bin/run.js`.
 
-- **23 items carry an `automated.ref` that lives ENTIRELY in the `objectui` repo — from
-  this checkout they are neither runnable nor pin-evidenced.** Their refs name only
+- **Some items carry an `automated.ref` that lives ENTIRELY in the `objectui` repo — from
+  this checkout they are neither runnable nor pin-evidenced.** No count is kept here: the
+  set moves with every pin re-point and every `automated` edit, and the count this line
+  used to carry went stale with nothing to notice it (wave anchor #24579). **Find them by
+  the rule, not by a number:** an item is in the set when its `automated.ref` names an
+  objectui path and no path that exists in this checkout. Their refs name only
   objectui paths (`e2e/live/*.spec.ts`, `e2e/import-console/*`, `e2e/import-harness/*`,
   and unit suites under `packages/plugin-grid`, `plugin-gantt`, `plugin-calendar`,
   `plugin-form`, `fields`, `core`, `app-shell`). This repository builds no console bundle
@@ -430,6 +455,116 @@ contradicts it, and correct it here when it does.
   17.1.0 sweep subject was `9a3daf8d37ad`). ⛔ Never record such an item as covered on the
   strength of the `automated` field alone: an unrun pin is a claim, not evidence — which
   is the same "ticking on a label" failure clause-grained acceptance exists to prevent.
+
+- **A walled boot is a fixture of its own: `os serve` boots `group` and `isolated` once the
+  walled prerequisites are provisioned, and the stock showcase provisions none of them.**
+  18.0 refused a walled posture at boot; 18.x step 4 (#24580) removed that refusal, so
+  `OS_TENANCY_POSTURE=group` or `isolated` (or the legacy `OS_MULTI_ORG_ENABLED=true`, which
+  `resolveTenancyPosture()` in `packages/types/src/env.ts` reads as `isolated`) boots through
+  `os serve`, and so `os dev` and `os start`. Each prerequisite below refuses the boot with a
+  FATAL naming itself when absent, so a refusal tells the runner what is missing, never that
+  the posture is unsupported:
+  1. the multi-org runtime **declared by the app**: `@objectstack/organizations` in the app's
+     own `package.json` and installed there. Reachable only through `NODE_PATH` or a hoisted
+     store is refused on purpose (ADR-0093 D5). No example app declares it, so a walled run
+     uses a scratch app that does;
+  2. `OS_PLATFORM_OWNER_EMAIL`, the deployment's platform administrators: first-registrant
+     promotion is off under a wall;
+  3. a declared membership policy, `OS_AUTH_MEMBERSHIP_POLICY` (for example `invite-only`).
+
+  Measured at `45898dbf6`: a scratch app declaring the real runtime, booted by the built CLI
+  under `isolated` with the other two set, mounted `Organizations`, answered
+  `GET /api/v1/discovery` 200 and logged no system-write refusal. The seven walled
+  e2e cases in `packages/cli/test/serve-organizations-*.e2e.test.ts` spawn that boot.
+  **So:** score a walled clause's live leg on such a boot, and its pins as its item says.
+  A run that does not provision the walled boot records the leg `blocked(fixture)`, naming
+  this entry and the missing prerequisite — never `fail`, and never on a faked posture.
+  Each item that carries such a leg names it in its own `fixtures.knownGaps`.
+
+- **A stock `single` boot holds exactly one organization, and no door mints a second; a
+  walled boot mints them through the auth API.**
+  `POST /api/v1/auth/organization/create` answers **`403 ORGANIZATION_CREATION_DISABLED`**
+  wherever the effective posture enforces no organization wall (`beforeCreateOrganization`
+  in `packages/plugins/plugin-auth/src/auth-manager.ts`, the same derivation `/auth/config`
+  publishes as `features.multiOrgEnabled: false`; pinned by
+  `packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts`), which is every stock
+  boot: the stock showcase boots `single`. `sys_organization` offers no create over the
+  data API (`apiMethods: ['get', 'list', 'update']`,
+  `packages/platform-objects/src/identity/sys-organization.object.ts`). On a stock boot
+  `POST /api/v1/auth/organization/set-active` therefore has the Default Organization, or
+  null, to switch between. On a walled boot (the entry above) a signed-in user creates an
+  organization with that same `POST /api/v1/auth/organization/create` and switches to it
+  with `set-active`; the walled dogfood suites
+  (`packages/qa/dogfood/test/wall-*.dogfood.test.ts`) create two that way. **So:** a clause
+  that needs a second organization (an org switch mid-flow, organization A against B) is
+  scored on a walled boot. On a stock boot record its live leg `blocked(fixture)` with this
+  entry cited, and score what its pins prove. A run that stages the second organization
+  with a system write (QA run #24560 did) scores a fixture of its own making, not a stock
+  boot, and its record says so. QA runs #24560 and #24558 met the 403; the pin reports 25
+  passed at `bfc1539fe0`.
+
+- **One container builds one tree at a time: never run `pnpm build` and
+  `pnpm objectui:build` together, and give the heavy steps a concurrency the shell's memory
+  can hold.** `pnpm objectui:build` (`scripts/build-console.sh`) runs `turbo run build` in
+  THIS checkout as well — `@objectstack/spec` when its dist is absent or incomplete,
+  `@objectstack/client`, and every `@objectstack/*` package the objectui pin overrides,
+  declarations included — so a `pnpm build` beside it writes the same `packages/spec/dist`
+  from a second turbo process nothing serialises, and the spec's DTS pass races (the 18.0
+  sweep, #24579 §6). The shell's cgroup is capped near 13.4 GiB (`memory.limit_in_bytes`
+  read `14343688192` on the cgroup `/proc/self/cgroup` names, at `bfc1539fe0`), and the
+  console's dependency build is `turbo run build --filter=@object-ui/console^...` at turbo's
+  default concurrency unless overridden. The 18.0 sweep's runner held both under that cap
+  only at `--concurrency=2`, and the Tier 1 vitest pins only at `--maxWorkers=1`, and was
+  killed with exit **137** otherwise (#24579 §6; QA run #24598's environment fingerprint
+  records the settings that held; the OOM itself is not re-run here). **Fix:**
+  `pnpm build --concurrency=2` first; then
+  `OBJECTUI_DEPS_BUILD_CMD='pnpm exec turbo run build --concurrency=2 --filter=@object-ui/console^...' pnpm objectui:build`
+  (the override the script's header documents); vitest one package at a time with
+  `--maxWorkers=1`. ⛔ An exit 137 is the container's memory limit, not a failing test or a
+  broken build — re-run narrower before reading anything into it.
+
+- **`OS_TEST_TIERS` narrows `packages/cli`'s vitest population, and only that package's —
+  a cli pin named under the wrong setting runs no test at all.** `scripts/nightly-tiers.mjs`
+  is the one reader of the switch: unset (or `queue`) collects every test file EXCEPT the
+  nightly tiers, `*.e2e.test.*` and `*.live.test.*`; `nightly` collects exactly those
+  (`testFilesOnDisk()` in `packages/cli/vitest-tiers.ts`). `packages/cli` owns every tier
+  file in the tree (`node scripts/nightly-tiers.mjs --packages`: 1 package, 83 files, at
+  `bfc1539fe0`), so the switch moves nothing anywhere else. The 18.0 sweep met both
+  directions: a `*.e2e.test.ts` pin (`serve-organization-record-page.e2e.test.ts`) collects
+  nothing without `OS_TEST_TIERS=nightly` (QA runs #24556 / #24558), and with it set, 28 of
+  the 29 cli files the Tier 1 rerun named ran 0 tests (QA run #24598, #24579 round 2).
+  **Fix:** run a cli `*.e2e.test.*` pin in an invocation of its own with
+  `OS_TEST_TIERS=nightly`, and every other cli pin without it. ⛔ A named file that collects
+  no test is not a pass, and here it is not a stale ref either — re-run it under the other
+  setting before fixing the item.
+
+- **`scripts/qa/qa-rollup.mjs` has two blind spots a runner meets at close-out.** (1) Only a
+  BARE area name classifies as an area: `classifySelector('platform-core')` answers `area`,
+  while `area:platform-core` — the selector spelling `checklist-select.mjs` takes — answers
+  `other`, so a record titled with it rolls up outside its area (16 records of 2026-10-16,
+  #23926 among them, do). Title an area run with the bare name, `QA run · platform-core (…)`,
+  as this sweep's records do. (2) Behind this container's egress proxy the roll-up dies on
+  its second page: it follows GitHub's `Link: rel="next"`, which names
+  `https://api.github.com/repositories/<id>/issues?…`, the proxy refuses numeric-id paths
+  **403** ("Numeric-ID repository paths … are not supported through this proxy"), and
+  `fetchRunRecords` throws on any non-OK page — measured at `bfc1539fe0` with 130 `qa-run`
+  records, so page 1 (100) is all it reads. The same page asked for by number on the named
+  path, `repos/objectstack-ai/objectstack/issues?labels=qa-run&state=all&per_page=100&page=2`,
+  answers 200 (#24579 §6). ⛔ That 403 says nothing about access to the repository: run the
+  roll-up where the proxy is not in the path, or read the pages by number.
+
+- **A map view draws its markers under a "Map failed to load" banner here, because the
+  default base style is unreachable — an environment fact, not a product defect.** The
+  console's map uses `https://demotiles.maplibre.org/style.json` unless the view declares a
+  style (objectui `packages/plugin-map/src/ObjectMap.tsx`, `DEFAULT_MAP_STYLE`, the same at
+  the pin `4016370a` QA run #24616 ran and at the pin `12dc7b47c340` #24660 moved it to), and
+  this container's egress proxy refuses that host
+  (`curl https://demotiles.maplibre.org/style.json` → `CONNECT tunnel failed, response 403`,
+  at `bfc1539fe0`). The map's `error` event then renders an amber `role="alert"` banner,
+  "Map failed to load (…). Markers below are still listed in the search box", over a canvas
+  that still carries the markers (QA run #24616, `records-forms.view-type-gallery`).
+  **So:** score the markers and the record list. ⛔ Do not file the missing tiles, and do
+  not read the banner as the map failing.
 
 ### Trap vocabulary (`traps` field)
 

@@ -9,7 +9,7 @@
       "title": "A widget authored with a stray/legacy key fails loud, never renders blank",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -26,7 +26,7 @@
         "for each variant in `variants`, author a dashboard draft via PUT /api/v1/meta/dashboard/qa_stray_key_probe?mode=draft whose single widget carries a valid dataset binding (dataset: showcase_task_metrics, dimensions: ['status'], values: ['task_count']) PLUS the stray key (e.g. \"categoryField\": \"status\")",
         "capture the full response status and error body for each variant",
         "additionally author one widget with a wrong-layer key INSIDE chartConfig (e.g. chartConfig.dataset or chartConfig.aggregate) — ChartConfigSchema carries per-key guidance for these — and capture that error text too",
-        "attempt the same stray-key widget through the Studio dashboard designer inspector (browser door) and capture the surfaced error",
+        "at the Studio dashboard designer's widget inspector (browser door), confirm it offers NO free-key path: it is a structured form whose legacy inline-analytics fields were removed (objectui app-shell metadata-admin/inspectors/DashboardWidgetInspector.tsx: 'its fields are gone so no Studio surface can emit the dead shape'), so the stray key cannot be typed there and there is no error to capture. A raw-JSON door that does take one — the metadata editor's Source tab — saves through the same PUT; if you use it, capture the 422 it surfaces",
         "after each rejection, GET /api/v1/meta/dashboard/qa_stray_key_probe and record whether anything was persisted",
         "finally author the SAME widget with the stray key removed (pure dataset + dimensions + values) and load it in the browser"
       ],
@@ -106,6 +106,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "steps[4] corrected from QA run #24573 (18.0 sweep, 5b14b7f3; carried by #24612 at ba4afcc2), re-read at the console pin 4016370af3c9: the Studio widget inspector is a structured form with no free-key or JSON entry (DashboardWidgetInspector.tsx removed the legacy fields), so 'attempt the same stray-key widget through the inspector and capture the surfaced error' could not be executed. The step now asks the run to confirm the inspector offers no free-key path. The same record's second note, that a pending draft is unreadable until publish, does not hold and is not taken: GET /meta/dashboard/NAME?state=draft reads the draft (META_ITEM_READ_PARAMS includes `state`); only `?mode=draft`, a save-door parameter, is refused on the read. No clause changed. Wave anchor #24579 §3",
+          "ref": "#24671"
         }
       ]
     },
@@ -280,7 +286,7 @@
       "title": "Every ChartTypeSchema member renders a real chart with the correct marks and series count",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -294,7 +300,7 @@
           "a scratch draft dashboard for the period-over-period compareTo probe (via PUT /api/v1/meta/dashboard/qa_compareto_probe?mode=draft) — NO showcase widget authors compareTo, so this is authored fresh exactly like the strict-widget probes. Two things the probe needs, both measured by QA run #23927: (a) a DATED WINDOW — compareTo shifts the selection's date range, so the dashboard declares one, dateRange: { field: 'issued_on', defaultRange: 'last_90_days' }; without it the dataset query answers a loud, correct 400 'compareTo needs a dated window to shift…' (packages/services/service-analytics/src/dataset-executor.ts) instead of a render; (b) data in BOTH windows — bind a line widget on the issued_on time dimension and a metric widget, each to dataset showcase_invoice_metrics with values ['invoice_count'] and compareTo: { kind: 'previousPeriod' }. The invoice seed spreads issued_on across ~6 months (examples/app-showcase/src/data/seed/index.ts: 7 dated invoices in the last 90 days, 3 in the 90 days before), so the comparison is non-zero and differs from the base. ⛔ Not showcase_task_metrics on created_at: every seeded task is created inside the current window, so the previous period is empty and a flat-zero comparison barely discriminates"
         ],
         "knownGaps": [
-          "kpi / gauge / solid-gauge / bullet have NO distinct renderer today — all four route to the SAME single-value renderer as `metric` (chart.zod.ts NOTE: '`metric`/`kpi` are kept as honest single-value synonyms; `gauge`/`solid-gauge`/`bullet` render a value today and gain a dial when a gauge renderer lands'; examples/app-showcase/test/coverage.test.ts SAME_AS_METRIC = {kpi, gauge, solid-gauge, bullet}). Two consequences a run must hold BOTH of: (a) the demonstrable claim is 'renders the value, not blank', NOT 'renders a dial' — do not tick a dial that does not exist; and (b) ⚠️ the four scratch tiles are expected to be VISUALLY IDENTICAL to each other and to the metric tile. Four indistinguishable tiles is the CORRECT observation, not evidence that the renderer ignored the declared type and not a per-variant FAIL — re-confirmed on 17.1.0 (#10560). The type IS being honoured; there is simply one renderer behind five names, which is what makes them synonyms rather than families"
+          "kpi / gauge / solid-gauge / bullet have NO distinct renderer today — all four route to the SAME single-value renderer as `metric` (chart.zod.ts NOTE: '`metric`/`kpi` are kept as honest single-value synonyms; `gauge`/`solid-gauge`/`bullet` render a value today and gain a dial when a gauge renderer lands'; examples/app-showcase/test/coverage.test.ts SAME_AS_METRIC = {kpi, gauge, solid-gauge, bullet}). Two consequences a run must hold BOTH of: (a) the demonstrable claim is 'renders the value, not blank', NOT 'renders a dial' — do not tick a dial that does not exist; and (b) ⚠️ the four scratch tiles are expected to be VISUALLY IDENTICAL to each other and to show the same value as the metric tile (the gallery's metric card differs only in its own title and placement — compare values, not chrome). Four indistinguishable tiles is the CORRECT observation, not evidence that the renderer ignored the declared type and not a per-variant FAIL — re-confirmed on 17.1.0 (#10560). The type IS being honoured; there is simply one renderer behind five names, which is what makes them synonyms rather than families"
         ]
       },
       "steps": [
@@ -303,7 +309,7 @@
         "open the Chart Gallery dashboard (Showcase app → Analytics → Chart Gallery), let it settle, and screenshot the full board",
         "per gallery widget (16 families: metric ×3 tiles, bar, column, horizontal-bar, line, area, combo, pie, donut, funnel, scatter, radar, treemap, sankey, table, pivot), screenshot the widget, then verify in the DOM that a real SVG (or table element for table/pivot) rendered with the mark type the family names",
         "count marks against ground truth: bar/column/horizontal-bar bars == distinct statuses (or priorities), pie/donut/funnel segments == distinct statuses/priorities, line/area points == month buckets",
-        "for combo, verify BOTH mark types on shared axes: task_count as bars bound to the left axis and avg_progress as a line on the right axis (the widget's series[] declares exactly that)",
+        "for combo, verify BOTH mark types on shared axes: task_count as bars bound to the left axis and avg_progress as a line on the right axis. The widget authors no series[] — the per-series mark type is gone with the structure keys (the D3 entry dashboard-widget-chart-config-structure-refused; examples/app-showcase/src/ui/dashboards/chart-gallery.dashboard.ts), so which mark each measure gets is the renderer's: in a combo the first measure draws as bars and the others as lines, and a combo always draws both value axes (objectui plugin-charts AdvancedChartImpl.tsx)",
         "for table and pivot, verify real grouped tables: Projects by Account rows == distinct accounts with 3 measure columns; Tasks by Status × Priority cross-tab dimensions match distinct status × priority",
         "author the scratch draft dashboard with four widgets of types kpi, gauge, solid-gauge, bullet, each bound to dataset showcase_task_metrics, values ['task_count'], publish it, and load it",
         "verify each of the four renders the same numeric value the metric tile shows — a number, never a blank tile",
@@ -324,7 +330,7 @@
           "evidence": "API bucket counts vs DOM mark counts, per widget"
         },
         {
-          "clause": "combo renders MIXED marks on dual axes — bars (left) and a line (right) in one plot, per its series[].type / series[].yAxis config",
+          "clause": "combo renders MIXED marks on dual axes — bars (left) and a line (right) in one plot, by the renderer's combo default (first measure bars, the others lines, both value axes drawn) — the widget authors no series[] since the D3 entry dashboard-widget-chart-config-structure-refused",
           "oracle": "screenshot",
           "verify": "the combo widget shows both rect-bars and a path-line, with two y-axes",
           "evidence": "combo screenshot + DOM excerpt"
@@ -338,7 +344,7 @@
         {
           "clause": "the four single-value synonyms (kpi, gauge, solid-gauge, bullet) render the SAME value as metric — a number, never a blank or an error",
           "oracle": "screenshot",
-          "verify": "scratch-dashboard tiles each show the task_count value; evidence must note these are value-only renders (no dial) per the spec's own NOTE, and that the four tiles are EXPECTED to look identical to one another and to the metric tile — one renderer, five names. ⛔ Do not score 'the four tiles are indistinguishable' against the negative below: that negative is about a variant rendering as a DIFFERENT FAMILY (sankey drawn as a bar), which is the opposite failure",
+          "verify": "scratch-dashboard tiles each show the task_count value; evidence must note these are value-only renders (no dial) per the spec's own NOTE, and that the four tiles are EXPECTED to look identical to one another and to show the same VALUE as the metric tile — one renderer, five names. The gallery's metric card is not pixel-identical (its title and placement differ, QA run #24573): compare values, not chrome. ⛔ Do not score 'the four tiles are indistinguishable' against the negative below: that negative is about a variant rendering as a DIFFERENT FAMILY (sankey drawn as a bar), which is the opposite failure",
           "evidence": "scratch-dashboard screenshot annotated with the honest-synonym caveat"
         },
         {
@@ -436,6 +442,12 @@
           "date": "2026-10-16",
           "change": "fixtures.requires[2], steps[9] and acceptance[7].verify re-pointed so the compareTo probe can render and discriminate (fixture gaps F1 and F2 of QA run #23927, wave #23878). F1: as written the probe declared no dateRange, and the dataset query refused it with a loud, correct 400 'compareTo needs a dated window to shift' — #23927 had to add one to get a render. F2: bound to showcase_task_metrics on created_at, the previous 90-day window held no tasks on the stock seed, so the comparison series was flat at 0. The probe now declares dateRange { field: 'issued_on', defaultRange: 'last_90_days' } and binds to showcase_invoice_metrics, whose seeded issued_on dates fall in both windows (7 and 3), and the verify text reconciles the comparison against the previous window's literal-window count. Not loosened: a comparison silently absent, or one that disagrees with the previous window's count, still FAILS",
           "ref": "#24036"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-19",
+          "change": "steps[5], acceptance[2].clause, acceptance[4].verify and fixtures.knownGaps[0] corrected from QA run #24573 (18.0 sweep, 5b14b7f3; carried by #24612), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. (1) The combo widget no longer authors series[]: chart-gallery.dashboard.ts drops it under the D3 entry dashboard-widget-chart-config-structure-refused, and the renderer picks each measure's mark (objectui AdvancedChartImpl.tsx: first measure bars, the rest lines, both value axes drawn). The run's combo read (2 bars + 1 line on dual axes) is exactly that default. (2) The single-value tiles are compared to the metric tile by value, not by look: the gallery's metric card carries its own title and placement. No clause substance changed. Wave anchor #24579 §3",
+          "ref": "#24671"
         }
       ],
       "enumSource": {
@@ -449,7 +461,7 @@
       "title": "Dataset-only authoring works end to end: layout-less designer drafts save/publish, and every ReportType renders from the same semantic datasets",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -528,7 +540,7 @@
       ],
       "negative": [
         "a joined block nested inside blocks[] must be rejected at parse (block type enum is tabular|summary|matrix — no recursion); a silent save is a FAIL",
-        "a report or widget silently rendering while its dataset binding names nothing (blank-without-error) is a FAIL"
+        "a report or widget silently rendering while its dataset binding names nothing (blank-without-error) is a FAIL. The guard sits at PUBLISH (and at an active save, the same verb `os build` gates), not at the draft save: a draft naming a dangling dataset, measure or dimension is admitted by design (packages/metadata-protocol/src/runtime-authoring-gate.ts D1 — 'a draft save is always let through'), and its publish answers 422 widget-dataset-unknown / widget-measure-unknown / widget-dimension-unknown / chart-dataset-unknown. Drive the negative through the publish door; a 200 on the draft save is not this FAIL (QA run #24612)"
       ],
       "variants": [
         "tabular (via ListView lens)",
@@ -564,6 +576,12 @@
           "date": "2026-10-16",
           "change": "acceptance[5] (clause, verify, evidence) and steps[6] made computable (checklist-accuracy finding C2 of QA run #23927, wave #23878). The clause asked for 'open_block totals + done_block totals == unfiltered totals', but the two blocks carry different measures — open_block est_hours, done_block task_count (examples/app-showcase/src/ui/reports/index.ts) — so the sum mixed hours with a count and could not be computed; #23927 reconciled it per measure through the API. The clause now checks each block's rendered total against its own measure under its own runtimeFilter, and the per-measure partition (done:false + done:true == unfiltered) for both measures. Not loosened: a block whose runtimeFilter is ignored still renders its measure's unfiltered total and FAILS",
           "ref": "#24036"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "negative[1] corrected from QA run #24612 (18.0 sweep round 2, ba4afcc2), re-read at objectstack f89d29e382: the dangling-binding guard is an author-time rule run at publish and on an active save, never on a draft (runtime-authoring-gate.ts D1), so a draft with a dangling dataset, measure or dimension answers 200 and its publish answers 422 with the named rule. The negative now names the publish door, so a draft 200 is not read as the blank-without-error FAIL. Wave anchor #24579 round 2 §3 (6272314386)",
+          "ref": "#24671"
         }
       ]
     },
@@ -664,7 +682,7 @@
       "title": "Dashboard-level dateRange + global filters re-scope every bound widget through its OWN field mapping; opted-out widgets stay fixed; and the Studio widget inspector AUTHORS those filterBindings",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -675,7 +693,7 @@
         "requires": [
           "the Revenue Pulse dashboard (showcase_revenue_pulse) — the framework#2501 acceptance fixture: one dateRange (default field issued_on) + one region filter (default field region) driving invoice AND account widgets, account widgets re-mapping via filterBindings (dateRange→signed_on, region→sales_region), one KPI opted out of both (filterBindings false) as the all-time reference",
           "seeded accounts spread across sales_region amer/emea/apac with signed_on dates (src/data/seed/index.ts)",
-          "for D2 and D3 a SCRATCH dashboard, because no stock dashboard serves either leg (QA run #23163 scored both on runtime scratch dashboards): D2's Studio authoring round-trip needs a dashboard in a WRITABLE package to publish into — create a scratch package (POST /api/v1/packages) and author the dashboard there, since the showcase package is read-only in Studio; D3's dataset-sourced option half needs a globalFilter whose options come from `optionsFrom` ({object, valueField, labelField} — GlobalFilterOptionsFromSchema in packages/spec/src/ui/dashboard.zod.ts), which NO stock dashboard declares (Revenue Pulse's region filter lists static options). D3's {value,label} render half still reads on Revenue Pulse. Delete the scratch package at teardown"
+          "for D2 and D3 a SCRATCH dashboard, because no stock dashboard serves either leg (QA run #23163 scored both on runtime scratch dashboards): D2's Studio authoring round-trip needs a dashboard in a WRITABLE package to publish into — create a scratch package (POST /api/v1/packages) and author the dashboard there, since the showcase package is read-only in Studio — AND author an app in that package whose navigation carries the dashboard (PUT /api/v1/meta/app/NAME?package=PKG): the Studio Interfaces pillar IS the app navigation tree (objectui app-shell StudioDesignSurface.tsx: \"Interfaces: the real App navigation tree\"), so a package with no app shows no dashboard to select (QA run #24573); D3's dataset-sourced option half needs a globalFilter whose options come from `optionsFrom` ({object, valueField, labelField} — GlobalFilterOptionsFromSchema in packages/spec/src/ui/dashboard.zod.ts), which NO stock dashboard declares (Revenue Pulse's region filter lists static options). D3's {value,label} render half still reads on Revenue Pulse. Delete the scratch package at teardown"
         ]
       },
       "steps": [
@@ -792,6 +810,12 @@
           "date": "2026-10-13",
           "change": "fixtures.requires[2] (new) names the scratch dashboard D2 and D3 need, and steps[10] and [11] point at it (fixture gap, #23163 D2 / D3; parked on #23121, carried by #23169). No stock dashboard declares a globalFilter with optionsFrom (examples/app-showcase has none; Revenue Pulse's region filter lists static options), so D3's server GROUP BY half has no stock subject, and D2's authoring round-trip needs a writable package to publish into. QA run #23163 passed both on runtime scratch dashboards. No clause changed",
           "ref": "#23169"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-19",
+          "change": "fixtures.requires[2] corrected from QA run #24573 (18.0 sweep, 5b14b7f3; carried by #24612), re-read at the console pin 4016370af3c9: the scratch package needs an app whose navigation points at the dashboard, because Studio's Interfaces pillar is the app navigation tree (StudioDesignSurface.tsx), and its create paths return early with no app. The recipe named only the package and the dashboard. No clause changed. Wave anchor #24579 §3",
+          "ref": "#24671"
         }
       ]
     },
@@ -1225,7 +1249,7 @@
       "title": "Analytics on v18 asks each object's `enable` block and internal flags: a cube or dataset over an apiEnabled:false object is 404, an internal field as dimension / measure / filter is 400 even for admin, an unexposed configured cube is warned at boot and absent from /analytics/meta, and a dataset answer's measure column states its aggregate",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1240,10 +1264,10 @@
         ]
       },
       "steps": [
-        "POST /api/v1/analytics/query on the cube over the unexposed object",
+        "POST /api/v1/analytics/query on the cube over the unexposed object, then the same query reaching the OBJECT itself: its inferred cube (cube: '<the object name>') or an inline dataset over it",
         "POST /api/v1/analytics/query using the internal field as a dimension, then as a filter",
         "GET /api/v1/analytics/meta and the boot log",
-        "POST /api/v1/analytics/dataset/query {datasetName: \"sys_user_metrics\", selection: {measures: [\"user_count\"]}} (a saved dataset is named by `datasetName`; `dataset` is an INLINE definition object); read fields[]"
+        "POST /api/v1/analytics/dataset/query {datasetName: \"sys_user_metrics\", selection: {measures: [\"user_count\"]}} (a saved dataset is named by `datasetName`; `dataset` is an INLINE definition object); read fields[]. sys_user_metrics declares NO dimensions (packages/platform-objects/src/apps/dashboards/system.datasets.ts), so read the dimension half on a dimensioned dataset too: {datasetName: \"showcase_task_metrics\", selection: {dimensions: [\"status\"], measures: [\"task_count\"]}}"
       ],
       "acceptance": [
         {
@@ -1253,7 +1277,7 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "the unexposed cube query → 404 OBJECT_API_DISABLED; the internal field → 400 INVALID_FIELD (admin too)",
+          "clause": "a query over the unexposed object answers 404 — CUBE_NOT_FOUND for the configured cube, whose registration acceptance[2] refused (so there is no such cube to query), and OBJECT_API_DISABLED for a query that reaches the object itself (its inferred cube or an inline dataset; service-analytics api-exposure-door.ts); the internal field → 400 INVALID_FIELD (admin too)",
           "oracle": "api",
           "verify": "status + code",
           "evidence": "answers"
@@ -1267,7 +1291,7 @@
         {
           "clause": "the count measure column carries aggregate:\"count\"; dimension columns carry none",
           "oracle": "api",
-          "verify": "fields[] entries",
+          "verify": "fields[] entries: sys_user_metrics for the measure column, and a dimensioned dataset (showcase_task_metrics by status) for the dimension column, since sys_user_metrics has none",
           "evidence": "the excerpt"
         }
       ],
@@ -1286,6 +1310,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "steps[0], steps[3], acceptance[1].clause and acceptance[3].verify corrected from QA run #24558 (18.0 since:v18 sweep, 5b14b7f3), re-read at objectstack f89d29e382. (1) A configured cube over an apiEnabled:false object is refused at registration (api-exposure-door.ts, the registration face), so querying it answers 404 CUBE_NOT_FOUND, consistent with acceptance[2]; OBJECT_API_DISABLED is reached by a query that names the object itself, through its inferred cube (assertInferableCube admits a registered object) or an inline dataset. The run read CUBE_NOT_FOUND where the clause expected OBJECT_API_DISABLED. (2) sys_user_metrics declares no dimensions (system.datasets.ts), so 'dimension columns carry none' needs a dimensioned dataset; step 4 adds showcase_task_metrics by status. Wave anchor #24579 (round 3 named this item)",
+          "ref": "#24671"
         }
       ]
     }

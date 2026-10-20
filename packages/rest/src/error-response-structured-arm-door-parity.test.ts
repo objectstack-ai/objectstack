@@ -75,7 +75,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DuplicateRecordError } from '@objectstack/objectql';
+import { DuplicateRecordError, HookConditionError } from '@objectstack/objectql';
 import { ConcurrentUpdateError } from '@objectstack/metadata-protocol';
 import {
     mapDataError,
@@ -433,6 +433,32 @@ const CASES: readonly Case[] = [
                 code: 'VALIDATION_FAILED',
                 fields: [{ field: 'email', code: 'required', message: 'email is required' }],
                 object: 'account',
+            },
+        },
+    },
+    {
+        // [#24662] An arm keyed on the CLASS (`name`) and its declared
+        // `reason`, so the code-literal census below cannot see it; listed
+        // here so the three doors are held together for it anyway. Its
+        // producer declares no `status` either.
+        covers: ['HookConditionError'],
+        what: "objectql's HookConditionError, reason 'unevaluable' — the condition compiled and faulted on this record",
+        error: () => new HookConditionError(
+            "Hook 'qa_failclosed' could not evaluate its condition (runtime: int() type error: cannot convert to int) — operation aborted.",
+            {
+                hook: 'qa_failclosed', object: 'inquiry', event: 'beforeInsert',
+                condition: "record.name.startsWith('qa-fc') && int(record.name) > 0",
+                reason: 'unevaluable', fault: 'runtime: int() type error: cannot convert to int',
+            },
+        ),
+        object: 'inquiry',
+        restored: [],
+        expect: {
+            status: 400,
+            body: {
+                error: "Hook 'qa_failclosed' could not evaluate its condition (runtime: int() type error: cannot convert to int) — operation aborted.",
+                code: 'VALIDATION_ERROR',
+                object: 'inquiry',
             },
         },
     },

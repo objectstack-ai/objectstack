@@ -32,8 +32,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *  • `metadata` / `checksum` are nullable — DELETE rows have no body or
  *    hash. Readers must tolerate null on both columns.
  *
- *  • `source` records the producer ('sys-metadata-repo', 'fs',
- *    'studio', …) and feeds MetadataEvent.source on history() reads.
+ *  • `source` records the write path that produced the row — an open
+ *    label its writer stamps, not an enum of authoring surfaces
+ *    ('protocol.saveMetaItem', 'migrate-stored', 'sys-metadata-repo', …)
+ *    — and feeds MetadataEvent.source on history() reads.
  *
  *  Indexes are purpose-built for the two dominant read patterns:
  *    1. per-item history view      → `(type, name, version)`
@@ -133,9 +135,18 @@ export const SysMetadataHistoryObject = ObjectSchema.create({
     }),
 
     /**
-     * Producer of the event ('sys-metadata-repo', 'fs', 'studio',
-     * 'api', …). Defaults to 'sys-metadata-repo' on the canonical
-     * write path; preserved on history() reads as MetadataEvent.source.
+     * The write path that produced the event (= MetadataEvent.source): an
+     * open label its writer stamps, not an enum of authoring surfaces.
+     * `SysMetadataRepository` stamps the caller's label or its own default
+     * — 'sys-metadata-repo' (put / delete), 'sys-metadata-repo.publish'
+     * (promoteDraft), 'sys-metadata-repo.revert' (restoreVersion). The
+     * protocol names its method ('protocol.saveMetaItem',
+     * 'protocol.publishMetaItem', 'protocol.deleteMetaItem',
+     * 'protocol.rollbackMetaItem', 'protocol.revertCommit'); a stored-row
+     * rewrite passes 'migrate-stored'; `@objectstack/metadata`'s
+     * DatabaseLoader writes 'database-loader'. history() reads pass the
+     * stored value through and answer 'sys-metadata-repo' for a row that
+     * stored none.
      */
     source: Field.text({
       label: 'Source',

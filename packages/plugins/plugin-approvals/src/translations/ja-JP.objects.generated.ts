@@ -25,7 +25,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "タイトル",
-        help: "レコードタイトル：申請のソースと対象レコード（読み取り時に計算）"
+        help: "レコードタイトル：このリクエストを開いたフローのラベル、ラベルがない場合はソース（読み取り時に計算）"
       },
       organization_id: {
         label: "組織",

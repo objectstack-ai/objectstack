@@ -115,6 +115,28 @@ describe('readLegacyOrganizationRows — fails closed', () => {
     await expect(readLegacyOrganizationRows({ dialectName: 'sqlite' })).rejects.toThrow(/no raw-SQL seam/);
   });
 
+  // What 18.0 supports, said to both readers: a driver-shaped refusal, which a
+  // fresh install meets too, and one only a database still carrying the
+  // column reaches. The ceremony 18.0 refuses is never the remedy.
+  it.each([
+    ['driver-shaped: no raw seam (any database, a fresh one included)', { dialectName: 'sqlite' }],
+    ['database-shaped: the column is on disk, the legacy select answered nothing', sqlDriver({ dialectName: 'sqlite', columns: V17_COLUMNS, rows: null })],
+  ])('the refusal says what 18.0 supports, never the ceremony (%s)', async (_label, driver) => {
+    const error = await readLegacyOrganizationRows(driver).then(() => null, (e: unknown) => e);
+    expect(error).toBeInstanceOf(LegacyOrganizationRowsUnreadable);
+    const refusal = error as LegacyOrganizationRowsUnreadable;
+    expect(refusal.code).toBe('LEGACY_ORGANIZATION_ROWS_UNREADABLE');
+    expect(refusal.message).toContain('Nothing was listed or written.');
+    expect(refusal.message).toContain(
+      'A fresh 18.0 install holds no legacy organization rows: there, the cause is the one named above, ' +
+        'and the fix is in the SQL driver or the caller that met it.',
+    );
+    expect(refusal.message).toMatch(
+      /A database that does hold them is a v17 one\. 18\.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17\.x release until the 18\.x release that carries the upgrade path\.$/,
+    );
+    expect(refusal.message).not.toContain('os migrate organization-ownership');
+  });
+
   it('a table outside the family is refused before anything runs', async () => {
     const driver = sqlDriver({ dialectName: 'sqlite', columns: V17_COLUMNS, rows: [] });
     await expect(readLegacyOrganizationRows(driver, 'sys_user')).rejects.toThrow(/not a sys_metadata-family table/);

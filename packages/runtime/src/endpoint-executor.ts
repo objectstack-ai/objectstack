@@ -75,7 +75,7 @@ import type { HttpProtocolContext } from './http-dispatcher.js';
  *
  * `params` is deliberately NOT here: the transport's own route params are
  * meaningless for a path no route matched, and the endpoint's path parameters
- * arrive on {@link ApiEndpointMatch.params} instead (always `{}` in 17.x — the
+ * arrive on {@link ApiEndpointMatch.params} instead (always `{}` — the
  * frozen vocabulary defines no template syntax).
  */
 export interface EndpointExecutionRequest {
@@ -133,7 +133,7 @@ export interface EndpointExecutionContext {
     /** Matched endpoint, schema defaults materialized. */
     endpoint: ApiEndpoint;
     /**
-     * Path parameters from the match. **Always `{}` in 17.x** and deliberately
+     * Path parameters from the match. **Always `{}`** and deliberately
      * NOT consulted when resolving a record id — the id comes from `query.id`
      * (#5040 §2), because reading it from a template segment would require a
      * template syntax the vocabulary does not define.
@@ -225,7 +225,7 @@ export type EndpointTargetPlan =
 /**
  * Classify a declaration into the pipeline that will run it.
  *
- * `script` and `proxy` are declared by the vocabulary and NOT executed in 17.x,
+ * `script` and `proxy` are declared by the vocabulary and NOT executed by this runtime,
  * on purpose (#5040 §7-3, restated in the E5 card): the automation contract's
  * `execute` doc mentions "flow or script" but nothing in this repo verifies a
  * script target is reachable that way, and `proxy` is an entirely new outbound
@@ -265,7 +265,7 @@ export function planEndpointTarget(endpoint: ApiEndpoint): EndpointTargetPlan {
     return {
         kind: 'unsupported',
         reason: `Endpoint '${endpoint.name}' declares type '${endpoint.type}', which this runtime does not execute.`,
-        hint: "Only 'object_operation' and 'flow' endpoints execute in 17.x. 'script' and 'proxy' "
+        hint: "This runtime executes only 'object_operation' and 'flow' endpoints. 'script' and 'proxy' "
             + 'are rejected at publish pending their own rulings — script reachability through the '
             + 'automation service is unverified, and proxy is an outbound (SSRF) surface.',
     };

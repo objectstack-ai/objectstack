@@ -52,9 +52,19 @@ export default defineConfig({
     // whatever the last build of that predicate emitted rather than to the
     // predicate sitting next to it — a green pin over a stale contract, which is
     // the one failure a contract pin exists to make impossible.
+    // `@objectstack/objectql` and `@objectstack/platform-objects/system` became
+    // TEST-layer imports with the walled credential-bind pin
+    // (`datasource-secret-binder.walled.test.ts`), which runs the binder over a
+    // real engine and the real `sys_secret` object. Same reasoning again:
+    // unaliased, that pin would judge the engine's last build rather than the
+    // walled bridge sitting in its source. `platform-objects` gets the explicit
+    // subpath entry its non-uniform export map needs (the shape
+    // `service-settings` uses).
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
       { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts') },
+      { find: /^@objectstack\/objectql$/, replacement: path.resolve(__dirname, '../../objectql/src/index.ts') },
+      { find: /^@objectstack\/platform-objects\/system$/, replacement: path.resolve(__dirname, '../../platform-objects/src/system/index.ts') },
     ],
   },
 });

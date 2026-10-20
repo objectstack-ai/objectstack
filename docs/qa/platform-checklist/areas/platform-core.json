@@ -416,7 +416,7 @@
       "title": "Metadata authoring round-trip: draft → publish on a WRITABLE package; read-only packages and locked types are server-side refused",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -485,12 +485,12 @@
         "ref": "packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts; objectui: e2e/live/studio-record-page.spec.ts, e2e/live/studio-object-designer.spec.ts",
         "stale": {
           "since": "2026-08-11",
-          "observedIn": "#7695",
+          "observedIn": "#24598",
           "ref": "#7753 item 6",
-          "partial": "objectui: e2e/live/studio-record-page.spec.ts ONLY",
-          "why": "STALE, NOT RED — that spec fills the Object control as an input when it is now a `role=combobox` button, so it fails against the CURRENT surface rather than against a product defect. The dogfood pin (package-first-authoring) and studio-object-designer.spec.ts are unaffected; object-designer-roundtrip's 4th ref, from the same class, was already repaired (package-create moved to /_console/studio).",
+          "partial": "objectui: e2e/live/studio-record-page.spec.ts (whole), and e2e/live/studio-object-designer.spec.ts cases F1 and F4 (no clause here rests on them)",
+          "why": "STALE, NOT RED — studio-record-page.spec.ts fills the Object control as an input when it is now a `role=combobox` button, so it fails against the CURRENT surface rather than against a product defect. Re-measured at the 18.0 sweep: Tier 1 run #24598 ran it at the sweep's console pin 4016370af3c9, 0 passed / 1 failed; at the shipped pin 12dc7b47c340 the spec is byte-identical (the same blob at both pins), so it is still stale there. First observed by #7695 on 2026-08-11. The dogfood pin (package-first-authoring) is unaffected. studio-object-designer.spec.ts is NOT unaffected, as this marker used to say: #24598 ran it with F2 and F3 passing and F1 and F4 failing as stale cases (F1 opens an app no stock boot loads; F4 expects no banner for a picklist with no option source), and it is byte-identical at 12dc7b47c340 too. No clause here cites it. object-designer-roundtrip's 4th ref, from the same class, was already repaired (package-create moved to /_console/studio).",
           "runnerRule": "The Studio-designer clause here (clause 3, 'creating a record page issues PUT /api/v1/meta/page/<name>') must be driven by hand — capture the PUT in the browser — until the spec is re-pointed; do not cite its output and do not score its failure as this item's FAIL. Every other clause keeps its own oracle.",
-          "ownedBy": "objectui — re-pointing the spec is a cross-repo half of #7753, reported not edited from this repo"
+          "ownedBy": "objectui — re-pointing the two specs is objectstack-ai/objectui#13104 (the family card for the eleven live specs that are stale or red at the console pin, both of these among them), the cross-repo half of #7753; reported, not edited from this repo"
         }
       },
       "source": [
@@ -502,7 +502,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — grounds the Studio authoring pipeline end-to-end with both deny gates as first-class clauses", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "annotated the objectui e2e/live/studio-record-page.spec.ts half of this item's automated.ref as STALE (run #7695): it fills the Object control as an input when it is now a role=combobox button, so it fails against the current surface, not against a defect. The Studio-designer clause now says drive it by hand until the spec is re-pointed; the dogfood pin and studio-object-designer.spec.ts are unaffected. Re-pointing lives in objectui (cross-repo half of #7753 item 6)", "ref": "#7753" },
-        { "revision": 3, "date": "2026-10-16", "change": "steps[1], [3] and [7] and acceptance[0].verify and [5].verify re-pointed (checklist-accuracy findings of QA run #23939, wave #23878). A plain PUT /meta/view/NAME saves state=active, so the draft never appeared in /meta/_drafts — ?mode=draft is required — and a view's name must be qualified OBJECT.view (#23939 used showcase_task.os_qa_view_RUNID). The Studio half now names the create form (/_console/apps/showcase_app/metadata/page/new) and its 'list' default, which has to be set to 'record' for a record page. Not loosened: every clause still scores the same server reads", "ref": "#24036" }
+        { "revision": 3, "date": "2026-10-16", "change": "steps[1], [3] and [7] and acceptance[0].verify and [5].verify re-pointed (checklist-accuracy findings of QA run #23939, wave #23878). A plain PUT /meta/view/NAME saves state=active, so the draft never appeared in /meta/_drafts — ?mode=draft is required — and a view's name must be qualified OBJECT.view (#23939 used showcase_task.os_qa_view_RUNID). The Studio half now names the create form (/_console/apps/showcase_app/metadata/page/new) and its 'list' default, which has to be set to 'record' for a record page. Not loosened: every clause still scores the same server reads", "ref": "#24036" },
+        { "revision": 4, "date": "2026-10-20", "change": "automated.stale.observedIn, partial, why and ownedBy refreshed — the carried note from round 6 of wave anchor #24579 (its report, comment 6280484387), the refresh round 6 made on studio-authoring.record-page-roundtrip in PR #24697. Tier 1 run #24598 re-measured studio-record-page.spec.ts red at the sweep's console pin 4016370af3c9 (0 passed / 1 failed), and the spec is byte-identical at the shipped pin 12dc7b47c340, so the marker first written from #7695 still holds; ownedBy names the family card objectstack-ai/objectui#13104. The why also said studio-object-designer.spec.ts was unaffected; #24598 ran its F1 and F4 red (F2 and F3 passed), and partial now says so. No clause changed", "ref": "#24717" }
       ]
     },
     {
@@ -3042,10 +3043,10 @@
     },
     {
       "id": "platform-core.v18-boot-refusals",
-      "title": "A v18 server refuses to boot rather than serve wrongly: against a 17.x-shaped database (a physical organization_id on a non-tenant table, no verified ADR-0131 ceremony marker) it stops before listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED naming the tables and the command, and with security on but no identity objects it stops with AuthzIdentityObjectsMissingError",
+      "title": "A v18 server refuses to boot rather than serve wrongly: against a 17.x-shaped database (a physical organization_id on a non-tenant table, no verified ADR-0131 ceremony marker) it stops before listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED, naming the tables and the ownership ceremony's plan and apply, and with security on but no identity objects it stops with AuthzIdentityObjectsMissingError",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 5,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -3070,9 +3071,9 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "the v18 serve against the v17 DB exits 1 before kernel:listening with the organization-ownership refusal, which names the tables and `os migrate organization-ownership`. ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED is that refusal's `code` (packages/runtime/src/organization-ownership-boot-guard.ts#OrganizationOwnershipBootRefusal) and the boot never prints it — `os serve` prints the refusal's message only — so the code is the pins' evidence (acceptance[0]), not this log's",
+          "clause": "the v18 serve against the v17 DB exits 1 before kernel:listening with the organization-ownership refusal, which opens \"This database carries no organization-ownership marker\", names the tables still carrying organization_id, and names the ceremony's two steps (`os migrate organization-ownership --out PLAN`, then `os migrate organization-ownership --apply --plan-file PLAN --backup-taken`). It does not tell the operator to stay on 17.x. ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED is that refusal's `code` (packages/runtime/src/organization-ownership-boot-guard.ts#OrganizationOwnershipBootRefusal) and the boot never prints it — `os serve` prints the refusal's message only — so the code is the pins' evidence (acceptance[0]), not this log's",
           "oracle": "log",
-          "verify": "boot output + exit code + no listening line: the printed refusal names each table still carrying organization_id and the `os migrate organization-ownership` command. ⛔ Do not grep the log for the code literal — it is not printed (packages/cli/src/commands/serve.ts prints the refusal's message)",
+          "verify": "boot output + exit code + no listening line: the printed refusal opens \"This database carries no organization-ownership marker\", names each table still carrying organization_id, and contains `os migrate organization-ownership --out PLAN` and `--apply --plan-file PLAN --backup-taken`; the refusal excerpt has 0 hits for `17.x release` and for `fresh installs only`. ⛔ Do not grep the log for the code literal — it is not printed (packages/cli/src/commands/serve.ts prints the refusal's message)",
           "evidence": "the refusal excerpt"
         },
         {
@@ -3123,6 +3124,18 @@
           "date": "2026-10-19",
           "change": "steps[1], acceptance[1] (clause, verify) and acceptance[3].verify corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.v18-boot-refusals; wave anchor #24579 §3). steps[1] booted `os dev` with `services: {auth: false}`, which is not a stack key (packages/spec/src/stack.zod.ts), so the run recorded acceptance[3] blocked(fixture); a stock boot composes the security plugin only beside AuthPlugin (packages/core/src/stack-auth.ts resolvePlatformAuthComposition), so the step now names a scratch config that mounts SecurityPlugin itself with the auth tier off, marked as not yet replayed live, and acceptance[3] names its pin as the fallback. acceptance[1] said the boot exits with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED on a log oracle; that literal is only the refusal error's code (OrganizationOwnershipBootRefusal) and serve.ts prints the message alone, so the log oracle now reads the named tables and command and the code is left to the pins. acceptance[2] and steps[0] (#24592) are unchanged",
           "ref": "#24632"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-19",
+          "change": "title and acceptance[1] (clause, verify) re-worded for 18.0's boot refusal text (card #24651). In 18.0 `os migrate organization-ownership` refuses plan and apply on every database (NOT_IMPLEMENTED: 18.0 supports fresh installs only), so the boot refusal no longer names that command or its `--out PLAN` / `--apply --plan-file PLAN --backup-taken` steps. Every branch now ends with \"18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path, and upgrade it there.\" (packages/runtime/src/organization-ownership-boot-guard.ts, freshInstallsOnly; `os serve --dev` says \"a v17 development database\"). The clause asserted that the refusal names the command, so a run against the new text would have recorded FAIL on a correct product. It now asserts the tables, that sentence, and the absence of the command and its steps. The ⛔ on the code literal is kept. acceptance[0], acceptance[2], acceptance[3] and both steps are unchanged",
+          "ref": "#24682"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "title and acceptance[1] (clause, verify) re-worded for the open ownership ceremony (#24581). `os migrate organization-ownership` plans and applies again, and the boot guard decides on the ownership marker (a birth marker a fresh datastore writes, or the ceremony's verified one): a v17 database has none, so the refusal opens \"This database carries no organization-ownership marker\", names the tables still carrying organization_id, and names the ceremony's plan and apply (`--out PLAN`, then `--apply --plan-file PLAN --backup-taken`). Revision 4 asserted the 18.0 sentence and the absence of the command, so a run against the new text would have recorded FAIL on a correct product. It now asserts the marker sentence, the tables and the two steps, and that the refusal says nothing of staying on 17.x. The ⛔ on the code literal is kept. acceptance[0], acceptance[2], acceptance[3] and both steps are unchanged",
+          "ref": "#24681"
         }
       ]
     },
@@ -3204,7 +3217,7 @@
       "title": "Settings on v18: a global-scope key is stored in sys_platform_setting (readable through /data only with manage_platform_settings), and under a walled posture one organization's tenant save or lock does not change or lock another's, with a data-API read of sys_setting filtered to readable namespaces",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3218,6 +3231,9 @@
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a second boot with OS_TENANCY_POSTURE=isolated (walled posture) on its own port and file DB — the stock single posture leaves every walled clause vacuous, so confirm the posture from the boot log before scoring",
           "on the walled boot: two organizations A and B with an admin each"
+        ],
+        "knownGaps": [
+          "acceptance[2] and acceptance[3] are walled legs, and fixtures.requires[1]–[2], personas[2] and steps[2]–[3] serve only them. Since 18.x step 4 (#24580) os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): the 18.0 refusal (serve.ts walledPostureRefusal) is deleted. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. On that boot organizations A and B are created through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records both clauses blocked(fixture) naming those entries, never fail. Their mechanism is scored through acceptance[0]: settings-organization-isolation.pin.test.ts drives two organizations, the lock and the organization-less refusal under a walled posture in-process, and asserts that `single` does not refuse. acceptance[0] and acceptance[1] run as written."
         ]
       },
       "steps": [
@@ -3246,7 +3262,7 @@
           "evidence": "reads"
         },
         {
-          "clause": "a tenant key with no organization → 400 SETTINGS_VALIDATION",
+          "clause": "walled: a tenant key written with no organization in scope → 400 SETTINGS_VALIDATION. Under `single` the same write is admitted, so the refusal is the walled posture's (packages/services/service-settings/src/settings-service.ts#organizationlessTenantKeyError)",
           "oracle": "api",
           "verify": "status + code",
           "evidence": "the answer"
@@ -3271,6 +3287,18 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "fixtures.knownGaps added and acceptance[3].clause marked walled — the 18.0 sweep's wave-wide theme '18.0 refuses every walled posture' (wave anchor #24579 §2; QA runs #24557 and #24558 scored both clauses blocked(environment) on the boot's NOT_IMPLEMENTED FATAL). Re-derived at base bfc1539fe0: serve.ts walledPostureRefusal refuses group and isolated before a config is read, and settings-service.ts refuses an organization-less tenant key only under a walled posture, so acceptance[3], which steps[3] already ran on the walled boot, was the second walled leg. No clause deleted; the shared statement is RUNNER.md's environment-facts entry, which this gap points at",
+          "ref": "#24687"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0] re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal, so the walled boot fixtures.requires[1]–[2] name is provisioned per RUNNER.md's 'A walled boot is a fixture of its own', and A and B are created on it through the auth API; unprovisioned, the walled clauses are blocked(fixture). No clause changed",
+          "ref": "#24580"
         }
       ]
     },

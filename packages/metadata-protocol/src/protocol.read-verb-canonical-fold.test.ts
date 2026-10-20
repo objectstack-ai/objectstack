@@ -210,7 +210,7 @@ async function expectSpellingRefusal(run: () => Promise<unknown>) {
 }
 
 describe('#9157 — the population, re-derived from the code rather than from the card', () => {
-    it('every `/meta` request-boundary verb with a required `type` calls the fold — all sixteen', () => {
+    it('every `/meta` request-boundary verb with a required `type` calls the fold — all seventeen', () => {
         // ⭐ The card hand-listed "nine fold, three do not". Hand-listed sets of
         // this shape have shipped short before, so the set is DERIVED here and
         // the derivation is the pin: a tenth verb arriving unfolded turns this
@@ -274,6 +274,9 @@ describe('#9157 — the population, re-derived from the code rather than from th
             'findReferencesToMeta',
             'getMetaItem',
             'getMetaItemCached',
+            // [#24535] The execution face of the by-name read — the API-exposure
+            // gate hands it the type it was asked for.
+            'getMetaItemForExecution',
             'getMetaItemLayered',
             'getMetaItems',
             // [#20552] The execution face of the same flattened read — an

@@ -46,6 +46,6 @@ export const entry: SemanticMigration = {
     'No authored stack seed or client write names `permission_set_id` on `sys_user_permission_set`: '
     + 'the engine refuses the undeclared field with 400 INVALID_FIELD. A second grant of one set to '
     + 'one user in one organization is refused by the unique index with 409 UNIQUE_VIOLATION, '
-    + 'platform-wide grants (organization NULL) included, on every write path. On a legacy database, after `os migrate organization-ownership --apply` the column '
+    + 'platform-wide grants (organization NULL) included, on every write path. On a legacy database, after `os migrate organization-ownership --apply --backup-taken --plan-file plan.json` the column '
     + 'is gone and the boot no longer reports it orphaned.',
 };

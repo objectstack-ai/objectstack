@@ -45,22 +45,31 @@ export const SysApprovalRequest = ObjectSchema.create({
   isSystem: true,
   managedBy: 'engine-owned',
   description: 'Live approval instance tracked per submission',
-  // [ADR-0079] The record title is `display_title`, a text formula. The
-  // pointer used to be `id`: once a renderer honours ADR-0079's order (an
-  // explicit `nameField` wins over `titleFormat`), that made the record page's
-  // H1 the raw id. The formula reads the flow's label (`process_label`) and
-  // falls back to the machine source (`process_name`) where no label is
-  // stored. `titleFormat` stays for renderers that still read it first — the
-  // global search palette (`searchAll` in `@objectstack/metadata-protocol`)
-  // ranks it above `nameField` — and keeps `{process_name}`: a placeholder
-  // template cannot say "else", and `process_label` can be null after the boot
-  // fill (a row the fill could not label, or a failed fill run), where a
-  // `{process_label}` template draws a title with no source at all.
-  // `sys-approval-display-title.test.ts` holds the two to the same text where
-  // no label is stored, and pins where they differ.
-  displayNameField: 'display_title',
-  nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{process_name} · {record_id}',
+  // [ADR-0079, ADR-0085] The record title is the flow's label, `process_label`:
+  // a STORED column, so every door that serves the row serves its title. The
+  // approvals get (`rowFromRequest`) serves it by the display-label chain —
+  // the column, else the config snapshot's label, else the humanized machine
+  // name — so the request page reached through that get always has a title,
+  // and it is never `flow:NAME`. The pointer used to be `display_title`, a
+  // formula: a formula has no column, the approvals get served no value for
+  // it, and the page fell through to `titleFormat`, the machine name and the
+  // raw subject record id.
+  //
+  // The title names no subject record. The request page names the subject on
+  // the card the `record_id` / `object_name` pair draws in the Details tab,
+  // which says so when the reader may not read the record or it was deleted;
+  // a title cannot, so a bare record id is never shown there.
+  //
+  // `titleFormat` is the deprecated fallback a renderer reaches only where
+  // `process_label` is empty: a row written before the column, until the boot
+  // fill labels it (`display-label-backfill.ts`). It names `{process_name}`,
+  // the machine source, because a placeholder template cannot say "else" —
+  // the same fallback `display_title` draws, so every door agrees on such a
+  // row too. `sys-approval-display-title.test.ts` and
+  // `sys-approval-request-title.integration.test.ts` pin both.
+  displayNameField: 'process_label',
+  nameField: 'process_label', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
+  titleFormat: '{process_name}',
   // [ADR-0085] The flow is named by its label, `process_label`, never by the
   // machine source `process_name` (`flow:NAME`), and the step by its label,
   // `current_step_label`, never by the node id `current_step`, as the request
@@ -71,6 +80,20 @@ export const SysApprovalRequest = ObjectSchema.create({
   // draws this list minus the strip, so the two move together
   // (`sys-approval-request.page.ts` says why).
   highlightFields: ['process_label', 'record_id', 'status', 'current_step_label', 'submitter_id', 'updated_at'],
+
+  // [#24625] Free-text search (ADR-0061) scans the auto-default set minus the
+  // snapshot, `payload_json`. A query naming the snapshot is refused to every
+  // reader withheld any field of any object (`payload-predicate-guard.ts`),
+  // and a `$search` names every searched column. With the snapshot in the
+  // set, one field withheld anywhere — an organization administrator's mail
+  // bodies — turned that reader's list search here, and its whole global
+  // search sweep, into a 403. A structured filter on the snapshot is
+  // unchanged, for the readers the guard admits.
+  searchableFields: [
+    'process_name', 'process_label', 'object_name', 'record_id', 'submitter_comment', 'status',
+    'cancel_reason', 'current_step', 'current_step_label', 'pending_approvers', 'pending_approver_labels',
+    'flow_run_id', 'flow_node_id', 'node_config_json',
+  ],
 
   // Curated built-in list views — render as segmented tabs in the console.
   // Filters use {current_user_id} substitution wired by the console.
@@ -91,13 +114,20 @@ export const SysApprovalRequest = ObjectSchema.create({
   // reads them as stored and never re-derives a label from flow metadata or
   // resolves an approver address itself; `process_name`, `current_step` and
   // `pending_approvers` keep the machine values every query and decision reads.
+  //
+  // The target is the `record_id` column alone. It is the pointer's id half,
+  // so the console draws the target record (its object's icon and name) and
+  // fetches the type half `object_name` for that cell without a column
+  // (objectui#13036). An `object_name` column drew the stored API name as
+  // text; no list view shows a pointer's type half
+  // (`sys-approval-request-pointer-pair.test.ts`).
   listViews: {
     all_requests: {
       type: 'grid',
       name: 'all_requests',
       label: 'All',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_label', 'object_name', 'record_id', 'status', 'current_step_label', 'pending_approver_labels', 'submitter_id', 'updated_at'],
+      columns: ['process_label', 'record_id', 'status', 'current_step_label', 'pending_approver_labels', 'submitter_id', 'updated_at'],
       sort: [{ field: 'updated_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
@@ -106,7 +136,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       name: 'my_pending',
       label: 'My Pending',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_label', 'object_name', 'record_id', 'current_step_label', 'pending_approver_labels', 'submitter_id', 'updated_at'],
+      columns: ['process_label', 'record_id', 'current_step_label', 'pending_approver_labels', 'submitter_id', 'updated_at'],
       filter: [
         { field: 'status', operator: 'equals', value: 'pending' },
         { field: 'pending_approvers', operator: 'contains', value: '{current_user_id}' },
@@ -120,7 +150,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       name: 'submitted_by_me',
       label: 'I Submitted',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_label', 'object_name', 'record_id', 'status', 'current_step_label', 'updated_at'],
+      columns: ['process_label', 'record_id', 'status', 'current_step_label', 'updated_at'],
       filter: [{ field: 'submitter_id', operator: 'equals', value: '{current_user_id}' }],
       sort: [{ field: 'updated_at', order: 'desc' }],
       pagination: { pageSize: 25 },
@@ -130,7 +160,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       name: 'completed',
       label: 'Completed',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_label', 'object_name', 'record_id', 'status', 'submitter_id', 'completed_at'],
+      columns: ['process_label', 'record_id', 'status', 'submitter_id', 'completed_at'],
       // Every terminal state, `cancelled` included (#13568) — a platform-voided
       // request is kept as audit evidence, and a terminal state absent from the
       // only curated terminal view is evidence nobody can find.
@@ -143,17 +173,25 @@ export const SysApprovalRequest = ObjectSchema.create({
   fields: {
     id: Field.text({ label: 'Request ID', required: true, readonly: true, group: 'System' }),
 
-    // [ADR-0079] The record title (`nameField` above). A formula is computed on
-    // read and has no stored column. Its flow half is the flow's label,
-    // `process_label`, the same column the request lists show. That column is
-    // nullable — a row the boot fill could not label, or one written before
-    // the fill ran — so the expression guards it and falls back to
-    // `process_name`, which is required, as is `record_id`.
+    // [ADR-0079] The title text the data API computes on read: the flow's
+    // label, `process_label`, else the machine source `process_name` (required)
+    // where no label is stored — the text the title ladder draws from
+    // `nameField` and `titleFormat` above, on every row the engine writes (a
+    // writer stores a label or null, never a blank). A formula has no
+    // stored column. It names no subject record, as the title does not.
+    //
+    // It is no longer the title pointer (the approvals get serves no formula
+    // value), and it stays declared because stored activity rows name it: the
+    // activity mirror records the title field each row's summary and record
+    // label were composed from (`text_sources`, plugin-audit), and the read
+    // side serves those texts only while every field they name is one the
+    // reader is served. Retiring the field would withhold the text of every
+    // activity row written while it was the title.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`record.process_label != null ? record.process_label + ' · ' + record.record_id : record.process_name + ' · ' + record.record_id`,
-      description: 'Record title: the request source and the record it is about (computed on read)',
+      expression: F`record.process_label != null ? record.process_label : record.process_name`,
+      description: 'Record title: the label of the flow that opened this request, else its source (computed on read)',
       group: 'Target',
     }),
 

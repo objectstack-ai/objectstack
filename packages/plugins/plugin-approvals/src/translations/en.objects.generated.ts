@@ -25,7 +25,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Title",
-        help: "Record title: the request source and the record it is about (computed on read)"
+        help: "Record title: the label of the flow that opened this request, else its source (computed on read)"
       },
       organization_id: {
         label: "Organization",

@@ -412,11 +412,13 @@ overlay axis is retired: the doors carry no organization, so the overlay is
 column, ADR-0131 D7) and served to every organization
 of the deployment, whatever the author's active organization. Every protocol
 read is environment → code, whatever organization a caller names. An overlay
-row an earlier release stored under an organization is served by no read, and
-an 18.x `os serve` refuses to start on a database still holding one until the
-v18 migration ceremony (ADR-0131 C7) has carried it to the environment layer. The anonymous form doors read the environment alone too: the ceremony carries
-every organization-layer public-form withdrawal onto the environment,
-fail-closed. The per-user,
+row an earlier release stored under an organization is served by no read. On a
+SQL database (SQLite, PostgreSQL, MySQL) still holding one, a v18 `os serve`
+refuses to start, because the `sys_metadata` family there still carries its
+`organization_id` column, until the v18 migration ceremony (ADR-0131 C7) has
+carried such a row to the environment layer. The anonymous form doors read the
+environment alone too; the ceremony carries every organization-layer
+public-form withdrawal onto the environment, fail-closed. The per-user,
 per-field patch overlay a previous revision of this page taught here was
 removed in #13135 — it was never served by any route.
 

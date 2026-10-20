@@ -13,9 +13,10 @@
 // its handler throws; an `abort` hook with the same unbindable condition is
 // rolled back as #22782 leaves it. One more: an `async: true` hook whose
 // condition evaluates now starts inside the door's unit and writes after it
-// commits — its late write must still land (#22855). The refusal is REST's
-// sanitised `500 INTERNAL_ERROR` on both sides of the fix; what this file pins
-// is what is STORED.
+// commits — its late write must still land (#22855). What this file pins is
+// what is STORED, and the refusal's status and code: since #24662 an
+// unevaluable condition is REST's coded `400 VALIDATION_ERROR` (it was the
+// unclassified `500 INTERNAL_ERROR` on both sides of #22856's fix).
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
@@ -72,13 +73,13 @@ describe('an after* hook whose condition cannot be evaluated rolls the write bac
 
   it('onError: \'log\' — REST createData is refused and the row is absent', async () => {
     const name = uniq('c');
-    expect(await refusal(await create(LOGGED, name))).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
+    expect(await refusal(await create(LOGGED, name))).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
     expect(await stored(LOGGED, name)).toBe(0);
   });
 
   it('async: true — the condition is evaluated before the hook detaches: refused, the row absent', async () => {
     const name = uniq('c');
-    expect(await refusal(await create(DETACHED, name))).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
+    expect(await refusal(await create(DETACHED, name))).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
     expect(await stored(DETACHED, name)).toBe(0);
   });
 
@@ -90,7 +91,7 @@ describe('an after* hook whose condition cannot be evaluated rolls the write bac
 
   it('CONTROL an abort hook with the same condition: refused, the row absent — as #22782 leaves it', async () => {
     const name = uniq('c');
-    expect(await refusal(await create(ABORTING, name))).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
+    expect(await refusal(await create(ABORTING, name))).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
     expect(await stored(ABORTING, name)).toBe(0);
   });
 

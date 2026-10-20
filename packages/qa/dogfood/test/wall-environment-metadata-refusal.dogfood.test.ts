@@ -84,6 +84,8 @@ function packageBody(id: string, version: string, objects: unknown[] = []) {
 
 const META_AUTHOR = 'em_meta_author';
 const CATALOG_PKG = 'com.em.catalog';
+/** The package that ships `crm_lead` (`examples/app-crm/objectstack.config.ts`, `manifest.id`). */
+const CRM_PKG = 'com.example.crm';
 
 interface Harness {
   stack: VerifyStack;
@@ -234,9 +236,21 @@ for (const posture of ['isolated', 'group'] as const) {
     it("/packages: each of the thirteen write doors refuses A 403 PERMISSION_DENIED, and B reads the operator's package unchanged", async () => {
       const pkg = `com.em.${p}.op`;
       const pv = `crm_lead.em_${p}_pv`;
-      await ok(await h.stack.apiAs(h.operator, 'POST', '/packages', { id: pkg, name: 'op', version: '1.0.0', type: 'app' }), 201);
+      // The operator's package DECLARES the CRM package as a dependency: a
+      // package's draft publish judges a list view against the package's
+      // closure and refuses a binding outside it
+      // (`list-view-object-outside-closure`, #24563), and `crm_lead` is the
+      // CRM package's object.
+      await ok(await h.stack.apiAs(h.operator, 'POST', '/packages',
+        { id: pkg, name: 'op', version: '1.0.0', type: 'app', dependencies: { [CRM_PKG]: '*' } }), 201);
       await ok(await h.stack.apiAs(h.operator, 'PUT', `/meta/view/${pv}?package=${pkg}&mode=draft`, view(pv, 'c1')));
-      await ok(await h.stack.apiAs(h.operator, 'POST', `/packages/${pkg}/publish-drafts`, {}));
+      // A 200 is not a publish: a refused batch answers 200 with `success: false`
+      // in `data`, so the receipt is read here, where a refusal names its cause.
+      const published = await h.stack.apiAs(h.operator, 'POST', `/packages/${pkg}/publish-drafts`, {});
+      await ok(published);
+      const receipt = ((await published.json()) as { data?: Record<string, unknown> }).data;
+      expect({ success: receipt?.success, outcome: receipt?.outcome, publishedCount: receipt?.publishedCount }, JSON.stringify(receipt?.failed))
+        .toEqual({ success: true, outcome: 'published', publishedCount: 1 });
       const commits = (((await (await h.stack.apiAs(h.operator, 'GET', `/packages/${pkg}/commits`)).json()) as any).data?.commits ?? [])
         .map((c: { id: string }) => c.id);
       expect(commits.length).toBeGreaterThan(0);

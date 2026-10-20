@@ -124,10 +124,10 @@ const DISPATCH_ORDER = {
 /**
  * A platform-namespace object the #13491 inventory did NOT adjudicate.
  *
- * ⚠️ Its exclusion below is `unclassified`, not `global`, and since ADR-0131
- * C8 stage 8b it holds under a WALLED posture only (epic ruling record
- * 6259899486 on #15194, item 4). Under `single` the object is judged like any
- * other — derived or refused. The admitted and `global` sides are pinned in
+ * ⚠️ Its old exclusion was `unclassified`, not `global`. ADR-0131 C8 stage
+ * 8b retired it under every posture (`single` first, the walled postures in
+ * 18.x): the object is judged like any other — derived or refused. The
+ * admitted and `global` sides are pinned in
  * `tenancy-by-object-classification.test.ts`.
  */
 const SYS_LEDGER = {
@@ -317,7 +317,7 @@ describe('#8844 multi-organization — the write is REFUSED, never defaulted', (
       expect(refusal.message).toContain('dispatch_order');
       expect(refusal.message).toContain('__global__');
       expect(refusal.message).toContain('tenantId');
-      expect(refusal.message).toContain('tenancy: { enabled: false }');
+      expect(refusal.message).toContain('systemFields: { tenant: false }');
 
       // ⛔ NOT defaulted and ⛔ not silently skipped — nothing reached the driver.
       expect(observed.filter((c) => c.object === 'dispatch_order')).toEqual([]);
@@ -389,15 +389,21 @@ describe('#8844 multi-organization — the write is REFUSED, never defaulted', (
 
 describe('#8844 the exclusions — populations the refusal must not touch', () => {
   it.each(['isolated', 'group'] as const)(
-    'a platform-namespace object stays org-less on the %s posture — the walled exemption stands in 18.0',
+    '[C8 stage 8b] %s posture: a platform-namespace object is no longer excluded — its org-less system insert is REFUSED, and never written',
     async (posture) => {
-      // ⚠️ [#13491] Reads as an UNCLASSIFIED verdict, not a namespace one, and
-      // [C8 stage 8b] holds under a wall only: 18.0 refuses a walled posture at
-      // the operator's boot path, and the walled half of the lift is 18.x's
-      // (epic ruling record 6259899486 on #15194, item 4).
+      // ⚠️ [#13491] The old exclusion read an UNCLASSIFIED verdict, not a
+      // namespace one. The walled half of the lift (18.x) retired it: under a
+      // wall no organization is derivable, so the write is refused loudly
+      // instead of landing NULL.
       const { engine, observed } = await makeEngine({ posture });
-      await engine.insert('sys_audit_entry', { subject: 'e1' }, { context: SYSTEM_CTX } as any);
-      expect(lastWrite(observed, 'sys_audit_entry')?.options?.tenantId).toBeUndefined();
+      await expect(
+        engine.insert('sys_audit_entry', { subject: 'e1' }, { context: SYSTEM_CTX } as any),
+      ).rejects.toMatchObject({
+        code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
+        status: 500,
+        reason: 'walled-posture',
+      });
+      expect(lastWrite(observed, 'sys_audit_entry')).toBeUndefined();
     },
   );
 
@@ -425,9 +431,8 @@ describe('#8844 the exclusions — populations the refusal must not touch', () =
   it('never probes `sys_organization` for a write it does not judge', async () => {
     // The cost half of the exclusions: an ordinary write must pay two property
     // reads and a regexp, not a query.
-    // [C8 stage 8b] A platform object is judged under `single` now, so it is
-    // not in this population: only the walled exemption skips its probe, and
-    // a walled refusal never probes anyway.
+    // [C8 stage 8b] A platform object is judged under every posture now, so
+    // it is not in this population (and a walled refusal never probes anyway).
     const { engine, observed } = await makeEngine({ organizations: [ORG_ID] });
     await engine.insert('billing_license', { subject: 'lic' }, { context: SYSTEM_CTX } as any);
     await engine.insert('dispatch_order', { subject: 'session' }, { context: SESSION_CTX } as any);

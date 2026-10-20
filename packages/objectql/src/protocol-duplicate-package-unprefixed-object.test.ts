@@ -9,7 +9,8 @@
  *
  * The method renamed an object only when its name started with the source
  * prefix (`dupsrc_customer` → `dupdst_customer`). A name without it (`ticket`,
- * stored by a direct-publish save, which no prefix gate reads) kept its name,
+ * stored by a direct-publish save before that door read the prefix rule —
+ * #24547 — or under a package that had no namespace) kept its name,
  * and an object name IS its registry key and its table: the copy was a second
  * claim on the source's object. It used to store a target row the registry
  * refused, over the source's table; since the ADR-0029 D9.9 refusal landed it
@@ -195,18 +196,38 @@ describe('ADR-0070 D4 — duplicatePackage of an object whose name lacks the sou
         expect(res.success).toBe(true);
     }
 
+    /**
+     * [#24547] Store an object the direct save now refuses: ADR-0129 D2 holds
+     * at that door too, so a bare name under a namespaced package is a row
+     * stored before it read the rule. Staged while the package's installed
+     * manifest declares no namespace, then the derived one is put back, so
+     * every read after it sees the package exactly as installed.
+     */
+    async function saveStoredBeforeRule(type: string, item: { name: string }): Promise<void> {
+        const manifest = engine.registry.getPackage(P)!.manifest as { namespace?: string };
+        const namespace = manifest.namespace;
+        delete manifest.namespace;
+        try {
+            await save(type, item);
+        } finally {
+            manifest.namespace = namespace;
+        }
+    }
+
     async function seedSource(extra: Array<[string, { name: string }]> = []): Promise<void> {
         await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'app' } });
         expect(engine.registry.getPackage(P)?.manifest?.namespace).toBe('dupsrc');
         await save('object', customerBody);
-        await save('object', ticketBody);
+        await saveStoredBeforeRule('object', ticketBody);
         await save('object', noteBody);
         await save('view', ticketViewsBody);
         await save('permission', opsBody);
         await save('flow', onTicketBody);
         for (const [type, item] of extra) await save(type, item);
-        // CONTROL: the bare name was stored by a direct save, no prefix gate read it.
+        // CONTROL: the bare name is stored, owned by the source, under the
+        // source's namespace — the row the copy has to rename.
         expect(owner('ticket')).toBe(P);
+        expect(engine.registry.getPackage(P)?.manifest?.namespace).toBe('dupsrc');
     }
 
     it('copies a prefixed and a non-prefixed object, each into the target namespace', async () => {
@@ -284,8 +305,8 @@ describe('ADR-0070 D4 — duplicatePackage of an object whose name lacks the sou
         const res = await protocol.duplicatePackage({ sourcePackageId: P, targetPackageId: Q });
 
         expect(res.success).toBe(false);
-        expect(res.failed).toHaveLength(1);
-        const [refusal] = res.failed;
+        expect(res.failed).toHaveLength(2);
+        const [refusal, viewRefusal] = res.failed;
         expect(refusal).toMatchObject({ type: 'object', name: 'ticket' });
         // Located: the object, the name it would take, who holds that name,
         // and the source rename that clears it.
@@ -293,6 +314,11 @@ describe('ADR-0070 D4 — duplicatePackage of an object whose name lacks the sou
         expect(refusal.error).toContain("'dupdst_ticket'");
         expect(refusal.error).toContain("'dupsrc_ticket'");
         expect(refusal.error).toContain("Rename 'ticket' on the source");
+        // [#24563] The `ticket` copy was refused, so the copy of `ticket_views`
+        // keeps the source's `ticket` — an object outside the copy package's
+        // closure — and the save door refuses it with the same rule.
+        expect(viewRefusal).toMatchObject({ type: 'view', name: 'ticket_views' });
+        expect(viewRefusal.error).toContain('views[0].object [list-view-object-outside-closure]');
 
         // NEGATIVE CONTROL: the prefixed sibling took the name, with its own
         // body, and nothing of `ticket` was written under it.

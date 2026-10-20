@@ -210,7 +210,26 @@ describe('flow.runAs identity enforcement at the data layer (#1888)', () => {
 describe('resolveRunDataContext (#1888 unit)', () => {
   it("maps runAs:'system' to an elevated context attributed to the flow AND the acting user (#4366, #5494)", () => {
     expect(resolveRunDataContext({ runAs: 'system', userId: 'u1', flowName: 'mirror_status' })).toEqual({
-      isSystem: true, actor: 'svc:flow:mirror_status', userId: 'u1', positions: [], permissions: [],
+      isSystem: true, actor: 'svc:flow:mirror_status', userId: 'u1',
+    });
+  });
+
+  // `toEqual` reads an absent key and an `undefined` one alike, so absence is
+  // asserted by key: the `runAs:'user'` hook seed resolves the user's grants
+  // only when no `permissions` key carries an array.
+  it("a system run that names a user carries no positions or permission sets, even when its trigger forwarded some", () => {
+    const ctx = resolveRunDataContext({
+      runAs: 'system', userId: 'u1', tenantId: 'org_a', flowName: 'sweep', flowRunId: 'r1',
+      positions: ['sales_rep'], permissions: ['deal_rep'],
+    });
+    expect(ctx).toEqual({ isSystem: true, actor: 'svc:flow:sweep', userId: 'u1', tenantId: 'org_a', flowRunId: 'r1' });
+    expect(Object.keys(ctx!)).not.toContain('positions');
+    expect(Object.keys(ctx!)).not.toContain('permissions');
+  });
+
+  it('a user-less system run keeps the empty positions and permission sets, its organisation included', () => {
+    expect(resolveRunDataContext({ runAs: 'system', tenantId: 'org_a', flowName: 'night' })).toEqual({
+      isSystem: true, actor: 'svc:flow:night', tenantId: 'org_a', positions: [], permissions: [],
     });
   });
 

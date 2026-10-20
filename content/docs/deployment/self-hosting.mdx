@@ -466,8 +466,7 @@ lock sign-up down via `OS_AUTH_SIGNUP_ENABLED` /
 configuration.** First-registrant promotion is removed there: with
 self-registration reachable, whoever posts to the sign-up endpoint first would
 otherwise receive cross-tenant access. No grant row is written on those
-postures, ever. Declare the administrators **before first boot** instead
-(18.0 supports fresh `single` installs; upgrades and walled postures arrive in 18.x. In 18.0 `os serve` refuses a walled posture at boot):
+postures, ever. Declare the administrators **before first boot** instead:
 
 ```bash
 # one address, or a comma-separated list

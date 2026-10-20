@@ -32,6 +32,7 @@ import {
   runRuntimeAuthoringRules,
   type RuntimePackageScope,
 } from './runtime-gate.js';
+import { validateListViewFieldRefs } from './validate-list-view-field-refs.js';
 
 type AnyRec = Record<string, any>;
 
@@ -279,5 +280,156 @@ describe('ablations — the equivalence assertions above can fail (#9612)', () =
     );
     expect(mutilated).toHaveLength(1);
     expect(mutilated[0]).toContain('flow-trigger-unknown-object');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #24563 — the VIEW door under a package closure: a list view bound outside the
+// closure is reported, never skipped; one bound inside keeps its field verdict.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A flattened list overlay — the shape `PUT /api/v1/meta/view` carries and the
+ * gate snapshots as `views: [item]` — bound to `object` with one known
+ * (`name`, every fixture object declares it) and optionally one unknown column.
+ */
+function listViewOn(object: string, columns: readonly string[] = ['name', 'zzz_nope']): AnyRec {
+  return {
+    name: `${object}.probe_list`,
+    object,
+    viewKind: 'list',
+    label: 'Probe',
+    type: 'grid',
+    data: { provider: 'object', object },
+    columns: columns.map((field) => ({ field })),
+  };
+}
+
+describe('the view door under a package closure (#24563)', () => {
+  const OUTSIDE = 'list-view-object-outside-closure';
+  const FIELD_UNKNOWN = 'list-view-field-unknown';
+  const objects = [...packagedTenant(3), obj('tenant_overlay', undefined)];
+  const scoped = (item: AnyRec, scope: RuntimePackageScope = SCOPE) =>
+    runRuntimeAuthoringRules({ type: 'view', item, context: { objects }, packageScope: scope });
+  const whole = (item: AnyRec) => runRuntimeAuthoringRules({ type: 'view', item, context: { objects } });
+  const rules = (fs: AnyRec[]) => fs.map((f) => f.rule);
+
+  it('REFUSES a binding into a package the written one never declared — at the binding, with the remedy', () => {
+    const result = scoped(listViewOn('other_0_0'));
+
+    // An `error`, so the door refuses the write: the dataset door's verdict
+    // for an out-of-closure base object under the same closure. The flow
+    // door's `flow-trigger-unknown-object` (pinned above) stays advisory.
+    expect(result.advisories).toEqual([]);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatchObject({ severity: 'error', rule: OUTSIDE });
+    expect(result.errors[0].path).toMatch(/^views(\[0\]|\.other_0_0\.probe_list)\.data\.object$/);
+    // The fix names the remedy and the package it applies to.
+    expect(result.errors[0].hint).toContain(OWN);
+    expect(result.errors[0].hint).toContain('dependencies');
+    // ⛔ The field positions stay unjudged: judging them against the whole
+    // collection would judge the package against what ruling #9612 says it may
+    // not reference.
+    expect(rules(result.errors)).not.toContain(FIELD_UNKNOWN);
+  });
+
+  it('REFUSES a binding to an object that exists nowhere the same way', () => {
+    const result = scoped(listViewOn('nosuch_obj'));
+
+    expect(result.advisories).toEqual([]);
+    expect(rules(result.errors)).toEqual([OUTSIDE]);
+  });
+
+  it('REFUSES it under a closure that carries no object at all — an empty graph is still a verdict', () => {
+    const result = runRuntimeAuthoringRules({
+      type: 'view',
+      item: listViewOn('nosuch_obj'),
+      context: { objects: [] },
+      packageScope: SCOPE,
+    });
+
+    expect(rules(result.errors)).toEqual([OUTSIDE]);
+  });
+
+  it('REFUSES an unknown column on an object of the written package — the field verdict is unchanged', () => {
+    const result = scoped(listViewOn('crm_account'));
+
+    expect(rules(result.errors)).toEqual([FIELD_UNKNOWN]);
+    expect(result.errors[0].path).toMatch(/columns\[1\]\.field$/);
+    expect(result.advisories).toEqual([]);
+  });
+
+  it('admits a known column on an object of the written package', () => {
+    const result = scoped(listViewOn('crm_account', ['name']));
+
+    expect(result.errors).toEqual([]);
+    expect(result.advisories).toEqual([]);
+  });
+
+  it('keeps a DECLARED DEPENDENCY inside the closure — known column admitted, unknown refused', () => {
+    // The discriminating case: a refusal of the binding here would mean the
+    // dependency limb never reached the rule.
+    expect(scoped(listViewOn('core_user', ['name']))).toMatchObject({ errors: [], advisories: [] });
+    expect(rules(scoped(listViewOn('core_user')).errors)).toEqual([FIELD_UNKNOWN]);
+  });
+
+  it('keeps system objects inside the closure — by name prefix and by isSystem flag', () => {
+    for (const name of ['sys_audit_log', 'platform_ledger']) {
+      expect(scoped(listViewOn(name, ['name'])), name).toMatchObject({ errors: [], advisories: [] });
+      expect(rules(scoped(listViewOn(name)).errors), name).toEqual([FIELD_UNKNOWN]);
+    }
+  });
+
+  it('keeps a provenance-less overlay object inside the closure — its field verdict is unchanged', () => {
+    expect(rules(scoped(listViewOn('tenant_overlay')).errors)).toEqual([FIELD_UNKNOWN]);
+    expect(scoped(listViewOn('tenant_overlay')).advisories).toEqual([]);
+  });
+
+  it('a write that names no package is unchanged — the whole collection, field verdict and silence alike', () => {
+    // ⛔ The overlay door: the stranger's object is in the whole collection, so
+    // its unknown column is refused exactly as before, and an object that
+    // exists nowhere stays skip 1's silence (no scope, so no closure verdict).
+    expect(rules(whole(listViewOn('other_0_0')).errors)).toEqual([FIELD_UNKNOWN]);
+    expect(whole(listViewOn('other_0_0')).advisories).toEqual([]);
+    expect(whole(listViewOn('nosuch_obj'))).toMatchObject({ errors: [], advisories: [] });
+    // An empty package id narrows nothing, so it states no closure either.
+    const empty = { packageId: '', dependencies: [] } as RuntimePackageScope;
+    expect(scoped(listViewOn('nosuch_obj'), empty)).toMatchObject({ errors: [], advisories: [] });
+  });
+
+  it('the flow verdict is unchanged, and a stored object\'s out-of-closure list view is not charged to it', () => {
+    // A context object of the written package whose built-in list view
+    // retargets an object outside the closure: the rule now refuses that list
+    // view, in the baseline and the candidate alike, so it cancels — a flow
+    // publish is not refused for a stored sibling's binding (#4463 D4).
+    const retargeting = obj('crm_board', OWN, {
+      listViews: { foreign: { label: 'Foreign', data: { provider: 'object', object: 'other_0_0' }, columns: ['name'] } },
+    });
+    const withSibling = [...objects, retargeting];
+    const flow = (item: AnyRec) =>
+      verdict(runRuntimeAuthoringRules({ type: 'flow', item, context: { objects: withSibling }, packageScope: SCOPE }));
+
+    // Non-vacuous: written itself, that object IS refused — the list view
+    // rides the object door too, at the same verdict.
+    const asWritten = runRuntimeAuthoringRules({ type: 'object', item: retargeting, context: { objects }, packageScope: SCOPE });
+    expect(rules(asWritten.errors)).toContain(OUTSIDE);
+    expect(rules(asWritten.advisories)).not.toContain(OUTSIDE);
+
+    expect(flow(FLOW_INTO_OWN_PACKAGE)).toEqual([]);
+    const undeclared = flow(FLOW_INTO_UNDECLARED);
+    expect(undeclared).toHaveLength(1);
+    expect(undeclared[0]).toContain('flow-trigger-unknown-object');
+  });
+
+  it('the CLI reading is unchanged: no scope stated, skip 1 judges nothing', () => {
+    // `os validate` / `os build` / `os lint` hand the rule no closure.
+    expect(validateListViewFieldRefs({ objects, views: [listViewOn('nosuch_obj')] })).toEqual([]);
+    // And the same stack under a stated closure is the verdict above.
+    expect(
+      validateListViewFieldRefs(
+        { objects, views: [listViewOn('nosuch_obj')] },
+        { packageScope: SCOPE },
+      ).map((f) => f.rule),
+    ).toEqual([OUTSIDE]);
   });
 });

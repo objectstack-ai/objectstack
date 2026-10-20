@@ -221,6 +221,43 @@ describe('[ADR-0131 D4] a grant that names nothing — the platform-admin bootst
     await unname(engine, { id: 'g_admin' });
     expect(await findExistingPlatformAdmin(engine, defaultPermissionSets)).toBeUndefined();
   });
+
+  // The one wording pin on the withheld-promotion warning. 18.0 supports fresh
+  // installs only and its `os migrate organization-ownership` refuses plan and
+  // apply on every database, so the warning an operator reads at boot must not
+  // send them to it; it ends with the sentence the unnamed-grant line of the
+  // catalog reference report and the boot refusal carry, in the same terms.
+  // Everything before the sentence is the warning's own: what is withheld, why,
+  // and that this pass mints no second grant.
+  const V17_SENTENCE = '18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a '
+    + '17.x release until the 18.x release that carries the upgrade path.';
+
+  it('unnamed, the withheld warning keeps what is withheld and why, ends with the 18.0 sentence, and prescribes no migration', async () => {
+    const engine = await standingAdminUnnamed();
+    await unname(engine, { id: 'g_admin' });
+    // An existing database: the platform-bucket rows an earlier release seeded.
+    await seedLegacyPlatformBucket(engine, defaultPermissionSets);
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const report = await bootstrapPlatformAdmin(engine, defaultPermissionSets, { logger });
+
+    // Anti-vacuity: the pass took the unnamed-holder branch and logged its warning exactly once.
+    expect(report).toMatchObject({ adminPromoted: false, reason: 'admin_grant_unnamed' });
+    const withheld = logger.warn.mock.calls
+      .map(([message]) => String(message))
+      .filter((message) => message.startsWith('[security] platform-admin promotion WITHHELD'));
+    expect(withheld).toHaveLength(1);
+    const [message] = withheld;
+
+    expect(message).toBe(
+      '[security] platform-admin promotion WITHHELD: an unscoped grant exists whose permission-set name '
+      + '(sys_user_permission_set.permission_set) was never written — a grant from a release before that '
+      + 'column existed. Which set it holds can no longer be read, and it may be the platform administrator\'s, '
+      + 'so this pass will not mint a second one. ' + V17_SENTENCE,
+    );
+    expect(message.endsWith(V17_SENTENCE), 'the sentence closes the warning').toBe(true);
+    // The refused command and the rewrite it performed are gone, not merely qualified.
+    expect(message).not.toMatch(/organization-ownership|os migrate|--out|--apply|--plan-file|ceremony|id-to-name/);
+  });
 });
 
 describe('[ADR-0131 D4] a grant that names nothing — the organization-administrator reconcile', () => {

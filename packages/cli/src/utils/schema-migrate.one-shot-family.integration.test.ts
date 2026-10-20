@@ -58,6 +58,7 @@ import MigrateAccountIssuer from '../commands/migrate/account-issuer.js';
 import MigrateActivityChangedFields from '../commands/migrate/activity-changed-fields.js';
 import MigrateCommentParentPair from '../commands/migrate/comment-parent-pair.js';
 import MigrateApply from '../commands/migrate/apply.js';
+import MigrateAuditMailBodies from '../commands/migrate/audit-mail-bodies.js';
 import MigrateAuditMetadataBodies from '../commands/migrate/audit-metadata-bodies.js';
 import MigrateCommentReactions from '../commands/migrate/comment-reactions.js';
 import MigrateDuplicates from '../commands/migrate/duplicates.js';
@@ -175,6 +176,11 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [],
     write: [{ label: 'migrate apply --yes', argv: ['--yes', '--database-url', '@DB@', '--json'] }],
     note: 'the apply step itself: its preview is `os migrate plan`',
+  },
+  'commands/migrate/audit-mail-bodies.ts': {
+    run: invoke(MigrateAuditMailBodies),
+    noWrite: [{ label: 'migrate audit-mail-bodies', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate audit-mail-bodies --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
   'commands/migrate/audit-metadata-bodies.ts': {
     run: invoke(MigrateAuditMetadataBodies),

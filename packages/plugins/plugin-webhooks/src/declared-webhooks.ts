@@ -45,6 +45,17 @@
  * sharing-rule reader's rules: a composition with no ledger object issues no
  * read, and a read that fails switches nothing for this pass.
  *
+ * ## Every posture: deployment-wide
+ *
+ * A declared webhook is the deployment's under `single`, `group` and
+ * `isolated` alike (the epic's ruling A, record 6278609968 on #24580): switched
+ * on, it receives every organization's events, and each `sys_http_delivery`
+ * row is stamped with its event's organization, so delivery history is walled
+ * like any other organization-stamped row. There is one switch, the ledger row
+ * above — deployment-level, and the platform operator's under a wall (the
+ * activation door's ADR-0126 §5 posture rule); an organization administrator
+ * is refused there.
+ *
  * ## An 18.0 database: the dual read (expand first)
  *
  * The 18.0 seeder's rows stay where they are; deleting them, and re-sourcing
@@ -263,4 +274,84 @@ export function classifyDeclaredNameHolder(row: { managed_by?: unknown; customiz
  */
 export function isSeededProvenance(managedBy: unknown): boolean {
     return managedBy === 'package' || managedBy === 'platform';
+}
+
+/**
+ * [ADR-0131 D6 regime C] A `sys_webhook` row — new, or renamed — that would
+ * take a declared webhook's name.
+ *
+ * A declared webhook is read-only and clonable: it is customised by a CLONE
+ * under a new name, with the declaration switched off through the activation
+ * ledger. A row holding a declared name withholds the declaration for the
+ * whole deployment (the dispatcher's `heldByRow`), so under a wall one
+ * organization's same-name row would silence a deployment-wide declaration
+ * for every organization. No write may take a declared name — Setup's New, a
+ * script, an AI tool, the `/data` door — and every such write is refused
+ * before it lands.
+ *
+ * `code` + `status` are the declared envelope a door answers at its own status
+ * (409 `RESOURCE_CONFLICT`, the catalogue's code for a 409 —
+ * `HttpStatusErrorCodeMap`): the name is taken by a declaration, which is a
+ * conflict, not a missing capability. The same shape as the sharing rules'
+ * `DeclaredSharingRuleNameConflictError`.
+ */
+export class DeclaredWebhookNameConflictError extends Error {
+    readonly code = 'RESOURCE_CONFLICT';
+    readonly status = 409;
+    /** The declared webhook whose name the write would take. */
+    readonly webhook: string;
+    constructor(name: string, write: 'create' | 'rename') {
+        super(
+            `webhook '${name}' is declared by the application, so `
+                + (write === 'create' ? 'a new webhook cannot take its name' : 'no webhook can be renamed to it')
+                + `. Declared webhooks are read-only: to customise '${name}', create your own webhook under another `
+                + `name and switch the declared one off (POST /api/v1/security/_activation/${WEBHOOK_ACTIVATION_TYPE}/${name} `
+                + 'with { "enabled": false }).',
+        );
+        this.name = 'DeclaredWebhookNameConflictError';
+        this.webhook = name;
+    }
+}
+
+/** Package id of {@link bindDeclaredWebhookNameGuard}'s hooks. */
+export const DECLARED_WEBHOOK_NAME_GUARD_PACKAGE = 'plugin-webhooks:declared-name-guard';
+
+/**
+ * [ADR-0131 D6 regime C] Bind the guard above on `sys_webhook` writes: an
+ * insert of a declared name is refused, and so is an update that CHANGES
+ * `name` onto one; an update that leaves the name alone passes — so an 18.0
+ * database's seeded mirror rows, and the rows an administrator customised
+ * there, stay editable exactly as they were.
+ *
+ * System writes pass: they are the platform's own machinery (the boot sweep,
+ * the ownership ceremony, migrations), never an author taking a name.
+ */
+export function bindDeclaredWebhookNameGuard(
+    engine: {
+        registerHook(event: string, handler: (ctx: any) => any, options?: Record<string, any>): void;
+        unregisterHooksByPackage?(packageId: string): number;
+    },
+    declared: Pick<DeclaredWebhookReader, 'declaredWebhookNamed'>,
+    object: string = 'sys_webhook',
+): void {
+    engine.unregisterHooksByPackage?.(DECLARED_WEBHOOK_NAME_GUARD_PACKAGE);
+    const guard = (insert: boolean) => async (ctx: any) => {
+        if ((ctx?.session as any)?.isSystem) return;
+        const data = ctx?.input?.data;
+        if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+        if (typeof data.name !== 'string') return;
+        // An update is a rename only against its pre-image (`ctx.previous`, the
+        // `HookContext` contract both update shapes bind before `beforeUpdate`): a
+        // full-form save re-sends the name it already has.
+        if (!insert) {
+            const previous = ctx?.previous as Record<string, unknown> | undefined;
+            if (!previous || typeof previous !== 'object' || data.name === previous.name) return;
+        }
+        if (await declared.declaredWebhookNamed(data.name)) {
+            throw new DeclaredWebhookNameConflictError(data.name, insert ? 'create' : 'rename');
+        }
+    };
+    const opts = { object, packageId: DECLARED_WEBHOOK_NAME_GUARD_PACKAGE, priority: 100 };
+    engine.registerHook('beforeInsert', guard(true), opts);
+    engine.registerHook('beforeUpdate', guard(false), opts);
 }

@@ -211,7 +211,7 @@ async function flush() {
     await new Promise((r) => setTimeout(r, 0));
 }
 
-async function startEnqueuer(engine: FakeEngine, logger?: any, deploymentWide?: boolean) {
+async function startEnqueuer(engine: FakeEngine, logger?: any) {
     const realtime = new FakeRealtime();
     const calls: any[] = [];
     const enqueue: HttpEnqueueFn = async (input) => {
@@ -222,7 +222,6 @@ async function startEnqueuer(engine: FakeEngine, logger?: any, deploymentWide?: 
     const enqueuer = new AutoEnqueuer(engine as any, realtime as any, enqueue, {
         refreshIntervalMs: 0,
         declaredWebhooks,
-        ...(deploymentWide !== undefined ? { declaredWebhooksDeploymentWide: () => deploymentWide } : {}),
         ...(logger ? { logger } : {}),
     });
     await enqueuer.start();
@@ -319,12 +318,12 @@ describe('declared webhooks — the organization dimension follows the posture (
         payload: { recordId: 't-1', organizationId },
     });
 
-    it('with no wall (`single`) a declared webhook receives an organization-stamped event, its delivery stamped with that organization', async () => {
+    it('a declared webhook receives an organization-stamped event, its delivery stamped with that organization', async () => {
         // Under `single` every record carries the Default Organization (D9), and
         // the 18.0 seeded copy carried it too, so it delivered. The declaration
         // has no organization of its own; deployment-wide, it delivers as well.
         const engine = newEngine({ declared: { webhook: [declaredWebhook()] } });
-        const { enqueuer, realtime, calls } = await startEnqueuer(engine, undefined, true);
+        const { enqueuer, realtime, calls } = await startEnqueuer(engine);
         await realtime.publish(orgEvent('org_default'));
         await flush();
         expect(calls).toHaveLength(1);
@@ -332,19 +331,22 @@ describe('declared webhooks — the organization dimension follows the posture (
         await enqueuer.stop();
     });
 
-    it('under a wall a declared webhook stays org-less: an organization-walled event is refused, said once', async () => {
+    it('[ruling A] two organizations: one delivery per event, each stamped with its event\'s organization, and nothing refused', async () => {
         const warn = vi.fn();
         const engine = newEngine({ declared: { webhook: [declaredWebhook()] } });
-        const { enqueuer, realtime, calls } = await startEnqueuer(engine, { warn, debug() {} }, false);
+        const { enqueuer, realtime, calls } = await startEnqueuer(engine, { warn, debug() {} });
         await realtime.publish(orgEvent('org_a'));
-        await realtime.publish(orgEvent('org_a'));
+        await realtime.publish(orgEvent('org_b'));
         await flush();
-        expect(calls).toEqual([]);
-        expect(warn.mock.calls.filter(([m]) => String(m).includes('belongs to NO organization'))).toHaveLength(1);
+        expect(calls.map((c) => [c.refId, c.organizationId])).toEqual([
+            [declaredWebhookRefId('task_changed'), 'org_a'],
+            [declaredWebhookRefId('task_changed'), 'org_b'],
+        ]);
+        expect(warn.mock.calls.filter(([m]) => String(m).includes('belongs to NO organization'))).toEqual([]);
         await enqueuer.stop();
     });
 
-    it('the plugin reads the posture from the tenancy service: `single` is deployment-wide, an absent service is walled', async () => {
+    it('[ruling A] the plugin serves it deployment-wide under every posture, and with no tenancy service', async () => {
         const boot = async (tenancy?: unknown) => {
             const engine = newEngine({ declared: { webhook: [declaredWebhook()] } });
             const realtime = new FakeRealtime();
@@ -379,9 +381,10 @@ describe('declared webhooks — the organization dimension follows the posture (
             await plugin.destroy();
             return calls;
         };
-        expect(await boot({ posture: 'single' })).toHaveLength(1);
-        expect(await boot({ posture: 'isolated' })).toEqual([]);
-        expect(await boot()).toEqual([]);
+        for (const tenancy of [{ posture: 'single' }, { posture: 'group' }, { posture: 'isolated' }, undefined]) {
+            const calls = await boot(tenancy);
+            expect(calls.map((c: any) => c.organizationId), JSON.stringify(tenancy)).toEqual(['org_default']);
+        }
     });
 });
 
