@@ -6,7 +6,7 @@
 
 fix(lint)!: `os lint` and the react-page props check report the retired list-view `filterableFields` by name, and the readers that still treated it as a field position go
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (already-registered view-list-filterable-fields-removed, list-view-filterable-fields-retired) The key's retirement, its D2 conversion and its D3 entry are already registered by the change that tombstoned it, in this same unreleased major. This change adds no key, conversion or stored shape: it makes `os lint` and the react-page props check give the verdict `os validate` and `os build` already give the list-view key, with the tombstone's own prescription. -->
 
@@ -22,7 +22,7 @@ Both now refuse the key by name, as an `error`, whatever it names:
 - a list view (every rung: an object's `listViews`, a `defineView` container's `list` / `listViews`, the flattened list overlay and the view item record) reports `list-view-key-retired` at `….filterableFields`, whether or not its object binding resolves;
 - `<ListView filterableFields>` on a react page reports `react-prop-retired`.
 
-The message names the retirement and the hint is the tombstone's own "Delete the key" sentence, read from `ListViewSchema` rather than retyped.
+The message names the retirement and the hint is the tombstone's own "Delete the key" sentence, read from `ListViewSchema` rather than retyped. The new rule id is exported from the package root as `LIST_VIEW_KEY_RETIRED`.
 
 ### FROM → TO
 
