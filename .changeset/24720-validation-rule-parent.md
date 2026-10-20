@@ -16,5 +16,5 @@ The build's expression rule (`validateStackExpressions`) now refuses such a pred
 
 - The runtime is unchanged: a `validations[]` rule still binds `record` and `previous` and no `parent`. If the runtime comes to bind `parent` there, this refusal is lifted in that same change.
 - `parent` on a field's own `readonlyWhen` / `requiredWhen` is still accepted, as before, and so is a `record` column spelled like the root (`record.parent_code`).
-- Such a rule could never pass a single write, so no working stack moves. No example or package object in this repository authors `parent` in a `validations[]` rule.
+- Such a rule refused every write it judged, so a stack that wrote through it never worked. The verdict judges the rule as written, the way the rest of the expression rule does: a rule marked `active: false`, a rule whose `events` a stack never fires, and a `conditional` branch whose `when` is never true are refused too, although the server never reached their `parent` read. No example or package object in this repository authors `parent` in a `validations[]` rule.
 - No public export or signature moves.
