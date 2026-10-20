@@ -1,6 +1,6 @@
 ---
 title: 18.0.0
-description: "The v18 GA release, published 2026-10-20: organization ownership is total (ADR-0131), so a database 17.x created takes the ownership ceremony before 18.0.0 serves it; protocol 18; a flow reads one expression dialect per slot; the security catalog is metadata; API keys expire; the CORS default admits no cross-origin caller. With its upgrade checklist, walked once from 17.7.0."
+description: "The v18 GA release, published 2026-10-20: organization ownership is total (ADR-0131), so a database 17.x created takes the ownership ceremony before 18.0.0 serves it; protocol 18; a flow reads one expression dialect per slot; the security catalog is metadata; API keys expire; the CORS default admits no cross-origin caller. With its upgrade checklist, walked from 17.7.0."
 ---
 
 ## Highlights — 18.0.0
@@ -127,8 +127,9 @@ no upgrade of a production application was run for this page.
 - **Move every `@objectstack/*` dependency to 18.0.0 together**,
   `devDependencies` included, and regenerate the lockfile —
   [Moving the dependency pins](/docs/upgrading#moving-the-dependency-pins). The
-  walk edited six `^17.7.0` ranges and `@objectstack/cli` to `^18.0.0`; the
-  install moved all seven to 18.0.0 and printed no peer-dependency warning.
+  walk moved the scaffold's seven `^17.7.0` ranges (`@objectstack/cli` among
+  them) to `^18.0.0`; `pnpm install` moved all seven to 18.0.0 and printed no
+  peer-dependency warning.
   *Measured in the walk.*
 - **Move the protocol declarations to 18.** `engines.protocol` in your
   `defineStack` manifest becomes `'^18'`, and `specVersion` in
