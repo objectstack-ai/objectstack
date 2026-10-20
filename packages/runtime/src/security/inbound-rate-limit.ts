@@ -37,6 +37,7 @@
 
 import type { Middleware, IHttpRequest, IHttpResponse } from '@objectstack/core';
 import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
+import { resolveClientAddress } from '@objectstack/plugin-auth/client-address';
 
 import { buildApiError } from '../error-envelope.js';
 import {
@@ -124,21 +125,6 @@ export interface RateLimitKeyInput {
     trustProxy: boolean;
 }
 
-function firstHeader(
-    headers: Record<string, string | string[] | undefined> | undefined,
-    name: string,
-): string | undefined {
-    if (!headers) return undefined;
-    const raw = headers[name] ?? headers[name.toLowerCase()];
-    const value = Array.isArray(raw) ? raw[0] : raw;
-    if (typeof value !== 'string') return undefined;
-    // `X-Forwarded-For: client, proxy1, proxy2` — the LEFTMOST entry is the
-    // original client. It is also the entry a client controls, which is exactly
-    // why reading it at all requires `trustProxy`.
-    const first = value.split(',')[0]?.trim();
-    return first ? first : undefined;
-}
-
 /**
  * Q3=C, in code: the bucket is keyed by **who**, and only falls back to
  * **where** when there is no who.
@@ -163,10 +149,15 @@ function firstHeader(
 export function resolveRateLimitKey(input: RateLimitKeyInput): { key: string; kind: RateLimitKeyKind } {
     if (input.principalId) return { key: `principal:${input.principalId}`, kind: 'principal' };
 
-    const forwarded = input.trustProxy
-        ? firstHeader(input.headers, 'x-forwarded-for') ?? firstHeader(input.headers, 'x-real-ip')
-        : undefined;
-    const address = forwarded ?? input.remoteAddress;
+    // The address half is the platform's ONE client-address trust rule, shared
+    // with plugin-auth's ADR-0069 D5 allow-list and D7 login audit. It lives in
+    // `@objectstack/plugin-auth/client-address` because this package depends on
+    // plugin-auth, never the other way round.
+    const address = resolveClientAddress({
+        ...(input.headers ? { headers: input.headers } : {}),
+        ...(input.remoteAddress ? { remoteAddress: input.remoteAddress } : {}),
+        trustProxy: input.trustProxy,
+    });
 
     if (address) return { key: `ip:${address}`, kind: 'ip' };
     return { key: 'ip:unknown', kind: 'unknown' };

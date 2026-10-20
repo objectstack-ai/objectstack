@@ -356,7 +356,7 @@ export const zhCN: PlatformTranslationData = {
         },
         allowed_ip_ranges: {
           label: '允许的 IP 段',
-          help: 'CIDR 段或精确 IP(每行一个,或用逗号分隔),例如 203.0.113.0/24。设置后,来自这些范围之外的登录将被拒绝。留空表示不限制。需要可信代理设置 X-Forwarded-For。',
+          help: 'CIDR 段或精确 IP(每行一个,或用逗号分隔),例如 203.0.113.0/24。设置后,来自这些范围之外的登录将被拒绝,服务器无法确定客户端地址的请求同样会被拒绝。留空表示不限制。判定的是连接的对端地址;部署在反向代理之后时,请在 stack 中声明 server.trustProxy,以改为判定转发的客户端地址。',
         },
         api_key_default_expiry_days: {
           label: '默认密钥有效期(天)',

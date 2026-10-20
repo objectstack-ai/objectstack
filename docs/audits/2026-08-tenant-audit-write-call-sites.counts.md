@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 231 |
+| Write call sites | 232 |
 | Object name statically decidable | 156 |
-| Object name chosen at run time | 75 |
+| Object name chosen at run time | 76 |
 | Against a tenancy-enabled object | 155 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 173 |
+| Threading a tenant context | 174 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 50 |
 | …and decidably tenancy-enabled | 29 |
-| Threading a decidably elevated context | 130 |
+| Threading a decidably elevated context | 131 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 93 |
 
@@ -90,11 +90,11 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-20 at `1f2b0cb73`.
+Measured on 2026-10-20 at `300e9d436`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 674 |
+| tracked non-test sources scanned | 675 |
 | engine-shaped types recognised | 80 |
 | declared objects in the registry | 118 |
 | same-named calls subtracted as non-engine | 166 |
@@ -158,6 +158,7 @@ Measured on 2026-10-20 at `1f2b0cb73`.
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `update` | `sys_sso_provider` | disabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/sys-session-revoke.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/attachment-reclaim.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `update` | `object` | undecidable | elevated | 1 |

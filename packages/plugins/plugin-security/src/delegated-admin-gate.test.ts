@@ -1384,3 +1384,152 @@ describe('DelegatedAdminGate — organization administrators (ADR-0090 D12 as am
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// [ADR-0090 D12, amended 2026-10-17] The delegated walk counts the own-name set
+// ---------------------------------------------------------------------------
+
+/**
+ * The sets a position carries are every set an assignment of it grants: the
+ * names its definition lists and, while the resolver folds held position names
+ * into the requested set names, the permission set of the position's own name.
+ * The delegated branch judges all of them — in the allowlist check, in strict
+ * containment, in the self-delegation rule against handing out administration
+ * and in the delegable-scope listing.
+ *
+ * Catalog: `rep_pos` → [field_user] beside a plain set named `rep_pos`;
+ * `lead_pos` → [field_user] beside a set named `lead_pos` that carries the wide
+ * delegate's own scope; `clerk_pos` → [field_user] with no set of its name;
+ * `duty_pos` (delegatable) → [field_user] beside a set named `duty_pos` that
+ * carries an adminScope; `duty_plain` (delegatable) → [field_user].
+ */
+function makeOwnNameHarness() {
+  const tables: Record<string, any[]> = {
+    sys_business_unit: [
+      { id: 'bu_hq', name: 'hq', parent_business_unit_id: null },
+      { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq' },
+      { id: 'bu_es', name: 'east_sales', parent_business_unit_id: 'bu_east' },
+    ],
+    sys_user_position: [
+      { id: 'held_rep', user_id: 'u_east_1', position: 'rep_pos', business_unit_id: 'bu_es' },
+      { id: 'boss_duty', user_id: 'u_boss', position: 'duty_pos' },
+      { id: 'boss_plain', user_id: 'u_boss', position: 'duty_plain' },
+    ],
+    sys_business_unit_member: [{ id: 'm1', business_unit_id: 'bu_es', user_id: 'u_east_1' }],
+    sys_user: [{ id: 'u_east_1' }, { id: 'u_boss' }, { id: 'u_deleg' }],
+  };
+  const matches = (row: any, where: any): boolean =>
+    Object.entries(where ?? {}).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
+      return row[k] === v;
+    });
+  const ql: any = {
+    tables,
+    async find(object: string, opts: any) {
+      const rows = (tables[object] ?? []).filter((r) => matches(r, opts?.where));
+      return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
+    },
+    async findOne(object: string, opts: any) {
+      return (tables[object] ?? []).find((r) => matches(r, opts?.where)) ?? null;
+    },
+  };
+  const scope = (allow: string[]) => ({ businessUnit: 'east', includeSubtree: true, manageAssignments: true, assignablePermissionSets: allow });
+  const WIDE_ALLOW = ['field_user', 'rep_pos', 'lead_pos'];
+  bindTestSecurityCatalog(ql, {
+    permissions: [
+      { name: 'field_user', objects: { crm_account: { allowRead: true } } },
+      { name: 'rep_pos', objects: { crm_account: { allowRead: true, allowEdit: true } } },
+      { name: 'lead_pos', objects: {}, adminScope: scope(WIDE_ALLOW) },
+      { name: 'duty_pos', objects: {}, adminScope: scope(['field_user']) },
+    ],
+    positions: [
+      { name: 'rep_pos', permissionSets: ['field_user'] },
+      { name: 'lead_pos', permissionSets: ['field_user'] },
+      { name: 'clerk_pos', permissionSets: ['field_user'] },
+      { name: 'duty_pos', permissionSets: ['field_user'], delegatable: true },
+      { name: 'duty_plain', permissionSets: ['field_user'], delegatable: true },
+    ],
+  });
+  const SETS: Record<string, any[]> = {
+    // Allowlists the sets the positions LIST, not their own-name sets.
+    narrow: [{ name: 'east_admin', objects: {}, adminScope: scope(['field_user']) }],
+    // Also allowlists the own-name sets.
+    wide: [{ name: 'east_admin_wide', objects: {}, adminScope: scope(WIDE_ALLOW) }],
+    member: [{ name: 'member_default', objects: {} }],
+  };
+  const gate = new DelegatedAdminGate({
+    ql,
+    resolveSets: async (c: any) => SETS[c?.principal ?? ''] ?? [],
+    now: () => T0,
+  });
+  const ctxOf = (principal: string) => ({ principal, userId: `u_${principal}`, positions: [] });
+  const assign = (principal: string, position: string) => gate.assert({
+    object: 'sys_user_position', operation: 'insert', context: ctxOf(principal),
+    data: { user_id: 'u_east_1', position, business_unit_id: 'bu_es' },
+  });
+  const offered = async (principal: string) =>
+    (await gate.describeDelegableScope(SETS[principal] as any, ctxOf(principal))).assignablePositions.sort();
+  return { gate, tables, ctxOf, assign, offered };
+}
+
+describe("DelegatedAdminGate — a delegate is judged on the permission set of the position's own name (ADR-0090 D12 as amended 2026-10-17)", () => {
+  let n: ReturnType<typeof makeOwnNameHarness>;
+  beforeEach(() => { n = makeOwnNameHarness(); });
+
+  it("refuses an assignment whose own-name set is outside the allowlist — 403 PERMISSION_DENIED, naming the set", async () => {
+    const err = await deniedOf(() => n.assign('narrow', 'rep_pos'));
+    expect(err.message).toMatch(/position 'rep_pos' distributes permission set 'rep_pos' \(the permission set of the position's own name.*not in the scope's allowlist/);
+    expect(err.details).toMatchObject({ position: 'rep_pos' });
+  });
+
+  it('CONTROL: admits the same assignment for a delegate whose allowlist covers the own-name set too', async () => {
+    const row: any = { user_id: 'u_east_1', position: 'rep_pos', business_unit_id: 'bu_es' };
+    await expect(n.gate.assert({ object: 'sys_user_position', operation: 'insert', data: row, context: n.ctxOf('wide') }))
+      .resolves.toBeUndefined();
+    expect(row.granted_by).toBe('u_wide');
+  });
+
+  it('a position with no own-name set in the catalog is judged on its listed sets alone, as before', async () => {
+    await expect(n.assign('narrow', 'clerk_pos')).resolves.toBeUndefined();
+  });
+
+  it('removing an assignment is judged on the same sets: the narrow delegate may not evict one granting a set outside its allowlist', async () => {
+    const err = await deniedOf(() => n.gate.assert({
+      object: 'sys_user_position', operation: 'delete', options: { where: { id: 'held_rep' } }, context: n.ctxOf('narrow'),
+    }));
+    expect(err.message).toMatch(/permission set 'rep_pos'.*not in the scope's allowlist/);
+    await expect(n.gate.assert({
+      object: 'sys_user_position', operation: 'delete', options: { where: { id: 'held_rep' } }, context: n.ctxOf('wide'),
+    })).resolves.toBeUndefined();
+  });
+
+  it('an own-name set carrying an adminScope is held to strict containment, allowlisted or not', async () => {
+    const err = await deniedOf(() => n.assign('wide', 'lead_pos'));
+    expect(err.message).toMatch(/granting set 'lead_pos' would hand out an adminScope not strictly contained by yours/);
+  });
+
+  it('the delegable-scope listing offers exactly the positions the write admits', async () => {
+    expect(await n.offered('narrow')).toEqual(['clerk_pos', 'duty_plain']);
+    expect(await n.offered('wide')).toEqual(['clerk_pos', 'duty_plain', 'rep_pos']);
+    for (const principal of ['narrow', 'wide']) {
+      const offered = await n.offered(principal);
+      for (const position of ['rep_pos', 'lead_pos', 'clerk_pos', 'duty_pos', 'duty_plain']) {
+        const admitted = await n.assign(principal, position).then(() => true, () => false);
+        expect(admitted, `${principal} · ${position}`).toBe(offered.includes(position));
+      }
+    }
+  });
+
+  it('a delegatable position whose own-name set carries an adminScope cannot be self-delegated', async () => {
+    const delegation = (position: string) => n.gate.assert({
+      object: 'sys_user_position', operation: 'insert', context: { userId: 'u_boss', positions: [], principal: 'member' },
+      data: { user_id: 'u_deleg', position, delegated_from: 'u_boss', valid_until: iso(T0 + 5 * DAY), reason: 'cover' },
+    });
+    const err = await deniedOf(() => delegation('duty_pos'));
+    expect(err.message).toMatch(/position 'duty_pos' distributes the admin set 'duty_pos' \(the permission set of the position's own name.*administration cannot be self-delegated/);
+    expect(err.details).toMatchObject({ position: 'duty_pos', permissionSet: 'duty_pos' });
+    // CONTROL: the same holder delegates a delegatable position with no such set.
+    await expect(delegation('duty_plain')).resolves.toBeUndefined();
+  });
+});

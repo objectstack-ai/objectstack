@@ -49,6 +49,10 @@ export const CLOSED_CEREMONY_PHRASES = Object.freeze([
   { id: 'keep-on-17x', re: /keep (?:a|this|the|your) (?:v17 )?(?:development )?database on a 17\.x release/i },
   { id: 'carries-the-upgrade-path', re: /the 18\.x release that carries the upgrade path/i },
   { id: 'upgrade-path-arrives-later', re: /upgrade path (?:for an existing database )?arrives in a later 18\.x release/i },
+  { id: 'in-a-later-18x-release', re: /\bin a later 18\.x release\b/i },
+  { id: 'ceremony-still-refuses', re: /(?:ceremony|command),? (?:which )?(?:still )?refuses(?: in this release| on every database|, plan and apply)/i },
+  { id: 'eighteen-refuses-the-command', re: /\b18\.0 refuses (?:it|this invocation|every (?:plan|invocation)|plan and apply)/i },
+  { id: 'until-then-it-refuses', re: /until then (?:the ceremony|this command|the command) refuses/i },
 ]);
 
 /** Is `path` (repo-relative, `/`-separated) in the population? */
@@ -133,6 +137,10 @@ function selfTest() {
   t('the shipped 18.0 sentence is found', findingsIn(SHIPPED).length >= 3);
   t('…its development spelling too', findingsIn('keep a v17 development database on a 17.x release').some((f) => f.phrase === 'keep-on-17x'));
   t('…and the docs callout', findingsIn('The upgrade path for an existing database arrives in a later 18.x release').some((f) => f.phrase === 'upgrade-path-arrives-later'));
+  t('…a deferral to a later release', findingsIn('the walled half of this change ships in a later 18.x release.').some((f) => f.phrase === 'in-a-later-18x-release'));
+  t('…a ceremony that still refuses', findingsIn('Upgrading waits for the upgrade ceremony, which still refuses in this release.').some((f) => f.phrase === 'ceremony-still-refuses'));
+  t('…18.0 refusing the command', findingsIn('18.0 refuses this invocation, as it refuses every plan and apply').some((f) => f.phrase === 'eighteen-refuses-the-command'));
+  t('…and step 4\'s docs sentence', findingsIn('Until then the ceremony refuses, so `os dev` stops at step 2').some((f) => f.phrase === 'until-then-it-refuses'));
   t('a finding names its line', JSON.stringify(findingsIn('a\nfresh install only\nb')) === JSON.stringify([{ line: 2, phrase: 'fresh-installs-only' }]));
 
   // The open ceremony's own text is not a finding.
@@ -142,6 +150,8 @@ function selfTest() {
     'A fresh install holds no legacy organization rows: there, the cause is the one named above.',
     'A database that does hold them was created by 17.x: run `os migrate organization-ownership` on it first.',
     'Fresh installs are supported under every posture: `single`, `group` and `isolated`.',
+    'The 18.0 pre-releases refused it with `NOT_IMPLEMENTED`: a bare run writes the plan.',
+    'A walled posture boots like `single`, under the same prerequisites as before the 18.0 pre-releases.',
   ]) t(`not a finding: ${open.slice(0, 50)}`, findingsIn(open).length === 0);
 
   // The population.

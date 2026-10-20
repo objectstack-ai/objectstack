@@ -4827,10 +4827,26 @@ describe('AuthManager', () => {
       expect(m.isClientIpAllowed('8.8.8.8')).toBe(false);
     });
 
-    it('fails OPEN when the client IP cannot be determined (no proxy header)', () => {
+    it('refuses an address the server could not establish once ranges are configured', () => {
       const m = mgr({ allowedIpRanges: ['203.0.113.0/24'] });
-      expect(m.isClientIpAllowed(undefined)).toBe(true);
-      expect(m.isClientIpAllowed('')).toBe(true);
+      expect(m.isClientIpAllowed(undefined)).toBe(false);
+      expect(m.isClientIpAllowed('')).toBe(false);
+    });
+
+    it('ipMatchesRange reads an IPv4-mapped IPv6 address as the IPv4 address it denotes', () => {
+      expect(ipMatchesRange('::ffff:203.0.113.5', '203.0.113.0/24')).toBe(true);
+      expect(ipMatchesRange('::FFFF:203.0.114.5', '203.0.113.0/24')).toBe(false);
+      expect(ipMatchesRange('::ffff:10.0.0.1', '10.0.0.1')).toBe(true);
+      expect(ipMatchesRange('10.0.0.1', '::ffff:10.0.0.1')).toBe(true);
+      expect(ipMatchesRange('2001:db8::1', '2001:db8::1')).toBe(true);
+    });
+
+    it('resolveClientAddress believes forwarded headers only under trustProxy', () => {
+      const headers = { 'x-forwarded-for': '203.0.113.9, 10.0.0.2' };
+      expect(mgr({}).resolveClientAddress({ headers, remoteAddress: '10.0.0.2' })).toBe('10.0.0.2');
+      expect(mgr({ trustProxy: true }).resolveClientAddress({ headers, remoteAddress: '10.0.0.2' }))
+        .toBe('203.0.113.9');
+      expect(mgr({}).resolveClientAddress({ headers })).toBeUndefined();
     });
   });
 

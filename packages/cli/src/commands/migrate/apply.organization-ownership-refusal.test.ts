@@ -67,7 +67,6 @@ const ORGANIZATION_DROP = {
   description: 'sys_platform_setting.organization_id: column exists in the database but not in metadata (orphaned)',
 };
 
-/** A step of `os migrate organization-ownership`, which 18.0 refuses on every database. */
 /** The ceremony's two steps, as the refusal prescribes them. */
 const CEREMONY_STEPS = [
   'os migrate organization-ownership --out PLAN',
@@ -143,7 +142,7 @@ async function runApply(argv: string[]) {
 
 const ARGV = ['--database-url', 'file:v17.db', '--allow-destructive', '--yes'];
 
-describe('os migrate apply --allow-destructive: the organization-ownership refusal names no command 18.0 refuses', () => {
+describe('os migrate apply --allow-destructive: the organization-ownership refusal names the ceremony\'s steps', () => {
   for (const [state, flag] of [['no ceremony run recorded', null], ['an unverified run recorded', UNVERIFIED]] as const) {
     it(`${state}: the human face refuses, exit 1, naming the ceremony's steps, and nothing is written`, async () => {
       bootWithOrganizationDrop();

@@ -232,6 +232,11 @@ describe('auth route ledger hygiene', () => {
       'POST /api/v1/auth/organization/add-member',
       'POST /api/v1/auth/set-initial-password',
       'POST /api/v1/auth/sys-oauth-application/register',
+      // The fourteenth, on this pin's own terms: `auth-plugin.ts` mounts it
+      // itself (a `rawApp.post` on the `${basePath}/sys-session/revoke`
+      // template, ahead of the catch-all), and the `live.has(route)` loop
+      // below holds it to the same proof — better-auth serves no by-id revoke.
+      'POST /api/v1/auth/sys-session/revoke',
     ]);
     for (const route of own) {
       expect(live.has(route), `${route} should NOT come from better-auth`).toBe(false);
