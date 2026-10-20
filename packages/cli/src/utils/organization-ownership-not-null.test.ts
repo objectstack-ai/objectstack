@@ -33,6 +33,16 @@ beforeEach(async () => {
   await driver.initObjects([
     { name: 'crm_deal', fields: { name: { type: 'text' }, organization_id: { type: 'lookup', reference: 'sys_organization', required: false } } },
   ] as never);
+  // The ceremony tightens a table an earlier release built: its tenant column
+  // is nullable, which a table this release creates never is (ADR-0131 D1).
+  // Relaxed through the driver's own drift apply door, the shape of that store.
+  const { applied } = await driver.applyMigrationEntries([
+    {
+      kind: 'nullability_mismatch', remoteName: 'crm_deal', table: 'crm_deal', column: 'organization_id', category: 'needs_confirm',
+      op: { type: 'relax_not_null', table: 'crm_deal', column: 'organization_id' },
+    } as never,
+  ]);
+  if (applied.length !== 1) throw new Error('crm_deal was not returned to its pre-18 shape');
   await knex('crm_deal').insert([
     { id: 'deal_1', name: 'Acme', organization_id: 'org_default' },
     { id: 'deal_2', name: 'Globex', organization_id: 'org_default' },

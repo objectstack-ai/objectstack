@@ -109,7 +109,9 @@ for (const plugin of stack.plugins) await kernel.use(plugin);
 await kernel.use(new PlatformObjectsPlugin());
 await runtime.start();
 const ql = kernel.getService('objectql');
-const SYSTEM = { context: { isSystem: true } };
+// The fixture's rows name an organization: a fresh tenant column is NOT NULL
+// (ADR-0131 D1), and this stack composes no authentication to derive one.
+const SYSTEM = { context: { isSystem: true, tenantId: 'org_fixture' } };
 await ql.insert('os21644_account', { id: 'a1', name: 'Acme' }, SYSTEM);
 await ql.insert('os21644_site', { id: 's1', name: 'HQ', geo: { lat: 1, lng: 2 } }, SYSTEM);
 await ql.insert('os21644_product', { id: 'p1', name: 'Widget' }, SYSTEM);
