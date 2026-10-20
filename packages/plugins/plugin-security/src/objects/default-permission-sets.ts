@@ -423,12 +423,18 @@ const baseDefaultPermissionSets: PermissionSet[] = [
   //     (`branding`, `feature_flags`) keep using `setup.access` so org
   //     admins CAN configure their own org's branding.
   //
-  // **Anti-escalation**: writes to the global RBAC tables
-  // (`sys_position`, `sys_permission_set`, `sys_position_permission_set`,
-  // `sys_user_permission_set`, `sys_user_position`) are denied. Allowing
-  // them would let an org admin bind `admin_full_access` (which has no
-  // RLS) to themselves and break out of tenant isolation. Reads are
-  // permitted so the Roles / Permission Sets nav entries still render.
+  // **Anti-escalation — the organization boundary** (ADR-0090 D12, amended
+  // 2026-10-17, ruling of record 6228728551): the two assignment tables
+  // (`sys_user_position`, `sys_user_permission_set`) are create-and-remove,
+  // never edit, and what an org admin may create or remove there is bounded
+  // by the delegated-administration gate (`delegated-admin-gate.ts`), not by
+  // these overrides: a row of its own organization, for its own members, whose
+  // every distributed set has no `'*'` superuser bit, no `adminScope` and only
+  // `scope: 'org'` capabilities. `admin_full_access` (which has no RLS), the
+  // platform sets, both org-admin variants and the agent ceilings stay outside,
+  // so an org admin can never bind itself or anyone out of tenant isolation.
+  // The catalog itself (positions, sets) is environment metadata, written
+  // through the metadata door by `manage_metadata` alone (ADR-0131 D3).
   //
   // Auto-granted to every `sys_member` whose role contains `owner` or
   // `admin` by `plugin-security/src/auto-org-admin-grant.ts` — but ONLY under a
@@ -471,9 +477,11 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // Identity tables — go through better-auth endpoints (invite,
       // accept, remove-member, transfer, …) rather than raw CRUD.
       ...denyWritesOnManagedObjects(),
-      // RBAC tables — read-only to prevent privilege escalation.
-      sys_user_permission_set: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
-      sys_user_position: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      // Assignment tables — created and removed inside the organization
+      // boundary the delegated-administration gate enforces (see above);
+      // never edited in place.
+      sys_user_permission_set: { allowRead: true, allowCreate: true, allowEdit: false, allowDelete: true },
+      sys_user_position: { allowRead: true, allowCreate: true, allowEdit: false, allowDelete: true },
       // [ADR-0131 D7] The compliance ledger, WITHOUT the superuser bits: the
       // ledger has no tenant column, so the wildcard's `viewAllRecords` would
       // skip its organization row scope (`sys_audit_log_org`, see
@@ -1463,7 +1471,7 @@ const baseDefaultPermissionSets: PermissionSet[] = [
  * [ADR-0105 D4] Derive the wall-less org-admin variant
  * ({@link ORGANIZATION_ADMIN_NO_BYPASS}) from `organization_admin` by dropping
  * the wildcard `viewAllRecords`/`modifyAllRecords` bits — everything else
- * (object grants, managed-write denies, anti-escalation RBAC read-only rules,
+ * (object grants, managed-write denies, the assignment-table overrides,
  * system permissions, the identity RLS carve-outs) is carried over verbatim.
  *
  * DERIVED, never a second literal: two hand-maintained copies of a

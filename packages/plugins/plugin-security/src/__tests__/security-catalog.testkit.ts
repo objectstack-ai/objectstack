@@ -23,13 +23,14 @@ type Definition = Record<string, unknown>;
 export interface TestSecurityCatalog {
   positions?: readonly Definition[];
   permissions?: readonly Definition[];
+  capabilities?: readonly Definition[];
 }
 
 /** Bind a catalog over these definitions (read afresh per lookup when given a function); returns `engine`. */
 export function bindTestSecurityCatalog<T extends object>(engine: T, catalog: TestSecurityCatalog | (() => TestSecurityCatalog)): T {
   const items = (type: string): readonly Definition[] => {
     const c = typeof catalog === 'function' ? catalog() : catalog;
-    return (type === 'position' ? c.positions : type === 'permission' ? c.permissions : undefined) ?? [];
+    return (type === 'position' ? c.positions : type === 'permission' ? c.permissions : type === 'capability' ? c.capabilities : undefined) ?? [];
   };
   bindSecurityCatalogReader(engine, createSecurityCatalogReader({
     registry: { getItem: (type, name) => items(type).find((d) => d.name === name), listItems: items, isPackageDisabled: () => false },
