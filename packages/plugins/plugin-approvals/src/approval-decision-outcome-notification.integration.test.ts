@@ -39,7 +39,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { AutomationEngine } from '@objectstack/service-automation';
+import { AutomationEngine, registerLogicNodes } from '@objectstack/service-automation';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { registerApprovalNode } from './approval-node.js';
@@ -190,6 +190,9 @@ describe('the decision that ends an approval tells its submitter (approval.appro
     for (const u of USERS) await engine.insert('sys_user', u, { context: SYSTEM } as any);
 
     automation = new AutomationEngine(silent);
+    // The ladder's gateway is a `decision` node, one of the built-ins the
+    // automation plugin seeds; a bare engine starts without them.
+    registerLogicNodes(automation, { logger: silent } as any);
     svc = new ApprovalService({
       engine: engine as any,
       clock: { now: () => new Date(now += 1000) },
