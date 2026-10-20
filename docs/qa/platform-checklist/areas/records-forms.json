@@ -1051,7 +1051,7 @@
           "revision": 8,
           "date": "2026-10-20",
           "change": "automated.ref, acceptance[2].verify and acceptance[3].verify narrowed, and automated.stale removed — the seat ruling 6281811723 (on #24723) and round 8's finding (i) for wave anchor #24579 (18.0 sweep; round 8's report 6281776167). Tier 1 run #24598 at the sweep's console pin 4016370af3c9 ran grid-file-upload.spec.ts red as a stale spec (cause from QA run #24572). Even green it asserts only the receipt the outgoing /api/v1/batch carries and never re-reads the line or fetches the file, so it scores no clause here: it is dropped from the ref and named there, and the stale record, which named only it, goes with it. grid-parent-rules.spec.ts asserts that Qty and Unit Price lock at paid and unlock at draft, and never the Product cell that the clause's 'three cells' include (#24598 scored acceptance[2] pass on it): acceptance[2].verify and the ref now say so. QA run #24616 drove acceptance[1], [3] and [4] by hand. Both specs are byte-identical at 4016370af3c9 and at the shipped pin 12dc7b47c340. No clause changed",
-          "ref": "#PENDING-24579R9"
+          "ref": "#24752"
         }
       ]
     },
@@ -1302,7 +1302,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "acceptance[0].verify and automated.ref narrowed to what master-detail.spec.ts asserts — round 8's finding (iii) for wave anchor #24579 (18.0 sweep; round 8's report 6281776167, carried by the seat's ACCEPT 6281811723). The spec drives showcase_project_workspace ('New Project + Tasks') with one task child staged through the per-row form, not the invoice grid with two lines that steps[1] and [2] drive. Tier 1 run #24598 at the sweep's console pin 4016370af3c9 ran it 2/2 green and scored acceptance[0] pass on it. The clause names no carrier (master and children in one atomic batch, the child ops referencing the parent), and the spec's two tests assert exactly that on their own carrier: the first batch the save sends opens with the populated parent op and carries the child op whose project is {$ref: 0}. So, under round 6's theme-B rule, a pin that asserts a full clause is kept and narrowed, not dropped. The spec is byte-identical at 4016370af3c9 and at the shipped pin 12dc7b47c340. No clause changed",
-          "ref": "#PENDING-24579R9"
+          "ref": "#24752"
         }
       ]
     },
@@ -3817,7 +3817,7 @@
           "revision": 2,
           "date": "2026-10-20",
           "change": "acceptance[7].verify corrected — round 8's carried finding for wave anchor #24579 (18.0 sweep; round 8's report 6281776167, out_of_scope_findings[1], carried by the seat's ACCEPT 6281811723). It cited objectui e2e/live/summary-rollup.spec.ts for showcase_invoice.total, which that spec never reads: it rolls showcase_task up into showcase_project (byte-identical at the sweep's console pin 4016370af3c9 and at the shipped pin 12dc7b47c340). Tier 1 run #24598 scored acceptance[7] not-run (its summary half unpinned), and round 1's QA run #24572 scored the item pass on its API pins. The verify now says that no pin reads invoice.total. The spec was never in automated.ref, which names API pins only, so the ref is unchanged. Beside it, fixtures.knownGaps[0]'s line citation 'createColumn ~7354-7368', a tilde range no gate reads, became the sql-driver.ts#createColumn anchor that its own text already named. No clause changed",
-          "ref": "#PENDING-24579R9"
+          "ref": "#24752"
         }
       ]
     },
@@ -4274,7 +4274,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[2].verify cited line 141 of memory-unique-constraint.test.ts and acceptance[3].verify lines 627-631 of memory-driver.ts in the comma-range spelling (authored in 45397edf53 as the lists 135 and 141, and 611 and 627-631). Lines 135 and 141 are unchanged at this base: the cases 'update onto a taken value is refused and the row keeps its old value' and 'a row does not collide with ITSELF — an update that leaves the unique field alone passes', which acceptance[2].verify now names. Lines 627-631 held findOne even at that commit; the comment the verify quotes, 'Prepare and CHECK every row before mutating any of them', sat in updateMany then and does now, so acceptance[3].verify anchors memory-driver.ts#updateMany. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
-          "ref": "#PENDING-24579R9"
+          "ref": "#24752"
         }
       ]
     },
@@ -4388,7 +4388,7 @@
           "revision": 2,
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[2] cited line 184 of the showcase invoice.object.ts in the comma-range spelling (authored in 45397edf53 as the list 69-71 and 184). At that commit 184 was deleteBehavior 'cascade' on the invoice line's invoice master_detail, and 69-71 the invoice's required account lookup, the required-FK escalation arm fixtures.requires names; at this base both have moved. source[2] now anchors invoice.object.ts#InvoiceLine and #Invoice. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
-          "ref": "#PENDING-24579R9"
+          "ref": "#24752"
         }
       ]
     },
@@ -4594,7 +4594,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.requires[1] and source[3] cited line 60 of the showcase task.object.ts in the comma-range spelling (authored in 45397edf53 as the list 49 and 60). At that commit 49 and 60 were the trackHistory flags of the task's status and priority fields; at this base both have moved by a line. Both citations now anchor task.object.ts#Task and name the two fields. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
-          "ref": "#PENDING-24579R9"
+          "ref": "#24752"
         }
       ]
     },

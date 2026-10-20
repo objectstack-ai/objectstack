@@ -2257,7 +2257,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[0] cited lines 176-185 of objectui apps/console AppContent.tsx in the comma-range spelling (authored in 45397edf53 as the list 35-41 and 176-185). At the objectui pin that commit shipped, 9602dc820450, those lines were the app-scoped docs route (DocsLayout with its index, :slug and :slug/:name children); at the shipped pin 12dc7b47c340 that route sits further down in the same file's systemRoutes, which source[0] now names. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
-          "ref": "#PENDING-24579R9"
+          "ref": "#24752"
         }
       ]
     },

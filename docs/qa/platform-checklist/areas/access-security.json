@@ -3160,7 +3160,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[2].clause cited lines 516-521 of read-audit.ts in the comma-range spelling, the second range of the two-range list 45397edf53 authored (55-75 and 516-521). At that commit lines 516-521 were the audit row's old_value / new_value nulls; at this base they hold a docblock, and the nulls sit in the buildRow closure of installReadAuditWriter. The clause now anchors read-audit.ts#buildRow and names the header section that gives the reason in prose. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
-          "ref": "#PENDING-24579R9"
+          "ref": "#24752"
         }
       ]
     },
@@ -3283,7 +3283,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.knownGaps[1], acceptance[1].verify, acceptance[2].verify and source[1] cited objectui SharedRecordPage.tsx by the line ranges 190-234 (twice), 143-176 and 178-186 in the comma-range spelling (authored in 45397edf53). At the objectui pin that commit shipped, 9602dc820450, those lines were the ai_conversations branch, the password form and the error state; at the shipped pin 12dc7b47c340 all three have moved down, below a sign-in gate and a reworked fetchResolve, and the password branch now reads gate === 'password'. Each now names its branch of the SharedRecordPage component. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
-          "ref": "#PENDING-24579R9"
+          "ref": "#24752"
         }
       ]
     },
