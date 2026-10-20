@@ -274,20 +274,21 @@ describe('addRecord — the ADR-0087 ledger rows', () => {
 
 describe('addRecord — the Studio forms offer exactly the two live keys', () => {
   type Entry = { field?: string; fields?: Entry[] };
+  /** Every entry named `field`, at any depth (the page form nests it under `interfaceConfig`). */
+  const findAll = (entries: Entry[], field: string): Entry[] =>
+    entries.flatMap((e) => [...(e.field === field ? [e] : []), ...findAll(e.fields ?? [], field)]);
   const find = (form: unknown, field: string): Entry | undefined => {
-    for (const section of (form as { sections: Array<{ fields: Entry[] }> }).sections) {
-      const hit = section.fields.find((f) => f.field === field);
-      if (hit) return hit;
-    }
-    return undefined;
+    const hits = (form as { sections: Array<{ fields: Entry[] }> }).sections.flatMap((s) => findAll(s.fields, field));
+    expect(hits, `exactly one \`${field}\` entry`).toHaveLength(1);
+    return hits[0];
   };
 
   it.each([
-    ['view form', viewForm, 'addRecord'],
-    ['page form', pageForm, 'interfaceConfig.addRecord'],
-  ])('the %s', (_, form, field) => {
-    const entry = find(form, field) ?? find(form, 'addRecord');
-    expect(entry, `${field} is offered`).toBeDefined();
+    ['view form', viewForm],
+    ['page form', pageForm],
+  ])('the %s', (_, form) => {
+    const entry = find(form, 'addRecord');
+    expect(entry, 'addRecord is offered').toBeDefined();
     expect(entry!.fields?.map((f) => f.field)).toEqual(['enabled', 'position']);
   });
 });
