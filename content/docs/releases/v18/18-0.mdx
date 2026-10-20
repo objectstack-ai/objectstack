@@ -268,7 +268,9 @@ are refused at author time, so `os validate` finds them before a deploy: a
 schema refusal throws `STACK_SCHEMA_INVALID` (422) from `defineStack`, a
 cross-reference one `STACK_CROSS_REFERENCE_INVALID` (422), and an author-time
 rule fails `os validate` with exit `1`. The metadata save door (Studio,
-`/api/v1/meta`, MCP) refuses the same shapes on a save.
+`/api/v1/meta`, MCP) refuses the same shapes on a save: in the walk,
+`PUT /api/v1/meta/page/NAME` answered `422 INVALID_METADATA` for an undeclared
+`page:header` prop and for `kind: 'jsx'`.
 
 ##### Flows: one expression dialect per slot
 
@@ -294,25 +296,29 @@ rule fails `os validate` with exit `1`. The metadata save door (Studio,
   (`'{current_user_id}'`, `'{today}'`) stays as it is. The refusal names the CEL
   spelling of each token (`0e9e7b7`, `6a06e3b`, `d85615d`, `615c696`,
   `111ffff`, `9fdb127`, `f66fdc7`, `12b9daf`, `968acc8`). *Probed on 18.0.0
-  (`os validate`).*
+  (`os validate`) at each of those positions but `sourceId`, `templateData`,
+  `defaults` and `recordId`.*
 - **Text slots take `{{ }}` holes.** A `notify` node's `title`, `message` and
   `actionUrl`, a `screen` node's `title` and `description`, a refusing `end`
   node's `message`, an `http` node's `url` and `headers` values, and the
   translated screen heading `flows.FLOW.screens.NODE.title`: `{x}` → `{{ x }}`.
   Compute anything else into a variable first, and a run-user value too —
   `{{ $User.Id }}` is refused (`2b61f2d`, `3073b72`, `968acc8`, `d973c34`).
-  *Probed on 18.0.0 (`os validate`).*
+  *Probed on 18.0.0 (`os validate`) on `notify` `title`, `message` and
+  `actionUrl`, `screen` `title` and `http` `url`.*
 - **CEL reads only the roots the flow binds.** `user.id`, `ctx.user.id`,
   `os.user.id` → `current_user.id`. `record` is bound only on a flow an
   entrance hands a record (a record trigger, a `type: 'flow'` action, an inbound
   hook, …): elsewhere read the variable by its name or as `vars.NAME`. A
-  condition is CEL: `'{amount} > 100'` → `'amount > 100'` (`5fb1746`,
-  `0f77ff5`, `243dd3c`, `7958bdf`). *Probed on 18.0.0 (`os validate`).*
+  condition is CEL: `'{amount} > 100'` → `'amount > 100'` — the old spelling is
+  refused as `invalid CEL predicate` (`5fb1746`, `0f77ff5`, `243dd3c`,
+  `7958bdf`). *Probed on 18.0.0 (`os validate`).*
 - **No `$` names of your own.** An `outputVariable`, an `errorVariable` other
   than the default `$error`, an `iteratorVariable` / `indexVariable`, an
   `idVariable`, a screen field's `name` and a declared variable's `name` drop
   the `$`, and every read of them follows (`3e72f93`, `9f5eca5`). *Probed on
-  18.0.0 (`defineStack`).*
+  18.0.0 (`defineStack`) for `outputVariable`, `errorVariable` and
+  `iteratorVariable`.*
 - **Node config is held to its executor's contract.** An undeclared key, or a
   value of the wrong type, is refused at its location: `fieldValues` → `fields`;
   `bulk` / `all` / `multiple` → `multi: true`; a screen field's `visibleIf` →
@@ -320,7 +326,7 @@ rule fails `os validate` with exit `1`. The metadata save door (Studio,
   node's `outputVariable`; a `subflow` `config.timeoutMs` moves onto the node;
   `limit: '10'` → `limit: 10`; a `{token}` in a literal key (`limit: '{x}'`) →
   the literal (`2f70c22`, `78f841b`, `ac9f8bd`, `ca0bdbc`). *Probed on 18.0.0
-  (`defineStack`).*
+  (`defineStack`), each.*
 - **The retired aliases are refused with their rename.** A CRUD node's
   `config.object` → `objectName` and `config.filters` → `filter`; a `notify`
   node's `to` / `subject` / `body` / `url` → `recipients` / `title` / `message`
@@ -331,7 +337,8 @@ rule fails `os validate` with exit `1`. The metadata save door (Studio,
   (`duration` → `timerDuration`, `signal` → `signalName`, `timeoutMs` →
   `timerDuration` as a string) and a `connector_action` node's →
   `connectorConfig`. `os migrate meta --from 16 --write` writes the ones it can
-  prove (`5fd2c76`, `f901746`, `d176b0a`). *Probed on 18.0.0 (`defineStack`).*
+  prove (`5fd2c76`, `f901746`, `d176b0a`). *Probed on 18.0.0 (`defineStack`),
+  each but the nested `source` pair.*
 - **An edge names two nodes of its graph, once.** An edge whose `source` or
   `target` is no node, or that repeats an earlier edge, is refused: delete it or
   re-point it (`db4c45b`). *Probed on 18.0.0 (`defineStack`).*
@@ -411,8 +418,8 @@ rule fails `os validate` with exit `1`. The metadata save door (Studio,
   on 18.0.0 (`os validate`).*
 - **A select option's `visibleWhen` reads what the server binds:** `record`,
   `previous` and the acting user (`current_user`, and its aliases `user`, `ctx`,
-  `os`). `parent`, `ctx.locale`, `os.env`, `current_user.roles` (now
-  `positions`) and `current_user.email` are refused, and a gate the server
+  `os`). `parent`, `ctx.locale`, `os.env` and `current_user.email` are
+  refused, and a gate the server
   cannot evaluate refuses the write instead of admitting the value (`bb4f5cc`,
   `b1f7a7a`, `46692c1`, `440bed6`). *Probed on 18.0.0 (`os validate`).*
 - **A relationship does not target a stored-metadata table** (`sys_metadata` and
@@ -421,7 +428,8 @@ rule fails `os validate` with exit `1`. The metadata save door (Studio,
 - **One name, one entry.** Two entries with one name in one of 27 stack
   collections, and two `functions` with one `name`, are refused, naming both
   (`1959aac`, `147a0d1`). `defineSeed()` refuses a record key that is no column
-  of the object (`9ad3d24`). *Probed on 18.0.0.*
+  of the object (`9ad3d24`). *Probed on 18.0.0 for `objects`, `functions` and
+  `defineSeed`.*
 
 ##### Positions, permission sets and sharing rules
 
@@ -453,7 +461,10 @@ rule fails `os validate` with exit `1`. The metadata save door (Studio,
 ##### Datasources, email templates, webhooks and inbound hooks
 
 - **`driver: 'mongo'` → `'mongodb'`,** and `OS_DATABASE_DRIVER=mongo` no longer
-  selects a driver (`bc0538a`). *Probed on 18.0.0 (`defineStack`).*
+  selects a driver: `os serve` exits `1` with
+  `✗ Unsupported driver "mongo" (OS_DATABASE_DRIVER / --database-driver).`
+  (`bc0538a`). *Probed on 18.0.0 (`defineStack`, and `os serve` in the walk's
+  app).*
 - **Email templates.** Delete `category` and `isSystem` (`ec7f7f8`). Templates
   resolve from the registry: declare them in code — an organization can no
   longer create or edit a `sys_email_template` row, and the built-in seed is
@@ -602,7 +613,8 @@ code is in the 18.0.0 packages while their entries will first appear in
   (`deploymentWide`, `@objectstack/plugin-sharing`).*
 
 The other six are fixes with no edit for an upgrader, among them
-`invite-member`'s refusal of an unknown role with `code: 'ROLE_NOT_FOUND'`
+`invite-member`'s refusal of a membership grade outside its vocabulary with
+`code: 'ROLE_NOT_FOUND'`
 (#24846, in the 18.0.0 `@objectstack/plugin-auth`).
 
 **Not in 18.0.0.** Twelve changesets belong to commits after the version
