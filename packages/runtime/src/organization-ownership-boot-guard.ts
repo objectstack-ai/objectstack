@@ -42,9 +42,9 @@ import { resolveRuntimeVersion } from './runtime-version.js';
  *    sync stats — never the sum over every driver: a `telemetry` sibling left
  *    over from an earlier boot does not make a fresh primary look old, and a
  *    fresh sibling does not make an old primary look new.
- * 3. No row on any other store: a database an earlier release created (every
- *    18.0 database and every v17 one) — refused until the ceremony has run on
- *    it. The tables still carrying a retired `organization_id` (an object that
+ * 3. No row on any other store: a database with no birth marker, which 17.x
+ *    and the 18.0 pre-releases (18.0.0-next.*) created — refused until the
+ *    ceremony has run on it. The tables still carrying a retired `organization_id` (an object that
  *    declares no organization column — `systemFields.tenant: false`,
  *    `systemFields: false` or `tenancy: { enabled: false }` — whose physical
  *    table still has one) are named when there are any.
@@ -264,9 +264,9 @@ export type OrganizationOwnershipMarkerState = 'absent' | 'unverified' | 'unread
 
 /**
  * The refusal text: what was found, that the server refuses to start, and the
- * command. It names no release line to stay on: a database an 18.0 install
- * created is refused here exactly as a v17 one is, and both take the same
- * ceremony.
+ * command. It names no release line to stay on: a database an 18.0
+ * pre-release (18.0.0-next.*) created is refused here exactly as a v17 one is,
+ * and both take the same ceremony.
  */
 export function organizationOwnershipRefusalMessage(
   tables: readonly string[],
@@ -291,8 +291,8 @@ export function organizationOwnershipRefusalMessage(
   }
   if (marker === 'absent') {
     return (
-      'This database carries no organization-ownership marker: an earlier release created it (a v17 install, or an ' +
-      '18.0 one), and this release serves only a database it created itself or one its ownership ceremony upgraded.' +
+      'This database carries no organization-ownership marker: 17.x or an 18.0 pre-release (18.0.0-next.*) ' +
+      'created it, and this release serves only a database it created itself or one its ownership ceremony upgraded.' +
       `${columns} The server refuses to start rather than serve it in a shape it was never migrated to. ${run}`
     );
   }

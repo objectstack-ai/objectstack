@@ -10,7 +10,7 @@
  *  1. ⭐ R1: a fresh remote database boots, the guard writing its birth marker,
  *     and the next boot over it boots on that marker;
  *  2. ⭐ a remote database an earlier boot created without the guard (an 18.0
- *     install's: tables present, no marker) is refused, naming the ceremony.
+ *     pre-release install's: tables present, no marker) is refused, naming the ceremony.
  *
  * The remote transport talks to a SQLite file through `@libsql/client`, the
  * double the driver's own remote-face pins use (`turso-remote-*.test.ts`).
@@ -103,7 +103,7 @@ describe('[ADR-0131 D10 item 5] the boot guard on the Turso remote face', () => 
     expect(markerRows(file)).toHaveLength(1);
   }, 60_000);
 
-  it('⭐ a remote database an earlier boot created without the guard (an 18.0 install: no marker) is refused, naming the ceremony', async () => {
+  it('⭐ a remote database an earlier boot created without the guard (an 18.0 pre-release install: no marker) is refused, naming the ceremony', async () => {
     const file = databaseFile();
     const db = new DatabaseSync(file);
     db.exec('CREATE TABLE sys_migration (id TEXT PRIMARY KEY, last_run_at TEXT, verified_at TEXT, applied_at TEXT, blocking INTEGER)');

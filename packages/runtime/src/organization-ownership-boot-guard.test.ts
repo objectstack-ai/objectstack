@@ -8,7 +8,7 @@
  *
  *  - a verified marker at the current generation boots — the ceremony's, or
  *    the BIRTH MARKER the guard writes once on a store created from empty;
- *  - no marker on any other store (a v17 database, an 18.0 one) is refused,
+ *  - no marker on any other store (a v17 database, an 18.0 pre-release one) is refused,
  *    naming the ceremony and the tables still carrying a retired column;
  *  - a verified marker below the current generation (a shorter ceremony's) is
  *    refused, naming the ceremony again;
@@ -92,7 +92,7 @@ function v17Shape(): void {
   `);
 }
 
-/** What an 18.0 install left, or what the ceremony's column-drops step leaves: no table in the v17 shape. */
+/** What an 18.0 pre-release install left, or what the ceremony's column-drops step leaves: no table in the v17 shape. */
 function columnlessShape(): void {
   db.exec(`
     CREATE TABLE sys_job (id TEXT PRIMARY KEY, status TEXT);
@@ -141,11 +141,12 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling �
     expect(isOrganizationOwnershipBootRefusal(err)).toBe(true);
     expect(err.code).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
     expect(err.tables).toEqual(['sys_api_key', 'sys_job', 'sys_metadata']);
-    expect(err.message).toMatch(/carries no organization-ownership marker: an earlier release created it \(a v17 install, or an 18\.0 one\)/);
+    expect(err.message).toMatch(/carries no organization-ownership marker: 17\.x or an 18\.0 pre-release \(18\.0\.0-next\.\*\) created it/);
     expect(err.message).toContain('sys_api_key, sys_job, sys_metadata still carry a physical organization_id column its object no longer declares.');
     expect(err.message).toMatch(/os migrate organization-ownership --apply --plan-file PLAN --backup-taken/);
-    // An 18.0 database takes the same ceremony: the text names no release line to stay on.
-    expect(err.message).not.toMatch(/17\.x|keep this one|does not upgrade/);
+    // An 18.0 pre-release database takes the same ceremony: the text names no release line to stay on,
+    // and never says every 18.0 database (18.0.0 itself writes the birth marker).
+    expect(err.message).not.toMatch(/17\.x release|keep this one|does not upgrade|every 18\.0/);
   });
 
   it('a development boot names the ceremony with --dev, so it boots the way the refused boot did', async () => {
@@ -174,7 +175,7 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5; the birth marker, ruling �
     expect(markerRow()).toEqual(row);
   });
 
-  it('⭐ an 18.0 database — no retired column, no marker, a store this boot found — is refused, naming the ceremony', async () => {
+  it('⭐ an 18.0 pre-release database — no retired column, no marker, a store this boot found — is refused, naming the ceremony', async () => {
     columnlessShape();
     const err = await refusalOf(() => assertOrganizationOwnershipMigrated(engine({ stats: FOUND })));
     expect(err.code).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);

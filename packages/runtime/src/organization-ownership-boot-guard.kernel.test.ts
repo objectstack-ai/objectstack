@@ -15,7 +15,7 @@
  *  2. the same database with the ceremony's marker verified boots;
  *  3. a fresh database boots, the guard writing its birth marker, and boots
  *     again on that marker; a database an earlier boot created WITHOUT the
- *     guard (an 18.0 install's: no retired column, no marker) is refused;
+ *     guard (an 18.0 pre-release install's: no retired column, no marker) is refused;
  *  4. a database the ceremony ran on to the end (no column left) whose marker
  *     is NOT verified — its post-check found rows still without their
  *     organization — is refused, naming the re-run;
@@ -189,7 +189,7 @@ describe('the v18 boot refusal on a real kernel (ADR-0131 D10 item 5)', () => {
     expect(sql(file, `SELECT id FROM sys_migration WHERE id = '${MARKER}'`)).toHaveLength(1);
   });
 
-  it('⭐ a database an earlier boot created without the guard (an 18.0 install: no retired column, no marker) is refused', async () => {
+  it('⭐ a database an earlier boot created without the guard (an 18.0 pre-release install: no retired column, no marker) is refused', async () => {
     const file = databaseFile();
     const db = new DatabaseSync(file);
     db.exec('CREATE TABLE sys_migration (id TEXT PRIMARY KEY, last_run_at TEXT, verified_at TEXT, applied_at TEXT, blocking INTEGER)');

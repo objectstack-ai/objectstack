@@ -1871,7 +1871,7 @@
     },
     {
       "id": "cli.organization-ownership-ceremony",
-      "title": "`os migrate organization-ownership` upgrades a v17 or an 18.0 database (18.x): a bare run writes the reviewed plan and changes nothing; `--apply --plan-file PLAN --backup-taken` runs every step — attribution through the moves, the declared webhook and sharing-rule settlements, the column drops and NOT NULL — and certifies the marker at this release's ownership shape generation; the served boot refuses an uncertified database, naming the command, and boots a certified one; `os migrate apply --allow-destructive` still withholds every organization_id drop the ceremony owns, and `os migrate comment-reactions --apply` stays pinned",
+      "title": "`os migrate organization-ownership` upgrades a database 17.x or an 18.0 pre-release (18.0.0-next.*) created (18.x): a bare run writes the reviewed plan and changes nothing; `--apply --plan-file PLAN --backup-taken` runs every step — attribution through the moves, the declared webhook and sharing-rule settlements, the column drops and NOT NULL — and certifies the marker at this release's ownership shape generation; the served boot refuses an uncertified database, naming the command, and boots a certified one; `os migrate apply --allow-destructive` still withholds every organization_id drop the ceremony owns, and `os migrate comment-reactions --apply` stays pinned",
       "since": "v18",
       "status": "active",
       "revision": 3,
@@ -1917,7 +1917,7 @@
           "evidence": "the report excerpt and the marker row"
         },
         {
-          "clause": "the served boot refuses the unmigrated copy with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED, naming `os migrate organization-ownership` and no 17.x release line, and boots the migrated copy",
+          "clause": "the served boot refuses the unmigrated copy with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED, naming `os migrate organization-ownership` and no 17.x release to stay on, and boots the migrated copy",
           "oracle": "build",
           "verify": "the refused boot's error line + the migrated boot's ready line",
           "evidence": "both lines"

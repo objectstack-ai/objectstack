@@ -138,7 +138,7 @@ describe(`[#24522] an 18.0 database (fixture from ${manifest.ref} @ ${manifest.s
     const refusal = refusalIn(refusedError) as { message?: string } | undefined;
     expect(refusal, `the boot was not refused by the ownership guard: ${String((refusedError as Error)?.stack ?? refusedError)}`).toBeDefined();
     expect(refusal!.message).toContain('os migrate organization-ownership');
-    expect(refusal!.message).not.toMatch(/17\.x/);
+    expect(refusal!.message).not.toMatch(/on a 17\.x release|stay on 17|every 18\.0/);
     const db = new DatabaseSync(file, { readOnly: true });
     try {
       expect(db.prepare('SELECT id FROM sys_migration WHERE id = ?').all(MARKER)).toEqual([]);

@@ -207,7 +207,7 @@ export const ORGANIZATION_OWNERSHIP_MIGRATION_ID = 'adr-0131-organization-owners
  * ceremony certified is never taken for one this release's ceremony did.
  *
  * Generations:
- *  - `1` — the ceremony that upgrades v17 and 18.0 databases: the declared
+ *  - `1` — the ceremony that upgrades 17.x and 18.0 pre-release databases: the declared
  *    webhook settlement, the two sibling moves, the declared sharing-rule
  *    copies, the `sys_secret` / `sys_flow_credential` column drops and the
  *    `organization_id` NOT NULL step.
