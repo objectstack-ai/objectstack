@@ -1063,7 +1063,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "fixtures.requires[0], knownGaps[0], steps[1] and acceptance[0] (verify, evidence) read the reset mail from sys_identity_email — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12): sys_email held 0 rows and the mail was in sys_identity_email. Governing text ADR-0131 D7 (identity mail is deployment-level); read at base 307ce4c4b4 in auth-manager.ts (the auth.password_reset send passes identityMail: true) and email-service.ts (emailLogObjectOf). Not loosened: the clause still requires a real mail carrying a working tokened link",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },

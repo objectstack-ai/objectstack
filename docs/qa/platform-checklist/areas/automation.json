@@ -1532,7 +1532,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "steps[5]'s INVALID_SIGNAL body and the 404 row's code — checklist-accuracy findings of QA run #24779 (wave anchor #24579 round 12). {\"output\":{\"$x\":1}} alone answers 400 INVALID_SCREEN_INPUT on the wizard, whose screen requires new_assignee, because refuseInvalidScreenInput runs before applyResumeSignal (engine.ts at base 307ce4c4b4); the body now satisfies the input too. The 404 row answers RESOURCE_NOT_FOUND: flow-dispatch-status.ts names no code for it, and the envelope takes the spec's HttpStatusErrorCodeMap default. steps[2] and acceptance[0] (clause, verify) state it. No other clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },
@@ -2143,7 +2143,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause — checklist-accuracy finding C8 of QA run #24786 (wave anchor #24579 round 12, round 6's theme-B rule): the ref listed nine spec and lint unit pins with no clause qualifier, though acceptance[1]–[3] need the CLI or the PUT door. The pins are acceptance[0]'s own subject, so `automated` stays, narrowed to it. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },

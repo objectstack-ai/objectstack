@@ -115,7 +115,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "automated.ref narrowed to the one clause its pin asserts whole — checklist-accuracy finding of QA run #24779 (18.0 sweep round 3, 580fd4ed; wave anchor #24579 round 12, round 6's theme-B rule). Re-read at base 307ce4c4b4: the dogfood pin's two cases assert negative[0] whole and halves of acceptance[0]–[2] (the mcp variant; the other two variants' state, not their origin), so no acceptance clause is pin-scored and the ref now says so. `automated` stays, with negative[0]. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },
@@ -212,7 +212,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "steps[6] names the view body its per-item publish needs — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12): a flat { type, columns } body answers 422 unrecognized_keys; the run published a view item carrying viewKind and config. Read at base 307ce4c4b4 against ViewItemSchema (view.zod.ts), which discriminates on viewKind and requires an OBJECT.view name. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },

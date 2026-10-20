@@ -175,7 +175,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "acceptance[3]'s example corrected — checklist-accuracy finding B3 of QA run #24787 (wave anchor #24579 round 12): the showcase holds no `due_date == today()`; at base 307ce4c4b4 its one today() use is predicate-matrix.action.ts's `record.f_date < today()`. The over-fire guard is unchanged: the untouched showcase still builds with exit 0",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },
@@ -267,7 +267,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "steps[1] locates the filter advisory by what the report prints — checklist-accuracy finding B2 of QA run #24787 (wave anchor #24579 round 12): the human output of `os migrate meta --from 16` prints the headline `⚠ [protocol 17] data.filter $regex / $options …`, never the id, which is only in `--json` todos[].id (printNotice, migrate/meta.ts at base 307ce4c4b4). No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },
@@ -1538,7 +1538,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "steps[0] and acceptance[3]'s clause name the registry's prefixes for what they are — checklist-accuracy finding B1 of QA run #24787 (wave anchor #24579 round 12): the prefixes are 17 and 18 and the runtime implements protocol 18, so they are the previous and the current major, and 'staged for the NEXT major' no longer describes prefix 18. Re-measured at base 307ce4c4b4: 224 retired-defs entries (53 at 17, 171 at 18), PROTOCOL_VERSION '18.0.0'. The clause still requires both prefixes",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },
@@ -2679,7 +2679,7 @@
           "revision": 2,
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause — checklist-accuracy finding B4 of QA run #24787 (wave anchor #24579 round 12, round 6's theme-B rule): the ref named one file with no clause qualifier and does not cover acceptance[2] or [3]. Read at base 307ce4c4b4, narrower than the record's '§E covers a0, a1 and a4': acceptance[1] rests on §B's routes case, acceptance[0] on §E for one value per key (not nameTransform 'plural'), and acceptance[4] on §E's empty-block case only, the routes strip being unpinned. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },

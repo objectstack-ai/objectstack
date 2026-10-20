@@ -1161,7 +1161,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "steps[0] spells out its boot — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12): the runner read 'boot showcase isolated' as the isolated tenancy posture, which no clause needs (all six passed on stock single). The ledger's 'isolated' boot is dogfood §0's own port and DB; the step now says that, and names the stock single posture. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },
@@ -3875,7 +3875,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "knownGaps[0]'s prerequisite sentence says os dev — round 11's carried finding 3 (wave anchor #24579 round 12; report 6285435593 on PR #24801), from QA run #24783's F2: a bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md, the serve.ts AuthPlugin-skipped branch at base 307ce4c4b4). The same sentence PR #24801 wrote into four other walled items, byte for byte. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },
@@ -3979,7 +3979,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "knownGaps[0]'s prerequisite sentence says os dev — round 11's carried finding 3 (wave anchor #24579 round 12; report 6285435593 on PR #24801), from QA run #24783's F2: a bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md, the serve.ts AuthPlugin-skipped branch at base 307ce4c4b4). The same sentence PR #24801 wrote into four other walled items, byte for byte. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },

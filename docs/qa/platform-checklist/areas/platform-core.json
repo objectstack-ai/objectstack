@@ -1305,7 +1305,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "knownGaps[2] is new — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12): no pin covers acceptance[2]'s 'unknown future audience shape → deny' branch. Read at base 307ce4c4b4: book.test.ts's audienceAllows cases drive the three declared shapes only. The item carries no automated.ref, so there is no ref to narrow. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },
@@ -1978,7 +1978,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "fixtures.requires[1], steps[2], steps[6]–[7] and acceptance[4].verify — checklist-accuracy findings of QA run #24779 (wave anchor #24579 round 12). The listing serves withSampleData, derived per request from the caller's rows (#21775), never sampleDataPurged, which lives in the ledger file (local-manifest-source.ts, marketplace-install-local-plugin.ts handleList at base 307ce4c4b4). The artifact step now says what a runner needs: the existing examples/app-crm/dist/objectstack.json the tree's build writes, rebuilt only when absent. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },
@@ -2813,7 +2813,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "knownGaps[2] is new — QA run #24779's observation on acceptance[3] (wave anchor #24579 round 12): after insert mode duplicated a natural key, upsert bound the newer duplicate and left the original unconverged. Read at base 307ce4c4b4 in seed-loader.ts loadExistingRecords, which keys an unordered find by externalId (last row wins). No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round12"
+          "ref": "#24824"
         }
       ]
     },
