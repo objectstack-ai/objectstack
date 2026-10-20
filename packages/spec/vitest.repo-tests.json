@@ -67,6 +67,7 @@
   "src/ui/page-header-show-star-retirement.test.ts",
   "src/ui/view-data-api-provider-retirement.test.ts",
   "src/ui/view-item-owner-hidden-retirement.test.ts",
+  "src/ui/view-list-filterable-fields-retirement.test.ts",
   "src/ui/view-list-tabs-retirement.test.ts",
   "src/ui/visibility-alias-keys-retirement.test.ts"
 ]

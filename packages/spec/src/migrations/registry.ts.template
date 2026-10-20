@@ -2163,6 +2163,23 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'keep. Its D3 record is the semantic entry `hook-body-stored-metadata-target-refused`.',
   },
   {
+    id: 'list-view-filterable-fields-retired',
+    order: 105,
+    text:
+      'It also retires the list view\'s `filterableFields` (ADR-0049 enforce-or-remove; maintainer '
+      + 'ruling 2026-10-19, letter C). The key was declared as a shorthand for `userFilters.fields`, the '
+      + 'quick-filter bar, while its one renderer read it as a whitelist of the fields the Filter '
+      + 'panel offers, so one key carried two meanings and the declared one was never delivered. '
+      + 'The ruling is that the platform carries no per-view Filter-panel whitelist, so no key '
+      + 'replaces it: a curated end-user filter bar is `userFilters`, and the Filter panel offers '
+      + 'every field the user may read, minus a field the object marks `hidden`. The key is a '
+      + '`retiredKey()` tombstone on the list-view shape. The D2 conversion '
+      + '`view-list-filterable-fields-removed` DROPS it from every list payload in `stack.views[]` '
+      + 'and never rewrites it to `userFilters.fields`, which would keep nothing an author saw; it '
+      + 'is retired from the load path, so authors are refused at parse rather than rewritten. Its '
+      + 'D3 record is the semantic entry `list-view-filterable-fields-retired`.',
+  },
+  {
     id: 'list-view-page-mount-retired',
     order: 27,
     text:
