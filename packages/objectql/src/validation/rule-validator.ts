@@ -524,11 +524,14 @@ export function needsPriorRecord(
  * case and is what lets the engine skip the extra read entirely: the N+1 bound
  * is "one hop, only the named fields, only when a rule asks".
  *
- * ## Scope: `script` / `cross_field`, including inside `conditional`
+ * ## Scope: `script` / `cross_field`, and a `conditional`'s `when`, at any depth
  *
- * These are the rules {@link checkPredicate} evaluates, and they are fail-CLOSED
- * (#4649) — the one policy under which a rule that cannot be evaluated refuses
- * the write instead of waving it through. The field-level `requiredWhen` /
+ * These are the predicates {@link checkPredicate} and {@link checkConditional}
+ * evaluate, and they are fail-CLOSED (#4649) — the one policy under which a
+ * rule that cannot be evaluated refuses the write instead of waving it
+ * through. A `when` is collected beside the rules it wraps (#24512): it is
+ * evaluated on the same per-predicate scope, so a `when` reading through a
+ * reference picks its branch on the related row. The field-level `requiredWhen` /
  * `readonlyWhen` / option `visibleWhen` predicates are deliberately NOT
  * collected here: this capability hydrates for a rule whose refusal is the
  * point, and the field level is not hydrated at all — a field predicate that
@@ -557,11 +560,13 @@ export function collectPredicateRelationships(
 
   const visit = (rule: unknown, depth: number): void => {
     if (!rule || typeof rule !== 'object' || depth > 8) return;
-    const r = rule as { type?: unknown; condition?: unknown; then?: unknown; otherwise?: unknown };
+    const r = rule as { type?: unknown; condition?: unknown; when?: unknown; then?: unknown; otherwise?: unknown };
     if (r.type === 'script' || r.type === 'cross_field') addFrom(r.condition);
-    // A `conditional` wraps the rules it guards; its own `when` is evaluated
-    // by a different seam, so only the wrapped rules are collected here.
+    // [#24512] A `conditional`'s own `when` is a predicate `checkConditional`
+    // evaluates on the same hydrated scope `checkPredicate` gives a condition,
+    // so its hops are preloaded too — at every depth, as the wrapped rules are.
     if (r.type === 'conditional') {
+      addFrom(r.when);
       visit(r.then, depth + 1);
       visit(r.otherwise, depth + 1);
     }
@@ -4453,6 +4458,34 @@ function referentialClearRefusal(
   };
 }
 
+/**
+ * [#18682 / #24512] The refusal a predicate gives when
+ * {@link resolveTraversalScope} decides it may not be evaluated: the rule HAS
+ * no verdict, so the write is rejected exactly as an unevaluable predicate's is
+ * (#4649), with the sentence naming the related object and field it could not
+ * read. One builder for both slots that are evaluated on that scope — a
+ * `script` / `cross_field` condition ({@link checkPredicate}) and a
+ * `conditional`'s `when` ({@link checkConditional}) — so the two cannot word
+ * or shape the same refusal differently.
+ */
+function traversalScopeRefusal(
+  ruleName: string,
+  field: string,
+  scope: Extract<TraversalScope, { ok: false }>,
+  what: 'predicate' | 'when-predicate',
+  logger: EvaluateRulesOptions['logger'],
+): FieldValidationError {
+  logger?.warn?.(
+    `Validation rule '${ruleName}' ${what} could not be evaluated (${scope.summary}) — write rejected`,
+  );
+  return {
+    field,
+    code: 'rule_violation',
+    message: `Validation rule '${ruleName}' could not be evaluated (${scope.summary}) — write rejected.${scope.detail}`,
+    constraint: { rule: ruleName, reason: 'unevaluable', fault: scope.summary },
+  };
+}
+
 function checkPredicate(
   rule: PredicateRule,
   record: Record<string, unknown>,
@@ -4471,18 +4504,7 @@ function checkPredicate(
   // (#4649), but says which RELATED object and field it could not read.
   if (typeof expr.source === 'string' && expr.dialect === 'cel') {
     const scope = resolveTraversalScope(record, expr.source, related, fields);
-    if (!scope.ok) {
-      logger?.warn?.(
-        `Validation rule '${rule.name}' predicate could not be evaluated (${scope.summary}) — write rejected`,
-      );
-      return {
-        field,
-        code: 'rule_violation',
-        message:
-          `Validation rule '${rule.name}' could not be evaluated (${scope.summary}) — write rejected.${scope.detail}`,
-        constraint: { rule: rule.name, reason: 'unevaluable', fault: scope.summary },
-      };
-    }
+    if (!scope.ok) return traversalScopeRefusal(rule.name, field, scope, 'predicate', logger);
     record = scope.record;
   }
 
@@ -4649,23 +4671,45 @@ function checkJsonSchema(
  * a pass. The nested rule supplies the violation (field/code/message) when the
  * `when` DOES evaluate; the *outer* conditional's `severity` governs whether
  * either outcome blocks (handled by the caller).
+ *
+ * [#24512] `when` is evaluated on the scope {@link resolveTraversalScope}
+ * decides, exactly as {@link checkPredicate} evaluates a condition: hydrated
+ * with the related rows for the references THIS `when` reads through (the
+ * collector preloads them), or refused with the sentence naming what it could
+ * not read. Before, `when` met the bare foreign key, so `record.account.status`
+ * faulted and every write the rule guarded was refused. The hydrated copy is
+ * this predicate's alone: the branch is handed `ctx` untouched and decides its
+ * own scope, so a branch comparing the bare id keeps seeing the id.
  */
 function checkConditional(
   rule: ConditionalRule,
   ctx: RuleContext,
 ): FieldValidationError | null {
-  const result = ExpressionEngine.evaluate<boolean>(toExpression(rule.when), ruleScope(ctx.merged, ctx.previous));
+  const expr = toExpression(rule.when);
+  let record = ctx.merged;
+  if (typeof expr.source === 'string' && expr.dialect === 'cel') {
+    const scope = resolveTraversalScope(record, expr.source, ctx.related, ctx.fields);
+    if (!scope.ok) return traversalScopeRefusal(rule.name, '_record', scope, 'when-predicate', ctx.logger);
+    record = scope.record;
+  }
+  const result = ExpressionEngine.evaluate<boolean>(expr, ruleScope(record, ctx.previous));
 
   if (!result.ok) {
     ctx.logger?.warn?.(
       `Validation rule '${rule.name}' when-predicate failed to evaluate (${result.error.kind}: ${result.error.message}) — write rejected: a rule that cannot be evaluated fails closed, it is never skipped`,
     );
     const nullRead = nullPreviousReadDetail(result.error, rule.when, ctx.previous, ctx.fields, 'when-predicate');
-    return unevaluableRuleError(
+    const unevaluable = unevaluableRuleError(
       rule.name, '_record', result.error, 'when-predicate',
       nullRead !== undefined ? { prose: `Validation rule '${rule.name}'`, detail: nullRead } : undefined,
       declaredColumnRead(ctx.fields, celSourceOfPredicate(rule.when)),
     );
+    // [#20006] Same verdict; on a delete's reference cleanup, a text that names
+    // it — the `when` reads through a reference as a condition does.
+    const onCleanup = expr.dialect === 'cel'
+      ? referentialClearRefusal(rule.name, expr, unevaluable, record, ctx.previous, ctx.related, ctx.fields)
+      : null;
+    return onCleanup ?? unevaluable;
   }
 
   const branch = result.value === true ? rule.then : rule.otherwise;

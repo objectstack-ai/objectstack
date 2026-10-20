@@ -20,6 +20,10 @@ import {
   isTenancyDisabled,
   referenceTargetOf,
   resolveInjectedSystemColumns,
+  // [#24624] The ONE declaration of which field types the engine masks on read
+  // (and which `managedBy` buckets exempt them), and the mask itself (ADR-0100).
+  isMaskedOnReadFieldType,
+  SECRET_MASK,
 } from '@objectstack/spec/data';
 import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { resolveSeedRecord } from '@objectstack/formula';
@@ -494,6 +498,44 @@ function temporalFieldKinds(definition: unknown): ReadonlyMap<string, TemporalCo
   return kinds;
 }
 
+/**
+ * [#24624] Every field whose stored value the engine's read path never hands
+ * back — the fields a replay cannot compare by value (see
+ * {@link SeedLoaderService.isNoOpReplay}).
+ *
+ * Asked of the ONE declaration of which field types are masked on read and
+ * which `managedBy` buckets exempt them (`isMaskedOnReadFieldType`,
+ * `@objectstack/spec/data`, ADR-0100), the predicate the engine's own
+ * `collectMaskedReadFields` asks, so the loader and the mask cannot disagree
+ * about a type or an exemption. That collector itself is out of reach here:
+ * `@objectstack/objectql` depends on this package. A definition the loader
+ * cannot resolve declares none, and its fields keep the ordinary comparison.
+ */
+function maskedOnReadFields(definition: unknown): ReadonlySet<string> {
+  const masked = new Set<string>();
+  const object = definition as
+    | { fields?: Record<string, { type?: unknown } | undefined>; managedBy?: unknown }
+    | null
+    | undefined;
+  const fields = object?.fields;
+  if (!fields || typeof fields !== 'object') return masked;
+  for (const [name, field] of Object.entries(fields)) {
+    if (isMaskedOnReadFieldType(field?.type, object.managedBy)) masked.add(name);
+  }
+  return masked;
+}
+
+/**
+ * How a replay compares the fields of ONE object, read once per dataset from
+ * its definition (see {@link SeedLoaderService.isNoOpReplay}).
+ */
+interface ReplayComparands {
+  /** [#24562] Fields compared in their STORED temporal form. */
+  readonly temporal: ReadonlyMap<string, TemporalComparandKind>;
+  /** [#24624] Fields the read path masks: a set value is never compared. */
+  readonly masked: ReadonlySet<string>;
+}
+
 export class SeedLoaderService implements ISeedLoaderService {
   private engine: IDataEngine;
   private metadata: IMetadataService;
@@ -614,6 +656,19 @@ export class SeedLoaderService implements ISeedLoaderService {
    * Reset per `load`.
    */
   private replayIdByAuthoredId = new Map<string, Map<string, string>>();
+  /**
+   * [#24624] Per seeded object, the credential fields the CURRENT {@link load}
+   * skipped a row without comparing (see {@link SeedLoaderService.isNoOpReplay}),
+   * and how many rows it skipped that way. Reported once, at the end of the
+   * load, by {@link reportUncomparedCredentials}.
+   *
+   * An instance field for the same reason {@link summariesStale} is one: the
+   * skip is counted several parameters below the point the load ends. Filled
+   * only where a skip is COUNTED, never by the comparison itself, which
+   * {@link decideWriteAction} runs up to three times per record. Reset per
+   * `load`.
+   */
+  private uncomparedCredentials = new Map<string, { fields: Set<string>; rows: number }>();
 
   constructor(engine: IDataEngine, metadata: IMetadataService, logger: Logger) {
     this.engine = engine;
@@ -686,6 +741,54 @@ export class SeedLoaderService implements ISeedLoaderService {
     }
   }
 
+  /**
+   * [#24624] Record a skipped row whose credential fields the replay did not
+   * compare. Called only where the skip is counted.
+   */
+  private noteUncomparedCredentials(objectName: string, fields: readonly string[]): void {
+    if (fields.length === 0) return;
+    let entry = this.uncomparedCredentials.get(objectName);
+    if (!entry) {
+      entry = { fields: new Set(), rows: 0 };
+      this.uncomparedCredentials.set(objectName, entry);
+    }
+    entry.rows++;
+    for (const field of fields) entry.fields.add(field);
+  }
+
+  /**
+   * [#24624] ONE line per load when a replay skipped a row without comparing a
+   * credential field: the rule, the fields it applied to, and the two ways a
+   * credential-only seed change takes effect (ruled letter B: a masked field
+   * never blocks the skip).
+   *
+   * Logged at `info`, like {@link filterByEnv}'s line: the skip is the
+   * declared, intended outcome, and it happens on every healthy replay of a
+   * seed that carries a credential (the stock showcase, every boot), where a
+   * `warn` would cry wolf — and the official examples boot with zero warnings
+   * (`examples/app-showcase/test/no-startup-warnings.test.ts`). Nothing is
+   * lost that the system claims to hold: the row keeps the credential it had,
+   * so this is not the durability class AGENTS.md reserves `error` for.
+   */
+  private reportUncomparedCredentials(): void {
+    if (this.uncomparedCredentials.size === 0) return;
+    const fields: string[] = [];
+    let rows = 0;
+    for (const [objectName, entry] of this.uncomparedCredentials) {
+      rows += entry.rows;
+      for (const field of entry.fields) fields.push(`${objectName}.${field}`);
+    }
+    this.logger.info(
+      `[SeedLoader] ${rows} seeded row(s) were left unchanged without comparing their credential field(s) ` +
+        `${fields.join(', ')}: a secret field, and a password field on an object not managed by better-auth, ` +
+        `is masked on read, so a replay cannot see whether the seed changed a value that is already set and ` +
+        `never rewrites a row for that alone. A seed change to only such a field is not applied on replay: ` +
+        `change another field of the same row too (the rewrite then writes the seed's value), or rebuild the ` +
+        `database.`,
+      { rows, fields },
+    );
+  }
+
   private async loadDatasets(request: SeedLoaderRequestParsed): Promise<SeedLoaderResultParsed> {
     const startTime = Date.now();
     // Pin the environment `Seed.env` is gated on BEFORE anything reads config.
@@ -714,6 +817,8 @@ export class SeedLoaderService implements ISeedLoaderService {
     // [#21665] One replay's ids belong to one organization: a reused service
     // instance must never re-point the next load's references with them.
     this.replayIdByAuthoredId.clear();
+    // [#24624] One notice per load, about this load's skips only.
+    this.uncomparedCredentials.clear();
 
     // When the caller pinned no target org (an in-process publish has no active
     // user session — the AI build agent's publish path; the `single`-posture
@@ -842,6 +947,9 @@ export class SeedLoaderService implements ISeedLoaderService {
       });
       await this.resolveDeferredUpdates(deferredUpdates, insertedRecords, allResults, allErrors, config.organizationId);
     }
+
+    // [#24624] The rule the replay applied to credential fields, said once.
+    this.reportUncomparedCredentials();
 
     // 7. Build final result
     const durationMs = Date.now() - startTime;
@@ -1240,8 +1348,13 @@ export class SeedLoaderService implements ISeedLoaderService {
     // judge, and nothing here refuses a row for an owner it cannot prove.
     const objectDefinition = await this.resolveObjectDefinition(objectName);
     const rowsCarryOrganization = objectDefinition == null || seedRowNeedsOrganization(objectDefinition);
-    // [#24562] What a replay compares in the stored form (`isNoOpReplay`).
-    const temporalKinds = temporalFieldKinds(objectDefinition);
+    // How a replay compares each field (`isNoOpReplay`): [#24562] a temporal
+    // field in its stored form, [#24624] a field the read path masks never by
+    // its set value.
+    const comparands: ReplayComparands = {
+      temporal: temporalFieldKinds(objectDefinition),
+      masked: maskedOnReadFields(objectDefinition),
+    };
     // [ADR-0131 D9] With no organization pinned and none derivable on an install
     // that registers the organization object, a row of an organization-owned
     // object has no owner: it is REFUSED below, never written NULL.
@@ -1717,7 +1830,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       // it, and which organization an unowned row belongs to is the
       // organization-ownership ceremony's attribution, never the loader's.
       if (unownedHolders && unownedHolders.size > 0) {
-        const decision = this.decideWriteAction(record, mode, externalId, existingRecords, temporalKinds, unownedHolders);
+        const decision = this.decideWriteAction(record, mode, externalId, existingRecords, comparands, unownedHolders);
         if (decision.action === 'refuse') {
           errored++;
           const label = this.externalIdLabel(externalId);
@@ -1772,7 +1885,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       // verbatim — this line only moves WHEN the author learns, from after the
       // engine's rejection to before the write that provokes it.
       if (!config.dryRun && requiredDeferrals.length > 0) {
-        if (this.decideWriteAction(record, mode, externalId, existingRecords, temporalKinds).action === 'insert') {
+        if (this.decideWriteAction(record, mode, externalId, existingRecords, comparands).action === 'insert') {
           for (const deferral of requiredDeferrals) {
             if (earlySignalledFields.has(deferral.field)) continue;
             earlySignalledFields.add(deferral.field);
@@ -1803,12 +1916,15 @@ export class SeedLoaderService implements ISeedLoaderService {
           // against an earlier one via `insertedRecords` — see `hasSelfRef`.
           try {
             const result = await this.writeRecord(
-              objectName, record, mode, externalId, existingRecords, temporalKinds
+              objectName, record, mode, externalId, existingRecords, comparands
             );
 
             if (result.action === 'inserted') inserted++;
             else if (result.action === 'updated') updated++;
-            else if (result.action === 'skipped') skipped++;
+            else if (result.action === 'skipped') {
+              skipped++;
+              if (result.uncompared) this.noteUncomparedCredentials(objectName, result.uncompared); // [#24624]
+            }
 
             const externalIdValue = this.externalIdKey(record, externalId);
             const internalId = result.id;
@@ -1841,11 +1957,12 @@ export class SeedLoaderService implements ISeedLoaderService {
             );
           }
         } else {
-          const decision = this.decideWriteAction(record, mode, externalId, existingRecords, temporalKinds);
+          const decision = this.decideWriteAction(record, mode, externalId, existingRecords, comparands);
           const externalIdValue = this.externalIdKey(record, externalId);
 
           if (decision.action === 'skip') {
             skipped++;
+            if (decision.uncompared) this.noteUncomparedCredentials(objectName, decision.uncompared); // [#24624]
             if (decision.id) noteLanded(i, decision.id); // [commit 9a884c6e4]
             if (decision.id && externalIdValue) {
               insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
@@ -2642,8 +2759,8 @@ export class SeedLoaderService implements ISeedLoaderService {
     mode: string,
     externalId: string | string[],
     existingRecords: Map<string, any> | undefined,
-    temporalKinds: ReadonlyMap<string, TemporalComparandKind>,
-  ): Promise<{ action: 'inserted' | 'updated' | 'skipped'; id?: string }> {
+    comparands: ReplayComparands,
+  ): Promise<{ action: 'inserted' | 'updated' | 'skipped'; id?: string; uncompared?: readonly string[] }> {
     const existing = existingRecords?.get(this.externalIdKey(record, externalId));
     const opts = SeedLoaderService.SEED_OPTIONS as any;
 
@@ -2658,8 +2775,8 @@ export class SeedLoaderService implements ISeedLoaderService {
           return { action: 'skipped' };
         }
         const id = this.extractId(existing);
-        if (this.isNoOpReplay(record, existing, temporalKinds)) {
-          return { action: 'skipped', id };
+        if (this.isNoOpReplay(record, existing, comparands)) {
+          return { action: 'skipped', id, uncompared: this.uncomparedCredentialFields(record, existing, comparands) };
         }
         await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts)));
         return { action: 'updated', id };
@@ -2668,8 +2785,8 @@ export class SeedLoaderService implements ISeedLoaderService {
       case 'upsert': {
         if (existing) {
           const id = this.extractId(existing);
-          if (this.isNoOpReplay(record, existing, temporalKinds)) {
-            return { action: 'skipped', id };
+          if (this.isNoOpReplay(record, existing, comparands)) {
+            return { action: 'skipped', id, uncompared: this.uncomparedCredentialFields(record, existing, comparands) };
           }
           await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts)));
           return { action: 'updated', id };
@@ -2720,12 +2837,12 @@ export class SeedLoaderService implements ISeedLoaderService {
     mode: string,
     externalId: string | string[],
     existingRecords: Map<string, any> | undefined,
-    temporalKinds: ReadonlyMap<string, TemporalComparandKind>,
+    comparands: ReplayComparands,
     unownedHolders?: Map<string, any>,
   ):
     | { action: 'insert' }
     | { action: 'update'; id: string }
-    | { action: 'skip'; id?: string }
+    | { action: 'skip'; id?: string; uncompared?: readonly string[] }
     | { action: 'refuse'; holderId?: string } {
     const key = this.externalIdKey(record, externalId);
     const existing = existingRecords?.get(key);
@@ -2735,13 +2852,13 @@ export class SeedLoaderService implements ISeedLoaderService {
     switch (mode) {
       case 'update':
         if (!existing) return { action: 'skip' };
-        return this.isNoOpReplay(record, existing, temporalKinds)
-          ? { action: 'skip', id: this.extractId(existing) }
+        return this.isNoOpReplay(record, existing, comparands)
+          ? { action: 'skip', id: this.extractId(existing), uncompared: this.uncomparedCredentialFields(record, existing, comparands) }
           : { action: 'update', id: this.extractId(existing)! };
       case 'upsert':
         if (!existing) return { action: 'insert' };
-        return this.isNoOpReplay(record, existing, temporalKinds)
-          ? { action: 'skip', id: this.extractId(existing) }
+        return this.isNoOpReplay(record, existing, comparands)
+          ? { action: 'skip', id: this.extractId(existing), uncompared: this.uncomparedCredentialFields(record, existing, comparands) }
           : { action: 'update', id: this.extractId(existing)! };
       case 'ignore':
         return existing ? { action: 'skip', id: this.extractId(existing) } : { action: 'insert' };
@@ -2766,7 +2883,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    * the historical update behavior.
    *
    * [#24562] A field the object declares `datetime`, `date` or `time`
-   * (`temporalKinds`, from {@link temporalFieldKinds}) is compared in its
+   * (`comparands.temporal`, from {@link temporalFieldKinds}) is compared in its
    * STORED form: both sides go through `temporalStorageForm`, the one rule
    * every driver applies on write (ADR-0053). The question a replay asks is
    * whether writing the seed value would change what the column holds, and a
@@ -2774,17 +2891,66 @@ export class SeedLoaderService implements ISeedLoaderService {
    * `'…T14:30:00.000Z'` — so two spellings of one instant, one calendar day or
    * one wall clock are the same stored value and the row is skipped. Read
    * literally, they rewrote the row on every boot.
+   *
+   * [#24624] A field the read path masks (`comparands.masked`, from
+   * {@link maskedOnReadFields}) never blocks the skip by its value: the
+   * existing row was read through `engine.find`, which serves a set `secret`,
+   * and a set `password` on an object not managed by better-auth, as
+   * `SECRET_MASK` in every context (ADR-0100), so the seed's plaintext has
+   * nothing to be compared with. Ruled letter B: such a field is not compared,
+   * a seed change to it alone is not applied on replay, and the load says so
+   * once ({@link reportUncomparedCredentials}); a change to any other field
+   * still rewrites the whole seeded record, the credential included. Only a
+   * SET value is uncomparable — the mask is presence-preserving, so an unset
+   * credential reads back `null` and setting or clearing one is still a
+   * change. No unmasked read is taken for this; the loader never sees a
+   * stored credential.
+   *
+   * Pure: {@link decideWriteAction} asks it up to three times per record.
    */
   private isNoOpReplay(
     record: Record<string, unknown>,
     existing: Record<string, unknown>,
-    temporalKinds: ReadonlyMap<string, TemporalComparandKind>,
+    comparands: ReplayComparands,
   ): boolean {
     for (const [key, value] of Object.entries(record)) {
       if (key === 'id') continue;
-      if (!this.seedValueEquals(value, existing[key], temporalKinds.get(key))) return false;
+      if (SeedLoaderService.isUncomparableCredential(key, value, existing[key], comparands)) continue;
+      if (!this.seedValueEquals(value, existing[key], comparands.temporal.get(key))) return false;
     }
     return true;
+  }
+
+  /**
+   * [#24624] The credential fields of `record` a no-op replay skips without
+   * comparing — what the skip site records for the load's one notice line.
+   */
+  private uncomparedCredentialFields(
+    record: Record<string, unknown>,
+    existing: Record<string, unknown>,
+    comparands: ReplayComparands,
+  ): readonly string[] {
+    if (comparands.masked.size === 0) return [];
+    return Object.entries(record)
+      .filter(([key, value]) => key !== 'id' && SeedLoaderService.isUncomparableCredential(key, value, existing[key], comparands))
+      .map(([key]) => key);
+  }
+
+  /**
+   * [#24624] Whether the replay must not compare this field: the definition
+   * declares it masked on read, the existing row read it back as the mask (a
+   * value IS set), and the seed sets one too. Both declaration and mask are
+   * required: a field the definition does not mask is compared even when it
+   * holds the mask's text, and a field the engine did not mask (an exempt
+   * object) never reads back as the mask.
+   */
+  private static isUncomparableCredential(
+    key: string,
+    seedValue: unknown,
+    stored: unknown,
+    comparands: ReplayComparands,
+  ): boolean {
+    return comparands.masked.has(key) && stored === SECRET_MASK && seedValue != null;
   }
 
   /**

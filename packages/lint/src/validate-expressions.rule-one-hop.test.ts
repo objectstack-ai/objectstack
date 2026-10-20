@@ -71,3 +71,58 @@ describe('[#24468] a validation rule reads one hop through a reference', () => {
     expect(errorsOf("record.account.region == 'north'", 'hop_elsewhere')).toEqual([]);
   });
 });
+
+/**
+ * [#24512] A `conditional` rule's `when` is hydrated one hop by ObjectQL's
+ * `checkConditional`, as a `condition` is by `checkPredicate`, so the same hop
+ * checks judge it — at the top level and in a nested `conditional` — under the
+ * same `expression-invalid` rule.
+ */
+describe('[#24512] a `conditional` rule\'s `when` reads one hop through a reference', () => {
+  const WHEN_WHERE = "object 'hop_order' · validation 'gate' when";
+  const NESTED_WHERE = "object 'hop_order' · validation rule 'outer' then → 'gate' when-predicate";
+  const gate = (when: string) => ({
+    name: 'gate', type: 'conditional', severity: 'error', message: 'x', when,
+    then: { name: 'cap', type: 'script', severity: 'error', message: 'y', condition: 'record.amount != null && record.amount > 100' },
+  });
+  const withRule = (rule: Record<string, unknown>) => ({ ...order('true'), validations: [rule] });
+  const errorsAt = (rule: Record<string, unknown>) =>
+    validateStackExpressions(specValid({ objects: [account, withRule(rule)] }))
+      .filter((i) => (i.severity ?? 'error') === 'error');
+  const outer = (when: string) => ({
+    name: 'outer', type: 'conditional', severity: 'error', message: 'x', when: 'record.amount != null', then: gate(when),
+  });
+
+  it('admits a `when` reading a field the target declares, top level and nested', () => {
+    expect(errorsAt(gate("record.account.status == 'active'"))).toEqual([]);
+    expect(errorsAt(outer("record.account.status == 'active'"))).toEqual([]);
+  });
+
+  it('refuses a `when` reading a field the target does not declare, naming the slot, the field and the target', () => {
+    for (const [rule, where] of [[gate("record.account.region == 'north'"), WHEN_WHERE], [outer("record.account.region == 'north'"), NESTED_WHERE]] as const) {
+      const errors = errorsAt(rule);
+      expect(errors.map((e) => e.where)).toEqual([where]);
+      expect(errors[0].message).toMatch(/^unknown field `region` on `hop_account`/);
+      expect(errors[0].message).toContain('through the reference `record.account`');
+    }
+  });
+
+  it('refuses a `when` reading a second hop, naming the slot', () => {
+    for (const [rule, where] of [[gate("record.account.owner.email == 'x'"), WHEN_WHERE], [outer("record.account.owner.email == 'x'"), NESTED_WHERE]] as const) {
+      const errors = errorsAt(rule);
+      expect(errors.map((e) => e.where)).toEqual([where]);
+      expect(errors[0].message).toContain('read through more than one relationship hop');
+    }
+  });
+
+  it('refuses a `when` reading the reference both through it and as a value, naming the guard', () => {
+    const errors = errorsAt(gate("record.account != null && record.account.status == 'active'"));
+    expect(errors.map((e) => e.where)).toEqual([WHEN_WHERE]);
+    expect(errors[0].message).toContain('is read BOTH through the relationship');
+    expect(errors[0].message).toContain('`conditional` rule whose `when` is `record.account != null`');
+  });
+
+  it('CONTROL — the guard spelling reads the stored id and is admitted', () => {
+    expect(errorsAt(gate('record.account != null'))).toEqual([]);
+  });
+});
