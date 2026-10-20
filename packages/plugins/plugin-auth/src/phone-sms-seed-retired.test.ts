@@ -59,7 +59,7 @@ function matchesWhere(row: Row, where: Record<string, unknown> = {}): boolean {
 }
 
 function store(rows: Row[]) {
-  const all = rows.map((r) => ({ organization_id: ORG, ...r }));
+  const all: Row[] = rows.map((r) => ({ organization_id: ORG, ...r }));
   return {
     all,
     async find(_object: string, q: any) {
