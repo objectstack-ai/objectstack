@@ -1,5 +1,61 @@
 # @objectstack/http-conformance
 
+## 0.1.8
+
+### Patch Changes
+
+- Updated dependencies [5a871e4]
+- Updated dependencies [9a7838e]
+- Updated dependencies [b2e7870]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [0d3ea29]
+- Updated dependencies [67b669e]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [66949b7]
+- Updated dependencies [41d0d40]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [4578c56]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [3089848]
+- Updated dependencies [db9cf80]
+- Updated dependencies [35ef501]
+- Updated dependencies [874a38d]
+- Updated dependencies [91f46d0]
+- Updated dependencies [d7b26df]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [51f36e7]
+- Updated dependencies [87e902d]
+- Updated dependencies [1e62f71]
+- Updated dependencies [ed03834]
+- Updated dependencies [e1deaef]
+- Updated dependencies [b4d573a]
+- Updated dependencies [f5ef054]
+- Updated dependencies [37510aa]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [1d79556]
+- Updated dependencies [daafae6]
+- Updated dependencies [be48c5e]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [e246f06]
+- Updated dependencies [2ac0616]
+- Updated dependencies [b036ac5]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [c7a3234]
+  - @objectstack/core@18.0.0
+
 ## 0.1.8-next.5
 
 ### Patch Changes

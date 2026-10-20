@@ -1,5 +1,573 @@
 # @objectstack/plugin-mcp-server
 
+## 18.0.0
+
+### Minor Changes
+
+- c4e7fa5: fix(mcp)!: on the stdio transport, a nested-relation filter condition asks the related object its declared exposure, and is refused when that object does not serve `list` (#22777)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is one runtime read position on one transport: the MCP stdio data bridge stops evaluating a filter condition on a lookup's target object whose existing `enable` declaration already refuses a query of it on every data door, and the remedy is a filter the caller can already write. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A nested-relation filter condition, `{ <lookup>: { <field of the related object>: … } }`, is evaluated on the RELATED object: the engine queries that object for the matching records and keeps the source rows that point at one.
+  
+  **FROM.** On the MCP stdio transport (`OS_MCP_STDIO_API_KEY`), the `query_records` and `aggregate_records` tools judged only the object they address against its `enable` block, so such a condition in `where` was evaluated whatever the related object's `enable` block declared — including a related object those same tools refuse when it is addressed.
+  
+  **TO.** The stdio data bridge asks each condition's related object the same exposure gate it applies to an addressed object, for `list` (the operation a query of that object is judged as), before the engine is asked. A related object the gate does not serve refuses the call with the bridge's existing exposure refusal, the one an addressed object gets:
+  
+  - `enable.apiEnabled: false` → `OBJECT_API_DISABLED` (404).
+  - an `enable.apiMethods` whitelist without `list` (for example `['get']`, `['create']` or the deny-all `[]`) → `OBJECT_API_METHOD_NOT_ALLOWED` (405), with the effective operation set.
+  
+  The tool's error text names the related object and the condition's position (`where.<lookup>`), with the remedy. It applies at the top level and under `$and` / `$or` / `$not`. The generic data door has given the same answer for the same condition since #22737.
+  
+  **Migration.** Filter on the lookup's stored id (`{ <lookup>: '<id>' }` or `{ <lookup>: { $in: [...] } }`), which is the source object's own column, or remove the condition. To keep the condition, declare `list` on the related object's `enable.apiMethods`.
+  
+  **Bindings.**
+  
+  - **Refused, not withheld.** Dropping a condition would widen the result.
+  - **One decision, one walk.** The gate is the one the bridge already applies to an addressed object, and the conditions are found by `relationConditionSites` from `@objectstack/core`, the walk the data door uses.
+  - **The engine is untouched.** A flow's or a hook's own query calls the engine directly and never passes this bridge.
+  - **No new error code.**
+- 1d79556: feat(spec,core,runtime,plugin-auth)!: API keys get a lifecycle: a 90-day default expiry, a one-year ceiling, a 90-day inactivity expiry, a one-year grace for keys created with none, and distinct refusal codes
+  
+  Clause-②: yes (narrowing) — the published contract widens (four `auth` settings keys, the `IAuthService.resolveApiKeyLifecyclePolicy` member and its `ApiKeyLifecyclePolicy` type, four registered error codes, new `@objectstack/core` exports) and the API-key doors narrow (a signing past the ceiling is refused; an inactive key, a key past its grace, and a revoked or expired key sent beside a session are refused where they were served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key signing door and the shared key-admission seam, not a metadata change. No authorable spec key, stored shape or metadata surface is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite: the four new `auth` settings keys are additive and defaulted, `sys_api_key` gains no column (its existing `expires_at` and `last_used_at` are written by the platform), and `ResolveAuthzInput.apiKeyLifecycle` / the sixth parameter of `resolveApiKeyAdmission` and `resolveApiKeyPrincipal` are server-side wiring no author writes. What narrows is which API keys are served and which signings are accepted; the remedy is a new key or a nearer date, never a rewrite of a package source or a stored row. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key doors), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling A on #23367: the key store stays `sys_api_key`, and the policy is auth configuration.
+  
+  - **The policy (`@objectstack/plugin-auth`, `IAuthService.resolveApiKeyLifecyclePolicy`).** Three `auth` settings keys, bound by `bindAuthSettings`: `api_key_default_expiry_days` (90), `api_key_max_expiry_days` (365) and `api_key_inactivity_days` (90; `0` turns it off). A fourth, `api_key_policy_started_at`, is recorded once — on the first boot that runs the policy, at `kernel:bootstrapped` — and anchors the two clocks below; it survives restarts and is never overwritten by the platform.
+  - **The signing door (`POST /api/v1/keys`).** A signing that names no `expires_at` gets the default life and the response echoes it. An `expires_at` further away than the ceiling is refused `400 API_KEY_EXPIRY_TOO_LONG`, naming the latest date allowed; exactly the ceiling is accepted. A kernel with no auth service signs as before.
+  - **The key-admission seam (`resolveApiKeyAdmission`, `@objectstack/core`).** A real key its own state refuses is a new outcome, `lifecycle`, with one of three distinct codes: `API_KEY_REVOKED`, `API_KEY_EXPIRED` (past `expires_at`, or past the grace of a key created with none) or `API_KEY_INACTIVE` (no recorded use for longer than the window). `resolveAuthzContext` raises it as the branded `ApiKeyLifecycleRefusalError` (`403`, a located message naming the key's prefix, the date and the remedy). An unknown key is still `none`.
+  - **`last_used_at` is written.** Its description promised "Automatically updated on each API call", and nothing wrote it. The seam now stamps it on an admitted (or held) call, at most once an hour per key, and the inactivity judgment reads the value as it was BEFORE that call's stamp, so a key's own use cannot revive it. A stamp that fails never fails the request; it is said once, at `error`.
+  - **Keys created before the policy.** A key with no expiry gets one year from `api_key_policy_started_at`; the date is stamped onto its `expires_at` the first time it is admitted, so the keys page shows it, and the refusal after it names it. A key with no recorded use counts its inactivity from the same anchor (or from its own creation, when later) — never from an earlier `created_at`, since no use was ever recorded before the policy.
+  - **Every face that admits keys** passes the policy source (`apiKeyLifecyclePolicySourceOf(authService)`, a required input beside `userAuthGates`). Every one of them answers the refusal's `403` and code: the runtime dispatcher (the MCP HTTP endpoint among its routes), the REST data API, the settings routes, the storage download routes, the datasource admin routes, the share-link routes, the marketplace install-local routes and the MCP stdio transport. Each relays the refusal by its brand, so every other identity fault at those doors keeps its existing answer.
+  - **`OS_CLOUD_API_KEY` is untouched.** It is the runtime's outbound credential to the control plane, never admitted by this seam.
+  
+  What changes for you:
+  
+  - **A key created without an expiry now expires.** It used to live until revoked; it now lives 90 days (or the configured default). Pass `expires_at` to choose, and create a new key before it ends.
+  - **A signing asking for more than a year is refused** `400 API_KEY_EXPIRY_TOO_LONG`, where it used to be accepted. Ask for the date the message names, or an earlier one.
+  - **A key unused for 90 days is refused** `403 API_KEY_INACTIVE`, where it used to be served. It is not revoked; the remedy is a new key.
+  - **A key that already existed with no expiry keeps working for one year** from the date the policy took effect on your deployment (`auth.api_key_policy_started_at`), then answers `403 API_KEY_EXPIRED` naming that date. Replace such keys within the year.
+  - **A revoked or expired key answers its own code** (`403 API_KEY_REVOKED` / `API_KEY_EXPIRED`) on every face that accepts a key, where it used to answer the generic `401`; and a session cookie sent beside such a key no longer answers for it.
+  - **Hosts calling `resolveAuthzContext`, `resolveApiKeyAdmission` or `resolveApiKeyPrincipal` directly** pass `apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService)` (or the sixth argument), or an explicit `undefined` where no auth service exists. A caller of `resolveAuthzContext` that wants the located answer re-raises `ApiKeyLifecycleRefusalError` (`isApiKeyLifecycleRefusalError`) the way it re-raises the store outage. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `lifecycle` outcome.
+- daafae6: fix(core,cloud-connection,mcp)!: every API-key admission names its owner-posture source, so a held owner's key is refused at the marketplace install-local doors and on every MCP stdio call
+  
+  Clause-②: no (narrowing) — no published accept-set widens; two more seams refuse a key whose owner holds an account-scope posture, the owner-posture input of the shared key-admission seam becomes required, and `resolveApiKeyPrincipal` no longer answers a held owner's key with a principal.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/resolve-authz-context.ts#ResolveAuthzInput) An authentication-policy change at runtime TypeScript call sites, not a metadata change. No authorable spec key, stored shape or metadata surface moves, so `objectstack migrate meta` has nothing to rewrite. The input that becomes required lives on a runtime interface and on two runtime functions of `@objectstack/core` (`resolveApiKeyAdmission`, `resolveApiKeyPrincipal`), none of them a metadata surface; the affected party is a TypeScript caller, and the compiler names its call site. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at two API-key doors, and a required input on the shared key-admission seam), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling C′ on #23287, item 1: "a held user's API key is refused at every seam with the same code". Item 4: "The refusal is not a revocation: the key resumes the moment the user enrols (or the account posture clears)". `AUTH_GATE_SCOPES` decides which posture holds a key: `MFA_REQUIRED` (scope `account`) holds it; `PASSWORD_EXPIRED` and `PASSWORD_RESET_REQUIRED` (scope `credential`) do not.
+  
+  - **The marketplace install-local doors (`@objectstack/cloud-connection`).** The resolver behind all five doors now hands the shared resolver the auth service's per-user posture computation and refuses on the posture it decided for whichever credential admitted the caller. A key whose owner holds `MFA_REQUIRED` gets `403 MFA_REQUIRED` with the session's message, before any effect. It used to be served there.
+  - **The MCP stdio transport (`@objectstack/mcp`).** `OS_MCP_STDIO_API_KEY` is resolved with the owner's posture on every call of a live session, and a held owner's call is refused before any read or write with the envelope REST answers (`code` `MFA_REQUIRED`, `status` 403, the session's remediation message). A data tool's error and the record resource carry that message, as they carry every other refusal on this transport. A held key still starts the transport and says so once in a warning: the key is valid, and the next call after the owner enrols is served with no restart.
+  - **The owner-posture input is required (`@objectstack/core`).** `ResolveAuthzInput.userAuthGates`, and the `tenancyPosture` and `userAuthGates` parameters of `resolveApiKeyAdmission` and `resolveApiKeyPrincipal`, are now required; `undefined` is a value passed on purpose. A seam that forgets the source no longer compiles, which is how the two seams above were missed. `@objectstack/runtime` re-exports these, so its importers see the same change.
+  - **`resolveApiKeyPrincipal` collapses a held owner's key to no principal.** A principal-or-nothing answer cannot carry the posture's code, so a host that answers requests should read `resolveApiKeyAdmission` and refuse its `held` outcome with `gate.code`.
+  - **The storage download authorizer (`@objectstack/service-storage`)** names the same source. The storage family's door already refused a held owner's key on the same request, so nothing changes on the wire.
+  
+  What changes for you:
+  
+  - **Refused now:** an API key whose owner owes MFA enrolment past the grace window gets `403 MFA_REQUIRED` at the install-local doors, and every principal-bound MCP stdio call it makes is refused with the same code and message. It works again the moment the owner enrols, with nothing reissued.
+  - **Unchanged:** a key whose owner's password expired, or whose administrator forced a password change, keeps working on both.
+  - **Code that calls `resolveAuthzContext`, `resolveApiKeyAdmission` or `resolveApiKeyPrincipal` directly** now passes the owner-posture source explicitly: `userAuthGates: userAuthGateSourceOf(authService)` wherever the kernel's `auth` service is reachable, or `undefined` on a kernel composed without `plugin-auth`. The two positional functions also take `tenancyPosture` explicitly (`undefined` when no `tenancy` service is registered).
+- b1cfa3d: fix(mcp): the data tools, `list_actions` and the record resource answer a coded refusal with its `code` (and `status`) beside the message, on stdio and Streamable HTTP alike (#23509)
+  
+  Clause-②: yes (widening)
+  
+  **What was wrong.** When a producer refused with an ADR-0112 envelope (`code`, `status`, the message), these surfaces handed an MCP client the message alone. The code is the half a client branches on. The refusals affected:
+  
+  - a key whose owner is held: `MFA_REQUIRED` / 403, refused "with the same code" at every seam;
+  - `RECORD_NOT_FOUND` / 404;
+  - `PERMISSION_DENIED` / 403;
+  - `INVALID_FIELD` / 400;
+  - the exposure refusals `OBJECT_API_DISABLED` / 404 and `OBJECT_API_METHOD_NOT_ALLOWED` / 405.
+  
+  `run_action` and `resume_run` already rendered the code. The other tools did not, and neither did the record resource.
+  
+  **What a client reads now.** The tools render the shape `run_action` already answers with. The record resource adds the code beside its unchanged `error` sentence, in the `{ error, code, status }` vocabulary the sibling resources `objectstack://objects` and `objectstack://objects/{objectName}` already use. A refusal's message is unchanged on both.
+  
+  A refusal's `details` is not rendered on these surfaces. What `details` may disclose is decided per error class at the HTTP boundary. For example, a `PERMISSION_DENIED` from the security gate carries the caller's positions and permission sets, and REST withholds them. This package holds no copy of that policy.
+  
+  ## FROM → TO
+  
+  | surface | refusal | FROM | TO |
+  |:--|:--|:--|:--|
+  | tools `list_objects`, `describe_object`, `validate_expression`, `query_records`, `aggregate_records`, `get_record`, `create_record`, `update_record`, `delete_record`, `list_actions` | coded | `isError: true`; the text is the message | `isError: true`; the text is the JSON `{ "error": { "code", "message", "status" } }`. `status` appears only when the refusal carries one. |
+  | resource `objectstack://objects/{objectName}/records/{recordId}` (stdio) | coded | `{ "error": MESSAGE }` | `{ "error": MESSAGE, "code", "status" }`. `status` appears only when the refusal carries one. `error` stays the same string. |
+  | either | no code (a plain `Error`, a thrown string, an empty or non-string `code`) | the message | unchanged, byte-identical |
+  
+  **Reading it.** For a tool error, parse the text. If it is an object with `error.code`, branch on the code and show `error.message`. Otherwise the text is the message. For the record resource, `typeof body.error === 'string'` still tells a refusal from a row, and `body.code` is present when the refusal carried one.
+
+### Patch Changes
+
+- 4e9fe9f: feat(spec)!: `PROTOCOL_VERSION` is `18.0.0`; the runtime handshake accepts `engines.protocol: '^18'` and refuses `'^17'`
+  
+  Clause-②: yes (narrowing: the handshake refuses a manifest pinned to protocol 17 (`'^17'`, `'^17.x.y'`, `'17.x'`), while the exported `PROTOCOL_VERSION` moves to `'18.0.0'` and a `'^18'` manifest is admitted)
+  
+  <!-- adr-0087: not-required (already-registered field-malformed-scale-precision-removed, record-chatter-position-vocabulary, element-input-target-variable-removed, element-filter-removed, element-form-removed, field-column-lists-canonicalized, metric-filters-removed, cube-sub-day-granularities-removed, cube-join-sql-and-relationship-removed, record-highlights-field-icon-removed, mapping-lookup-params-removed, translation-component-submit-label-removed, page-component-responsive-removed, object-grid-default-sort-removed, object-kanban-quick-add-removed, permission-allow-restore-purge-removed, form-view-option-default-removed, field-reference-to-alias, connector-error-mapping-removed, connector-connection-timeout-ms-removed, hook-timeout-to-timeout-ms, job-timeout-to-timeout-ms, api-endpoint-cache-ttl-to-cache-ttl-seconds, dashboard-refresh-interval-to-refresh-interval-seconds, connector-resilience-keys-removed, connector-triggers-removed, memory-persistence-auto-save-interval-to-ms, turso-config-timeout-to-timeout-ms, view-page-mount-removed, list-view-sort-string-clause-to-array, page-assigned-profiles-removed, chart-config-aria-removed, dashboard-widget-chart-config-structure-removed, translation-per-app-settings-removed, object-tenancy-organization-field-removed, page-component-filter-record-to-rule-array, view-item-owner-hidden-removed, report-joined-chart-removed, view-overlay-owner-hidden-removed, form-layout-inline-grid-to-vertical, currency-config-precision-removed, permission-rls-tags-removed, action-aria-removed, cube-member-inner-name-removed, flow-decision-mode-inclusive-explicit, view-list-tabs-removed, cube-refresh-key-removed, time-default-utc-suffix-dropped, page-header-breadcrumb-removed, connector-sync-keys-removed, form-view-subform-columns-canonicalized, action-block-endpoint-to-target, form-field-public-picker-removed, dataset-count-measure-empty-field-removed, agent-structured-output-refused-members-removed, translation-widget-sub-caption-removed, agent-memory-long-term-store-removed, agent-lifecycle-removed, object-grid-resizable-columns-removed, page-requires-non-compiled-kind-removed, element-text-variant-heading-levels, object-master-detail-form-detail-sort-field-removed, declared-index-unique-scope, manifest-permissions-string-list-removed) The protocol major moves, and that move publishes the already-registered step-18 chain as the current upgrade path: these are its 64 D2 conversions, which `os migrate meta --from 17` replays together with the step's 329 D3 semantic entries. Each entry was registered by the change that made its break, under that change's own disposition; this diff adds, renames and removes none. The one edit outside that chain is the manifest's `engines.protocol` range: it is the ADR-0087 D1 handshake's input rather than a metadata shape any conversion rewrites, and `os migrate meta --write` rewrites it from `'^17'` to `'^18'`. The other categories are closed on facts: the package publishes (not unpublished); a consumer has an edit to make (not no-migration-prescription); and an exported value and the load door move, not a TypeScript declaration alone (not runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING**, graded `major`: Changesets is in pre mode (`next`) for the v18 line, so this ships in an `18.0.0-next.N` prerelease. The protocol major moves in this reviewed change, not in the version pass (ruling record 6049734955, Q1 → B). Until that line's first version pass, `PROTOCOL_VERSION` is one major ahead of the package version; `check-changeset-no-major.mjs` admits that only in pre mode with a pending `major` for `@objectstack/spec` (ruling record 6056808625).
+  
+  - **`PROTOCOL_VERSION` reads `'18.0.0'`** and `PROTOCOL_MAJOR` reads `18`. The ADR-0087 D1 handshake on every load and install door (the app load seam, `POST /api/v1/packages`, `POST /api/v1/marketplace/install-local`) now admits a package whose `engines.protocol` admits major 18, and refuses one pinned to 17 (`'^17'`, `'^17.x.y'`, `'17.x'`) with `OS_PROTOCOL_INCOMPATIBLE` (422), naming `objectstack migrate meta --from 17`.
+  - **What you change.** Run `objectstack migrate meta --from 17` to list the edits for existing sources; `--write` applies the ones it can prove, including the declared `engines.protocol` range, rewritten in place from `'^17'` to `'^18'`, and you apply the rest by hand.
+  - **`spec-changes.json` and the protocol upgrade guide** now carry the protocol 17 → 18 record, generated from the registries: 64 mechanical conversions and 329 semantic entries. The aggregate record spans 16 → 18.
+  - **`os init`** stamps `'^18'` in the manifests it writes, and `os lint`'s `protocol/missing-engines-range` fix names `'^18'`. The `create-objectstack` template keeps `'^17'` until the version pass stamps it together with its `@objectstack/*` dependency ranges.
+  - **`@objectstack/mcp`**: the README's `defineStack` examples declare `'^18'`.
+- 0fb55fc: fix(mcp): `run_action` and `resume_run` withhold a `PERMISSION_DENIED` refusal's `details`, as the data tools already do (#23529)
+  
+  **What was wrong.** The two action tools render a thrown coded refusal through `errorResultFromThrown`, which served the refusal's `details` verbatim. The security gate's `PERMISSION_DENIED` carries the caller's own positions and permission-set names in `details`. Those are server-side diagnostics. The runtime dispatcher and the REST actions door withhold them, and the data tools and the record resource never serve a refusal's `details`. The action tools were the one place on the MCP surface that still served them, and `executeDeclarativeUpdateAction` writes as the caller, so the gate's write-side refusal reaches that renderer.
+  
+  **What a client reads now.** A `PERMISSION_DENIED` on `run_action` or `resume_run` answers the shape the data tools answer: `isError: true`, and the text is the JSON `{ "error": { "code", "message", "status" } }` with no `details`. The code, the message and the status are unchanged.
+  
+  Every other coded refusal on the two tools is unchanged. `ACTION_CONFIRMATION_REQUIRED` keeps the `details` that name the action and the member to set, and `resume_run`'s other refusals keep theirs. A throw with no code still answers its bare message.
+- 4c21e57: fix(mcp): an MCP tool call that repeats a unique value answers the wire code `UNIQUE_VIOLATION`, not the engine's in-process `DUPLICATE_RECORD` (#23701)
+  
+  **Wire change in the MCP tool result: `DUPLICATE_RECORD` becomes `UNIQUE_VIOLATION`.** It applies to every tool error rendered from a thrown refusal, on both transports (Streamable HTTP and stdio), and to the record resource. Measured: `create_record` and `update_record` writing a value a unique field already holds, and `run_action` for an action whose handler write or declarative `operation: 'update'` repeats one. `resume_run` renders through the same writer. An MCP client, AI agents included, that matched `error.code === 'DUPLICATE_RECORD'` on that tool error must match `error.code === 'UNIQUE_VIOLATION'` instead. That is what the REST server, the batch and import rows, both Hono doors and the runtime dispatcher already answer for the same refusal.
+  
+  Why: the maintainer ruled one wire spelling for a unique-constraint refusal on every route, `UNIQUE_VIOLATION` (recorded in commit 65846bc46). The MCP tool writer still relayed the engine's spelling.
+  
+  - FROM `{"error":{"code":"DUPLICATE_RECORD","message":"Duplicate record refused on 'udoc': …","status":409}}`, with `isError: true`
+  - TO `{"error":{"code":"UNIQUE_VIOLATION","message":"Duplicate record refused on 'udoc': …","status":409}}`, with `isError: true`
+  
+  Only the code moves. The result is still an `isError` tool result, `status` stays `409`, and `message` is unchanged. The envelope's keys stay `code`, `message` and `status`: this envelope has no context slot, so the `developerMessage`, `object` and `field` that the HTTP doors carry in `error.details` are not added here. Only the engine's `DuplicateRecordError` is translated, recognised by its registered code and its class name together. A hook or action handler that throws the registered `DUPLICATE_RECORD` without being that class keeps its own code. Inside the engine, `DuplicateRecordError.code` is still `DUPLICATE_RECORD`, so an in-process caller (a hook, a flow node) is unaffected. Other coded refusals (`DELETE_RESTRICTED`, `CONCURRENT_UPDATE`) are unchanged.
+  
+  Clause-②: no
+- 3a734e0: feat(spec)!: a page region named `main` takes only `width: 'full'` — `'small'`, `'medium'` and `'large'` there are refused at publish (#24326)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered page-main-region-width-refused, page-main-region-width-removed -->
+  
+  **BREAKING** — an accept-set narrowing on a published authoring surface, shipped as `minor` under the repo's launch-window convention.
+  
+  `PageRegionSchema.width` is one enum shared by every region, so a `main` region accepted `'small'`, `'medium'` and `'large'`. The console never read them: every layout draws `main` at the width the layout leaves it (the flexible column beside `sidebar` and `aside`; one grid cell on `dashboard`), and the only reader of `main.width` is the page itself, for `'full'`, which lifts the page's max-width cap. A three-column page that asked for a `large` main got the space the two rails left, and every door reported success.
+  
+  - `PageSchema` now refuses `width: 'small' | 'medium' | 'large'` on a region named `main` (matched case-insensitively, as the console matches it), at `regions.N.width`, on every page kind and template. The message names the region and `'full'` as the one width it takes. The doors are `definePage`, `defineStack` (so `os validate` and `os build`, `STACK_SCHEMA_INVALID` 422) and the metadata save door (422 `INVALID_METADATA`).
+  - `'full'` on `main` is unchanged, with its page-wide meaning. Every other region accepts the same widths as before.
+  - The check is exported as `checkPageMainRegionWidth` from `@objectstack/spec/ui`, so a mirror built from `PageSchema.shape` can attach the same rule.
+  - Data at rest keeps loading: the retired ADR-0087 conversion `page-main-region-width-removed` deletes those widths on read: a stored page row, a compiled artifact inside the window its declared protocol range opens, and a package body registered with its declared range. The page renders exactly as before.
+  - `@objectstack/mcp` (the Connect an Agent page) and `@objectstack/cloud-connection` (the Cloud Connection page) drop `width: 'large'` from their `main` region. Both render the same.
+  
+  ### Migration: FROM → TO
+  
+  | Wrote | Write instead |
+  | :--- | :--- |
+  | `width: 'small' \| 'medium' \| 'large'` on a region named `main` | drop it; `'full'` stays |
+  
+  Deleting the key changes nothing on screen. Write `width: 'full'` only when you want a full-bleed page, which drops the page's max-width cap.
+- 71fa166: Clause-②: no
+  
+  fix(mcp): the known-partial listing warning and the Connect-an-Agent bundle description say "this system"
+  
+  - **What changed.** Inside the running system, user-facing copy names the system the caller is in as "this system". The warning an MCP client receives with a known-partial object listing (the `objectstack://objects` resource and the `list_objects` tool) now says "this system declares at least that many objects, possibly more", and the Connect-an-Agent UI bundle's description ends "for connecting MCP clients to this system".
+  - **Unchanged.** The `SERVICE_UNAVAILABLE` code that marks a partial listing, every payload shape, the portable `SKILL.md` (which names the deployment an outside agent connects to), and server log lines.
+- 4d12b23: Clause-②: no (copy only: no accept set or public surface moves; owes the seat's review of record at `TIER_DEFAULT` before the queue)
+  
+  fix(mcp): the Connect-an-Agent page subtitle says "this system"
+  
+  - **What changed.** The Connect-an-Agent page header now reads "Give any MCP-capable AI client governed access to this system — every call runs under the caller's own permissions and row-level security." Inside the running system, user-facing copy names the system the caller is in as "this system".
+  - **Unchanged.** The page's name, layout, components and navigation entries, and every MCP route and payload.
+- Updated dependencies [5a871e4]
+- Updated dependencies [ffba02e]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [1b40780]
+- Updated dependencies [ca426cb]
+- Updated dependencies [4ad3ce5]
+- Updated dependencies [8016a9d]
+- Updated dependencies [df9d07e]
+- Updated dependencies [8eac321]
+- Updated dependencies [a5a781b]
+- Updated dependencies [9a7838e]
+- Updated dependencies [191e043]
+- Updated dependencies [b12e16a]
+- Updated dependencies [fbafb85]
+- Updated dependencies [35450f0]
+- Updated dependencies [4840720]
+- Updated dependencies [1e8b628]
+- Updated dependencies [12d1476]
+- Updated dependencies [14ccb1d]
+- Updated dependencies [c0803b0]
+- Updated dependencies [4bc3bec]
+- Updated dependencies [1f949da]
+- Updated dependencies [ecb7b44]
+- Updated dependencies [41edf73]
+- Updated dependencies [1c1144f]
+- Updated dependencies [014863d]
+- Updated dependencies [3983965]
+- Updated dependencies [3230d66]
+- Updated dependencies [0c910d5]
+- Updated dependencies [317cddd]
+- Updated dependencies [b2e7870]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [dac99c2]
+- Updated dependencies [0d3ea29]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [66949b7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [f9b4217]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [7958bdf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [b15f8a1]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [345d3f3]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [94379f4]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [194a42d]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [87e902d]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [777eed2]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [ed03834]
+- Updated dependencies [e1deaef]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [4216796]
+- Updated dependencies [a22e67b]
+- Updated dependencies [5f37d36]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [1912af4]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [60f9baf]
+- Updated dependencies [f5ef054]
+- Updated dependencies [584e737]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [301eec6]
+- Updated dependencies [572ecfb]
+- Updated dependencies [5547ad4]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [0f05907]
+- Updated dependencies [5e725b8]
+- Updated dependencies [086fa46]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [daafae6]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [f606ba2]
+- Updated dependencies [d176b0a]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [ee0e115]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [0a052e6]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [c03077e]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [45e6001]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [9f024d8]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [fa26308]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [01fafde]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [26501ae]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [94e60c0]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [adb7910]
+- Updated dependencies [f573976]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [325a92e]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/core@18.0.0
+  - @objectstack/spec@18.0.0
+  - @objectstack/formula@18.0.0
+  - @objectstack/types@18.0.0
+
 ## 18.0.0-next.5
 
 ### Patch Changes
