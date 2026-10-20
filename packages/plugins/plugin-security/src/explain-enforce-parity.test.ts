@@ -1476,9 +1476,11 @@ describe('an app-authored row-level write policy the by-id write gate defers to 
  * and answers the not-visible refusal (`PERMISSION_DENIED`) to one who does not.
  */
 describe('the real comment moderation gate admits exactly what the parent by-id update admits', () => {
-  const NAMED: Enforced = { kind: 'refused', code: 'RECORD_NOT_ACCESSIBLE', status: 403 };
-  const NOT_VISIBLE: Enforced = { kind: 'refused', code: 'PERMISSION_DENIED', status: 403 };
-  type GateCell = [who: string, onBehalf: boolean, object: 'PARENT' | 'DETAIL', id: string, shape: string, gate: Enforced];
+  /** What the gate answers: it admits, or it refuses with an envelope. */
+  type GateAnswer = { kind: 'admitted' } | ({ kind: 'refused' } & Envelope);
+  const NAMED: GateAnswer = { kind: 'refused', code: 'RECORD_NOT_ACCESSIBLE', status: 403 };
+  const NOT_VISIBLE: GateAnswer = { kind: 'refused', code: 'PERMISSION_DENIED', status: 403 };
+  type GateCell = [who: string, onBehalf: boolean, object: 'PARENT' | 'DETAIL', id: string, shape: string, gate: GateAnswer];
   const CELLS: GateCell[] = [
     [D_ORG, false, 'PARENT', 'p_theirs', 'the `org` writer, a row owned by someone else', { kind: 'admitted' }],
     [D_OWN, false, 'PARENT', 'p_own_mine', 'the `own` writer, its own row', { kind: 'admitted' }],
