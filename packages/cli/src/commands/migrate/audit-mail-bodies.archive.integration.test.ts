@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 70 — spawns the real producer once per single-cause fixture: two served-shape boots that run the real Archiver, and five spawns of the source CLI (dry run, --apply, re-run over the archive fixture; --apply on a project with no archive; a dry run with a runtime archive row); 54.7 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
+// test-budget: 70 — spawns the real producer once per single-cause fixture: two served-shape boots that run the real Archiver, and six spawns of the source CLI (dry run, --apply, re-run over the archive fixture; --apply on a project with no archive; a dry run with a runtime archive row; --apply with a declared archive that cannot connect); 54.7 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
 
 /**
  * [#24899] `os migrate audit-mail-bodies` masks the mail-log bodies the
@@ -40,6 +40,10 @@
  *      connects and this command's boot does not) is NOT reported clean: the
  *      archive reads `not-connected` and the command exits 1. With neither a
  *      connected datasource nor such a row it reads `none` and exits 0.
+ *   7. A DECLARED `autoConnect: true` archive this boot cannot connect is NOT
+ *      reported clean either: gate (c) is not fail-fast, so the boot degrades
+ *      and leaves no driver, and the archive reads `not-connected`, carrying
+ *      the connect service's verdict, and the command exits 1.
  *
  * ⛔ The bodies are sentinels, never a link or a token, and every comparison is
  * reported as a count or a boolean.
@@ -51,6 +55,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import Database from 'better-sqlite3';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -167,6 +172,11 @@ let hotAfterApply: Record<string, unknown>[];
 let archivedAfterAging: Record<string, unknown>[];
 let runtimeRowRun: Run;
 let noArchiveRun: Run;
+let unreachableDir: string;
+let unreachableRun: Run;
+let archivedAfterDry: Record<string, unknown>[];
+let hotBeforeDry: Record<string, unknown>[];
+let hotAfterDry: Record<string, unknown>[];
 
 function sweep(mode: 'seed' | 'age'): { source: string; archived: number | null } {
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', SWEEP_CHILD], {
@@ -243,7 +253,10 @@ beforeAll(async () => {
   seedDetail = sweep('seed');
   archivedBefore = auditRows(archiveDb);
 
+  hotBeforeDry = auditRows(mainDb);
   runs.dry = await runCommand(dir, mainDb, ['--json']);
+  archivedAfterDry = auditRows(archiveDb);
+  hotAfterDry = auditRows(mainDb);
   runs.apply = await runCommand(dir, mainDb, ['--apply', '--yes', '--json']);
   archivedAfterApply = auditRows(archiveDb);
   hotAfterApply = auditRows(mainDb);
@@ -267,14 +280,27 @@ beforeAll(async () => {
     db.close();
   }
   runtimeRowRun = await runCommand(runtimeRowDir, runtimeRowDb, ['--json']);
+
+  // A declared archive whose SQLite file cannot be opened: its directory is a
+  // regular file, so the connect fails on every attempt.
+  unreachableDir = mkdtempSync(join(tmpdir(), 'os-24899-unreachable-'));
+  writeFileSync(join(unreachableDir, 'blocker'), 'not a directory');
+  writeArtifact(unreachableDir, [
+    { name: 'archive', driver: 'sqlite', config: { filename: join(unreachableDir, 'blocker', 'archive.db') }, autoConnect: true },
+  ]);
+  unreachableRun = await runCommand(unreachableDir, join(unreachableDir, 'main.db'), ['--apply', '--yes', '--json']);
 }, HOOK_TIMEOUT_MS);
 
 afterAll(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
   if (runtimeRowDir) rmSync(runtimeRowDir, { recursive: true, force: true });
+  if (unreachableDir) rmSync(unreachableDir, { recursive: true, force: true });
 });
 
 const doc = (run: Run): any => JSON.parse(run.stdout);
+/** Two row sets hold the same rows, column for column — a boolean, so a failure prints no row. */
+const sameRows = (a: Record<string, unknown>[], b: Record<string, unknown>[]): boolean =>
+  a.length === b.length && a.every((row, i) => isDeepStrictEqual(row, b[i]));
 const archiveOf = (run: Run): any => doc(run).archive.find((a: { datasource: string }) => a.datasource === 'archive');
 
 describe('[#24899] os migrate audit-mail-bodies over an archive datasource', () => {
@@ -293,8 +319,10 @@ describe('[#24899] os migrate audit-mail-bodies over an archive datasource', () 
       objects: ['sys_audit_log'],
       report: { apply: false, failures: 0, byObject: { sys_audit_log: { scanned: 2, rewritten: 2 } } },
     });
-    // Written only by --apply below: the dry run left the archive as the Archiver did.
-    expect(clear(archivedBefore)).toBe(2);
+    // Both stores, read after the dry run: neither moved.
+    expect(sameRows(archivedAfterDry, archivedBefore)).toBe(true);
+    expect(sameRows(hotAfterDry, hotBeforeDry)).toBe(true);
+    expect(clear(archivedAfterDry)).toBe(2);
   });
 
   it('2. --apply leaves 0 clear copies in either store, and every other archived row is untouched', () => {
@@ -304,14 +332,15 @@ describe('[#24899] os migrate audit-mail-bodies over an archive datasource', () 
     expect(clear(archivedAfterApply)).toBe(0);
     expect(clear(hotAfterApply)).toBe(0);
     const before = new Map(archivedBefore.map((r) => [r.id, r]));
-    for (const row of archivedAfterApply) {
-      const original = before.get(row.id)!;
-      for (const key of Object.keys(original)) {
-        if (key === 'new_value' || key === 'old_value') continue;
-        expect(row[key], `${String(row.id)}.${key}`).toEqual(original[key]);
-      }
-    }
-    expect(archivedAfterApply.find((r) => r.id === 'aud_old_3')).toEqual(before.get('aud_old_3'));
+    const movedColumns = archivedAfterApply.flatMap((row) =>
+      Object.keys(before.get(row.id)!)
+        .filter((key) => key !== 'new_value' && key !== 'old_value')
+        .filter((key) => !isDeepStrictEqual(row[key], before.get(row.id)![key]))
+        .map((key) => `${String(row.id)}.${key}`),
+    );
+    // Names only: an id and a column, never a value.
+    expect(movedColumns).toEqual([]);
+    expect(isDeepStrictEqual(archivedAfterApply.find((r) => r.id === 'aud_old_3'), before.get('aud_old_3'))).toBe(true);
     const masked = JSON.parse(String(archivedAfterApply.find((r) => r.id === 'aud_old_1')!.new_value));
     expect([masked.body_text === MASK, masked.body_html === MASK, masked.subject === 'Subject kept']).toEqual([true, true, true]);
   });
@@ -321,7 +350,7 @@ describe('[#24899] os migrate audit-mail-bodies over an archive datasource', () 
     expect(run.code, run.stderr.slice(-2000)).toBe(0);
     expect(doc(run).report.rewritten).toBe(0);
     expect(archiveOf(run).report).toMatchObject({ scanned: 2, rewritten: 0, failures: 0 });
-    expect(archivedAfterAgain).toEqual(archivedAfterApply);
+    expect(sameRows(archivedAfterAgain, archivedAfterApply)).toBe(true);
   });
 
   it('4. the copy that was hot when the command ran is archived masked', () => {
@@ -332,7 +361,7 @@ describe('[#24899] os migrate audit-mail-bodies over an archive datasource', () 
   });
 
   it('5. no run prints a body', () => {
-    for (const run of [runs.dry, runs.apply, runs.again, runtimeRowRun, noArchiveRun]) {
+    for (const run of [runs.dry, runs.apply, runs.again, runtimeRowRun, noArchiveRun, unreachableRun]) {
       expect(`${run.stdout}\n${run.stderr}`.includes(SENTINEL)).toBe(false);
     }
   });
@@ -342,5 +371,14 @@ describe('[#24899] os migrate audit-mail-bodies over an archive datasource', () 
     expect(archiveOf(noArchiveRun)).toEqual({ datasource: 'archive', objects: ['sys_audit_log'], status: 'none' });
     expect(runtimeRowRun.code).toBe(1);
     expect(archiveOf(runtimeRowRun)).toEqual({ datasource: 'archive', objects: ['sys_audit_log'], status: 'not-connected' });
+  });
+
+  it('7. a declared archive this boot cannot connect is NOT reported clean', () => {
+    expect(unreachableRun.code).toBe(1);
+    const entry = archiveOf(unreachableRun);
+    expect(entry).toMatchObject({ datasource: 'archive', objects: ['sys_audit_log'], status: 'not-connected' });
+    expect(typeof entry.connection?.status).toBe('string');
+    expect(entry.connection.status === 'connected' || entry.connection.status === 'already-registered').toBe(false);
+    expect(entry.report).toBeUndefined();
   });
 });

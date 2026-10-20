@@ -1501,9 +1501,15 @@ value.
 
 **Idempotent**: a masked body is the mask, so a second run masks nothing, and
 re-running is how an interrupted run is finished. A failed read or write exits
-`1`. The copies age out with each table's retention (14 days for activity, 90
-for the audit log, unless the deployment lengthens it); run it once after
-upgrading rather than wait for that.
+`1`. Activity copies age out with its 14-day retention. Audit-log copies do not
+age out: with no archive datasource they are retained hot, and with one they
+are moved there after 90 days and kept for seven years. Run it once after
+upgrading.
+
+**Run it with the server stopped**, or re-run it once and read 0 to mask in
+both halves. A live server's Archiver sweeps on its own schedule, and a row it
+moves between the hot run and the archive run can land in the archive
+unmasked.
 
 **The archive datasource too.** `sys_audit_log` declares
 `lifecycle.archive: { after: '90d', to: 'archive', keep: '7y' }`: past the hot
@@ -1516,9 +1522,9 @@ every other column, `updated_at` included. A hot copy masked first is archived
 masked, so one run covers both the copies already archived and the ones still
 to be. `sys_activity` declares no archive: its copies are only ever hot.
 
-The command connects the datasources the stack config declares, as `os serve`
-does, so it reaches an archive declared there. A managed datasource nothing
-routes to is connected only with `autoConnect: true`, which is how an archive
+The command connects the managed datasources the stack config declares through
+the same connect service `os serve` uses. A managed datasource nothing routes
+to is connected only with `autoConnect: true`, which is how an archive
 datasource is declared:
 
 ```ts
@@ -1533,12 +1539,17 @@ The `--json` document carries one `archive` entry per declared target, with a
 | `status` | Meaning | Exit |
 | :--- | :--- | :--- |
 | `examined` | Connected and masked (or counted); `report` holds the counts | `0`, or `1` on a failed read or write |
-| `none` | No such datasource, and no runtime datasource row of that name: the Archiver retains every row hot, so nothing was archived | `0` |
-| `not-connected` | The database holds an active runtime datasource of that name (one created in Setup → Datasources). `os serve` connects it; this command does not, so the archive was **not** examined | `1` |
+| `none` | No datasource of that name is declared and connected on this boot, none was attempted, and no active runtime datasource row names one. That is all it checked | `0` |
+| `not-connected` | The archive was **not** examined. Either the stack config declares it and this boot did not connect it (`connection` carries the connect status and reason), or the database holds an active runtime datasource of that name (one created in Setup → Datasources), which `os serve` connects and this command does not | `1` |
 | `unknown` | Not connected, and the datasource rows could not be read | `1` |
 
-On `not-connected`, declare the archive datasource in the stack config's
-`datasources` (with `autoConnect: true`), then re-run.
+On `not-connected` for a runtime datasource, declare the archive datasource in
+the stack config's `datasources` (with `autoConnect: true`), then re-run. For a
+declared one, make it reachable from where the command runs, then re-run.
+
+An archive that a host registers in code outside the stack config (a plugin
+that publishes the driver itself) is not reached and reads `none`. To mask it,
+declare it in the stack config's `datasources` with `autoConnect: true`.
 
 #### `os migrate organization-ownership`
 

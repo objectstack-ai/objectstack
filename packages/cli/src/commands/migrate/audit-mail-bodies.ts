@@ -25,18 +25,54 @@ import { absentTableReads } from '../../utils/absent-table-reads.js';
 import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 
 /**
- * [#24899] What the command did about one declared archive target: `examined`
- * (its driver is registered on this boot, and `report` is the run), `none` (no
- * connected datasource and no runtime row of that name — the deployment has no
- * archive), `not-connected` (an active runtime datasource row of that name
- * exists, which this boot does not connect: NOT examined) or `unknown` (not
- * connected, and that row could not be read). The last two fail the run.
+ * [#24899] What the command did about one declared archive target:
+ *
+ *  - `examined`: its driver is registered on this boot, and `report` is the run;
+ *  - `not-connected`, NOT examined: either the stack config declares a
+ *    datasource of that name that this boot attempted and did not connect
+ *    (`connection` carries the connect service's retained verdict), or an
+ *    active runtime datasource row of that name exists, which `os serve`
+ *    connects and this boot does not;
+ *  - `unknown`, NOT examined: neither of the above, and the runtime rows could
+ *    not be read;
+ *  - `none`: no datasource of that name is declared and connected on this boot,
+ *    none was attempted, and no active runtime row names one. That is all it
+ *    checked: an archive a host registers in code outside the stack config is
+ *    not visible here.
+ *
+ * `not-connected` and `unknown` fail the run.
  */
 interface ArchiveOutcome {
   datasource: string;
   objects: string[];
   status: 'examined' | 'none' | 'not-connected' | 'unknown';
   report?: MailLogBodyMigrationReport;
+  connection?: { status: string; reason?: string };
+}
+
+/**
+ * The connect service's retained verdict for a declared datasource named
+ * `datasource` that this boot attempted and did not connect, or `undefined`
+ * when it connected or was never attempted. Gate (c) `autoConnect` is not a
+ * fail-fast trigger, so a declared archive that fails to connect only degrades
+ * and leaves no driver behind. The verdicts are the ones
+ * `findDeclaredDatasourceDrivers` reads.
+ */
+function declaredConnectFailure(kernel: unknown, datasource: string): { status: string; reason?: string } | undefined {
+  let states: unknown;
+  try {
+    states = (kernel as { getService?: (n: string) => any })?.getService?.('datasource-connection')?.listConnectionStates?.();
+  } catch {
+    return undefined;
+  }
+  const state = (Array.isArray(states) ? states : []).find((s: { name?: unknown }) => s?.name === datasource) as
+    | { status?: unknown; reason?: unknown; availability?: unknown }
+    | undefined;
+  if (!state || state.availability === 'available') return undefined;
+  return {
+    status: String(state.status),
+    ...(typeof state.reason === 'string' && state.reason !== '' ? { reason: state.reason } : {}),
+  };
 }
 
 /**
@@ -110,12 +146,14 @@ async function confirm(question: string): Promise<boolean> {
  * moves it is archived masked, so the two runs cover the copies already
  * archived and the ones still to be.
  *
- * Absence is loud: when the target is not connected here but the database
+ * Absence is loud: when the target is not connected here but the stack config
+ * declares it and this boot's connect failed or was refused, or the database
  * holds an active runtime datasource row of that name (one an admin created,
  * which `os serve` connects and this boot does not), the archive was NOT
- * examined — the report says so and the command exits non-zero. No such row
- * and no connected datasource means the deployment has no archive, and the
- * Archiver retains every row hot: nothing to mask there.
+ * examined — the report says so and the command exits non-zero. `none` says
+ * only what was checked: no such declaration attempted, no such row. An
+ * archive a host registers in code outside the stack config is not reached;
+ * declare it in the stack config's `datasources` with `autoConnect: true`.
  */
 export default class MigrateAuditMailBodies extends Command {
   static override description =
@@ -286,8 +324,14 @@ export default class MigrateAuditMailBodies extends Command {
           archive.push({ datasource, objects, status: 'examined', report: archived });
           continue;
         }
-        // Not connected on this boot. A runtime datasource row of that name is
-        // an archive `os serve` connects and this boot cannot: NOT examined.
+        // Not connected on this boot. A declaration this boot attempted and
+        // did not connect, or a runtime datasource row of that name (an
+        // archive `os serve` connects and this boot cannot): NOT examined.
+        const connection = declaredConnectFailure(stack.kernel, datasource);
+        if (connection) {
+          archive.push({ datasource, objects, status: 'not-connected', connection });
+          continue;
+        }
         archive.push({ datasource, objects, status: await runtimeDatasourceRowStatus(readView, datasource) });
       }
       const archiveFailures = archive.reduce(
@@ -320,12 +364,23 @@ export default class MigrateAuditMailBodies extends Command {
             );
           }
         } else if (a.status === 'none') {
-          console.log(chalk.dim(`  archive datasource '${a.datasource}': none on this deployment — nothing archived, nothing to mask`));
+          console.log(chalk.dim(
+            `  archive datasource '${a.datasource}': none declared and connected on this boot, and no active runtime ` +
+              `datasource row names one — nothing examined. An archive a host registers in code outside the stack ` +
+              `config is not reached: declare it in the config's \`datasources\` with \`autoConnect: true\`.`,
+          ));
         }
       }
       console.log('');
       for (const a of archive) {
-        if (a.status === 'not-connected') {
+        if (a.status === 'not-connected' && a.connection) {
+          printError(
+            `Archive datasource '${a.datasource}' (${a.objects.join(', ')}) was NOT examined: the stack config declares ` +
+              `it, and this boot did not connect it (${a.connection.status}` +
+              `${a.connection.reason ? `: ${a.connection.reason}` : ''}), so its archived copies may still hold a mail ` +
+              `body in clear. Make it reachable from where this command runs, and re-run.`,
+          );
+        } else if (a.status === 'not-connected') {
           printError(
             `Archive datasource '${a.datasource}' (${a.objects.join(', ')}) was NOT examined: the database holds an active ` +
               `runtime datasource of that name, which \`os serve\` connects and this command does not, so its archived ` +
