@@ -12,7 +12,10 @@
 //      to that exact name; if nobody writes it, the flow never fires. Names
 //      match exactly (`eval_app_candidate`, not `candidate`). Objects owned by
 //      other packages (`sys_*`, dependency packages) are legitimate targets,
-//      so this is a warning with the cross-package caveat, not an error.
+//      so this is a warning with the cross-package caveat, not an error —
+//      except under a package closure the runtime publish gate states, where
+//      an object outside it is one the package never declared and the same id
+//      is an error (#24669; see the Severity section below).
 //
 //   2. `status: 'draft'` on an auto-triggered flow — the schema default when
 //      no status is authored (defineFlow parses at definition time, so by the
