@@ -195,6 +195,22 @@ function suite(face: Face) {
       ]);
     });
 
+    it('a batch with no tenant on the call answers every row it stored, the organization-less one included', async () => {
+      // [ADR-0131 D1] The tenant scope carries no `IS NULL` arm, so the rows'
+      // own union (`IN ('org_b')`) would miss the unstamped row this call just
+      // wrote. The read is scoped by that union only when every row carries a
+      // tenant; here the call's own options (none) decide, and the ids bound it.
+      const batch = await driver.bulkCreate(TABLE, [
+        { id: 't-m1', title: 'named', organization_id: 'org_b' },
+        { id: 't-m2', title: 'unstamped' },
+      ]);
+      expect(batch.map((r) => [r.id, r.organization_id ?? null])).toEqual([
+        ['t-m1', 'org_b'],
+        ['t-m2', null],
+      ]);
+      expect(batch[1]).toEqual(await stored('t-m2'));
+    });
+
     it('inside a caller transaction, create and bulkCreate answer the uncommitted rows and the rollback keeps', async () => {
       const trx = await driver.beginTransaction();
       let single!: Record<string, unknown>;

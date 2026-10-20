@@ -20,7 +20,10 @@
  *  1. walled: the row carries the RECORD's organization — even when the caller
  *     acts in another one (the link exposes the record, so it belongs where
  *     the record does);
- *  2. walled: an organization-less record takes the caller's organization;
+ *  2. walled: an organization-less record takes the caller's organization —
+ *     reached by a system caller acting in one; a session acting in one does
+ *     not reach it at all (ADR-0131 D1: NULL is not an owner, and the
+ *     driver's scope carries no `IS NULL` arm), so it mints nothing;
  *  3. `single`: neither names one — the Default Organization (the only one);
  *  4. walled: neither names one — refused with the engine's ADR-0112 envelope,
  *     and no row is written.
@@ -112,8 +115,17 @@ describe('[ADR-0131 D9] a minted share link carries an organization', () => {
 
   it("walled: an organization-less record takes the caller's organization", async () => {
     const { service, links } = await boot('isolated', [ORG_A, ORG_B]);
-    await service.createLink({ object: OBJECT, recordId: 'brief_p' }, caller(ORG_B));
+    await service.createLink({ object: OBJECT, recordId: 'brief_p' }, { ...caller(ORG_B), isSystem: true } as never);
     expect(await links()).toEqual([{ record_id: 'brief_p', organization_id: ORG_B }]);
+  });
+
+  it('walled: a session acting in an organization does not reach an organization-less record — refused, and no row is written', async () => {
+    const { service, links } = await boot('isolated', [ORG_A, ORG_B]);
+    const refusal = await service
+      .createLink({ object: OBJECT, recordId: 'brief_p' }, caller(ORG_B))
+      .then(() => undefined, (err: unknown) => err);
+    expect(refusal).toMatchObject({ code: 'FORBIDDEN', status: 403 });
+    expect(await links()).toEqual([]);
   });
 
   it('single: neither names one — the Default Organization, the only one there is', async () => {
