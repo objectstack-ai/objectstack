@@ -99,8 +99,8 @@ export interface AdminStandingTable {
  * authenticates a principal and seeds `permissions` with the key's scopes, and
  * confers no administrator standing of its own — `hasPlatformAdminGrant` is set
  * from the catalog's `admin_full_access` set reached through the anchoring
- * `sys_user_permission_set` grant (§6b — the Default Organization's or an
- * organization-less one, on a NON-WALLED posture only since #11663 L5) or from the deployment config matched against the caller's own
+ * `sys_user_permission_set` grant (§6b — the Default Organization's, on a
+ * NON-WALLED posture only since #11663 L5) or from the deployment config matched against the caller's own
  * STORED `sys_user` row (§6b-config, on every posture), never from a scope
  * string and never from the caller-seedable `grants.email`.
  */
@@ -128,7 +128,7 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
     reason:
       'The grant that makes a user a platform admin UNDER A NON-WALLED POSTURE: an in-window '
       + '(ADR-0091) grant of `admin_full_access` owned by the Default Organization (ADR-0131 D5, the '
-      + 'row the first-user promotion writes) or by no organization (the row it wrote before) — §6, '
+      + 'row the first-user promotion writes) — §6, '
       + '`grantAnchorsPlatformStanding`. Re-pointing it, scoping it to another organization or moving '
       + 'it out of its window revokes the standing while leaving the row in place. ⚠️ Under a '
       + 'WALLED posture (`group`/`isolated`) it confers NOTHING: the walled half '
