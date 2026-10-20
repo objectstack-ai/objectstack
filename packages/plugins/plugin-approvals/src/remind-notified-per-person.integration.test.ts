@@ -204,8 +204,8 @@ describe('a reminder counts the reminders it hands over, one per distinct approv
     // The scene: the stored slate really lists her twice, so a count of 1 is the rule, not an empty slate.
     expect(stored).toEqual(['u_alice', 'u_alice']);
 
-    expect(reminders).toEqual([['u_alice']]);
     expect(notified).toBe(1);
+    expect(reminders).toEqual([['u_alice']]);
 
     // Unchanged: the reminder itself — topic, deep link, per-approver dedup key — and its one audit row.
     const [reminder] = emits.filter((e) => e.topic === 'approval.reminder' && e.source?.id === req.id);
@@ -220,29 +220,29 @@ describe('a reminder counts the reminders it hands over, one per distinct approv
   it('an approver authored as the same email in two groups is handed one reminder and counted once', async () => {
     const { stored, notified, reminders } = await remindOn('twice_by_email');
     expect(stored).toEqual([ALICE_EMAIL, ALICE_EMAIL]);
-    expect(reminders).toEqual([[ALICE_EMAIL]]);
     expect(notified).toBe(1);
+    expect(reminders).toEqual([[ALICE_EMAIL]]);
   });
 
   it('control: two distinct approvers are each handed a reminder, and both are counted', async () => {
     const { stored, notified, reminders } = await remindOn('two_people');
     expect(stored).toEqual(['u_alice', 'u_bob']);
-    expect(reminders).toEqual([['u_alice'], ['u_bob']]);
     expect(notified).toBe(2);
+    expect(reminders).toEqual([['u_alice'], ['u_bob']]);
   });
 
   it('a position:* literal on the slate adds nothing, and the person beside it is still reminded', async () => {
     const { stored, notified, reminders } = await remindOn('person_and_literal');
     expect(stored).toEqual(['u_alice', 'position:nobody_holds']);
-    // The literal names no one: no emit carries it, and it adds nothing to the count.
-    expect(reminders).toEqual([['u_alice']]);
+    // The literal names no one: it adds nothing to the count, and no emit carries it.
     expect(notified).toBe(1);
+    expect(reminders).toEqual([['u_alice']]);
   });
 
   it("an account's id and its email are two addresses: two reminders, as at the opening", async () => {
     const { stored, notified, reminders } = await remindOn('id_and_email');
     expect(stored).toEqual(['u_alice', ALICE_EMAIL]);
-    expect(reminders).toEqual([['u_alice'], [ALICE_EMAIL]]);
     expect(notified).toBe(2);
+    expect(reminders).toEqual([['u_alice'], [ALICE_EMAIL]]);
   });
 });
