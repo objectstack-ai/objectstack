@@ -109,7 +109,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "automated.ref narrowed clause by clause, in the scope-depth-asymmetry shape — round 2 part 1 of wave anchor #24579 (comment 6272032736: Tier 1 run #24598 named this ref among those that over-claim clause coverage). QA run #24575 scored every clause pass on the pin's 2/2; read against the spec, its two cases cover negative[0], acceptance[0]'s mcp variant and the other two variants' state, and the mcp halves of acceptance[1] and [2] only. No clause changed",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     },
@@ -200,7 +200,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3; wave anchor #24579 §3, which lists it under automation). acceptance[3].verify and steps[6] said a reload reconcile resets the backoff; it retries at once and keeps counting, and only a config edit (a changed materialization signature) resets it, as degradeConnectorInstance has it. steps[6] said to touch or save the entry, which restarts os dev; it now names a restart-free reload, a per-item publish. fixtures.requires[0] puts every boot in a scratch copy (the stdio path is cwd-relative) and names #24575's file-move break, the one steps[4] can undo with no config change; steps[4] names the warn line that shows the swap at the default log level. Not loosened: every clause keeps its oracle",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     },
@@ -807,7 +807,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3; wave anchor #24579 §3, whose dashboards/search bullet says the job timeout probe needs a retryPolicy). steps[4]'s timeout probe carried no retryPolicy, so it could not show acceptance[3]'s 'timeouts COUNT as failures' half; a second probe with a policy now does, and acceptance[3]'s verify and evidence read both. fixtures.requires[1] carries the writable-copy recipe #24575 used and says the shipped cron fixture fires only at 01:00 UTC. steps[6] builds each refused shape on its own, since a build stops at the first refused job. Not loosened: no clause changed",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     },
@@ -1087,7 +1087,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA runs #24575 (5b14b7f3) and #24615 (ba4afcc2), 18.0 sweep; wave anchor #24579 §3 and its round 2 part 2. knownGaps[2] said no served boot lacks MessagingServicePlugin; `--preset minimal` mounts no always-on slate, and #24615 scored the 501 half on a scratch app-todo copy requiring automation, triggers and auth, so the gap carries that recipe and acceptance[3].verify names the boot. steps[5] reads the receipts as the recipient (the admin's /data view is owner-scoped); acceptance[4].verify counts delivery rows before and after, because inbox deliveries write them too. fixtures.requires[0] spells the recipients as the flow now declares them, one CEL value envelope. Not loosened: a fabricated inbox, delivery or receipt still FAILS",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     },
@@ -1155,7 +1155,7 @@
         },
         { "revision": 2, "date": "2026-08-18", "change": "re-worded clause 3 and step 5 for this item's declared api surface. Both named the Setup → Datasources console page inside an item whose surface is api, so the clause could only ever be scored by a substitution the item did not authorize. The datasources admin API is what the page renders from, so it is now the oracle and the page is the optional substitution — surface left as api rather than widened to mixed, since every other clause here is a server read (#9417)", "ref": "#9386" },
         { "revision": 3, "date": "2026-10-16", "change": "acceptance[0].verify corrected (checklist-accuracy finding of QA run #23922, wave #23878): 'filters/$top work as on a native object' — OData $filter is refused 400 INVALID_FILTER on /data (the filter must be JSON), while the JSON filter param and top work, which is what #23922 used. The verify text names the working spellings and the refusal. Not loosened: a filter that returns the unfiltered set still FAILS", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-20", "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3; wave anchor #24579 §3). acceptance[2]'s oracle still read 'screenshot' and its evidence 'screenshot', although revision 2 made the datasources API the oracle; both now name the API reads. steps[4] names the console route for the substitution (…/setup/datasources is not one). fixtures.requires[0] says where the fixture DB is provisioned. Not loosened: the clause and its verify are unchanged", "ref": "#PENDING-24579R7" }
+        { "revision": 4, "date": "2026-10-20", "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3; wave anchor #24579 §3). acceptance[2]'s oracle still read 'screenshot' and its evidence 'screenshot', although revision 2 made the datasources API the oracle; both now name the API reads. steps[4] names the console route for the substitution (…/setup/datasources is not one). fixtures.requires[0] says where the fixture DB is provisioned. Not loosened: the clause and its verify are unchanged", "ref": "#24717" }
       ]
     },
     {
@@ -1298,7 +1298,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24615 (18.0 sweep round 2, ba4afcc2; wave anchor #24579 §3, round 2 part 2). The served driver id is `mongodb`, not `mongo` (steps[2], acceptance[0].clause); the sqlite config key is `filename`, and `file` is an alias authoring refuses (steps[3], steps[4]); the health field is spelled `status`, beside `statusReason` (steps[5], acceptance[4] clause and verify). steps[3] and acceptance[2].clause said POST /test is registered before the :name routes; it is registered after every one of them (admin-routes.ts), and 'test' stays uncaptured because no POST route takes a bare :name. The code comment that says otherwise is reported, not edited. steps[8] carries the live bind-arm recipe #24615 proved and names the wire statuses. Not loosened: no clause's oracle or verdict changed",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     },
@@ -1412,7 +1412,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0] corrected — checklist-accuracy finding of QA run #24615 (18.0 sweep round 2, ba4afcc2; wave anchor #24579 §3, round 2 part 2). It said a schema-qualified Postgres fixture would make ?schema= narrowing live-scoreable; measured on PostgreSQL 16, the SQL driver's Postgres introspection returns bare names from current_schemas(false) too, so narrowing stays unobservable live. That is the product defect #24664, split from #24619 row (c); acceptance[1] states the #7955 contract and stays as written, scored by its pin. No clause changed",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     },
@@ -1534,7 +1534,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24615 (18.0 sweep round 2, ba4afcc2; wave anchor #24579 §3). knownGaps[0] preferred altering the fixture DB; the recipe #24615 proved adds a field to the federated object (a measured missing_column) and survives re-provisioning, so the gap leads with it. steps[0] names --log-level info: the all-clear, SKIPPED and armed-timer lines are info-level and absent at the default warn level. No clause changed",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     },
@@ -1780,7 +1780,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3), the P0 run #24556's continuation and wave anchor #24579 §3. knownGaps[2] said no Postgres recipe is proven and the QA container has no database; the container has PostgreSQL 16 and #24575 proved a recipe that scored acceptance[1] and [6] pass, so the gap carries it. The driver id is `mongodb` since 18 (an authored `mongo` is refused by name, #24556), in knownGaps[2] and steps[0]. steps[8] names the admin-only third read door, /data/sys_metadata, which also redacts. knownGaps[4] (new) records that no datasource read door serves the mask (the admin door withholds the key, the metadata door serves the credentialsRef handle), so acceptance[6].clause says the echoed config carries none and source[2] no longer says both readers import it; the literal-mask PATCH #24575 measured is held for the maintainer on #24579 §7 and scored under no clause. Not loosened: every verify and every negative is unchanged",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     },
@@ -1884,7 +1884,7 @@
           "revision": 2,
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24615 (18.0 sweep round 2, ba4afcc2; wave anchor #24579 §3). steps[1] offered 'direct engine dispatch', which has no HTTP door; it names the runtime-flow vehicle #24615 used (POST /api/v1/automation, then POST /automation/NAME/trigger). fixtures.knownGaps[0] and source[5] cited the showcase connectors file by comma-separated line numbers, the rot class the line-citation limb exists for; both now anchor the declaring symbol. No clause changed",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     },
@@ -2018,7 +2018,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24615 (18.0 sweep round 2, ba4afcc2, driven by hand at the console pin 4016370a; wave anchor #24579 §3, round 2 part 2), re-read in objectui at the shipped pin 12dc7b47c340. steps[1]: no entry from the Setup list reaches the panel (DatasourceResourcePage rows never open the item), so the step names the engine edit route. acceptance[0] (clause, verify, evidence): the save-first guidance is unreachable (datasource is not in CREATE_MODE_CANVAS_TYPES), so the clause scores the observable half, no name-less call, and records the guidance half not-run. steps[7]: the quoted refusal was POST /meta/_migrate-stored's; the item save door answers 403 FORBIDDEN 'Saving a metadata item requires…'. knownGaps[3] carries #24615's drift recipe that needs no scratch copy; knownGaps[4] (new) records that a repeated import answers 201 and overwrites, which no clause scores. acceptance[3].verify's comma-range line citation names the handler instead (the line-citation rot class). Not loosened: every other clause and negative is unchanged",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     },
@@ -2096,7 +2096,7 @@
           "revision": 2,
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24558 (since:v18, 5b14b7f3; its first comment; wave anchor #24579). knownGaps[0] said no in-repo app composes the mailbox service; the showcase requires 'mailbox' and serves the sys_mail_* objects, and what is missing is the IMAP sync composition, a mailAssociation field and an IMAP double, so knownGaps[0] and fixtures.requires[1] now say that. No clause changed",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     },
@@ -2173,7 +2173,7 @@
           "revision": 2,
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24558 (since:v18, 5b14b7f3; its first comment; wave anchor #24579). fixtures.requires[2] asked for the shipped inactive webhook 'with one delivery', which cannot exist: an inactive webhook is never dispatched. It now carries #24558's recipe (an active webhook to a local sink, a terminal delivery, then switch it off), and steps[2] warns off a pending row, which answers the same code for another reason. steps[3] says its MCP leg is scored by acceptance[0]'s pin only. No clause changed",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     }

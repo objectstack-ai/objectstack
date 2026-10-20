@@ -2597,7 +2597,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "line citations re-pointed — the carried note from round 5 of wave anchor #24579 (its report, comment 6279808387). acceptance[3].clause, acceptance[4].verify, acceptance[5].verify, negative[3] and source[0] cited activation-gate.ts by line number in a comma-range spelling (',141-147', ',155-163', ',190', and source[0]'s five ranges), the rot class the line-citation limb exists for and does not detect; at this base those lines hold other code. Each now anchors the declaring symbol (refuseUngrantedActivationWrite, refuseUngrantedActivationAuthoring, readEffectiveTenancyPosture, FLOW_ACTIVATION_SUBJECT, ACTION_ACTIVATION_SUBJECT) or names the header section in prose. Reading the gate for that, acceptance[4].clause was corrected beside its walled lead, which is unchanged: it said flows recommend the clone path and that the platform_admin POSITION admits; both remedies name the operator and neither a clone (ADR-0131 D6 · D12 items 7–8, as both pins assert), and the gate reads the PLATFORM_ADMIN posture rung, never a position name (#15981). Not loosened: the oracle and the pins are unchanged",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     },
@@ -2918,7 +2918,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "steps[0]'s walled parenthetical corrected — the carried note from round 5 of wave anchor #24579 (its report, comment 6279808387). It said a walled posture refuses to boot with the variable unset (plugin-auth init); on 18.0 serve.ts#walledPostureRefusal refuses a walled posture earlier, before any config or plugin, whether the variable is set or unset. The item boots single throughout and no clause scores the walled case, so no clause changed",
-          "ref": "#PENDING-24579R7"
+          "ref": "#24717"
         }
       ]
     },
