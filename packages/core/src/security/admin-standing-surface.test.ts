@@ -151,16 +151,19 @@ const VARIANTS: Record<
     platformAdminEmails?: string;
   }
 > = {
-  // Snake_case rows, unscoped in-window grant, active set: the happy platform-admin path.
+  // Snake_case rows, the Default Organization's in-window grant, active set: the
+  // happy platform-admin path, resolved in another organization (`org_1`), which
+  // owns the position grant.
   'snake-case rows, standing intact': {
     org: 'org_1',
     tables: {
       sys_user: [{ id: 'usr_1', email: 'ada@example.com', ai_access: 1 }],
+      sys_organization: [{ id: 'org_default', slug: 'default' }, { id: 'org_1', slug: 'one' }],
       sys_member: [
         { id: 'mem_1', user_id: 'usr_1', organization_id: 'org_1', role: 'owner', valid_from: null, valid_until: null },
       ],
       sys_user_position: [
-        { id: 'upo_1', user_id: 'usr_1', position: 'contributor', organization_id: null, valid_from: null, valid_until: null },
+        { id: 'upo_1', user_id: 'usr_1', position: 'contributor', organization_id: 'org_1', valid_from: null, valid_until: null },
       ],
       sys_position: [{ id: 'pos_1', name: 'contributor', active: true }],
       sys_position_permission_set: [{ position_id: 'pos_1', permission_set_id: 'pst_2' }],
@@ -169,7 +172,7 @@ const VARIANTS: Record<
           id: 'ups_1',
           user_id: 'usr_1',
           permission_set_id: 'pst_1', permission_set: 'admin_full_access',
-          organization_id: null,
+          organization_id: 'org_default',
           valid_from: null,
           valid_until: null,
         },
@@ -194,10 +197,10 @@ const VARIANTS: Record<
     tables: {
       sys_user: [{ id: 'usr_1', email: 'ada@example.com', ai_access: true }],
       sys_member: [{ id: 'mem_1', userId: 'usr_1', organizationId: 'org_1', role: 'admin' }],
-      sys_user_position: [{ id: 'upo_1', userId: 'usr_1', position: 'contributor' }],
+      sys_user_position: [{ id: 'upo_1', userId: 'usr_1', position: 'contributor', organizationId: 'org_1' }],
       sys_position: [{ id: 'pos_1', name: 'contributor', active: true }],
       sys_position_permission_set: [{ positionId: 'pos_1', permissionSetId: 'pst_2' }],
-      sys_user_permission_set: [{ id: 'ups_1', userId: 'usr_1', permissionSetId: 'pst_1' }],
+      sys_user_permission_set: [{ id: 'ups_1', userId: 'usr_1', permissionSetId: 'pst_1', organizationId: 'org_1' }],
       sys_permission_set: [
         {
           id: 'pst_1',
@@ -269,10 +272,11 @@ const VARIANTS: Record<
   },
 
   // [ADR-0131 D5] The `single` promotion's grant, owned by the Default
-  // Organization: the only variant in which that organization's row is read,
-  // so the union needs it — without it `sys_organization.id` would be absent
-  // from the declaration and the guard would stop judging the delete that
-  // moves the anchor off this grant.
+  // Organization and resolved IN it, with no other grant: the isolated reading
+  // of that organization's row (the happy path above reads it too, beside
+  // everything else), so the union needs it — without it `sys_organization.id`
+  // would be absent from the declaration and the guard would stop judging the
+  // delete that moves the anchor off this grant.
   'default-organization-owned grant': {
     org: 'org_1',
     tables: {

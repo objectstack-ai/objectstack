@@ -426,6 +426,7 @@ export {
   validateObjectReferences,
   OBJECT_REFERENCE_UNKNOWN,
   OBJECT_REFERENCE_UNREGISTERED_PLATFORM,
+  USER_FIELD_FOREIGN_REFERENCE,
 } from './validate-object-references.js';
 export type { ObjectRefFinding, ObjectRefSeverity } from './validate-object-references.js';
 
@@ -496,12 +497,15 @@ export type {
 // [#24668] Its FOURTH: a list view judged against the whole collection (a
 // runtime write that names no package) whose bound object exists nowhere —
 // refused the same way; `wholeCollection` is the statement.
+// Its FIFTH: a list view still carrying a key the spec retired, reported by
+// name with the tombstone's prescription (`os lint` never parses).
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
   LIST_VIEW_OBJECT_UNKNOWN,
+  LIST_VIEW_KEY_RETIRED,
 } from './validate-list-view-field-refs.js';
 export type {
   ListViewFieldRefFinding,

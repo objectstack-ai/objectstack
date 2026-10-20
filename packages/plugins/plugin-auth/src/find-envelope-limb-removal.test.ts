@@ -154,7 +154,7 @@ async function seedAll(engine: ObjectQL): Promise<void> {
   await engine.insert('sys_invitation', { id: 'inv_1', email: 'alice@corp.example', status: 'pending', organization_id: 'org_1', inviter_id: 'usr_1', expires_at: new Date(Date.now() + 86_400_000).toISOString() }, SYSTEM);
   await engine.insert('sys_permission_set', { id: 'ps_1', name: 'member_default', label: 'Member' }, SYSTEM);
   await engine.insert('sys_user_permission_set', { id: 'ups_1', user_id: 'usr_1', permission_set_id: 'ps_1' }, SYSTEM);
-  await engine.insert('sys_notification_template', { id: 'nt_1', topic: 'otp', channel: 'sms', locale: 'en', body: 'code {{code}}', is_active: true }, SYSTEM);
+  await engine.insert('sys_notification_template', { id: 'nt_1', organization_id: 'org_1', topic: 'otp', channel: 'sms', locale: 'en', body: 'code {{code}}', is_active: true }, SYSTEM);
 }
 
 /**
@@ -406,11 +406,11 @@ describe('#15597 — the blocks driven through their real production entry point
   it('phone-sms template read reads the bare array (B14, the `data` limb)', async () => {
     const engine = await bootEngine();
     await seedAll(engine);
-    expect(await resolvePhoneSmsTemplateBody(engine as never, 'otp', 'en')).toBe('code {{code}}');
+    expect(await resolvePhoneSmsTemplateBody(engine as never, 'otp', 'en', 'org_1')).toBe('code {{code}}');
     // No row and no built-in text for the topic: the built-in walk's empty
     // floor, not a row invented from a misread envelope. (The seeder's
     // existence read, this site's second `rowsOf` call, retired with the seed.)
-    expect(await resolvePhoneSmsTemplateBody(engine as never, 'nosuchtopic', 'en')).toBe('');
+    expect(await resolvePhoneSmsTemplateBody(engine as never, 'nosuchtopic', 'en', 'org_1')).toBe('');
   });
 
   it('tenancy resolveDefaultOrgId reads the bare array (B7)', async () => {

@@ -19,6 +19,9 @@ function delivery(over: Partial<Delivery['notification']> = {}, recipient = 'use
         recipient,
         notification: {
             notificationId: 'evt_1',
+            // Every composed delivery names its organization (the event row's);
+            // the template rows below are that organization's.
+            organizationId: 'org_1',
             topic: 'deal.won',
             title: 'Deal closed',
             body: 'Acme signed',
@@ -36,7 +39,8 @@ type FakeUser = string | { phone_number: string; locale?: unknown };
 /** Fake data engine: user id → phone_number (+ locale), and template lookups. */
 function fakeData(opts: { users?: Record<string, FakeUser>; templates?: any[] } = {}) {
     const users = opts.users ?? { user_1: '+8613800000000' };
-    const templates = opts.templates ?? [];
+    // A fixture row is the delivery organization's unless it names another.
+    const templates = (opts.templates ?? []).map((t) => ({ organization_id: 'org_1', ...t }));
     const findOnes: Array<{ object: string; query: any }> = [];
     return {
         findOnes,
@@ -50,7 +54,7 @@ function fakeData(opts: { users?: Record<string, FakeUser>; templates?: any[] } 
                 return typeof user === 'string' ? { phone_number: user } : { ...user };
             }
             if (object === 'sys_notification_template') {
-                return templates.find((t) => t.topic === w.topic && t.channel === w.channel && t.locale === w.locale && t.is_active) ?? null;
+                return templates.find((t) => t.organization_id === w.organization_id && t.topic === w.topic && t.channel === w.channel && t.locale === w.locale && t.is_active) ?? null;
             }
             return null;
         },

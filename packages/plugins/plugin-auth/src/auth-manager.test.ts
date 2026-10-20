@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthManager, ipMatchesRange } from './auth-manager';
+import { vendorClientAddressOptions } from './client-address-vendor';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/objectql';
 
 // Mock better-auth so we can control the handler behaviour
@@ -2116,6 +2117,7 @@ describe('AuthManager', () => {
           domain: '.objectos.app',
         },
         useSecureCookies: true,
+        ipAddress: vendorClientAddressOptions(),
       });
     });
 
@@ -2142,7 +2144,7 @@ describe('AuthManager', () => {
       expect(capturedConfig.advanced.cookiePrefix).toBe('objectos');
     });
 
-    it('should NOT include advanced when not provided', async () => {
+    it('carries only the library client-address source when no advanced option is provided', async () => {
       let capturedConfig: any;
       (betterAuth as any).mockImplementation((config: any) => {
         capturedConfig = config;
@@ -2157,7 +2159,7 @@ describe('AuthManager', () => {
       await manager.getAuthInstance();
       warnSpy.mockRestore();
 
-      expect(capturedConfig).not.toHaveProperty('advanced');
+      expect(capturedConfig.advanced).toEqual({ ipAddress: vendorClientAddressOptions() });
     });
   });
 
@@ -2686,11 +2688,16 @@ describe('AuthManager', () => {
     });
 
     it('a tenant sys_notification_template row overrides the built-in text', async () => {
+      // The row is read in the organization the send resolves to,
+      // `tenancy.defaultOrgId()` — the Default Organization under `single`
+      // (phone-sms-texts.ts, "Which organization's row").
       const { manager, opts } = await bootOtp({
+        getTenancy: () => ({ defaultOrgId: async () => 'org_default' }),
         dataEngine: {
           async find(object: string, q: any) {
             if (
               object === 'sys_notification_template' &&
+              q?.where?.organization_id === 'org_default' &&
               q?.where?.topic === 'auth.phone_otp' &&
               q?.where?.channel === 'sms' &&
               q?.where?.locale === 'zh-CN'
@@ -3642,9 +3649,10 @@ describe('AuthManager', () => {
   });
 
   describe('customSession – derived identity and positions array', () => {
-    // dataEngine stub: `adminLinks` controls whether the user resolves as a
+    // dataEngine stub: `platformAdmin` controls whether the user resolves as a
     // platform admin (a sys_user_permission_set row pointing at the
-    // admin_full_access permission set with no organization scope).
+    // admin_full_access permission set, owned by the Default Organization —
+    // the `sys_organization` row slugged `default` the stub serves).
     const makeDataEngine = (opts: { platformAdmin: boolean }) => bindTestSecurityCatalog({
       // Two parameters because the seam has two: `IDataEngine.find(objectName,
       // query?, options?)`, and every production read reaching this double goes
@@ -3654,18 +3662,21 @@ describe('AuthManager', () => {
       find: vi.fn(async (object: string, _query?: any) => {
         if (object === 'sys_user_permission_set') {
           return opts.platformAdmin
-            ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', permission_set: 'admin_full_access', organization_id: null }]
+            ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', permission_set: 'admin_full_access', organization_id: 'org_default' }]
             : [];
         }
         if (object === 'sys_permission_set') {
           return [{ id: 'ps-admin', name: 'admin_full_access' }];
+        }
+        if (object === 'sys_organization') {
+          return [{ id: 'org_default', slug: 'default' }];
         }
         return [];
       }),
       findOne: vi.fn(),
     }, { permissions: [{ name: ADMIN_FULL_ACCESS, ...ADMIN_FULL_ACCESS_CAPABILITIES }] });
 
-    const getSessionCallback = async (dataEngine: any) => {
+    const getSessionCallback = async (dataEngine: any, extra: Record<string, unknown> = {}) => {
       let capturedConfig: any;
       (betterAuth as any).mockImplementation((config: any) => {
         capturedConfig = config;
@@ -3677,6 +3688,7 @@ describe('AuthManager', () => {
         secret: 'test-secret-at-least-32-chars-long',
         baseUrl: 'http://localhost:3000',
         dataEngine,
+        ...extra,
       });
       await manager.getAuthInstance();
       warnSpy.mockRestore();
@@ -3750,15 +3762,16 @@ describe('AuthManager', () => {
       const inner = engine.find;
       engine.find = vi.fn(async (object: string, q?: any) => {
         if (object === 'sys_user_position') {
-          return [{ user_id: 'u-1', position: 'demo_reviewer', organization_id: null }];
+          return [{ user_id: 'u-1', position: 'demo_reviewer', organization_id: 'o1' }];
         }
         return inner(object, q);
       }) as any;
 
+      // The assignment applies in its own organization, so the session acts in it.
       const callback = await getSessionCallback(engine);
       const result = await callback({
         user: { id: 'u-1', email: 'a@b.com', role: 'manager' },
-        session: {},
+        session: { activeOrganizationId: 'o1' },
       });
       expect(result.user.positions).toContain('demo_reviewer');
       // Still not the scalar — the two axes do not blend.
@@ -3771,6 +3784,56 @@ describe('AuthManager', () => {
       const result = await callback({ user, session: {} });
       expect(result.user).toBe(user);
       expect(result.user.positions).toBeUndefined();
+    });
+
+    // [#24762, ruling 6288774214 items 1–3] What `user.authGate` the producer
+    // stamps on an impersonation session (`session.impersonatedBy` set) of a
+    // held user: only an `account`-scope posture (`AUTH_GATE_SCOPES`) holds
+    // it, the first one the user's list reports. The user's own session keeps
+    // the list's first entry. The same cases on a real boot, through the
+    // transport seams' 403 envelope, are `@objectstack/verify`'s
+    // `held-session-impersonation-target.pin.test.ts`.
+    describe('the posture stamped on an impersonation session (ADR-0069, AUTH_GATE_SCOPES)', () => {
+      const LAPSED = () => new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const IMPERSONATION = { impersonatedBy: 'u-admin' };
+      // Every posture computable at once: enforced MFA with no grace, and a
+      // one-day expiry. Each row below decides which postures its user holds.
+      const POLICY = { mfaRequired: true, mfaGracePeriodDays: 0, passwordExpiryDays: 1 };
+      const sessionGateFor = async (row: Record<string, unknown>, session: Record<string, unknown>) => {
+        const engine = makeDataEngine({ platformAdmin: false });
+        // The block's double, its `findOne` answering the posture read of the user row.
+        engine.findOne = vi.fn(async (object: string, q?: any) => {
+          assertEngineFindOnePredicate(object, q);
+          return object === 'sys_user' && q?.where?.id === 'u-1' ? { id: 'u-1', ...row } : null;
+        }) as any;
+        const callback = await getSessionCallback(engine, POLICY);
+        const result = await callback({ user: { id: 'u-1', email: 'a@b.com' }, session });
+        return result.user.authGate?.code;
+      };
+      const RESET = { must_change_password: true, two_factor_enabled: true, password_changed_at: new Date().toISOString() };
+      const EXPIRED = { must_change_password: false, two_factor_enabled: true, password_changed_at: LAPSED() };
+      const MFA = { must_change_password: false, two_factor_enabled: false, mfa_required_at: LAPSED(), password_changed_at: new Date().toISOString() };
+      const RESET_AND_MFA = { ...MFA, must_change_password: true };
+
+      it('a forced-reset user: their own session is held, an impersonation session of them is not', async () => {
+        expect(await sessionGateFor(RESET, {})).toBe('PASSWORD_RESET_REQUIRED');
+        expect(await sessionGateFor(RESET, IMPERSONATION)).toBeUndefined();
+      });
+
+      it('an expired-password user: the same, the other credential-scope posture', async () => {
+        expect(await sessionGateFor(EXPIRED, {})).toBe('PASSWORD_EXPIRED');
+        expect(await sessionGateFor(EXPIRED, IMPERSONATION)).toBeUndefined();
+      });
+
+      it('an MFA-held user: the account-scope posture holds the impersonation session too', async () => {
+        expect(await sessionGateFor(MFA, {})).toBe('MFA_REQUIRED');
+        expect(await sessionGateFor(MFA, IMPERSONATION)).toBe('MFA_REQUIRED');
+      });
+
+      it('a user held by both: their own session shows the reset, the impersonation session MFA_REQUIRED', async () => {
+        expect(await sessionGateFor(RESET_AND_MFA, {})).toBe('PASSWORD_RESET_REQUIRED');
+        expect(await sessionGateFor(RESET_AND_MFA, IMPERSONATION)).toBe('MFA_REQUIRED');
+      });
     });
   });
 
@@ -5013,26 +5076,33 @@ describe('isPlatformAdminUserId – the /sso/register criterion is platform-admi
   const SECRET = 'test-secret-at-least-32-chars-long';
 
   /**
-   * Read-only engine stub. `platformAdmin` controls the ADR-0068 org-less
-   * `admin_full_access` link; `members` are `sys_member` rows, which this
+   * Read-only engine stub. `platformAdmin` controls the ADR-0068
+   * `admin_full_access` link, owned by the Default Organization (`org-default`,
+   * slugged `default`) unless `grantOrganization` names another owner — `null`
+   * for an organization-less row; `members` are `sys_member` rows, which this
    * criterion must now ignore entirely. `find` honours the `where` the judge
    * passes, so any org-scoping is the product's, not the fixture's.
    */
-  const makeEngine = (opts: { members?: any[]; platformAdmin?: boolean; throws?: boolean; orgScopedGrant?: boolean } = {}) => bindTestSecurityCatalog({
+  const makeEngine = (opts: { members?: any[]; platformAdmin?: boolean; throws?: boolean; grantOrganization?: string | null } = {}) => bindTestSecurityCatalog({
     find: vi.fn(async (object: string, query?: any) => {
       if (opts.throws) throw new Error('db down');
+      const byWhere = (rows: any[]) => {
+        const where = query?.where ?? {};
+        return rows.filter((row) =>
+          Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return row[k] === v; }),
+        );
+      };
       if (object === 'sys_user_permission_set') {
+        const organization_id = opts.grantOrganization === undefined ? 'org-default' : opts.grantOrganization;
         return opts.platformAdmin
-          ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', permission_set: 'admin_full_access', organization_id: opts.orgScopedGrant ? 'org-1' : null }]
+          ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', permission_set: 'admin_full_access', organization_id }]
           : [];
       }
       if (object === 'sys_permission_set') return [{ id: 'ps-admin', name: 'admin_full_access' }];
-      if (object === 'sys_member') {
-        const where = query?.where ?? {};
-        return (opts.members ?? []).filter((row) =>
-          Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return row[k] === v; }),
-        );
+      if (object === 'sys_organization') {
+        return byWhere([{ id: 'org-default', slug: 'default' }, { id: 'org-1', slug: 'org-1' }]);
       }
+      if (object === 'sys_member') return byWhere(opts.members ?? []);
       return [];
     }),
     findOne: vi.fn(),
@@ -5083,7 +5153,7 @@ describe('isPlatformAdminUserId – the /sso/register criterion is platform-admi
 
   // -- (2) the other direction: a real platform admin is still admitted ------
   describe('the ADR-0068 platform admin is still ADMITTED', () => {
-    it('admits an org-less admin_full_access grant even when the membership is a plain member', async () => {
+    it('admits the Default Organization\'s admin_full_access grant even when the membership is a plain member', async () => {
       expect(await judge(makeEngine({ platformAdmin: true, members: [memberRow('member')] }))).toBe(true);
     });
 
@@ -5098,10 +5168,18 @@ describe('isPlatformAdminUserId – the /sso/register criterion is platform-admi
       expect(await judge(makeEngine({ members: [memberRow('member')] }))).toBe(false);
     });
 
-    it('refuses when the admin_full_access grant is ORG-SCOPED, not platform-wide', async () => {
-      // `organization_id != null` is an org-scoped assignment — ADR-0068 D2
-      // reads only the org-less link as platform admin.
-      expect(await judge(makeEngine({ platformAdmin: true, orgScopedGrant: true }))).toBe(false);
+    it('refuses when the admin_full_access grant is owned by ANOTHER organization, not the Default one', async () => {
+      // Any organization's grant other than the Default Organization's is an
+      // org-scoped assignment — it confers the set there, never platform standing.
+      expect(await judge(makeEngine({ platformAdmin: true, grantOrganization: 'org-1' }))).toBe(false);
+    });
+
+    it('refuses an ORGANIZATION-LESS admin_full_access grant — it anchors nothing', async () => {
+      // Invalid state since the ownership ceremony made the column NOT NULL; the
+      // reading that took it as the platform-wide link retired. The Default
+      // Organization's grant on the same engine is the control (admitted above).
+      expect(await judge(makeEngine({ platformAdmin: true, grantOrganization: null }))).toBe(false);
+      expect(await judge(makeEngine({ platformAdmin: true }))).toBe(true);
     });
 
     it('refuses when the engine read throws (fail CLOSED)', async () => {

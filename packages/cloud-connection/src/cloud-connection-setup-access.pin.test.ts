@@ -38,20 +38,22 @@ import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 const CC = '/api/v1/cloud-connection';
 const ORIGIN = 'https://env.example.test';
 
-/** Holds `setup.access` through an unscoped grant (the platform-admin shape). */
+/** Holds `setup.access` through the Default Organization's `admin_full_access` grant (the platform-admin shape: it applies with no active organization). */
 const ADMIN = 'u_setup_admin';
 /** Holds `setup.access` through a grant scoped to the organization its session is active in (the organization-admin shape). */
 const ORG_ADMIN = 'u_org_admin';
-/** Signed in, holds a permission set, and the set carries no `setup.access`. */
+/** Signed in, holds a permission set in the organization its session is active in, and the set carries no `setup.access`. */
 const MEMBER = 'u_member';
-/** Holds `setup.access`, but the ADR-0069 policy holds the session. */
+/** Holds `setup.access` (the platform-admin shape, as {@link ADMIN}), but the ADR-0069 policy holds the session. */
 const HELD_ADMIN = 'u_held_admin';
 
 const ORG = 'org_a';
+/** The Default Organization — the owner of the one `admin_full_access` grant that anchors platform standing. */
+const DEFAULT_ORG = 'org_default';
 const SESSIONS: Record<string, { activeOrganizationId?: string; authGate?: { code: string; message: string } }> = {
     [ADMIN]: {},
     [ORG_ADMIN]: { activeOrganizationId: ORG },
-    [MEMBER]: {},
+    [MEMBER]: { activeOrganizationId: ORG },
     [HELD_ADMIN]: { authGate: { code: 'PASSWORD_EXPIRED', message: 'You must change your password before continuing.' } },
 };
 
@@ -61,18 +63,20 @@ const ADMIN_KEY = 'osk_setup_admin_key_24148';
 function grantRows(): Record<string, any[]> {
     return {
         sys_user: Object.keys(SESSIONS).map((id) => ({ id, email: `${id}@example.test` })),
+        sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }, { id: ORG, slug: 'org-a' }],
         sys_member: [{ id: 'mem_1', user_id: ORG_ADMIN, organization_id: ORG, role: 'admin' }],
         sys_user_position: [],
         sys_position: [],
         sys_metadata_activation: [],
         sys_position_permission_set: [],
         sys_user_permission_set: [
-            { id: 'ups_admin', user_id: ADMIN, permission_set_id: 'ps_setup', permission_set: 'setup_admin', organization_id: null },
+            { id: 'ups_admin', user_id: ADMIN, permission_set_id: 'ps_full', permission_set: 'admin_full_access', organization_id: DEFAULT_ORG },
             { id: 'ups_org_admin', user_id: ORG_ADMIN, permission_set_id: 'ps_setup', permission_set: 'setup_admin', organization_id: ORG },
-            { id: 'ups_held', user_id: HELD_ADMIN, permission_set_id: 'ps_setup', permission_set: 'setup_admin', organization_id: null },
-            { id: 'ups_member', user_id: MEMBER, permission_set_id: 'ps_member', permission_set: 'member_basic', organization_id: null },
+            { id: 'ups_held', user_id: HELD_ADMIN, permission_set_id: 'ps_full', permission_set: 'admin_full_access', organization_id: DEFAULT_ORG },
+            { id: 'ups_member', user_id: MEMBER, permission_set_id: 'ps_member', permission_set: 'member_basic', organization_id: ORG },
         ],
         sys_permission_set: [
+            { id: 'ps_full', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access'] },
             { id: 'ps_setup', name: 'setup_admin', system_permissions: ['setup.access'] },
             { id: 'ps_member', name: 'member_basic', system_permissions: ['export_data'] },
         ],

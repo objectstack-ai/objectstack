@@ -135,11 +135,12 @@
  *    `assertProjectionFieldsExist` answers the same at the REST ingress
  *    (#7532). So every dotted column is reported, whatever its head's type.
  *  - **Filter** — the view's own `filter`, its `userFilters.tabs[].filter`,
- *    and the two positions that DECLARE which names the end user may
- *    filter on (`filterableFields`, spelled by the
- *    spec as "bare field names enabled for end-user filtering", and
- *    `userFilters.fields`; objectui folds the resulting conditions into the
- *    fetched query through `buildEffectiveFilter`). Here the door does NOT
+ *    and the position that DECLARES which names the end user may filter on
+ *    (`userFilters.fields`; objectui folds the resulting conditions into the
+ *    fetched query through `buildEffectiveFilter`). The second such position,
+ *    `filterableFields`, retired in @objectstack/spec 18 and is no longer a
+ *    field position here: it is reported by name instead — see
+ *    {@link LIST_VIEW_KEY_RETIRED}. Here the door does NOT
  *    refuse everything: `assertFilterIsMaterializable` judges a dotted key
  *    only when `classifyDottedFilterHead` classifies its head as `relation`,
  *    `virtual` or `scalar`, and deliberately passes structured/JSON heads
@@ -327,8 +328,10 @@
  */
 
 import { classifyDottedFilterHead } from '@objectstack/spec/data';
+import { ListViewSchema } from '@objectstack/spec/ui';
 
 import { walkFilterFieldKeys } from './filter-walk.js';
+import { retiredKeyRemedy } from './validate-retired-permission-residue.js';
 import {
   describeFieldPathVerdict,
   indexObjectGraph,
@@ -360,6 +363,74 @@ export const LIST_VIEW_OBJECT_UNKNOWN = 'list-view-object-unknown';
  * second-class section on this module for the scope and the measurements.
  */
 export const LIST_VIEW_FIELD_DOTTED = 'list-view-field-dotted';
+
+/**
+ * A list view that still carries a key `@objectstack/spec` retired — reported
+ * BY NAME, with the tombstone's own prescription, never as a field reference.
+ *
+ * ## Why `os lint` needs it
+ *
+ * `retiredKey()` puts the refusal in the PARSE: `os validate` and `os build`
+ * refuse such a list view with the prescription before any rule runs. `os
+ * lint` never parses — it judges the `normalizeStackInput` output — and the
+ * D2 conversion that strips the key is retired from the load path, so on a
+ * non-`defineStack` source (JSON, YAML, a raw object) the key reaches this
+ * rule as written. Until the key retired, this rule walked it as a field
+ * position, so on that input `os lint` passed a list view the other two
+ * commands refuse, or named a stale entry as an unknown FIELD rather than
+ * naming the retirement. This finding is that missing channel: one `error`
+ * per list view, at the key, whatever its value and whatever the binding
+ * resolves to.
+ *
+ * ## The wording is READ, never retyped
+ *
+ * The prescription is the tombstone's published `description`
+ * (`[REMOVED] <guidance>`) on `ListViewSchema`, the one wording the parse
+ * raises too, so an author refused through either door is told the same
+ * thing. The `hint` is its "Delete the key" sentence, cut by
+ * {@link retiredKeyRemedy} exactly as the permission-residue rule cuts its
+ * own. An unresolvable description yields NO finding rather than a hint this
+ * module invented.
+ *
+ * ## Which keys
+ *
+ * {@link LIST_VIEW_RETIRED_KEYS_REPORTED} — the retired keys this rule used to
+ * read as field positions. The other list-view tombstones were never field
+ * positions here, so nothing in this rule ever gave them a wrong answer.
+ */
+export const LIST_VIEW_KEY_RETIRED = 'list-view-key-retired';
+
+/**
+ * The retired list-view keys reported by name (see {@link LIST_VIEW_KEY_RETIRED}).
+ * `validate-react-page-props.ts` reads the same list for `<ListView>`'s props.
+ */
+export const LIST_VIEW_RETIRED_KEYS_REPORTED: readonly string[] = Object.freeze(['filterableFields']);
+
+/** Strip the `[REMOVED] ` marker `retiredKey()` prefixes onto its guidance. */
+const REMOVED_MARKER = /^\[REMOVED\]\s*/;
+
+/**
+ * The retirement's own prescription for a list-view `key`, read from the
+ * tombstone's published description on `ListViewSchema`. `null` when the key
+ * is not a tombstone there, or its description cannot be resolved.
+ */
+export function listViewRetiredKeyPrescription(key: string): string | null {
+  const shape = (ListViewSchema as unknown as { shape?: Record<string, { description?: unknown }> }).shape;
+  const described = shape?.[key]?.description;
+  if (typeof described !== 'string' || !REMOVED_MARKER.test(described)) return null;
+  const prescription = described.replace(REMOVED_MARKER, '').trim();
+  return prescription.length > 0 ? prescription : null;
+}
+
+/**
+ * The verdict head of a retirement prescription: its first clause, up to the
+ * first ` — `, without the trailing period. Cut, never rewritten.
+ */
+export function retiredKeyVerdictHead(prescription: string): string {
+  const dash = prescription.indexOf(' — ');
+  const head = dash > 0 ? prescription.slice(0, dash) : prescription;
+  return head.replace(/\.$/, '');
+}
 
 /**
  * Which query door a position's written name reaches, for the #14282 verdict.
@@ -451,7 +522,7 @@ const POSITIONS: Record<string, BlockPositions> = {
   '': {
     // A stale `hiddenFields` / `fieldOrder` entry hides and orders nothing —
     // the inert case, warned rather than gated.
-    lists: { filterableFields: 'error', hiddenFields: 'warning', fieldOrder: 'warning' },
+    lists: { hiddenFields: 'warning', fieldOrder: 'warning' },
     entries: { columns: 'error' },
   },
   grouping: { entries: { fields: 'error' } },
@@ -593,7 +664,7 @@ const POSITIONS: Record<string, BlockPositions> = {
  * exception: measured client-side, it ACCEPTS a dot-path. See the module note.
  */
 const DOTTED_AXIS: Record<string, Record<string, DottedAxis>> = {
-  '': { columns: 'projection', filterableFields: 'filter' },
+  '': { columns: 'projection' },
   userFilters: { fields: 'filter' },
 };
 
@@ -750,7 +821,9 @@ export function validateListViewFieldRefs(
   // object binding is then outside it, and is refused below. [#24668] An empty
   // WHOLE collection is not: no deployment serves zero objects, so it means
   // the host supplied no universe (see the section of that name).
-  if (graph.size === 0 && !scope) return findings;
+  // The retired-key finding below does not depend on any field map, so an
+  // empty graph only switches the field positions off.
+  const noUniverse = graph.size === 0 && !scope;
 
   /**
    * [#24563] One list view whose binding is not in the stated closure — see
@@ -892,6 +965,23 @@ export function validateListViewFieldRefs(
     bindingPath: string,
   ): void => {
     if (!isRec(listView)) return;
+
+    // ── A retired key, reported by name before any skip: its verdict does
+    // not depend on the binding or on a field map (see LIST_VIEW_KEY_RETIRED).
+    for (const key of LIST_VIEW_RETIRED_KEYS_REPORTED) {
+      if (!Object.prototype.hasOwnProperty.call(listView, key)) continue;
+      const prescription = listViewRetiredKeyPrescription(key);
+      if (prescription === null) continue;
+      findings.push({
+        severity: 'error',
+        rule: LIST_VIEW_KEY_RETIRED,
+        where,
+        path: `${path}.${key}`,
+        message: `\`${key}\` is a retired list-view key: ${retiredKeyVerdictHead(prescription)}, so \`os validate\` and \`os build\` refuse this list view`,
+        hint: retiredKeyRemedy(prescription),
+      });
+    }
+    if (noUniverse) return;
 
     // ── Skip 4 (this surface's own): a list view bound to a non-`object`
     // provider names no fields on any object graph.

@@ -56,19 +56,24 @@ function makeC(url: string, body?: any) {
     };
 }
 
+/** The organization the sessions act in, and the one {@link setupAccessEngine}'s grant is owned by. */
+const ORG = 'o1';
+
 const sessionAuth = (userId?: string) => ({
-    api: { getSession: async () => (userId ? { user: { id: userId } } : null) },
+    api: { getSession: async () => (userId ? { user: { id: userId }, session: { activeOrganizationId: ORG } } : null) },
 });
 
 /**
  * [#24148] A data engine under which `userId` holds `setup.access` — what
  * `/status` serves its full answer behind. Real permission-set rows, read by
- * the shared resolver through `find`.
+ * the shared resolver through `find`. The grant is owned by {@link ORG}, the
+ * organization the session acts in: a grant applies only in its own
+ * organization.
  */
 const setupAccessEngine = (userId: string) => {
     const rows: Record<string, any[]> = {
         sys_user: [{ id: userId, email: `${userId}@example.test` }],
-        sys_user_permission_set: [{ id: 'ups_1', user_id: userId, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: null }],
+        sys_user_permission_set: [{ id: 'ups_1', user_id: userId, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: ORG }],
         sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
     };
     return bindCatalogFromTables({ find: async (object: string) => rows[object] ?? [] }, rows);

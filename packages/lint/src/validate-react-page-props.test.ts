@@ -33,6 +33,8 @@ import {
   REACT_RECORD_BLOCK_ALTERNATIVES,
 } from '@objectstack/spec/ui';
 import { explainRule } from './rule-explanations.js';
+import { listViewRetiredKeyPrescription } from './validate-list-view-field-refs.js';
+import { retiredKeyRemedy } from './validate-retired-permission-residue.js';
 
 // [#22161] Each finding of the five ids below is one verdict sentence; the
 // reasoning it used to carry is the id's `os explain` entry. Every call in this
@@ -689,11 +691,31 @@ describe('validateReactPageProps — <ListView> field props (#4340)', () => {
     ]);
   });
 
-  it('covers the legacy `filterableFields` shorthand', () => {
-    const f = unknownFields(
-      validateReactPageProps(propsPage(jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} filterableFields={['nope']}`))),
+  it('refuses the retired `filterableFields` prop by name, and never judges it as a field position', () => {
+    // @objectstack/spec 18 retired the list view's `filterableFields` with no
+    // replacement. A react page's source is parsed against no list-view
+    // schema, so the prop is refused here, by name, whatever it names: a
+    // valid field (`name`) and a stale one (`nope`) get the same verdict, and
+    // neither is reported as a field reference.
+    const prescription = listViewRetiredKeyPrescription('filterableFields');
+    expect(prescription, 'the tombstone publishes its prescription').not.toBeNull();
+    for (const named of ['name', 'nope']) {
+      const f = validateReactPageProps(
+        propsPage(jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} filterableFields={['${named}']}`)),
+      );
+      expect(unknownFields(f), named).toEqual([]);
+      const retired = f.filter((x) => x.rule === REACT_PROP_RETIRED);
+      expect(retired, named).toHaveLength(1);
+      expect(retired[0]).toMatchObject({ severity: 'error', path: 'pages[0].source' });
+      expect(retired[0]!.message).toContain('"filterableFields"');
+      // Read from the tombstone, never retyped.
+      expect(retired[0]!.hint).toBe(retiredKeyRemedy(prescription!));
+    }
+    // Lit control: the surviving filter-bar prop is not refused.
+    const control = validateReactPageProps(
+      propsPage(jsx('ListView', `data={{ provider: 'object', object: 'crm_account' }} userFilters={{ element: 'dropdown', fields: [{ field: 'name' }] }}`)),
     );
-    expect(f).toHaveLength(1);
+    expect(control.filter((x) => x.rule === REACT_PROP_RETIRED)).toEqual([]);
   });
 });
 

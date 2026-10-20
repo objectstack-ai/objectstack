@@ -26,6 +26,8 @@ import { bindTestSecurityCatalog, type TestSecurityCatalog } from '../security/s
 
 const LEDGER = 'sys_metadata_activation';
 const USER = 'u_holder';
+/** The organization the holder's grants belong to, and the one the EFFECT is resolved in. */
+const HOLDER_ORG = 'org_holder';
 const POSITION = 'sales_rep';
 const SET = 'sales_access';
 const DIRECT_SET = 'report_reader';
@@ -67,11 +69,11 @@ function makeEngine(opts: EngineOptions = {}) {
         sys_user: [{ id: USER }],
         sys_member: [],
         sys_user_position: [
-            { user_id: USER, position: POSITION, organization_id: null },
-            { user_id: USER, position: ENV_POSITION, organization_id: null },
+            { user_id: USER, position: POSITION, organization_id: HOLDER_ORG },
+            { user_id: USER, position: ENV_POSITION, organization_id: HOLDER_ORG },
         ],
         sys_user_permission_set: [
-            { user_id: USER, permission_set_id: 'ps_direct', permission_set: DIRECT_SET, organization_id: null },
+            { user_id: USER, permission_set_id: 'ps_direct', permission_set: DIRECT_SET, organization_id: HOLDER_ORG },
         ],
         [LEDGER]: [],
     };
@@ -185,7 +187,8 @@ const messageOf = (r: any): string => String(r?.response?.body?.error?.message ?
 const flip = (h: Harness, ctx: HttpProtocolContext, path: string, body: unknown = { enabled: false }) =>
     h.dispatcher.handleSecurity(path, 'POST', body, {}, ctx);
 
-const grantsOf = (h: Harness) => resolveUserAuthzGrants(h.engine, USER, {});
+// A grant applies only in its own organization, so the effect is read there.
+const grantsOf = (h: Harness) => resolveUserAuthzGrants(h.engine, USER, { tenantId: HOLDER_ORG });
 
 describe('the catalog activation door — authority', () => {
     for (const [type, name] of [['position', POSITION], ['permission', SET]] as const) {

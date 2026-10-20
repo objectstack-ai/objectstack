@@ -36,6 +36,9 @@ import { bindStaticSecurityCatalog } from './__tests__/security-catalog.testkit.
 
 const USER = 'u_admin';
 const SESSION = { getSession: async () => ({ user: { id: USER } }) };
+/** The organization {@link qlHealthy}'s grant belongs to, and the session acting in it. */
+const ORG = 'org_a';
+const SESSION_IN_ORG = { getSession: async () => ({ user: { id: USER }, session: { activeOrganizationId: ORG } }) };
 
 /** The permission store, unreachable — every read throws, as a driver outage does. */
 const qlDown = () => ({ find: async () => { throw new Error('permission store unreachable'); } });
@@ -44,11 +47,12 @@ const qlEmpty = () => ({ find: async () => [] });
 /**
  * A store that actually grants something, so "resolves" is read against a real
  * grant: the grant row, and the set it names in the security catalog bound to
- * the engine (ADR-0131 D3/D4).
+ * the engine (ADR-0131 D3/D4). The grant belongs to {@link ORG} and applies only
+ * there, so it is resolved with {@link SESSION_IN_ORG}.
  */
 const qlHealthy = () => bindStaticSecurityCatalog({
   find: async (object: string) => {
-    if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps', permission_set: 'pkg_admin' }];
+    if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps', permission_set: 'pkg_admin', organization_id: ORG }];
     if (object === 'sys_permission_set') return [{ id: 'ps', name: 'pkg_admin' }];
     return [];
   },
@@ -83,7 +87,7 @@ describe('[#13279] resolveAuthzContext — an outage is loud, an empty store is 
   });
 
   it('⭐ CONTROL: a healthy store still resolves the capability it grants', async () => {
-    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: qlHealthy(), headers: {}, ...SESSION });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: qlHealthy(), headers: {}, ...SESSION_IN_ORG });
     expect(ctx.userId).toBe(USER);
     expect(ctx.systemPermissions).toContain('studio.access');
   });
@@ -472,9 +476,13 @@ describe('[#13279 option A] ⭐ THE UNPROVISIONED DIRECTION — a never-provisio
     });
     const empty = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: qlEmpty(), headers: {}, ...SESSION });
     expect(JSON.stringify(unprovisioned)).toBe(JSON.stringify(empty));
-    // CONTROL against a vacuous comparison: a HEALTHY store differs from both.
-    const healthy = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: qlHealthy(), headers: {}, ...SESSION });
-    expect(JSON.stringify(healthy)).not.toBe(JSON.stringify(empty));
+    // CONTROL against a vacuous comparison: a HEALTHY store differs from an
+    // empty one — compared in the organization its grant belongs to, so the
+    // difference is the grant and not the session.
+    const healthy = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: qlHealthy(), headers: {}, ...SESSION_IN_ORG });
+    const emptyInOrg = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: qlEmpty(), headers: {}, ...SESSION_IN_ORG });
+    expect(JSON.stringify(healthy)).not.toBe(JSON.stringify(emptyInOrg));
+    expect(healthy.systemPermissions).toContain('studio.access');
   });
 
   it('⭐ `resolveUserAuthzGrants` inherits the quiet direction too', async () => {

@@ -221,7 +221,7 @@
       "title": "Declarative stdio connector transports are denied by default; the host allowlists exact commands (declarativeStdio) — and the deny is a config fault (boot fatal), not a degrade",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "cli",
       "fixtures": {
@@ -275,7 +275,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/connectors/connector-mcp/src/mcp-provider.test.ts"
+        "ref": "packages/connectors/connector-mcp/src/mcp-provider.test.ts — negative[0] ONLY, at the provider unit: in its 'mcp provider declarative stdio policy (#3055)' describe, 'DENIES a declarative stdio transport by default, as a plain (non-retryable) fault' shows that with no policy the factory rejects a stdio transport before the client factory is handed one (seen.transport stays undefined), so nothing is spawned. The same cases assert the default-deny text, the allowlist-mismatch text and the non-retryable class at the provider: evidence for acceptance[0]–[2] at that layer only, never their pass, since those clauses score the boot output. acceptance[3] (GET /automation/connectors) and negative[1] (no degraded husk on the boot) need the run"
       },
       "source": [
         "docs/plans/release-15.1-test-plan.md §B4 (#3059)",
@@ -294,6 +294,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: a bare ref over-implies coverage), round 15 of wave anchor #24579. The one pin drives createMcpProviderFactory over a fake client factory. By RUNNER rule 6 (a pin scores only the layer it drives) it scores negative[0] (on a deny, nothing reaches the spawner) and is provider-layer evidence for the boot-output clauses acceptance[0]–[2]. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ]
     },
@@ -546,7 +552,7 @@
       "title": "Outbound webhooks are read from the registry (spec object→object_name, no sys_webhook row) and switched through the activation ledger, fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, redeliver terminal rows tenant-scoped via POST /api/v1/webhooks/redeliver, and reject retired trigger kinds",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
@@ -558,7 +564,8 @@
         ],
         "knownGaps": [
           "PREDICATE (multi:true) WRITES ARE UNREACHABLE OVER REST BY DESIGN (run #7690) — do not re-derive this, and do not file the 400 as a defect. #3897 made the batch routes parse their body against the spec contract, and Zod object schemas STRIP unknown keys: `options.multi` and `options.where` can no longer ride into the engine's delete/update options, and `POST /data/:object/deleteMany` now deletes per id (packages/rest/src/rest-server.ts). That is a security boundary, not a gap. The bulk_update/bulk_delete clause therefore needs a FLOW `update_record` / `delete_record` node authored with multi:true, fired through the api trigger — that is the supported predicate-write door",
-          "acceptance[2], the bulk pair, is BLOCKED(dependency) on the org-walled showcase (QA run #23166): a flow node's predicate multi-write publishes its bulk event with NO organizationId, the org-owned subscription refuses it (auto-enqueuer.ts organization match), and an org-less subscription cannot be authored to receive it. Whether flow-node multi-writes should carry the organization is a maintainer question raised on #23166, not ruled; score acceptance[2] blocked(dependency) until it is. The same run did not attempt negative[1] or negative[2] (time budget): a re-run owes them, and their text is unchanged"
+          "acceptance[2], the bulk pair, is BLOCKED(dependency) on the org-walled showcase (QA run #23166): a flow node's predicate multi-write publishes its bulk event with NO organizationId, the org-owned subscription refuses it (auto-enqueuer.ts organization match), and an org-less subscription cannot be authored to receive it. Whether flow-node multi-writes should carry the organization is a maintainer question raised on #23166, not ruled; score acceptance[2] blocked(dependency) until it is. The same run did not attempt negative[1] or negative[2] (time budget): a re-run owes them, and their text is unchanged",
+          "no pin scores a full clause of this item at its layer (RUNNER rule 6, a pin scores only the layer it drives), so the item carries no automated ref. packages/qa/dogfood/test/webhook-materialization.dogfood.test.ts boots its own fixture stack (fixtures/webhook-materialization-fixture.ts, not the showcase). At the engine it asserts that no sys_webhook row is written for a declared webhook, and that the declared-webhook reader hands a matching record event to an AutoEnqueuer over a hand-driven realtime stub. That is acceptance[0]'s no-row half only: the activation door's 200 and 404 are never driven, and nothing of acceptance[1]–[6] is asserted. automated may return when a pin drives the activation door and a delivery on the showcase"
         ]
       },
       "variants": [
@@ -633,10 +640,6 @@
         "seed-data-thin",
         "stale-dist"
       ],
-      "automated": {
-        "kind": "e2e",
-        "ref": "packages/qa/dogfood/test/webhook-materialization.dogfood.test.ts"
-      },
       "source": [
         "packages/spec/src/automation/webhook.zod.ts#WebhookTriggerType (WebhookTriggerType enum + why undelete/api are absent; materialization contract; strict shape #4001)",
         "packages/spec/liveness/webhook.json (9 props live on the registry read; label/description dead since the boot seeder retired)",
@@ -701,6 +704,12 @@
           "date": "2026-10-20",
           "change": "fixtures.requires[0]'s walled sentence and scratch-webhook recipe corrected — QA run #24783 (finding F4), round 11 of wave anchor #24579. 'Under a walled posture it would be refused as belonging to no organization' predates ADR-0131 ruling A: a declared webhook is deployment-wide under every posture (auto-enqueuer.ts admitsOrganization answers true for CachedSubscription.deploymentWide), delivers one row per event stamped with that event's organization, and is switched on by the operator under a wall, as wall-declared-webhook-deployment-wide.dogfood.test.ts pins and QA run #24783 measured on both postures. The scratch sys_webhook recipe now names its required definition_json and the lower-case method values sys-webhook.object.ts declares. No clause changed",
           "ref": "#24801"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-20",
+          "change": "automated removed, fixtures.knownGaps[2] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: a bare ref over-implies coverage), round 15 of wave anchor #24579. The one dogfood pin asserts acceptance[0]'s no-sys_webhook-row half on its own fixture stack and drives no activation door. By RUNNER rule 6 (a pin scores only the layer it drives) no full clause is pinned, so automated is dropped (theme-B rule) and the knownGap says what the pin asserts. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ],
       "enumSource": {
@@ -1181,7 +1190,7 @@
       "title": "The /api/v1/datasources admin lifecycle: all 11 routes behind ONE manage_platform_settings floor (drivers catalog included), runtime create with provenance+health, draft test probe, credential migration into the store, secret never echoes (hasSecret only), bad drafts 400 DATASOURCE_ADMIN_ERROR, unwired federation degrades 503 naming external-datasource",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1282,7 +1291,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/services/service-datasource/src/__tests__/admin-routes.test.ts (+ __tests__/envelope.conformance.test.ts) — pins route behavior + envelope; the LIVE-mount half is not pinned, drive os dev for it"
+        "ref": "packages/services/service-datasource/src/__tests__/admin-routes.test.ts + packages/services/service-datasource/src/__tests__/envelope.conformance.test.ts — pins route behavior + envelope; the LIVE-mount half is not pinned, drive os dev for it"
       },
       "source": [
         "packages/services/service-datasource/src/admin-routes.ts#requireDatasourceAdmin (the eleven routes; the uniform floor docblock + requireDatasourceAdmin + DATASOURCE_ADMIN_CAPABILITY #9391/#9593; splitSecret keeps the secret out of the persisted draft; resolve()/badRequest() per-service attribution #4225/#4249; getDatasource credential-stripped + hasSecret; POST /test draft probe; POST /:name/migrate-credential)",
@@ -1317,6 +1326,12 @@
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24615 (18.0 sweep round 2, ba4afcc2; wave anchor #24579 §3, round 2 part 2). The served driver id is `mongodb`, not `mongo` (steps[2], acceptance[0].clause); the sqlite config key is `filename`, and `file` is an alias authoring refuses (steps[3], steps[4]); the health field is spelled `status`, beside `statusReason` (steps[5], acceptance[4] clause and verify). steps[3] and acceptance[2].clause said POST /test is registered before the :name routes; it is registered after every one of them (admin-routes.ts), and 'test' stays uncaptured because no POST route takes a bare :name. The code comment that says otherwise is reported, not edited. steps[8] carries the live bind-arm recipe #24615 proved and names the wire statuses. Not loosened: no clause's oracle or verdict changed",
           "ref": "#24717"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "automated.ref respelled — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: a ref that misses its own pin), round 15 of wave anchor #24579. The second pin was spelled '(+ __tests__/envelope.conformance.test.ts)', a partial path in a parenthesis, so the run's ref parser missed it and ran it separately (24/24). It is now a full repo path after ' + ', as the other multi-pin refs spell it. The ref's scope is unchanged. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ]
     },
@@ -1439,7 +1454,7 @@
       "title": "Boot-time external-schema drift gate (ADR-0015 §5.2 Gate 2): onMismatch defaults to 'fail' and refuses boot naming the object and mismatched column; 'warn' proceeds logging the diff; 'ignore' is silent; checkOnBoot:false skips a datasource with a loud info line (boot step only — the interval sweep is unaffected); a partial metadata read withholds the all-clear instead of faking one",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -1452,7 +1467,7 @@
           "the shipped external datasource + fixture DB (showcase_external — IN SYNC by construction, provisioned idempotently each boot by external-fixture.ts)"
         ],
         "knownGaps": [
-          "NO stock drift fixture exists — drift must be INDUCED, and only in a scratch copy: the fixture DB is re-provisioned in-sync each boot, and showcase_external deliberately declares onMismatch:'warn' (showcase-external.datasource.ts) precisely so drift can never brick the stock showcase. To induce, in a scratch app copy: the recipe QA run #24615 proved adds a field to the federated OBJECT instead of altering the fixture DB — ExternalCustomer gained `qa_drift_col: Field.text`, which no remote column backs, a measured missing_column — and it survives the boot's idempotent re-provisioning because the fixture's own table definition is untouched. Altering the fixture DB between boots is the weaker route (initObjects re-runs at every boot and may heal an added or dropped column; verify any such drift survives the re-run before scoring), as is binding a scratch federated object to a missing or mismatched table. Without an induced drift, the live arms of clauses 1-3 are blocked(fixture) and the unit pins are the fallback evidence",
+          "NO stock drift fixture exists — drift must be INDUCED, and only in a scratch copy: the fixture DB is re-provisioned in-sync each boot, and showcase_external deliberately declares onMismatch:'warn' (showcase-external.datasource.ts) precisely so drift can never brick the stock showcase. To induce, in a scratch app copy: the recipe QA run #24615 proved adds a field to the federated OBJECT instead of altering the fixture DB — ExternalCustomer gained `qa_drift_col: Field.text`, which no remote column backs, a measured missing_column — and it survives the boot's idempotent re-provisioning because the fixture's own table definition is untouched. Altering the fixture DB between boots is the weaker route (initObjects re-runs at every boot and may heal an added or dropped column; verify any such drift survives the re-run before scoring), as is binding a scratch federated object to a missing or mismatched table. Without an induced drift, the live arms of clauses 1-3 are blocked(fixture), and the unit pins are plugin-layer evidence beside that verdict, never a pass (RUNNER rule 6, a pin scores only the layer it drives)",
           "the 'fail'-DEFAULT arm additionally needs a datasource that OMITS external.validation.onMismatch (the `?? 'fail'` default, external-validation-plugin.ts; an unreadable definition also lands there — the def loader swallows the read failure to undefined) — stock showcase never exercises it live",
         "INDUCE MEASURED drift, not an outage: only MEASURED diffs reach the onMismatch policy — an 'unreachable' row (remote or definition could not be read) warns loudly and CONTINUES boot by maintainer ruling 2026-08-23 (#11166, external-validation-plugin.ts), so breaking connectivity (deleting the fixture DB file, bad credentials) tests the wrong arm and a non-aborting boot there is correct, not a gate failure",
           "clause 5's partial-read arm (a degraded metadata loader) is not reasonably inducible live — it is scored via its pin (list-diagnosed-consumer-sweep.test.ts), declared here rather than pretending a loader-outage fixture exists"
@@ -1471,8 +1486,8 @@
         {
           "clause": "the DEFAULT is 'fail' and it refuses boot: with drift present and onMismatch undeclared (or explicit 'fail'), boot aborts with ExternalSchemaMismatchError whose message names the object, the datasource, and the mismatched column per diff line (renderDiffMessage) — the highest-consequence branch here: a mis-typed federation must not come up serving garbage",
           "oracle": "log",
-          "verify": "the induced-drift boot's abort output against external-errors.ts; the default pinned at external-validation-plugin.ts (resolveOnMismatch `?? 'fail'`; an unreadable datasource definition ALSO lands on it — the memoized def loader answers undefined on a failed read). Only MEASURED diffs reach this throw — an 'unreachable' row warns and continues by ruling (#11166), see knownGaps. Unit fallback: external-validation-plugin.test.ts 'throws … default (fail) policy' + 'defaults to fail when the datasource definition is unavailable'",
-          "evidence": "the boot abort log (or the unit-test output when the live arm is blocked(fixture))"
+          "verify": "the induced-drift boot's abort output against external-errors.ts; the default pinned at external-validation-plugin.ts (resolveOnMismatch `?? 'fail'`; an unreadable datasource definition ALSO lands on it — the memoized def loader answers undefined on a failed read). Only MEASURED diffs reach this throw — an 'unreachable' row warns and continues by ruling (#11166), see knownGaps. The unit pins external-validation-plugin.test.ts 'throws … default (fail) policy' and 'defaults to fail when the datasource definition is unavailable' drive runValidation over stubbed services and assert the error class, not this message: plugin-layer evidence, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives). Without an induced-drift boot the clause is blocked(fixture) (knownGaps[0], [1])",
+          "evidence": "the boot abort log; when the live arm is blocked(fixture), that verdict with its fixture cited, the unit-test output beside it as lower-layer evidence"
         },
         {
           "clause": "'warn' proceeds and logs: the same drift under onMismatch:'warn' (the stock showcase policy) completes boot and logs '[external-validation] external schema drift' carrying datasource, object, and the structured diffs",
@@ -1489,8 +1504,8 @@
         {
           "clause": "checkOnBoot IS ENFORCED at the boot step — the rev-1 declared≠enforced finding is FIXED by #13149 (2026-08-29) and must not be re-filed: (a) a datasource with external.validation.checkOnBoot:false is dropped BEFORE any verdict — no onMismatch policy applies to it, a measured mismatch on it cannot abort boot, no unreachable-remote warning is raised for it, and its objects are not counted in the all-clear; (b) the skip is LOUD — one info line names the skipped datasource(s), says their federated objects were NOT gated, and says background drift checking is unaffected; (c) only an explicit false opts out: an absent key (schema default true), an unparseable/legacy row, or a definition the metadata service could not hand back all VALIDATE (the safe direction), and the misspellings checkonboot/validateonboot are parse-REJECTED with a did-you-mean, never folded",
           "oracle": "log",
-          "verify": "boot the drifted scratch fixture with checkOnBoot:false — boot completes and the '[external-validation] boot schema validation SKIPPED …' info line names it (external-validation-plugin.ts; bootCheckEnabled `!== false`); a sibling datasource in the same boot is still judged. Unit pins: external-validation-checkonboot.test.ts (all five describes — skip, unchanged default, per-datasource scope, one parsed spelling, boot-step-only scope)",
-          "evidence": "the completed-boot log with the skip line (or the pin output where the live arm is blocked(fixture))"
+          "verify": "boot the drifted scratch fixture with checkOnBoot:false — boot completes and the '[external-validation] boot schema validation SKIPPED …' info line names it (external-validation-plugin.ts; bootCheckEnabled `!== false`); a sibling datasource in the same boot is still judged. external-validation-checkonboot.test.ts (all five describes — skip, unchanged default, per-datasource scope, one parsed spelling, boot-step-only scope) drives the plugin over stubbed services: plugin-layer evidence for this clause, never its pass (RUNNER rule 6, a pin scores only the layer it drives)",
+          "evidence": "the completed-boot log with the skip line; where the live arm is blocked(fixture), that verdict with its fixture cited, the pin output beside it as lower-layer evidence"
         },
         {
           "clause": "the checkOnBoot skip is BOOT-STEP-ONLY, by maintainer ruling (2026-08-29): a datasource declaring both checkOnBoot:false and checkIntervalMs still gets its background drift checker armed — the two keys answer different questions ('gate my startup on this' vs 'watch this while I run'), and arming a watcher is not an opt back in to the boot gate",
@@ -1525,7 +1540,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/runtime/src/external-validation-plugin.test.ts (fail-default / warn / ignore / default-when-unreadable + drift-event emission) + packages/runtime/src/external-validation-checkonboot.test.ts (#13037/#13149 — the checkOnBoot gate, its scope, and the one-spelling rule) + packages/runtime/src/list-diagnosed-consumer-sweep.test.ts (#6504 withheld all-clear) — the LIVE boot-abort arm is not pinned; an induced-drift boot is required for it"
+        "ref": "packages/runtime/src/external-validation-plugin.test.ts — acceptance[6] and negative[4] (its 'ExternalValidationPlugin — background drift detection (ADR-0015 §5.2)' describe: one external.schema.drift event per drifted object, and 'runDriftCheck is a no-op (no throw) when the scoped validation rejects') + packages/runtime/src/external-validation-checkonboot.test.ts — acceptance[4] (its 'scope: the gate covers the BOOT STEP ONLY' describe) + packages/runtime/src/list-diagnosed-consumer-sweep.test.ts — acceptance[5] and negative[2] (the #6504 boot-gate describe). All three drive ExternalValidationPlugin over stubbed services. Their fail-default / warn / ignore / default-when-unreadable cases and the other checkOnBoot describes are evidence for acceptance[0]–[3] at that layer only, never their pass: those clauses score the boot log, and need an induced-drift boot"
       },
       "source": [
         "packages/runtime/src/external-validation-plugin.ts#runValidation (Gate 2 kernel:ready runValidation; the #13149 checkOnBoot gate + skip info line; the #11166 unreachable carve-out — warn and continue, only measured diffs reach onMismatch; the fail throw), (bootCheckEnabled — explicit false only, safe direction), (resolveOnMismatch — `?? 'fail'`), (memoized def loader; a failed read answers undefined → strict defaults), (announceAllClear #6504; the INCOMPLETE-sweep warn), (background drift checks + external.schema.drift events; the boot-step-only ruling ⛔)",
@@ -1553,6 +1568,12 @@
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24615 (18.0 sweep round 2, ba4afcc2; wave anchor #24579 §3). knownGaps[0] preferred altering the fixture DB; the recipe #24615 proved adds a field to the federated object (a measured missing_column) and survives re-provisioning, so the gap leads with it. steps[0] names --log-level info: the all-clear, SKIPPED and armed-timer lines are info-level and absent at the default warn level. No clause changed",
           "ref": "#24717"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause; acceptance[0] (verify, evidence), acceptance[3] (verify, evidence) and fixtures.knownGaps[0] rewritten — the sweep-wide rule-6 contradiction QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4) names at drift-gate acceptance[0] and [3], round 15 of wave anchor #24579. acceptance[0]–[3] score the boot log, and the item told the runner to score them from the plugin pins when the live arm is blocked ('Unit fallback', 'the unit pins are the fallback evidence'). The three pins drive ExternalValidationPlugin over stubbed services. By RUNNER rule 6 (a pin scores only the layer it drives) they score the test-oracle clauses acceptance[4]–[6] and negative[2] and [4], and are cited as plugin-layer evidence beside a blocked(fixture) verdict for the rest. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ]
     },

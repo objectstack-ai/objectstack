@@ -100,10 +100,31 @@ export interface NotificationTemplateStoreOptions {
 }
 
 /**
- * Loads `sys_notification_template` rows by `(topic, channel, locale)`, with a
- * locale fallback (`en-US` → `en` → {@link DEFAULT_LOCALE}). Best-effort: no
- * data engine or a lookup error yields `null` (→ the renderer's generic
- * fallback), never a throw — a template outage must not block delivery.
+ * Loads `sys_notification_template` rows by `(topic, channel, locale)` in the
+ * recipient's organization, with a locale fallback (`en-US` → `en` →
+ * {@link DEFAULT_LOCALE}). Best-effort: no data engine or a lookup error yields
+ * `null` (→ the renderer's generic fallback), never a throw — a template outage
+ * must not block delivery.
+ *
+ * ## A template is resolved in the recipient's organization (ADR-0131)
+ *
+ * `sys_notification_template` is organization-owned: a row is the organization
+ * that authored it (ADR-0131 D1/D3), so the row a delivery renders is one its
+ * OWN organization authored — `organizationId` is the delivery's
+ * (`Notification.organizationId`, the organization the event row carries). The
+ * read is keyed `where: { organization_id }`, the same spelling
+ * `PreferenceResolver.loadRows` scopes its rows by.
+ *
+ *  - ⛔ Never drop the `organization_id` term. The read runs under the explicit
+ *    system opt-in ({@link FAN_OUT_SYSTEM_CONTEXT}), which names no
+ *    organization: here the term IS the organization boundary, as the
+ *    `user_id` term is under `INBOX_SYSTEM_CONTEXT`.
+ *  - A call that names no organization reads NO row and answers `null`, so the
+ *    channel renders the producer's own title and body. There is no row with no
+ *    organization (ADR-0131 D1), so there is no row such a delivery could own.
+ *    The composed fan-out never hands a channel such a delivery: the event row
+ *    takes its organization from the producer or from the engine's system-write
+ *    rule (ADR-0131 D9), and an emit with neither is refused.
  */
 export class NotificationTemplateStore {
     private readonly objectName: string;
@@ -111,16 +132,23 @@ export class NotificationTemplateStore {
         this.objectName = opts.objectName ?? TEMPLATE_OBJECT;
     }
 
-    async load(topic: string, channel: string, locale?: string): Promise<NotificationTemplateRow | null> {
+    async load(
+        topic: string,
+        channel: string,
+        locale?: string,
+        organizationId?: string,
+    ): Promise<NotificationTemplateRow | null> {
         const data = this.opts.getData();
         if (!data) return null;
+        if (!organizationId) return null;
         const candidates = localeCandidates(locale);
         for (const loc of candidates) {
             try {
                 // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the
-                // platform's own template row, read to render a delivery.
+                // recipient organization's template row, read to render a
+                // delivery to that recipient.
                 const row = await data.findOne(this.objectName, {
-                    where: { topic, channel, locale: loc, is_active: true },
+                    where: { organization_id: organizationId, topic, channel, locale: loc, is_active: true },
                     fields: ['subject', 'body', 'format'],
                 }, { context: FAN_OUT_SYSTEM_CONTEXT });
                 if (row) return row as NotificationTemplateRow;

@@ -13,7 +13,7 @@
  * Each reader takes its fail-closed direction:
  *
  * - **explain** reports nothing about it — it names no set;
- * - **the platform-admin bootstrap** reads an unscoped one as an administrator
+ * - **the platform-admin bootstrap** reads a Default Organization one as an administrator
  *   who may already exist, and withholds the promotion — without naming it as
  *   the holder;
  * - **the organization-administrator reconcile** reads grants by name alone:
@@ -204,7 +204,7 @@ describe('[ADR-0131 D4] a grant that names nothing — the platform-admin bootst
     expect(await findExistingPlatformAdmin(engine, defaultPermissionSets)).toBe('usr_admin');
   });
 
-  it('unnamed, the promotion is WITHHELD — no second unscoped grant is minted for the oldest account', async () => {
+  it('unnamed, the promotion is WITHHELD — no second anchoring grant is minted for the oldest account', async () => {
     const engine = await standingAdminUnnamed();
     await unname(engine, { id: 'g_admin' });
     // An existing database: the platform-bucket rows an earlier release seeded.
@@ -247,7 +247,7 @@ describe('[ADR-0131 D4] a grant that names nothing — the platform-admin bootst
     const [message] = withheld;
 
     expect(message).toBe(
-      '[security] platform-admin promotion WITHHELD: an unscoped grant exists whose permission-set name '
+      '[security] platform-admin promotion WITHHELD: a Default Organization grant exists whose permission-set name '
       + '(sys_user_permission_set.permission_set) was never written — a grant from a release before that '
       + 'column existed. Which set it holds can no longer be read, and it may be the platform administrator\'s, '
       + 'so this pass will not mint a second one. ' + REWRITE_SENTENCE,

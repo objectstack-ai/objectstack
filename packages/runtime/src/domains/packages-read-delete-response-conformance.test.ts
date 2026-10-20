@@ -123,7 +123,8 @@ const ORG = 'org_acme';
 const TABLES: Record<string, any[]> = {
     sys_member: [{ user_id: 'u_admin', organization_id: ORG, role: 'member' }],
     sys_user: [{ id: 'u_admin', email: 'u_admin@example.com' }],
-    sys_user_permission_set: [{ user_id: 'u_admin', permission_set_id: 'ps_pkg', permission_set: 'pkg_admin' }],
+    // Owned by the organization the session names: a grant applies only there.
+    sys_user_permission_set: [{ user_id: 'u_admin', permission_set_id: 'ps_pkg', permission_set: 'pkg_admin', organization_id: ORG }],
     sys_permission_set: [
         { id: 'ps_pkg', name: 'pkg_admin', system_permissions: ['manage_metadata', 'studio.access'] },
     ],

@@ -41,6 +41,30 @@ export function runOwnershipCeremony(dir: string, file: string, tag: string): Re
   return JSON.parse(readFileSync(reportFile, 'utf8')) as Record<string, unknown>;
 }
 
+/** One change `os migrate plan --json` reports: the managed drift between the database and HEAD's objects. */
+export interface SchemaPlanChange {
+  table?: string;
+  category: 'safe' | 'needs_confirm' | 'destructive';
+  [key: string]: unknown;
+}
+
+/**
+ * `os migrate plan --json` on `file`, the real binary in the showcase's
+ * directory, as an operator reads the drift before serving a database. Writes
+ * no row or table. The parsed document; throws, with the run's output, when it
+ * exits non-zero.
+ */
+export function runSchemaPlan(file: string): { total: number; changes: SchemaPlanChange[]; pending: unknown[] } {
+  const plan = spawnSync(process.execPath, [CLI_BIN, 'migrate', 'plan', '--json', '--database-url', `file:${file}`], {
+    cwd: SHOWCASE_DIR,
+    encoding: 'utf8',
+    timeout: 300_000,
+    env: { ...process.env, NO_COLOR: '1' },
+  });
+  if (plan.status !== 0) throw new Error(`os migrate plan exited ${plan.status}:\n${plan.stdout}\n${plan.stderr}`);
+  return JSON.parse(plan.stdout);
+}
+
 /**
  * A copy of the 18.0 fixture the ceremony has certified, at `dir/<tag>.db`,
  * ready to boot under the guard — reached the way an operator reaches it.
