@@ -50,6 +50,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+// The release gate's run listing reads GitHub through the ONE retry policy the
+// citation gate already measured (see `readRuns` below). Imported, never
+// copied; the module imports nothing, which release.yml's install-free
+// `full-battery` job depends on.
+import { BOARD_READ_RETRY, boardReadBudget, readBoard, readFailure } from '../github-read-retry.mjs';
 import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 // The `Blocked-by:` reader the half-state patrol's H19 discovers targets with.
@@ -892,18 +897,42 @@ export function readFirstParentHistory(releaseCommit, window = RELEASE_GATE_WIND
   return git(['rev-list', '--first-parent', `--max-count=${window}`, releaseCommit]).split('\n').filter(Boolean);
 }
 
-export async function readRuns({ repo, token, file, event, pages = RELEASE_GATE_PAGES }) {
+// ONE READ OF THE LISTING, RETRIED ONLY WHEN THE FAILURE IS TRANSIENT (#24741).
+// One HTTP 502 on `lint.yml`'s `schedule` listing used to refuse a publish as
+// NOT MEASURED with no second attempt: release run 39230668843, whose every
+// full-battery verdict was green, shipped only after a manual re-run and a
+// second `release` approval. Each page is now read through the citation gate's
+// policy (`../github-read-retry.mjs`, whose docblock is the measurement):
+//
+//   retried      an HTTP 5xx, or a named connection failure (ECONNRESET,
+//                UND_ERR_SOCKET) -- 3 attempts per read, 500 / 1000 ms apart;
+//   final        any 4xx, an OK body with no `workflow_runs` array, and every
+//                other error, on the first attempt.
+//
+// `budget` is the RUN's: `readFullBattery` creates one and hands it to every
+// workflow x event x page it reads, so a flapping API costs one release gate
+// at most `BOARD_READ_RETRY.retriesPerRun` retries, never that many per read.
+// The default here exists for a caller that reads one listing on its own.
+//
+// ⛔ Not a weaker gate. A read whose ladder or budget is spent is thrown as the
+// failure it is, its text naming the last answer and the attempts made, and the
+// release gate turns that into the same NOT MEASURED refusal and exit as before.
+export async function readRuns({ repo, token, file, event, pages = RELEASE_GATE_PAGES, fetchImpl = fetch, budget = boardReadBudget() }) {
   const runs = [];
   for (let page = 1; page <= pages; page += 1) {
     const url =
       `https://api.github.com/repos/${repo}/actions/workflows/${file}/runs` +
       `?branch=main&event=${event}&status=completed&per_page=100&page=${page}`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
-    });
-    if (!res.ok) throw new Error(`GET ${url} answered HTTP ${res.status}`);
-    const body = await res.json();
-    const batch = Array.isArray(body?.workflow_runs) ? body.workflow_runs : null;
+    const read = await readBoard(
+      fetchImpl,
+      url,
+      { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' } },
+      budget
+    );
+    if (!read.ok) throw readFailure(`GET ${url}`, read, budget.policy);
+    // An OK answer without the array is an answer about the endpoint, not a
+    // blip: final, and never retried.
+    const batch = Array.isArray(read.body?.workflow_runs) ? read.body.workflow_runs : null;
     if (!batch) throw new Error(`GET ${url} answered no workflow_runs array`);
     runs.push(...batch);
     if (batch.length < 100) break;
@@ -911,32 +940,54 @@ export async function readRuns({ repo, token, file, event, pages = RELEASE_GATE_
   return runs;
 }
 
+// Every listing one release gate reads, under ONE retry budget for the run.
+export async function readFullBattery({ repo, token, workflows = RELEASE_GATE_WORKFLOWS, fetchImpl = fetch, budget = boardReadBudget() }) {
+  const runsByWorkflow = {};
+  for (const { file } of workflows) {
+    runsByWorkflow[file] = [];
+    for (const event of FULL_BATTERY_EVENTS) runsByWorkflow[file].push(...(await readRuns({ repo, token, file, event, fetchImpl, budget })));
+  }
+  return runsByWorkflow;
+}
+
+// The gate, as lines to print and an exit code. Both reads are injectable --
+// `readHistory` (git) and `fetchImpl` / `sleep` (the Actions API) -- so the
+// self-test drives the whole read path offline, refusal text included.
+export async function runReleaseGate({ releaseCommit, repo, token, readHistory = readFirstParentHistory, fetchImpl = fetch, sleep } = {}) {
+  const budget = boardReadBudget({ sleep });
+  let history;
+  let runsByWorkflow;
+  try {
+    if (!repo || !token) throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are both required');
+    history = readHistory(releaseCommit);
+    runsByWorkflow = await readFullBattery({ repo, token, fetchImpl, budget });
+  } catch (error) {
+    return {
+      exit: EXIT_PREREQUISITE_NOT_MET,
+      lines: [`::error::release gate NOT MEASURED -- ${error.message}. Refusing: an unread full battery is not a green one.`],
+      verdict: null,
+    };
+  }
+  const verdict = releaseGateVerdict({ history, runsByWorkflow });
+  const lines = verdict.lines.map((line) => `scheduled-full-run --release-gate: ${line}`);
+  if (verdict.ok) {
+    lines.push(`scheduled-full-run --release-gate: PASS -- the full battery at or before ${String(releaseCommit).slice(0, 10)} is green in every workflow (${RELEASE_GATE_WORKFLOWS.map((w) => w.name).join(', ')}).`);
+  } else {
+    for (const refusal of verdict.refusals) lines.push(`::error::release refused -- ${refusal}`);
+  }
+  return { exit: releaseGateExit(verdict), lines, verdict };
+}
+
 async function releaseGate(argv) {
   const at = argv.indexOf('--release-commit');
   const releaseCommit = at === -1 ? '' : String(argv[at + 1] ?? '');
-  const repo = process.env.GITHUB_REPOSITORY ?? '';
-  const token = process.env.GITHUB_TOKEN ?? '';
-  let history;
-  const runsByWorkflow = {};
-  try {
-    if (!repo || !token) throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are both required');
-    history = readFirstParentHistory(releaseCommit);
-    for (const { file } of RELEASE_GATE_WORKFLOWS) {
-      runsByWorkflow[file] = [];
-      for (const event of FULL_BATTERY_EVENTS) runsByWorkflow[file].push(...(await readRuns({ repo, token, file, event })));
-    }
-  } catch (error) {
-    console.log(`::error::release gate NOT MEASURED -- ${error.message}. Refusing: an unread full battery is not a green one.`);
-    process.exit(EXIT_PREREQUISITE_NOT_MET);
-  }
-  const verdict = releaseGateVerdict({ history, runsByWorkflow });
-  for (const line of verdict.lines) console.log(`scheduled-full-run --release-gate: ${line}`);
-  if (verdict.ok) {
-    console.log(`scheduled-full-run --release-gate: PASS -- the full battery at or before ${releaseCommit.slice(0, 10)} is green in every workflow (${RELEASE_GATE_WORKFLOWS.map((w) => w.name).join(', ')}).`);
-  } else {
-    for (const refusal of verdict.refusals) console.log(`::error::release refused -- ${refusal}`);
-  }
-  process.exit(releaseGateExit(verdict));
+  const { exit, lines } = await runReleaseGate({
+    releaseCommit,
+    repo: process.env.GITHUB_REPOSITORY ?? '',
+    token: process.env.GITHUB_TOKEN ?? '',
+  });
+  for (const line of lines) console.log(line);
+  process.exit(exit);
 }
 
 // ---------------------------------------------------------------------------
@@ -951,9 +1002,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'card refresh: a stale pm:blocked (the measured #23885 sequence)': 22,
   'release gate: the selection rule on the recorded 2026-10-12 listing': 8,
   'release gate: the selection rule on synthetic runs': 17,
+  'release gate: the read path retries a transient answer, inside one budget per run': 16,
   'release gate: release.yml wiring': 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 // Returned by `selfTest()` only after its verdict is printed, so a `return`
@@ -1868,8 +1920,229 @@ async function selfTest() {
     if (!v.ok) throw new Error(`synthetic: a dispatch run of Spec Shape Gate was read as full battery (${v.refusals.join(' | ')})`);
   });
 
+  battery('release gate: the read path retries a transient answer, inside one budget per run');
+  // The four pins the card names, driven through `runReleaseGate` -- the
+  // refusal text and the exit included -- with no network and no wall-clock
+  // backoff: `fetchImpl` is a stub over the six listings (three workflows x two
+  // events) and `sleep` records the backoff it was asked for.
+  const RETRY = BOARD_READ_RETRY;
+  const listingUrl = (file, event, page = 1) =>
+    `https://api.github.com/repos/o/r/actions/workflows/${file}/runs?branch=main&event=${event}&status=completed&per_page=100&page=${page}`;
+  // The shape node 22's fetch throws a connection failure in: a TypeError whose
+  // cause carries the code.
+  const connectionFailure = (code) => new TypeError('fetch failed', { cause: Object.assign(new Error(`read ${code}`), { code }) });
+  // One full-battery run per workflow on the release commit, in its `schedule`
+  // listing; every `push` listing is empty.
+  const greenListing = (file, event, conclusion = 'success') =>
+    event !== 'schedule'
+      ? []
+      : [{
+          id: 4100 + RELEASE_GATE_WORKFLOWS.findIndex((w) => w.file === file),
+          path: `.github/workflows/${file}`,
+          event,
+          status: 'completed',
+          conclusion,
+          head_sha: H[0],
+          head_branch: 'main',
+          run_started_at: '2026-10-19T08:00:00Z',
+          run_attempt: 1,
+        }];
+  // `reply({ file, event, page, n })` answers the n-th request (1-based) for
+  // one listing page; returning null answers the default listing.
+  const readPathGate = async (reply = () => null, { conclusion = 'success' } = {}) => {
+    const calls = [];
+    const slept = [];
+    const perUrl = new Map();
+    const fetchImpl = async (url) => {
+      const m = /\/actions\/workflows\/([^/]+)\/runs\?branch=main&event=([a-z_]+)&status=completed&per_page=100&page=(\d+)$/.exec(url);
+      if (!m) throw new Error(`stub transport: unexpected URL ${url}`);
+      const n = (perUrl.get(url) ?? 0) + 1;
+      perUrl.set(url, n);
+      calls.push(url);
+      const [, file, event, page] = m;
+      const r = reply({ file, event, page: Number(page), n }) ?? { body: { workflow_runs: greenListing(file, event, conclusion) } };
+      if (r.throws) throw r.throws;
+      const status = r.status ?? 200;
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        headers: { get: () => null },
+        json: async () => {
+          if (r.bodyThrows) throw r.bodyThrows;
+          return r.body;
+        },
+      };
+    };
+    const result = await runReleaseGate({
+      releaseCommit: H[0],
+      repo: 'o/r',
+      token: 't',
+      readHistory: () => H,
+      fetchImpl,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+    return { ...result, calls, slept, said: result.lines.join(' | ') };
+  };
+  const onLint = ({ file, event }) => file === 'lint.yml' && event === 'schedule';
+  const NOT_MEASURED = '::error::release gate NOT MEASURED -- ';
+  const REFUSING = '. Refusing: an unread full battery is not a green one.';
+
+  // PIN 1 -- a 502 then a 200 is MEASURED, and the verdict is computed.
+  await check(async () => {
+    // ⭐ The measured case (release run 39230668843): one 502 on lint.yml's
+    // `schedule` listing, then a 200.
+    const g = await readPathGate((at) => (onLint(at) && at.n === 1 ? { status: 502 } : null));
+    if (g.exit !== 0 || !g.lines.at(-1)?.startsWith('scheduled-full-run --release-gate: PASS') || g.verdict?.lines.length !== RELEASE_GATE_WORKFLOWS.length) {
+      throw new Error(`read path: a 502 then a 200 must be measured and pass, got exit ${g.exit}: ${g.said}`);
+    }
+    if (g.calls.length !== 7 || g.calls.filter((u) => u === listingUrl('lint.yml', 'schedule')).length !== 2 || g.slept.join() !== '500') {
+      throw new Error(`read path: expected one retry after one 500 ms backoff, got ${g.calls.length} requests, slept ${g.slept.join(',') || 'never'}`);
+    }
+  });
+  await check(async () => {
+    // ...and the verdict is COMPUTED, not assumed: behind the same blip a red
+    // battery refuses as a verdict (exit 1), never as NOT MEASURED.
+    const g = await readPathGate((at) => (onLint(at) && at.n === 1 ? { status: 502 } : null), { conclusion: 'failure' });
+    if (g.exit !== EXIT_FINDINGS || g.verdict?.refusals.length !== RELEASE_GATE_WORKFLOWS.length || g.said.includes('NOT MEASURED')) {
+      throw new Error(`read path: a red battery behind a blip must refuse as a verdict, got exit ${g.exit}: ${g.said}`);
+    }
+  });
+  await check(async () => {
+    // A connection reset is the same blip, and so is a socket the peer closes
+    // while the BODY streams: the unit retried is the request and its body.
+    const reset = await readPathGate((at) => (at.file === 'ci.yml' && at.event === 'push' && at.n === 1 ? { throws: connectionFailure('ECONNRESET') } : null));
+    const cut = await readPathGate((at) =>
+      onLint(at) && at.n === 1 ? { body: { workflow_runs: [] }, bodyThrows: connectionFailure('UND_ERR_SOCKET') } : null
+    );
+    for (const [label, g] of [['a connection reset', reset], ['a socket closed mid-body', cut]]) {
+      if (g.exit !== 0 || g.calls.length !== 7 || g.slept.join() !== '500') {
+        throw new Error(`read path: ${label}, then a 200, must be measured and pass, got exit ${g.exit} after ${g.calls.length} requests: ${g.said}`);
+      }
+    }
+  });
+  await check(async () => {
+    // Every PAGE goes through the same read: a full first page of 100, then a
+    // 503 on page 2, then the page that carries the verdict.
+    const filler = Array.from({ length: 100 }, (_, i) => ({ ...greenListing('ci.yml', 'schedule')[0], id: 5000 + i, conclusion: 'cancelled' }));
+    const g = await readPathGate((at) => {
+      if (at.file !== 'ci.yml' || at.event !== 'schedule') return null;
+      if (at.page === 1) return { body: { workflow_runs: filler } };
+      return at.n === 1 ? { status: 503 } : null;
+    });
+    if (g.exit !== 0 || g.calls.filter((u) => u === listingUrl('ci.yml', 'schedule', 2)).length !== 2 || g.calls.length !== 8) {
+      throw new Error(`read path: a transient 503 on page 2 must be retried and measured, got exit ${g.exit} after ${g.calls.length} requests: ${g.said}`);
+    }
+  });
+
+  // PIN 2 -- three 5xx answers refuse NOT MEASURED, naming the attempts.
+  await check(async () => {
+    const g = await readPathGate((at) => (onLint(at) ? { status: 503 } : null));
+    const want = `${NOT_MEASURED}GET ${listingUrl('lint.yml', 'schedule')} -> HTTP 503 after ${RETRY.attemptsPerRead} attempts (`;
+    if (g.exit !== EXIT_PREREQUISITE_NOT_MET || g.verdict !== null || g.lines.length !== 1 || !g.lines[0].startsWith(want) || !g.lines[0].endsWith(REFUSING)) {
+      throw new Error(`read path: three 503s must refuse NOT MEASURED naming ${RETRY.attemptsPerRead} attempts, got exit ${g.exit}: ${g.said}`);
+    }
+    if (g.calls.filter((u) => u === listingUrl('lint.yml', 'schedule')).length !== RETRY.attemptsPerRead || g.slept.join() !== RETRY.backoffMs.join()) {
+      throw new Error(`read path: the ladder is ${RETRY.attemptsPerRead} attempts and ${RETRY.backoffMs.join(' + ')} ms, got slept ${g.slept.join(',') || 'never'}`);
+    }
+    if (/#\d/.test(g.lines[0])) throw new Error('read path: the refusal is runtime prose and carries no tracker number');
+  });
+  await check(async () => {
+    // Persistent resets: the same ladder, and the refusal names the code.
+    const g = await readPathGate((at) => (onLint(at) ? { throws: connectionFailure('ECONNRESET') } : null));
+    if (g.exit !== EXIT_PREREQUISITE_NOT_MET || !g.lines[0]?.startsWith(`${NOT_MEASURED}GET ${listingUrl('lint.yml', 'schedule')} -> ECONNRESET after 3 attempts`)) {
+      throw new Error(`read path: persistent resets must refuse NOT MEASURED naming the code and the attempts, got exit ${g.exit}: ${g.said}`);
+    }
+  });
+  await check(async () => {
+    // ⛔ An unread battery is never a green one: a persistent transient answer
+    // on ANY of the six listings refuses NOT MEASURED, exit 3.
+    const persistent = [
+      ['HTTP 500', { status: 500 }],
+      ['HTTP 502', { status: 502 }],
+      ['HTTP 503', { status: 503 }],
+      ['HTTP 504', { status: 504 }],
+      ['ECONNRESET', { throws: connectionFailure('ECONNRESET') }],
+      ['UND_ERR_SOCKET', { throws: connectionFailure('UND_ERR_SOCKET') }],
+    ];
+    const passed = [];
+    for (const [label, reply] of persistent) {
+      for (const { file } of RELEASE_GATE_WORKFLOWS) {
+        for (const event of FULL_BATTERY_EVENTS) {
+          const g = await readPathGate((at) => (at.file === file && at.event === event ? reply : null));
+          if (g.exit !== EXIT_PREREQUISITE_NOT_MET || !g.lines[0]?.startsWith(NOT_MEASURED)) passed.push(`${label} on ${file}/${event} (exit ${g.exit})`);
+        }
+      }
+    }
+    if (passed.length > 0) throw new Error(`read path: an unread listing was not refused NOT MEASURED: ${passed.join(', ')}`);
+  });
+
+  // PIN 3 -- a 404 refuses at once: one fetch, no sleep. So does every other
+  // answer that is not transient.
+  await check(async () => {
+    const g = await readPathGate((at) => (at.file === 'ci.yml' && at.event === 'schedule' ? { status: 404, body: { message: 'Not Found' } } : null));
+    if (g.exit !== EXIT_PREREQUISITE_NOT_MET || g.calls.length !== 1 || g.slept.length !== 0 || !g.lines[0]?.includes(' -> HTTP 404 after 1 attempt (not retried')) {
+      throw new Error(`read path: a 404 must refuse at once, with one request and no backoff, got exit ${g.exit} after ${g.calls.length} request(s), slept ${g.slept.join(',') || 'never'}: ${g.said}`);
+    }
+  });
+  for (const status of [401, 403, 422, 429]) {
+    await check(async () => {
+      const g = await readPathGate((at) => (onLint(at) ? { status } : null));
+      if (g.exit !== EXIT_PREREQUISITE_NOT_MET || g.calls.length !== 3 || g.slept.length !== 0 || !g.lines[0]?.includes(`-> HTTP ${status} after 1 attempt (not retried`)) {
+        throw new Error(`read path: a ${status} is an answer, not a blip, got exit ${g.exit} after ${g.calls.length} request(s), slept ${g.slept.join(',') || 'never'}: ${g.said}`);
+      }
+    });
+  }
+  await check(async () => {
+    // An OK body with no `workflow_runs` array is an answer about the
+    // endpoint: final at once, never retried.
+    const g = await readPathGate((at) => (onLint(at) ? { body: { message: 'moved' } } : null));
+    if (g.exit !== EXIT_PREREQUISITE_NOT_MET || g.calls.length !== 3 || g.slept.length !== 0 || !g.lines[0]?.includes('answered no workflow_runs array')) {
+      throw new Error(`read path: an OK body without workflow_runs must refuse at once, got exit ${g.exit} after ${g.calls.length} request(s): ${g.said}`);
+    }
+  });
+  await check(async () => {
+    // Every other error is final at once too: a refused connection, a failed
+    // lookup, and a body that is not JSON.
+    const finals = [
+      ['ECONNREFUSED', { throws: connectionFailure('ECONNREFUSED') }],
+      ['ENOTFOUND', { throws: connectionFailure('ENOTFOUND') }],
+      ['a body that is not JSON', { body: null, bodyThrows: new SyntaxError('Unexpected token < in JSON') }],
+    ];
+    for (const [label, reply] of finals) {
+      const g = await readPathGate((at) => (onLint(at) ? reply : null));
+      if (g.exit !== EXIT_PREREQUISITE_NOT_MET || g.calls.length !== 3 || g.slept.length !== 0) {
+        throw new Error(`read path: ${label} must refuse at once, got exit ${g.exit} after ${g.calls.length} request(s), slept ${g.slept.join(',') || 'never'}`);
+      }
+    }
+  });
+
+  // PIN 4 -- ONE budget per gate run, shared across every workflow x event x
+  // page it reads; never one per `readRuns` call.
+  await check(async () => {
+    // ⭐ Every listing answers 502 once, then 200. Six reads want six retries;
+    // the run allows four, so the FIFTH listing's first 502 is final.
+    const g = await readPathGate((at) => (at.n === 1 ? { status: 502 } : null));
+    const want = `-> HTTP 502 after 1 attempt (this run's budget of ${RETRY.retriesPerRun} retries is spent)`;
+    if (g.exit !== EXIT_PREREQUISITE_NOT_MET || g.slept.length !== RETRY.retriesPerRun || g.calls.length !== 2 * RETRY.retriesPerRun + 1) {
+      throw new Error(`read path: a flapping API must spend the run's ${RETRY.retriesPerRun} retries and then refuse, got exit ${g.exit} after ${g.calls.length} requests and ${g.slept.length} backoff(s): ${g.said}`);
+    }
+    if (!g.lines[0]?.startsWith(`${NOT_MEASURED}GET ${listingUrl('spec-shape-gate.yml', 'schedule')} ${want}`)) {
+      throw new Error(`read path: the refusal must name the listing whose 502 met a spent budget, got ${g.said}`);
+    }
+  });
+  await check(async () => {
+    // ...and the budget is exactly that, not tighter: four listings that blip
+    // once each are still measured.
+    const g = await readPathGate((at) => (at.n === 1 && at.file !== 'spec-shape-gate.yml' ? { status: 502 } : null));
+    if (g.exit !== 0 || g.slept.length !== RETRY.retriesPerRun || g.calls.length !== 6 + RETRY.retriesPerRun) {
+      throw new Error(`read path: ${RETRY.retriesPerRun} blips in one run must all be retried and measured, got exit ${g.exit} after ${g.calls.length} requests: ${g.said}`);
+    }
+  });
+
   battery('release gate: release.yml wiring');
-  const releaseYml = readFileSync(fileURLToPath(new URL('../../.github/workflows/release.yml', import.meta.url)), 'utf8');
+  const releaseYml =readFileSync(fileURLToPath(new URL('../../.github/workflows/release.yml', import.meta.url)), 'utf8');
   await check(() => {
     // Every workflow the release reads exists as a file, so a rename or a
     // deletion cannot leave the gate reading a workflow that no longer runs.
