@@ -42,13 +42,14 @@ import {
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysUser } from '@objectstack/platform-objects';
 import { resolveDisplayField, resolveRecordDisplayName } from '@objectstack/spec/data';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SysUserPermissionSet } from './sys-user-permission-set.object.js';
 
 const SYS = { context: { isSystem: true } } as any;
 const OBJECT = 'sys_user_permission_set';
 
 /** A reader who is not SYSTEM: the shape every request's context has. */
-const READER = { userId: 'usr_reader', tenantId: 'org_1' };
+const READER: ExecutionContext = { userId: 'usr_reader', tenantId: 'org_1' };
 
 /** Every `record.<path>` the `display_title` expression reads, as written. */
 function formulaReads(): string[] {
@@ -152,7 +153,7 @@ describe('sys_user_permission_set is titled by the person, not the raw user id',
       const bob = await user('Bob Kinney', 'bob@example.com');
       const g = await grant(bob);
       readable.add(bob);
-      const row = await engine.findOne(OBJECT, { where: { id: g.id } }, { context: READER } as any);
+      const row = await engine.findOne(OBJECT, { where: { id: g.id } }, { context: READER });
       expect(row!.display_title).toBe('Bob Kinney → crm_edit');
     });
 
@@ -160,9 +161,9 @@ describe('sys_user_permission_set is titled by the person, not the raw user id',
       const carol = await user('Carol Hidden', 'carol.hidden@example.com');
       const g = await grant(carol);
       // The reader's own read of that user returns nothing…
-      expect(await engine.find('sys_user', { where: { id: carol } }, { context: READER } as any)).toEqual([]);
+      expect(await engine.find('sys_user', { where: { id: carol } }, { context: READER })).toEqual([]);
       // …so the title over it has no value, and neither the name nor the email leaks.
-      const row = await engine.findOne(OBJECT, { where: { id: g.id } }, { context: READER } as any);
+      const row = await engine.findOne(OBJECT, { where: { id: g.id } }, { context: READER });
       expect(row!.display_title).toBeNull();
       expect(JSON.stringify(row)).not.toContain('Carol Hidden');
       expect(JSON.stringify(row)).not.toContain('carol.hidden@example.com');
