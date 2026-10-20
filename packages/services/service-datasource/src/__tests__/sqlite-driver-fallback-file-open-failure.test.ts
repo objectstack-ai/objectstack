@@ -179,7 +179,9 @@ describe('resolveSqliteDriver in development: a native addon that cannot load st
     expect(resolved.engine).toBe('sqlite-wasm');
   });
 
-  it('an addon that cannot load AND a file that cannot open rejects at the wasm rung, never memory', async () => {
+  it('an addon that cannot load AND a path under a regular file still rejects, never memory', async () => {
+    // connect() makes the file's directory before the first statement loads
+    // the addon, so the native rung refuses the path before the load fails.
     await failNativeAddonLoad(realDlopenFailure());
 
     const warn = vi.fn();

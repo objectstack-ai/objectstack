@@ -48,14 +48,16 @@
  *     `SqlDriver.connect()` names these with the operating system's code
  *     (`EEXIST`, `ENOTDIR`, `ENOENT`, `EACCES`, …) or SQLite's
  *     `SQLITE_CANTOPEN`; see {@link isSqliteFileOpenFailure}. Every rung opens
- *     the same file, so no rung can cure this. Before, wasm failed on the same
- *     path, and the in-memory rung answered in its place: a declared datasource
- *     that could not answer one query read `connected`, and a maintenance
- *     command reported a store it never opened as examined and clean. Now the
- *     datasource's connect fails and its connection state says so. That holds
- *     for every datasource, the primary included, and at the wasm rung too
- *     (an addon that cannot load AND a file that cannot open is still a file
- *     that cannot open).
+ *     the same file, so no rung can cure this. Before, the step-down answered
+ *     in its place: the in-memory rung when wasm failed on the same path, or a
+ *     wasm driver whose connect resolved over a file it could not read. So a
+ *     declared datasource that could not answer one query read `connected`,
+ *     and a maintenance command reported a store it never opened as examined
+ *     and clean. Now the datasource's connect fails and its connection state
+ *     says so. That holds for every datasource, the primary included.
+ *     `connect()` makes the directory before the addon loads, so a path the
+ *     driver cannot make is refused at the native rung even when the addon
+ *     could not have loaded.
  *
  * An ABSENT file in a directory that exists, or can be made, is not an open
  * failure: the driver makes the directory and SQLite creates the file. A dev
@@ -172,7 +174,9 @@ async function closeQuietly(driver: any): Promise<void> {
 
 /**
  * Probe a `better-sqlite3` SQLite construction and, in dev, step down to wasm
- * SQLite (then in-memory) when the native addon cannot load.
+ * SQLite (then in-memory) when the native addon cannot load. A database file
+ * that cannot be opened or created is re-thrown instead, in dev as in
+ * production (#24950).
  *
  * @see {@link ResolveSqliteDriverOptions}
  */
@@ -239,6 +243,8 @@ export async function resolveSqliteDriver(
     await closeQuietly(nativeDriver);
     // The FILE cannot be opened or created: no other engine can cure that, so
     // the datasource's connect fails here, as it does in production (#24950).
+    // Every other failure, a native addon that cannot load first among them,
+    // goes on down the chain as before.
     if (isSqliteFileOpenFailure(err)) throw err;
   }
   if (nativeOk) {
@@ -259,12 +265,9 @@ export async function resolveSqliteDriver(
     } as any);
     await wasmDriver.connect();
     wasmOk = true;
-  } catch (err) {
+  } catch {
     wasmOk = false;
     await closeQuietly(wasmDriver);
-    // The native addon could not load AND wasm cannot open the file: the
-    // in-memory rung would answer for a file nothing opened (#24950).
-    if (isSqliteFileOpenFailure(err)) throw err;
   }
   if (wasmOk) {
     warn(NATIVE_SQLITE_WASM_FALLBACK_WARNING);
