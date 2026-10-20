@@ -242,13 +242,6 @@ export interface SettingsSecretStore {
     alg: string;
     version: number;
     ciphertext: string;
-    /**
-     * [ADR-0131 D3/D9] The organization that owns the secret — the owning
-     * `sys_setting` row's, for a tenant or user value. Absent for a global
-     * value: a deployment-level secret, whose fate in this tenant-column
-     * store is not settled yet.
-     */
-    organization_id?: string;
   }): Promise<{ id: string }>;
   /** Look up the latest ciphertext for a handle id; null when missing. */
   get(id: string): Promise<{

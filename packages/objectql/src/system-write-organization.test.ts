@@ -317,7 +317,7 @@ describe('#8844 multi-organization — the write is REFUSED, never defaulted', (
       expect(refusal.message).toContain('dispatch_order');
       expect(refusal.message).toContain('__global__');
       expect(refusal.message).toContain('tenantId');
-      expect(refusal.message).toContain('tenancy: { enabled: false }');
+      expect(refusal.message).toContain('systemFields: { tenant: false }');
 
       // ⛔ NOT defaulted and ⛔ not silently skipped — nothing reached the driver.
       expect(observed.filter((c) => c.object === 'dispatch_order')).toEqual([]);
