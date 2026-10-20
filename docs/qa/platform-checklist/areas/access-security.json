@@ -3052,7 +3052,7 @@
       "title": "Opt-in record-view auditing writes `read` rows for exactly the opted-in objects' detail reads, batched off the request path — stock boot audits nothing, excluded names refuse loudly, values never copied",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3091,7 +3091,7 @@
           "evidence": "log line + the ledger rows before/after each read"
         },
         {
-          "clause": "the row records WHO/WHICH/WHEN and nothing else: action 'read', user_id = M, object_name/record_id correct, old_value AND new_value both null (the afterFind hook sees PRE-MASK plaintext, so copying values would mint a plaintext copy of exactly what FLS withholds — read-audit.ts,516-521), and created_at is the VIEW instant, not the flush instant",
+          "clause": "the row records WHO/WHICH/WHEN and nothing else: action 'read', user_id = M, object_name/record_id correct, old_value AND new_value both null (the afterFind hook sees PRE-MASK plaintext, so copying values would mint a plaintext copy of exactly what FLS withholds — packages/plugins/plugin-audit/src/read-audit.ts#buildRow writes both as null, for the reason the file header's section 'The row records NO field values, and that is load-bearing' gives), and created_at is the VIEW instant, not the flush instant",
           "oracle": "api",
           "verify": "field-by-field read of the landed row; created_at within the read's wall-clock window, not the flush's",
           "evidence": "the row + the recorded clocks"
@@ -3155,6 +3155,12 @@
           "date": "2026-10-17",
           "change": "re-measured on main c91af8ed6 (checklist-accuracy finding from #23878): the stock leg's install-line grep was vacuous on a default boot, because the line logs at INFO and os dev defaults to warn, so steps[0], the fixture and clause 0's verify now boot at OS_LOG_LEVEL=info with an INFO-line positive control. The stock specimen GET /data/showcase_contact/ID is refused to a baseline member at the object gate (403), so the zero proved nothing either; the step now reads a showcase_account detail (200). knownGaps[0] gains the scripted scratch-copy recipe for the configured half, and steps 1 and 3 name X = showcase_account and the un-opted showcase_project. Re-run: stock boot at info (649 INFO lines), plain member detail reads of showcase_project, showcase_task and showcase_account all 200, action 'read' rows 0, no install line. Configured scratch copy: 'Plugin superseded: com.objectstack.audit' WARN, the sys_job exclusion WARN and 'AuditPlugin: record-view auditing installed on 1 object(s) — showcase_account'; member M's account detail read → 1 row (action read, user_id M, object_name showcase_account, record_id correct, old_value and new_value null, created_at 00:15:23.489Z inside the 23.385–23.497 read window, about 4 s before the flush read); the list read and the showcase_project detail read left the count at 1; the admin's detail read made it 2",
           "ref": "#24036"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[2].clause cited lines 516-521 of read-audit.ts in the comma-range spelling, the second range of the two-range list 45397edf53 authored (55-75 and 516-521). At that commit lines 516-521 were the audit row's old_value / new_value nulls; at this base they hold a docblock, and the nulls sit in the buildRow closure of installReadAuditWriter. The clause now anchors read-audit.ts#buildRow and names the header section that gives the reason in prose. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#PENDING-24579R9"
         }
       ]
     },
@@ -3163,7 +3169,7 @@
       "title": "The /s/:token share-link landing page renders the resolved record minus redacted fields, gates on password, and refuses dead links with designed states — never a blank page or a raw error",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3179,7 +3185,7 @@
         ],
         "knownGaps": [
           "automated.ref lives ENTIRELY in the objectui repo — from this checkout it is neither runnable nor pin-evidenced (the RUNNER standing fact): drive the item by hand in the browser, or run the pin in an objectui checkout and name the revision",
-          "the ai_conversations transcript branch (SharedRecordPage.tsx,190-234 — messages fetch + ChatbotEnhanced readOnly) is ai_conversations-only (Cloud/EE service-ai) — the same knownGap split the API item records for /:token/messages; not runnable on open-framework showcase",
+          "the ai_conversations transcript branch (objectui SharedRecordPage.tsx: the SharedRecordPage component's ai_conversations branch, with its messages-fetch effect and the ChatbotEnhanced readOnly transcript) is ai_conversations-only (Cloud/EE service-ai) — the same knownGap split the API item records for /:token/messages; not runnable on open-framework showcase",
           "FIXED, regression row, expected PASS (objectui#11649): the page no longer folds every 401 into the password prompt. Measured at objectui 1fb1ced36243 (the pin this row was written at), again at daeb77fc84dd (#23878) and at f8267df93aba (this repo's .objectui-sha when revision 3 was written; re-read it at whatever pin the run boots): SharedRecordPage.tsx reads a 401 by the body's error.code through shared-record-shape.ts resolveGateOf — NEEDS_PASSWORD and WRONG_PASSWORD open the password prompt, SIGN_IN_REQUIRED opens the sign-in gate, and any other code shows the server's message, not a prompt — so a signed_in-audience link opened anonymously renders the dedicated 'Sign in required' state, never 'Password required'. acceptance[3] now asserts that state (QA run #23163 saw it live at objectstack 36b2889c). The objectui pins are apps/console/src/pages/SharedRecordPage-11649.test.tsx ('shows the sign-in path back to this link, and no password prompt') and shared-record-shape.test.ts ('reads each 401 code as its gate'), objectui-repo-only like knownGaps[0]"
         ]
       },
@@ -3201,13 +3207,13 @@
         {
           "clause": "the password gate renders as designed and never leaks early: 401 → the 'Password required' prompt; wrong password → re-prompt with 'Wrong password.'; correct password → the record renders — and NO 401 response body carries the record",
           "oracle": "network",
-          "verify": "the three round-trips (SharedRecordPage.tsx,143-176): two 401s with record-free bodies, then the 200 render; drive the input with native setter + events, not coordinate typing",
+          "verify": "the three round-trips (objectui SharedRecordPage.tsx: the component's password-gate branch, gate === 'password'): two 401s with record-free bodies, then the 200 render; drive the input with native setter + events, not coordinate typing",
           "evidence": "the three network traces + screenshots of prompt and render"
         },
         {
           "clause": "dead links refuse with designed, non-leaking states: revoked and expired render 'This link has expired or was revoked.' (410), a garbage token renders 'This link is invalid or no longer available.' (404) — never a blank page, a spinner that never settles, or a raw stack/JSON error, and no record data in any refusal body",
           "oracle": "screenshot",
-          "verify": "each terminal state's screenshot shows the designed message (SharedRecordPage.tsx,178-186); the paired network bodies are record-free",
+          "verify": "each terminal state's screenshot shows the designed message (objectui SharedRecordPage.tsx: the component's error branch, which renders the message fetchResolve sets for a 404 or a 410); the paired network bodies are record-free",
           "evidence": "screenshots + the 404/410 bodies"
         },
         {
@@ -3249,7 +3255,7 @@
       },
       "source": [
         "objectui apps/console/src/App.tsx (the /s/:token route, mounted outside the authenticated shell)",
-        "objectui apps/console/src/pages/SharedRecordPage.tsx (status folds, password form, error states, generic record render + hidden-fields notice, ai_conversations branch,190-234)",
+        "objectui apps/console/src/pages/SharedRecordPage.tsx (status folds, password form, error states, generic record render + hidden-fields notice, ai_conversations branch)",
         "objectui apps/console/src/pages/shared-record-shape.ts (normalizeResolvedShare — both envelopes, the #3983 rename)",
         "cross-ref access-security.share-link-capability-tokens — the API half: mint/resolve/redaction/password/audience/revoke semantics and the #9308 showcase_client_brief fixture are asserted THERE; this item asserts only what the console renders of them",
         "#9308 (the stock fixture), objectstack#3983 (the enveloped-branch rename regression the notice clause guards)"
@@ -3272,6 +3278,12 @@
           "date": "2026-10-16",
           "change": "knownGaps[2] stopped naming objectui 1fb1ced36243 as 'still this repo's .objectui-sha' (#23878 checklist-accuracy finding). The pin moved to daeb77fc84dd and then to f8267df93aba; at f8267df93aba SharedRecordPage.tsx still reads a 401 by its code through shared-record-shape.ts resolveGateOf, renders the 'Sign in required' state for SIGN_IN_REQUIRED, and both objectui pins (SharedRecordPage-11649.test.tsx, shared-record-shape.test.ts) are present. The revision 2 history row stays as written: it was true at its pin. Wording only, no re-run owed",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.knownGaps[1], acceptance[1].verify, acceptance[2].verify and source[1] cited objectui SharedRecordPage.tsx by the line ranges 190-234 (twice), 143-176 and 178-186 in the comma-range spelling (authored in 45397edf53). At the objectui pin that commit shipped, 9602dc820450, those lines were the ai_conversations branch, the password form and the error state; at the shipped pin 12dc7b47c340 all three have moved down, below a sign-in gate and a reworked fetchResolve, and the password branch now reads gate === 'password'. Each now names its branch of the SharedRecordPage component. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#PENDING-24579R9"
         }
       ]
     },
