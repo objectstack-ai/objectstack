@@ -51,6 +51,7 @@ import { RestServer } from '@objectstack/rest';
 import { declaredEnvelopeForThrow } from '@objectstack/plugin-hono-server';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const PREFIX = '/api/v1';
 const DATA = `${PREFIX}/data`;
@@ -228,6 +229,9 @@ describe('[#23586] a 409 CONCURRENT_UPDATE reports only what the caller may read
             ],
         } as never);
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
 
         const services: Record<string, unknown> = {
             manifest: { register: vi.fn() },
