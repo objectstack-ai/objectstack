@@ -10,11 +10,8 @@ import { dirname, isAbsolute, resolve } from 'node:path';
  * Thrown by `SqlDriver.connect()`, so the boot's connect refusal (ADR-0062 D5,
  * `datasource '<name>': connect failed — <reason>`) carries the path and the
  * operating system's own answer instead of waiting for a plugin start timeout.
- * Under `sqliteAbsentFile: 'empty-in-memory'` it is thrown earlier, by
- * {@link probeAbsentSqliteDatabaseFile} — so by `resolveSqliteAbsentFileTarget`
- * and the `SqlDriver` constructor — for a file that can be neither opened nor
- * created (#24961). `code` is the underlying error's (`ENOENT`, `EACCES`,
- * `ENOTDIR`, `SQLITE_CANTOPEN`, …) and `cause` the error itself.
+ * `code` is the underlying error's (`ENOENT`, `EACCES`, `ENOTDIR`,
+ * `SQLITE_CANTOPEN`, …) and `cause` the error itself.
  */
 export class SqliteDatabaseFileError extends Error {
   readonly code: string | undefined;
@@ -84,7 +81,9 @@ export async function makeDatabaseDirectory(dir: string): Promise<void> {
  * Does the SQLite database file `filename` exist, or is it absent in a way a
  * boot that may write could bring into existence? Answered WITHOUT writing
  * anything, and thrown as a {@link SqliteDatabaseFileError} when it is neither
- * (#24961).
+ * (#24961) — so under `sqliteAbsentFile: 'empty-in-memory'` that error comes
+ * from `resolveSqliteAbsentFileTarget`, and from the `SqlDriver` constructor,
+ * before any `connect()`.
  *
  * The read-only twin of {@link makeDatabaseDirectory}, for
  * `sqliteAbsentFile: 'empty-in-memory'`, whose contract is that the filesystem
