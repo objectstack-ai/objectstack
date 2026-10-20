@@ -78,8 +78,8 @@ describe('7b-1 — the differ: COALESCE(tenant) ≡ tenant where the tenant colu
     expect(diff(expectedNullSafe, plain, false).map((d) => d.op.type)).toEqual(['recreate_index']);
   });
 
-  it('the equivalence is the TENANT column\'s: with no tenant column named it does not apply', () => {
-    expect(diff(expectedPlain, coalesced, true, null).map((d) => d.op.type)).not.toEqual([]);
+  it("the equivalence is the TENANT column's: on a table whose tenant column is another one, it does not apply", () => {
+    expect(diff(expectedNullSafe, plain, true, 'workspace_id').map((d) => d.op.type)).toEqual(['recreate_index']);
   });
 
   it('it changes the form of the key part only — a different column set stays drift, certified or not', () => {
