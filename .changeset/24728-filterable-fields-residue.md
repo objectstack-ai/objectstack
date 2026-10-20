@@ -8,7 +8,7 @@ fix(lint)!: `os lint` and the react-page props check report the retired list-vie
 
 Clause-②: yes (narrowing)
 
-<!-- adr-0087: not-required (already-registered view-list-filterable-fields-removed, list-view-filterable-fields-retired) The key's retirement, its D2 conversion and its D3 entry are already registered by the change that tombstoned it, in this same unreleased major. This change adds no key, conversion or stored shape: it makes `os lint` and the react-page props check give the verdict `os validate` and `os build` already give the list-view key, with the tombstone's own prescription. -->
+<!-- adr-0087: not-required (already-registered view-list-filterable-fields-removed, list-view-filterable-fields-retired) The key's retirement, its D2 conversion and its D3 entry are already registered by the change that tombstoned it, which shipped in 18.0.0. This change adds no key, conversion or stored shape: it makes `os lint` and the react-page props check give the verdict `os validate` and `os build` already give the list-view key, with the tombstone's own prescription. -->
 
 **BREAKING** (an authoring narrowing), shipped as `minor` under the launch-window convention for breaking changes.
 

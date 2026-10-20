@@ -112,10 +112,10 @@ describe('the list view\'s retired `filterableFields` is reported by name, never
       stackWithList(listWith({ data: { provider: 'object', object: 'no_such_object' }, filterableFields: ['x'] })),
     );
     expect(retiredOf(unbound)).toHaveLength(1);
-    const api = validateListViewFieldRefs(
-      stackWithList(listWith({ data: { provider: 'api', read: { url: '/x' } }, filterableFields: ['x'] })),
+    const inline = validateListViewFieldRefs(
+      stackWithList(listWith({ data: { provider: 'value', items: [] }, filterableFields: ['x'] })),
     );
-    expect(retiredOf(api)).toHaveLength(1);
+    expect(retiredOf(inline)).toHaveLength(1);
     const noObjects = validateListViewFieldRefs(stackWithList(listWith({ filterableFields: ['x'] }), []));
     expect(retiredOf(noObjects)).toHaveLength(1);
   });
