@@ -20,8 +20,11 @@
 //    grid's consistent save stays silent), nor is a key the caller never sent;
 //  - a caller value another strip already took is reported once, under that
 //    strip's reason, never twice;
-//  - `strictReadonlyWrites` refuses a replaced value, writing nothing — its
-//    coverage is derived from what `onFieldsDropped` reports.
+//  - `strictReadonlyWrites` does NOT refuse a replaced value in 18.x (the
+//    maintainer's ruling 「甲」: only the loud half ships; the refusal waits
+//    for 19.0) — the write completes with the computed value and the report
+//    reaches the listener under strict too, while a strict write that ALSO
+//    carries a refusable drop is still refused, and fires no listener.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
@@ -251,38 +254,51 @@ describe('[#24690] a caller value a stored expression replaced is reported as `s
     });
   });
 
-  describe('strictReadonlyWrites — coverage derived from the reported set refuses a replaced value', () => {
-    it('update by id: ERR_READONLY_FIELD_REJECTED carrying the `stored_expression` drop, nothing written', async () => {
+  describe('strictReadonlyWrites — a replaced value is REPORTED, not refused, in 18.x (ruling 「甲」)', () => {
+    it('update by id: the write completes with the computed value, and the report reaches the listener', async () => {
+      const l = listener();
+      await engine.update(LINE, { id: 'line_draft', quantity: 4, amount: 5 }, { strictReadonlyWrites: true, onFieldsDropped: l.onFieldsDropped } as any);
+      expect(line('line_draft')).toMatchObject({ quantity: 4, amount: 40 });
+      expect(l.events).toEqual([AMOUNT]);
+    });
+
+    it('insert: the row is written with the computed value, and reported', async () => {
+      const l = listener();
+      await engine.insert(LINE, { invoice: 'INV-1004', quantity: 2, unit_price: 10, amount: 999 }, { strictReadonlyWrites: true, onFieldsDropped: l.onFieldsDropped });
+      const rows = [...storeFor(LINE).values()];
+      expect(rows).toHaveLength(4);
+      expect(rows.find((r) => r.amount === 20 && r.quantity === 2)).toBeDefined();
+      expect(l.events).toEqual([AMOUNT]);
+    });
+
+    it('predicate update: every matched row is written, and the replacement is reported', async () => {
+      const l = listener();
+      await engine.update(LINE, { quantity: 2, unit_price: 5, amount: 1 }, { where: { invoice: 'INV-1004' }, multi: true, strictReadonlyWrites: true, onFieldsDropped: l.onFieldsDropped } as any);
+      expect([line('line_draft').amount, line('line_draft_2').amount]).toEqual([10, 10]);
+      expect(l.events).toEqual([AMOUNT]);
+    });
+
+    it('a strict write that ALSO carries a refusable drop is refused for THAT drop alone, writes nothing, and fires no listener', async () => {
+      const l = listener();
       const err: any = await engine
-        .update(LINE, { id: 'line_draft', quantity: 4, amount: 5 }, { strictReadonlyWrites: true } as any)
+        .update(LINE, { id: 'line_paid', quantity: 60, amount: 2999.4 }, { strictReadonlyWrites: true, onFieldsDropped: l.onFieldsDropped } as any)
         .catch((e: unknown) => e);
       expect(err).toBeInstanceOf(ReadonlyFieldRejectedError);
       expect(err.code).toBe('ERR_READONLY_FIELD_REJECTED');
-      expect(err.drops).toEqual([AMOUNT]);
-      expect(line('line_draft')).toMatchObject({ quantity: 3, amount: 30 });
+      expect(err.drops).toEqual([{ object: LINE, fields: ['quantity'], reason: 'readonly_when' }]);
+      expect(line('line_paid')).toMatchObject({ quantity: 6, amount: 299.94 });
+      expect(l.events).toEqual([]);
     });
 
-    it('insert: refused the same way, before the driver', async () => {
+    it('insert: a strict write with a refusable drop is refused before the computation, carrying no stored_expression drop', async () => {
+      const l = listener();
       const err: any = await engine
-        .insert(LINE, { invoice: 'INV-1004', quantity: 2, unit_price: 10, amount: 999 }, { strictReadonlyWrites: true })
+        .insert('qa_locked_line', { quantity: 4, unit_price: 2, amount: 5 }, { strictReadonlyWrites: true, onFieldsDropped: l.onFieldsDropped })
         .catch((e: unknown) => e);
       expect(err).toBeInstanceOf(ReadonlyFieldRejectedError);
-      expect(err.drops).toEqual([AMOUNT]);
-      expect([...storeFor(LINE).values()]).toHaveLength(3);
-    });
-
-    it('predicate update: refused before any row is written', async () => {
-      const err: any = await engine
-        .update(LINE, { quantity: 2, unit_price: 5, amount: 1 }, { where: { invoice: 'INV-1004' }, multi: true, strictReadonlyWrites: true } as any)
-        .catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(ReadonlyFieldRejectedError);
-      expect(err.drops).toEqual([AMOUNT]);
-      expect([line('line_draft').amount, line('line_draft_2').amount]).toEqual([30, 14]);
-    });
-
-    it('control: a consistent value is not refused — nothing was replaced', async () => {
-      await engine.update(LINE, { id: 'line_draft', quantity: 5, unit_price: 20, amount: 100 }, { strictReadonlyWrites: true } as any);
-      expect(line('line_draft')).toMatchObject({ quantity: 5, amount: 100 });
+      expect(err.drops.map((d: DroppedFieldsEvent) => d.reason)).not.toContain('stored_expression');
+      expect([...storeFor('qa_locked_line').values()]).toHaveLength(1);
+      expect(l.events).toEqual([]);
     });
   });
 });

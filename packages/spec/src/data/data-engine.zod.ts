@@ -317,7 +317,10 @@ export const DroppedFieldsEventSchema = lazySchema(() => z.object({
    *   declared `readonly` is reported once, as `readonly`). On a predicate
    *   update the value stored is the one computed value, or the column left
    *   as it is when the patch moves no input; a caller value that differs
-   *   from what any matched row stores is reported.
+   *   from what any matched row stores is reported. The one arm
+   *   `strictReadonlyWrites` does NOT refuse in 18.x (ruling 「甲」): the
+   *   report reaches `onFieldsDropped` under strict too, and the refusal
+   *   waits for 19.0 (see `WriteObservabilityOptions`).
    *
    * `primary_key` names the FIELD's role, not the offending value's shape, on
    * purpose: `not_a_primary_key` would describe the value and become false the
