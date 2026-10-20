@@ -281,7 +281,7 @@ describe('[#24061] one authenticated request\'s prelude, counted on a real engin
       // not project it — so the hop, where declared, is live on this engine.
       const [held] = (await engine.find('sys_user_permission_set', { where: { user_id: userId }, ...SYS })) as any[];
       expect(held?.permission_set).toBe('prelude_editor');
-      expect(held?.display_title).toBe(oneHopGrantTitle ? 'Prelude → prelude_editor' : `${userId} → prelude_editor`);
+      expect(held?.display_title).toBe('Prelude → prelude_editor');
 
       const run = await probe.measure(prelude);
 
