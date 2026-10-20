@@ -88,7 +88,6 @@ const FULL_LIST_VIEW: AnyRec = {
     { field: 'period_key', summary: { field: 'estimate' }, prefix: { field: 'status' } },
   ],
   filter: [{ field: 'visible_from', operator: 'equals', value: '2026-01-01' }],
-  filterableFields: ['status'],
   hiddenFields: ['business_unit'],
   fieldOrder: ['title', 'status'],
   grouping: { fields: [{ field: 'business_unit' }] },
@@ -295,7 +294,6 @@ describe('#14107 — every other walked position', () => {
       'views[0].list.columns[0].prefix.field',
       'warning',
     ],
-    [{ filterableFields: [BAD] }, 'views[0].list.filterableFields[0]', 'error'],
     [{ hiddenFields: [BAD] }, 'views[0].list.hiddenFields[0]', 'warning'],
     [{ fieldOrder: [BAD] }, 'views[0].list.fieldOrder[0]', 'warning'],
     [{ rowColor: { field: BAD } }, 'views[0].list.rowColor.field', 'warning'],
@@ -733,19 +731,19 @@ describe('#14282 — a dotted key the FILTER door refuses, and the ones it serve
     expect(findings.every((f) => f.rule === LIST_VIEW_FIELD_DOTTED)).toBe(true);
   });
 
-  it('the two positions that DECLARE end-user filterable names are judged', () => {
+  it('the position that DECLARES end-user filterable names is judged', () => {
     // objectui folds the resulting conditions into the fetched query
-    // (`buildEffectiveFilter`), so these names become filter keys.
+    // (`buildEffectiveFilter`), so these names become filter keys. Its retired
+    // sibling `filterableFields` is reported by name instead
+    // (`list-view-filterable-fields-retired.test.ts`).
     const findings = validateListViewFieldRefs(
       stackWith(
         mutate({
-          filterableFields: ['owner.name'],
           userFilters: { fields: [{ field: 'parent.title' }] },
         }),
       ),
     );
     expect(idsOf(findings).sort()).toEqual([
-      'views[0].list.filterableFields[0]',
       'views[0].list.userFilters.fields[0].field',
     ]);
     expect(findings.every((f) => f.rule === LIST_VIEW_FIELD_DOTTED)).toBe(true);
