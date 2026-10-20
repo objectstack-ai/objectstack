@@ -382,8 +382,15 @@ export interface AuthoringRuleContext {
    * force; ABSENT on the three CLI commands and on a write that names no
    * package, whose snapshots carry the whole collection. It is what lets a
    * rule tell "outside what this package declared it may reference" from
-   * "not in this stack": an object missing from a narrowed snapshot is the
-   * first, one missing from a whole one may come from another package. Read
+   * "exists nowhere": an object missing from a narrowed snapshot is the
+   * first. What an object missing from a whole snapshot means depends on who
+   * built it. On the CLI the stack is one app, so the object may come from a
+   * dependency package the stack does not carry, and "exists nowhere" cannot
+   * be decided. At the runtime door with no closure in force the snapshot is
+   * the whole collection the host serves, so the object exists nowhere, and
+   * [#24668] a list view bound to it is refused `list-view-object-unknown`
+   * (the reference-integrity suite reads a set `runtimeWriteType` beside an
+   * absent `packageScope` as that whole collection). Read
    * by `validateListViewFieldRefs` only (through the reference-integrity
    * suite), which refuses a list view bound outside the closure instead of
    * skipping it.
