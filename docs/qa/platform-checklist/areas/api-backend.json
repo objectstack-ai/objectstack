@@ -1565,7 +1565,7 @@
       "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1581,7 +1581,7 @@
           "showcase_portfolio_snapshot (ui/actions/index.ts — object-less/global, and the ONLY stock action with ai.exposed: true): the live MCP-door probe; its activation flip spells the object segment `global` (/actions/_activation/global/showcase_portfolio_snapshot)"
         ],
         "knownGaps": [
-          "The MCP door cannot be driven live with showcase_mark_done: the bridge's AI-exposure gate (actionAiExposureError, fail-closed on ai.exposed !== true) sits AHEAD of the activation consult, so a non-exposed action answers the exposure refusal regardless of its switch. showcase_portfolio_snapshot is the only stock ai.exposed action. The MCP transport IS drivable live on a stock boot: the boot banner prints `MCP: http://localhost:<port>/api/v1/mcp`, and QA run #21056 drove POST /api/v1/mcp tools/call run_action against showcase_portfolio_snapshot (disabled → isError carrying code ACTION_DISABLED, status 409; re-enabled → ok). Score the MCP clause live; fall back to the unit pin (action-activation-dispatch.test.ts 'door 2') only where the endpoint is not mounted, and record which oracle the verdict rests on.",
+          "The MCP door cannot be driven live with showcase_mark_done: the bridge's AI-exposure gate (actionAiExposureError, fail-closed on ai.exposed !== true) sits AHEAD of the activation consult, so a non-exposed action answers the exposure refusal regardless of its switch. showcase_portfolio_snapshot is the only stock ai.exposed action. The MCP transport IS drivable live on a stock boot: the boot banner prints `MCP: http://localhost:<port>/api/v1/mcp`, and QA run #21056 drove POST /api/v1/mcp tools/call run_action against showcase_portfolio_snapshot (disabled → isError carrying code ACTION_DISABLED, status 409; re-enabled → ok). Score the MCP clause live. Where the endpoint is not mounted, record acceptance[4] blocked(environment), with the unit pin cited beside it: action-activation-dispatch.test.ts 'door 2' calls invokeBusinessAction in-process over a stubbed engine and metadata service, with no MCP transport and no HTTP, so it is evidence of that layer only, never the clause's pass (RUNNER rule 6, a pin scores only the layer it drives).",
           "The record-load half of the ordering proof has NO contrasting refusal: the REST door's record load is best-effort (try/catch in domains/actions.ts — a missing record passes an empty record for new-record actions), so a nonexistent recordId never 404s on its own, enabled or disabled. The record leg is proven by code order plus the absence of any read/side effect, never by expecting a 404 from the enabled control."
         ]
       },
@@ -1694,6 +1694,12 @@
           "date": "2026-10-19",
           "change": "steps[5] names the MCP argument — checklist-accuracy finding of the 18.0 QA sweep (QA run #24556, api-backend.packaged-action-disabled-dispatch step 6; wave anchor #24579 §3). Re-derived at base 9a7838edf5 (packages/mcp/src/mcp-http-tools.ts run_action input: actionName, objectName, recordId). No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0] no longer falls back to the unit pin for the MCP clause. PR #24891's carried finding (round 15's acceptance notes: the 'score from the pin' spelling, the MCP clause's unit fallback), read under RUNNER rule 6. acceptance[4]'s oracle is the MCP tool's answer. The 'door 2' case of packages/runtime/src/domains/action-activation-dispatch.test.ts calls invokeBusinessAction in-process over a stubbed engine and metadata service (read at base feb09db14a), so where the endpoint is not mounted the clause is blocked(environment), with the pin beside it. No clause changed",
+          "ref": "#PENDING-24579R16"
         }
       ]
     },
