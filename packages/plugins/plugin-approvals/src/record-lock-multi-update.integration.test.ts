@@ -34,6 +34,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { bindApprovalLockHook } from './lifecycle-hooks.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const opportunity = {
   name: 'opportunity',
@@ -112,6 +113,9 @@ describe('approvals record lock — predicate (multi) updates (#4778)', () => {
     // Real DDL through the real path — the tables every write below hits are
     // created by the driver, not conjured by a store on first write.
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     lockedId = String((await engine.insert('opportunity', { name: 'Deal', amount: 100 })).id);
     freeId = String((await engine.insert('opportunity', { name: 'Other', amount: 100 })).id);

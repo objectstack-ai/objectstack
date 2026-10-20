@@ -53,6 +53,7 @@ import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { SysApprovalToken } from './sys-approval-token.object.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'linkrest_invoice';
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
@@ -150,6 +151,9 @@ async function boot(): Promise<Rig> {
     engine.registry.registerObject(def as any, 'approvals-link-at-rest-test', 'approvals-link-at-rest-test');
   }
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   for (const [id, name] of [[SUBMITTER, 'Sam Submitter'], [APPROVER, 'Ada Approver'], [ORG_ADMIN.userId, 'Olga Admin']]) {
     await engine.insert('sys_user', { id, name, email: `${id}@example.com` }, { context: SYSTEM } as any);
   }

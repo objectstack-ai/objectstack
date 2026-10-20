@@ -58,6 +58,7 @@ import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
 const SUBMITTER = { userId: 'submitter', positions: [], permissions: [] } as any;
@@ -157,6 +158,9 @@ describe('a deleted record auto-cancels its pending approvals (#13568)', () => {
     // this card adds, so a write of it that the schema does not carry fails
     // here rather than passing against a permissive fake.
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     warnings = [];
     automation = makeAutomationSpy();
@@ -349,6 +353,9 @@ describe('#13568 control — without the linkage the same delete strands the req
       engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
     }
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     svc = new ApprovalService({ engine: engine as any });
     await engine.insert('crm_leave_request', { id: 'LR6', title: 'Leave' }, { context: SYSTEM } as any);
     // ⛔ deliberately NOT bound — that is the whole case.

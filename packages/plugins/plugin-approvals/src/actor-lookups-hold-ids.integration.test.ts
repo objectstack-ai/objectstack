@@ -46,6 +46,7 @@ import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
 const asUser = (userId: string, positions: string[] = []) =>
@@ -156,6 +157,9 @@ describe('ADR-0118 D1 — every sys_user lookup approvals writes holds an id or 
       engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
     }
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     for (const u of USERS) await engine.insert('sys_user', u, { context: SYSTEM } as any);
 
     svc = new ApprovalService({
