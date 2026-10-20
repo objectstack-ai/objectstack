@@ -36,7 +36,8 @@ type FakeUser = string | { email: string; locale?: unknown };
 /** Fake data engine: user id → email (+ locale), and template lookups. */
 function fakeData(opts: { users?: Record<string, FakeUser>; templates?: any[] } = {}) {
     const users = opts.users ?? { user_1: 'ada@example.com' };
-    const templates = opts.templates ?? [];
+    // A fixture row is the delivery organization's unless it names another.
+    const templates = (opts.templates ?? []).map((t) => ({ organization_id: 'org_1', ...t }));
     const findOnes: Array<{ object: string; query: any }> = [];
     return {
         findOnes,
@@ -50,7 +51,7 @@ function fakeData(opts: { users?: Record<string, FakeUser>; templates?: any[] } 
                 return typeof user === 'string' ? { email: user } : { ...user };
             }
             if (object === 'sys_notification_template') {
-                return templates.find((t) => t.topic === w.topic && t.channel === w.channel && t.locale === w.locale && t.is_active) ?? null;
+                return templates.find((t) => t.organization_id === w.organization_id && t.topic === w.topic && t.channel === w.channel && t.locale === w.locale && t.is_active) ?? null;
             }
             return null;
         },
@@ -206,8 +207,10 @@ describe('email channel', () => {
             templates: [{ topic: 'deal.won', channel: 'email', locale: 'en', is_active: true, subject: 'Won {{ payload.title }}', body: '<h1>{{ payload.title }}</h1>', format: 'html' }],
         });
         const ch = channel(() => email.service, data);
-        await ch.send(silentCtx(), delivery());
-        expect(email.sent[0]).toEqual({ to: 'ada@example.com', subject: 'Won Deal closed', html: '<h1>Deal closed</h1>' });
+        // The row is the delivery organization's (a template is resolved in
+        // the recipient's organization), so the delivery names it.
+        await ch.send(silentCtx(), delivery({ organizationId: 'org_1' }));
+        expect(email.sent[0]).toEqual({ to: 'ada@example.com', subject: 'Won Deal closed', html: '<h1>Deal closed</h1>', organizationId: 'org_1' });
     });
 
     it('accepts an email-shaped recipient verbatim (no user lookup)', async () => {
@@ -548,8 +551,8 @@ describe('email channel', () => {
                 ],
             });
             const ch = build(data, email, 'ja-JP');
-            await ch.send(silentCtx(), delivery({}, 'ada'));
-            await ch.send(silentCtx(), delivery({}, 'bob'));
+            await ch.send(silentCtx(), delivery({ organizationId: 'org_1' }, 'ada'));
+            await ch.send(silentCtx(), delivery({ organizationId: 'org_1' }, 'bob'));
             expect(email.sent.map((s) => [s.to, s.subject])).toEqual([
                 ['ada@example.com', '成交 Deal closed'],   // her own locale
                 ['bob@example.com', '成約 Deal closed'],   // no locale ⇒ deployment default
@@ -562,7 +565,7 @@ describe('email channel', () => {
                 users: { user_1: { email: 'ada@example.com', locale: 'undefined' } },
                 templates: [{ topic: 'deal.won', channel: 'email', locale: 'en', is_active: true, subject: 'Won {{ payload.title }}', body: 'en body', format: 'text' }],
             });
-            await build(data, email).send(silentCtx(), delivery());
+            await build(data, email).send(silentCtx(), delivery({ organizationId: 'org_1' }));
             expect(email.sent[0].subject).toBe('Won Deal closed');
         });
 
@@ -575,7 +578,7 @@ describe('email channel', () => {
                     { topic: 'deal.won', channel: 'email', locale: 'es-ES', is_active: true, subject: 'Ganado', body: 'es', format: 'text' },
                 ],
             });
-            await build(data, email).send(silentCtx(), delivery({ payload: { title: 'x', body: 'y', locale: 'es-ES' } }));
+            await build(data, email).send(silentCtx(), delivery({ organizationId: 'org_1', payload: { title: 'x', body: 'y', locale: 'es-ES' } }));
             expect(email.sent[0].subject).toBe('成交');
         });
     });

@@ -1472,6 +1472,45 @@ describe('translation unknown-key strictness', () => {
     });
   });
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // An approval node's step label has a key: `flows.<flow>.approvals.<node_id>.label`
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('flow approvals — `flows.<flow>.approvals.<node_id>.label`', () => {
+    const parse = (flows: unknown) => TranslationDataSchema.safeParse({ flows });
+
+    it('accepts and keeps a translated approval-step label, at both doors', () => {
+      const flows = { opportunity_approval: { approvals: { manager_review: { label: '销售经理审批' } } } };
+      const result = parse(flows) as { success: boolean; data: any; error?: unknown };
+      expect(result.success, JSON.stringify(result.error)).toBe(true);
+      expect(result.data.flows.opportunity_approval.approvals.manager_review.label).toBe('销售经理审批');
+      expect(TranslationItemSchema.safeParse({ locale: 'zh-CN', flows }).success).toBe(true);
+    });
+
+    it('accepts an empty label — the untranslated skeleton slot', () => {
+      expect(parse({ f: { approvals: { n: { label: '' } } } }).success).toBe(true);
+    });
+
+    it('names `title` as the rename onto `label` it is — the spelling a screen key carries', () => {
+      const result = parse({ f: { approvals: { n: { title: 'x' } } } });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.code === 'unrecognized_keys')!;
+      expect(issue.path).toEqual(['flows', 'f', 'approvals', 'n']);
+      expect(issue.message).toContain('`title` → `label`');
+    });
+
+    it('closes the entry: a key the approval node does not declare is refused', () => {
+      const result = parse({ f: { approvals: { n: { instructions: 'x' } } } });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+    });
+
+    it('names `approval` as the rename onto the `approvals` group', () => {
+      const result = parse({ f: { approval: { n: { label: 'x' } } } });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.find((i) => i.code === 'unrecognized_keys')?.message).toContain('`approval` → `approvals`');
+    });
+  });
+
   it('names which action surface the key landed on', () => {
     const onObject = TranslationDataSchema.safeParse({
       objects: { account: { _actions: { merge: { confirm: 'ok?' } } } },

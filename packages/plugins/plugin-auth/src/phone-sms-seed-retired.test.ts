@@ -33,6 +33,12 @@ import {
 } from './phone-sms-texts.js';
 
 const TEMPLATE_OBJECT = 'sys_notification_template';
+/**
+ * The organization every store below belongs to — the one-organization world
+ * the seeded store lived in. Every row is that organization's, and the read
+ * is handed it, as `AuthManager` hands the Default Organization under `single`.
+ */
+const ORG = 'org_default';
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 const SECRET = 'test-secret-at-least-32-chars-long';
 
@@ -53,14 +59,14 @@ function matchesWhere(row: Row, where: Record<string, unknown> = {}): boolean {
 }
 
 function store(rows: Row[]) {
-  const all = rows.map((r) => ({ ...r }));
+  const all: Row[] = rows.map((r) => ({ organization_id: ORG, ...r }));
   return {
     all,
     async find(_object: string, q: any) {
       const hit = all.filter((r) => matchesWhere(r, q?.where));
       return typeof q?.limit === 'number' ? hit.slice(0, q.limit) : hit;
     },
-    async insert(_object: string, row: Row) { all.push({ ...row }); return row; },
+    async insert(_object: string, row: Row) { all.push({ organization_id: ORG, ...row }); return row; },
   };
 }
 
@@ -131,7 +137,7 @@ describe('the retired auth SMS seed', () => {
     let compared = 0;
     for (const topic of TOPICS) {
       for (const locale of LOCALES) {
-        const now = await resolvePhoneSmsTemplateBody(store([]), topic, locale);
+        const now = await resolvePhoneSmsTemplateBody(store([]), topic, locale, ORG);
         expect(now, `${topic} @ ${String(locale)}`).toBe(await seededWorld([], topic, locale));
         // …and that text IS the built-in one for the rung, rendered identically.
         expect(now).toBe(builtinPhoneSmsBody(topic, locale));
@@ -142,7 +148,7 @@ describe('the retired auth SMS seed', () => {
     }
     // Every built-in text is reached: both topics in both bundled languages.
     const reached = new Set<string>();
-    for (const topic of TOPICS) for (const locale of LOCALES) reached.add(await resolvePhoneSmsTemplateBody(store([]), topic, locale));
+    for (const topic of TOPICS) for (const locale of LOCALES) reached.add(await resolvePhoneSmsTemplateBody(store([]), topic, locale, ORG));
     expect([...reached].sort()).toEqual(BUILTIN_PHONE_SMS_TEMPLATES.map((t) => t.body).sort());
     expect(compared).toBe(TOPICS.length * LOCALES.length);
   });
@@ -161,7 +167,7 @@ describe('the retired auth SMS seed', () => {
     for (const rows of storesOver(slots)) {
       for (const topic of TOPICS) {
         for (const locale of LOCALES) {
-          const now = await resolvePhoneSmsTemplateBody(store(rows), topic, locale);
+          const now = await resolvePhoneSmsTemplateBody(store(rows), topic, locale, ORG);
           const before = await seededWorld(rows, topic, locale);
           if (now !== before) diverged.push(`${topic} @ ${String(locale)} over ${JSON.stringify(rows)}: ${now} != ${before}`);
           compared += 1;
@@ -175,13 +181,13 @@ describe('the retired auth SMS seed', () => {
   it('a row an operator authored still wins', async () => {
     const custom = '【定制】验证码 {{code}}';
     const rows = [{ topic: PHONE_SMS_TOPICS.otp, channel: 'sms', locale: 'zh', is_active: true, body: custom }];
-    expect(await resolvePhoneSmsTemplateBody(store(rows), PHONE_SMS_TOPICS.otp, 'zh-CN')).toBe(custom);
-    expect(await resolvePhoneSmsTemplateBody(store(rows), PHONE_SMS_TOPICS.otp, 'zh')).toBe(custom);
+    expect(await resolvePhoneSmsTemplateBody(store(rows), PHONE_SMS_TOPICS.otp, 'zh-CN', ORG)).toBe(custom);
+    expect(await resolvePhoneSmsTemplateBody(store(rows), PHONE_SMS_TOPICS.otp, 'zh', ORG)).toBe(custom);
     // The other topic, and the other language, keep their built-in texts.
-    expect(await resolvePhoneSmsTemplateBody(store(rows), PHONE_SMS_TOPICS.invite, 'zh')).toBe(
+    expect(await resolvePhoneSmsTemplateBody(store(rows), PHONE_SMS_TOPICS.invite, 'zh', ORG)).toBe(
       builtinPhoneSmsBody(PHONE_SMS_TOPICS.invite, 'zh'),
     );
-    expect(await resolvePhoneSmsTemplateBody(store(rows), PHONE_SMS_TOPICS.otp, 'en')).toBe(
+    expect(await resolvePhoneSmsTemplateBody(store(rows), PHONE_SMS_TOPICS.otp, 'en', ORG)).toBe(
       builtinPhoneSmsBody(PHONE_SMS_TOPICS.otp, 'en'),
     );
   });

@@ -8,9 +8,10 @@
  * {@link resolvePhoneSmsTemplateBody}:
  *
  *  1. **A tenant template row** — a `sys_notification_template` row for
- *     `(topic, channel:'sms', locale)`, the same object the messaging `sms`
- *     channel renders. Operators author them in Setup; a row at a rung
- *     decides that rung.
+ *     `(topic, channel:'sms', locale)` in the organization the send resolves
+ *     to (see "Which organization's row" below), the same object the
+ *     messaging `sms` channel renders. Operators author them in Setup; a row
+ *     at a rung decides that rung.
  *  2. **The built-in text at that rung** — the bundled texts here (en + zh),
  *     when no row exists at that locale.
  *
@@ -44,6 +45,24 @@
  *
  * Red line unchanged: the OTP code appears only in the rendered body handed
  * to the SMS service — never in logs or error messages.
+ *
+ * ## Which organization's row (ADR-0131, ADR-0093 D3)
+ *
+ * `sys_notification_template` is organization-owned: a row is the organization
+ * that authored it (ADR-0131 D1/D3). An auth SMS is a deployment-level act —
+ * the send callbacks carry no organization — so the caller hands in the
+ * organization that act resolves to, `tenancy.defaultOrgId()`: the Default
+ * Organization when no wall is requested, and `null` under a requested wall,
+ * where the framework never guesses an organization (ADR-0093 D3).
+ *
+ *  - An organization ⇒ every template read below is keyed
+ *    `where: { organization_id }`. ⛔ Never drop the term: the read runs under
+ *    the explicit system opt-in, which names no organization, so the term IS
+ *    the organization boundary.
+ *  - No organization ⇒ no row is read and the built-in walk answers. The
+ *    per-organization template door stays closed under a wall (ADR-0131 §1.4,
+ *    D6): no organization's row decides the text another organization's user
+ *    receives.
  */
 
 /** Topics the auth phone SMS templates live under. */
@@ -186,6 +205,10 @@ async function firstTemplateRow(
  * If no rung answers, the built-in walk ({@link builtinPhoneSmsBody}) is the
  * floor, as it is when the template read fails (missing table, no engine).
  *
+ * Every read is keyed by `organizationId`, the organization the send resolves
+ * to; with none (`null` / `undefined`), no row is read and the built-in walk
+ * answers — see "Which organization's row" in the module doc.
+ *
  * This is exactly what the retired boot seed rendered. That seed inserted the
  * built-in text at every built-in `(topic, locale)` that held NO row, active or
  * not, and the read then took the first active, non-blank row along the chain,
@@ -201,11 +224,12 @@ export async function resolvePhoneSmsTemplateBody(
   engine: PhoneSmsTemplateEngine | undefined,
   topic: string,
   locale: string | undefined,
+  organizationId: string | null | undefined,
 ): Promise<string> {
-  if (!engine) return builtinPhoneSmsBody(topic, locale);
+  if (!engine || !organizationId) return builtinPhoneSmsBody(topic, locale);
   try {
     for (const loc of phoneSmsLocaleChain(locale)) {
-      const where = { topic, channel: 'sms', locale: loc };
+      const where = { organization_id: organizationId, topic, channel: 'sms', locale: loc };
       const active = await firstTemplateRow(engine, { ...where, is_active: true });
       const body = active?.body;
       if (typeof body === 'string' && body.trim()) return body;

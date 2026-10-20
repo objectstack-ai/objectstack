@@ -6453,6 +6453,14 @@ export class AuthManager {
    * gets exactly the deployment default, as before commit 35e94c96b. #14641 made the
    * SMS invite path a passer rather than an abstainer; it is no longer the
    * standing example of a caller that names nothing.
+   *
+   * The template row is read in the organization this deployment-level act
+   * resolves to — `tenancy.defaultOrgId()`, the same answer the membership
+   * reconciler binds a new user to (ADR-0093 D3): the Default Organization
+   * when no wall is requested, `null` under a requested wall, where no row is
+   * read and the built-in text is sent (`phone-sms-texts.ts`, "Which
+   * organization's row"). No tenancy service, or a failed resolution, is
+   * `null` too: the built-in text, never a blocked send.
    */
   private async renderPhoneSmsBody(
     topic: string,
@@ -6460,7 +6468,13 @@ export class AuthManager {
     storedLocale?: string,
   ): Promise<string> {
     const locale = storedLocale ?? this.smsLocale;
-    const template = await resolvePhoneSmsTemplateBody(this.getDataEngine(), topic, locale);
+    let organizationId: string | null = null;
+    try {
+      organizationId = (await this.config.getTenancy?.()?.defaultOrgId()) ?? null;
+    } catch {
+      organizationId = null;
+    }
+    const template = await resolvePhoneSmsTemplateBody(this.getDataEngine(), topic, locale, organizationId);
     return interpolatePhoneSms(template, data);
   }
 
