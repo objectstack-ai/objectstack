@@ -103,19 +103,19 @@ describe('@objectstack/platform-objects', () => {
     // readable on screen and in screenshots; `password` renders the masked
     // input. The roster pins each param by name; the sweep over every identity
     // object fails on a credential-named param added later as `text`.
-    const roster: Array<[string, { name: string; actions?: readonly unknown[] }, string, string]> = [
-      ['SysUser', SysUser, 'create_user', 'password'],
-      ['SysUser', SysUser, 'set_user_password', 'newPassword'],
-      ['SysUser', SysUser, 'change_my_password', 'currentPassword'],
-      ['SysUser', SysUser, 'change_my_password', 'newPassword'],
-      ['SysUser', SysUser, 'delete_my_account', 'password'],
-      ['SysUser', SysUser, 'enable_two_factor', 'password'],
-      ['SysUser', SysUser, 'disable_two_factor', 'password'],
-      ['SysUser', SysUser, 'generate_backup_codes', 'password'],
-      ['SysTwoFactor', SysTwoFactor, 'enable_two_factor', 'password'],
-      ['SysTwoFactor', SysTwoFactor, 'disable_two_factor', 'password'],
-      ['SysTwoFactor', SysTwoFactor, 'regenerate_backup_codes', 'password'],
-      ['SysSsoProvider', SysSsoProvider, 'register_sso_provider', 'clientSecret'],
+    const roster: Array<[string, string, string, { name: string; actions?: readonly unknown[] }]> = [
+      ['SysUser', 'create_user', 'password', SysUser],
+      ['SysUser', 'set_user_password', 'newPassword', SysUser],
+      ['SysUser', 'change_my_password', 'currentPassword', SysUser],
+      ['SysUser', 'change_my_password', 'newPassword', SysUser],
+      ['SysUser', 'delete_my_account', 'password', SysUser],
+      ['SysUser', 'enable_two_factor', 'password', SysUser],
+      ['SysUser', 'disable_two_factor', 'password', SysUser],
+      ['SysUser', 'generate_backup_codes', 'password', SysUser],
+      ['SysTwoFactor', 'enable_two_factor', 'password', SysTwoFactor],
+      ['SysTwoFactor', 'disable_two_factor', 'password', SysTwoFactor],
+      ['SysTwoFactor', 'regenerate_backup_codes', 'password', SysTwoFactor],
+      ['SysSsoProvider', 'register_sso_provider', 'clientSecret', SysSsoProvider],
     ];
 
     type Param = { name?: string; type?: string };
@@ -123,7 +123,7 @@ describe('@objectstack/platform-objects', () => {
     const actionsOf = (object: unknown): readonly Action[] =>
       ((object as { actions?: readonly Action[] }).actions ?? []);
 
-    it.each(roster)('%s.%s#%s declares `password`', (_exportName, object, actionName, paramName) => {
+    it.each(roster)('%s.%s#%s declares `password`', (_exportName, actionName, paramName, object) => {
       const action = actionsOf(object).find((a) => a.name === actionName);
       const param = (action?.params ?? []).find((p) => p.name === paramName);
       expect(param, `${object.name}.${actionName} must declare a '${paramName}' param`).toBeDefined();
@@ -148,7 +148,7 @@ describe('@objectstack/platform-objects', () => {
         }
       }
       // Positive control: the sweep reaches exactly the rostered params.
-      expect(seen.sort()).toEqual(roster.map(([, o, a, p]) => `${o.name}.${a}#${p}`).sort());
+      expect(seen.sort()).toEqual(roster.map(([, a, p, o]) => `${o.name}.${a}#${p}`).sort());
       expect(offenders).toEqual([]);
     });
   });
