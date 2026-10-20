@@ -3411,7 +3411,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "范围",
         help: "该记录写入的级联层。",
         options: {
-          global: "全局",
           tenant: "租户",
           user: "用户"
         }

@@ -12,14 +12,16 @@
  *  2. **The switch (regime C).** A `sys_metadata_activation` row of type
  *     `webhook` turns a declared webhook off, or on when it shipped inactive,
  *     and a ledger write refreshes the cache in the request that made it.
- *  3. **The dual read, on an 18.0-shaped database.** The rows the 18.0 seeder
- *     wrote stay. A pristine one is ignored in favour of its declaration — one
- *     delivery, never two; an edited one (`customized: true`) or an admin row
- *     of the same name answers as itself and the declaration is withheld, so
- *     an administrator's `active: false` survives the upgrade. The fixture
+ *  3. **A row holding a declared name, on a certified database.** The
+ *     ownership ceremony settles every seeded copy of a declaration before
+ *     certification; what it leaves is a seeded row no package declares, and
+ *     authored rows. Any row holding a declared name answers as itself and the
+ *     declaration is withheld — one delivery, never two — whatever the row's
+ *     provenance: a seeded row the ceremony left whose name a package declares
+ *     LATER is withheld-by, not skipped (regime C). The fixture
  *     {@link seeded18_0Row} is byte-for-byte the row shape 18.0's seeder wrote
- *     (its `mapWebhookToRow` plus provenance), which is the shape an upgraded
- *     database holds.
+ *     (its `mapWebhookToRow` plus provenance), which is the shape such a row
+ *     keeps.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -461,73 +463,49 @@ describe('declared webhooks — the activation ledger switches them (ADR-0131 D6
 });
 
 // ---------------------------------------------------------------------------
-// 3. The dual read, on an 18.0-shaped database
+// 3. A row holding a declared name, on a certified database
 // ---------------------------------------------------------------------------
 
-describe('declared webhooks — an 18.0 database keeps its seeded rows, and nothing fires twice', () => {
-    it('a pristine seeded row is ignored in favour of its declaration: one delivery, from the declaration', async () => {
-        const wh = declaredWebhook({ secret: 'shh' });
-        const engine = newEngine({
-            declared: { webhook: [wh] },
-            rows: { sys_webhook: [seeded18_0Row('whk_seeded', wh)] },
-        });
-        const { enqueuer, realtime, calls } = await startEnqueuer(engine);
-        await realtime.publish(taskCreated());
-        await flush();
-
-        expect(calls).toHaveLength(1);
-        expect(calls[0].refId).toBe(declaredWebhookRefId('task_changed'));
-        expect(calls[0].signingSecret).toBe('shh');
-        // Expand first: the row is left exactly where 18.0 put it.
-        expect(engine.rows['sys_webhook']).toHaveLength(1);
-        expect(engine.writes).toEqual([]);
-        await enqueuer.stop();
-    });
-
-    it('a pristine seeded row follows its declaration\'s switch: switched off, neither the row nor the declaration fires', async () => {
-        const wh = declaredWebhook();
-        const engine = newEngine({
-            declared: { webhook: [wh] },
-            rows: { sys_webhook: [seeded18_0Row('whk_seeded', wh)], [LEDGER]: [ledgerRow('task_changed', false)] },
-        });
-        const { enqueuer, realtime, calls } = await startEnqueuer(engine);
-        await realtime.publish(taskCreated());
-        await flush();
-        expect(calls).toEqual([]);
-        await enqueuer.stop();
-    });
-
-    it('a pristine seeded row follows a changed declaration — the new URL, as the 18.0 seeder would have rewritten it', async () => {
-        const engine = newEngine({
-            declared: { webhook: [declaredWebhook({ url: 'https://hooks.example/task-v2' })] },
-            rows: { sys_webhook: [seeded18_0Row('whk_seeded', declaredWebhook())] },
-        });
-        const { enqueuer, realtime, calls } = await startEnqueuer(engine);
-        await realtime.publish(taskCreated());
-        await flush();
-        expect(calls.map((c) => c.url)).toEqual(['https://hooks.example/task-v2']);
-        await enqueuer.stop();
-    });
-
-    it('a seeded row an administrator switched off (customized) stays off: the declaration is withheld, said once', async () => {
+describe('declared webhooks — a row holding a declared name answers as itself (regime C)', () => {
+    it('a seeded row the ceremony left, its name declared later, withholds the declaration: one delivery, from the row', async () => {
+        // The 18.x step 5a leftover: a pristine seeded row no package declared
+        // at the ceremony, so it stayed. A package now declares its name with
+        // another URL. The row answers; the declaration is withheld, said once.
         const warn = vi.fn();
-        const wh = declaredWebhook();
         const engine = newEngine({
-            declared: { webhook: [wh] },
-            rows: { sys_webhook: [seeded18_0Row('whk_seeded', wh, { active: false, customized: true })] },
+            declared: { webhook: [declaredWebhook({ url: 'https://hooks.example/task-v2', secret: 'shh' })] },
+            rows: { sys_webhook: [seeded18_0Row('whk_left', declaredWebhook())] },
         });
         const { enqueuer, realtime, calls } = await startEnqueuer(engine, { warn, debug() {} });
         await enqueuer.refresh();
         await realtime.publish(taskCreated());
         await flush();
 
-        expect(calls).toEqual([]);
+        expect(calls).toHaveLength(1);
+        expect(calls[0]).toMatchObject({ refId: 'whk_left', url: 'https://hooks.example/task' });
         const withheld = warn.mock.calls.filter(([m]) => String(m).includes("declared webhook 'task_changed' is not dispatched"));
         expect(withheld).toHaveLength(1);
+        expect(engine.writes).toEqual([]);
         await enqueuer.stop();
     });
 
-    it('a seeded row an administrator pointed elsewhere (customized) answers as itself — one delivery, to the row\'s URL', async () => {
+    it('a pristine seeded row switched off keeps the declaration withheld: neither fires, whatever the ledger says', async () => {
+        const wh = declaredWebhook();
+        const engine = newEngine({
+            declared: { webhook: [wh] },
+            rows: {
+                sys_webhook: [seeded18_0Row('whk_left', wh, { active: false })],
+                [LEDGER]: [ledgerRow('task_changed', true)],
+            },
+        });
+        const { enqueuer, realtime, calls } = await startEnqueuer(engine);
+        await realtime.publish(taskCreated());
+        await flush();
+        expect(calls).toEqual([]);
+        await enqueuer.stop();
+    });
+
+    it('a customized seeded row answers as itself — one delivery, to the row\'s URL', async () => {
         const wh = declaredWebhook({ isActive: false });
         const engine = newEngine({
             declared: { webhook: [wh] },
@@ -545,24 +523,12 @@ describe('declared webhooks — an 18.0 database keeps its seeded rows, and noth
         await enqueuer.stop();
     });
 
-    it('an admin edit through the provenance stamp turns a pristine seeded row into one that answers as itself', async () => {
-        const wh = declaredWebhook();
-        const engine = newEngine({
-            declared: { webhook: [wh] },
-            rows: { sys_webhook: [seeded18_0Row('whk_seeded', wh)] },
-        });
+    it('the provenance stamp still records an admin edit of a seeded row — the ceremony\'s reader of `customized`', async () => {
+        const wh = declaredWebhook({ name: 'retired_hook' });
+        const engine = newEngine({ rows: { sys_webhook: [seeded18_0Row('whk_left', wh)] } });
         bindWebhookProvenanceStamp(engine as any);
-        const { enqueuer, realtime, calls } = await startEnqueuer(engine);
-
-        await engine.update('sys_webhook', { id: 'whk_seeded', active: false }, { context: ADMIN_CTX });
+        await engine.update('sys_webhook', { id: 'whk_left', active: false }, { context: ADMIN_CTX });
         expect(engine.rows['sys_webhook'][0].customized).toBe(true);
-        await realtime.publish({ type: 'data.record.updated', object: 'sys_webhook', payload: { recordId: 'whk_seeded' } });
-        await flush();
-        await realtime.publish(taskCreated());
-        await flush();
-
-        expect(calls).toEqual([]);
-        await enqueuer.stop();
     });
 
     it('an administrator-authored row under a declared name answers as itself, and the declaration is withheld', async () => {
@@ -583,7 +549,7 @@ describe('declared webhooks — an 18.0 database keeps its seeded rows, and noth
         await enqueuer.stop();
     });
 
-    it('a pristine seeded row whose declaration is gone keeps dispatching, as it did on 18.0', async () => {
+    it('a seeded row whose name no package declares keeps dispatching, as it did on 18.0', async () => {
         const engine = newEngine({
             rows: { sys_webhook: [seeded18_0Row('whk_orphan', declaredWebhook({ name: 'retired_hook' }))] },
         });
@@ -621,14 +587,14 @@ describe('declared webhooks — the redelivery veto', () => {
             .toMatch(/switched off/);
     });
 
-    it('judges an 18.0 pristine seeded row\'s old delivery by the declaration that now answers for it', async () => {
+    it('judges a pristine seeded row holding a declared name by the row, not by the declaration\'s switch', async () => {
         const wh = declaredWebhook();
         const engine = newEngine({
             declared: { webhook: [wh] },
-            rows: { sys_webhook: [seeded18_0Row('whk_seeded', wh)], [LEDGER]: [ledgerRow('task_changed', false)] },
+            rows: { sys_webhook: [seeded18_0Row('whk_left', wh)], [LEDGER]: [ledgerRow('task_changed', false)] },
         });
-        // The row itself still reads active:true; the declaration's switch governs.
-        expect(await guardFor(engine)({ source: 'webhook', refId: 'whk_seeded' })).toMatch(/switched off/);
+        // The row reads active:true and the dispatcher reads it as itself, so a replay is allowed.
+        expect(await guardFor(engine)({ source: 'webhook', refId: 'whk_left' })).toBeUndefined();
     });
 
     it('judges a customized seeded row by the row, as before', async () => {

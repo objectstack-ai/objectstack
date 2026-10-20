@@ -564,6 +564,13 @@ so a locked password stage and a locked second factor are independent states. Ea
 counter resets on a success at its own stage, and the admin **Unlock Account**
 action clears both at once.
 
+The password-stage counter and lock belong to the **account**, not to the text
+typed into the sign-in form. Both live on the `sys_user` row that the sign-in's own
+credential check resolves the address to. So every refused sign-in on that account
+counts toward its one lock, whichever spelling of the address it used. A lock refuses
+every sign-in that resolves to the account, the correct password included, and a
+successful sign-in under any spelling clears the counter.
+
 Setting `lockout_threshold` to `0` disables the **password-stage** lockout only.
 Two-factor verification keeps a built-in limit of 10 attempts per 15 minutes,
 because it is the last check before a session is issued. Two-factor verification

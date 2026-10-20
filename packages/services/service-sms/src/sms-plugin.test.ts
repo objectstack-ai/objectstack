@@ -161,11 +161,58 @@ describe('SmsServicePlugin', () => {
 
     const test = harness.actions.get('sms/test');
     expect(test).toBeDefined();
+    const send = vi.spyOn((harness.services.get('sms') as SmsService).options.transport, 'send');
     const bad = await test!({ values: { provider: 'log' }, payload: { to: 'not-a-phone' }, ctx: {} });
-    expect(bad.ok).toBe(false);
-    const good = await test!({ values: { provider: 'log' }, payload: { to: '+15005550006' }, ctx: {} });
-    expect(good.ok).toBe(true);
-    expect(good.message).not.toContain('5550006'); // masked
+    expect(bad).toMatchObject({ ok: false, severity: 'error' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('never reports success while only the LogSmsTransport is active', async () => {
+    // The mail/test rule: a log "send" is not a delivery. `log` is this
+    // namespace's default, so this is the answer a fresh install's button gives.
+    const harness = fakeCtx({ settingsValues: { provider: 'log' } });
+    const plugin = new SmsServicePlugin();
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    const svc = harness.services.get('sms') as SmsService;
+    expect(svc.options.transport).toBeInstanceOf(LogSmsTransport);
+    const send = vi.spyOn(svc.options.transport, 'send');
+    const result = await harness.actions.get('sms/test')!({
+      values: { provider: 'log' }, payload: { to: '+15005550006' }, ctx: {},
+    });
+    expect(result).toMatchObject({ ok: false, severity: 'warning' });
+    expect(send).not.toHaveBeenCalled();
+    expect(result.message).not.toContain('5550006');
+  });
+
+  it('names the deployment\'s transport, not `log`, when the boot-configured one carried the test', async () => {
+    // A deployment that configured Twilio at boot, with the namespace's
+    // `provider` still at its `log` default: the live service delivers, so the
+    // answer must not say the message went "via log".
+    const fetchImpl = vi.fn(async () => new Response(
+      JSON.stringify({ sid: 'SM1', status: 'queued' }),
+      { status: 201, headers: { 'Content-Type': 'application/json' } },
+    ));
+    const harness = fakeCtx({
+      settingsValues: { provider: 'log' },
+      settingsSources: { provider: 'default' },
+    });
+    const plugin = new SmsServicePlugin({
+      provider: 'twilio',
+      providerOptions: { accountSid: 'AC1', authToken: 't', from: '+15005550006', fetchImpl },
+    });
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    const result = await harness.actions.get('sms/test')!({
+      values: { provider: 'log' }, payload: { to: '+15005550009' }, ctx: {},
+    });
+    expect(result).toMatchObject({ ok: true, severity: 'info' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.message).not.toMatch(/via log\b/);
   });
 });
 

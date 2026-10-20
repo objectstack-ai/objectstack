@@ -22,7 +22,7 @@ Clause-②: yes (narrowing)
 
 - A list view bound to an object inside the closure (the package's own, a declared dependency's, a platform/system object, an overlay row): same field verdicts, same refusals.
 - A write that names no package (an overlay write) is judged against the whole collection, exactly as before. An object that exists nowhere gets no closure verdict there; #24668 refuses it as `list-view-object-unknown` (see that changeset).
-- The flow door: `flow-trigger-unknown-object` stays an advisory.
+- The flow door: under the same closure, `flow-trigger-unknown-object` refuses an out-of-closure trigger object too (#24669, see that changeset).
 - `os validate`, `os build` and `os lint`: no closure is stated, so the rule skips an unresolvable binding as before.
 - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.
 - Measured before crossing: the 11 views shipped in this repository carry 39 list-view bindings, in `examples/app-crm`, `app-todo`, `app-showcase` and `app-multi-package`, the `create-objectstack` blank template, and `qa/downstream-contract`. None is outside its package's closure, and the door's `view` rule set refuses none of them, with the package's closure or without it. None of the 97 platform built-in list views retargets `data.object`. Deployed rows were not measured.

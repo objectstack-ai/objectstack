@@ -3411,7 +3411,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Scope",
         help: "Cascade layer the row was written to.",
         options: {
-          global: "Global",
           tenant: "Tenant",
           user: "User"
         }
