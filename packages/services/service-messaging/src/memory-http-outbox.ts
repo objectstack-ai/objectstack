@@ -203,16 +203,13 @@ export class MemoryHttpOutbox implements IHttpOutbox {
      * owes the predicate here") — and `insert()` now stamps
      * {@link HttpDelivery.organizationId}, so the debt is due.
      *
-     * The predicate was written to mirror the SQL driver's v17 tenant term
-     * `(organization_id = :tenantId OR organization_id IS NULL)`, all three
-     * arms deliberately:
+     * The predicate mirrors the SQL driver's tenant term
+     * `organization_id = :tenantId` (ADR-0131 D8 — no layer has a NULL arm):
      *  - a row in ANOTHER organization is INVISIBLE (`RESOURCE_NOT_FOUND`),
      *    never forbidden — the same non-oracle refusal the contract rules;
-     *  - a row with NO organization is reachable by every tenant here. ⚠️ The
-     *    SQL driver no longer does this: ADR-0131 D8 retired its NULL arm, so
-     *    there the term is `organization_id = :tenantId` alone and an
-     *    organization-less row is reached by no tenant. This in-memory store
-     *    still admits it;
+     *  - a row with NO organization is invisible to every tenant-scoped
+     *    caller too: NULL is not an owner (ADR-0131 D1), so no tenant's
+     *    redeliver reaches it — exactly as `SqlHttpOutbox` answers;
      *  - a caller with NO tenant (`tenantId: undefined`) stays unscoped,
      *    which is the honest degraded shape {@link RedeliverOptions} rules
      *    for genuinely tenant-less deployments.
@@ -221,9 +218,7 @@ export class MemoryHttpOutbox implements IHttpOutbox {
         const row = this.rows.get(id);
         if (
             !row ||
-            (options.tenantId !== undefined &&
-                row.organizationId !== undefined &&
-                row.organizationId !== options.tenantId)
+            (options.tenantId !== undefined && row.organizationId !== options.tenantId)
         ) {
             throw new HttpRedeliverError(`Delivery row '${id}' not found`, 'RESOURCE_NOT_FOUND');
         }
