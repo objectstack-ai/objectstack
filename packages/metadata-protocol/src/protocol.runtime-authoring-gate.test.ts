@@ -3069,6 +3069,123 @@ describe('runtime authoring gate on OBJECT writes — the object action predicat
     });
 });
 
+/**
+ * [#24677] The object save door refuses a `lookup` or `master_detail` whose
+ * `reference` is a stored-metadata-body table.
+ *
+ * The engine never hydrates such a field (`expand` keeps the stored id; a
+ * master-detail `parent` root over a family header stays unbound), and this
+ * door saved it with a 200, as `os validate` and `os build` built it. The
+ * refusal is in `@objectstack/lint`'s expression rule, beside the refusal of a
+ * formula reading through such a field; no code here moves. Pinned through
+ * the REAL `saveMetaItem` / `publishMetaItem`:
+ *
+ *  (a) each family table, as a `lookup` and as a `master_detail`, is refused
+ *      with the 422 `INVALID_METADATA` envelope carrying the build's located
+ *      finding, on an active save AND on a draft's promotion, and nothing
+ *      lands;
+ *  (b) the control: a reference to an ordinary platform table still saves;
+ *  (d) the door's issue and the build's finding are the same finding.
+ *
+ * The rule's own pins are `@objectstack/lint`'s
+ * `validate-expressions.stored-metadata-body-reference.test.ts`.
+ *
+ * ⚠️ As in the #22019 block above: this package reaches `@objectstack/lint`
+ * through its built `dist/`, so an edit to the rule is invisible here until
+ * `pnpm --filter @objectstack/lint build` has run.
+ */
+describe('runtime authoring gate on OBJECT writes — a relationship into a stored-metadata-body table (#24677)', () => {
+    /** `sharingModel` is authored so `security-owd-unset` stays quiet and the refusal is the reference's. */
+    const fxRef = (type: string, target: string) => ({
+        name: 'fx_ref',
+        label: 'Reference Probe',
+        sharingModel: 'private',
+        fields: {
+            name: { type: 'text', label: 'Name' },
+            meta: { type, label: 'Meta', reference: target },
+        },
+    });
+    const FAMILY = ['sys_metadata', 'sys_metadata_history'] as const;
+    const TYPES = ['lookup', 'master_detail'] as const;
+    /** Where the build locates the refusal — the KEY the author edits. */
+    const WHERE = "object 'fx_ref' · field 'meta' reference";
+
+    const refRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'object' && r.name === 'fx_ref');
+    const buildFindings = (obj: unknown) => {
+        const stack = { objects: [obj] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack })
+            .filter((f) => f.rule === EXPRESSION_INVALID && f.where === WHERE);
+    };
+
+    for (const target of FAMILY) {
+        for (const type of TYPES) {
+            it(`(a) REFUSES an active save of a \`${type}\` to '${target}' with a 422 carrying the build's located finding`, async () => {
+                const { protocol, rows } = makeProtocol();
+
+                const err = await protocol
+                    .saveMetaItem({ type: 'object', name: 'fx_ref', item: fxRef(type, target) })
+                    .catch((e: any) => e);
+
+                expect(err, 'the save resolved — the door still accepts the reference').toBeInstanceOf(Error);
+                expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+                expect(err.rulesRun).toContain('validateStackExpressions');
+                const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID && i.where === WHERE);
+                expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+                expect(issue.path).toBe(WHERE);
+                expect(issue.severity).toBe('error');
+                // The named subjects: the field, its type and the target.
+                expect(issue.message).toContain(`\`meta\` is a \`${type}\` whose \`reference\` names '${target}'`);
+                // And nothing landed.
+                expect(refRows(rows)).toEqual([]);
+            });
+        }
+    }
+
+    it("(a) REFUSES the same body on a draft's PROMOTION — the draft door is not a bypass", async () => {
+        const { protocol, rows } = makeProtocol();
+        await expect(
+            protocol.saveMetaItem({ type: 'object', name: 'fx_ref', item: fxRef('master_detail', 'sys_metadata'), mode: 'draft' }),
+        ).resolves.toMatchObject({ success: true });
+
+        const err = await protocol.publishMetaItem({ type: 'object', name: 'fx_ref' }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID && i.where === WHERE);
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(refRows(rows).map((r) => r.state)).not.toContain('active');
+    });
+
+    for (const type of TYPES) {
+        it(`(b) the control: a \`${type}\` to an ordinary platform table (\`sys_user\`) still saves, and the row lands`, async () => {
+            const { protocol, rows } = makeProtocol();
+
+            const result = await protocol.saveMetaItem({ type: 'object', name: 'fx_ref', item: fxRef(type, 'sys_user') });
+
+            expect(result.success).toBe(true);
+            expect(refRows(rows).map((r) => r.state)).toEqual(['active']);
+        });
+    }
+
+    it('(d) the door and `os build` give the SAME finding for the same field', async () => {
+        const { protocol } = makeProtocol();
+        const err = await protocol
+            .saveMetaItem({ type: 'object', name: 'fx_ref', item: fxRef('lookup', 'sys_metadata') })
+            .catch((e: any) => e);
+        const atDoor = (err.issues ?? []).filter((i: any) => i.rule === EXPRESSION_INVALID && i.where === WHERE);
+
+        const atBuild = buildFindings(fxRef('lookup', 'sys_metadata'));
+
+        expect(atBuild).toHaveLength(1);
+        expect(atBuild[0]!.severity).toBe('error');
+        expect(atDoor).toHaveLength(1);
+        for (const k of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+            expect(atDoor[0][k], `door and build disagree on '${k}'`).toBe(atBuild[0]![k]);
+        }
+        expect(buildFindings(fxRef('lookup', 'sys_user'))).toEqual([]);
+    });
+});
+
 // #23388 — the two page component rules at the runtime save door, ruling of
 // record 6161173492 (letter B): `validateComponentProps` and
 // `validateComponentTypes` run on a `page` write (`runtimeTypes: ['page']`),
