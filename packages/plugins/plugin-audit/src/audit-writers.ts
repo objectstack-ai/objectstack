@@ -18,6 +18,8 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 // for the same value, so it honours the same declaration the same way — the
 // producer's declaration consumed, not a masking rule of this package's own.
 import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields } from '@objectstack/objectql/core';
+// [#24625] The mail logs and their body columns, named once beside the objects.
+import { MAIL_LOG_BODY_FIELDS, isMailLogObject } from '@objectstack/platform-objects/audit';
 // [#7230] ADR-0079's record display-name contract, imported rather than
 // re-derived. `resolveDisplayField` IS the definition of "which field is this
 // object's human title" (`nameField` → deprecated `displayNameField` alias →
@@ -1389,37 +1391,42 @@ export function installAuditWriters(
   // with the auth-event writer so both stamp on the same answer.
   const objectHasField = createFieldPresenceProbe(engine);
 
-  // Cached full field-definition map per object (for ADR-0052 §5b trackHistory
-  // rendering — needs labels/options, not just field names).
-  const fieldDefsCache = new Map<string, Record<string, any> | null>();
-  const getFieldDefs = (objectName: string): Record<string, any> | null => {
-    if (fieldDefsCache.has(objectName)) return fieldDefsCache.get(objectName) ?? null;
-    let defs: Record<string, any> | null = null;
+  /**
+   * [#24565] The object's REGISTERED definition, read on every call and never
+   * held here. Every gate and every row this installer writes asks it: the
+   * `enable.files` / `enable.feeds` capability gates, the ledger's credential
+   * mask and `internal` omission, the activity mirror's `enable.activities`
+   * switch, its milestones, titles, labels and computed-field drop.
+   *
+   * ⛔ No second cache over the registry. The registry is the one owner of an
+   * object's current definition and already memoizes the merged body behind
+   * its own invalidation points (`SchemaRegistry.resolveObject`), so a read
+   * here costs two map lookups. A copy here would have to be retired at every
+   * place the definition can change: the metadata door, a per-item or package
+   * publish, a dev reload, a peer replica's replay, a delete, a plugin's own
+   * `registerObject`. They do not all announce, and they announce on different
+   * channels (`metadata:reloaded` does not fire for the door's save). The copy
+   * this replaces kept each object's first answer for the life of the process,
+   * so an object whose `enable.files` was switched on through the door kept
+   * refusing attachments with 403 `FILES_DISABLED` until a restart, while the
+   * door's own read-back showed the new value. ⛔ Nor a TTL: an expiring copy
+   * is the same stale answer for a shorter time. The same rule this package
+   * already keeps for the stamped columns (`declaresActivityStampColumns`) and
+   * for a milestone declaration on the read side (`currentMilestoneWatched`).
+   */
+  const getObjectDef = (objectName: string): any => {
     try {
-      const schema: any =
-        typeof (engine as any).getSchema === 'function' ? (engine as any).getSchema(objectName) : null;
-      const fields = schema?.fields;
-      if (fields && typeof fields === 'object' && !Array.isArray(fields)) defs = fields;
+      return typeof (engine as any).getSchema === 'function' ? (engine as any).getSchema(objectName) : null;
     } catch {
-      /* ignore — best-effort; absence just means we fall back to generic text */
+      return null; // best-effort — no definition means each reader's own fallback
     }
-    fieldDefsCache.set(objectName, defs);
-    return defs;
   };
 
-  // Cached full object definition (for ADR-0052 §5b.2 activityMilestones —
-  // object-level metadata, not just fields).
-  const objectDefCache = new Map<string, any>();
-  const getObjectDef = (objectName: string): any => {
-    if (objectDefCache.has(objectName)) return objectDefCache.get(objectName);
-    let def: any = null;
-    try {
-      def = typeof (engine as any).getSchema === 'function' ? (engine as any).getSchema(objectName) : null;
-    } catch {
-      /* ignore — best-effort */
-    }
-    objectDefCache.set(objectName, def);
-    return def;
+  // The full field-definition map (ADR-0052 §5b trackHistory rendering needs
+  // labels/options, not just field names), from the same per-call read.
+  const getFieldDefs = (objectName: string): Record<string, any> | null => {
+    const fields = getObjectDef(objectName)?.fields;
+    return fields && typeof fields === 'object' && !Array.isArray(fields) ? fields : null;
   };
 
   /**
@@ -1745,6 +1752,19 @@ export function installAuditWriters(
     // the value — the same trail a masked credential rotation keeps.
     for (const field of collectInternalReadFields(getObjectDef(objectName))) {
       delete out[field];
+    }
+    // [#24625] A mail log's BODY is masked like a credential field, on every
+    // side this view is taken for. Identity mail (reset, verification, magic
+    // link, account invitation, email-change notice) carries sign-in and reset
+    // links in its body; every `sys_identity_email` row is one, and the 18.0
+    // identity rows still in `sys_email` cannot be told apart from tenant mail
+    // by any column, so both logs' bodies are masked on every row. The log row
+    // keeps the body behind its field gate; the copy never holds it in clear.
+    if (isMailLogObject(objectName)) {
+      for (const field of MAIL_LOG_BODY_FIELDS) {
+        if (!(field in out)) continue;
+        out[field] = out[field] == null ? null : SECRET_MASK;
+      }
     }
     // [#21120] A stored metadata BODY (`sys_metadata` / `sys_metadata_history`)
     // is not a top-level secret field, so the mask above never touches it. The

@@ -827,6 +827,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.item-execution-read.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.item-name-every-door.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3943,6 +3948,11 @@
     },
     {
       "file": "packages/rest/src/rest-declared-refusal-relay.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-exposure-gate-execution-read.test.ts",
       "verb": "findOne",
       "pinned": 1
     },

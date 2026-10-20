@@ -13,6 +13,7 @@ export { SysNotification } from './sys-notification.object.js';
 export { SysAttachment } from './sys-attachment.object.js';
 export { SysEmail } from './sys-email.object.js';
 export { SysIdentityEmail } from './sys-identity-email.object.js';
+export { MAIL_LOG_OBJECTS, MAIL_LOG_BODY_FIELDS, isMailLogObject } from './mail-log-body.js';
 export { SysEmailTemplate } from './sys-email-template.object.js';
 // sys_saved_report / sys_report_schedule retired with the saved-report stack (#20102).
 // sys_approval_request / sys_approval_action moved to @objectstack/plugin-approvals (ADR-0029 K2.b).
