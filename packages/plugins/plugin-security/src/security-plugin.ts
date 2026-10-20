@@ -902,9 +902,25 @@ interface SecurityReportSink {
  * (#10706), so a degraded boot reports through the host too.
  */
 /**
- * [#13419 执行要点 3] The stable event name stamped on every position-name-fold
- * report — the structured half of {@link SecurityPlugin.reportNameFoldCollisions},
- * so an operator can grep one token for every ungoverned same-name grant.
+ * [#13419 执行要点 3; #24757 under 「甲」] The stable event name stamped on every
+ * position-name-fold report — the structured half of
+ * {@link SecurityPlugin.reportNameFoldCollisions}, so an operator can grep one
+ * token for every grant that exists only because a position and a permission
+ * set share a name.
+ *
+ * ## The 18.x loud half of the fold's retirement
+ *
+ * The standing ruling 「甲」 (ruling record 6292005854 on #6015) splits a
+ * narrowing that no ADR-0087 conversion can carry: 18.x ships only its loud
+ * half, and the refusal waits for 19.0. Retiring the position-name fold is
+ * such a narrowing: the platform cannot write `permissionSets` into a sealed
+ * managed position definition (ADR-0131 D6), so nothing rewrites an author's
+ * reliance on it (triage's derivation for #24757, record 6292072572). This
+ * event is that loud half's REPORTED EVENT. Every report carries the retirement
+ * as data, `removedIn: 'next_major'`, beside the fields it has always carried
+ * (`event`, `position`, `permissionSet`), which stay unchanged because a log
+ * consumer may already key on them. 19.0 removes the fold, and with it this
+ * event and its reporter (the card's 19.0 half).
  *
  * Deliberately NOT exported from this package. The maintainer ruling this
  * serves permits a warning and nothing more; adding a published symbol would
@@ -6989,20 +7005,48 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * [#13419 执行要点 3, warning half] Report a permission-set name that collides
-   * with a POSITION name and has NO junction row — the ungoverned half of the
-   * position→set binding, said out loud.
+   * [#13419 执行要点 3; #24757 under 「甲」] Report a permission set granted to a
+   * position's holders only because the two share a NAME — a grant the
+   * position's definition does not declare — and say what happens to it when
+   * the fold is retired.
    *
    * ## What is being reported
    *
    * {@link resolvePermissionSetsForContextUnmemoized} builds its request as
    * `[...positions, ...explicitPermissionSets]`. That fold means a position
-   * called `sales_rep` resolves a permission set called `sales_rep` — with no
-   * `sys_position_permission_set` row, no audit line, and nothing declaring
-   * that it happens. The maintainer ruling (2026-08-31, 「同意」) makes the
-   * junction table the one governed channel and retires the fold; the fold's
-   * DELETION is not this method (see the boundary note below), so until it
-   * lands the grant is at least no longer silent.
+   * called `sales_rep` resolves a permission set called `sales_rep` although
+   * the definition of `sales_rep` names no such set in `permissionSets`, the
+   * one binding spec and docs declare (ADR-0131 D3/D4; `position.zod.ts`,
+   * `positions.mdx`). Nothing declares that it happens, and Setup cannot show
+   * it: both the position's Permission Sets field and the set's Assigned Users
+   * read the declared binding. The maintainer ruling on #13419 (2026-08-31,
+   * 「同意」 to B) retires the fold; ADR-0131 later made the definition's
+   * `permissionSets` the binding in place of the junction table that ruling
+   * named.
+   *
+   * ## The 18.x loud half (「甲」, #24757)
+   *
+   * The fold's retirement is a narrowing no ADR-0087 conversion can carry, so
+   * under 「甲」 (ruling record 6292005854 on #6015) 18.x ships its loud half
+   * and the removal waits for 19.0. This warning IS that loud half, and its
+   * text says three things the 17.x wording did not: the grant is in force
+   * today only because the names match; that name-based grant is deprecated
+   * and is removed in the next major version, after which holders of `P` do
+   * not receive set `P` unless `P`'s definition names it; and the fix,
+   * `permissionSets: ['P']` on position `P` (or renaming one of the two). The
+   * structured payload carries the same consequence as `removedIn:
+   * 'next_major'` beside its unchanged `event`, `position` and `permissionSet`
+   * ({@link POSITION_NAME_FOLD_EVENT}). The string says "the next major
+   * version" and not a number, and carries no tracker id: an operator reading
+   * the log can resolve neither a ruling record nor `#NNNN`.
+   *
+   * ## When it fires
+   *
+   * Lazily, on the first resolution that meets an undeclared pair — never at
+   * boot, so a deployment where no holder of `P` has made a request has not
+   * been told yet. Once per position NAME per plugin instance
+   * ({@link nameFoldWarned}): not per holder, and not per organization, since
+   * the key is the name alone. A restart reports again.
    *
    * ## The predicate, and why each clause is there
    *
@@ -7030,14 +7074,18 @@ export class SecurityPlugin implements Plugin {
    * anything?" would report neither of the two real name-folds in the repo
    * while looking complete.
    *
-   * ## Boundary (#13419 slice 2)
+   * ## Boundary (#13419 slice 2, kept by #24757)
    *
    * ⛔ Purely additive. The resolution result is READ, never rewritten — 要点 5
    * of the ruling: 「任何行为差异只能表现为拒绝/告警,永不静默改变解析结果」, and a
-   * warning is the permitted half. ⛔ Deleting the fold is NOT this change: the
-   * vendored HotCRM artifact carries that app's permission sets but not its
-   * position roster, so HotCRM's own same-name folds are NOT MEASURED rather
-   * than zero, and deleting the fold would silently revoke them.
+   * warning is the permitted half. Under 「甲」 the grant does not change in 18.x
+   * either: a holder of `P` still resolves set `P`, and
+   * `position-name-fold-warning.test.ts` pins that beside the text. ⛔ Deleting
+   * the fold is NOT this change. It is #24757's 19.0 half, with
+   * {@link dropDeactivatedFoldedSets} and the delegated walk, explain and
+   * collision-gate follow-ups. The reliance it would revoke, as measured on the
+   * card, is HotCRM's: 5 of its 12 positions at `f22dfa52`, which
+   * objectstack-ai/hotcrm#2200 declares in `permissionSets`.
    */
   private reportNameFoldCollisions(
     positions: unknown,
@@ -7066,15 +7114,21 @@ export class SecurityPlugin implements Plugin {
       // ruling 2026-08-12). The card anchor lives in the docblock above, where the reader
       // who can resolve it is already looking.
       this.logger.warn?.(
-        `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' was granted ` +
-          `because a POSITION of the same name resolved by name — the position's definition ` +
-          `does not name it in its permissionSets. This grant is in force and ungoverned: ` +
-          `no position declares it. Declare it explicitly (position '${position}': ` +
-          `permissionSets: ['${position}']) or rename one of the two.`,
+        `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' is in force for ` +
+          `holders of position '${position}' only because the two share a name — the definition ` +
+          `of position '${position}' does not name it in its permissionSets. This name-based ` +
+          `grant is deprecated and is removed in the next major version: from then on, holders ` +
+          `of position '${position}' do not receive permission set '${position}' unless the ` +
+          `position's definition names it. To keep the grant, declare it (position ` +
+          `'${position}': permissionSets: ['${position}']); if the shared name is a ` +
+          `coincidence, rename one of the two.`,
         {
           event: POSITION_NAME_FOLD_EVENT,
           position,
           permissionSet: position,
+          // The consequence as data, for a consumer that keys on fields rather
+          // than prose. The three fields above are unchanged on purpose.
+          removedIn: 'next_major',
         },
       );
     }
