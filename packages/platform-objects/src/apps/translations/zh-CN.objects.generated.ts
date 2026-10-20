@@ -930,7 +930,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "上级业务单元",
-        help: "组织树的自关联字段。Null 表示租户根节点。"
+        help: "组织树的自关联字段。Null 表示租户根节点。仍有下级单元的业务单元无法删除，须先将下级单元改挂到其他上级或删除。"
       },
       timezone: {
         label: "时区",

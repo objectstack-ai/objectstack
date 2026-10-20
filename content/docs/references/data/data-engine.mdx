@@ -886,15 +886,15 @@ Options for DataEngine.update operations
 
 ## DroppedFieldsEvent
 
-A write-path strip event: caller-supplied fields legally dropped from the payload
+A write-path strip event: caller-supplied fields legally dropped from the payload, or written with the engine's computed value in place of the caller's
 
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
-| **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
-| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, or a computed (formula) field no driver has a column for |
+| **fields** | `string[]` | ✅ | Caller-supplied field names whose value the engine did not store: removed from the write payload, or (`stored_expression`) written with the computed value in place of the caller's |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed' \| 'stored_expression'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, a computed (formula) field no driver has a column for, or a stored field whose declared expression the engine computes on every write, so the caller's different value was replaced by the computed one |
 
 
 ---
