@@ -2148,7 +2148,7 @@ async function selfTest() {
   });
 
   battery('release gate: release.yml wiring');
-  const releaseYml =readFileSync(fileURLToPath(new URL('../../.github/workflows/release.yml', import.meta.url)), 'utf8');
+  const releaseYml = readFileSync(fileURLToPath(new URL('../../.github/workflows/release.yml', import.meta.url)), 'utf8');
   await check(() => {
     // Every workflow the release reads exists as a file, so a rename or a
     // deletion cannot leave the gate reading a workflow that no longer runs.
