@@ -2245,10 +2245,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         }
 
         // PATCH /packages/:id → edit the manifest (name / description /
-        // version). A partial patch: only the fields present are changed;
-        // lifecycle state (enabled / status / installedAt) is preserved.
-        // `id` / `scope` / `type` are identity/structure and are NOT editable
-        // here. Body accepts the fields flat or under a `manifest` wrapper.
+        // version / dependencies). A partial patch: only the fields present
+        // are changed; lifecycle state (enabled / status / installedAt) is
+        // preserved. `id` / `scope` / `type` are identity/structure and are
+        // NOT editable here. Body accepts the fields flat or under a
+        // `manifest` wrapper.
         if (parts.length === 1 && m === 'PATCH') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
@@ -2264,8 +2265,14 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // installed is writable by the predicate's own rule, so it still
             // reaches the 404 below.
             const readOnly = requireWritablePackage(deps, qlService, id, 'edit'); if (readOnly) return readOnly;
-            const src = (body?.manifest && typeof body.manifest === 'object' ? body.manifest : body) ?? {};
-            const patch: { name?: string; description?: string; version?: string } = {};
+            const wrapped = Boolean(body?.manifest && typeof body.manifest === 'object');
+            const src = (wrapped ? body.manifest : body) ?? {};
+            const patch: {
+                name?: string;
+                description?: string;
+                version?: string;
+                dependencies?: Record<string, string>;
+            } = {};
             if (typeof src.name === 'string') patch.name = src.name.trim();
             if (typeof src.description === 'string') patch.description = src.description;
             if (typeof src.version === 'string') patch.version = src.version.trim();
@@ -2276,8 +2283,48 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (patch.version !== undefined && !SEMVER_2_0_0_VERSION_PATTERN.test(patch.version)) {
                 return { handled: true, response: deps.error('version must be a SemVer 2.0.0 string (e.g. 1.0.0, 2.0.0-beta.1)', 400) };
             }
-            if (patch.name === undefined && patch.description === undefined && patch.version === undefined) {
-                return { handled: true, response: deps.error('Body { name?, description?, version? } — nothing to update', 400) };
+            // [#24670] `dependencies` — the declaration the save door's closure
+            // verdict reads (ruling #9612), and the key its refusal tells the
+            // author to edit («declare a dependency … in the `dependencies` of
+            // P's manifest»). It could be set at create and never again, so for
+            // a package that already existed that remedy had no door.
+            //
+            // ⭐ THE ROW IS JUDGED BY THE DECLARATION, by reference:
+            // `ManifestSchema.shape.dependencies`, the row `POST /packages`
+            // parses the same key with at create — never a shape restated
+            // here. A malformed row is refused `400` (`VALIDATION_ERROR`, the
+            // envelope the create door answers for it) BEFORE the protocol or
+            // the registry is reached, so a refusal writes nothing, not even a
+            // valid key sent beside it.
+            //
+            // The parsed row REPLACES the stored one whole — removing an entry
+            // is the same write, with the entry left out, and `{}` clears the
+            // declaration. ⛔ No in-use check is made here: an edit that takes
+            // an object some stored item binds to out of the closure is
+            // applied as given (the stored item is judged at its next save).
+            if (src.dependencies !== undefined) {
+                const declared = ManifestSchema.shape.dependencies.safeParse(src.dependencies);
+                if (!declared.success) {
+                    const key = wrapped ? 'manifest.dependencies' : 'dependencies';
+                    const located = declared.error.issues
+                        .map((issue) => `${[key, ...issue.path.map(String)].join('.')}: ${issue.message}`)
+                        .join('; ');
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            `Invalid package dependencies — ${located}. \`dependencies\` maps package ids to `
+                            + `version requirements, e.g. { "com.acme.core": "^1.0.0" }`,
+                            400,
+                        ),
+                    };
+                }
+                patch.dependencies = declared.data;
+            }
+            if (
+                patch.name === undefined && patch.description === undefined
+                && patch.version === undefined && patch.dependencies === undefined
+            ) {
+                return { handled: true, response: deps.error('Body { name?, description?, version?, dependencies? } — nothing to update', 400) };
             }
 
             const protocol = await resolveProtocol(deps, _context);

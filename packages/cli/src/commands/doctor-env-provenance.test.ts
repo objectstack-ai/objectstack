@@ -455,9 +455,7 @@ describe('os doctor, end to end, against a posture that only exists in .env', ()
 
   it('names the file, refuses to call the environment functional, and exits 1', async () => {
     // ── Control: the same .env, a posture that parses ─────────────────────
-    // `single`, not `isolated`: 18.0 refuses a walled posture at `os serve`, so
-    // doctor reports one, and a walled control would carry a posture row.
-    fs.writeFileSync(path.join(tmp, '.env'), 'OS_TENANCY_POSTURE=single\n');
+    fs.writeFileSync(path.join(tmp, '.env'), 'OS_TENANCY_POSTURE=isolated\n');
     const healthy = await runDoctor();
 
     expect(healthy.exitCode).toBeUndefined();

@@ -3211,7 +3211,7 @@
       "title": "Settings on v18: a global-scope key is stored in sys_platform_setting (readable through /data only with manage_platform_settings), and under a walled posture one organization's tenant save or lock does not change or lock another's, with a data-API read of sys_setting filtered to readable namespaces",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3227,7 +3227,7 @@
           "on the walled boot: two organizations A and B with an admin each"
         ],
         "knownGaps": [
-          "acceptance[2] and acceptance[3] are walled legs, and fixtures.requires[1]–[2], personas[2] and steps[2]–[3] serve only them. 18.0 refuses the boot they need: os serve — and os dev / os start, which boot through it — refuses OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true) before a config is read: FATAL: tenancy posture '…' is not supported in 18.0 (NOT_IMPLEMENTED), exit 1 (packages/cli/src/commands/serve.ts#walledPostureRefusal). A stock 18.0 boot also holds one organization, so there is no B to read (see RUNNER.md's environment-facts entries '18.0 boots the single tenancy posture only' and 'A stock 18.0 boot holds exactly one organization'). On a stock 18.0 boot neither clause is scored: record both skipped with those entries cited, never blocked(fixture) and never fail. Their mechanism is scored through acceptance[0]: settings-organization-isolation.pin.test.ts drives two organizations, the lock and the organization-less refusal under a walled posture in-process, and asserts that `single` does not refuse. acceptance[0] and acceptance[1] run as written. The clauses stay: the walled postures return in a later 18.x release"
+          "acceptance[2] and acceptance[3] are walled legs, and fixtures.requires[1]–[2], personas[2] and steps[2]–[3] serve only them. Since 18.x step 4 (#24580) os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): the 18.0 refusal (serve.ts walledPostureRefusal) is deleted. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. On that boot organizations A and B are created through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records both clauses blocked(fixture) naming those entries, never fail. Their mechanism is scored through acceptance[0]: settings-organization-isolation.pin.test.ts drives two organizations, the lock and the organization-less refusal under a walled posture in-process, and asserts that `single` does not refuse. acceptance[0] and acceptance[1] run as written."
         ]
       },
       "steps": [
@@ -3287,6 +3287,12 @@
           "date": "2026-10-19",
           "change": "fixtures.knownGaps added and acceptance[3].clause marked walled — the 18.0 sweep's wave-wide theme '18.0 refuses every walled posture' (wave anchor #24579 §2; QA runs #24557 and #24558 scored both clauses blocked(environment) on the boot's NOT_IMPLEMENTED FATAL). Re-derived at base bfc1539fe0: serve.ts walledPostureRefusal refuses group and isolated before a config is read, and settings-service.ts refuses an organization-less tenant key only under a walled posture, so acceptance[3], which steps[3] already ran on the walled boot, was the second walled leg. No clause deleted; the shared statement is RUNNER.md's environment-facts entry, which this gap points at",
           "ref": "#24687"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0] re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal, so the walled boot fixtures.requires[1]–[2] name is provisioned per RUNNER.md's 'A walled boot is a fixture of its own', and A and B are created on it through the auth API; unprovisioned, the walled clauses are blocked(fixture). No clause changed",
+          "ref": "#24580"
         }
       ]
     },

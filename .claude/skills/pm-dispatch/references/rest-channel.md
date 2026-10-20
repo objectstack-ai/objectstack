@@ -27,7 +27,7 @@
 - ⛔ 查重必须含 closed:卡刚关闭时最易被重开,开域查重漏掉刚关闭的同题卡即重复派发。
 - 开域查重是要申报的例外,不是默认;状态与标签列卡仍 `state=open`,那是状态读不是查重。
 - ✓ 卡与 PR 元数据 `GET .../issues/{n}` · `GET .../pulls/{n}`,assignees、labels、body 齐全。
-- ✓ 整条评论线 `GET .../issues/{n}/comments?per_page=100`。
+- ✓ 整条评论线 `GET .../issues/{n}/comments?per_page=100`;裸 `#N` 展开见 `platform-readings.md` 配额段。
 - ✓ Timeline 事件 `GET .../issues/{n}/timeline`:cross-ref、`added_to_merge_queue`、ready_for_review。
 - ✓ PR diff `GET .../pulls/{n}` 带 Accept `application/vnd.github.diff`;文件清单 `.../pulls/{n}/files`。
 - ✓ 线程 `GET .../pulls/{n}/ccr/review_threads` 回 `{resolved,outdated,path,line,comment_ids}`,无线程 id。

@@ -177,11 +177,12 @@ async function boot(opts: BootOptions = {}) {
   vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
 
   // The catalog the rows name, seeded where every writer reads it: a position
-  // and a permission set with no organization.
+  // and a permission set. [C8 stage 8b] Under the wall a system insert must
+  // carry its organization, so the position rows are the writers' organization's.
   await engine.insert('sys_position', [
     { id: 'pos_rep', name: 'qa_rep', label: 'Rep', active: true },
     { id: 'pos_lead', name: 'qa_lead', label: 'Lead', active: true },
-  ], { context: SYS } as any);
+  ], { context: opts.walled ? { ...SYS, tenantId: ORG_A } : SYS } as any);
   // [ADR-0131 D3/D4] The set a grant names lives in the catalog (the registry).
   engine.registry.registerItem('permission', { name: 'qa_rep_set', label: 'QA Rep' } as any, 'name' as any, 'qa.grant-holder');
   if (withMembers) {

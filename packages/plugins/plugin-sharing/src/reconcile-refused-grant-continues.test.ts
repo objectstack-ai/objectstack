@@ -173,6 +173,7 @@ async function boot(posture: 'single' | 'isolated' | 'group' = 'isolated') {
   const warn = vi.fn();
   const sharing = new SharingService({ engine: ql as never });
   const rules = new SharingRuleService({ engine: ql as never, sharing, logger: { warn } });
+  driverOf.set(rules, driver);
 
   return {
     driver,
@@ -225,19 +226,36 @@ afterEach(async () => {
   while (open.length) await open.pop()?.disconnect?.();
 });
 
-const platformGlobalRule = (rules: SharingRuleService, name: string, accessLevel: 'read' | 'edit' = 'read') =>
-  rules.defineRule(
-    {
-      name,
-      label: 'Platform won',
-      object: OBJECT,
-      criteria: WON,
-      recipientType: 'user',
-      recipientId: 'u_plat',
-      accessLevel,
-    } as never,
-    SYSTEM,
-  );
+/** The driver behind each booted rule service, for {@link platformGlobalRule}. */
+const driverOf = new WeakMap<SharingRuleService, SqlDriver>();
+
+/**
+ * A platform-global rule (`organization_id` null), as a database written
+ * before the walled half of ADR-0131 C8 stage 8b holds one. Since that lift a
+ * system write can no longer create such a row under a wall (the engine
+ * refuses the organization-less insert), so the fixture seeds it straight
+ * through the driver, as it seeds its organization-less records, and the
+ * reconcile below meets the row such a database still holds.
+ */
+const platformGlobalRule = async (rules: SharingRuleService, name: string, accessLevel: 'read' | 'edit' = 'read') => {
+  const now = '2026-01-01T00:00:00Z';
+  await driverOf.get(rules)!.create('sys_sharing_rule', {
+    id: `srule_${name}`,
+    name,
+    label: 'Platform won',
+    object_name: OBJECT,
+    criteria_json: JSON.stringify(WON),
+    recipient_type: 'user',
+    recipient_id: 'u_plat',
+    access_level: accessLevel,
+    active: true,
+    managed_by: 'admin',
+    customized: false,
+    created_at: now,
+    updated_at: now,
+  } as never);
+  return (await rules.getRule(`srule_${name}`, SYSTEM))!;
+};
 
 describe('[#14754] reconcile: a refused grant is counted and the pass CONTINUES', () => {
   it('CONTROL: on an `isolated` posture the organization-less record really is refused — the precondition, measured', async () => {

@@ -196,10 +196,9 @@ describe('#13491 gate 1 — an admitted platform object reaches #8844 derive/ref
     expect(lastWrite(observed, 'sys_file')?.options?.tenantId).toBe(ORG_ID);
   });
 
-  // [ADR-0131 C8 stage 8b] Under `single` the classification no longer decides
-  // the write: every platform object with a tenant column is judged, admitted
-  // or not. The walled cases below are the control — there the exemption
-  // stands in 18.0 (epic ruling record 6259899486 on #15194, item 4).
+  // [ADR-0131 C8 stage 8b] The classification no longer decides the write
+  // under any posture: every platform object with a tenant column is judged,
+  // admitted or not (`single` first, the walled postures in 18.x).
   it.each([
     ['sys_permission_set', { label: 'Admin' }],
     ['sys_audit_entry', { subject: 'e1' }],
@@ -230,12 +229,19 @@ describe('#13491 gate 1 — an admitted platform object reaches #8844 derive/ref
     },
   );
 
-  it.each(['isolated', 'group'] as const)(
-    '%s posture: an UNCLASSIFIED platform object still stays org-less — the walled exemption stands in 18.0',
-    async (posture) => {
+  it.each([
+    ['isolated', 'sys_audit_entry', { subject: 'e1' }],
+    ['group', 'sys_audit_entry', { subject: 'e1' }],
+    ['isolated', 'sys_permission_set', { label: 'Admin' }],
+    ['group', 'sys_permission_set', { label: 'Admin' }],
+  ] as const)(
+    '[C8 stage 8b] %s posture: the un-admitted platform object %s is judged too — its org-less system insert is REFUSED, and never written',
+    async (posture, object, row) => {
       const { engine, observed } = await makeEngine({ posture });
-      await engine.insert('sys_audit_entry', { subject: 'e1' }, { context: SYSTEM_CTX } as any);
-      expect(lastWrite(observed, 'sys_audit_entry')?.options?.tenantId).toBeUndefined();
+      await expect(
+        engine.insert(object, { ...row }, { context: SYSTEM_CTX } as any),
+      ).rejects.toMatchObject({ code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED', status: 500 });
+      expect(lastWrite(observed, object)).toBeUndefined();
     },
   );
 
@@ -256,11 +262,14 @@ describe('#13491 gate 1 — an admitted platform object reaches #8844 derive/ref
   );
 
   it.each(['isolated', 'group'] as const)(
-    '%s posture: a GLOBAL platform object is NOT refused — the discriminating control',
+    '%s posture: an object with NO tenant column is NOT refused — the discriminating control',
     async (posture) => {
+      // ADR-0131 D7: a deployment-level table declares no organization column,
+      // and that declaration — not a platform-namespace verdict — is what keeps
+      // its rows organization-less under a wall.
       const { engine, observed } = await makeEngine({ posture });
-      await engine.insert('sys_permission_set', { label: 'Admin' }, { context: SYSTEM_CTX } as any);
-      expect(lastWrite(observed, 'sys_permission_set')?.options?.tenantId).toBeUndefined();
+      await engine.insert('billing_license', { subject: 'lic' }, { context: SYSTEM_CTX } as any);
+      expect(lastWrite(observed, 'billing_license')?.options?.tenantId).toBeUndefined();
     },
   );
 
