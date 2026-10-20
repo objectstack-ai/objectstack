@@ -930,7 +930,7 @@
       "title": "Grid-level conditional rules: row-scoped requiredWhen and parent-scoped readonlyWhen in the inline line-item grid",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -971,13 +971,13 @@
         {
           "clause": "parent-scoped readonlyWhen re-evaluates live against the header record: setting status to paid locks the three cells, reverting unlocks them — without a page reload",
           "oracle": "dom",
-          "verify": "after screenshots at each state, assert cell editability (pinned by objectui e2e/live/grid-parent-rules.spec.ts)",
+          "verify": "after screenshots at each state, assert the editability of all three cells. objectui e2e/live/grid-parent-rules.spec.ts pins Qty and Unit Price only (disabled at paid, enabled at draft, on the New Invoice dialog's first line); the Product cell carries the same readonlyWhen and no pin asserts it, so read it by hand",
           "evidence": "lock/unlock screenshots"
         },
         {
           "clause": "the receipt upload cell stores a real managed file: the API re-read of the line carries the sys_file reference and the file is retrievable",
           "oracle": "api",
-          "verify": "GET the line post-save; the receipt field holds the file id, not an inline blob (ADR-0104 stored form; pinned by objectui e2e/live/grid-file-upload.spec.ts)",
+          "verify": "GET the line post-save; the receipt field holds the file id, not an inline blob (ADR-0104 stored form). No pin covers this clause: objectui e2e/live/grid-file-upload.spec.ts, cited here until revision 8, asserts only the receipt the outgoing batch carries; it never re-reads the line or fetches the file",
           "evidence": "line read + fetched file"
         },
         {
@@ -997,16 +997,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/grid-conditional-rules.spec.ts (acceptance[0]'s inline-flag half ONLY — on the New Invoice dialog's first line, Description carries no required flag at Qty 2, is flagged at Qty 100 and clears once filled; the spec adds no second row and never saves, so neither the unflagged sibling row nor the blocked save is pinned), e2e/live/grid-parent-rules.spec.ts, e2e/live/grid-file-upload.spec.ts (stale at the pin, see automated.stale). No pin covers acceptance[1] or acceptance[4]",
-        "stale": {
-          "since": "2026-10-19",
-          "observedIn": "#24598",
-          "ref": "#24579 §2",
-          "partial": "objectui: e2e/live/grid-file-upload.spec.ts ONLY — grid-conditional-rules.spec.ts and grid-parent-rules.spec.ts passed",
-          "why": "RED AT THE PIN, AS A STALE SPEC — not a product defect. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: grid-file-upload.spec.ts failed; the other two passed. Its 'Line Items' text locator also matches the master-detail dialog's screen-reader-only description (\"Enter the record and its line items, then save.\", objectui packages/plugin-form/src/ModalForm.tsx), so Playwright's strict mode refuses the locator before the form is driven (round-1 record #24572). Re-read at the shipped pin 12dc7b47c340: the spec's bytes and that description are unchanged, so it is still stale there.",
-          "runnerRule": "Cite grid-conditional-rules.spec.ts for acceptance[0]'s inline flag and grid-parent-rules.spec.ts for acceptance[2] as before. Do NOT cite grid-file-upload.spec.ts or score its failure as this item's FAIL: drive acceptance[3] by hand, with every clause no passing spec covers.",
-          "ownedBy": "objectui — re-pointing grid-file-upload.spec.ts at the current surface is objectui's half, recorded on wave anchor #24579 §2; this repository reports it and does not edit the spec"
-        }
+        "ref": "objectui: e2e/live/grid-conditional-rules.spec.ts (acceptance[0]'s inline-flag half ONLY — on the New Invoice dialog's first line, Description carries no required flag at Qty 2, is flagged at Qty 100 and clears once filled; the spec adds no second row and never saves, so neither the unflagged sibling row nor the blocked save is pinned), e2e/live/grid-parent-rules.spec.ts (acceptance[2] for Qty and Unit Price ONLY — on the New Invoice dialog's first line, with Qty filled, both inputs are enabled at status draft, disabled at paid with the typed quantity kept, and enabled again at draft; it never asserts the Product cell, which declares the same parent-scoped readonlyWhen). No pin covers acceptance[1], acceptance[3] or acceptance[4]. Dropped at revision 8: e2e/live/grid-file-upload.spec.ts, which uploads a file into the first line's Receipt cell and asserts only that the submitted /api/v1/batch carries a receipt with a name and an http(s) url; it never re-reads the saved line or fetches the file, so even green it would score no clause of this item (seat ruling 6281811723). Its stale-spec repair stays on objectstack-ai/objectui#13104 for the items it serves"
       },
       "source": [
         "examples/app-showcase/src/data/objects/invoice.object.ts (row/parent-scoped rules on the line object; ADR-0036 / #1581)",
@@ -1055,6 +1046,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep), one of the leftovers round 6 (#24697) named. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: grid-conditional-rules.spec.ts passed, but it flags the Description cell on one row and never saves, so #24598 scored acceptance[0] not-run (round 1's QA run #24572 had scored it pass on that spec). The ref now says the spec claims acceptance[0]'s inline-flag half only, and that no pin covers acceptance[1] or [4]; QA run #24616 drove acceptance[1], [3] and [4] by hand. The spec is byte-identical at the shipped pin 12dc7b47c340. grid-parent-rules.spec.ts and grid-file-upload.spec.ts stay cited as they were, and the automated.stale record (grid-file-upload.spec.ts) is unchanged. No clause changed",
           "ref": "#24723"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "automated.ref, acceptance[2].verify and acceptance[3].verify narrowed, and automated.stale removed — the seat ruling 6281811723 (on #24723) and round 8's finding (i) for wave anchor #24579 (18.0 sweep; round 8's report 6281776167). Tier 1 run #24598 at the sweep's console pin 4016370af3c9 ran grid-file-upload.spec.ts red as a stale spec (cause from QA run #24572). Even green it asserts only the receipt the outgoing /api/v1/batch carries and never re-reads the line or fetches the file, so it scores no clause here: it is dropped from the ref and named there, and the stale record, which named only it, goes with it. grid-parent-rules.spec.ts asserts that Qty and Unit Price lock at paid and unlock at draft, and never the Product cell that the clause's 'three cells' include (#24598 scored acceptance[2] pass on it): acceptance[2].verify and the ref now say so. QA run #24616 drove acceptance[1], [3] and [4] by hand. Both specs are byte-identical at 4016370af3c9 and at the shipped pin 12dc7b47c340. No clause changed",
+          "ref": "#PENDING-24579R9"
         }
       ]
     },
@@ -1181,7 +1178,7 @@
       "title": "Master + line items save as one atomic batch, with server-side roll-up",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1210,7 +1207,7 @@
         {
           "clause": "the happy-path save lands master + children in ONE atomic batch request (not N sequential writes), with the child ops referencing the parent",
           "oracle": "network",
-          "verify": "the save issues a single batch call whose payload contains the parent and both line ops (pinned by objectui e2e/live/master-detail.spec.ts: 'Create submits the populated parent in one atomic batch' / 'includes the child op referencing the parent')",
+          "verify": "the save issues a single batch call whose payload contains the parent and both line ops. objectui e2e/live/master-detail.spec.ts pins the clause carrier-neutrally, not on this invoice: on the showcase 'New Project + Tasks' page (showcase_project_workspace), 'Create submits the populated parent in one atomic batch' asserts that the first POST /api/v1/batch the save sends opens with the populated showcase_project op, and 'Create with a task line includes the child op referencing the parent' asserts that the same batch carries one showcase_task op whose project is {$ref: 0}. It stages one child through the per-row form, not two lines in this item's invoice grid, and it reads the first batch rather than counting them, so read this run's two-line invoice payload from the network trace",
           "evidence": "the batch request payload"
         },
         {
@@ -1254,7 +1251,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/master-detail.spec.ts, e2e/live/form-view-subforms.spec.ts. Dropped at revision 5: e2e/live/summary-rollup.spec.ts, which rolls showcase_task's estimate_hours up into showcase_project (total_estimate as a SUM, task_count as a COUNT) through a direct POST /api/v1/batch, reading both back after that create and again after a child delete. It never opens the invoice form and never reads invoice.total, the roll-up acceptance[2] scores, so it asserts no clause of this item (Tier 1 run #24598 scored acceptance[2] not-run on it for that carrier mismatch)",
+        "ref": "objectui: e2e/live/master-detail.spec.ts (acceptance[0], carrier-neutrally: the showcase 'New Project + Tasks' page, one showcase_task child staged through the per-row form, not this item's invoice grid with two lines), e2e/live/form-view-subforms.spec.ts. Dropped at revision 5: e2e/live/summary-rollup.spec.ts, which rolls showcase_task's estimate_hours up into showcase_project (total_estimate as a SUM, task_count as a COUNT) through a direct POST /api/v1/batch, reading both back after that create and again after a child delete. It never opens the invoice form and never reads invoice.total, the roll-up acceptance[2] scores, so it asserts no clause of this item (Tier 1 run #24598 scored acceptance[2] not-run on it for that carrier mismatch)",
         "stale": {
           "since": "2026-10-19",
           "observedIn": "#24598",
@@ -1300,6 +1297,12 @@
           "date": "2026-10-20",
           "change": "automated.ref and acceptance[2].verify corrected — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep), one of the leftovers round 6 (#24697) named. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: summary-rollup.spec.ts passed 2/2, but it rolls showcase_task up into showcase_project through a direct batch and never reads invoice.total, so #24598 scored acceptance[2] not-run on it (round 1's QA run #24572 had scored acceptance[2] pass on it). It asserts no clause of this item, so it is dropped from the ref and named there, and acceptance[2].verify no longer says it pins the clause. The spec is byte-identical at the shipped pin 12dc7b47c340. QA run #24616 drove the invoice.total roll-up by hand. master-detail.spec.ts and form-view-subforms.spec.ts stay cited, and the automated.stale record (form-view-subforms.spec.ts) is unchanged. No clause text changed",
           "ref": "#24723"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "acceptance[0].verify and automated.ref narrowed to what master-detail.spec.ts asserts — round 8's finding (iii) for wave anchor #24579 (18.0 sweep; round 8's report 6281776167, carried by the seat's ACCEPT 6281811723). The spec drives showcase_project_workspace ('New Project + Tasks') with one task child staged through the per-row form, not the invoice grid with two lines that steps[1] and [2] drive. Tier 1 run #24598 at the sweep's console pin 4016370af3c9 ran it 2/2 green and scored acceptance[0] pass on it. The clause names no carrier (master and children in one atomic batch, the child ops referencing the parent), and the spec's two tests assert exactly that on their own carrier: the first batch the save sends opens with the populated parent op and carries the child op whose project is {$ref: 0}. So, under round 6's theme-B rule, a pin that asserts a full clause is kept and narrowed, not dropped. The spec is byte-identical at 4016370af3c9 and at the shipped pin 12dc7b47c340. No clause changed",
+          "ref": "#PENDING-24579R9"
         }
       ]
     },
@@ -3672,7 +3675,7 @@
       "title": "Per-type CONSTRAINT enforcement on the write path (not just widget render): length/range/option/reference/computed limits, and where the platform deliberately does NOT enforce",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3685,7 +3688,7 @@
           "showcase_invoice (invoice.object.ts): status select {draft,sent,paid,void} required; account lookup with lookupFilters status!=churned; total summary(sum showcase_invoice_line.amount) — the summary carrier the zoo lacks"
         ],
         "knownGaps": [
-          "precision/scale is DECLARED but NOT enforced on the write path — record-validator.ts validateOne's number branch checks only min/max/finite, no runtime reads field.scale/precision for rounding (grep clean across objectql/rest/runtime), and the SQL driver stores number/currency/percent as table.float (REAL affinity), not DECIMAL(p,s) (sql-driver.ts createColumn ~7354-7368). A currency value with more decimals than `scale` is stored verbatim, unrounded. Record it as a gap; do NOT tick 'scale enforced'.",
+          "precision/scale is DECLARED but NOT enforced on the write path — record-validator.ts validateOne's number branch checks only min/max/finite, no runtime reads field.scale/precision for rounding (grep clean across objectql/rest/runtime), and the SQL driver stores number/currency/percent as table.float (REAL affinity), not DECIMAL(p,s) (packages/drivers/driver-sql/src/sql-driver.ts#createColumn). A currency value with more decimals than `scale` is stored verbatim, unrounded. Record it as a gap; do NOT tick 'scale enforced'.",
           "autonumberFormat TOKEN expansion ({0000}/{YYYY}/{MM}/{DD}/{YYYYMMDD}/{field}, per-rendered-prefix scope+reset) has NO showcase fixture — no showcase object declares autonumberFormat (f_autonumber uses the default bare 4-width global counter). Token expansion is pinned instead by packages/spec/src/data/autonumber-format.test.ts + packages/drivers/driver-sql/src/sql-driver-autonumber.test.ts; only server-assignment + client-value-ignored is driveable on the zoo.",
           "the #4441 reference gate is EXISTENCE-only and deliberately unscoped (engine.ts assertReferencesResolve) — an id that exists but lies outside the field's lookupFilters/dependsOn scope is accepted; scope enforcement is client-only (drilled in records-forms.cascading-multilevel-and-clear).",
           "summary is a runtime-MAINTAINED cache, not a write-rejected readonly field — a caller-supplied initial total is a SUPPORTED import path and is kept, then self-heals to the child aggregate on the next child write (rule-validator.ts RUNTIME_OWNED_FIELD_TYPES note, #6014). Only `formula` is strictly read-only-on-write; do NOT assert 'summary rejects direct writes'."
@@ -3773,7 +3776,7 @@
         {
           "clause": "formula is read-only/computed: a direct write to f_formula is ignored and the read equals f_number*f_percent/100 (42*75/100 = 31.5); summary is a runtime-MAINTAINED cache (invoice.total = Σ line.amount server-side) and is NOT write-rejected — a caller's initial total is a supported import path that self-heals on the next child write",
           "oracle": "api",
-          "verify": "GET f_formula after a direct write shows 31.5 (write ignored); GET showcase_invoice.total equals the seeded line sum (objectui e2e/live/summary-rollup.spec.ts). The formula/summary distinction: rule-validator.ts note (formula computed-on-read; summary maintained cache, deliberately NOT in RUNTIME_OWNED)",
+          "verify": "GET f_formula after a direct write shows 31.5 (write ignored); GET showcase_invoice.total equals the seeded line sum. No pin reads invoice.total: objectui e2e/live/summary-rollup.spec.ts, cited here until revision 2, asserts a server roll-up on another carrier (showcase_project's total_estimate and task_count over showcase_task, written through a direct /api/v1/batch) and never reads showcase_invoice.total. The formula/summary distinction: rule-validator.ts note (formula computed-on-read; summary maintained cache, deliberately NOT in RUNTIME_OWNED)",
           "evidence": "the formula re-read + the invoice total re-read"
         }
       ],
@@ -3809,6 +3812,12 @@
           "date": "2026-08-08",
           "change": "initial — drills the field-type-matrix's shallow 'reject invalid' clause into per-type CONSTRAINT enforcement on the write path (length reject-not-truncate, numeric range, option server-boundary on two carriers, multiselect array shape, dangling-reference gate + its unscoped boundary, autonumber server-assignment, formula read-only) and records the deliberate non-enforcement gaps (scale/precision, autonumberFormat tokens, summary maintained-not-rejected)",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "acceptance[7].verify corrected — round 8's carried finding for wave anchor #24579 (18.0 sweep; round 8's report 6281776167, out_of_scope_findings[1], carried by the seat's ACCEPT 6281811723). It cited objectui e2e/live/summary-rollup.spec.ts for showcase_invoice.total, which that spec never reads: it rolls showcase_task up into showcase_project (byte-identical at the sweep's console pin 4016370af3c9 and at the shipped pin 12dc7b47c340). Tier 1 run #24598 scored acceptance[7] not-run (its summary half unpinned), and round 1's QA run #24572 scored the item pass on its API pins. The verify now says that no pin reads invoice.total. The spec was never in automated.ref, which names API pins only, so the ref is unchanged. Beside it, fixtures.knownGaps[0]'s line citation 'createColumn ~7354-7368', a tilde range no gate reads, became the sql-driver.ts#createColumn anchor that its own text already named. No clause changed",
+          "ref": "#PENDING-24579R9"
         }
       ]
     },
