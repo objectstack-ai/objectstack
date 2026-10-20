@@ -48,6 +48,7 @@ import {
   API_KEY_DEFAULT_EXPIRY_DAYS,
   API_KEY_INACTIVITY_DAYS,
   API_KEY_MAX_EXPIRY_DAYS,
+  accountScopeAuthGate,
   hasPlatformAdminStanding,
   resolveUserAuthzGrants,
 } from '@objectstack/core';
@@ -4586,10 +4587,16 @@ export class AuthManager {
         // revokes the session in place when exceeded (next request → 401).
         await this.enforceSessionControls((session as any)?.id, (session as any)?.createdAt);
 
+        // An impersonation session carries the administrator who started it
+        // (`impersonatedBy`, written by the admin plugin's impersonation and
+        // stored as `sys_session.impersonated_by`); which postures hold the
+        // session depends on it — see computeAuthGate().
+        const impersonatedBy = (session as any)?.impersonatedBy;
         const authGate = await this.computeAuthGate(
           user.id,
           (session as any)?.activeOrganizationId,
           (user as any)?.twoFactorEnabled === true,
+          { impersonation: typeof impersonatedBy === 'string' && impersonatedBy.trim() !== '' },
         );
 
         return {
@@ -8890,15 +8897,36 @@ export class AuthManager {
   /**
    * ADR-0069 — the auth-policy gate posture for a SESSION: the first, most
    * urgent posture {@link resolveUserAuthGates} reports for its user in its
-   * active organization, else undefined. Every scope holds a session, because
-   * a session IS the password sign-in (#23287, ruling C′ item 1).
+   * active organization that holds this session, else undefined.
+   *
+   * What a posture holds is its declared scope (`AUTH_GATE_SCOPES`, #23287,
+   * ruling C′ item 1): `account` holds every credential of the user,
+   * `credential` holds the password sign-in alone. Which postures hold a
+   * session therefore depends on what the session is:
+   *
+   *  - a session the user signed in to themselves is held by every scope: it
+   *    IS the password sign-in a `credential` posture holds;
+   *  - an IMPERSONATION session (`options.impersonation`, read off
+   *    `session.impersonatedBy`) is not the user's password sign-in. It is
+   *    minted from the administrator's own session, which passed its own
+   *    posture check at the impersonation door. So only an `account`-scope
+   *    posture holds it: the first one the list reports, wherever it sits
+   *    (`accountScopeAuthGate`, the reading the API-key admission seam gives
+   *    a key, the other credential that is not the password sign-in). A target
+   *    held by both the forced reset and enforced MFA answers `MFA_REQUIRED`
+   *    on it, never nothing (#24762, ruling 6288774214 items 1 and 2).
+   *
+   * The other callers ask for a user's own session (`options` omitted), so
+   * their answer is the list's first entry, as it always was.
    */
   private async computeAuthGate(
     userId: string,
     activeOrgId: string | undefined,
     _twoFactorEnabledHint: boolean,
+    options: { impersonation?: boolean } = {},
   ): Promise<AuthGate | undefined> {
     const gates = await this.resolveUserAuthGates(userId, { organizationId: activeOrgId });
+    if (options.impersonation === true) return accountScopeAuthGate(gates) ?? undefined;
     return gates[0];
   }
 
@@ -8907,7 +8935,8 @@ export class AuthManager {
    * `userId` holds right now, most urgent first; `[]` when no policy holds
    * them. The ONE per-user posture computation (`IAuthService.resolveUserAuthGates`):
    *
-   *  - the session gate takes its first entry ({@link computeAuthGate}, onto
+   *  - the session gate takes its first entry, and on an impersonation session
+   *    its first `account`-scope entry ({@link computeAuthGate}, onto
    *    `user.authGate` in `customSession`);
    *  - the API-key admission seam (`resolveApiKeyAdmission`, `@objectstack/core`)
    *    asks it for a key's owner and holds the key on an `account`-scope entry
@@ -8918,10 +8947,11 @@ export class AuthManager {
    * organization may require MFA above the global floor.
    *
    * Order, most urgent first: the administrator's forced reset, then natural
-   * password expiry, then enforced MFA. The session shows the first; a key is
-   * held only by an `account`-scope entry, wherever it sits in the list — a
-   * user whose password expired AND who owes MFA enrolment holds their keys
-   * on the MFA entry even though their session shows the expiry.
+   * password expiry, then enforced MFA. The user's own session shows the
+   * first; a key, and an impersonation session, are held only by an
+   * `account`-scope entry, wherever it sits in the list — a user whose
+   * password expired AND who owes MFA enrolment holds their keys on the MFA
+   * entry even though their session shows the expiry.
    *
    * No-op (no read) when no gate feature is enabled. Fails OPEN on any lookup
    * error, answering `[]` — a transient hiccup must never lock a compliant user
