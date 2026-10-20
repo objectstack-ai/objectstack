@@ -32,6 +32,7 @@ import {
   runRuntimeAuthoringRules,
   type RuntimePackageScope,
 } from './runtime-gate.js';
+import { validateFlowTriggerReadiness } from './validate-flow-trigger-readiness.js';
 import { validateListViewFieldRefs } from './validate-list-view-field-refs.js';
 
 type AnyRec = Record<string, any>;
@@ -202,9 +203,20 @@ describe('the differential verdict survives package narrowing (#9612)', () => {
   it('a REAL finding survives narrowing — the equivalence is not vacuous', () => {
     // Asserted first and by content: every other case in this block compares
     // two empty verdicts, which would also be equal if the gate had stopped
-    // working. This one pins that the narrowed gate still FINDS things.
+    // working. This one pins that the narrowed gate still FINDS things — at the
+    // same rule and position. [#24669] Its severity is the one place it may
+    // differ: under the closure an object found nowhere is outside it, so the
+    // narrowed gate REFUSES what the whole-collection gate advises.
+    const at = (r: { errors: AnyRec[]; advisories: AnyRec[] }) =>
+      [...r.errors, ...r.advisories].map((f) => `${f.rule}|${f.path}`);
+    const wholeRun = runRuntimeAuthoringRules({ type: 'flow', item: FLOW_INTO_GHOST, context: { objects } });
+    const scopedRun = runRuntimeAuthoringRules({
+      type: 'flow', item: FLOW_INTO_GHOST, context: { objects }, packageScope: SCOPE,
+    });
     expect(whole('flow', FLOW_INTO_GHOST)).toHaveLength(1);
-    expect(scoped('flow', FLOW_INTO_GHOST)).toEqual(whole('flow', FLOW_INTO_GHOST));
+    expect(at(scopedRun)).toEqual(at(wholeRun));
+    expect(wholeRun.advisories.map((f) => f.severity)).toEqual(['warning']);
+    expect(scopedRun.errors.map((f) => f.severity)).toEqual(['error']);
   });
 
   it('reaches the whole-stack answer exactly for a flow into its own package', () => {
@@ -248,12 +260,17 @@ describe('the differential verdict survives package narrowing (#9612)', () => {
     // decision on the record rather than a surprise. A package's declared
     // `dependencies` bound what it MAY reference; a flow reaching into a
     // package this one never declared is not resolvable BY DECLARATION, and
-    // the closure says so. Measured severity here is advisory (`warning`), so
-    // it reports rather than refuses.
+    // the closure says so. [#24669] It REFUSES (`error`), the verdict the
+    // dataset and view doors give the same reference; it used to advise.
     expect(whole('flow', FLOW_INTO_UNDECLARED)).toEqual([]);
     const narrowed = scoped('flow', FLOW_INTO_UNDECLARED);
     expect(narrowed).toHaveLength(1);
     expect(narrowed[0]).toContain('flow-trigger-unknown-object');
+    const run = runRuntimeAuthoringRules({
+      type: 'flow', item: FLOW_INTO_UNDECLARED, context: { objects }, packageScope: SCOPE,
+    });
+    expect(run.advisories).toEqual([]);
+    expect(run.errors.map((f) => [f.rule, f.severity])).toEqual([['flow-trigger-unknown-object', 'error']]);
   });
 });
 
@@ -318,8 +335,8 @@ describe('the view door under a package closure (#24563)', () => {
     const result = scoped(listViewOn('other_0_0'));
 
     // An `error`, so the door refuses the write: the dataset door's verdict
-    // for an out-of-closure base object under the same closure. The flow
-    // door's `flow-trigger-unknown-object` (pinned above) stays advisory.
+    // for an out-of-closure base object under the same closure, and [#24669]
+    // the flow door's `flow-trigger-unknown-object` (pinned above and below).
     expect(result.advisories).toEqual([]);
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toMatchObject({ severity: 'error', rule: OUTSIDE });
@@ -397,7 +414,7 @@ describe('the view door under a package closure (#24563)', () => {
     expect(scoped(listViewOn('nosuch_obj'), empty)).toMatchObject({ errors: [], advisories: [] });
   });
 
-  it('the flow verdict is unchanged, and a stored object\'s out-of-closure list view is not charged to it', () => {
+  it('the flow verdict is the closure\'s, and a stored object\'s out-of-closure list view is not charged to it', () => {
     // A context object of the written package whose built-in list view
     // retargets an object outside the closure: the rule now refuses that list
     // view, in the baseline and the candidate alike, so it cancels — a flow
@@ -419,6 +436,13 @@ describe('the view door under a package closure (#24563)', () => {
     const undeclared = flow(FLOW_INTO_UNDECLARED);
     expect(undeclared).toHaveLength(1);
     expect(undeclared[0]).toContain('flow-trigger-unknown-object');
+    // [#24669] Refused, not advised: the flow's own trigger object is outside
+    // the closure. The stored sibling's list view still cancels.
+    const run = runRuntimeAuthoringRules({
+      type: 'flow', item: FLOW_INTO_UNDECLARED, context: { objects: withSibling }, packageScope: SCOPE,
+    });
+    expect(run.errors.map((f) => f.rule)).toEqual(['flow-trigger-unknown-object']);
+    expect(run.advisories).toEqual([]);
   });
 
   it('the CLI reading is unchanged: no scope stated, skip 1 judges nothing', () => {
@@ -431,5 +455,129 @@ describe('the view door under a package closure (#24563)', () => {
         { packageScope: SCOPE },
       ).map((f) => f.rule),
     ).toEqual([OUTSIDE]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #24669 — the FLOW door under a package closure: a trigger object outside the
+// closure is refused, at both positions the rule reads; one inside it, a
+// platform object and a `sys_` name are admitted; with no closure stated the
+// advisory is byte-identical to the CLI's.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A daily time-relative sweep over `object` — the rule's second position. */
+function sweepOf(name: string, object: string): AnyRec {
+  return {
+    name,
+    label: name,
+    status: 'active',
+    type: 'schedule',
+    runAs: 'system',
+    nodes: [
+      {
+        id: 'start',
+        type: 'start',
+        label: 'Daily sweep',
+        config: { timeRelative: { object, dateField: 'name', withinDays: 7 } },
+      },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end', type: 'default', isDefault: false }],
+  };
+}
+
+describe('the flow door under a package closure (#24669)', () => {
+  const UNKNOWN = 'flow-trigger-unknown-object';
+  const objects = [
+    ...packagedTenant(3),
+    obj('tenant_overlay', undefined),
+    obj('stranger_flagged', STRANGER, { isSystem: true }),
+  ];
+  const run = (item: AnyRec, scope?: RuntimePackageScope) =>
+    runRuntimeAuthoringRules({
+      type: 'flow',
+      item,
+      context: { objects },
+      ...(scope !== undefined ? { packageScope: scope } : {}),
+    });
+  const of = (fs: AnyRec[]) => fs.filter((f) => f.rule === UNKNOWN);
+  /** The two positions, each as (flow body, the finding path's tail). */
+  const positions: Array<[string, (object: string) => AnyRec, string]> = [
+    ['config.objectName', (o) => flowOn(`on_${o}`, o), 'config.objectName'],
+    ['config.timeRelative.object', (o) => sweepOf(`sweep_${o}`, o), 'config.timeRelative.object'],
+  ];
+
+  for (const [label, body, tail] of positions) {
+    it(`REFUSES an object of a package the written one never declared — ${label}`, () => {
+      const result = run(body('other_0_0'), SCOPE);
+      expect(of(result.advisories)).toEqual([]);
+      expect(of(result.errors)).toHaveLength(1);
+      const [f] = of(result.errors);
+      expect(f).toMatchObject({ severity: 'error', rule: UNKNOWN });
+      expect(f.path.endsWith(tail)).toBe(true);
+      // The fix names the remedy and the package it applies to.
+      expect(f.hint).toContain(OWN);
+      expect(f.hint).toContain('dependencies');
+      expect(f.hint).toContain(tail);
+      expect(f.message).toContain("'other_0_0'");
+      expect(f.message).toContain(OWN);
+    });
+
+    it(`REFUSES an object that exists nowhere — the closure is all the snapshot sees — ${label}`, () => {
+      const result = run(body('ghost_object'), SCOPE);
+      expect(of(result.errors).map((f) => f.severity)).toEqual(['error']);
+      expect(of(result.advisories)).toEqual([]);
+    });
+
+    it(`admits the own package, a declared dependency, platform objects and overlay rows — ${label}`, () => {
+      for (const target of [
+        'crm_account', // the written package
+        'core_user', // its declared dependency
+        'platform_ledger', // a platform object by `isSystem`
+        'stranger_flagged', // `isSystem` although a stranger package owns it
+        'sys_audit_log', // a platform object by prefix, carried
+        'sys_never_carried', // a `sys_` name the snapshot does not carry: unjudged, as without a closure
+        'tenant_overlay', // a provenance-less overlay row
+      ]) {
+        const result = run(body(target), SCOPE);
+        expect([...of(result.errors), ...of(result.advisories)], target).toEqual([]);
+      }
+    });
+
+    it(`a write that names no package keeps the advisory, byte-identical to the CLI's — ${label}`, () => {
+      // The stranger's object is in the whole collection, so it is not
+      // unknown at all; an object that exists nowhere is ADVISED, not refused.
+      expect(of([...run(body('other_0_0')).errors, ...run(body('other_0_0')).advisories])).toEqual([]);
+      const advised = run(body('ghost_object'));
+      expect(of(advised.errors)).toEqual([]);
+      expect(of(advised.advisories)).toHaveLength(1);
+      const cli = validateFlowTriggerReadiness({ objects, flows: [body('ghost_object')] })
+        .filter((f) => f.rule === UNKNOWN);
+      expect(cli).toHaveLength(1);
+      expect(cli[0]!.severity).toBe('warning');
+      const [door] = of(advised.advisories);
+      expect({ severity: door.severity, message: door.message, hint: door.hint }).toEqual({
+        severity: cli[0]!.severity,
+        message: cli[0]!.message,
+        hint: cli[0]!.hint,
+      });
+      // An empty package id narrows nothing, so it states no closure either.
+      const empty = { packageId: '', dependencies: [] } as RuntimePackageScope;
+      expect(of(run(body('ghost_object'), empty).errors)).toEqual([]);
+      expect(of(run(body('ghost_object'), empty).advisories)).toHaveLength(1);
+    });
+  }
+
+  it('the CLI reading is unchanged: no scope stated, the advisory the rule always gave', () => {
+    // `os validate` / `os build` / `os lint` hand the rule no closure.
+    const [f] = validateFlowTriggerReadiness({ objects: [], flows: [flowOn('cli_probe', 'ghost_object')] });
+    expect(f).toMatchObject({ severity: 'warning', rule: UNKNOWN });
+    expect(f!.hint).toContain('ignore this if another installed package declares it');
+    // And the same stack under a stated closure is the verdict above.
+    const [g] = validateFlowTriggerReadiness(
+      { objects: [], flows: [flowOn('cli_probe', 'ghost_object')] },
+      { packageScope: SCOPE },
+    );
+    expect(g).toMatchObject({ severity: 'error', rule: UNKNOWN });
   });
 });
