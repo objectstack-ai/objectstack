@@ -212,9 +212,12 @@ variable:
 OS_CORS_ORIGIN=https://app.example.com
 ```
 
-`OS_TRUSTED_ORIGINS` is a different list — the origins auth accepts for
-its callbacks and CSRF checks — and admits nothing to CORS. A
-cross-origin front-end that signs in belongs in both.
+`OS_TRUSTED_ORIGINS` is auth's own list — the origins it accepts for
+its callbacks and CSRF checks — and it admits nothing to CORS. Auth
+also trusts every origin listed in `OS_CORS_ORIGIN`, so that one
+variable covers a cross-origin front-end that signs in. A list given
+through the plugin's `cors.origins` option instead is not seen by
+auth, so such a front-end is then also named in `OS_TRUSTED_ORIGINS`.
 
 Composing the Hono adapter yourself, name the origins there as well:
 
