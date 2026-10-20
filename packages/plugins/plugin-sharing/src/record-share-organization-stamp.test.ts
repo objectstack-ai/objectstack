@@ -91,6 +91,20 @@ const ORG_FIELDS: Record<string, Record<string, unknown>> = {
   name: { type: 'text', name: 'name', label: 'Name' },
 };
 
+/**
+ * Return driver-created tables to a pre-18 store's shape, tenant column
+ * nullable, through the driver's own drift apply door (`relax_not_null`).
+ */
+async function relaxTenantColumns(driver: SqlDriver, tables: readonly string[]): Promise<void> {
+  for (const table of tables) {
+    const op = { type: 'relax_not_null', table, column: 'organization_id' };
+    const { applied } = await driver.applyMigrationEntries([
+      { kind: 'nullability_mismatch', remoteName: table, table, column: 'organization_id', category: 'needs_confirm', op } as never,
+    ]);
+    if (applied.length !== 1) throw new Error(`relaxTenantColumns: ${table} was not relaxed`);
+  }
+}
+
 const ORG_A = 'org_a';
 const ORG_B = 'org_b';
 
@@ -150,7 +164,8 @@ async function boot(posture?: 'single' | 'isolated' | 'group', organizations: re
   // `no-organization-yet` reading the earlier blocks rely on — and provisioned
   // only for the cases that need the install to hold several.
   if (organizations.length > 0) {
-    ql.registerObject({ name: 'sys_organization', label: 'Organization', isSystem: true, fields: ORG_FIELDS } as never);
+    // The real `sys_organization` carries no tenant column of its own.
+    ql.registerObject({ name: 'sys_organization', label: 'Organization', isSystem: true, systemFields: { tenant: false }, fields: ORG_FIELDS } as never);
   }
   await driver.initObjects([
     { name: OBJECT, fields: DEAL_FIELDS } as never,
@@ -158,6 +173,10 @@ async function boot(posture?: 'single' | 'isolated' | 'group', organizations: re
     { name: 'sys_sharing_rule', fields: RULE_FIELDS } as never,
     ...(organizations.length > 0 ? [{ name: 'sys_organization', fields: ORG_FIELDS } as never] : []),
   ]);
+  // `deal_p1` and its organization-less grants exist only on a store built
+  // before 18.x, whose tenant columns are nullable (ADR-0131 D1 makes a fresh
+  // one NOT NULL): the fixture is that store.
+  await relaxTenantColumns(driver, [OBJECT, 'sys_record_share', 'sys_sharing_rule']);
   for (const id of organizations) await driver.create('sys_organization', { id, name: id } as never);
 
   // Seeded through the driver: the fixture is the DATA at rest.

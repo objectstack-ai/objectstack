@@ -37,6 +37,22 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { ShareLinkService } from './share-link-service.js';
 import { SysShareLink } from './objects/index.js';
 
+/**
+ * Return driver-created tables to a pre-18 store's shape, tenant column
+ * nullable, through the driver's own drift apply door (`relax_not_null`).
+ * The organization-less rows this file seeds exist only on such a store:
+ * ADR-0131 D1 makes a fresh tenant column NOT NULL.
+ */
+async function relaxTenantColumns(driver: SqlDriver, tables: readonly string[]): Promise<void> {
+  for (const table of tables) {
+    const op = { type: 'relax_not_null', table, column: 'organization_id' };
+    const { applied } = await driver.applyMigrationEntries([
+      { kind: 'nullability_mismatch', remoteName: table, table, column: 'organization_id', category: 'needs_confirm', op } as never,
+    ]);
+    if (applied.length !== 1) throw new Error(`relaxTenantColumns: ${table} was not relaxed`);
+  }
+}
+
 const OBJECT = 'os15212_brief';
 const ORG_A = 'org_a';
 const ORG_B = 'org_b';
@@ -78,10 +94,12 @@ async function boot(posture: 'single' | 'isolated', organizations: readonly stri
   await ql.init();
   ql.registerObject({ name: OBJECT, label: 'Brief', fields: BRIEF_FIELDS } as never);
   ql.registerObject(SysShareLink as never);
-  ql.registerObject({ name: 'sys_organization', label: 'Organization', isSystem: true, fields: ORG_FIELDS } as never);
+  // The real `sys_organization` carries no tenant column of its own.
+  ql.registerObject({ name: 'sys_organization', label: 'Organization', isSystem: true, systemFields: { tenant: false }, fields: ORG_FIELDS } as never);
   await driver.initObjects(
     [OBJECT, 'sys_share_link', 'sys_organization'].map((name) => ({ name, fields: (ql.getSchema(name) as any).fields }) as never),
   );
+  await relaxTenantColumns(driver, [OBJECT, 'sys_share_link']);
   for (const id of organizations) await driver.create('sys_organization', { id, name: id } as never);
   await driver.create(OBJECT, { id: 'brief_a', name: 'A', organization_id: ORG_A } as never);
   await driver.create(OBJECT, { id: 'brief_p', name: 'P' } as never);

@@ -110,7 +110,9 @@ async function boot() {
   await engine.init();
   for (const o of [SysShareLink, TARGET]) engine.registry.registerObject(o as never, '@objectstack/plugin-sharing');
   await engine.syncSchemas();
-  await (engine as any).insert('pin_doc', { id: 'doc_1', title: 'Shared doc' }, { context: { isSystem: true } });
+  // Seeded under one organization: a fresh tenant column is NOT NULL (ADR-0131
+  // D1), and this lean engine registers no organization object to derive one from.
+  await (engine as any).insert('pin_doc', { id: 'doc_1', title: 'Shared doc' }, { context: { isSystem: true, tenantId: 'org_pin' } });
   const service = new ShareLinkService({ engine: engine as unknown as SharingEngine });
   const http = new MockHttp();
   registerShareLinkRoutes(http, service, engine as unknown as SharingEngine, {
