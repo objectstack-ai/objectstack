@@ -4,13 +4,14 @@ import { mkdir, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
 /**
- * A SQLite database file this driver cannot open or create (#23696).
+ * A SQLite database file this driver cannot open or create (#23696), or one
+ * whose bytes are not a SQLite database (#24960).
  *
  * Thrown by `SqlDriver.connect()`, so the boot's connect refusal (ADR-0062 D5,
  * `datasource '<name>': connect failed — <reason>`) carries the path and the
  * operating system's own answer instead of waiting for a plugin start timeout.
  * `code` is the underlying error's (`ENOENT`, `EACCES`, `ENOTDIR`,
- * `SQLITE_CANTOPEN`, …) and `cause` the error itself.
+ * `SQLITE_CANTOPEN`, `SQLITE_NOTADB`, …) and `cause` the error itself.
  */
 export class SqliteDatabaseFileError extends Error {
   readonly code: string | undefined;
