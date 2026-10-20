@@ -2694,9 +2694,10 @@ const UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION: RuleExplanation = {
       'object\'s `tenancy.tenantField` — is the hand-written per-organization composite that ' +
       'predates the scope vocabulary (ADR-0120 S6). It reads as "unique per organization" but ' +
       'materializes as a plain composite, and SQL UNIQUE is NULL-distinct: it enforces nothing on a ' +
-      'row whose organization column is NULL, which on a single-organization deployment is every ' +
-      'row.',
-    'Respelled `unique: \'organization\'`, the NULL rows become one platform bucket ' +
+      'row whose organization column is NULL — every row a 17.x single-organization deployment ' +
+      'wrote. Since ADR-0131 D9 a new row carries its organization, so what the gap still admits is ' +
+      'that residue.',
+    'Respelled `unique: \'organization\'`, the NULL rows become one bucket ' +
       '(`COALESCE(organization_id, \'__global__\')`) that is unique among themselves, which is what ' +
       'closes the hole. The respelling keeps `fields` exactly as they are: the driver makes the listed ' +
       'organization column NULL-safe in place rather than prepending a second organization key part, ' +

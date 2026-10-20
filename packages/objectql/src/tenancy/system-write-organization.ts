@@ -4,17 +4,17 @@
  * System-context write organization resolution (#8844) — the RUNTIME twin of
  * #8686's seed-path fix, one layer up.
  *
- * ## The defect
+ * ## The defect (17.x)
  *
  * A session write carries the caller's active organization
  * (`ExecutionContext.tenantId`), and the driver stamps it onto the row
  * (`injectTenantOnInsert`) before the autonumber counter reads it
  * (`fillAutoNumberFields`, which resolves `row[tenantField] ?? options.tenantId
  * ?? null`). A SYSTEM-context write — a hook, a scheduled job, a custom
- * endpoint, a `runAs: system` flow — carries no organization at all, so the
- * column lands NULL and the counter files the row under the `__global__`
- * pseudo-tenant. One object then runs TWO counters that cannot see each other,
- * each correct within its own scope, and both hand out the same number:
+ * endpoint, a `runAs: system` flow — carried no organization at all, so the
+ * column landed NULL and the counter filed the row under the `__global__`
+ * pseudo-tenant. One object then ran TWO counters that cannot see each other,
+ * each correct within its own scope, and both handed out the same number:
  *
  *     _objectstack_sequences, one object, one scope key:
  *       tenant_id = 'org_msokm9oaz0cal87q'   last_value = 2   <- REST / Console
@@ -56,6 +56,15 @@
  * a write with no derivable owner is REFUSED — several organizations, a wall,
  * and (since the Default Organization became a boot invariant, D3) zero
  * organizations alike. ⛔ Nothing defaults to any owner but the derivable one.
+ *
+ * Stage 8d closed the counter half from below as well: the SQL driver refuses
+ * an organization-less row on a tenant table under this module's code
+ * (`OrganizationlessCounterRefusal`, `@objectstack/driver-sql`) wherever it
+ * registered the organization object, so no writer — the engine or a direct
+ * driver caller — can reach the `__global__` counter for a tenant table any
+ * more. `__global__` stays the counter key of an object with no tenant
+ * column, and of a composition that registers no organization object (the
+ * `no-organization-object` decision below), where no organization can exist.
  *
  * ## The exclusions, and why the refusal is not broader
  *
@@ -111,14 +120,6 @@ import {
  * the one protocol-level name, not a re-spelling (`SystemObjectName`).
  */
 export const ORGANIZATION_OBJECT = SystemObjectName.ORGANIZATION;
-
-/**
- * The NULL-organization sentinel the SQL driver's counter and partitioned
- * unique index collapse a missing organization to (`GLOBAL_TENANT` in
- * `driver-sql`, ADR-0120 D3). Named here only to make the refusal message say
- * what it is refusing to write; nothing in this module produces the value.
- */
-export const GLOBAL_TENANT = '__global__';
 
 /**
  * The tenant column the kernel injects into every tenant-scoped object
@@ -268,10 +269,9 @@ function buildRefusalMessage(
   return (
     `Insert on '${object}' was REFUSED: a system-context write on a tenant-scoped object must carry an ` +
     `organization, and ${condition}. Writing it anyway would store ` +
-    `${DEFAULT_TENANT_FIELD} = NULL, which the autonumber counter and the partitioned unique index ` +
-    `(COALESCE(${DEFAULT_TENANT_FIELD}, '${GLOBAL_TENANT}'), <field>) both collapse to the ` +
-    `'${GLOBAL_TENANT}' pseudo-tenant — a second counter that cannot see the organization's own, so a ` +
-    `field declared unique silently gets the same value twice. Nothing was written. Fix it by ` +
+    `${DEFAULT_TENANT_FIELD} = NULL — a row no organization owns, whose autonumber has no counter to ` +
+    `draw from, and which a field declared unique per organization cannot compare with the ` +
+    `organization's own rows (ADR-0131 D9). Nothing was written. Fix it by ` +
     `carrying the organization the way a session write does: pass it on the execution context ` +
     `({ context: { isSystem: true, tenantId: '<organization id>' } }), or set ${DEFAULT_TENANT_FIELD} ` +
     `on the record itself. If rows of '${object}' are genuinely platform-global and belong to no ` +
