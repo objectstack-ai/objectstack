@@ -6330,11 +6330,6 @@ export class SecurityPlugin implements Plugin {
       //    empty list grants nothing, which is the middleware's step 2 answer.
       if (permissionSets.length === 0) return false;
 
-      const { isPrivate, unresolved, requiredPermissions } =
-        await this.getObjectSecurityMeta(objectName);
-      // 3. [#3545] Posture unresolvable → deny.
-      if (unresolved) return false;
-
       // [ADR-0090 D10] Resolve the delegator ONCE — arms 4 and 6 both need it,
       // and a dangling link denies before either runs.
       let delegatorSets: PermissionSet[] | null = null;
@@ -6346,36 +6341,9 @@ export class SecurityPlugin implements Plugin {
         }
       }
 
-      // 4. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
-      //    principals — a caller missing any required capability is denied
-      //    however permissive their grants are.
-      const required = requiredCapsForOperation(requiredPermissions, 'find');
-      if (required.length > 0) {
-        const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
-        if (required.some((cap) => !held.has(cap))) return false;
-        if (delegatorSets && delegatorSets.length > 0) {
-          const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
-          if (required.some((cap) => !delHeld.has(cap))) return false;
-        }
-      }
-
-      // 5. The object-level CRUD grant.
-      if (!this.permissionEvaluator.checkObjectPermission('find', objectName, permissionSets, { isPrivate })) {
-        return false;
-      }
-
-      // 6. [ADR-0090 D10] The delegator must independently grant the same read.
-      //    [#21079] Asked over the delegator's list whatever its length, as the
-      //    middleware asks it: a delegator who resolves NO set grants nothing,
-      //    the deny baseline for the second principal too.
-      if (
-        delegatorSets &&
-        !this.permissionEvaluator.checkObjectPermission('find', objectName, delegatorSets, { isPrivate })
-      ) {
-        return false;
-      }
-
-      return true;
+      // 3–6. The posture and grant arms, over the resolved sets — the one
+      // predicate the ADR-0055 master-derived read scope asks as well.
+      return await this.objectReadAdmission(objectName, permissionSets, delegatorSets);
     } catch (e) {
       this.logger.error?.(
         `[security] canReadObject could not resolve the object-level read admission for ` +
@@ -6384,6 +6352,81 @@ export class SecurityPlugin implements Plugin {
       );
       return false;
     }
+  }
+
+  /**
+   * Arms 3–6 of {@link canReadObject} — the OBJECT-level read admission over
+   * permission sets the caller has ALREADY resolved: the posture arm, the
+   * ADR-0066 D3/⑤ capability AND-gate, the `allowRead` CRUD grant, and the
+   * ADR-0090 D10 delegator's same two questions when `delegatorSets` is given.
+   * Each is the primitive the middleware's own read gate calls (steps 1, 1.5
+   * and 2), in that order.
+   *
+   * Two askers, one rule:
+   *
+   *   - {@link canReadObject}, which resolves the context first (system bypass,
+   *     principal-less refusal, sets, delegator) and then asks this;
+   *   - [ADR-0055 §3] {@link computeControlledByParentFilter}, which asks it of
+   *     the MASTER for the principal whose sets it was handed — the caller's on
+   *     the caller half, the delegator's on the D10 half — before it scopes the
+   *     master's rows. "Reading a detail requires read access to its master",
+   *     and the object-level admission is the first half of that access.
+   *
+   * ⛔ There is no second copy of this rule: a reader that needs the object-level
+   * read answer for sets it already holds asks this, and one that holds only a
+   * context asks {@link canReadObject}.
+   *
+   *   - [#21079] An empty list grants nothing (ADR-0056 D2).
+   *   - 3. [#3545] An unresolvable posture denies.
+   *   - 4. The capabilities the object requires for a read, held by the caller
+   *     and (D10) by a delegator who resolved any set.
+   *   - 5. The caller's `find` grant, with the posture's `isPrivate` (ADR-0066 D2).
+   *   - 6. [ADR-0090 D10] The delegator's `find` grant, asked over its list
+   *     whatever its length, as the middleware asks it: a delegator who resolves
+   *     NO set grants nothing, the deny baseline for the second principal too.
+   *
+   * ⛔ Object-level ONLY, like {@link canReadObject}: `true` never means
+   * "unrestricted". A throw propagates; each asker fails closed on it.
+   */
+  private async objectReadAdmission(
+    objectName: string,
+    permissionSets: PermissionSet[],
+    delegatorSets: PermissionSet[] | null,
+  ): Promise<boolean> {
+    if (permissionSets.length === 0) return false;
+
+    const { isPrivate, unresolved, requiredPermissions } =
+      await this.getObjectSecurityMeta(objectName);
+    // 3. [#3545] Posture unresolvable → deny.
+    if (unresolved) return false;
+
+    // 4. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
+    //    principals — a caller missing any required capability is denied
+    //    however permissive their grants are.
+    const required = requiredCapsForOperation(requiredPermissions, 'find');
+    if (required.length > 0) {
+      const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+      if (required.some((cap) => !held.has(cap))) return false;
+      if (delegatorSets && delegatorSets.length > 0) {
+        const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
+        if (required.some((cap) => !delHeld.has(cap))) return false;
+      }
+    }
+
+    // 5. The object-level CRUD grant.
+    if (!this.permissionEvaluator.checkObjectPermission('find', objectName, permissionSets, { isPrivate })) {
+      return false;
+    }
+
+    // 6. [ADR-0090 D10] The delegator must independently grant the same read.
+    if (
+      delegatorSets &&
+      !this.permissionEvaluator.checkObjectPermission('find', objectName, delegatorSets, { isPrivate })
+    ) {
+      return false;
+    }
+
+    return true;
   }
 
   /**
@@ -8493,6 +8536,14 @@ export class SecurityPlugin implements Plugin {
    * `buildReadFilter` returns null for a non-`private` master — so the derived
    * set stays point-for-point equal to what a direct find of the master returns.
    *
+   * [ADR-0055 §3] Both halves scope ROWS. Ahead of them the master's OBJECT-level
+   * read admission is asked ({@link objectReadAdmission}, the predicate
+   * `canReadObject` asks), for the principal whose sets this call was handed: a
+   * principal the master's own read door refuses at the object gate gets the
+   * empty master set, so the equality with a direct find of the master holds for
+   * that principal too, and with the engine's ReadableIds leaf, which asks
+   * `canReadObject` before it scopes a parent's rows.
+   *
    * An empty set yields `{ masterFK: { $in: [] } }`, which matches no rows (fail
    * closed), as does a failure to resolve the sharing half. A misconfigured
    * object (not exactly one required master_detail to derive from, ADR-0055 §1)
@@ -8574,6 +8625,32 @@ export class SecurityPlugin implements Plugin {
       );
       return { [rel.fk]: { $in: [] } };
     }
+
+    // [ADR-0055 §3] "Reading a detail requires READ access to its master", and
+    // the OBJECT-level read admission is the first half of that access — the
+    // half the master's own read door asks before any row filter, and the half
+    // the engine's ADR-0139 ReadableIds leaf asks (`canReadObject`). Asked here
+    // through the one predicate both read ({@link objectReadAdmission}), for
+    // the principal whose sets this call was handed, before the master's rows
+    // are scoped below under a system context. A principal the master's own
+    // door does not admit reads no master, so the master set is empty and no
+    // detail is read; at every hop of a chain alike, since the recursion below
+    // asks the same question of the next master. A throw denies too
+    // (fail-closed), as the sharing half's resolution failure does.
+    let masterObjectReadable: boolean;
+    try {
+      masterObjectReadable = await this.objectReadAdmission(rel.master, permissionSets, null);
+    } catch (e) {
+      this.logger.error?.(
+        `[security] controlled_by_parent derivation could not resolve the object-level read admission ` +
+          `of master '${rel.master}' for '${object}' (user ${context?.userId ?? 'unknown'}) ` +
+          `— denying (fail-closed: a child is readable only where its master is, so a master whose ` +
+          `admission cannot be resolved admits no child)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return { [rel.fk]: { $in: [] } };
+    }
+    if (!masterObjectReadable) return { [rel.fk]: { $in: [] } };
 
     const masterRlsFilter = await this.computeRlsFilter(permissionSets, rel.master, 'find', context);
     // [#5386] The OWD / record-share half, resolved through the SAME helper
