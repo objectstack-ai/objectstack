@@ -448,3 +448,70 @@ describe('#7725 — the delegated-admin issuance scope is UNCHANGED (ADR-0090 D1
     expect(invitationsFor(engine, 'scoped.denied@example.com')).toHaveLength(0);
   });
 });
+
+describe('#24750 — invite-member refuses an unknown role with the ADR-0112 code ROLE_NOT_FOUND', () => {
+  // The spec's invitation `role` docstring (`identity/organization.zod.ts`)
+  // promises "refused at the door (`ROLE_NOT_FOUND`) before any invitation row
+  // exists". better-auth's invite route throws that refusal with a message and
+  // no `code`; `update-member-role` throws the same refusal WITH one. These pin
+  // the door's answer, the untouched valid-role path, and the control door.
+  beforeEach(() => {
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('an unknown role is refused 400 with code ROLE_NOT_FOUND, the message names the role, and no invitation row exists', async () => {
+    const { engine, manager, owner } = await bootWithOwner();
+
+    const res = await post(
+      manager,
+      '/organization/invite-member',
+      { email: 'qa-invitee@example.com', role: 'no_such_role', organizationId: DEFAULT_ORG },
+      owner.cookie,
+    );
+    expect(res.status).toBe(400);
+    const body: any = await res.json();
+    expect(body.code).toBe('ROLE_NOT_FOUND');
+    expect(body.message).toContain('no_such_role');
+    expect(invitationsFor(engine, 'qa-invitee@example.com')).toHaveLength(0);
+  });
+
+  it('CONTROL: a valid role is unchanged — 200 and one pending row carrying that role', async () => {
+    const { engine, manager, owner } = await bootWithOwner();
+
+    const res = await post(
+      manager,
+      '/organization/invite-member',
+      { email: 'qa-valid@example.com', role: 'member', organizationId: DEFAULT_ORG },
+      owner.cookie,
+    );
+    expect(res.status, await res.clone().text()).toBe(200);
+    const rows = invitationsFor(engine, 'qa-valid@example.com');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.status).toBe('pending');
+    expect(rows[0]!.role).toBe('member');
+  });
+
+  it('CONTROL: update-member-role keeps the code it already answered with — 400 ROLE_NOT_FOUND, role unchanged', async () => {
+    const { engine, manager, owner } = await bootWithOwner();
+    const colleague = await signUp(manager, engine, 'colleague@example.com');
+    const [membership] = membersOf(engine, DEFAULT_ORG, colleague.userId);
+    expect(membership, 'the reconciler did not bind the colleague').toBeDefined();
+
+    const res = await post(
+      manager,
+      '/organization/update-member-role',
+      { memberId: String(membership!.id), role: 'no_such_role', organizationId: DEFAULT_ORG },
+      owner.cookie,
+    );
+    expect(res.status).toBe(400);
+    const body: any = await res.json();
+    expect(body.code).toBe('ROLE_NOT_FOUND');
+    expect(body.message).toContain('no_such_role');
+    expect(membersOf(engine, DEFAULT_ORG, colleague.userId)[0]!.role).toBe('member');
+  });
+});
