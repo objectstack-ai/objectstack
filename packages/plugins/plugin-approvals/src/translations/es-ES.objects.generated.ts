@@ -25,7 +25,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "Título",
-        help: "Título del registro: el origen de la solicitud y el registro al que se refiere (calculado al leer)"
+        help: "Título del registro: la etiqueta del flujo que abrió esta solicitud o, si no hay etiqueta, su origen (calculado al leer)"
       },
       organization_id: {
         label: "Organización",
