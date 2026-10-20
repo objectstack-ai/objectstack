@@ -42,6 +42,11 @@ export const SysSecret = ObjectSchema.create({
   icon: 'key',
   isSystem: true,
   managedBy: 'engine-owned',
+  // [ADR-0131 D7] Deployment-level: every read is by id under the system
+  // context, never by organization, so the store carries no organization
+  // column. The flip lands with the open upgrade ceremony (18.x step 6, line
+  // fact F2), whose column-drops step takes an upgraded database's column.
+  systemFields: { tenant: false },
   // [ADR-0066 D2/④] Secure-by-default: the environment's encrypted-secrets
   // store (settings/datasource credentials). Not covered by the wildcard `'*'`
   // grant — ordinary members get 403 from the generic data layer. Platform

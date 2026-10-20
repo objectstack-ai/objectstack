@@ -402,16 +402,17 @@ describe('the view door under a package closure (#24563)', () => {
     expect(scoped(listViewOn('tenant_overlay')).advisories).toEqual([]);
   });
 
-  it('a write that names no package is unchanged — the whole collection, field verdict and silence alike', () => {
+  it('a write that names no package is judged against the whole collection — field verdict unchanged, no closure verdict', () => {
     // ⛔ The overlay door: the stranger's object is in the whole collection, so
-    // its unknown column is refused exactly as before, and an object that
-    // exists nowhere stays skip 1's silence (no scope, so no closure verdict).
+    // its unknown column is refused exactly as before. An object that exists
+    // nowhere gets no closure verdict (no scope); [#24668] it is refused as
+    // existing nowhere instead (`runtime-gate.whole-collection.test.ts`).
     expect(rules(whole(listViewOn('other_0_0')).errors)).toEqual([FIELD_UNKNOWN]);
     expect(whole(listViewOn('other_0_0')).advisories).toEqual([]);
-    expect(whole(listViewOn('nosuch_obj'))).toMatchObject({ errors: [], advisories: [] });
+    expect(rules(whole(listViewOn('nosuch_obj')).errors)).toEqual(['list-view-object-unknown']);
     // An empty package id narrows nothing, so it states no closure either.
     const empty = { packageId: '', dependencies: [] } as RuntimePackageScope;
-    expect(scoped(listViewOn('nosuch_obj'), empty)).toMatchObject({ errors: [], advisories: [] });
+    expect(rules(scoped(listViewOn('nosuch_obj'), empty).errors)).toEqual(['list-view-object-unknown']);
   });
 
   it('the flow verdict is the closure\'s, and a stored object\'s out-of-closure list view is not charged to it', () => {
