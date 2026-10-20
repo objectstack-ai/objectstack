@@ -1078,9 +1078,11 @@ export const REMOTE_FACE_ANSWERS = {
   deferredSchemaObjectCount: 'inherited',
   previewDeferredSchemaWork: 'inherited',
   flushDeferredSchemaDdl: 'inherited',
-  // `{ created: 0, existing: 0 }`: the remote doors count nothing, and both
-  // counts at zero is the `IDataDriver` contract's "cannot say".
-  getSchemaSyncStats: 'inherited',
+  // The remote schema doors count what their `sqlite_master` probe answers —
+  // created vs found — so a fresh remote database is observed as one (the
+  // organization-ownership birth marker reads it). A remote boot that ran no
+  // schema door still answers `{0, 0}`, the contract's "cannot say".
+  getSchemaSyncStats: 'remote',
   // [#23816] Drift and migration: the shared differ over the remote catalog,
   // and the index / column-drop entries applied through the libSQL client (see
   // "Remote schema drift" above for which entries, and why only those).
@@ -4199,6 +4201,16 @@ export class TursoDriver extends SqlDriver {
    * statement and no round-trip. The parameter repeats the base's declared
    * shape key for key (`check:object-def-param-keys` arm C).
    */
+  /**
+   * `IDataDriver.getSchemaSyncStats` — on the REMOTE face, what the transport's
+   * schema doors counted (`RemoteTransport.schemaSyncStats`); the local and
+   * embedded-replica faces answer with the inherited Knex count.
+   */
+  override getSchemaSyncStats(): { created: number; existing: number } {
+    if (this.isRemote) return this.remoteTransport!.schemaSyncStats();
+    return super.getSchemaSyncStats();
+  }
+
   override registerObjectMetadata(
     objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] }>,
   ): void {

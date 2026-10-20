@@ -159,15 +159,15 @@ describe('SqlDriver SQLite reconcile reports only what the rebuild honoured (#11
         t.timestamp('created_at');
         t.timestamp('updated_at');
         t.string('name');
-        t.string('organization_id').notNullable();
+        t.string('region_code').notNullable();
       });
-      await knexInstance('biz_unit').insert({ id: '1', name: 'Acme', organization_id: 'org1' });
+      await knexInstance('biz_unit').insert({ id: '1', name: 'Acme', region_code: 'emea' });
       await driver.initObjects([
         {
           name: 'biz_unit',
           fields: {
             name: { type: 'string' },
-            organization_id: { type: 'string', required: false },
+            region_code: { type: 'string', required: false },
           },
         },
       ]);
@@ -192,10 +192,10 @@ describe('SqlDriver SQLite reconcile reports only what the rebuild honoured (#11
 
       // The rebuild genuinely ran: the constraint is gone and the row survived.
       const info = await knexInstance('biz_unit').columnInfo();
-      expect(info.organization_id.nullable).toBe(true);
+      expect(info.region_code.nullable).toBe(true);
       expect(info).toHaveProperty('name');
       expect(await knexInstance('biz_unit').select('*')).toMatchObject([
-        { id: '1', name: 'Acme', organization_id: 'org1' },
+        { id: '1', name: 'Acme', region_code: 'emea' },
       ]);
     });
   });

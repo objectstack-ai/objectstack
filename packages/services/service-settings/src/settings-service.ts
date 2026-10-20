@@ -2118,11 +2118,9 @@ export class SettingsService {
               alg: handle.alg,
               version: handle.version,
               ciphertext: handle.ciphertext,
-              // [ADR-0131 D3/D9] The ciphertext of a tenant or user value is
-              // that organization's, as its `sys_setting` row is. A global
-              // value's is deployment-level and names none (see
-              // `SettingsSecretStore.insert`).
-              ...(organizationId ? { organization_id: organizationId } : {}),
+              // [ADR-0131 D7] No organization: `sys_secret` is deployment-level
+              // (`systemFields.tenant: false`); the owning `sys_setting` row
+              // carries the organization, and the cipher is read by its id.
             });
             storedEnc = handle.id;
             digest = await this.secretAuditDigest(namespace, key, plain);

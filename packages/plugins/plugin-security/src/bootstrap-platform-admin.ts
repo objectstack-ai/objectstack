@@ -880,8 +880,8 @@ export async function bootstrapPlatformAdmin(
       '[security] platform-admin promotion WITHHELD: an unscoped grant exists whose permission-set name '
       + '(sys_user_permission_set.permission_set) was never written — a grant from a release before that '
       + 'column existed. Which set it holds can no longer be read, and it may be the platform administrator\'s, '
-      + 'so this pass will not mint a second one. 18.0 supports fresh installs only and does not upgrade a v17 '
-      + 'database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path.';
+      + 'so this pass will not mint a second one. The organization-ownership migration\'s id-to-name rewrite '
+      + '(ADR-0131 D10) names it; the next pass after that reads it by name.';
     if (logger?.warn) logger.warn(withheld);
     else logger?.info?.(withheld);
     return {

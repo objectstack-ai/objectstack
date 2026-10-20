@@ -543,7 +543,27 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   },
   { object: 'sys_comment', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; a reply's parent comment carries the organization`, anchors: [parent('parent_id', 'sys_comment')] },
   { object: 'sys_comment_reaction', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the reaction's comment carries the organization`, anchors: [parent('comment_id', 'sys_comment')] },
-  { object: 'sys_email', census: P1, fate: 'attribution', citation: `${D7}: sys_email is stamped at its producers; the related record carries the organization`, anchors: [subject('related_object', 'related_id')] },
+  {
+    object: 'sys_email',
+    census: P1,
+    fate: 'attribution',
+    citation: `${D7}: sys_email is stamped at its producers; the related record carries the organization`,
+    anchors: [subject('related_object', 'related_id')],
+    // Executed by the apply's sibling-moves step, which also takes the magic
+    // link (no related record; selected by its sign-in link), whatever the
+    // row's organization (line fact F3: 18.0 stamped identity mail).
+    departures: [
+      {
+        id: 'identity-mail-move',
+        label:
+          'identity mail (mail about a person: reset, verification, account invitation, change-email notice; and the ' +
+          'magic link) — moved to sys_identity_email by the sibling-moves step',
+        citation: 'ruling record 6257510973, Q2 A; ADR-0131 D7',
+        as: 'moved',
+        where: [{ column: 'related_object', equals: 'sys_user' }],
+      },
+    ],
+  },
   {
     object: 'sys_identity_email',
     census: PMAIN,
@@ -557,7 +577,20 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     fate: 'attribution',
     citation: `${D3_ORG_ROWS}; no anchor names the organization; ${D10_SINGLE}`,
     anchors: [],
-    categories: [{ id: 'declared', label: 'boot-seeded declared webhooks (managed_by package) — not named by D10 fate 2, so they stay', citation: 'sys-webhook.object.ts (bootstrapDeclaredWebhooks)', where: [{ column: 'managed_by', equals: 'package' }] }],
+    // A category, not a departure: a seeded row whose name no package declares
+    // any more is a live webhook that stays, so its NULL row is attributed
+    // like any other before the declared-webhooks step settles the rest.
+    categories: [
+      {
+        id: 'declared',
+        label:
+          'webhooks a package seeded (managed_by package or platform) — the declared-webhooks step settles each one ' +
+          'whose name a package still declares: a pristine copy deleted with its deliveries re-sourced to the ' +
+          'declaration, a customized one kept as an activation row or a clone under a new name',
+        citation: 'ADR-0131 D2, D10 fate 2; ruling Q2 A on the declared-webhook card (regime C)',
+        where: [{ column: 'managed_by', in: ['package', 'platform'] }],
+      },
+    ],
   },
   {
     object: 'sys_sharing_rule',
@@ -624,16 +657,45 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       },
     ],
   },
-  { object: 'sys_setting_audit', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
+  {
+    object: 'sys_setting_audit',
+    census: P1,
+    fate: 'attribution',
+    citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`,
+    anchors: [],
+    departures: [
+      {
+        id: 'global-audit-move',
+        label: 'scope = global rows — moved to sys_platform_setting_audit by the sibling-moves step, whatever their organization',
+        citation: 'ruling record 6257510973, Q4 A; ADR-0131 D7',
+        as: 'moved',
+        where: [{ column: 'scope', equals: 'global' }],
+      },
+    ],
+  },
   {
     object: 'sys_platform_setting_audit',
     census: PMAIN,
     fate: 'column-drop',
     citation: `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the settings audit trail's global rung (ruling record 6257510973, Q4 A)`,
   },
-  { object: 'sys_secret', census: P1, fate: 'attribution', citation: `re-verification 6018712820: sys_secret is tenant-attributed by one producer (moved here from C6); ${D10_SINGLE}`, anchors: [] },
+  {
+    object: 'sys_secret',
+    census: P1,
+    fate: 'column-drop',
+    citation:
+      `${D7}: every sys_secret read is by id under the system context, never by organization; systemFields.tenant: ` +
+      'false with the open ceremony (18.x step 6, line fact F2)',
+  },
   { object: 'sys_scim_connection_credential', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
-  { object: 'sys_flow_credential', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  {
+    object: 'sys_flow_credential',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation:
+      `${D7}: a flow's encrypted credential is read by its flow, never by organization; systemFields.tenant: false ` +
+      'with the open ceremony (18.x step 6, line fact F2)',
+  },
   // Inbound mail (`@objectstack/service-mailbox`): every row is written by the
   // system with the mailbox's organization stamped (ADR-0131 D9), so a NULL
   // row has no producer today; the parents below are where one would take it.

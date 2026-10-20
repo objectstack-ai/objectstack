@@ -3049,10 +3049,10 @@
     },
     {
       "id": "platform-core.v18-boot-refusals",
-      "title": "A v18 server refuses to boot rather than serve wrongly: against a 17.x-shaped database (a physical organization_id on a non-tenant table, no verified ADR-0131 ceremony marker) it stops before listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED, naming the tables and saying that 18.0 supports fresh installs only, and with security on but no identity objects it stops with AuthzIdentityObjectsMissingError",
+      "title": "A v18 server refuses to boot rather than serve wrongly: against a 17.x-shaped database (a physical organization_id on a non-tenant table, no verified ADR-0131 ceremony marker) it stops before listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED, naming the tables and the ownership ceremony's plan and apply, and with security on but no identity objects it stops with AuthzIdentityObjectsMissingError",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -3077,9 +3077,9 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "the v18 serve against the v17 DB exits 1 before kernel:listening with the organization-ownership refusal, which names the tables and ends with the 18.0 sentence (\"18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path, and upgrade it there.\"), and names neither `os migrate organization-ownership` nor any step of it (no `--out PLAN`, no `--apply --plan-file`): 18.0 refuses that command on every database (NOT_IMPLEMENTED). ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED is that refusal's `code` (packages/runtime/src/organization-ownership-boot-guard.ts#OrganizationOwnershipBootRefusal) and the boot never prints it — `os serve` prints the refusal's message only — so the code is the pins' evidence (acceptance[0]), not this log's",
+          "clause": "the v18 serve against the v17 DB exits 1 before kernel:listening with the organization-ownership refusal, which opens \"This database carries no organization-ownership marker\", names the tables still carrying organization_id, and names the ceremony's two steps (`os migrate organization-ownership --out PLAN`, then `os migrate organization-ownership --apply --plan-file PLAN --backup-taken`). It does not tell the operator to stay on 17.x. ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED is that refusal's `code` (packages/runtime/src/organization-ownership-boot-guard.ts#OrganizationOwnershipBootRefusal) and the boot never prints it — `os serve` prints the refusal's message only — so the code is the pins' evidence (acceptance[0]), not this log's",
           "oracle": "log",
-          "verify": "boot output + exit code + no listening line: the printed refusal names each table still carrying organization_id and ends with \"18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path, and upgrade it there.\"; the refusal excerpt has 0 hits each for `--out PLAN`, `--plan-file` and `os migrate organization-ownership`. ⛔ Do not grep the log for the code literal — it is not printed (packages/cli/src/commands/serve.ts prints the refusal's message)",
+          "verify": "boot output + exit code + no listening line: the printed refusal opens \"This database carries no organization-ownership marker\", names each table still carrying organization_id, and contains `os migrate organization-ownership --out PLAN` and `--apply --plan-file PLAN --backup-taken`; the refusal excerpt has 0 hits for `17.x release` and for `fresh installs only`. ⛔ Do not grep the log for the code literal — it is not printed (packages/cli/src/commands/serve.ts prints the refusal's message)",
           "evidence": "the refusal excerpt"
         },
         {
@@ -3136,6 +3136,12 @@
           "date": "2026-10-19",
           "change": "title and acceptance[1] (clause, verify) re-worded for 18.0's boot refusal text (card #24651). In 18.0 `os migrate organization-ownership` refuses plan and apply on every database (NOT_IMPLEMENTED: 18.0 supports fresh installs only), so the boot refusal no longer names that command or its `--out PLAN` / `--apply --plan-file PLAN --backup-taken` steps. Every branch now ends with \"18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path, and upgrade it there.\" (packages/runtime/src/organization-ownership-boot-guard.ts, freshInstallsOnly; `os serve --dev` says \"a v17 development database\"). The clause asserted that the refusal names the command, so a run against the new text would have recorded FAIL on a correct product. It now asserts the tables, that sentence, and the absence of the command and its steps. The ⛔ on the code literal is kept. acceptance[0], acceptance[2], acceptance[3] and both steps are unchanged",
           "ref": "#24682"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "title and acceptance[1] (clause, verify) re-worded for the open ownership ceremony (#24581). `os migrate organization-ownership` plans and applies again, and the boot guard decides on the ownership marker (a birth marker a fresh datastore writes, or the ceremony's verified one): a v17 database has none, so the refusal opens \"This database carries no organization-ownership marker\", names the tables still carrying organization_id, and names the ceremony's plan and apply (`--out PLAN`, then `--apply --plan-file PLAN --backup-taken`). Revision 4 asserted the 18.0 sentence and the absence of the command, so a run against the new text would have recorded FAIL on a correct product. It now asserts the marker sentence, the tables and the two steps, and that the refusal says nothing of staying on 17.x. The ⛔ on the code literal is kept. acceptance[0], acceptance[2], acceptance[3] and both steps are unchanged",
+          "ref": "#24681"
         }
       ]
     },

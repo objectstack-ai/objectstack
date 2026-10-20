@@ -47,6 +47,11 @@ export const SysFlowCredential = ObjectSchema.create({
   icon: 'key',
   isSystem: true,
   managedBy: 'engine-owned',
+  // [ADR-0131 D7] Deployment-level: a credential is read by its flow under the
+  // system context, never by organization, so the store carries no
+  // organization column. The flip lands with the open upgrade ceremony (18.x
+  // step 6, line fact F2), whose column-drops step takes an upgraded database's column.
+  systemFields: { tenant: false },
   // ADR-0066 secure-by-default: a credential store is not covered by the
   // wildcard grant. Everything reads and writes it through the engine under a
   // system context.

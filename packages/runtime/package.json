@@ -61,6 +61,7 @@
     "@objectstack/driver-mongodb": "workspace:*"
   },
   "devDependencies": {
+    "@libsql/client": "^0.18.0",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/plugin-sharing": "workspace:*",
