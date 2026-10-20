@@ -149,8 +149,16 @@ async function makeProtocol() {
 
 const PKG = 'app.edu';
 
+/**
+ * A list view bound to an object the package may reach (#24563): the save door
+ * judges a write into a package against that package's closure, and refuses a
+ * binding outside it (`list-view-object-outside-closure`). `app.edu` declares
+ * no dependency and owns no object here, so the binding is a platform object
+ * the harness registers — kept in every package's closure — and `id` is a
+ * field it declares. The view is advisory-free, which is what these cases need.
+ */
 const viewBody = (name: string, label: string) => ({
-    name, type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list',
+    name, type: 'grid', label, columns: ['id'], object: 'sys_metadata', viewKind: 'list',
 });
 
 /**

@@ -481,7 +481,7 @@
       "closes": "add @objectstack/objectql to this package's devDependencies (verified acyclic — see `why`), then open the fake's update with assertEngineUpdateDispatch(data, options)"
     },
     {
-      "file": "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.test.ts",
+      "file": "packages/plugins/plugin-webhooks/src/declared-webhooks.test.ts",
       "verb": "delete",
       "unguarded": 1,
       "kind": "DEBT",
@@ -489,7 +489,7 @@
       "closes": "add @objectstack/objectql to this package's devDependencies (verified acyclic on this branch — see `why`), then open the fake's delete with assertEngineDeleteDispatch(options)"
     },
     {
-      "file": "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.test.ts",
+      "file": "packages/plugins/plugin-webhooks/src/declared-webhooks.test.ts",
       "verb": "update",
       "unguarded": 1,
       "kind": "DEBT",

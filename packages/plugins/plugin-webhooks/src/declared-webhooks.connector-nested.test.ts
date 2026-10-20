@@ -1,12 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * A connector's nested `webhooks[]` does NOT reach `sys_webhook` — pinned as
+ * A connector's nested `webhooks[]` does NOT reach the dispatcher — pinned as
  * behaviour, against a REAL registration path.
  *
  * ## Why this file exists
  *
- * `bootstrap-declared-webhooks.ts` used to open with "materialize
+ * The retired declared-webhook seeder (`bootstrap-declared-webhooks.ts`, which
+ * `declared-webhooks.ts` replaced: ADR-0131 D2) used to open with "materialize
  * stack/**connector**-declared `webhooks` into `sys_webhook` rows so the
  * dispatcher can actually see them". The connector half was false, and it was
  * false in the one place a reader looks when deciding whether a connector's
@@ -26,13 +27,13 @@
  *
  * ⚠️ ANTI-VACUITY CONTROL, on the same subject and in the same corpus: the same
  * manifest also declares a TOP-LEVEL `webhooks:` entry, and the same assertions
- * demand that one IS registered and IS seeded. Without it, every expectation
+ * demand that one IS registered and IS read as a declared webhook. Without it, every expectation
  * below would also pass on an engine that registered nothing at all, on a
  * misspelled metadata type, or on a manifest this engine rejected outright.
  *
  * ## The direction this pins is the DECLARED one
  *
- * ⛔ A red here is not a licence to widen the seeder. `packages/spec` RETIRED
+ * ⛔ A red here is not a licence to widen the declared-webhook reader. `packages/spec` RETIRED
  * the connector surface under ADR-0049 enforce-or-remove: `connector.webhooks`
  * is a `retiredKey()` tombstone and the `WebhookConfig` shape left whole
  * (`integration/connector.zod.ts`, "REMOVED: `health`, `status` and the nested
@@ -53,7 +54,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { bootstrapDeclaredWebhooks } from './bootstrap-declared-webhooks.js';
+import { DeclaredWebhookSource } from './declared-webhooks.js';
 
 const PKG = 'com.acme.billing';
 
@@ -102,29 +103,15 @@ const namesOf = (registry: any, type: string): string[] =>
   (registry.listItems(type) ?? []).filter(Boolean).map((i: any) => i?.name);
 
 /**
- * The minimum `IDataEngine` surface the seeder's INSERT path touches, wired to
- * a real registry so `readDeclared` sees exactly what boot registered. No
- * secret is authored, so no CryptoProvider is needed.
- *
- * `update` is deliberately ABSENT rather than stubbed. `find` always answers
- * empty here, so the seeder always takes the INSERT branch and never dispatches
- * an update; a stub for it would be an engine double declaring a verb this file
- * does not exercise, which `check:engine-double-contract` correctly treats as
- * new surface to pin. A fake that stops where the path stops has nothing to be
- * looser than, and a future change that DID reach the update branch would fail
- * loudly here instead of passing against a permissive stub.
+ * The surface the declared-webhook reader touches, wired to a real registry so
+ * `readDeclaredWebhookItems` sees exactly what boot registered: the registry,
+ * and a `find` for the activation ledger that holds no row.
  */
-function seedingEngine(registry: any) {
-  const rows: any[] = [];
+function readingEngine(registry: any) {
   return {
-    rows,
     _registry: registry,
     async find() {
       return [];
-    },
-    async insert(_object: string, row: any) {
-      rows.push(row);
-      return row;
     },
   };
 }
@@ -148,19 +135,23 @@ describe("a connector's nested `webhooks[]` never becomes a `webhook` metadata i
     expect(connector.webhooks?.map((w: any) => w?.name)).toEqual([CONNECTOR_NESTED.name]);
   });
 
-  it('seeds `sys_webhook` from the top-level collection only — the connector half is not even skipped', async () => {
-    const engine = seedingEngine(bootedRegistry());
+  it('reads the top-level collection only as declared webhooks — the connector half is not even skipped', async () => {
+    const warn: unknown[] = [];
+    const reader = new DeclaredWebhookSource(readingEngine(bootedRegistry()), undefined, {
+      warn: (msg: string) => { warn.push(msg); },
+    });
 
-    const result = await bootstrapDeclaredWebhooks(engine as any, undefined);
+    const declared = await reader.list();
 
-    // CONTROL: the bridge really did run and really did materialize.
-    expect(result.seeded).toBe(1);
-    expect(engine.rows.map((r) => r.name)).toEqual([STACK_DECLARED.name]);
+    // CONTROL: the reader really did run and really did read the declaration.
+    expect(declared.map((d) => d.webhook.name)).toEqual([STACK_DECLARED.name]);
 
-    // SUBJECT: the connector-nested webhook produces NO row — and no `skipped`
-    // either, because the seeder never sees it at all. A future bridge that
-    // merely warned about it would move this number, not just the row list.
-    expect(engine.rows.map((r) => r.name)).not.toContain(CONNECTOR_NESTED.name);
-    expect(result.skipped).toBe(0);
+    // SUBJECT: the connector-nested webhook is no declared webhook — and no
+    // validation warning either, because the reader never sees it at all. A
+    // future reader that merely warned about it would move this, not just the
+    // name list.
+    expect(declared.map((d) => d.webhook.name)).not.toContain(CONNECTOR_NESTED.name);
+    expect(await reader.declaredWebhookNamed(CONNECTOR_NESTED.name)).toBeNull();
+    expect(warn).toEqual([]);
   });
 });

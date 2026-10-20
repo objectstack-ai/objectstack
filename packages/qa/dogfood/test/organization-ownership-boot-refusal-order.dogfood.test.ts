@@ -16,7 +16,8 @@
 // that declare no organization column) still carrying a physical
 // `organization_id`:
 //
-//  1. the v18 boot is refused, naming the command — and the refused boot has
+//  1. the v18 boot is refused, saying what 18.0 supports for a v17 database and
+//     naming no step of the command 18.0 refuses — and the refused boot has
 //     ALREADY added the column the ceremony waits for: the guard judges in its
 //     own `start()`, after the engine's `start()`, which is where the schema
 //     sync runs (and before every plugin that writes rows at start, so the
@@ -109,7 +110,7 @@ describe('[ADR-0131 D10 item 5] a 17.x database upgrades through the boot refusa
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('1. a v17-shape database is refused, naming the command', async () => {
+  it('1. a v17-shape database is refused, saying what 18.0 supports and naming no step of the refused command', async () => {
     const seed = new DatabaseSync(file);
     seed.exec(`
       CREATE TABLE sys_user_permission_set (id TEXT PRIMARY KEY, user_id TEXT, permission_set_id TEXT, organization_id TEXT);
@@ -121,7 +122,8 @@ describe('[ADR-0131 D10 item 5] a 17.x database upgrades through the boot refusa
 
     refusal = refusalIn(await boot(file));
     expect(refusal, 'the boot was refused for the v17 shape').toBeDefined();
-    expect(String((refusal as Error).message)).toContain('os migrate organization-ownership');
+    expect(String((refusal as Error).message)).toContain('18.0 supports fresh installs only and does not upgrade a v17 database');
+    expect(String((refusal as Error).message)).not.toMatch(/os migrate organization-ownership|--plan-file|--out PLAN|--backup-taken/);
     expect((refusal as { tables?: string[] }).tables).toEqual(expect.arrayContaining(['sys_metadata', 'sys_migration_journal']));
   }, 240_000);
 

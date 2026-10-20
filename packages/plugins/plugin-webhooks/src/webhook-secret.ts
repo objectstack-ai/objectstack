@@ -202,11 +202,6 @@ type SecretResolvingEngine = IDataEngine & {
   onCryptoProviderChange?(listener: () => void): () => void;
 };
 
-/** True when this engine can dereference an encrypted field. */
-export function canResolveSecrets(engine: IDataEngine | undefined): boolean {
-  return typeof (engine as SecretResolvingEngine | undefined)?.resolveSecretField === 'function';
-}
-
 /**
  * [#8022] Subscribe to the engine's crypto-provider registration. Returns an
  * unsubscribe function, or `undefined` when the engine has no such channel.

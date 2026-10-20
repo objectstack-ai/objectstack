@@ -202,9 +202,9 @@ export const SysOrganization = ObjectSchema.create({
       // `invite_user` leading, the header's three inline slots go to the
       // invite, `set_active_organization` and `rename_organization`, and this
       // one folds into the `⋯` overflow's destructive band (objectui's
-      // page:header split, default `maxVisible` 3), with `change_slug` in the
-      // overflow above it. Without it, registration order kept it inline as
-      // the third button. Ungated by grade: every grade may leave.
+      // page:header split, default `maxVisible` 3). Without it, registration
+      // order kept it inline as the third button. Ungated by grade: every
+      // grade may leave.
       order: 1,
       mode: 'custom',
       locations: ['list_item', 'record_header'],
@@ -226,15 +226,13 @@ export const SysOrganization = ObjectSchema.create({
       // `beforeUpdateOrganization` slug guard both run only on a sent slug.
       //
       // One door per field. A record page reaches no `list_item` action, so
-      // this one is declared at `record_header` too; where the cloud
-      // orchestrator governs the slug, that page offers this action and
-      // `change_slug`, and nothing on it sends a slug to better-auth.
-      // `update_organization` stays the slug door of a composition without the
-      // orchestrator, because `change_slug`'s target exists only in cloud.
-      //
-      // Declared BEFORE `change_slug`: both sort at `order` 0, so declaration
-      // order breaks the tie, the rename takes the header's third inline slot,
-      // and `change_slug` folds into the `⋯` overflow.
+      // this one is declared at `record_header` too, and nothing on that page
+      // sends a slug to better-auth. `update_organization` is the slug door of
+      // a composition without the cloud orchestrator. Where the orchestrator
+      // governs the slug, the composition that serves its route declares the
+      // slug action itself, bound to this object by `objectName` and attached
+      // to it as served; this object declares no action whose door only one
+      // composition mounts.
       name: 'rename_organization',
       label: 'Rename Organization',
       icon: 'pencil',
@@ -255,36 +253,6 @@ export const SysOrganization = ObjectSchema.create({
         { field: 'logo', defaultFromRow: true },
       ],
     },
-    {
-      // Rename the organization slug (URL prefix). Backed by the cloud
-      // orchestrator at /api/v1/cloud/organizations/{id}/change-slug,
-      // which atomically updates sys_organization.slug, rewrites
-      // platform_subdomain sys_domain rows under the new slug, soft-
-      // retires the old rows with a redirect window, parks the old
-      // slug in sys_slug_reservation, and refreshes the registry
-      // mirror. See cloud `docs/design/sys-domain.md` §6.
-      name: 'change_slug',
-      label: 'Change Slug',
-      icon: 'edit-3',
-      variant: 'secondary',
-      mode: 'custom',
-      locations: ['record_header'],
-      type: 'api',
-      target: '/api/v1/cloud/organizations/{id}/change-slug',
-      method: 'POST',
-      requiresFeature: 'multiOrgEnabled',
-      // Confirm question on `description`, not `confirmText`: this action collects
-      // params, and pairing the two keys opens two dialogs for one decision
-      // (#7278 ruling 2026-08-10, swept by #7309). The two param-LESS actions
-      // above (`delete_organization`, `leave_organization`) keep `confirmText`
-      // — with no param dialog, the confirm IS the only dialog.
-      description: 'Renaming the slug rewrites every platform subdomain for this org and parks the old slug for 90 days. Continue?',
-      successMessage: 'Organization slug changed',
-      refreshAfter: true,
-      params: [
-        { field: 'slug', required: true, defaultFromRow: true },
-      ],
-    },
   ],
 
   listViews: {
@@ -297,6 +265,20 @@ export const SysOrganization = ObjectSchema.create({
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
     },
+  },
+
+  // [ADR-0095 D1, 2026-10-18 note] This object's default row scope: the one policy
+  // plugin-security's shipped permission sets spread for it today (the `_self`
+  // carve-outs in `default-permission-sets.ts`), moved here verbatim. Layer 0 is inert
+  // on this table (no organization column), so Layer 1 silence means this scope, not no
+  // filter. The security plugin's row-policy collection applies it when no set the
+  // caller holds carries a row policy for the object and operation; the shipped sets
+  // still carry it, so their holders read as before. An `extend` contribution cannot set
+  // or loosen it (refused at registration).
+  defaultRowScope: {
+    name: 'sys_organization_self',
+    operation: 'all',
+    using: 'id == current_user.organization_id',
   },
 
   fields: {

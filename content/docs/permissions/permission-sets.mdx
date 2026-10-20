@@ -396,7 +396,10 @@ posture, the platform operator. This has three author-visible consequences:
   package. Uninstall the owning package to remove a packaged set entirely.
 
 An older database keeps the `sys_permission_set` table and its rows, and
-nothing serves or reads them. `os migrate organization-ownership --apply`
+nothing serves or reads them. In the 18.x release that carries the upgrade
+path (18.0 does not upgrade a v17 database: see
+[`os migrate organization-ownership`](/docs/deployment/cli#os-migrate-organization-ownership)),
+`os migrate organization-ownership --apply`
 (ADR-0131 D10) converts the sets an organization authored in Setup into
 environment metadata under `single` and deletes the seeded copies. The shipped
 sets that an install created before 2026-08-15 stored as `managed_by: 'admin'`

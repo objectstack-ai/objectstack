@@ -10,7 +10,8 @@
 // reads of a connector's own `webhooks` outside `packages/spec`, while
 // `stack.webhooks` — the lit control, same scan — is read five times; the one
 // test that authors a nested array
-// (`bootstrap-declared-webhooks.connector-nested.test.ts`) exists to pin that it
+// (`declared-webhooks.connector-nested.test.ts`, renamed from the retired
+// seeder's `bootstrap-declared-webhooks.connector-nested.test.ts`) exists to pin that it
 // is NOT hoisted. And no code path emits a connector lifecycle event
 // (`sync.completed`, `auth.expired`, …) for its `events` to subscribe to.
 //

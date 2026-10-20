@@ -5,8 +5,9 @@
 //
 // `update_organization` renames too, but it is declared at `list_item` only (a
 // record page's header never offers it) and it bundles `slug`, which the cloud
-// orchestrator's `change_slug` governs where it exists. So the record page
-// needs its own door for `name` and `logo`, one that sends no slug.
+// orchestrator's slug action governs where it exists — an action the
+// composition serving that route declares itself, never this object. So the
+// record page needs its own door for `name` and `logo`, one that sends no slug.
 //
 // What this file pins, from source:
 //  - the new action's declaration: its params are exactly `name` and `logo`,
@@ -16,10 +17,12 @@
 //    `organization/update` (owner, admin);
 //  - one door per field on the record header: no `record_header` action that
 //    targets `organization/update` carries a `slug` param;
-//  - the header order: the rename takes an inline slot and `change_slug` folds
-//    into the overflow (the ordering model is described in
+//  - the header order: the rename takes an inline slot and leave folds into
+//    the overflow (the ordering model is described in
 //    `sys-organization-invite-action.test.ts`);
-//  - controls: `update_organization` and `change_slug` are unchanged.
+//  - every door this object declares is better-auth's: no action targets the
+//    cloud orchestrator, whose route no package in this repository serves;
+//  - control: `update_organization`, the open-source slug door, is unchanged.
 //
 // The runtime half, a rename through better-auth that reads the slug back
 // unchanged, is `organization-rename-door.dogfood.test.ts` in
@@ -117,29 +120,35 @@ describe('sys_organization: one door per field on the record header', () => {
     }
   });
 
-  it('the rename takes an inline header slot and change_slug folds into the overflow', () => {
+  it('the rename takes an inline header slot and leave_organization folds into the overflow', () => {
     const order = headerOrder();
-    const names = actions().map((a) => a.name);
-    expect(names.indexOf('rename_organization')).toBeLessThan(names.indexOf('change_slug'));
-    expect(order.indexOf('rename_organization')).toBeGreaterThanOrEqual(0);
+    expect(order).toEqual(['invite_user', 'set_active_organization', 'rename_organization', 'leave_organization']);
     expect(order.indexOf('rename_organization')).toBeLessThan(MAX_VISIBLE);
-    expect(order.indexOf('change_slug')).toBeGreaterThanOrEqual(MAX_VISIBLE);
-    expect(order[order.length - 1]).toBe('leave_organization');
+    expect(order.indexOf('leave_organization')).toBeGreaterThanOrEqual(MAX_VISIBLE);
   });
 });
 
-describe('sys_organization: the slug doors are unchanged (controls)', () => {
+describe('sys_organization: every door it declares is one an open-source composition mounts', () => {
+  it("every api action targets better-auth's organization routes, and none the cloud orchestrator", () => {
+    const api = actions().filter((a) => a.type === 'api');
+    expect(api.map((a) => a.name).sort()).toEqual([
+      'create_organization', 'delete_organization', 'invite_user', 'leave_organization',
+      'rename_organization', 'set_active_organization', 'update_organization',
+    ]);
+    for (const a of api) {
+      expect(a.target, a.name).toMatch(/^\/api\/v1\/auth\/organization\/[a-z-]+$/);
+    }
+    // The slug action the cloud orchestrator serves is declared by the
+    // composition that mounts its route, bound here by `objectName`.
+    expect(actions().map((a) => a.name)).not.toContain('change_slug');
+  });
+});
+
+describe('sys_organization: the open-source slug door is unchanged (control)', () => {
   it('update_organization keeps name / slug / logo, its target and list_item alone', () => {
     const update = action('update_organization');
     expect(update.locations).toEqual(['list_item']);
     expect(update.target).toBe(UPDATE_TARGET);
     expect(paramKeys(update)).toEqual(['name', 'slug', 'logo']);
-  });
-
-  it("change_slug keeps its cloud orchestrator target, record_header alone and its one slug param", () => {
-    const change = action('change_slug');
-    expect(change.locations).toEqual(['record_header']);
-    expect(change.target).toBe('/api/v1/cloud/organizations/{id}/change-slug');
-    expect(paramKeys(change)).toEqual(['slug']);
   });
 });

@@ -6598,8 +6598,10 @@ export class AutomationEngine implements IAutomationService {
      * decision run as `{ isSystem: true, userId: DECIDER }` — the shape the
      * approvals verdict mirror already writes with — so `updated_by`, the audit
      * row and `ctx.user` in the hooks those writes fire name the decider, while
-     * elevation is untouched and no grant is resolved (a system run's data
-     * context carries none: {@link resolveRunDataContext}'s system arm). The
+     * elevation is untouched and no grant is resolved for the run. Its data
+     * context carries no positions or permission sets
+     * ({@link resolveRunDataContext}'s system arm), so a `runAs:'user'` hook a
+     * post-decision write fires resolves the decider's own grants. The
      * trigger user's positions, permission sets, peers and email are removed
      * here too, so `current_user` in the segment is the decider and never the
      * decider's id over the submitter's grants.
