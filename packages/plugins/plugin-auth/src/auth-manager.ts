@@ -214,7 +214,7 @@ import {
   isDefaultOrganizationTarget,
   organizationDeleteRefusal,
   organizationNotEmptyBody,
-  removeOrganizationTeams,
+  removeOrganizationAuthStructure,
 } from './organization-delete.js';
 
 /**
@@ -3871,19 +3871,20 @@ export class AuthManager {
               });
             }
           },
-          // [#24948] The teams and their members are the organization's own
-          // auth structure, and better-auth's delete leaves them behind. They
-          // go here, inside the request's transaction (`handleRequest`), after
-          // the `hooks.before` refusal has found no records left. The Default
-          // Organization is the last-administrator guard's to answer, so its
-          // teams are not touched: when that guard admits the delete, the
-          // engine's own refusal still holds while anything names it.
+          // [#24948] The teams, their members and the organization-admin
+          // grants are the organization's own auth structure, and better-auth's
+          // delete leaves them behind. They go here, inside the request's
+          // transaction (`handleRequest`), after the `hooks.before` refusal has
+          // found no records left. The Default Organization is the
+          // last-administrator guard's to answer, so its structure is not
+          // touched: when that guard admits the delete, the engine's own
+          // refusal still holds while anything names it.
           beforeDeleteOrganization: async ({ organization }: any) => {
             const engine = this.getDataEngine();
             const organizationId = organization?.id;
             if (!engine || typeof organizationId !== 'string' || !organizationId) return;
-            if (await isDefaultOrganizationTarget(engine, organization)) return;
-            await removeOrganizationTeams(engine, organizationId);
+            if (await isDefaultOrganizationTarget(engine, organization, postureEnforcesWall(resolveTenancyPosture()))) return;
+            await removeOrganizationAuthStructure(engine, organizationId);
           },
         },
         // No mailer is wired in framework yet — log the accept URL so
@@ -6999,7 +7000,7 @@ export class AuthManager {
    *
    * [#24948] `/organization/delete` runs here too, on the same terms and for
    * the same reason: the vendor's member, invitation and organization deletes
-   * are separate adapter calls, and the teams removed by
+   * are separate adapter calls, and the teams and grants removed by
    * `beforeDeleteOrganization` must roll back with them.
    */
   private async runSubjectErasureAtomically(
@@ -8120,7 +8121,7 @@ export class AuthManager {
       if (!permitted) return; // the vendor answers YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_ORGANIZATION
       organization = await sys.findOne('sys_organization', { where: { id: organizationId } });
       if (!organization) return; // the vendor answers 400
-      if (await isDefaultOrganizationTarget(engine, organization)) return;
+      if (await isDefaultOrganizationTarget(engine, organization, postureEnforcesWall(resolveTenancyPosture()))) return;
     } catch {
       // A lookup that did not complete hands the request back to the vendor,
       // which re-reads everything it decides; the engine's own refusal still
