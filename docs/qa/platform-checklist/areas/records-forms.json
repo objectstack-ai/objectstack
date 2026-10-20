@@ -239,7 +239,7 @@
           "revision": 13,
           "date": "2026-10-20",
           "change": "acceptance[6] (clause, verify, evidence) drives its readonly half at its own layer; automated is removed and fixtures.knownGaps[1] added. PR #24963's carried finding (round 16's acceptance notes): the P0 api clause said to score its readonly half from the pins in automated, never as blocked(fixture). Read at base e4d604efd3 under RUNNER rule 6: protocol.readonly-insert.test.ts drives cloneData over a stub engine and engine-insert-static-readonly-strip.test.ts a real engine over a recording driver, neither through HTTP, and no pin holds a full clause of this item. The live leg can be staged: a lead_score value written into the run's own file DB travels in the clone's copy, and cloneData reports the engine's readonly drop in the 201's droppedFields (packages/metadata-protocol/src/protocol.ts). So the half is driven at the clone door on a planted row, or recorded blocked(fixture) with the pins beside it as evidence of their own layers. Also PR #24982's pin finding: acceptance[4].verify now names the console pin cf153eb2e535, where e2e/live/record-history-display.spec.ts keeps blob 7ebc45106cff (it named 616df6598b42). acceptance[6].clause changed how its readonly half is scored and staged; what the clause asserts did not change",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ]
     },
@@ -420,7 +420,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "steps[1] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ],
       "enumSource": {
@@ -1905,7 +1905,7 @@
           "revision": 14,
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot the showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ],
       "enumSource": {
@@ -2044,7 +2044,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ]
     },
@@ -2891,7 +2891,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "personas[1] and fixtures.knownGaps[0] mint the second user through the admin door. Anchor comment 6290946648 (round 16's carried finding, from #24864 / PR #24869): both said 'a second signed-up user', and knownGaps[0] recorded the mention and bell clauses blocked(fixture) without one. Read at base e4d604efd3: the showcase declares no auth.audience, so resolveAudience answers invite_only and an uninvited sign-up answers 403 SELF_REGISTRATION_CLOSED (packages/plugins/plugin-auth/src/audience-posture.ts), while runAdminCreateUser mints the user with mustChangePassword true by default (admin-user-endpoints.ts), as steps[13] (revision 5) already does. personas[1]'s 'sys_user rows come from sign-up, not seeds' goes too: the showcase seeds its demo personas (examples/app-showcase/src/security/demo-personas.ts), though none of them is this item's mention target. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ]
     },
@@ -3729,7 +3729,7 @@
           "revision": 9,
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ]
     },
@@ -3886,7 +3886,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ]
     },
@@ -4024,7 +4024,7 @@
           "revision": 7,
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ]
     },
@@ -4138,7 +4138,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated on ' → 'boot the showcase on its own port and DB, on '. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ]
     },
@@ -4252,7 +4252,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ]
     },
@@ -4388,7 +4388,7 @@
           "revision": 7,
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated on ' → 'boot the showcase on its own port and DB, on '. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ]
     },
@@ -4508,7 +4508,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ]
     },
@@ -4604,7 +4604,7 @@
           "revision": 2,
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ]
     },
@@ -4723,7 +4723,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ]
     },
@@ -5119,7 +5119,7 @@
           "revision": 2,
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot the showcase isolated (RUNNER canonical boot line: own port, own file DB, --seed-admin)' → 'boot the showcase with RUNNER's canonical checklist boot (own port, own file DB, --seed-admin)'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
-          "ref": "#PENDING-24579R17"
+          "ref": "#25003"
         }
       ]
     },
