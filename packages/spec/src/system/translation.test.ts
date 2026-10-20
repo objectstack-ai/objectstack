@@ -986,6 +986,33 @@ describe('translation unknown-key strictness', () => {
       expect(declared).toEqual([...PAGE_COMPONENT_COPY_KEYS].sort());
     });
 
+    it('accepts a `page:tabs` item label keyed by the item `value` under the tabs component id', () => {
+      const result = parse({
+        home_tabs: { label: 'Work', items: { my_leads: { label: 'My Leads' }, my_deals: { label: 'My Open Deals' } } },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('keeps the tab-item entry closed — `label` is its one key', () => {
+      const result = parse({ home_tabs: { items: { my_leads: { label: 'My Leads', icon: 'user' } } } });
+      expect(result.success).toBe(false);
+      const issue = result.error?.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(issue?.message).toContain('this page tab item translation');
+      expect(issue?.path).toEqual(['pages', 'sales_home_page', 'components', 'home_tabs', 'items', 'my_leads']);
+    });
+
+    it('names `title` and `name` on a tab item as renames onto `label`', () => {
+      const result = parse({ home_tabs: { items: { my_leads: { title: 'My Leads' } } } });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message).toContain('`title` → `label`');
+    });
+
+    it('names `tabs` on a component entry as the rename onto `items`', () => {
+      const result = parse({ home_tabs: { tabs: { my_leads: { label: 'My Leads' } } } });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message).toContain('`tabs` → `items`');
+    });
+
     it('carries the `label`/`title` trap alias the dashboard widget face carries', () => {
       // A page's headline is `label`; a component's is `title`. One level
       // apart, opposite spellings — the same trap `dashboards.widgets` names.

@@ -2347,6 +2347,113 @@ describe('validateTranslationReferences — flow approval steps (`approvals.<nod
   });
 });
 
+describe('validateTranslationReferences — `page:tabs` item labels (`components.<tabsId>.items.<value>.label`)', () => {
+  /**
+   * HotCRM's measured shape: a home page whose `page:tabs` holds the three
+   * tabs, beside an accordion and a related list, so each verdict below is
+   * judged against the same metadata as the clean run and differs only in
+   * the bundle.
+   */
+  const homeStack = {
+    pages: [
+      {
+        name: 'sales_home_page',
+        label: 'Sales Home',
+        regions: [{
+          name: 'main',
+          components: [
+            {
+              type: 'page:tabs',
+              id: 'home_tabs',
+              properties: {
+                items: [
+                  { label: 'My Leads', value: 'my_leads', children: [{ type: 'record:related_list', id: 'home_my_leads', properties: { title: 'Leads' } }] },
+                  { label: 'My Open Deals', value: 'my_deals', children: [] },
+                  { label: 'My Open Tasks', children: [] },
+                ],
+              },
+            },
+            { type: 'page:accordion', id: 'faq', properties: { items: [{ label: 'Pricing', children: [] }] } },
+          ],
+        }],
+      },
+    ],
+  };
+  const bundle = (pages: unknown) => ({ ...homeStack, translations: [{ 'zh-CN': { pages } }] });
+  const tabs = (items: unknown, extra: Record<string, unknown> = {}) =>
+    bundle({ sales_home_page: { components: { home_tabs: { items }, ...extra } } });
+
+  it('reports nothing for the label of a valued tab item', () => {
+    expect(validateTranslationReferences(tabs({ my_leads: { label: '我的线索' }, my_deals: { label: '我的商机' } }))).toEqual([]);
+  });
+
+  it('controls: the component keys of the same page still resolve beside it, judged by nothing new', () => {
+    expect(
+      validateTranslationReferences(
+        tabs({ my_leads: { label: '我的线索' } }, { home_my_leads: { title: '线索' }, faq: { label: '常见问题' } }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('refuses an item key over an UNKNOWN value, with the nearest tab value offered', () => {
+    const findings = validateTranslationReferences(tabs({ my_lead: { label: 'x' } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].pages.sales_home_page.components.home_tabs.items.my_lead');
+    expect(findings[0].message).toBe(
+      'Translations are keyed to tab "my_lead", which `page:tabs` "home_tabs" on page "sales_home_page" gives ' +
+        'no item as its `value`, so the tab keeps its source-locale label. Did you mean "my_leads"?',
+    );
+    expect(findings[0].hint).toBe(
+      "Tab-item translations are keyed by the item's `value`; give the item a `value` if it has none.",
+    );
+  });
+
+  it('refuses an item key over an index token, which no key ever reaches', () => {
+    const findings = validateTranslationReferences(tabs({ 'tab-2': { label: 'x' } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].pages.sales_home_page.components.home_tabs.items.tab-2');
+  });
+
+  it('refuses `items` on a `page:accordion`, pointing at the inline locale map', () => {
+    const findings = validateTranslationReferences(bundle({ sales_home_page: { components: { faq: { items: { pricing: { label: 'x' } } } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].pages.sales_home_page.components.faq.items');
+    expect(findings[0].message).toBe(
+      'Translations carry tab items for "faq", which page "sales_home_page" declares as a `page:accordion`, ' +
+        'whose panels have no stable key, so nothing resolves them.',
+    );
+    expect(findings[0].hint).toBe('Localize an accordion panel label in place, as an inline locale map on `items[].label`.');
+  });
+
+  it('refuses `items` on a component of another type, by name', () => {
+    const findings = validateTranslationReferences(
+      bundle({ sales_home_page: { components: { home_my_leads: { items: { leads: { label: 'x' } } } } } }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toBe(
+      'Translations carry tab items for "home_my_leads", which page "sales_home_page" declares as a ' +
+        '`record:related_list`, not a `page:tabs`, so nothing resolves them.',
+    );
+    expect(findings[0].hint).toBe('Tab-item translations go under the `id` of a `page:tabs` component.');
+  });
+
+  it('refuses `items` under a component id the page does not declare', () => {
+    const findings = validateTranslationReferences(bundle({ sales_home_page: { components: { home_tab: { items: { my_leads: { label: 'x' } } } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].pages.sales_home_page.components.home_tab.items');
+    expect(findings[0].message).toBe(
+      'Translations carry tab items for "home_tab", a component id page "sales_home_page" does not declare, ' +
+        'so nothing resolves them. Did you mean "home_tabs"?',
+    );
+  });
+
+  it('control: a page this stack does not declare is not judged by this check', () => {
+    expect(validateTranslationReferences(bundle({ other_page: { components: { t: { items: { a: { label: 'x' } } } } } }))).toEqual([]);
+  });
+});
+
 describe('validateTranslationReferences — flow toasts and screen-field options (#22507)', () => {
   /**
    * hotclm's measured shape, trimmed: a screen flow that authors a completion
@@ -4035,6 +4142,10 @@ describe('[#22161] one-line verdicts — translation-target-unknown, translation
     '`resultDialog.fields` does not declare',
     'declares no `fields` (it renders the whole response as JSON)',
     'Translations are keyed to picklist "',
+    'gives no item as its `value`',
+    'whose panels have no stable key',
+    'not a `page:tabs`, so nothing resolves them',
+    'a component id page "',
   ];
   const OPTION_ARMS = [
     'which declares no `options` at all (field type',
@@ -4186,6 +4297,9 @@ describe('[#22161] one-line fixes — translation-target-unknown', () => {
     'Move the `resultDialog` translations under the action',
     "Match the key to a declared field's literal `path`",
     "Match the key to a picklist's `name`",
+    "Tab-item translations are keyed by the item's `value`",
+    'Localize an accordion panel label in place',
+    'Tab-item translations go under the `id` of a `page:tabs` component',
   ];
 
   it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {

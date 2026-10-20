@@ -2499,6 +2499,42 @@ describe('walkAddressedPageComponents — the one addressed-component walk, shar
     expect(doc.regions[0].components[0].properties.items[0].children[0].properties.title).toBe('Tab kid');
     expect(doc.slots.header.properties.title).toBe('Header');
   });
+
+  it("keeps a visitor's edit to a panel's OWN keys, and still descends the AUTHORED panel children", () => {
+    const doc: any = {
+      regions: [{
+        name: 'main',
+        components: [{
+          id: 'tabs',
+          type: 'page:tabs',
+          properties: {
+            items: [
+              { label: 'One', value: 'one', children: [{ id: 'kid', type: 'object-metric', properties: { title: 'Kid' } }] },
+              { label: 'Two', value: 'two' },
+            ],
+          },
+        }],
+      }],
+    };
+    const { regions } = walkAddressedPageComponents(doc, (component, { id }) => (id !== 'tabs'
+      ? { ...component, properties: { ...component.properties, title: `visited:${id}` } }
+      : {
+          ...component,
+          properties: {
+            ...component.properties,
+            // The visitor relabels each panel and drops its children; the walk
+            // owns the descent, so the authored children come back visited.
+            items: component.properties.items.map((item: any) => ({ label: `relabelled:${item.value}`, value: item.value })),
+          },
+        })) as any;
+    const items = regions[0].components[0].properties.items;
+    expect(items[0]).toEqual({
+      label: 'relabelled:one', value: 'one',
+      children: [{ id: 'kid', type: 'object-metric', properties: { title: 'visited:kid' } }],
+    });
+    expect(items[1]).toEqual({ label: 'relabelled:two', value: 'two' });
+    expect(doc.regions[0].components[0].properties.items[0].label).toBe('One');
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -2634,17 +2670,114 @@ describe('translatePage — slotted page roots and tab panels', () => {
     expect(other.slots).toEqual(contractPage().slots);
   });
 
-  it('BOUNDARY: a tab panel `label` (`items[].label`) has no bundle key — its route is the inline locale map', () => {
-    // Recorded, not endorsed. `PageTabsProps.items[].label` is an
-    // `I18nLabelSchema`, so a tab strip is localisable at its authoring site;
-    // a bundle key for the panel (which carries no id and whose `value` is
-    // optional) is a naming decision this change does not make. If a key is
-    // added, this pin is the one to flip.
+  it('CONTROL: with no `items` entry in the bundle, an inline locale map on a tab label is left intact', () => {
+    // `PageTabsProps.items[].label` is an `I18nLabelSchema`, so a tab strip
+    // is also localisable at its authoring site. A bundle that does not key
+    // the item must leave that map alone rather than flatten it.
     const page = contractPage();
     (page.slots.tabs.properties.items[0] as any).label = { en: 'Parties', 'zh-CN': '当事方' };
     const out = translatePage(page, bundle, { locale: 'zh-CN' });
     expect((out.slots as any).tabs.properties.items[0].label).toEqual({ en: 'Parties', 'zh-CN': '当事方' });
     expect((out.slots as any).tabs.properties.items[1].label).toBe('Clauses');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// `pages.<page>.components.<tabsId>.items.<value>.label` — a tab item's label
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('translatePage — `page:tabs` item labels, keyed by the item `value`', () => {
+  /**
+   * HotCRM's measured shape: a home page whose `page:tabs` holds three tabs,
+   * each panel embedding a list. The pack translated the lists (keyed by
+   * their component ids) and had no key for the tab labels.
+   */
+  const homePage = () => ({
+    name: 'sales_home_page',
+    label: 'Sales Home',
+    regions: [{
+      name: 'main',
+      components: [{
+        type: 'page:tabs',
+        id: 'home_tabs',
+        properties: {
+          items: [
+            { label: 'My Leads', value: 'my_leads', icon: 'user', children: [{ type: 'record:related_list', id: 'home_my_leads', properties: { title: 'Leads' } }] },
+            { label: 'My Open Deals', value: 'my_deals', children: [{ type: 'record:related_list', id: 'home_my_deals', properties: { title: 'Deals' } }] },
+            // No `value`: the renderer derives an index token, so no key reaches it.
+            { label: 'My Open Tasks', children: [] },
+          ] as any[],
+        },
+      }],
+    }],
+  });
+
+  const pack = (items: Record<string, unknown>, extra: Record<string, unknown> = {}): TranslationBundle => ({
+    'zh-CN': {
+      pages: {
+        sales_home_page: {
+          components: {
+            home_tabs: { items },
+            home_my_leads: { title: '线索' },
+            ...extra,
+          },
+        },
+      },
+    } as any,
+  });
+
+  const items = (out: any): any[] => out.regions[0].components[0].properties.items;
+
+  it('translates a tab label from its item key', () => {
+    const out = translatePage(homePage(), pack({ my_leads: { label: '我的线索' }, my_deals: { label: '我的商机' } }), { locale: 'zh-CN' });
+    expect(items(out).map((i) => i.label)).toEqual(['我的线索', '我的商机', 'My Open Tasks']);
+  });
+
+  it('CONTROL: the panel children keep their own component keys, and the item keeps its other keys', () => {
+    const out = translatePage(homePage(), pack({ my_leads: { label: '我的线索' } }), { locale: 'zh-CN' });
+    expect(items(out)[0].children[0].properties.title).toBe('线索');
+    expect(items(out)[1].children[0].properties.title).toBe('Deals');
+    expect(items(out)[0]).toMatchObject({ value: 'my_leads', icon: 'user' });
+  });
+
+  it('a bundle entry wins over an inline locale map; an item the bundle does not key keeps its map', () => {
+    const page = homePage();
+    page.regions[0].components[0].properties.items[0].label = { en: 'My Leads', 'zh-CN': '线索（内联）' };
+    page.regions[0].components[0].properties.items[1].label = { en: 'My Open Deals', 'zh-CN': '商机（内联）' };
+    const out = translatePage(page, pack({ my_leads: { label: '我的线索' } }), { locale: 'zh-CN' });
+    expect(items(out)[0].label).toBe('我的线索');
+    expect(items(out)[1].label).toEqual({ en: 'My Open Deals', 'zh-CN': '商机（内联）' });
+  });
+
+  it('falls back along the locale chain, key by key', () => {
+    const bundle: TranslationBundle = {
+      ...pack({ my_leads: { label: '我的线索' } }),
+      en: { pages: { sales_home_page: { components: { home_tabs: { items: { my_deals: { label: 'Deals (en)' } } } } } } } as any,
+    };
+    const out = translatePage(homePage(), bundle, { locale: 'zh-CN', fallbackChain: ['en'] });
+    expect(items(out).map((i) => i.label)).toEqual(['我的线索', 'Deals (en)', 'My Open Tasks']);
+  });
+
+  it('reaches no item without a `value` — an index token is never a key', () => {
+    const out = translatePage(homePage(), pack({ 'tab-2': { label: 'MUST-NOT-APPLY' } }), { locale: 'zh-CN' });
+    expect(items(out)[2].label).toBe('My Open Tasks');
+  });
+
+  it('CONTROL: the same `items` key on a component that is not `page:tabs` translates nothing', () => {
+    const page = homePage();
+    (page.regions[0].components[0] as any).type = 'page:accordion';
+    const out = translatePage(page, pack({ my_leads: { label: 'MUST-NOT-APPLY' } }), { locale: 'zh-CN' });
+    expect(items(out)[0].label).toBe('My Leads');
+  });
+
+  it('CONTROL: the tabs component\'s own `label` key and its item keys compose', () => {
+    const page = homePage();
+    (page.regions[0].components[0].properties as any).label = 'Work';
+    const bundle = pack({ my_leads: { label: '我的线索' } });
+    (bundle['zh-CN'] as any).pages.sales_home_page.components.home_tabs.label = '工作';
+    const out: any = translatePage(page, bundle, { locale: 'zh-CN' });
+    expect(out.regions[0].components[0].properties.label).toBe('工作');
+    expect(items(out)[0].label).toBe('我的线索');
   });
 });
 
