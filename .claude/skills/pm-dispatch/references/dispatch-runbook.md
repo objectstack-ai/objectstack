@@ -208,9 +208,6 @@
 - 文件面两句原文照抄:预期落点是 X。
 - 若实测表明真正的生产者在别包,直接按生产者侧修,落点与理由写进报告和 PR 正文。
 - 跨包常等于跨车道,PM 事后补跨座位声明。
-- 卡的代码首读 spec 发布 R 首发的键、类型成员或运行时行为,即 R 的首个消费者:
-- 同 PR 把消费包 `@objectstack/spec` 下限抬到 R,认领文件面点名 manifest 与 lockfile specifier。
-- 「不动 pin」只禁 lockfile 解析版本与 `.objectui-sha`/console pin 的移动,⛔ 永不禁下限。
 - 模型标识只禁内容工件:PR 标题与正文、代码注释、文档、changeset、评论。
 - 豁免:`.claude/agents/*` frontmatter 的 `model:`,`check:agent-model-declared` 要求。
 - 新 changeset 文件名用 `<issue>-<slug>.md`,⛔ 不用随机词对名。
