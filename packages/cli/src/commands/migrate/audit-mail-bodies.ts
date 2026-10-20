@@ -22,6 +22,7 @@ import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupa
 import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { absentTableReads } from '../../utils/absent-table-reads.js';
+import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 
 /**
  * [#24899] What the command did about one declared archive target: `examined`
@@ -145,7 +146,19 @@ export default class MigrateAuditMailBodies extends Command {
     json: Flags.boolean({ description: 'Output as JSON (implies non-interactive; requires --yes to apply)' }),
   };
 
+  /**
+   * [#24899] The process must end when the run does — the reason `os migrate
+   * plan`'s does (#13027): the boot connects the declared datasources
+   * (`composeDeclaredDatasources`), and a pool it opened can leave the event
+   * loop alive after the kernel reports a clean shutdown. The failure paths
+   * exit through oclif's own signal and do not come back here.
+   */
   async run(): Promise<void> {
+    await this.mask();
+    await exitOneShotCommand(typeof process.exitCode === 'number' ? process.exitCode : 0);
+  }
+
+  private async mask(): Promise<void> {
     const { flags } = await this.parse(MigrateAuditMailBodies);
     const timer = createTimer();
     const apply = flags.apply;
@@ -211,6 +224,10 @@ export default class MigrateAuditMailBodies extends Command {
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         extraPlugins: await buildDataMigrationPlugins({ audit: true }),
+        // [#24899] Connect the declared datasources as `os serve` does, so a
+        // declared archive datasource is registered under its name and the
+        // archive run below reaches it.
+        composeDeclaredDatasources: true,
         ...(apply ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
     } catch (error: any) {

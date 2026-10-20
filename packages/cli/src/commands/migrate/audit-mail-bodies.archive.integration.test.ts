@@ -105,7 +105,8 @@ const stack = await rt.createStandaloneStack({
   projectRoot: process.env.FIXTURE_PROJECT,
   databaseUrl: 'file:' + process.env.FIXTURE_DB,
   skipSeedData: true,
-  armLifecycleSweep: false,
+  // Armed, so the service is enabled: the sweep below is the one this child
+  // runs itself, long before the schedule's first (unref'ed) tick.
 });
 const runtime = new rt.Runtime({ cluster: false });
 const kernel = runtime.getKernel();
