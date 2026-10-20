@@ -15,8 +15,10 @@
  * page's H1.
  *
  * Each object now points at `display_title`, a text formula over the columns
- * its `titleFormat` names. Through the real engine this file asserts, per
- * object:
+ * its `titleFormat` names. `sys_user_permission_set`'s title names the PERSON
+ * through `user_id` instead, so its pins live in
+ * `sys-user-permission-set-person-title.test.ts`; this file holds the rest.
+ * Through the real engine this file asserts, per object:
  *
  *  1. the body the registry holds after registration names `display_title`;
  *  2. a seeded row's H1 is the `titleFormat` text, not the id, and the
@@ -46,7 +48,6 @@ import {
 } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveDisplayField } from '@objectstack/spec/data';
-import { SysUserPermissionSet } from './sys-user-permission-set.object.js';
 import { SysUserPosition } from './sys-user-position.object.js';
 
 const SYS = { context: { isSystem: true } } as any;
@@ -58,12 +59,6 @@ interface Case {
 }
 
 const CASES: Case[] = [
-  {
-    schema: SysUserPermissionSet,
-    // [ADR-0131 D4] A grant names its set; the title shows that name.
-    row: { user_id: 'usr_alice', permission_set: 'crm_edit' },
-    title: 'usr_alice → crm_edit',
-  },
   {
     schema: SysUserPosition,
     row: { user_id: 'usr_alice', position: 'sales_manager' },

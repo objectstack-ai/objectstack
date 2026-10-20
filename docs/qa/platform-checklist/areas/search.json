@@ -211,7 +211,7 @@
       "title": "Search honors RLS both ways: a restricted member gets no hits — and no total leakage — from rows they cannot see; the entitled persona finds the same rows",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (sees all invoices)", "signed-up member bound to the contributor position via the qa-contributor-bound-member recipe (invoice_own_rows RLS: owner == current_user.email) — ⛔ NOT one of the seeded demo personas: Mei holds no position (PERMISSION_DENIED, object gate) and Ada holds auditor with viewAllRecords (all 12). See the recipe."],
@@ -235,7 +235,8 @@
         "as admin, run the identical search — INV-1003 must return (the entitled side of the same gate)",
         "as the member, create their own invoice (POST /api/v1/data/showcase_invoice, name 'INV-QA-RLS') and search for it — their own rows must remain findable",
         "as the member, run a broad paged search { search: 'INV', limit: 2 } and record records/total/hasMore across pages",
-        "compare the member's paged totals against their full visible row set"
+        "compare the member's paged totals against their full visible row set",
+        "persona discipline, not a probe: running the deny side as admin proves nothing (wrong-persona trap); the guard check must run as the non-privileged member"
       ],
       "acceptance": [
         {
@@ -264,8 +265,7 @@
         }
       ],
       "negative": [
-        "any hit (or any total inflation) for the restricted member from an invisible row is an RLS bypass — P1 FAIL, reproduce twice and file",
-        "running the deny side as admin proves nothing (wrong-persona trap): the guard check must run as the non-privileged member"
+        "any hit (or any total inflation) for the restricted member from an invisible row is an RLS bypass — P1 FAIL, reproduce twice and file"
       ],
       "traps": ["wrong-persona", "seed-data-thin"],
       "source": [
@@ -301,6 +301,12 @@
           "date": "2026-10-15",
           "change": "clause 2's mechanism re-authored to the behaviour on main, and its source anchor re-pointed. #22790 (PR #22857, 55382dc02) deleted protocol.ts's `countable` exception and its page-local estimate: a paged search now runs engine.count with the query's search and searchFields, through the same expander find runs and the same read middleware, so `total` is the counted number of matches the caller can read. The clause said the protocol never counts a searched list, and revision 3 bounded the reconciliation to skip <= the visible count because the estimate had no page to count past it; both were true of the deleted arm and are false now, so the verify now asks for one total on every page that equals the enumerable matches, at any skip. The source anchor on protocol.ts named countable and no longer resolved (check:platform-checklist ABSENT SYMBOL); it now names findData, which holds the counting arm, plus the door pin that measures a member's searched total. The security property is unchanged: no response may reveal a row the caller cannot read. Clauses 1, 3 and 4, the steps, the personas and the fixtures are unchanged",
           "ref": "#23593"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "negative[1] moved to steps[6]. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4): it stated a runner rule (the deny side run as admin proves nothing) with no product expectation, so it could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). The outcome it guards, a hit or a total for the member from a row it cannot see, is already negative[0]. Its text moved, unchanged in substance, to steps[6], and traps keeps wrong-persona. No acceptance clause changed",
+          "ref": "#24963"
         }
       ]
     },
