@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #7309 — translation-carryover guard for the 14 confirm questions moved from
- * `confirmText` to `description`.
+ * #7309 — translation-carryover guard for the confirm questions moved from
+ * `confirmText` to `description` (14 then, 13 the platform still declares).
  *
  * The wording did not change; the KEY did. `os i18n extract` treats a renamed
  * key as a brand-new gap, and this repo's `i18n:extract` script runs with
@@ -32,7 +32,12 @@ const LOCALES = [
   ['es-ES', esESObjects],
 ] as const;
 
-/** The 14 (object, action) pairs #7309 converted. */
+/**
+ * The (object, action) pairs #7309 converted that this package still
+ * declares: 13 of its 14. `sys_organization.change_slug` left the platform
+ * object (its door is the cloud orchestrator's, and the composition that
+ * mounts it declares it), so its strings left these bundles with it.
+ */
 const PAIRS: readonly (readonly [string, string])[] = [
   ['sys_user', 'ban_user'],
   ['sys_user', 'delete_my_account'],
@@ -41,7 +46,6 @@ const PAIRS: readonly (readonly [string, string])[] = [
   ['sys_two_factor', 'disable_two_factor'],
   ['sys_two_factor', 'regenerate_backup_codes'],
   ['sys_account', 'unlink_account'],
-  ['sys_organization', 'change_slug'],
   ['sys_team_member', 'remove_team_member'],
   ['sys_oauth_application', 'enable_oauth_application'],
   ['sys_oauth_application', 'disable_oauth_application'],
@@ -75,6 +79,15 @@ describe('#7309 — the moved confirm questions stay translated', () => {
             + '`confirmText`).',
         ).not.toBe(node(enObjects, obj, act)?.description);
       }
+    }
+  });
+
+  it('the pinned set is 13 pairs, and no locale still carries sys_organization.change_slug', () => {
+    expect(PAIRS).toHaveLength(13);
+    for (const [locale, bundle] of [['en', enObjects] as const, ...LOCALES]) {
+      expect(node(bundle, 'sys_organization', 'change_slug'), `${locale} sys_organization.change_slug`).toBeUndefined();
+      // The control: the sibling actions of the same object are still there.
+      expect(node(bundle, 'sys_organization', 'rename_organization'), `${locale} sys_organization.rename_organization`).toBeDefined();
     }
   });
 
