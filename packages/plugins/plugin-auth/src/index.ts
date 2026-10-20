@@ -61,9 +61,6 @@ export * from './otp-send-guard.js';
 // of record out of `sys_session`, which disables the ADR-0069 D4 session
 // controls, so a host opts into that trade explicitly or not at all.
 export * from './rate-limit-storage.js';
-// The client-address trust rule shared with the runtime's inbound rate limiter
-// (also published as the dependency-free `./client-address` subpath).
-export * from './client-address.js';
 export * from './secondary-storage.js';
 export * from './register-sso-provider.js';
 export * from './send-verification-email.js';
