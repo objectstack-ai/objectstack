@@ -34,12 +34,17 @@
  * `bootstrapPlatformAdmin` (which does the analogous thing for
  * platform admins).
  *
- * **Anti-escalation:** `organization_admin` itself (declared in
- * `platform-objects/src/security/default-permission-sets.ts`) is
- * deliberately read-only on the global RBAC tables
- * (`sys_permission_set`, `sys_user_permission_set`, `sys_position`, …),
- * so a freshly-granted org admin cannot rebind themselves to
- * `admin_full_access`.
+ * **Anti-escalation — the organization boundary** (ADR-0090 D12, amended
+ * 2026-10-17): the set granted here (declared in
+ * `objects/default-permission-sets.ts`) creates and removes its organization's
+ * `sys_user_position` / `sys_user_permission_set` rows only inside the
+ * boundary the delegated-administration gate enforces — every distributed set
+ * free of the `'*'` superuser bits and of `adminScope`, with only
+ * `scope: 'org'` capabilities — and `admin_full_access`, the platform sets,
+ * both org-admin variants and the agent ceilings stay outside it. So a
+ * freshly-granted org admin cannot rebind itself (or anyone) to
+ * `admin_full_access`, and cannot copy its own administrator status: that is
+ * conferred here, by membership grade, and nowhere else.
  */
 
 import { ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';

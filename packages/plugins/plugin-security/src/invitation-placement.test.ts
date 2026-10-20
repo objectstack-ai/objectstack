@@ -17,6 +17,8 @@ import {
   readPlacementIntent,
 } from './invitation-placement.js';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
+import { DelegatedAdminGate } from './delegated-admin-gate.js';
+import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const INTENT = { businessUnitId: 'bu_plant_a', positions: ['qc_inspector', 'line_lead'] };
 
@@ -196,5 +198,65 @@ describe('apply — accept-time placement', () => {
     const { svc } = makeService({ ql });
     const result = await svc.apply({ intent: INTENT, userId: 'u', organizationId: 'org_1' });
     expect(result.created).toBe(2);
+  });
+});
+
+// [ADR-0090 D12, amended 2026-10-17] The organization administrator's
+// invitation is judged by the REAL gate, so it carries only positions inside
+// the organization boundary — the property the module header now argues from.
+describe("assertIssuable — an organization administrator's invitation stays inside the organization boundary", () => {
+  function makeOrganizationService() {
+    const ql = makeQl({
+      sys_business_unit: [
+        { id: 'bu_plant_a', name: 'plant_a', organization_id: 'org_1' },
+        { id: 'bu_other', name: 'other', organization_id: 'org_2' },
+      ],
+    });
+    bindTestSecurityCatalog(ql, {
+      permissions: [
+        { name: 'qc_set', objects: { qc_check: { allowRead: true, allowCreate: true } } },
+        { name: 'admin_full_access', objects: { '*': { allowRead: true, modifyAllRecords: true } } },
+      ],
+      positions: [
+        { name: 'qc_inspector', permissionSets: ['qc_set'] },
+        { name: 'plant_superuser', permissionSets: ['qc_set', 'admin_full_access'] },
+      ],
+    });
+    const gate = new DelegatedAdminGate({
+      ql,
+      // The issuer holds the walled organization-administrator set for org_1.
+      resolveSets: async (c: any) => (c?.userId === 'u_org_admin'
+        ? [{ name: 'organization_admin', objects: { '*': { allowRead: true, modifyAllRecords: true } } } as any]
+        : []),
+    });
+    return createInvitationPlacementService({ ql, gate, logger: { info: vi.fn() } });
+  }
+
+  it('in-boundary positions into a unit of its organization are issuable', async () => {
+    await expect(makeOrganizationService().assertIssuable({
+      intent: { businessUnitId: 'bu_plant_a', positions: ['qc_inspector'] },
+      actorUserId: 'u_org_admin',
+      organizationId: 'org_1',
+    })).resolves.toBeUndefined();
+  });
+
+  it('a position carrying a set outside the boundary is refused, naming the set and the condition', async () => {
+    const err: any = await makeOrganizationService().assertIssuable({
+      intent: { businessUnitId: 'bu_plant_a', positions: ['qc_inspector', 'plant_superuser'] },
+      actorUserId: 'u_org_admin',
+      organizationId: 'org_1',
+    }).then(() => null, (e) => e);
+    expect([err?.code, err?.status]).toEqual(['PERMISSION_DENIED', 403]);
+    expect(err.message).toMatch(/position 'plant_superuser' carries permission set 'admin_full_access'.*by name/);
+  });
+
+  it("a unit of another organization is refused", async () => {
+    const err: any = await makeOrganizationService().assertIssuable({
+      intent: { businessUnitId: 'bu_other', positions: ['qc_inspector'] },
+      actorUserId: 'u_org_admin',
+      organizationId: 'org_1',
+    }).then(() => null, (e) => e);
+    expect([err?.code, err?.status]).toEqual(['PERMISSION_DENIED', 403]);
+    expect(err.message).toMatch(/business unit 'bu_other' is not a unit of the organization you administer/);
   });
 });

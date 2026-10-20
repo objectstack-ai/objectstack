@@ -7,15 +7,19 @@
  * lands in and the positions they are assigned on acceptance. Two halves,
  * and they must ship together:
  *
- *   1. **Issuance is authorized** against the issuer's `adminScope`
- *      (ADR-0090 D12) — a delegated admin may only invite into their own
- *      subtree and only attach positions whose permission sets are in their
- *      allowlist. Without this the feature would be a privilege-escalation
- *      hole: `organization_admin` is deliberately READ-ONLY on the RBAC
- *      tables (`auto-org-admin-grant.ts`) precisely so a fresh org admin
- *      cannot rebind themselves, and a platform that applied an unchecked
- *      invitation payload under system context would hand that authority
- *      straight back through the invitation surface.
+ *   1. **Issuance is authorized** against the issuer's authority as the
+ *      delegated-administration gate judges it (ADR-0090 D12) — a delegated
+ *      admin may only invite into their own subtree and only attach positions
+ *      whose permission sets are in their allowlist; an organization
+ *      administrator (D12 as amended 2026-10-17) only into a unit of its own
+ *      organization and only with positions inside the organization boundary
+ *      (every set they carry: no `'*'` superuser bit, no `adminScope`, only
+ *      `scope: 'org'` capabilities, none of the sets the ADR keeps outside by
+ *      name). That boundary is the safety premise: acceptance writes the rows
+ *      under system context, so an unchecked invitation payload would hand
+ *      out exactly what the boundary withholds — `admin_full_access`, a
+ *      platform capability, administration itself — through the invitation
+ *      surface.
  *   2. **Acceptance applies it** — the `sys_user_position` rows land with the
  *      better-auth membership, so a plant admin's invitee arrives already in
  *      the right unit and role instead of waiting on a platform admin.

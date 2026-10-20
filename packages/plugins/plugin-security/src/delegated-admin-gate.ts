@@ -69,6 +69,7 @@ import {
   seedCtx as organizationScopedCtx,
 } from './organization-scope.js';
 import { grantSetNameOf } from './grant-permission-set-name.js';
+import { isReservedIdentityName } from './objects/reserved-identity-names.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 /**
@@ -622,13 +623,16 @@ export class DelegatedAdminGate {
     // [ADR-0090 D12, amended 2026-10-17] An organization administrator places
     // into every unit of its organization and assigns every position inside
     // the organization boundary — `organizationAdminFailure`'s own test, so an
-    // option offered here is one the write path admits.
+    // option offered here is one the write path admits. The ADR-0068 D2
+    // identity names carry no sets, so the boundary does not settle them, but
+    // `sys_user_position.position` refuses them from every writer: they are
+    // not offered either.
     if (holdsOrganizationAdmin(sets) && organizationId) {
       for (const id of await this.organizationBusinessUnitIds(organizationId)) {
         if (!placeableBusinessUnitIds.includes(id)) placeableBusinessUnitIds.push(id);
       }
       for (const positionName of await allPositions()) {
-        if (assignablePositions.includes(positionName)) continue;
+        if (assignablePositions.includes(positionName) || isReservedIdentityName(positionName)) continue;
         let failure: unknown;
         try {
           failure = await this.positionBoundaryFailure(positionName);
