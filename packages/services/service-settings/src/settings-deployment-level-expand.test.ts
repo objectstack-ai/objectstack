@@ -217,7 +217,8 @@ describe('[18.x step 7] the global rung\'s history has one home: sys_setting_aud
   it('a global-scope row is refused before the driver sees it, and the writer\'s global row lands in the sibling', async () => {
     const { engine, svc, rows, writesTo } = await boot();
     await expect(engine.insert('sys_setting_audit', auditRow('global'), SYS)).rejects.toMatchObject({
-      code: 'VALIDATION_ERROR',
+      code: 'VALIDATION_FAILED',
+      fields: [expect.objectContaining({ field: 'scope' })],
     });
     expect(writesTo('sys_setting_audit')).toEqual([]);
 
