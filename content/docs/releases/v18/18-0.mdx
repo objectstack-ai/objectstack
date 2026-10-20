@@ -574,11 +574,11 @@ Every line here was answered by the walk's 18.0.0 server after the ceremony.
 #### 4. What 18.0.0 does not carry yet, and what it carries unlisted
 
 The v18 line keeps landing on `main`, and the version commit did not take
-everything that landed before it. Read on `main` at `fcb40ad673`: 18 pending
-changesets, five of them `minor`, so the release that publishes them is
+everything that landed before it. Read on `main` at `a7199ef974`: 20 pending
+changesets, six of them `minor`, so the release that publishes them is
 **18.1.0**. They fall in two sets.
 
-**Shipped in 18.0.0, listed in no 18.0.0 CHANGELOG.** Eight of the 18 belong to
+**Shipped in 18.0.0, listed in no 18.0.0 CHANGELOG.** Eight of the 20 belong to
 commits that landed before the 18.0.0 version commit (`06cab4849a`), so their
 code is in the 18.0.0 packages while their entries will first appear in
 18.1.0's CHANGELOG. Two of them reach an upgrade:
@@ -605,14 +605,15 @@ The other six are fixes with no edit for an upgrader, among them
 `invite-member`'s refusal of an unknown role with `code: 'ROLE_NOT_FOUND'`
 (#24846, in the 18.0.0 `@objectstack/plugin-auth`).
 
-**Not in 18.0.0.** Ten changesets belong to commits after the version commit,
-and only 18.1.0 carries them. One is `minor`:
+**Not in 18.0.0.** Twelve changesets belong to commits after the version
+commit, and only 18.1.0 carries them. Two are `minor`:
 `POST /api/v1/packages/:id/adopt-orphans` refuses a read-only package with
 `422 WRITABLE_PACKAGE_REQUIRED` (#24861; absent from the 18.0.0
-`@objectstack/runtime`). The rest are fixes: masked password inputs in the
-identity action dialogs, an impersonation session that a target's forced
-password reset no longer holds, `server.trustProxy` read for the vendored auth
-library's client address, and others.
+`@objectstack/runtime`), and a team record no longer lists Sessions (#24881).
+The rest are fixes: masked password inputs in the identity action dialogs, an
+impersonation session that a target's forced password reset no longer holds,
+`server.trustProxy` read for the vendored auth library's client address, and
+others.
 
 **18.x step 7, part 7a-2** — "a grant applies only in its own organization; the
 organization-less grant readers retire" — is an open pull request (#24872) and
