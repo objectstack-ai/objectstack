@@ -1,7 +1,7 @@
 ---
 title: services.audit — the audit log service API
 navTitle: services.audit
-description: Write ingress for audit events that are not CRUD — today, auth session events.
+description: Write ingress for audit events that are not CRUD — today, auth session events and sign-in outcome events on an account.
 ---
 
 - **Stability:** `experimental`
@@ -10,7 +10,8 @@ description: Write ingress for audit events that are not CRUD — today, auth se
 
 `services.audit` is the kernel service slot that `@objectstack/plugin-audit` registers
 during `init()`. It is the **write ingress for audit events that are not CRUD** — today,
-auth session events — and every call appends one row to `sys_audit_log`.
+auth session events and sign-in outcome events on an account — and every call appends one
+row to `sys_audit_log`.
 
 Record-level `create` / `update` / `delete` rows do **not** travel through this slot. The
 same plugin writes those from ObjectQL lifecycle hooks, with no service call involved, so
@@ -27,7 +28,7 @@ The slot's entire surface is one method:
 
 ```ts
 services.audit.recordAuthEvent(event: {
-  action: 'login' | 'logout';
+  action: 'login' | 'logout' | 'login_failed' | 'account_locked';
   userId: string;
   sessionId?: string;
   organizationId?: string;
@@ -43,18 +44,32 @@ services.audit.recordAuthEvent(event: {
   validates nothing in either direction — a misspelled action would be accepted silently.
   This union is the only structural protection an author gets, which is why the caller
   hands over an **event** (what happened) rather than a row (what to store).
+  - `login` / `logout` are **session events**: a sign-in that minted a session, and a
+    sign-out.
+  - `login_failed` / `account_locked` are **account events**: a refused password sign-in
+    that named an existing account, and the refused sign-in that stamped the account
+    lockout (`lockoutThreshold`, ADR-0069 D2). They exist without any session.
 - **`userId`** is required and must be a real `sys_user` id — it lands on the strict
-  `user_id` lookup.
-- **`sessionId`** lands on `record_id`, with `object_name` fixed to `sys_session`, so the
-  ledger row is navigable to the session it describes.
+  `user_id` lookup. On an account event it is the account the sign-in named.
+- **`sessionId`** lands on `record_id`, with `object_name` set to `sys_session`, so the
+  ledger row is navigable to the session it describes. An account event names its account
+  instead — `object_name` `sys_user` and `record_id` the account's id — and does not read
+  `sessionId`.
 - **`organizationId`** is the session's active organization. It stamps the row's tenant
   columns, and an unstamped row is one that non-administrator members can never see
   through the security layer's predicate.
+- **`ipAddress`** / **`userAgent`** are the client fingerprint by better-auth's own rule:
+  the session row's values for a session event, and the same resolution applied to the
+  sign-in request for an account event.
 - **`actor`** is the principal that *caused* the event when that is not the subject — an
   administrator's user id on an impersonation session. Omitted, the subject is recorded as
-  having acted for themselves.
+  having acted for themselves on a session event; an account event records no principal,
+  because a refused attempt authenticated nobody.
 - **`context`** is free-form and is serialized into `metadata`, e.g. the endpoint that
-  produced the event (`/sign-in/email`, `/sign-out`).
+  produced the event (`/sign-in/email`, `/sign-out`). On an account event it is the
+  endpoint, the refusal's machine code (`reason`, e.g. `INVALID_EMAIL_OR_PASSWORD` or
+  `ACCOUNT_LOCKED`) and, for `account_locked`, the lock's `locked_until` and `threshold`.
+  It never carries the attempted credential.
 
 ## Notes
 
@@ -64,8 +79,9 @@ services.audit.recordAuthEvent(event: {
   `kernel:ready`. The sink therefore resolves its engine per call, so it is safe to hold a
   reference from the moment the plugin initializes.
 - `@objectstack/plugin-auth` is the only in-repo consumer. It resolves the slot lazily
-  through a locally-declared structural surface and calls it from the session lifecycle,
-  so neither package depends on the other.
+  through a locally-declared structural surface and calls it from the session lifecycle
+  and from the password sign-in outcome, so neither package depends on the other. A
+  sign-in identifier that resolves to no account produces no call.
 
 ## Typical Errors
 
@@ -76,11 +92,12 @@ caller's side:
 
 - A failed ledger insert is reported at `error` level **once per cause** — a cause is the
   error's `code` plus the object the row is about, so every uncoded failure collapses into
-  one bucket and the object is always `sys_session` on this seam — and the row is simply
-  lost. Nothing retries it. A repeat of an **already-reported** cause drops to `debug`; a
-  **new** cause gets its own `error` line, once. The sign-in itself succeeded and returned
-  200, so the shipped `auth_events` list view and the system-overview widgets keep showing
-  an empty, healthy-looking screen.
+  one bucket per object, and the object is `sys_session` for a session event and
+  `sys_user` for an account event — and the row is simply lost. Nothing retries it. A
+  repeat of an **already-reported** cause drops to `debug`; a **new** cause gets its own
+  `error` line, once. The sign-in was answered exactly as it would have been without the
+  ledger, so the shipped `auth_events` list view and the system-overview widgets keep
+  showing an empty, healthy-looking screen.
 - The call **silently no-ops** when no data engine resolves, or when `userId` is absent.
   A caller that passes an event without a subject records nothing and is told nothing.
 - The most common cause of a failing insert is a datasource split rather than a broken

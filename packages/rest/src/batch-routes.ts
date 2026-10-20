@@ -53,6 +53,9 @@ import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 // The write-response rules (credential-class mask, `internal` omit) for
 // the cross-object batch's direct-engine update arm.
 import { omitInternalFieldsFromWriteResponse } from '@objectstack/core';
+// The engine's own by-id predicates, which `ObjectQL.update` / `.delete`
+// dispatch on — the cross-object batch's up-front id check asks them.
+import { resolveEngineDeleteDispatch, resolveEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { handleRouteError } from './error-response.js';
 import type { ServerScopedDataRequest } from './data-action-routes.js';
 import {
@@ -79,6 +82,64 @@ export interface BatchRouteHost {
     enforceApiAccess: RestServer['enforceApiAccess'];
     enforceBatchSize: RestServer['enforceBatchSize'];
     loadObjectItems: RestServer['loadObjectItems'];
+}
+
+/** One operation of the cross-object batch, as the spec contract parses it. */
+type CrossObjectBatchOp = {
+    object: string;
+    action: 'create' | 'update' | 'delete';
+    id?: string;
+    data?: Record<string, any>;
+};
+
+/**
+ * A field value of the form `{ $ref: <earlier op index> }`: an intra-batch
+ * reference the cross-object batch resolves, inside the transaction, to that
+ * op's created id. One spelling for the resolver and for the up-front id check,
+ * so the check never judges a value the resolver would have replaced.
+ */
+function isBatchRef(value: unknown): value is { $ref: unknown } {
+    return Boolean(value) && typeof value === 'object' && '$ref' in (value as object);
+}
+
+/**
+ * The row an `update` / `delete` op of the cross-object batch addresses. The
+ * up-front refusal and both write arms read it HERE, so the refusal cannot pass
+ * an op that its arm then hands to the engine without an id.
+ *
+ * - `update`: `id`, else the payload's `data.id`. An `id` key that is present
+ *   wins even when it names no row: it is refused, and the payload's id does
+ *   not silently replace it.
+ * - `delete`: `id` alone. The delete arm addresses `where: { id }` and never
+ *   read `data.id`, which the spec declares as the create/update payload. The
+ *   up-front check used to accept `data.id` for a delete anyway, and the op
+ *   then reached the engine with no address at all.
+ */
+function batchOpRowAddress(op: CrossObjectBatchOp, data: Record<string, any> | undefined): unknown {
+    return op.action === 'delete' ? op.id : (op.id ?? data?.id);
+}
+
+/**
+ * Does this address name no row the engine could write? Such an op is refused
+ * up front with the answer a missing id gets. Before, it reached `ql.update` /
+ * `ql.delete`, whose `… requires an ID or options.multi=true` throw answered as
+ * a 500.
+ *
+ * Judged by the engine's OWN by-id predicates (`resolveEngineUpdateDispatch` /
+ * `resolveEngineDeleteDispatch`, the functions `ObjectQL.update` and
+ * `ObjectQL.delete` dispatch on), never by a mirrored `if`. A by-id address is
+ * a TRUTHY scalar. So `undefined`, `null`, `''`, `0`, a boolean, an object and
+ * an array name no row. A whitespace string does name one: the engine looks it
+ * up and answers 404 when no row has it. ⛔ This is not an id FORMAT check.
+ *
+ * A `{ $ref }` is not judged here. It is resolved inside the transaction, and
+ * a reference to no earlier create is refused there (`BATCH_UNRESOLVED_REF`).
+ */
+function namesNoRow(action: 'update' | 'delete', address: unknown): boolean {
+    if (isBatchRef(address)) return false;
+    return action === 'delete'
+        ? resolveEngineDeleteDispatch({ where: { id: address } }).kind !== 'by-id'
+        : resolveEngineUpdateDispatch({ id: address }, undefined).kind !== 'by-id';
 }
 
 /**
@@ -185,7 +246,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     res.status(400).json({ error: 'Invalid batch request', code: 'VALIDATION_FAILED', issues: parsed.error?.issues });
                     return;
                 }
-                const ops: Array<{ object: string; action: 'create' | 'update' | 'delete'; id?: string; data?: Record<string, any> }> = parsed.data.operations;
+                const ops: CrossObjectBatchOp[] = parsed.data.operations;
                 // All-or-nothing by construction: refuse a request that asks for
                 // non-atomic semantics rather than silently applying atomically
                 // (honest contract). Per-object partial batches use the
@@ -201,9 +262,11 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                 if (this.enforceBatchSize(res, ops.length, maxBatch)) return;
 
                 // update/delete need a target id — the schema can't express this
-                // conditionally, so surface it as a 400 up front.
+                // conditionally, so surface it as a 400 up front. "Missing" is
+                // the address the op's arm would hand the engine naming no row
+                // (`namesNoRow`): a blank id gets the answer an absent one does.
                 for (const op of ops) {
-                    if ((op.action === 'update' || op.action === 'delete') && op.id == null && op.data?.id == null) {
+                    if ((op.action === 'update' || op.action === 'delete') && namesNoRow(op.action, batchOpRowAddress(op, op.data))) {
                         res.status(400).json({ error: `Operation '${op.action}' on '${op.object}' requires an id`, code: 'VALIDATION_FAILED' });
                         return;
                     }
@@ -240,8 +303,8 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     if (!data || typeof data !== 'object') return data;
                     const result: any = Array.isArray(data) ? [] : {};
                     for (const [k, v] of Object.entries(data)) {
-                        if (v && typeof v === 'object' && '$ref' in (v as any)) {
-                            const idx = (v as any).$ref;
+                        if (isBatchRef(v)) {
+                            const idx = v.$ref;
                             const ref = typeof idx === 'number' ? out[idx] : undefined;
                             const refId = ref && (ref.id ?? ref._id);
                             if (refId == null) {
@@ -309,7 +372,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                             // and `readonlyWhen` (#3042) on its own update path,
                             // and reports them through this listener.
                             const onFieldsDropped = (e: DroppedFieldsEvent) => { dropped.push({ ...e, index }); };
-                            const id = op.id ?? data?.id;
+                            const id = batchOpRowAddress(op, data);
                             const updated = await ql.update(op.object, { ...data, id }, { context: trxCtx, onFieldsDropped });
                             // [#7823] …but the RESPONSE half moved to the ingress
                             // (A-prime ruling, 2026-08-13): the engine keeps its
@@ -330,7 +393,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                                 out.push(updated);
                             }
                         } else { // 'delete'
-                            out.push(await ql.delete(op.object, { where: { id: op.id }, context: trxCtx }));
+                            out.push(await ql.delete(op.object, { where: { id: batchOpRowAddress(op, data) }, context: trxCtx }));
                         }
                     }
                     return out;

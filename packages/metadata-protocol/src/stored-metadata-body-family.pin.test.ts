@@ -43,7 +43,9 @@
  *  - [#24358] the engine's two relationship hydrations outside that loader,
  *    `expand` and the master-detail `parent` root → `@objectstack/objectql`
  *    (`engine-hydration-stored-metadata-body.test.ts`: the engine never
- *    hydrates a reference or a header into the family);
+ *    hydrates a reference or a header into the family), and [#24677] the
+ *    author-time refusal of the reference field itself → `@objectstack/lint`
+ *    (`validate-expressions.stored-metadata-body-reference.test.ts`);
  *  - the generic data door reads / groupBy / filter+sort → this package
  *    (`protocol.data-door-stored-metadata-redaction.test.ts`, and the behaviour
  *    asserted below).
@@ -166,6 +168,14 @@ const FAMILY_SURFACES = [
     disposition: 'refuses',
     pin: '@objectstack/objectql (engine-hydration-stored-metadata-body.test.ts)',
   },
+  // [#24677] The declaration both hydrations above presuppose, refused where it
+  // is written: the engine guards stay for installed artifacts, which run no
+  // authoring rule.
+  {
+    surface: 'author time: a lookup or master_detail field whose reference is in the family (os validate, os build, the object save door)',
+    disposition: 'refuses',
+    pin: '@objectstack/lint (validate-expressions.stored-metadata-body-reference.test.ts) + this package (protocol.runtime-authoring-gate.test.ts)',
+  },
 ] as const;
 
 /** A stored datasource body as it sits in the `metadata` column: serialized JSON with credential material. */
@@ -238,8 +248,9 @@ describe('[#21120] stored-metadata-body family — the data door exposes only co
     // + [#21207] the thirteen surfaces of the stored content hash, and the two
     // of the history change note that can quote one, + [#24316] the three of
     // the one-hop read through a reference, + [#24358] the two relationship
-    // hydrations outside it.
-    expect(FAMILY_SURFACES).toHaveLength(28);
+    // hydrations outside it, + [#24677] the author-time refusal of the
+    // reference field they presuppose.
+    expect(FAMILY_SURFACES).toHaveLength(29);
   });
 });
 

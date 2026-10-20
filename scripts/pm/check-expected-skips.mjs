@@ -270,6 +270,13 @@ export const EXPECTED_SKIPS = Object.freeze([
     reason: 'opt-in by the `needs:pack-smoke` label; skipped on every PR that does not carry it, once per pull_request event',
   },
   {
+    name: '18.x upgrade harness (opt-in)',
+    workflow: 'upgrade-harness-optin.yml',
+    job: 'upgrade-harness',
+    gate: { kind: 'label', label: 'needs:upgrade-harness' },
+    reason: 'opt-in by the `needs:upgrade-harness` label (the 18.x line\'s R2 check, #24522); skipped on every PR that does not carry it, once per pull_request event',
+  },
+  {
     name: 'Build Core',
     workflow: 'ci.yml',
     job: 'build-core',

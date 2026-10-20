@@ -359,8 +359,12 @@ export const objectForm = defineForm({
 
             // Formula / summary
             // `expression`, not `formula` — the key is named for what it holds,
-            // not for the field type that uses it.
-            { field: 'expression', type: 'code', language: 'expression', helpText: 'CEL formula expression', visibleWhen: "data.type == 'formula'" },
+            // not for the field type that uses it. Shown for every type, as the
+            // field designer's own row in `field.form.ts` is: `FieldSchema`
+            // accepts `expression` on any type, and on a non-formula field the
+            // engine computes and stores it on write (`planStoredExpressions`),
+            // so a formula-only row hid a live key on a stored field.
+            { field: 'expression', type: 'code', language: 'expression', helpText: 'CEL expression the field\'s value is computed from. On a formula field: computed on read, no stored column. On any other field: computed by the engine from the row each write stores, and stored, so a client-sent value never stands.' },
             // The five members are what `FieldSchema.returnType` declares, and
             // the same explicit list the field designer's own control carries
             // in `field.form.ts` (#19677). This grid additionally offered

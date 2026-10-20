@@ -2520,8 +2520,8 @@ export class TursoDriver extends SqlDriver {
    * {@link SqlDriver.applyTenantScope} a bare Knex query builder and compiles
    * what the chokepoint added. So the rule's decisions all stay in that one
    * method:
-   *  - the NULL-organization arm (a platform row with no organization is no
-   *    other tenant's);
+   *  - the organization equality (a row with no organization is no tenant's,
+   *    ADR-0131 D1, so no scope reaches it);
    *  - the `group` posture's membership set (`tenantIds`, the union Layer 0
    *    enforces);
    *  - the exits for a call with no tenant context and for an object with no

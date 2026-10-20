@@ -86,9 +86,19 @@ export const SysApprovalDelegation = ObjectSchema.create({
       group: 'Delegation',
     }),
 
+    // A delegation names its own author as delegator: on every non-system
+    // write `bindDelegationWriteGuard` (lifecycle-hooks.ts) admits exactly one
+    // value here, the acting user, and refuses any other with 403 (its
+    // docstring holds why there is no admin exemption). So the picker offers
+    // that one value, instead of every user with all but one refused:
+    // `lookupFilters` is the picker's candidate query, and the engine resolves
+    // `{current_user_id}` against the caller on every read. Presentation only
+    // — the guard stays the enforcement, and what a write may store is
+    // unchanged. Pinned in `sys-approval-delegation-delegator-picker.test.ts`.
     delegator_id: Field.lookup('sys_user', {
       label: 'Delegator',
       required: true,
+      lookupFilters: [{ field: 'id', operator: 'eq', value: '{current_user_id}' }],
       group: 'Delegation',
       description: 'The user going out of office; their individually-routed approver slots are rerouted while active.',
     }),

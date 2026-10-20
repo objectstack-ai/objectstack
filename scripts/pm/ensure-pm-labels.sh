@@ -326,6 +326,16 @@ done
 # would assert a kinship the paragraph above spends its length denying.
 gh label create needs:pack-smoke -R objectstack-ai/objectstack -c 006b75 -d "Opt-in pre-merge pack smoke: self-declared breaking auth/audience change (see CONTRIBUTING.md)" 2>/dev/null || true
 
+# needs:upgrade-harness — the opt-in pre-merge 18.x upgrade harness (#24522;
+# ruling record 6266750393 on #15194, R2). Its consumer is the job guard in
+# `.github/workflows/upgrade-harness-optin.yml`, which boots the PR's merge
+# preview on the 18.0 fixture only while this label is on the PR. Like
+# needs:pack-smoke it names a property of the CHANGE, not a board position: the
+# epic seat hangs it on each 18.x line PR, nothing auto-applies it, and no sweep
+# in scripts/pm/ reads it. Same colour as needs:pack-smoke, the one family it
+# belongs to: an opt-in pre-merge check.
+gh label create needs:upgrade-harness -R objectstack-ai/objectstack -c 006b75 -d "Opt-in pre-merge 18.x upgrade harness: an 18.0 database boots on this PR's merge preview (#24522)" 2>/dev/null || true
+
 # needs:contract-review — a MARKER, never a gate; rules in
 # .claude/skills/pm-dispatch/references/contract-review.md 〈等复核标记〉. The
 # dispatching seat hangs it on the PR at ACCEPT when either clause-② limb hits

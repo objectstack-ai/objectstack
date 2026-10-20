@@ -324,7 +324,19 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
     );
     seed.productId = await firstId('showcase_product');
     seed.projectId = await firstId('showcase_project');
-    seed.invoiceId = await firstId('showcase_invoice');
+    // NOT `firstId` either, for the same reason as the account: the showcase
+    // locks a PAID invoice's lines (its `showcase_guard_paid_invoice_line_*`
+    // hooks), so a line can be neither added under one nor removed from one.
+    // `firstId` takes whichever invoice a `limit: 1` read returns, and with
+    // random ids that is a different invoice on every boot — several seeded
+    // invoices are paid, so the admin control below failed on some boots and
+    // not others. Every line this file creates under a seeded invoice hangs
+    // off this one, so the parent is chosen by the state the lock reads.
+    seed.invoiceId = String(
+      (await ql.find('showcase_invoice', {
+        where: { status: { $ne: 'paid' } }, limit: 1, context: SYS,
+      }))?.[0]?.id ?? '',
+    );
     seed.expenseReportId = await firstId('showcase_expense_report');
     seed.teamId = await firstId('showcase_team');
     expect(
