@@ -1337,7 +1337,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause, and the credential-migration bind arm is no longer scored from its unit pin. PR #24891's carried finding (round 15 respelled this ref and left its scope, 'pins route behavior + envelope', unnarrowed), read under RUNNER rule 6 and the theme-B rule. Read at base feb09db14a: both ref pins mount registerDatasourceAdminRoutes on the real HonoHttpServer adapter over stubbed services and a fake auth service, so they score acceptance[7] (test oracle), negative[4] and negative[5] (attributions the route layer owns) whole, and hold only route-layer halves of acceptance[0], [2], [4], [6] and [8]. The capability floor has its own pin (admin-routes-auth-guard.test.ts), which this ref does not name. acceptance[3] (verify, evidence) and steps[8] scored the bind arm from datasource-credential-migration.test.ts, which drives the re-homing planner over row objects, under an api clause; that arm is now blocked(fixture) where the row cannot be planted, with the pin beside it, as the narrowed ref implies. No clause changed",
-          "ref": "#PENDING-24579R16"
+          "ref": "#24963"
         }
       ]
     },
@@ -1935,7 +1935,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "acceptance[0].verify and fixtures.knownGaps[0] no longer fall back to the unit pin for the wire shapes. PR #24891's carried finding (round 15's acceptance notes: the 'score from the pin' spelling, wire-shape clauses), read under RUNNER rule 6. acceptance[0] is a network clause: what the echo upstream received. packages/connectors/connector-rest/src/rest-connector.test.ts drives applyAuth through a stubbed fetch (read at base feb09db14a), so without the echo upstream the clause is blocked(fixture), with the pin beside it. No clause changed",
-          "ref": "#PENDING-24579R16"
+          "ref": "#24963"
         }
       ]
     },

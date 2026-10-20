@@ -306,7 +306,7 @@
           "revision": 8,
           "date": "2026-10-20",
           "change": "negative[1] moved to steps[6]. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4): it stated a runner rule (the deny side run as admin proves nothing) with no product expectation, so it could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). The outcome it guards, a hit or a total for the member from a row it cannot see, is already negative[0]. Its text moved, unchanged in substance, to steps[6], and traps keeps wrong-persona. No acceptance clause changed",
-          "ref": "#PENDING-24579R16"
+          "ref": "#24963"
         }
       ]
     },

@@ -107,7 +107,7 @@
           "revision": 8,
           "date": "2026-10-20",
           "change": "acceptance[3] narrowed to its server half, with the console half appended as acceptance[5]. Checklist-accuracy finding of QA run #24838 (18.0 sweep round 4 at 307ce4c4): acceptance[3] bundled GET /_console/ with the app-metadata read, so a run with no console build (QA runs #24838 and #24786: /_console/ answered 503) could never pass it, although the metadata half held. The two halves now score apart, and acceptance[5] says what an unbuilt tree answers and that it is blocked(environment) (console.ts createConsoleNotBuiltPlugin, read at base feb09db14a). No other clause changed",
-          "ref": "#PENDING-24579R16"
+          "ref": "#24963"
         }
       ]
     },
@@ -1988,7 +1988,7 @@
           "revision": 7,
           "date": "2026-10-20",
           "change": "negative[5] removed. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4): it stated a recording rule (a browse-leg upstream failure on an egress-blocked runner is not a product defect; score blocked(environment)) with no product expectation, so it could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). Its text already stands, unchanged in substance, in fixtures.knownGaps[0] (on an egress-blocked or air-gapped runner the leg scores blocked(environment), never a product FAIL; what this item scores about browse is the MOUNT), so nothing was added. No acceptance clause changed",
-          "ref": "#PENDING-24579R16"
+          "ref": "#24963"
         }
       ]
     },
@@ -2182,7 +2182,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "negative[3] moved to steps[6]. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4): it stated a filing rule (a flag/route contradiction belongs to the marketplace item's clause 1; do not double-file) with no product expectation, so it could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). Its text moved, unchanged in substance, to steps[6]. No acceptance clause changed",
-          "ref": "#PENDING-24579R16"
+          "ref": "#24963"
         }
       ]
     },
@@ -2839,7 +2839,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "steps[0] names the namespace prefix; negative[2] and negative[3] removed. Checklist-accuracy findings of QA run #24841 (18.0 sweep round 4 at 307ce4c4). (1) The scratch object needs the package namespace prefix: QA run #24841's unprefixed qa_seedprobe draft saved 200, and its publish answered 422 NAMESPACE_PREFIX. Read at base feb09db14a: the publish doors judge objectNamespacePrefixViolation (protocol.ts, ADR-0129 D2), and a runtime-created package with no namespace takes deriveNamespaceFromPackageId. (2) negative[2] and negative[3] stated a recording rule and a fixture rule with no product expectation, so they could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). negative[2]'s text already stands, unchanged in substance, in steps[5] and acceptance[4] (do not tick 'replace scoped to its own object'; there is no deletion to scope). negative[3]'s stands in fixtures.requires[1], which now carries its reason as well (it contaminates platform-core.seed-integrity's baselines). No acceptance clause changed",
-          "ref": "#PENDING-24579R16"
+          "ref": "#24963"
         }
       ]
     },
@@ -3202,7 +3202,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0] added, a cross-reference. Checklist-accuracy finding of QA run #24838 (18.0 sweep round 4 at 307ce4c4): neither ceremony item had a clause for a real 18.0 pre-release database. The clause is cli.organization-ownership-ceremony acceptance[5], because that item's title names an 18.0 pre-release database and this item's names a 17.x-shaped one; this item points at it. Its scope does not cover fresh installs, so the order #24827 fixed (os migrate apply before the first os serve) is not added here. Read at base feb09db14a. No clause changed",
-          "ref": "#PENDING-24579R16"
+          "ref": "#24963"
         }
       ]
     },

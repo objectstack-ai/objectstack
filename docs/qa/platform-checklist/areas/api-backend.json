@@ -1699,7 +1699,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0] no longer falls back to the unit pin for the MCP clause. PR #24891's carried finding (round 15's acceptance notes: the 'score from the pin' spelling, the MCP clause's unit fallback), read under RUNNER rule 6. acceptance[4]'s oracle is the MCP tool's answer. The 'door 2' case of packages/runtime/src/domains/action-activation-dispatch.test.ts calls invokeBusinessAction in-process over a stubbed engine and metadata service (read at base feb09db14a), so where the endpoint is not mounted the clause is blocked(environment), with the pin beside it. No clause changed",
-          "ref": "#PENDING-24579R16"
+          "ref": "#24963"
         }
       ]
     },

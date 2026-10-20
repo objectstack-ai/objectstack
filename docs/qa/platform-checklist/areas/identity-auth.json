@@ -1075,7 +1075,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "steps[5]'s expiry leg runs without a clock wait. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4; QA run #24838 ran the same leg): the step said 'let the token expire', and a reset token lives an hour (resetPasswordTokenExpiresIn || 3600, better-auth 1.7.3 routes/password.mjs). It now writes the token's sys_verification.expires_at into the past, the simulation both records measured (400 INVALID_TOKEN, the password unchanged). Read at base feb09db14a: AUTH_VERIFICATION_CONFIG maps expiresAt to expires_at; no verification.storeIdentifier is set, so the identifier is stored plain; consumeVerificationValue treats a row past expiresAt as invalid. The record's other finding (requires and steps still naming sys_email) no longer holds: revision 4 (#24824) moved them to sys_identity_email, and the sys_email mentions left say 'never sys_email'. No clause changed",
-          "ref": "#PENDING-24579R16"
+          "ref": "#24963"
         }
       ]
     },

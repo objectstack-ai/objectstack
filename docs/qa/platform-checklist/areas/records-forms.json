@@ -236,7 +236,7 @@
           "revision": 12,
           "date": "2026-10-20",
           "change": "acceptance[4].verify names the object the objectui spec drives. Round 14's out-of-scope finding (report 6289612504 on PR #24857, wave anchor #24579): it said the spec pins the History contract 'on showcase Project'. Read at objectstack's .objectui-sha pin 616df6598b42 (objectui blob 7ebc45106cff): e2e/live/record-history-display.spec.ts creates and patches a showcase_account, the showcase's enable.trackHistory object, and asserts its option labels, the localized signed_on date and the resolved owner. The live verdict at the pin is not measured here. No clause changed",
-          "ref": "#PENDING-24579R16"
+          "ref": "#24963"
         }
       ]
     },
@@ -4325,7 +4325,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "acceptance[4].clause states what its oracle measures, and automated.ref's sentence quoting the old wording follows it. PR #24891's carried finding (round 15 left the clause text, 'the same 409 UNIQUE_VIOLATION over REST', under a test oracle). Read at base feb09db14a: the SQL pins drive SqlDriver over better-sqlite3 and map each refusal through a test-local createAsApi helper with isUniqueViolationError (@objectstack/types), the predicate envelopeUniqueViolation (objectql duplicate-record-error.ts) builds the 409 on; no pin drives a REST door. acceptance[0]–[3] drive the REST door live, so no knownGaps line is owed. The scope matrix the clause asserts is unchanged",
-          "ref": "#PENDING-24579R16"
+          "ref": "#24963"
         }
       ]
     },
