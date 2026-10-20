@@ -11,9 +11,9 @@
     "a pin bump without regeneration goes RED there — that is the anti-rot half of the freshness gate.",
     "Regenerate + re-record: pnpm objectui:build && node scripts/gen-sdui-manifest-node.mjs"
   ],
-  "objectuiSha": "616df6598b429d2b3687301a2041198928e68971",
+  "objectuiSha": "cf153eb2e5351505abf3b82fb76bfdc9a841bbde",
   "source": "built-tree",
-  "modulesRoot": ".cache/objectui-616df6598b42/apps/console",
+  "modulesRoot": ".cache/objectui-cf153eb2e535/apps/console",
   "objectuiWorkspaceVersion": "17.7.0",
   "generator": "scripts/gen-sdui-manifest-node.mjs",
   "generatedAt": "2026-10-20",
