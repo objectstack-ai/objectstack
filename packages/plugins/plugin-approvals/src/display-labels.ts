@@ -23,6 +23,14 @@
  * string counts as no label — the spec allows one (`FlowSchema.label` and
  * `FlowNodeSchema.label` are `z.string()` with no minimum) — so the chain falls
  * through to the machine name instead of showing a blank cell.
+ *
+ * [#24863] The chain answers the AUTHORED label, in the language the flow was
+ * written in. The approvals door then serves the reader's-locale translation
+ * over it where the reader's language pack carries one
+ * (`reader-locale-labels.ts`), a read-time pick that never writes the columns.
+ * So the lists and the door show the same label to a reader with no
+ * translation, and a reader whose pack translates the flow or the step sees
+ * the translation on the door and the stored text on the lists.
  */
 
 /**

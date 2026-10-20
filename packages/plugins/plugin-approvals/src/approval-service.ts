@@ -3766,6 +3766,9 @@ export class ApprovalService implements IApprovalService {
       // a reader (`sys-approval-request.object.ts` documents each column).
       // An empty authored label counts as none: the chain falls through to
       // the humanized machine name, the label the approvals door served.
+      // [#24863] The approvals door serves the reader's-locale translation of
+      // both labels over this snapshot at read time (`reader-locale-labels.ts`);
+      // the stored text stays the authored one.
       process_label: labelOrMachineName(input.flowLabel, processName) ?? null,
       current_step: input.nodeId,
       current_step_label: labelOrMachineName(input.nodeLabel, input.nodeId) ?? null,
