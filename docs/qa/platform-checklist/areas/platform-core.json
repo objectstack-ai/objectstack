@@ -3042,10 +3042,10 @@
     },
     {
       "id": "platform-core.v18-boot-refusals",
-      "title": "A v18 server refuses to boot rather than serve wrongly: against a 17.x-shaped database (a physical organization_id on a non-tenant table, no verified ADR-0131 ceremony marker) it stops before listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED naming the tables and the command, and with security on but no identity objects it stops with AuthzIdentityObjectsMissingError",
+      "title": "A v18 server refuses to boot rather than serve wrongly: against a 17.x-shaped database (a physical organization_id on a non-tenant table, no verified ADR-0131 ceremony marker) it stops before listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED, naming the tables and saying that 18.0 supports fresh installs only, and with security on but no identity objects it stops with AuthzIdentityObjectsMissingError",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -3070,9 +3070,9 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "the v18 serve against the v17 DB exits 1 before kernel:listening with the organization-ownership refusal, which names the tables and `os migrate organization-ownership`. ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED is that refusal's `code` (packages/runtime/src/organization-ownership-boot-guard.ts#OrganizationOwnershipBootRefusal) and the boot never prints it — `os serve` prints the refusal's message only — so the code is the pins' evidence (acceptance[0]), not this log's",
+          "clause": "the v18 serve against the v17 DB exits 1 before kernel:listening with the organization-ownership refusal, which names the tables and ends with the 18.0 sentence (\"18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path, and upgrade it there.\"), and names neither `os migrate organization-ownership` nor any step of it (no `--out PLAN`, no `--apply --plan-file`): 18.0 refuses that command on every database (NOT_IMPLEMENTED). ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED is that refusal's `code` (packages/runtime/src/organization-ownership-boot-guard.ts#OrganizationOwnershipBootRefusal) and the boot never prints it — `os serve` prints the refusal's message only — so the code is the pins' evidence (acceptance[0]), not this log's",
           "oracle": "log",
-          "verify": "boot output + exit code + no listening line: the printed refusal names each table still carrying organization_id and the `os migrate organization-ownership` command. ⛔ Do not grep the log for the code literal — it is not printed (packages/cli/src/commands/serve.ts prints the refusal's message)",
+          "verify": "boot output + exit code + no listening line: the printed refusal names each table still carrying organization_id and ends with \"18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path, and upgrade it there.\"; the refusal excerpt has 0 hits each for `--out PLAN`, `--plan-file` and `os migrate organization-ownership`. ⛔ Do not grep the log for the code literal — it is not printed (packages/cli/src/commands/serve.ts prints the refusal's message)",
           "evidence": "the refusal excerpt"
         },
         {
@@ -3123,6 +3123,12 @@
           "date": "2026-10-19",
           "change": "steps[1], acceptance[1] (clause, verify) and acceptance[3].verify corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.v18-boot-refusals; wave anchor #24579 §3). steps[1] booted `os dev` with `services: {auth: false}`, which is not a stack key (packages/spec/src/stack.zod.ts), so the run recorded acceptance[3] blocked(fixture); a stock boot composes the security plugin only beside AuthPlugin (packages/core/src/stack-auth.ts resolvePlatformAuthComposition), so the step now names a scratch config that mounts SecurityPlugin itself with the auth tier off, marked as not yet replayed live, and acceptance[3] names its pin as the fallback. acceptance[1] said the boot exits with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED on a log oracle; that literal is only the refusal error's code (OrganizationOwnershipBootRefusal) and serve.ts prints the message alone, so the log oracle now reads the named tables and command and the code is left to the pins. acceptance[2] and steps[0] (#24592) are unchanged",
           "ref": "#24632"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-19",
+          "change": "title and acceptance[1] (clause, verify) re-worded for 18.0's boot refusal text (card #24651). In 18.0 `os migrate organization-ownership` refuses plan and apply on every database (NOT_IMPLEMENTED: 18.0 supports fresh installs only), so the boot refusal no longer names that command or its `--out PLAN` / `--apply --plan-file PLAN --backup-taken` steps. Every branch now ends with \"18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path, and upgrade it there.\" (packages/runtime/src/organization-ownership-boot-guard.ts, freshInstallsOnly; `os serve --dev` says \"a v17 development database\"). The clause asserted that the refusal names the command, so a run against the new text would have recorded FAIL on a correct product. It now asserts the tables, that sentence, and the absence of the command and its steps. The ⛔ on the code literal is kept. acceptance[0], acceptance[2], acceptance[3] and both steps are unchanged",
+          "ref": "#24682"
         }
       ]
     },
