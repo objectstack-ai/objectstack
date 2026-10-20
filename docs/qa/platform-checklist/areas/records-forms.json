@@ -577,7 +577,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "automated.stale removed, automated.ref scoped per objectui spec, and acceptance[5].verify narrowed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired both specs the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. user-filters.spec.ts: blob aa52b2b8de2a at the old pin 12dc7b47c340, ab50146bcfd0 at both 0b36ffa and 616df6598b42; the tabs case moved to the Task Triage page, the switcher is read through the Display popover, the grid's cells are gridcells, and the lookup quick-filter case is retired (the shipped showcase declares no lookup user filter). inline-edit-polish-2572.spec.ts: blob 84e0677df02e, then 4cc1557d475f at both; it creates its own project and asserts the lock at exec_review. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, both repaired specs assert less than the clauses the stale record sent to hand-driving: the switcher case reads the six entries but switches only to Kanban and reads no records (acceptance[7]'s whitelist half), and inline-edit-polish asserts the PATCH's keys on a Project record page but never re-reads the row (acceptance[5]'s PATCH half). So the ref and acceptance[5].verify narrow to those halves. saved-view-filter.spec.ts (blob 94a201c63a0a at all three) keeps acceptance[1]. No clause changed",
-          "ref": "#PENDING-24579R14"
+          "ref": "#24857"
         }
       ]
     },
@@ -915,7 +915,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "automated.stale removed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired field-conditional-rules.spec.ts, the one spec the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is c37a93cdc839 at the old pin 12dc7b47c340 and 4e8c3d6ebec3 at both 0b36ffa and 616df6598b42: at paid it now expects tax_rate's input gone and the read-only field group shown, and an editable input again at sent and draft. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the spec asserts all three clauses the ref claims for it (acceptance[0]'s required marker, acceptance[2]'s client lock and acceptance[3]), so the ref keeps them and its stale note gives way to what the spec drives. required-when-submit.spec.ts keeps acceptance[0]. No clause changed",
-          "ref": "#PENDING-24579R14"
+          "ref": "#24857"
         }
       ]
     },
@@ -1160,7 +1160,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "automated.stale removed, automated.ref scoped per case and acceptance[0].verify narrowed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired the re-filter case the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. cascading-options.spec.ts: blob 648d5c917d19 at the old pin 12dc7b47c340, 5f65228948b7 at both 0b36ffa and 616df6598b42; the case now waits for the flat ModalForm's modal-form-footer instead of md-form-submit. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the case asserts less than acceptance[0], which the stale record sent to hand-driving: it enumerates province under cn and under us and sees Zhejiang leave the trigger, but never reads the province before a country is chosen. So the ref and acceptance[0].verify narrow to the re-filter and clear halves. The server case keeps acceptance[1]. No clause changed",
-          "ref": "#PENDING-24579R14"
+          "ref": "#24857"
         }
       ]
     },
@@ -1290,7 +1290,7 @@
           "revision": 7,
           "date": "2026-10-20",
           "change": "automated.stale removed and automated.ref scoped for form-view-subforms.spec.ts — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired form-view-subforms.spec.ts, the one spec the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is 4f2a95b529f3 at the old pin 12dc7b47c340 and 9485f378abd7 at both 0b36ffa and 616df6598b42: it now finds the Line Items section by its heading role, so the dialog's screen-reader-only description no longer collides with the locator. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, it asserts acceptance[4], the clause the stale record sent to hand-driving, and the ref now names that scope and no wider one. master-detail.spec.ts keeps acceptance[0]. No clause changed",
-          "ref": "#PENDING-24579R14"
+          "ref": "#24857"
         }
       ]
     },
@@ -1428,7 +1428,7 @@
           "revision": 7,
           "date": "2026-10-20",
           "change": "automated.stale removed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired detail-related-list.spec.ts, the only pin, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is 48a1d10e59da at the old pin 12dc7b47c340 and f12f7237fd6f at both 0b36ffa and 616df6598b42: it now reads the record id from the /record/ID route a Northwind row opens, and finds the primary Projects list in its own tab. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, it asserts acceptance[2], the one clause the ref claims, so the ref keeps it and loses its stale note. No clause changed",
-          "ref": "#PENDING-24579R14"
+          "ref": "#24857"
         }
       ]
     },
@@ -2457,7 +2457,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "automated.stale removed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired user-filters.spec.ts, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is aa52b2b8de2a at the old pin 12dc7b47c340 and ab50146bcfd0 at both 0b36ffa and 616df6598b42: the filter-tabs case now drives the tabs element on the Task Triage interface page (ADR-0053), and the lookup quick-filter case is retired. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the two cases the ref claims assert acceptance[4]'s two halves as it says (uf_priority=urgent and uf__tab=urgent each survive a reload), so the ref keeps acceptance[4] and loses its stale note. No case this item cites was retired. No clause changed",
-          "ref": "#PENDING-24579R14"
+          "ref": "#24857"
         }
       ]
     },
@@ -3949,7 +3949,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "automated.stale removed and automated.ref scoped per pin — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired the cascading-options.spec.ts re-filter case the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is 648d5c917d19 at the old pin 12dc7b47c340 and 5f65228948b7 at both 0b36ffa and 616df6598b42; the case now waits for the flat ModalForm's modal-form-footer instead of md-form-submit. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the case asserts acceptance[0]'s re-filter and cleared trigger but never submits, so the ref says the submit half is driven by hand. The objectql pin's scope (acceptance[1] and acceptance[2]), which only the stale record's runnerRule carried, moves into the ref unchanged. No clause changed",
-          "ref": "#PENDING-24579R14"
+          "ref": "#24857"
         }
       ]
     },
@@ -4594,7 +4594,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "automated.stale removed — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired record-history-display.spec.ts, the one spec the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. Its blob is 2c4d8a674f81 at the old pin 12dc7b47c340 and 7ebc45106cff at both 0b36ffa and 616df6598b42: it now targets showcase_account, the showcase's enable.trackHistory object, with no app-todo skip guard. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, it asserts the History tab's display values on showcase_account (crud-roundtrip's contract, per negative[3]) and opens no task detail, so it still claims no clause here, and the ref now says so. The two plugin-audit pins keep their scope. No clause changed",
-          "ref": "#PENDING-24579R14"
+          "ref": "#24857"
         }
       ]
     },

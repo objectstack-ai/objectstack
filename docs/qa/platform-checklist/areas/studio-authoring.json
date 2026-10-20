@@ -191,7 +191,7 @@
           "revision": 7,
           "date": "2026-10-20",
           "change": "automated.stale removed, automated.ref scoped per case, and steps[3]'s note on F4 corrected — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired studio-object-designer.spec.ts, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. The spec's blob is 5967807df335 at the old pin 12dc7b47c340 and 58a7f1cbf024 at both 0b36ffa and 616df6598b42: F1 now creates the package through the Studio surface's switcher (/studio/PKG/data) and F4 gives the picklist one real option before the empty row, so both stale causes are gone, and the stale record, which named only F1 and F4, goes with them. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the ref keeps only the clauses this record let a runner cite or sent to hand-driving: F3 for acceptance[1]'s designer half, F2 for acceptance[2], and F4 for acceptance[3]'s banner half only (one real option, no publish, no meta read). F1 asserts no clause here. No clause changed",
-          "ref": "#PENDING-24579R14"
+          "ref": "#24857"
         }
       ]
     },
@@ -362,7 +362,7 @@
           "revision": 7,
           "date": "2026-10-20",
           "change": "automated.stale removed, automated.ref scoped to acceptance[0], and the stale notes in acceptance[0].verify, acceptance[1].verify, steps[3], source[0] and source[1] rewritten — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired both specs the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. studio-record-page.spec.ts: blob 181b2562c18d at the old pin 12dc7b47c340, 3844a60ccd79 at both 0b36ffa and 616df6598b42; it now sets Page type to record and picks the object from the Object combobox. studio-editor.spec.ts: blob e442b4c1a29e, then 19f9cc131654 at both; it now edits a copy of showcase_project_workspace and reads the layout on the canvas. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, studio-record-page.spec.ts asserts acceptance[0], the one clause the ref claims (carrier-neutrally, on showcase_invoice). studio-editor.spec.ts was never in the ref, so acceptance[1] stays driven by hand rather than widening the ref. No clause changed",
-          "ref": "#PENDING-24579R14"
+          "ref": "#24857"
         }
       ]
     },
