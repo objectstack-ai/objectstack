@@ -89,23 +89,15 @@ export const SysApprovalDelegation = ObjectSchema.create({
     // A delegation names its own author as delegator: on every non-system
     // write `bindDelegationWriteGuard` (lifecycle-hooks.ts) admits exactly one
     // value here, the acting user, and refuses any other with 403 (its
-    // docstring holds why there is no admin exemption). So the field declares
-    // that one value in the vocabulary the create form honours, instead of a
-    // free `sys_user` lookup that offered every user and saw all but one
-    // refused:
-    //  - `defaultValue: 'current_user'` — the create form opens on the acting
-    //    user, and an insert that omits the field stores the acting user
-    //    (`applyFieldDefaults`, before the guard runs; the guard stamps the
-    //    same value). `required` stays: a write with no acting user still has
-    //    no delegator, and is refused.
-    //  - `lookupFilters` — the picker's candidate query, which the engine
-    //    resolves `{current_user_id}` in for every read, so it offers the
-    //    acting user and nobody else.
-    // Pinned in `sys-approval-delegation-delegator-picker.test.ts`.
+    // docstring holds why there is no admin exemption). So the picker offers
+    // that one value, instead of every user with all but one refused:
+    // `lookupFilters` is the picker's candidate query, and the engine resolves
+    // `{current_user_id}` against the caller on every read. Presentation only
+    // — the guard stays the enforcement, and what a write may store is
+    // unchanged. Pinned in `sys-approval-delegation-delegator-picker.test.ts`.
     delegator_id: Field.lookup('sys_user', {
       label: 'Delegator',
       required: true,
-      defaultValue: 'current_user',
       lookupFilters: [{ field: 'id', operator: 'eq', value: '{current_user_id}' }],
       group: 'Delegation',
       description: 'The user going out of office; their individually-routed approver slots are rerouted while active.',
