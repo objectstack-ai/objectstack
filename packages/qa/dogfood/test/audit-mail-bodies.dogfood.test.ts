@@ -145,6 +145,18 @@ describe('[#24693] os migrate audit-mail-bodies over an 18.0 database', () => {
 
   beforeAll(() => {
     loadSqlIntoSqlite(fixtureSql, file);
+    // The fixture travels as a dump of its TABLES, so it carries no view; the
+    // 18.0 server that wrote it left `sys_activity` as the read view over its
+    // rotation shards (driver-sql `ensureRotation`), and every boot rebuilds
+    // it. The dry run boots read-only and creates nothing, so the view is put
+    // back as the server left it before anything reads the copy.
+    const db = new DatabaseSync(file);
+    try {
+      const shards = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'sys_activity__r%' ORDER BY name DESC").all() as Array<{ name: string }>).map((r) => r.name);
+      db.exec(`CREATE VIEW "sys_activity" AS ${shards.map((s) => `SELECT * FROM "${s}"`).join(' UNION ALL ')}`);
+    } finally {
+      db.close();
+    }
     fixture = snapshot(file);
     fixtureClear = clearCopies(fixture);
   });

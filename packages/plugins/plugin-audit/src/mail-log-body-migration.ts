@@ -29,9 +29,10 @@
  * The decision is pure ({@link planMailLogBodyAuditRowPatch} /
  * {@link planMailLogBodyActivityRowPatch}); {@link migrateMailLogBodyCopies}
  * pages the two tables through the engine and rewrites only the rows a planner
- * changed — and in a row, only the column holding the copy. Nothing else in the
- * copy moves: the other keys of the snapshot and of the activity pair are
- * re-serialized as they were read.
+ * changed — and in a row, only the column holding the copy, under
+ * `preserveAudit` with the row's stored `updated_at`, so no other column of the
+ * row moves. Nothing else in the copy moves either: the other keys of the
+ * snapshot and of the activity pair are re-serialized as they were read.
  *
  * ## Idempotent, its own verification
  *
@@ -53,8 +54,9 @@ export const MAIL_LOG_BODY_COPY_OBJECTS = ['sys_audit_log', 'sys_activity'] as c
 /** Rows read per page. */
 export const MAIL_LOG_BODY_MIGRATION_PAGE_SIZE = 500;
 
-/** The rewrite reads and writes as the platform, never as a user. */
+/** The rewrite reads as the platform, and writes as the platform keeping each row's audit stamp. */
 const SYSTEM_CTX = { isSystem: true } as const;
+const SYSTEM_PRESERVING_CTX = { isSystem: true, preserveAudit: true } as const;
 
 /**
  * Mask the body columns of one parsed snapshot of an `objectName` row. A
@@ -166,8 +168,8 @@ export async function migrateMailLogBodyCopies(
     fields: readonly string[];
     plan: (row: Record<string, unknown>) => Record<string, unknown> | null;
   }> = [
-    { object: 'sys_audit_log', fields: ['id', 'object_name', 'new_value', 'old_value'], plan: planMailLogBodyAuditRowPatch },
-    { object: 'sys_activity', fields: ['id', 'object_name', 'metadata'], plan: planMailLogBodyActivityRowPatch },
+    { object: 'sys_audit_log', fields: ['id', 'object_name', 'new_value', 'old_value', 'updated_at'], plan: planMailLogBodyAuditRowPatch },
+    { object: 'sys_activity', fields: ['id', 'object_name', 'metadata', 'updated_at'], plan: planMailLogBodyActivityRowPatch },
   ];
 
   for (const { object, fields, plan } of tables) {
@@ -216,7 +218,14 @@ export async function migrateMailLogBodyCopies(
         try {
           // A single-id write, as the platform: a system caller is exempt from
           // the static-readonly strip every audit/activity field carries.
-          await engine.update(object, { ...patch, id }, { context: SYSTEM_CTX });
+          // `preserveAudit` with the stored `updated_at` keeps the row's own
+          // timestamp (the shape `comment-parent-pair-backfill.ts` takes):
+          // masking a copy is not an edit of the ledger row.
+          await engine.update(
+            object,
+            { ...patch, id, ...(row.updated_at !== undefined && row.updated_at !== null ? { updated_at: row.updated_at } : {}) },
+            { context: SYSTEM_PRESERVING_CTX },
+          );
         } catch (e) {
           report.failures += 1;
           logger.warn(

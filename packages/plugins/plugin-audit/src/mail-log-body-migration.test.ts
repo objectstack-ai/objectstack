@@ -12,6 +12,7 @@
  * and no title or message names one.
  */
 
+import { isDeepStrictEqual } from 'node:util';
 import { describe, expect, it, vi } from 'vitest';
 // [engine-double-contract] A fake engine's update must refuse exactly what
 // ObjectQL refuses — opened with the producer's own predicate, the shape
@@ -46,7 +47,7 @@ const mailRow = (id: string, body: { text?: string | null; html?: string | null 
 
 /** The 18.0 sys_audit_log rows: a create (new_value) and a delete (old_value) carry the body; a status update does not. */
 const auditRows = (): Row[] => [
-  { id: 'al_1', object_name: 'sys_email', action: 'create', record_id: 'em_1', old_value: null, new_value: JSON.stringify(mailRow('em_1')) },
+  { id: 'al_1', object_name: 'sys_email', action: 'create', record_id: 'em_1', updated_at: '2026-10-19T00:00:00.000Z', old_value: null, new_value: JSON.stringify(mailRow('em_1')) },
   { id: 'al_2', object_name: 'sys_email', action: 'update', record_id: 'em_1', old_value: JSON.stringify({ status: 'queued' }), new_value: JSON.stringify({ status: 'sent' }) },
   { id: 'al_3', object_name: 'sys_identity_email', action: 'delete', record_id: 'ie_1', old_value: JSON.stringify(mailRow('ie_1')), new_value: null },
   // An update diff whose two halves both name a body column (a resend that re-rendered it).
@@ -136,6 +137,7 @@ describe('migrateMailLogBodyCopies (driven, paged)', () => {
   /** A fake engine over two in-memory tables, answering the runner's keyset page query. */
   function fakeEngine(tables: Record<string, Row[]>, opts: { failRead?: string } = {}) {
     const reads: Array<{ object: string; limit: unknown }> = [];
+    const writes: Array<{ object: string; data: Row; context: unknown }> = [];
     const engine: MailLogBodyMigrationEngine = {
       async find(object, query) {
         if (object === opts.failRead) throw new Error('read refused');
@@ -154,13 +156,14 @@ describe('migrateMailLogBodyCopies (driven, paged)', () => {
       async update(object, data, options) {
         // Refuse exactly what the real engine's update dispatch refuses.
         assertEngineUpdateDispatch(data, options === undefined ? undefined : { ...options });
+        writes.push({ object, data: data as Row, context: (options as { context?: unknown } | undefined)?.context });
         const { id, ...rest } = data as Row;
         const row = (tables[object] ?? []).find((r) => r.id === id);
         if (row) Object.assign(row, rest);
         return { id, ...rest };
       },
     };
-    return { engine, reads };
+    return { engine, reads, writes };
   }
   const logger = () => ({ info: vi.fn(), warn: vi.fn() });
 
@@ -206,6 +209,21 @@ describe('migrateMailLogBodyCopies (driven, paged)', () => {
     expect(again.rewritten).toBe(0);
     expect(again.scanned).toBe(7);
     expect(JSON.stringify(tables)).toBe(after);
+  });
+
+  it('writes the copy column alone, as the platform keeping the row\'s stored updated_at', async () => {
+    const tables = { sys_audit_log: auditRows(), sys_activity: activityRows() };
+    const { engine, writes } = fakeEngine(tables);
+    await migrateMailLogBodyCopies(engine, logger(), { apply: true });
+    expect(writes.map((w) => Object.keys(w.data).sort())).toEqual([
+      ['id', 'new_value', 'updated_at'],
+      ['id', 'old_value'],
+      ['id', 'new_value', 'old_value'],
+      ['id', 'metadata'],
+      ['id', 'metadata'],
+    ]);
+    expect(writes[0]!.data.updated_at).toBe('2026-10-19T00:00:00.000Z');
+    expect(writes.every((w) => isDeepStrictEqual(w.context, { isSystem: true, preserveAudit: true }))).toBe(true);
   });
 
   it('pages: every page is bounded and every mail-log copy is read exactly once', async () => {
