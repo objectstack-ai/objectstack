@@ -271,6 +271,12 @@
           "description": "One line about the list, drawn as the toolbar's info control (its tooltip and accessible name). A plain string, or an inline per-locale map resolved against the display locale. `appearance.showDescription: false` hides it."
         },
         {
+          "name": "requiredPermissions",
+          "type": "array",
+          "of": "string",
+          "description": "Capabilities the viewer must ALL hold to see this list, the names permission sets grant through `systemPermissions`. A viewer missing one sees an insufficient-permissions notice in place of the list, and no records are queried. Absent or empty: no gate."
+        },
+        {
           "name": "userFilters",
           "type": "object",
           "description": "The quick-filter bar above the list, the spec's `UserFilters` config: `{ element: \"dropdown\" | \"toggle\" | \"tabs\", fields | tabs }`. Each filter narrows the query."
@@ -279,6 +285,11 @@
           "name": "userActions",
           "type": "object",
           "description": "Which toolbar controls the user gets, the spec's `UserActionsConfig` of per-control toggles: a control set to `false` (for example `sort: false`) is taken off the toolbar, and the controls it does not name stay."
+        },
+        {
+          "name": "addRecord",
+          "type": "object",
+          "description": "The Add button, the spec's `AddRecordConfig`. The spec row declares `enabled` default `true` and `position` default `\"bottom\"`; the renderer does not apply those defaults: it draws the button only for an explicit `enabled: true`, and places an absent `position` at the top (objectui#13099 owns that gap). `position` places it: `\"top\"` (the toolbar), `\"bottom\"` (under the list) or `\"both\"`. A click opens the create form for the listed object, the one the object list's New opens: the record-form overlay, or the full-page create for an object whose `editMode` is `page`. The button is withheld for a viewer who may not create, or whose create the object greys, and on a host that serves no create. `mode` and `formView` are not read. `userActions.addRecordForm: false` also takes the button off."
         },
         {
           "name": "compactToolbar",

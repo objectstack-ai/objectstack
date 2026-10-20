@@ -9302,6 +9302,10 @@ export class AuthManager {
    * (`lockoutThreshold <= 0`) or no data engine is wired. Fails OPEN on a
    * lookup error: an infra hiccup must never block every login.
    *
+   * The lock it enforces is the one held by the account the credential check
+   * resolves the identifier to ({@link findSignInAccount}), so it holds for
+   * every spelling of the address that signs in to that account.
+   *
    * The refusal is a refused sign-in of the account it names, so — given the
    * endpoint context `ctx` — it writes that account's `login_failed` row with
    * the refusal's own code before throwing (`auth-session-audit.ts`).
@@ -9314,13 +9318,10 @@ export class AuthManager {
     let locked = false;
     let lockedUserId: string | undefined;
     try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      const u = await engine.findOne('sys_user', {
-        where: { email }, fields: ['id', 'locked_until'], context: SYSTEM_CTX,
-      } as any);
-      const lu = u?.locked_until;
+      const u = await this.findSignInAccount(engine, email, ['locked_until']);
+      const lu = u?.locked_until as string | number | Date | null | undefined;
       locked = !!(lu && new Date(lu).getTime() > Date.now());
-      if (locked && typeof u?.id === 'string' && u.id) lockedUserId = u.id;
+      if (locked && u) lockedUserId = u.id;
     } catch {
       return; // fail-open
     }
@@ -9353,6 +9354,12 @@ export class AuthManager {
    * history row on every login). No-op when lockout is disabled. Never throws —
    * a counter write must not turn a valid login into an error.
    *
+   * The counter it moves is the one held by the account the credential check
+   * resolves the identifier to ({@link findSignInAccount}) — the account the
+   * gate above enforces — so every refused attempt on that account counts
+   * toward one lock, and every success on it clears that lock, whatever
+   * spelling of the address the attempt carried.
+   *
    * Resolves to the lock it stamped — the account, the expiry and the
    * threshold — when THIS call wrote `locked_until` and the write landed, and
    * to `undefined` otherwise. That is the lockout transition the
@@ -9369,12 +9376,8 @@ export class AuthManager {
     if (!engine) return undefined;
     try {
       const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      const u = await engine.findOne('sys_user', {
-        where: { email },
-        fields: ['id', 'failed_login_count', 'locked_until'],
-        context: SYSTEM_CTX,
-      } as any);
-      if (!u?.id) return undefined;
+      const u = await this.findSignInAccount(engine, email, ['failed_login_count', 'locked_until']);
+      if (!u) return undefined;
       if (success) {
         if ((Number(u.failed_login_count) || 0) !== 0 || u.locked_until) {
           await engine.update(
@@ -9394,9 +9397,7 @@ export class AuthManager {
         patch.locked_until = lockedUntil;
       }
       await engine.update('sys_user', patch, { context: SYSTEM_CTX } as any);
-      return lockedUntil && typeof u.id === 'string'
-        ? { userId: u.id, lockedUntil, threshold }
-        : undefined;
+      return lockedUntil ? { userId: u.id, lockedUntil, threshold } : undefined;
     } catch (e) {
       // Never break the auth response. [#12981] But lockout accounting that
       // silently stops accounting is brute-force protection that is OFF.
@@ -9461,22 +9462,15 @@ export class AuthManager {
 
   /**
    * The id of the account a password sign-in for `email` is checked against,
-   * or `undefined`. Resolved the way better-auth's `/sign-in/email` resolves
-   * it — the address lower-cased (`findUserByEmail(email.toLowerCase())`),
-   * matching the lower-cased identifier the adapter stores — so the
-   * `login_failed` row names the account the credential check actually judged.
+   * or `undefined` — {@link findSignInAccount}'s answer, so the `login_failed`
+   * row names the account the credential check actually judged and the lock
+   * gate and counter hold.
    */
   private async resolveSignInAccountId(email: string): Promise<string | undefined> {
     const engine = this.getDataEngine();
     if (!engine) return undefined;
     try {
-      const query: EngineQueryOptions = {
-        where: { email: email.toLowerCase() },
-        fields: ['id'],
-        context: { isSystem: true, positions: [], permissions: [] },
-      };
-      const u = await engine.findOne('sys_user', query);
-      return typeof u?.id === 'string' && u.id ? u.id : undefined;
+      return (await this.findSignInAccount(engine, email, []))?.id;
     } catch (e) {
       // The refusal stands either way; what is lost is its ledger row.
       this.logDurabilityDegradation(
@@ -9489,6 +9483,45 @@ export class AuthManager {
       );
       return undefined;
     }
+  }
+
+  /**
+   * ADR-0069 D2 — the ONE answer to "which account does this password sign-in
+   * name", read by the lock gate ({@link assertAccountNotLocked}), the counter
+   * ({@link recordSignInOutcome}) and the account events
+   * ({@link resolveSignInAccountId}): the `sys_user` row with `fields`
+   * (plus `id`), or `undefined` when the identifier names no account.
+   *
+   * It asks exactly what better-auth's `/sign-in/email` credential check asks
+   * (1.7.3: `internalAdapter.findUserByEmail(email.toLowerCase())`, an
+   * equality match of the `email` column against the lower-cased address,
+   * which is also the spelling `internalAdapter.createUser` stores), so the
+   * gate, the counter, the ledger and the credential check name one account
+   * for every identifier the credential check resolves to it.
+   *
+   * The lockout state lives on that row (`failed_login_count` /
+   * `locked_until`) and every write to it is by the row's `id`, so one account
+   * holds one counter. ⛔ Never resolve the account any other way on this
+   * path: the lockout holds exactly as far as it names the account the
+   * credential check names.
+   *
+   * Throws what the engine throws; each caller keeps its own failure posture
+   * (the gate fails open, the counter and the ledger report the lost write).
+   */
+  private async findSignInAccount(
+    engine: IDataEngine,
+    email: string,
+    fields: readonly string[],
+  ): Promise<({ id: string } & Record<string, unknown>) | undefined> {
+    const query: EngineQueryOptions = {
+      where: { email: email.toLowerCase() },
+      fields: ['id', ...fields],
+      context: { isSystem: true, positions: [], permissions: [] },
+    };
+    const row = await engine.findOne('sys_user', query);
+    return row && typeof row.id === 'string' && row.id
+      ? (row as { id: string } & Record<string, unknown>)
+      : undefined;
   }
 
   /**

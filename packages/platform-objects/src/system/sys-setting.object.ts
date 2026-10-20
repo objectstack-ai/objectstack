@@ -130,9 +130,10 @@ export const SysSetting = ObjectSchema.create({
     // The option list is the storage-side mirror of the cascade layers THIS
     // table stores: `SpecifierScopeSchema`
     // (`packages/spec/src/system/settings-manifest.zod.ts`) minus `global`.
-    // `sys-setting.scope-options.test.ts` pins the parity. The sibling audit
-    // object (`sys_setting_audit.scope`) keeps all three, because the audit
-    // writer records a global-scope change too.
+    // `sys-setting.scope-options.test.ts` pins the parity. The audit trail
+    // splits the same way: `sys_setting_audit.scope` keeps `tenant` and
+    // `user`, and a global-scope change is recorded in
+    // `sys_platform_setting_audit`.
     // `global` left with the rung itself (ADR-0131 D7): a global value is
     // written to `sys_platform_setting`, no writer produces a `global` row
     // here, and the resolver excludes one from its reads — so the option was a

@@ -305,8 +305,8 @@ describe('ADR-0070 D4 — duplicatePackage of an object whose name lacks the sou
         const res = await protocol.duplicatePackage({ sourcePackageId: P, targetPackageId: Q });
 
         expect(res.success).toBe(false);
-        expect(res.failed).toHaveLength(2);
-        const [refusal, viewRefusal] = res.failed;
+        expect(res.failed, JSON.stringify(res.failed)).toHaveLength(3);
+        const [refusal, viewRefusal, flowRefusal] = res.failed;
         expect(refusal).toMatchObject({ type: 'object', name: 'ticket' });
         // Located: the object, the name it would take, who holds that name,
         // and the source rename that clears it.
@@ -319,6 +319,11 @@ describe('ADR-0070 D4 — duplicatePackage of an object whose name lacks the sou
         // closure — and the save door refuses it with the same rule.
         expect(viewRefusal).toMatchObject({ type: 'view', name: 'ticket_views' });
         expect(viewRefusal.error).toContain('views[0].object [list-view-object-outside-closure]');
+        // [#24669] And the copy of `dupsrc_on_ticket` keeps the source's
+        // `ticket` as its trigger object, outside the copy package's closure
+        // too, so the flow door refuses it — the same verdict, at the third door.
+        expect(flowRefusal).toMatchObject({ type: 'flow' });
+        expect(flowRefusal.error).toContain('flows[0].nodes[0].config.objectName [flow-trigger-unknown-object]');
 
         // NEGATIVE CONTROL: the prefixed sibling took the name, with its own
         // body, and nothing of `ticket` was written under it.

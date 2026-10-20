@@ -3411,7 +3411,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Ámbito",
         help: "Capa de cascada en la que se escribió la fila.",
         options: {
-          global: "Global",
           tenant: "Inquilino",
           user: "Usuario"
         }

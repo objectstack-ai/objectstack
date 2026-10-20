@@ -116,8 +116,6 @@ const SAME_WORD_ERROR =
   'Spanish spells the word exactly as English (el error); this bundle already writes it so in the authored label Último error on sys_job_queue.';
 const SAME_WORD_ACTOR =
   'Spanish spells the word exactly as English (el actor); this bundle already writes it so in authored help (Último actor que escribió esta fila), and the messaging bundle authors its actor label as Actor.';
-const SAME_WORD_GLOBAL =
-  'Spanish spells the word exactly as English (global); the security bundle already writes it so in authored help (nulo = global (entre inquilinos)), beside the authored sibling scope options Inquilino and Usuario.';
 const SAME_WORD_VARIABLES =
   'Spanish spells the word exactly as English (las variables); the authored description of this same object already says (asunto + contenido + variables).';
 const BUNDLE_LOANWORD =
@@ -180,7 +178,6 @@ const DECISIONS: readonly Decision[] = [
   echo('sys_notification.fields.actor_id.label', 'Actor', SAME_WORD_ACTOR),
   echo('sys_metadata_audit.fields.actor.label', 'Actor', SAME_WORD_ACTOR),
   echo('sys_setting_audit.fields.actor_id.label', 'Actor', SAME_WORD_ACTOR),
-  echo('sys_setting_audit.fields.scope.options.global', 'Global', SAME_WORD_GLOBAL),
   echo('sys_email_template.fields.variables_json.label', 'Variables (JSON)', SAME_WORD_VARIABLES),
 
   echo('sys_oauth_access_token.fields.token.label', 'Token', BUNDLE_LOANWORD),
@@ -239,13 +236,16 @@ function undeclaredEchoes(rows: readonly Decision[]): string[] {
 describe('#20493 es-ES — the ledger itself (controls before verdicts)', () => {
   // [ADR-0131 D7] 47 → 46 echoes: `sys_setting.scope` no longer declares the
   // `global` option (the rung moved to `sys_platform_setting`), so its leaf left
-  // the catalog with it. `sys_setting_audit.scope`'s `global` option stays.
+  // the catalog with it.
   // [ADR-0131 D13] 46 → 45: `sys_view_definition` retired as inert, and its
   // bare `ID` leaf left the catalog with the object.
-  it('is the size it claims: 3 pinned translations and 45 declared echoes, no path twice', () => {
-    expect(DECISIONS.length).toBe(48);
+  // [18.x step 7] 45 → 44: `sys_setting_audit.scope` no longer declares the
+  // `global` option either (the ceremony moved those rows to
+  // `sys_platform_setting_audit`), so its leaf left the catalog too.
+  it('is the size it claims: 3 pinned translations and 44 declared echoes, no path twice', () => {
+    expect(DECISIONS.length).toBe(47);
     expect(DECISIONS.filter((d) => d.verdict === 'translate').length).toBe(3);
-    expect(DECISIONS.filter((d) => d.verdict === 'echo').length).toBe(45);
+    expect(DECISIONS.filter((d) => d.verdict === 'echo').length).toBe(44);
     expect(new Set(DECISIONS.map((d) => d.path)).size).toBe(DECISIONS.length);
   });
 

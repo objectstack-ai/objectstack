@@ -25,6 +25,16 @@
  * really ran and really put `com.acme.core` in the closure. That is the #4449
  * wired-and-running-on-nothing shape, in the other direction.
  *
+ * ## #24669 — the out-of-closure trigger object is REFUSED, not advised
+ *
+ * A flow written into a package whose trigger object (`config.objectName`, or
+ * a sweep's `config.timeRelative.object`) is outside that package's closure is
+ * refused `422 INVALID_METADATA` with `flow-trigger-unknown-object` at
+ * `error`: the verdict the dataset and view doors give the same reference
+ * under the same closure. A write that names no package, the sentinel and an
+ * unreadable package state no closure and keep the advisory; a draft save is
+ * not gated, and its promotion is.
+ *
  * Harness: the real repository write path over a stub engine, the same shape as
  * `protocol.dashboard-dataset-publish-gate.test.ts`.
  */
@@ -57,6 +67,28 @@ const object = (name: string, packageId: string) => ({
     label: name,
     _packageId: packageId,
     fields: [{ name: 'title', type: 'text', label: 'Title' }],
+});
+
+/** A Zod-valid daily time-relative sweep over `object` — the rule's second position. */
+const sweepOf = (name: string, object: string) => ({
+    name,
+    label: name,
+    description: `sweeps ${object}`,
+    version: 1,
+    status: 'active',
+    type: 'schedule',
+    runAs: 'system',
+    variables: [],
+    nodes: [
+        {
+            id: 'start',
+            type: 'start',
+            label: 'Daily sweep',
+            config: { timeRelative: { object, dateField: 'title', withinDays: 7 } },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end', type: 'default', isDefault: false }],
 });
 
 /** A Zod-valid autolaunched flow whose start node fires on `objectName`. */
@@ -158,7 +190,14 @@ function makeStubEngine() {
             registerObject: () => {},
             listItems: (type: string) =>
                 type === 'object'
-                    ? [object('crm_account', OWN), object('core_user', DEP), object('other_widget', STRANGER)]
+                    ? [
+                        object('crm_account', OWN),
+                        object('core_user', DEP),
+                        object('other_widget', STRANGER),
+                        // [#24669] A platform object a stranger package registers,
+                        // kept by the closure's `isSystem` limb.
+                        { ...object('platform_ledger', STRANGER), isSystem: true },
+                    ]
                     : [],
             getItem: () => undefined,
             getPackage: (id: string) => packages[id],
@@ -177,6 +216,25 @@ const save = (protocol: any, item: any, extra: Record<string, unknown> = {}) =>
 
 const triggerAdvisories = (result: any): string[] =>
     (result.advisories ?? []).map((a: any) => a.rule).filter((r: string) => r === 'flow-trigger-unknown-object');
+
+const activeFlowRows = (rows: Map<string, Row>) =>
+    Array.from(rows.values()).filter((r) => r.type === 'flow' && r.state === 'active');
+
+/**
+ * [#24669] A refused publish-mode flow write: the ADR-0112 envelope (`code`
+ * AND `status`), carrying the one closure issue at the trigger position.
+ */
+const expectRefusedOutsideClosure = (err: any, path: string, what: string) => {
+    expect(err, `${what}: the write resolved — the door still only advises on the out-of-closure trigger`)
+        .toBeInstanceOf(Error);
+    expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+    const issues = (err.issues ?? []).filter((i: any) => i.rule === 'flow-trigger-unknown-object');
+    expect(issues, JSON.stringify(err.issues)).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ severity: 'error', path });
+    // The fix names the remedy and the package it applies to.
+    expect(issues[0].hint).toContain(OWN);
+    expect(issues[0].hint).toContain('dependencies');
+};
 
 describe('the write package closure reaches the gate (#9612)', () => {
     let warn: ReturnType<typeof vi.spyOn>;
@@ -208,30 +266,94 @@ describe('the write package closure reaches the gate (#9612)', () => {
         expect(triggerAdvisories(result)).toEqual([]);
     });
 
-    it('reports a reference into a package the written one never declared', async () => {
+    it('REFUSES a trigger object of a package the written one never declared — config.objectName', async () => {
         // ⭐ The ruling's intended consequence, pinned as a decision rather than
         // left to surprise someone: a package's declared `dependencies` bound
         // what it MAY reference, so a flow reaching into `com.other.analytics`
-        // is not resolvable BY DECLARATION. Advisory severity — it reports, it
-        // does not refuse.
-        const { protocol } = makeProtocol();
+        // is not resolvable BY DECLARATION. [#24669] It is REFUSED — the
+        // verdict the dataset and view doors give the same reference; it used
+        // to be a save advisory on a 2xx.
+        const { protocol, rows } = makeProtocol();
 
-        const result = await save(protocol, flowOn('crm_on_stranger', 'other_widget'), { packageId: OWN });
+        const err = await save(protocol, flowOn('crm_on_stranger', 'other_widget'), { packageId: OWN })
+            .catch((e: any) => e);
 
-        expect(triggerAdvisories(result)).toEqual(['flow-trigger-unknown-object']);
-        expect(result.success).toBe(true);
+        expectRefusedOutsideClosure(err, 'flows[0].nodes[0].config.objectName', 'stranger object');
+        // A gate that refuses after persisting is a log line.
+        expect(activeFlowRows(rows)).toEqual([]);
+    });
+
+    it('REFUSES a sweep over an object of a package the written one never declared — config.timeRelative.object', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const err = await save(protocol, sweepOf('crm_sweep_stranger', 'other_widget'), { packageId: OWN })
+            .catch((e: any) => e);
+
+        expectRefusedOutsideClosure(err, 'flows[0].nodes[0].config.timeRelative.object', 'stranger sweep');
+        expect(activeFlowRows(rows)).toEqual([]);
+    });
+
+    it('REFUSES a trigger object that exists nowhere the same way — the closure is all the gate sees', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const err = await save(protocol, flowOn('crm_on_ghost', 'nosuch_obj'), { packageId: OWN })
+            .catch((e: any) => e);
+
+        expectRefusedOutsideClosure(err, 'flows[0].nodes[0].config.objectName', 'nosuch_obj');
+        expect(activeFlowRows(rows)).toEqual([]);
+    });
+
+    it('admits the own package, a declared dependency, a platform object and a `sys_` name, at both positions', async () => {
+        // `platform_ledger` is registered by the stranger package but carries
+        // `isSystem: true`, so the closure keeps it; a `sys_` name is never
+        // judged, carried or not — the exception is unchanged, never widened.
+        for (const target of ['crm_account', 'core_user', 'platform_ledger', 'sys_user']) {
+            for (const body of [flowOn(`crm_on_${target}`, target), sweepOf(`crm_sweep_${target}`, target)]) {
+                const { protocol } = makeProtocol();
+                const result = await save(protocol, body, { packageId: OWN });
+                expect(result.success, `${body.name}`).toBe(true);
+                expect(triggerAdvisories(result), `${body.name}`).toEqual([]);
+            }
+        }
+    });
+
+    it('a DRAFT save of the refused body is not gated — its promotion is', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const draft = await save(protocol, flowOn('crm_on_stranger', 'other_widget'), { packageId: OWN, mode: 'draft' });
+        expect(draft.success).toBe(true);
+        expect(activeFlowRows(rows)).toEqual([]);
+
+        const err = await protocol.publishMetaItem({ type: 'flow', name: 'crm_on_stranger', packageId: OWN })
+            .catch((e: any) => e);
+        expectRefusedOutsideClosure(err, 'flows[0].nodes[0].config.objectName', 'draft promotion');
+        expect(activeFlowRows(rows)).toEqual([]);
     });
 
     it('narrows NOTHING when the write names no package', async () => {
         // ⛔ The fallback direction, and the whole reason this is not a size
         // threshold: an unstated package buys MORE validation input, never
-        // less. The identical body that reports above is silent here, because
-        // the gate is handed the whole collection exactly as before #9612.
+        // less. The identical body that is refused above is silent here,
+        // because the gate is handed the whole collection exactly as before
+        // #9612.
         const { protocol } = makeProtocol();
 
         const result = await save(protocol, flowOn('crm_on_stranger', 'other_widget'));
 
         expect(triggerAdvisories(result)).toEqual([]);
+    });
+
+    it('keeps the ADVISORY when the write names no package and the object exists nowhere', async () => {
+        // [#24669] The overlay door states no closure, so the hedge stands:
+        // advised on a 2xx, never refused, at both positions.
+        for (const body of [flowOn('crm_on_ghost', 'nosuch_obj'), sweepOf('crm_sweep_ghost', 'nosuch_obj')]) {
+            const { protocol } = makeProtocol();
+            const result = await save(protocol, body);
+            expect(result.success, body.name).toBe(true);
+            expect(triggerAdvisories(result), body.name).toEqual(['flow-trigger-unknown-object']);
+            expect(result.advisories.find((a: any) => a.rule === 'flow-trigger-unknown-object').severity)
+                .toBe('warning');
+        }
     });
 
     it('narrows NOTHING when the registry cannot produce the written package', async () => {
@@ -253,8 +375,17 @@ describe('the write package closure reaches the gate (#9612)', () => {
             return protocol.publishMetaItem({ type: 'flow', name: 'crm_on_stranger', packageId: OWN });
         };
 
-        expect(triggerAdvisories(await promoted(false))).toEqual(['flow-trigger-unknown-object']);
-        expect(triggerAdvisories(await promoted(true))).toEqual([]);
+        // [#24669] Installed, the closure is in force and the promotion is
+        // refused; uninstalled, nothing narrows and the stranger's object
+        // resolves against the whole collection.
+        expectRefusedOutsideClosure(
+            await promoted(false).catch((e: any) => e),
+            'flows[0].nodes[0].config.objectName',
+            'promotion into the installed package',
+        );
+        const unnarrowed = await promoted(true);
+        expect(unnarrowed.success).toBe(true);
+        expect(triggerAdvisories(unnarrowed)).toEqual([]);
     });
 
     it('narrows NOTHING for the `sys_metadata` overlay sentinel', async () => {
