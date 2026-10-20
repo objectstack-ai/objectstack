@@ -141,17 +141,23 @@ describe('migrateMailLogBodyCopies (driven, paged)', () => {
     const engine: MailLogBodyMigrationEngine = {
       async find(object, query) {
         if (object === opts.failRead) throw new Error('read refused');
-        const q = query as { where?: any; limit?: number };
+        const q = (query ?? {}) as { where?: any; limit?: number };
         reads.push({ object, limit: q.limit });
-        const where = q.where ?? {};
-        const scope = where.$and ? where.$and[0] : where;
-        const after = where.$and ? where.$and[1].id.$gt : undefined;
-        const names: string[] = scope.object_name.$in;
-        return (tables[object] ?? [])
-          .filter((r) => names.includes(String(r.object_name)) && (after === undefined || String(r.id) > after))
-          .sort((a, b) => String(a.id).localeCompare(String(b.id)))
-          .slice(0, q.limit)
-          .map((r) => ({ ...r }));
+        // The Filter Protocol subset the runner's page query speaks: equality,
+        // `$in`, `$gt` and `$and`.
+        const matches = (r: Row, w: Record<string, any>): boolean =>
+          Object.entries(w).every(([key, cond]) => {
+            if (key === '$and') return (cond as Record<string, any>[]).every((c) => matches(r, c));
+            if (cond && typeof cond === 'object' && '$in' in cond) return (cond.$in as unknown[]).includes(r[key]);
+            if (cond && typeof cond === 'object' && '$gt' in cond) return String(r[key]) > String(cond.$gt);
+            return r[key] === cond;
+          });
+        const rows = (tables[object] ?? [])
+          .filter((r) => matches(r, q.where ?? {}))
+          .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+        // The caller's bound, applied AFTER the filter, by presence.
+        const page = typeof q.limit === 'number' ? rows.slice(0, q.limit) : rows;
+        return page.map((r) => ({ ...r }));
       },
       async update(object, data, options) {
         // Refuse exactly what the real engine's update dispatch refuses.
