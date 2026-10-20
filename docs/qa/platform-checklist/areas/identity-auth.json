@@ -988,7 +988,7 @@
       "title": "Forgot-password: request → token captured at the dev mail transport → reset; old password refused, expired/reused token refused loudly",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["anonymous visitor (holds no session)", "the account owner (before and after reset)"],
@@ -1008,7 +1008,7 @@
         "complete the reset: POST /api/v1/auth/reset-password with the token + a new password; capture the response",
         "sign in with the NEW password (2xx) and confirm the OLD password is now refused",
         "reuse the SAME token a second time (POST /api/v1/auth/reset-password again) and capture the loud refusal — a consumed token must not reset again",
-        "request a fresh reset, let the token expire (or use a tampered/garbage token) and confirm the reset is refused with a named error, never a silent success",
+        "request a fresh reset and expire its token without a clock wait. Read the token from the new sys_identity_email row (steps[1]); then, in the run's own file DB, move that token's verification row into the past with node:sqlite (no sqlite3 CLI in this container): `UPDATE sys_verification SET expires_at = 'PAST' WHERE identifier = 'reset-password:TOKEN'`, where PAST is one hour before now in the form Date#toISOString writes, and the statement reports one changed row. better-auth keys a reset row reset-password:TOKEN, stored plain, and expires_at is a datetime column stored as canonical UTC text (packages/plugins/plugin-auth/src/auth-schema-config.ts#AUTH_VERIFICATION_CONFIG). Then POST /api/v1/auth/reset-password with that token and confirm it is refused with a named error (better-auth's consume treats a row past expiresAt as invalid: 400 INVALID_TOKEN, as QA runs #24838 and #24841 measured), that the current password still signs in, and that the attempted one does not. Separately, a tampered/garbage token: confirm the same refusal, never a silent success",
         "negative: request-password-reset for an unknown email should not leak whether the account exists (anti-enumeration) — record the response shape",
         "confirm password-reuse prevention if configured: resetting to the OLD password is refused where password_history_count > 0 (previous_password_hashes ring, ADR-0069 D1)"
       ],
@@ -1070,6 +1070,12 @@
           "date": "2026-10-20",
           "change": "fixtures.requires[0], knownGaps[0], steps[1] and acceptance[0] (verify, evidence) read the reset mail from sys_identity_email — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12): sys_email held 0 rows and the mail was in sys_identity_email. Governing text ADR-0131 D7 (identity mail is deployment-level); read at base 307ce4c4b4 in auth-manager.ts (the auth.password_reset send passes identityMail: true) and email-service.ts (emailLogObjectOf). Not loosened: the clause still requires a real mail carrying a working tokened link",
           "ref": "#24824"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[5]'s expiry leg runs without a clock wait. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4; QA run #24838 ran the same leg): the step said 'let the token expire', and a reset token lives an hour (resetPasswordTokenExpiresIn || 3600, better-auth 1.7.3 routes/password.mjs). It now writes the token's sys_verification.expires_at into the past, the simulation both records measured (400 INVALID_TOKEN, the password unchanged). Read at base feb09db14a: AUTH_VERIFICATION_CONFIG maps expiresAt to expires_at; no verification.storeIdentifier is set, so the identifier is stored plain; consumeVerificationValue treats a row past expiresAt as invalid. The record's other finding (requires and steps still naming sys_email) no longer holds: revision 4 (#24824) moved them to sys_identity_email, and the sys_email mentions left say 'never sys_email'. No clause changed",
+          "ref": "#PENDING-24579R16"
         }
       ]
     },
