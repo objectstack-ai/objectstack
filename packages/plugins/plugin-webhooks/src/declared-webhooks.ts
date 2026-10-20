@@ -11,7 +11,7 @@
  * for a declared webhook, and the dispatcher ({@link AutoEnqueuer}) reads the
  * declaration itself, here, on every cache refresh. `sys_webhook` holds only the
  * webhooks an organization authors — plus, on a database an 18.0 install
- * created, the mirror rows that release's seeder left behind (below).
+ * created, the seeded rows the ownership ceremony leaves (below).
  *
  * ## Where the declaration is read
  *
@@ -56,25 +56,24 @@
  * activation door's ADR-0126 §5 posture rule); an organization administrator
  * is refused there.
  *
- * ## An 18.0 database: the dual read (expand first)
+ * ## A row holding a declared name: the row answers (regime C)
  *
- * The 18.0 seeder's rows stay where they are; deleting them, and re-sourcing
- * their `sys_http_delivery` tails, is the ownership ceremony's step
- * (ADR-0131 D10 fate 2). Until then the reader must not fire a declared webhook
- * twice, and must not undo what an administrator did to a seeded row. So a
- * `sys_webhook` row holding a declared name is judged by what the 18.0 seeder
- * would have done with it on this boot ({@link classifyDeclaredNameHolder}):
+ * A `sys_webhook` row that holds a declared webhook's name — any row, whatever
+ * its provenance — answers as itself, and the declaration is withheld for the
+ * whole deployment, reported once per name per process. No write may take a
+ * declared name ({@link bindDeclaredWebhookNameGuard}), so such a row is one
+ * that held the name before a package declared it.
  *
- *  - **A pristine mirror** (`managed_by` `package` or `platform`, not `customized`): the
- *    seeder would have overwritten it from the declaration. The row is ignored
- *    and the declaration answers.
- *  - **Any other row** (`customized: true`, or `managed_by: 'admin'`): the
- *    seeder never touched it, and an administrator's `active: false` on a noisy
- *    webhook survived every redeploy. The row answers as itself and the
- *    declaration is withheld, reported once per name per process.
- *
- * A pristine mirror whose declaration is gone is an ordinary row: 18.0 left it
- * in place and dispatching, and so does this release.
+ * The 18.0 seeder's copies are not read apart from that any more. The
+ * ownership ceremony settles every one of them before a database is certified
+ * (18.x step 5a, ADR-0131 D10 fate 2): a pristine copy is deleted with its
+ * deliveries re-sourced to the declaration, a switch-only edit becomes the
+ * declaration's activation row, any other edit becomes a clone under a new
+ * name; and the v18 boot guard refuses a database the ceremony has not
+ * certified. What 5a leaves is a seeded row whose name no installed package
+ * declares — an ordinary webhook, dispatching as itself, as it did on 18.0. If
+ * a package declares that name later, the row withholds the declaration like
+ * any other row: rename or delete the row to let the declaration answer.
  */
 
 import { WebhookSchema, type WebhookParsed } from '@objectstack/spec/automation';
@@ -255,22 +254,9 @@ export async function readWebhookActivation(engine: unknown, logger?: Logger): P
 }
 
 /**
- * How a `sys_webhook` row that holds a declared webhook's name is read — what
- * the 18.0 seeder would have done with it on this boot (see the module doc):
- * `'mirror'` — a pristine seeded copy, ignored in favour of the declaration;
- * `'row'` — customized or administrator-authored, answering as itself while the
- * declaration is withheld.
- */
-export function classifyDeclaredNameHolder(row: { managed_by?: unknown; customized?: unknown }): 'mirror' | 'row' {
-    return isSeededProvenance(row.managed_by) && row.customized !== true ? 'mirror' : 'row';
-}
-
-/**
  * The provenance values a seeded copy carries: `package` and `platform`, the
  * same pair the provenance hook stamps `customized` on
- * (`webhook-provenance.ts`) and the upgrade ceremony settles. One predicate,
- * so the mirror skip, the redeliver guard and the ceremony never disagree on
- * which rows are copies of a declaration.
+ * (`webhook-provenance.ts`) and the upgrade ceremony settles.
  */
 export function isSeededProvenance(managedBy: unknown): boolean {
     return managedBy === 'package' || managedBy === 'platform';
@@ -319,9 +305,8 @@ export const DECLARED_WEBHOOK_NAME_GUARD_PACKAGE = 'plugin-webhooks:declared-nam
 /**
  * [ADR-0131 D6 regime C] Bind the guard above on `sys_webhook` writes: an
  * insert of a declared name is refused, and so is an update that CHANGES
- * `name` onto one; an update that leaves the name alone passes — so an 18.0
- * database's seeded mirror rows, and the rows an administrator customised
- * there, stay editable exactly as they were.
+ * `name` onto one; an update that leaves the name alone passes — so a row that
+ * held a name before a package declared it stays editable exactly as it was.
  *
  * System writes pass: they are the platform's own machinery (the boot sweep,
  * the ownership ceremony, migrations), never an author taking a name.

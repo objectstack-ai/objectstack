@@ -22,9 +22,9 @@ What changes:
 
 On a database an 18.0 install created (expand first — nothing is moved or deleted):
 
-- The rows the 18.0 seeder wrote stay where they are. A pristine one (`managed_by: 'package'`, not `customized`) is ignored in favour of its declaration, so a declared webhook is never delivered twice; it follows the declaration's URL and switch, as the seeder's rewrite on every boot made it do.
+- The rows the 18.0 seeder wrote stay where they are until the ownership ceremony settles them, and the v18 boot guard refuses the database until the ceremony has certified it. A pristine copy (`managed_by: 'package'`, not `customized`) is deleted by the ceremony, its deliveries re-pointed at the declaration, so a declared webhook is never delivered twice.
 - A seeded row an administrator edited (`customized: true`), or a row an administrator authored under a declared name, answers as itself, and the declaration is not dispatched beside it — an administrator's `active: false` on a noisy webhook keeps holding. This is logged at `warn` once per name per process, with the remedy.
 - A seeded row whose declaration was removed keeps delivering, as it did on 18.0.
-- Redelivering an old delivery of a pristine seeded row is judged by the declaration that now answers for it, so a webhook switched off through the ledger is not re-sent.
+- Redelivering an old delivery of a pristine seeded copy is judged by the declaration, because the ceremony re-points that delivery at `declared:<name>`; a webhook switched off through the ledger is not re-sent.
 
 Deleting the seeded rows, and re-pointing their `sys_http_delivery` history at the declaration, is the ownership ceremony's `declared-webhooks` step (`os migrate organization-ownership`).

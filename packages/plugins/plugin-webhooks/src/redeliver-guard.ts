@@ -68,16 +68,15 @@
  * same questions of the declaration, through the reader the dispatcher uses.
  * Not declared any more is case 1, switched off (the activation ledger, or a
  * declared `isActive: false` no ledger row overrides) is case 2. Case 3 cannot
- * arise: the signing key is code, held with the declaration. A pristine 18.0
- * mirror row (`classifyDeclaredNameHolder`) whose name is still declared is
- * judged by its declaration too, because the dispatcher reads the declaration
- * in its place: replaying one of its old deliveries must answer to the switch
- * that now governs the webhook, not to a row nothing reads.
+ * arise: the signing key is code, held with the declaration. A delivery whose
+ * `ref_id` names a `sys_webhook` row is judged by that row, whatever name it
+ * holds: the dispatcher reads such a row as itself (regime C), and the
+ * ownership ceremony re-sourced every pristine 18.0 copy's deliveries to
+ * `declared:NAME` before it deleted the copy.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import {
-    classifyDeclaredNameHolder,
     declaredWebhookNameOfRefId,
     type DeclaredWebhookReader,
 } from './declared-webhooks.js';
@@ -140,11 +139,6 @@ export function createWebhookRedeliverGuard(
             );
         }
 
-        if (declared && classifyDeclaredNameHolder(subscription) === 'mirror' && typeof subscription.name === 'string') {
-            const declaration = await declared.declaredWebhookNamed(subscription.name);
-            if (declaration) return judgeDeclared(declared, subscription.name, declaration);
-        }
-
         // [#22804] Case 2: the off switch. `=== true` is the dispatcher's own
         // predicate (`AutoEnqueuer` loads `{ active: true }`), so a replay is
         // refused for exactly the rows automatic dispatch skips — `false`, and
@@ -193,16 +187,15 @@ export function createWebhookRedeliverGuard(
 }
 
 /**
- * The guard's answer for a delivery a declared webhook produced, or a pristine
- * 18.0 mirror the declaration now answers for (see the module doc). A lookup
- * that throws propagates: "we could not check" never reads as "allowed".
+ * The guard's answer for a delivery a declared webhook produced (see the module
+ * doc). A lookup that throws propagates: "we could not check" never reads as
+ * "allowed".
  */
 async function judgeDeclared(
     declared: DeclaredWebhookReader | undefined,
     name: string,
-    known?: Awaited<ReturnType<DeclaredWebhookReader['declaredWebhookNamed']>>,
 ): Promise<string | undefined> {
-    const declaration = known ?? (declared ? await declared.declaredWebhookNamed(name) : null);
+    const declaration = declared ? await declared.declaredWebhookNamed(name) : null;
     if (!declaration) {
         return (
             `the declared webhook '${name}' this delivery belongs to is no longer declared by the application, so `
