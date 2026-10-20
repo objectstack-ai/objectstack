@@ -54,7 +54,12 @@ const byName = (obj: any, name: string) => {
   return a;
 };
 
-/** The 14 sites #7309 converted: object → action names. */
+/**
+ * The sites #7309 converted that this package still declares: object → action
+ * names. #7309 converted 14; the fifteenth row it carried,
+ * `sys_organization.change_slug`, left the platform object, because its door
+ * is the cloud orchestrator's and the composition that mounts it declares it.
+ */
 const CONVERTED: Record<string, string[]> = {
   sys_user: ['ban_user', 'delete_my_account', 'disable_two_factor', 'generate_backup_codes'],
   sys_oauth_application: [
@@ -63,7 +68,6 @@ const CONVERTED: Record<string, string[]> = {
   ],
   sys_two_factor: ['disable_two_factor', 'regenerate_backup_codes'],
   sys_account: ['unlink_account'],
-  sys_organization: ['change_slug'],
   sys_sso_provider: ['delete_sso_provider'],
   sys_team_member: ['remove_team_member'],
 };
