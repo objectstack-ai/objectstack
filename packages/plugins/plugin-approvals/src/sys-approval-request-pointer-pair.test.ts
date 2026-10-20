@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectSchema } from '@objectstack/spec/data';
+import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 
 /**
@@ -75,5 +76,66 @@ describe('sys_approval_request — record_id tombstone predicate', () => {
     );
     const parsed = ObjectSchema.safeParse(SysApprovalRequest);
     expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true);
+  });
+});
+
+/**
+ * [#24501] A list names a pointer's target with the id half alone. The console
+ * draws a `referenceVia` column as the target record (its object's icon and
+ * name) and fetches the type half for that cell without a column
+ * (objectui#13036); a type-half column draws the stored API name as text.
+ * Enumerated over every object the plugin registers, so a view added later is
+ * judged without anyone listing it here.
+ */
+describe('approvals list views — a pointer shows as its id half, never its type half (#24501)', () => {
+  type PointerObject = {
+    name: string;
+    fields: Record<string, { referenceVia?: unknown } | undefined>;
+    listViews?: Record<string, { columns?: ReadonlyArray<string | { field: string }> }>;
+  };
+
+  async function registeredObjects(): Promise<PointerObject[]> {
+    const registered: Array<{ objects: PointerObject[] }> = [];
+    const ctx: any = {
+      getService: (name: string) =>
+        name === 'manifest' ? { register: (m: { objects: PointerObject[] }) => registered.push(m) } : undefined,
+      logger: { info: () => {}, warn: () => {} },
+    };
+    await new ApprovalsServicePlugin({ disableService: true }).init(ctx);
+    expect(registered).toHaveLength(1);
+    return registered[0].objects;
+  }
+
+  /** `object.view: column` for each shown id half, and for each type half shown beside one. */
+  function pointerColumns(objects: readonly PointerObject[]): { idHalves: string[]; typeHalves: string[] } {
+    const idHalves: string[] = [];
+    const typeHalves: string[] = [];
+    for (const object of objects) {
+      for (const [view, def] of Object.entries(object.listViews ?? {})) {
+        const shown = new Set((def.columns ?? []).map((c) => (typeof c === 'string' ? c : c.field)));
+        for (const column of shown) {
+          const via = object.fields[column]?.referenceVia;
+          if (typeof via !== 'string') continue;
+          idHalves.push(`${object.name}.${view}: ${column}`);
+          if (shown.has(via)) typeHalves.push(`${object.name}.${view}: ${via}`);
+        }
+      }
+    }
+    return { idHalves, typeHalves };
+  }
+
+  it('no list view shows a referenceVia sibling beside its id half', async () => {
+    expect(pointerColumns(await registeredObjects()).typeHalves).toEqual([]);
+  });
+
+  it('the request and action lists still show the id half, so the Record column names the target', async () => {
+    expect(pointerColumns(await registeredObjects()).idHalves).toEqual(expect.arrayContaining([
+      'sys_approval_request.all_requests: record_id',
+      'sys_approval_request.my_pending: record_id',
+      'sys_approval_request.submitted_by_me: record_id',
+      'sys_approval_request.completed: record_id',
+      'sys_approval_action.recent: record_id',
+      'sys_approval_action.all_actions: record_id',
+    ]));
   });
 });

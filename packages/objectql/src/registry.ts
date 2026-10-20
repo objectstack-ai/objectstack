@@ -1466,6 +1466,65 @@ class ObjectFieldTypeRefusedError extends Error implements ObjectFieldTypeRefusa
 }
 
 /**
+ * {@link ExtensionDefaultRowScopeRefusedError}'s code — `INVALID_METADATA`,
+ * this package's spelling for "a programmatically supplied metadata body does
+ * not satisfy the spec schema" (see {@link OBJECT_FIELD_TYPE_REFUSED_CODE}):
+ * `ObjectExtensionSchema` is strict and declares no `defaultRowScope`, so the
+ * parse refuses the same body at authoring. ⛔ Not a new code. The condition is
+ * named by the error's `name`.
+ */
+export const EXTENSION_DEFAULT_ROW_SCOPE_REFUSED_CODE = 'INVALID_METADATA' as const;
+
+/**
+ * [ADR-0095 D1, 2026-10-18 note; ruling of record 6250748677 on #24164, letter
+ * E′ item 4] An `extend` contribution carried `defaultRowScope`. An object's
+ * default row scope is the owning declaration's alone: the platform identity
+ * objects declare theirs (Layer 1 silence means that scope, not no filter), and
+ * an extender "cannot set or loosen a platform object's declared default;
+ * refused at registration with a named reason".
+ *
+ * Refused whatever the value and whatever the target, because no other line is
+ * decidable or honest: whether one row predicate admits more rows than another
+ * is not decidable for CEL predicates in general, so "loosens" cannot be judged
+ * pairwise, and the ruling's own verb is "set"; and the fold
+ * ({@link mergeObjectDefinitions}) never carries the key onto the resolved
+ * object, so accepting it on any target would be a row restriction its author
+ * believes is in force and nothing applies. A contribution that leaves the key
+ * alone registers exactly as before.
+ *
+ * Reachable only by a caller that skips the parse — a direct
+ * `registerObject(def, pkg, undefined, 'extend')` call: the manifest path
+ * (`ObjectQL.registerApp`) copies a closed key list off each
+ * `objectExtensions` entry, and the entry's schema refuses the key at
+ * authoring.
+ *
+ * The ADR-0112 envelope (`code` + `status: 422`), never a bare throw.
+ */
+class ExtensionDefaultRowScopeRefusedError extends Error {
+  readonly code = EXTENSION_DEFAULT_ROW_SCOPE_REFUSED_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
+  /** The object the extension targets. */
+  readonly objectName: string;
+  /** The package whose `extend` contribution this refusal stopped. */
+  readonly packageId: string | undefined;
+
+  constructor(objectName: string, packageId: string | undefined) {
+    super(
+      `Object "${objectName}": the \`extend\` contribution from package "${packageId}" carries ` +
+        '`defaultRowScope`. An object\'s default row scope is declared only by the object\'s owner; an ' +
+        'extension can neither set nor loosen it, and the extension merge never carries it onto the ' +
+        'object. Remove `defaultRowScope` from the extension. To scope the rows a permission set\'s ' +
+        'holders read, give that set a `rowLevelSecurity` policy for the object.',
+    );
+    this.name = 'ExtensionDefaultRowScopeRefusedError';
+    this.objectName = objectName;
+    this.packageId = packageId;
+  }
+}
+
+/**
  * [#16319] The registration-door field-`type` check — the single point of
  * closure the ruling names.
  *
@@ -3245,6 +3304,15 @@ export class SchemaRegistry {
     // its own. See {@link ObjectFieldTypeRefusedError}.
     const fieldTypeRefusal = objectFieldTypeRefusal(schema);
     if (fieldTypeRefusal) throw fieldTypeRefusal;
+
+    // [ADR-0095 D1 note; ruling E′ item 4] An `extend` contribution never sets
+    // the object's default row scope — see
+    // {@link ExtensionDefaultRowScopeRefusedError}. Here, beside the field-`type`
+    // door and for the same reason: before any materialization and before the
+    // contributor list is opened, so a refused contribution leaves nothing behind.
+    if (ownership === 'extend' && (schema as { defaultRowScope?: unknown }).defaultRowScope !== undefined) {
+      throw new ExtensionDefaultRowScopeRefusedError(schema.name, packageId);
+    }
 
     // [#23065] A `tree` field that names no `reference` references the object
     // that declares it, and this is where that is written down for every door

@@ -48,16 +48,29 @@ export const SysShareLink = ObjectSchema.create({
   isSystem: true,
   managedBy: 'engine-owned',
   description: 'Opaque capability token granting access to a single record. Notion/Figma-style public link sharing.',
-  titleFormat: '{object_name}/{record_id} ({permission})',
-  highlightFields: ['object_name', 'record_id', 'permission', 'audience', 'expires_at', 'revoked_at'],
+  // [#24611] The record title is the link's own label, the free text its
+  // creator gave it. Declared rather than left to the registry's designation,
+  // which derives the same field today. A link created without a label is
+  // titled by `titleFormat`: what the link grants and to whom, each value drawn
+  // as its option label on the record page. Neither title names the shared
+  // record's object; the Details tab's pointer card names it by its label.
+  nameField: 'label',
+  titleFormat: '{permission} · {audience}',
+  // Neither half of the pointer pair is listed, as on `sys_record_share`: the
+  // strip would draw the type half as an API name and the id half as a raw id,
+  // and would hide `record_id` from the Details tab, where it draws as the
+  // labelled pointer card (`sharing-pointer-pairs.test.ts`).
+  highlightFields: ['permission', 'audience', 'expires_at', 'revoked_at'],
 
+  // Lists name the target as `sys_record_share`'s do: the id half alone, the
+  // type half fetched for its cell without a column (`sharing-pointer-pairs.test.ts`).
   listViews: {
     active_links: {
       type: 'grid',
       name: 'active_links',
       label: 'Active',
       data: { provider: 'object', object: 'sys_share_link' },
-      columns: ['object_name', 'record_id', 'permission', 'audience', 'expires_at', 'use_count', 'last_used_at'],
+      columns: ['record_id', 'permission', 'audience', 'expires_at', 'use_count', 'last_used_at'],
       filter: [{ field: 'revoked_at', operator: 'is_null' }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 100 },
@@ -67,7 +80,7 @@ export const SysShareLink = ObjectSchema.create({
       name: 'by_me',
       label: 'Created by Me',
       data: { provider: 'object', object: 'sys_share_link' },
-      columns: ['object_name', 'record_id', 'permission', 'audience', 'expires_at', 'revoked_at'],
+      columns: ['record_id', 'permission', 'audience', 'expires_at', 'revoked_at'],
       filter: [{ field: 'created_by', operator: 'equals', value: '{current_user_id}' }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 100 },
@@ -77,7 +90,7 @@ export const SysShareLink = ObjectSchema.create({
       name: 'revoked',
       label: 'Revoked',
       data: { provider: 'object', object: 'sys_share_link' },
-      columns: ['object_name', 'record_id', 'revoked_at', 'created_by'],
+      columns: ['record_id', 'revoked_at', 'created_by'],
       filter: [{ field: 'revoked_at', operator: 'is_not_null' }],
       sort: [{ field: 'revoked_at', order: 'desc' }],
       pagination: { pageSize: 50 },
@@ -87,7 +100,7 @@ export const SysShareLink = ObjectSchema.create({
       name: 'all_links',
       label: 'All',
       data: { provider: 'object', object: 'sys_share_link' },
-      columns: ['object_name', 'record_id', 'permission', 'audience', 'expires_at', 'revoked_at', 'created_at'],
+      columns: ['record_id', 'permission', 'audience', 'expires_at', 'revoked_at', 'created_at'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 200 },
     },

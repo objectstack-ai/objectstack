@@ -2256,6 +2256,15 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Updating package "${id}"`);
             if (walled) return walled;
+            // [#24705] ADR-0070 D2: the manifest of a package the deployment
+            // ships is the deployment's, so this door refuses it with the
+            // answer install-overwrite, disable, publish, revert and delete
+            // give. Asked BEFORE the body is read, so the answer is the same
+            // whatever keys the body carries, and before `updatePackage`
+            // re-persists the edited manifest to `sys_packages`. An id nothing
+            // installed is writable by the predicate's own rule, so it still
+            // reaches the 404 below.
+            const readOnly = requireWritablePackage(deps, qlService, id, 'edit'); if (readOnly) return readOnly;
             const wrapped = Boolean(body?.manifest && typeof body.manifest === 'object');
             const src = (wrapped ? body.manifest : body) ?? {};
             const patch: {

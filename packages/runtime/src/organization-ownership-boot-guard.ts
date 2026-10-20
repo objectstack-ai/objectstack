@@ -17,8 +17,11 @@ import {
  * objects and the `sys_metadata` family no longer declare still hold their
  * legacy rows, and nothing reads them. The ceremony that carries those rows,
  * `os migrate organization-ownership --apply`, is an operator's act, never a
- * boot step (D10). So the runtime refuses to start until it has run, and says
- * which command to run.
+ * boot step (D10). So the runtime refuses to start until it has run. In 18.0
+ * that command refuses on every database (18.0 supports fresh installs only,
+ * ruling record 6259608309 on the v18 epic, item 1), so the refusal names no
+ * step of it: it says what 18.0 supports for a v17 database
+ * ({@link freshInstallsOnly}).
  *
  * ## What is refused
  *
@@ -38,8 +41,8 @@ import {
  *    `verified_at` NULL — rows of an organization-owned object still without
  *    their organization. D10 item 5 refuses a database the ceremony has not
  *    COMPLETED, and `verified_at` is the ceremony's completion marker, so this
- *    database is refused too, naming the re-run. Without a marker there is
- *    nothing to judge: a fresh database is never refused.
+ *    database is refused too. Without a marker there is nothing to judge: a
+ *    fresh database is never refused.
  *
  * - A FRESH database is never refused: no table it creates carries a retired
  *   column, and no ceremony wrote a marker on it.
@@ -100,19 +103,27 @@ export const ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME = 'com.objectstack.or
 const ORG = 'organization_id';
 
 /**
- * The ceremony command the refusal names, spelled for the boot that refused:
- * a development boot (`os dev`, `os serve --dev`) composes its security
- * plugin, `.env*` files and `telemetry` sibling as a development boot, and the
- * ceremony has to boot the same way to see the same database, so the command
- * it names carries `--dev`.
+ * What 18.0 supports for a v17 database, the sentence every refusal here
+ * closes on. 18.0 supports fresh installs only, and its `os migrate
+ * organization-ownership` refuses on every database, plan and apply alike
+ * (`ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE` in `@objectstack/cli`; ruling
+ * record 6259608309 on the v18 epic, item 1). So no refusal here names a step
+ * of that command: each says this instead, in the words the command's other
+ * 18.0 refusals use (`os migrate apply`'s drop gate, and `os dev`'s way on for
+ * a development database). The 18.x release that registers the ceremony names
+ * its steps here again.
  */
-function ceremonyCommand(dev: boolean | undefined): string {
-  return dev ? 'os migrate organization-ownership --dev' : 'os migrate organization-ownership';
+function freshInstallsOnly(dev: boolean | undefined): string {
+  return (
+    '18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 ' +
+    `${dev ? 'development ' : ''}database on a 17.x release until the 18.x release that carries the upgrade path, ` +
+    'and upgrade it there.'
+  );
 }
 
-/** How the boot that runs the guard was started — what the refusal's command must match. */
+/** How the boot that runs the guard was started — what the refusal's words must match. */
 export interface OrganizationOwnershipBootGuardOptions {
-  /** A development boot (`os dev` / `os serve --dev`): the named ceremony command carries `--dev`. */
+  /** A development boot (`os dev` / `os serve --dev`): the refusal speaks of a development database. */
   dev?: boolean;
 }
 
@@ -218,19 +229,20 @@ export async function findV17ShapeTables(engine: GuardEngine): Promise<string[]>
 }
 
 /**
- * The refusal text: what was found, that the server refuses to start, the
- * command, and the 17.x way out. On a v17-shaped database it says first that
- * 18.0 does not upgrade it, because in 18.0 the command it names refuses too,
- * so the operator does not reach that answer in two hops. With no table left in the v17 shape (`tables`
- * empty), the ceremony ran every step and its marker is not verified: the
- * text says so and names the re-run instead.
+ * The refusal text: what was found, that the server refuses to start, and what
+ * 18.0 supports for a v17 database ({@link freshInstallsOnly}). On a
+ * v17-shaped database (`tables` not empty) that is the whole way on. With no
+ * table left in the v17 shape (`tables` empty) a ceremony ran every step and
+ * its marker is not verified, or the marker could not be read: an unread
+ * marker says to fix the read first, since a database no ceremony ran on boots
+ * once the read answers.
  */
 export function organizationOwnershipRefusalMessage(
   tables: readonly string[],
   marker: 'absent' | 'unverified' | 'unreadable',
   opts: OrganizationOwnershipBootGuardOptions = {},
 ): string {
-  const ceremony = ceremonyCommand(opts.dev);
+  const answer = freshInstallsOnly(opts.dev);
   if (tables.length === 0) {
     const state = marker === 'unreadable'
       ? `its marker (sys_migration '${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') could not be read`
@@ -238,9 +250,8 @@ export function organizationOwnershipRefusalMessage(
         'still found rows the ceremony has not carried';
     return (
       `The organization-ownership ceremony has not finished on this database: ${state}. The server refuses to start ` +
-      'rather than serve rows of an organization-owned object with no organization. Resolve what the apply report ' +
-      `names, then run '${ceremony} --out PLAN' again, review it, run '${ceremony} --apply --plan-file PLAN ` +
-      "--backup-taken', and start again."
+      'rather than serve rows of an organization-owned object with no organization. ' +
+      `${marker === 'unreadable' ? 'Fix the read, then start again. ' : ''}${answer}`
     );
   }
   const state = marker === 'absent'
@@ -251,11 +262,7 @@ export function organizationOwnershipRefusalMessage(
   return (
     `This database is still in the v17 organization-ownership shape: ${tables.join(', ')} still carr` +
     `${tables.length === 1 ? 'ies' : 'y'} a physical organization_id column, and ${state}. The server refuses to ` +
-    'start rather than serve v17 data with v18 semantics. 18.0 does not upgrade a v17 database: keep this one on a ' +
-    '17.x release until the 18.x release that carries the upgrade path, and run these steps there. ' +
-    `Run '${ceremony} --out PLAN' to write and review its ` +
-    `plan, take a backup, then run '${ceremony} --apply --plan-file PLAN --backup-taken', and start again. ` +
-    'To keep 17.x semantics, run a 17.x runtime.'
+    `start rather than serve v17 data with v18 semantics. ${answer}`
   );
 }
 
@@ -331,7 +338,6 @@ export async function assertOrganizationOwnershipMigrated(
   logger?: { info?: (msg: string) => void },
   opts: OrganizationOwnershipBootGuardOptions = {},
 ): Promise<void> {
-  const ceremony = ceremonyCommand(opts.dev);
   let tables: string[];
   try {
     tables = await findV17ShapeTables(engine);
@@ -339,8 +345,7 @@ export async function assertOrganizationOwnershipMigrated(
     throw new OrganizationOwnershipBootRefusal(
       `The server refuses to start: it could not read whether this database is still in the v17 organization-ownership ` +
         `shape (${error instanceof Error ? error.message : String(error)}), and an unread answer is never taken for a ` +
-        `migrated database. Fix the read, or run the ceremony ('${ceremony} --out PLAN', then ` +
-        `'${ceremony} --apply --plan-file PLAN --backup-taken'), then start again.`,
+        `migrated database. Fix the read, then start again. ${freshInstallsOnly(opts.dev)}`,
       [],
     );
   }

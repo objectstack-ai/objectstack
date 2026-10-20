@@ -187,11 +187,14 @@ function readCloneBody(body: unknown): { name: string; label: string } {
     }
     // The metadata name rule, asked of its one declaration, so the refusal is
     // this door's 400 naming the field rather than a 422 from the save.
+    // `invalid_format` — the ADR-0114 D2 catalog member for "a declared
+    // pattern/format the value does not match". This row used to hand-spell
+    // Zod's `invalid_string`, a code outside the closed catalog.
     const nameRule = SnakeCaseIdentifierSchema.safeParse(name);
     if (!nameRule.success) {
         throw validationFailure(
             `'${name}' is not a valid permission-set name — use lowercase snake_case: start with a lowercase letter, then lowercase letters, digits and underscores, at least 2 characters (e.g. 'sales_rep_copy').`,
-            [{ field: 'name', code: 'invalid_string', message: nameRule.error.issues[0]?.message ?? 'not snake_case' }],
+            [{ field: 'name', code: 'invalid_format', message: nameRule.error.issues[0]?.message ?? 'not snake_case' }],
         );
     }
     const label = (cloneBody as { label?: unknown }).label;

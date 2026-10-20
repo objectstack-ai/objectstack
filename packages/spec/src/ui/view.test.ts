@@ -502,11 +502,14 @@ describe('ListViewSchema', () => {
     expect(() => ListViewSchema.parse(listView)).not.toThrow();
   });
 
-  it('should accept list view with top filter fields', () => {
+  it('should accept list view with quick-filter fields (userFilters)', () => {
+    // [#24640] Re-trued from the retired `filterableFields` key to the surviving
+    // `userFilters.fields` (the curated end-user filter bar); the refusal of the
+    // retired key is pinned in `view-list-filterable-fields-retirement.test.ts`.
     const listView: ListView = {
       type: 'grid',
       columns: ['name', 'status'],
-      filterableFields: ['status', 'category', 'owner'],
+      userFilters: { element: 'dropdown', fields: [{ field: 'status' }, { field: 'category' }, { field: 'owner' }] },
     };
 
     expect(() => ListViewSchema.parse(listView)).not.toThrow();

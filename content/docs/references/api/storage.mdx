@@ -102,7 +102,7 @@ const result = CompleteChunkedUploadRequestSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **fileId** | `string` | ✅ | File ID returned from presigned request |
-| **eTag** | `string` | optional | S3 ETag verification |
+| **eTag** | `string` | optional | ETag the client reports for the uploaded object. Stored on the file record as sent and not compared with anything: no storage adapter reports a stored object's ETag. Before committing, the door checks that the storage backend holds bytes under the file's key and, when the upload declared a size, that the held size equals it. |
 
 
 ---

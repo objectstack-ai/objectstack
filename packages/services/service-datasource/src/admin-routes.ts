@@ -698,6 +698,11 @@ export function registerDatasourceAdminRoutes(
   // unusable query parameter should instead be REFUSED is the ingress-policy
   // question #7606 owns globally; honouring it is correct under either answer,
   // so this route does not pre-empt it.
+  //
+  // Honouring it can be a refusal: where the driver's introspection names no
+  // table's schema (the in-tree SQL driver, every dialect), the service throws
+  // rather than answer a list `?schema=` or `external.allowedSchemas` did not
+  // narrow, and that throw is the `400 EXTERNAL_DATASOURCE_ERROR` below.
   server.get(`${root}/:name/remote-tables`, async (req: any, res: any) => {
     if (await requireDatasourceAdmin(req, res)) return;
     const svc = resolve(res, 'external-datasource', 'listRemoteTables');

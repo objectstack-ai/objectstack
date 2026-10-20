@@ -196,17 +196,24 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 | `--seed-admin` / `--no-seed-admin` | — | Seed a dev admin (`admin@objectos.ai` / `admin123`) on an empty DB — default on; override with `--admin-email` / `--admin-password` |
 | `-v, --verbose` | — | Verbose output |
 
-##### A 17.x development database is upgraded in place
+##### A 17.x development database
 
 A v18 server refuses to start on a database still in the v17
 organization-ownership shape until the [ownership ceremony](#os-migrate-organization-ownership)
-has run on it. `os dev` runs that ceremony for you when the database is a local
-SQLite file:
+has run on it.
 
 <Callout type="warn">
 18.0 supports fresh `single` installs; upgrades and walled postures arrive in 18.x. In 18.0 the ceremony refuses, so `os dev` stops at step 2 with its
 refusal and changes nothing.
+18.0 does not upgrade a v17 database: keep a v17 database on a 17.x release
+until the 18.x release that carries the upgrade path. For a local SQLite file,
+`os dev` in 18.0 still takes step 1's copy first and prints where it is,
+beside the ceremony's `NOT_IMPLEMENTED` refusal; any other database gets no
+copy and the same answer.
 </Callout>
+
+In the 18.x release that carries the upgrade path, `os dev` runs that ceremony
+for you when the database is a local SQLite file:
 
 1. It copies the database file and its `telemetry` sibling (each with its
    `-wal` / `-shm`) into `<data dir>/backups/organization-ownership-<timestamp>/`.
@@ -215,12 +222,14 @@ refusal and changes nothing.
    beside the copy.
 3. It prints the ceremony's warnings and starts the server again.
 
-If a step blocks, or the post-check still holds rows (a row whose owner cannot
+In that release, if a step blocks, or the post-check still holds rows (a row whose owner cannot
 be derived, named per table with its remedy), `os dev` stops and prints what
 holds it, where the copy is, and the command that resumes the run. It tries once per session. A database that is
 not a local SQLite file (PostgreSQL, a remote libSQL, `:memory:`) is not
-upgraded in place: run the ceremony yourself. `os serve` and `os start` never run
-it; they refuse and name the command.
+upgraded in place: run the ceremony yourself.
+
+`os serve` and `os start` never run the ceremony: they refuse to start, and on
+a v17 database their 18.0 refusal says that 18.0 does not upgrade it.
 
 ##### Serving dev over https
 
@@ -1025,13 +1034,18 @@ safe. No flag skips these refusals:
 - `sys_account.issuer` is dropped only when its retirement pre-flight reads the
   table clean (`os migrate account-issuer` reports the colliding rows).
 - `sys_comment.reactions` waits for a verified `os migrate comment-reactions --apply` run.
-- `organization_id` on any table the organization-ownership ceremony covers
-  waits for a verified `os migrate organization-ownership --apply --plan-file FILE`
-  run. These tables are the ADR-0131 D7 tables and the `sys_metadata` family.
-  The ceremony drops those columns itself, in its column-drops step, before it
-  records the run verified. Dropping one first would turn every legacy
+- `organization_id` waits for a verified run of the organization-ownership
+  ceremony, on every table the drift offers to drop it from: the ceremony plans
+  every table that still carries the column, the ADR-0131 D7 tables and the
+  `sys_metadata` family among them. Dropping one first would turn every legacy
   organization row into an environment row. Under `--json` the refusal answers
   `message: 'refused_organization_ownership_unmigrated'` and lists the `tables`.
+  18.0 itself never records a verified run, so on a v17 database this refusal
+  holds on every run. 18.0 supports fresh installs only and does not upgrade a
+  v17 database: keep a v17 database on a 17.x release until the 18.x release
+  that carries the upgrade path. In that release, the ceremony's
+  `os migrate organization-ownership --apply --plan-file FILE` run drops these
+  columns itself, in its column-drops step, before it records the run verified.
 
 Each refusal holds the whole `--allow-destructive` run: nothing in it is
 created, applied or dropped, the run's other changes included. A run without
@@ -1478,14 +1492,15 @@ reports the failed read and exits `1`. A failed read or write exits `1`.
 
 The v18 ownership ceremony (ADR-0131 D10). A v18 `os serve` / `os start` refuses
 to start on a database still in the v17 organization-ownership shape until this
-has run. Under `os dev` it runs on its own for a local SQLite database (see
-[`os dev`](#os-dev)).
+has run. In the 18.x release that carries the upgrade path, `os dev` runs it on
+its own for a local SQLite database (see [`os dev`](#os-dev)).
 
 <Callout type="warn">
 18.0 supports fresh `single` installs; upgrades and walled postures arrive in 18.x. In 18.0 this command refuses, plan and apply alike: it exits `1` with
 `NOT_IMPLEMENTED` (under `--json`, `code` beside `error`) and reads and
 writes nothing. Keep a v17 database on a 17.x release until the 18.x release
-that carries the upgrade path.
+that carries the upgrade path. The invocations below, and what the list after
+them says the ceremony does, are that 18.x release's.
 </Callout>
 
 ```bash

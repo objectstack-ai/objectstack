@@ -39,8 +39,8 @@
  * down, in `os build` and at this door alike. The pass now runs the same
  * `check()` on every nested predicate, at the location the null-guard gate
  * already gives it (`validation rule 'outer' then → 'inner'`), with the
- * relationship-traversal checks on a nested `condition` (ObjectQL hydrates it)
- * and not on a nested `when` (it does not). The second describe block below
+ * relationship-traversal checks on a nested `condition` and — since #24512 —
+ * on a nested `when` (ObjectQL hydrates both). The second describe block below
  * pins it; its protocol half is the #22042 block of the same protocol file.
  */
 import { describe, expect, it } from 'vitest';
@@ -236,7 +236,7 @@ const fxRef = (validations: unknown[]) => {
   const base = fxRule(validations);
   return { ...base, fields: { ...base.fields, account: { type: 'lookup', label: 'Account', reference: 'fx_rule' } } };
 };
-/** Reads more than one relationship hop — a shape `checkPredicate` refuses, and `checkConditional` never judges. */
+/** Reads more than one relationship hop — a shape `checkPredicate` and (#24512) `checkConditional` refuse. */
 const MULTI_HOP = 'record.account.owner.email != null';
 const HYDRATION = {
   type: 'conditional',
@@ -311,16 +311,21 @@ describe('#22042 — a `conditional` rule\'s nested predicates meet the same ver
     ]);
   });
 
-  it('the traversal checks follow the evaluator per slot: ON for a nested `condition`, OFF for a nested `when`', () => {
+  it('the traversal checks follow the evaluator per slot: ON for a nested `condition` and, since #24512, a nested `when`', () => {
     const atBuild = buildFindings(fxRef([HYDRATION]));
 
-    // `checkPredicate` refuses a read deeper than one hop at any depth, so the build says so…
-    expect(atBuild.map((f) => f.where), dump(atBuild)).toEqual(["object 'fx_rule' · validation rule 'outer' then → 'inner'"]);
-    expect(atBuild[0]!.message).toContain('ONE hop');
-    // …and `checkConditional` never hydrates a `when`, so the same source there earns no
-    // traversal prescription — exactly as the top-level `when` site is opted out.
+    // `checkPredicate` refuses a read deeper than one hop at any depth, and
+    // `checkConditional` evaluates a `when` on the same hydrated scope, so the
+    // build says so for both slots…
+    expect(atBuild.map((f) => f.where), dump(atBuild)).toEqual([
+      "object 'fx_rule' · validation rule 'outer' then → 'inner'",
+      "object 'fx_rule' · validation rule 'outer' otherwise → 'mid' when-predicate",
+    ]);
+    for (const f of atBuild) expect(f.message).toContain('ONE hop');
+    // …and at the top-level `when` site too.
     const topWhen = buildFindings(fxRef([{ ...HYDRATION, when: MULTI_HOP, then: NESTED_VALID.otherwise, otherwise: undefined }]));
-    expect(topWhen, dump(topWhen)).toEqual([]);
+    expect(topWhen.map((f) => f.where), dump(topWhen)).toEqual(["object 'fx_rule' · validation 'outer' when"]);
+    expect(topWhen[0]!.message).toContain('ONE hop');
     expect(expressionFindings(gateObject(fxRef([HYDRATION])).errors)).toEqual(atBuild);
   });
 
@@ -377,6 +382,71 @@ describe('#24468 — the object door refuses a rule hop to a field the target do
 
   it('⭐ CONTROL — a rule reading a field the target declares publishes clean', () => {
     const result = gateOrder([rule('open_account', "record.account.status == 'closed'")]);
+
+    expect(expressionFindings(result.errors), dump(result)).toEqual([]);
+    expect(expressionFindings(result.advisories), dump(result)).toEqual([]);
+  });
+});
+
+describe('#24512 — the object door judges a `conditional` rule\'s `when` hop as it judges a `condition`\'s', () => {
+  /** The lookup's target, delivered by ANOTHER package the written one depends on. */
+  const account = {
+    name: 'fx_account', label: 'Account', sharingModel: 'private', _packageId: 'com.example.accounts',
+    fields: { status: { type: 'text', label: 'Status' } },
+  };
+  const order = (validations: unknown[]) => ({
+    name: 'fx_order',
+    label: 'Order',
+    sharingModel: 'private',
+    fields: {
+      amount: { type: 'number', label: 'Amount' },
+      account: { type: 'lookup', label: 'Account', reference: 'fx_account' },
+    },
+    validations,
+  });
+  const gate = (when: string, name = 'gate') => ({
+    type: 'conditional', name, when, message: 'x',
+    then: { type: 'script', name: 'cap', condition: 'record.amount != null && record.amount > 100', message: 'y' },
+  });
+  const gateOrder = (validations: unknown[]) => runRuntimeAuthoringRules({
+    type: 'object',
+    item: order(validations),
+    context: { objects: [account] },
+    packageScope: { packageId: 'com.example.orders', dependencies: ['com.example.accounts'] },
+  });
+
+  it('the fixtures are spec-valid: each refusal below is the expression verdict, not the schema\'s', () => {
+    for (const when of ["record.account.region == 'north'", 'record.account.owner.email != null', "record.account.status == 'open'"]) {
+      const parsed = ObjectSchema.safeParse(order([gate(when), { type: 'conditional', name: 'outer', when: 'record.amount != null', message: 'x', then: gate(when, 'inner') }]));
+      expect(parsed.success, dump(parsed.error?.issues)).toBe(true);
+    }
+  });
+
+  it('⭐ LIT — a `when` reading a field the target does not declare is REFUSED under EXPRESSION_INVALID, naming the slot, the field and the target', () => {
+    const result = gateOrder([gate("record.account.region == 'north'")]);
+
+    const errs = expressionFindings(result.errors);
+    expect(errs, dump(result)).toHaveLength(1);
+    const where = "object 'fx_order' · validation 'gate' when";
+    expect(errs[0]).toMatchObject({ rule: EXPRESSION_INVALID, severity: 'error', where, path: where });
+    expect(errs[0]!.message).toContain('unknown field `region` on `fx_account`');
+    expect(errs[0]!.message).toContain('the rule has no verdict');
+  });
+
+  it('⭐ LIT — a `when` reading a second hop is REFUSED, and a nested `when` is judged too', () => {
+    const result = gateOrder([{
+      type: 'conditional', name: 'outer', when: 'record.amount != null', message: 'x',
+      then: gate('record.account.owner.email != null', 'inner'),
+    }]);
+
+    const errs = expressionFindings(result.errors);
+    expect(errs.map((e) => e.where), dump(result)).toEqual(["object 'fx_order' · validation rule 'outer' then → 'inner' when-predicate"]);
+    expect(errs[0]).toMatchObject({ rule: EXPRESSION_INVALID, severity: 'error' });
+    expect(errs[0]!.message).toContain('ONE hop');
+  });
+
+  it('⭐ CONTROL — a `when` reading a field the target declares publishes clean', () => {
+    const result = gateOrder([gate("record.account.status == 'open'")]);
 
     expect(expressionFindings(result.errors), dump(result)).toEqual([]);
     expect(expressionFindings(result.advisories), dump(result)).toEqual([]);

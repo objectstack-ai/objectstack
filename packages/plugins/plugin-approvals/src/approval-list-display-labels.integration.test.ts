@@ -288,7 +288,10 @@ describe('#23889 — the approval lists read engine-written display columns', ()
       for (const col of view.columns) expect(act.fields[col], `${name}.${col}`).toBeDefined();
     }
     for (const name of ['recent', 'all_actions']) {
-      expect(act.listViews[name].columns, name).toEqual(expect.arrayContaining(['object_name', 'record_id', 'acted_as_label']));
+      // The pointer shows as its id half; the type half is fetched for that
+      // cell, never shown as a column (`sys-approval-request-pointer-pair.test.ts`).
+      expect(act.listViews[name].columns, name).toEqual(expect.arrayContaining(['record_id', 'acted_as_label']));
+      expect(act.listViews[name].columns, name).not.toContain('object_name');
       expect(act.listViews[name].columns, name).not.toContain('acted_as');
     }
     expect(act.fields.record_id.referenceVia).toBe('object_name');
