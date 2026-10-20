@@ -569,22 +569,19 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    *    name (ADR-0062), and it is not a federation source, so its tables are not
    *    introspected: that costs a round trip per table of the platform database
    *    and answers nothing the connection question needs. No `tableCount`.
-   *  - a driver with no `introspectSchema` (memory, mongodb). The answer says
-   *    so in `introspection: 'unsupported'`, rather than calling a connected
-   *    datasource failed.
+   *  - a driver with no `introspectSchema` (memory, mongodb). Its connected
+   *    datasource was called failed. It now answers the same health probe, and
+   *    the missing `tableCount` is the whole of what it cannot say.
    *
-   * Every other datasource is tested exactly as before. So is one with no live
-   * driver: `introspect` names the absence itself.
+   * Both answer `{ ok, latencyMs }`, the answer's existing keys: no key is added
+   * to say why `tableCount` is absent, because nothing reads one (the console's
+   * Test reads `ok`, `error` and `latencyMs`). Every other datasource is tested
+   * exactly as before. So is one with no live driver: `introspect` names the
+   * absence itself.
    */
   async testConnection(
     datasource: string,
-  ): Promise<{
-    ok: boolean;
-    latencyMs?: number;
-    tableCount?: number;
-    introspection?: 'unsupported';
-    error?: string;
-  }> {
+  ): Promise<{ ok: boolean; latencyMs?: number; tableCount?: number; error?: string }> {
     const started = Date.now();
     try {
       const driver = this.config.liveDriver?.(datasource);
@@ -593,11 +590,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
         if (!(await driver.checkHealth())) {
           return { ok: false, error: `Datasource '${datasource}' is registered, but its driver failed its health check.` };
         }
-        return {
-          ok: true,
-          latencyMs: Date.now() - started,
-          ...(canIntrospect ? {} : { introspection: 'unsupported' as const }),
-        };
+        return { ok: true, latencyMs: Date.now() - started };
       }
       const schema = await this.config.introspect(datasource);
       return {

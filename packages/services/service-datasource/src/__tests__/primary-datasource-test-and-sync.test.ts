@@ -16,8 +16,10 @@
  *
  *  - Test answers truthfully for both. The primary datasource's driver is
  *    found by the resolver `DatasourceConnectionService.disconnect` already
- *    applies (`registeredDriverName`), and a driver that cannot introspect says
- *    so instead of failing.
+ *    applies (`registeredDriverName`), and a driver that cannot introspect
+ *    answers its health probe instead of failing. Both answer the existing
+ *    `{ ok, latencyMs }` keys and nothing more (the seat's REWORK record:
+ *    no answer key without a consumer).
  *  - Sync on `default` keeps refusing with the SAME status and code, and now
  *    gives the true reason: the primary datasource is the platform's managed
  *    storage, not a federation source (ADR-0015 §1). It never introspects the
@@ -162,10 +164,11 @@ describe('the primary datasource: Test agrees with the "connected" the page list
     expect(test.status).toBe(200);
     expect(test.body.data).toMatchObject({ ok: true });
     expect(typeof test.body.data.latencyMs).toBe('number');
-    expect(test.body.data).not.toHaveProperty('error');
     // The primary datasource is not a federation source: Test asks the driver
     // whether it is connected, never lists the platform's tables to find out.
-    expect(test.body.data).not.toHaveProperty('tableCount');
+    // So the answer is the existing keys `ok` and `latencyMs`, with no
+    // `tableCount` and no `error`.
+    expect(Object.keys(test.body.data).sort()).toEqual(['latencyMs', 'ok']);
     expect(introspect).not.toHaveBeenCalled();
   });
 });
@@ -202,13 +205,16 @@ describe('the primary datasource: Sync refuses as before, with the true reason',
 });
 
 describe('a driver with no introspectSchema', () => {
-  it('Test answers connected and says introspection is unsupported, instead of ok: false', async () => {
+  it('Test answers its health probe, connected, instead of ok: false', async () => {
     const { call } = await boot();
 
     const test = await call('POST', '/scratch/test');
     expect(test.status).toBe(200);
-    expect(test.body.data).toMatchObject({ ok: true, introspection: 'unsupported' });
-    expect(test.body.data).not.toHaveProperty('error');
+    expect(test.body.data).toMatchObject({ ok: true });
+    expect(typeof test.body.data.latencyMs).toBe('number');
+    // The answer's existing keys, and no other: no `tableCount` (it cannot list
+    // tables), no `error`, and no key invented to say why.
+    expect(Object.keys(test.body.data).sort()).toEqual(['latencyMs', 'ok']);
   });
 
   it('a registered driver that fails its health check is not reported connected', async () => {
@@ -241,7 +247,6 @@ describe('nothing else moves', () => {
     const test = await call('POST', '/warehouse/test');
     expect(test.status).toBe(200);
     expect(test.body.data).toMatchObject({ ok: true, tableCount: 1 });
-    expect(test.body.data).not.toHaveProperty('introspection');
 
     const tables = await call('GET', '/warehouse/remote-tables');
     expect(tables.status).toBe(200);
