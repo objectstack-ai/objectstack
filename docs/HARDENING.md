@@ -201,11 +201,11 @@ origins you name:
 | --- | --- |
 | No origin list (neither `OS_CORS_ORIGIN` nor the plugin's `cors.origins`) | **No cross-origin caller.** On a development boot (`NODE_ENV=development`, which `os dev` and `os serve --dev` set), loopback origins (`localhost`, `127.0.0.1`, `[::1]`, any port) are admitted too. |
 | A list (`OS_CORS_ORIGIN=https://app.example.com`, comma-separated; exact origins or patterns such as `https://*.example.com`) | Those origins, with credentials unless `OS_CORS_CREDENTIALS=false`. Loopback origins are admitted alongside any list. |
-| `*` while credentials are on | **Refused at boot** — the process exits naming the two remedies. |
+| `*` while credentials are on | **Refused at boot** — the boot fails with a message naming the two remedies. |
 
 Same-origin requests need no CORS answer, so the Console under
 `/_console` and any page the server itself serves work with no list at
-all. A front-end served from **another origin** needs exactly one
+all. A front-end served from **another origin** needs one CORS
 variable:
 
 ```bash
