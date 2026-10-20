@@ -226,7 +226,11 @@ export interface DelegatedAdminGateDeps {
  * {@link DelegatedAdminGate.describeDelegableScope}).
  */
 export interface DelegableScopeReport {
-  /** ADR-0066 superuser wildcard: unconstrained. The lists below then enumerate everything. */
+  /**
+   * ADR-0066 superuser wildcard: unconstrained. The lists below then enumerate
+   * everything the write path admits — never an audience anchor or a built-in
+   * identity name, which no writer may assign.
+   */
   isTenantAdmin: boolean;
   /** Every `adminScope` the caller holds, with its subtree resolved to ids. */
   scopes: Array<{
@@ -555,8 +559,10 @@ export class DelegatedAdminGate {
    * organization-less surface, correct for a `single` posture.
    *
    * A tenant-level admin (ADR-0066 superuser wildcard) is unconstrained;
-   * the report says so AND enumerates everything, so a consumer can render
-   * one uniform picker instead of special-casing. An organization
+   * the report says so AND enumerates everything the write path admits, so a
+   * consumer can render one uniform picker instead of special-casing. Every
+   * branch reads one position listing, which never offers a name no writer
+   * may assign (an audience anchor or a built-in identity). An organization
    * administrator (D12 as amended 2026-10-17) is not: `isTenantAdmin` is
    * false, every unit of its organization is placeable and the positions
    * inside the organization boundary are assignable — on the same report
@@ -572,13 +578,22 @@ export class DelegatedAdminGate {
     // per-organization `sys_position` rows: a position declared only in the
     // registry is assignable, and a row with no definition grants nothing
     // (the resolver reads the catalog), so it is not offered.
+    //
+    // Two kinds of catalog name are never offered, by ANY branch below,
+    // because no writer may assign them: the ADR-0090 D9 audience anchors
+    // (refused by `authorize`'s unconditional invariant) and the ADR-0068 D2
+    // built-in identity names (`sys_user_position.position` refuses them from
+    // every writer, tenant-level administrators included — the shared
+    // `isReservedIdentityName` predicate that validation is generated from).
+    // They carry no sets, so no branch's own test would settle them: the
+    // listing every branch reads leaves them out, once.
     const allPositions = async (): Promise<string[]> => {
       const catalog = this.catalog();
       if (!catalog) return [];
       try {
         return (await catalog.list('position'))
           .map((entry) => entry.name)
-          .filter((n) => n && !ANCHOR_POSITIONS.has(n));
+          .filter((n) => n && !ANCHOR_POSITIONS.has(n) && !isReservedIdentityName(n));
       } catch {
         return []; // a picker over an unreadable catalog offers nothing (fail closed)
       }
@@ -638,15 +653,14 @@ export class DelegatedAdminGate {
     // into every unit of its organization and assigns every position inside
     // the organization boundary — `organizationAdminFailure`'s own test, so an
     // option offered here is one the write path admits. The ADR-0068 D2
-    // identity names carry no sets, so the boundary does not settle them, but
-    // `sys_user_position.position` refuses them from every writer: they are
-    // not offered either.
+    // identity names carry no sets, so the boundary does not settle them; the
+    // shared listing has already left them out (see `allPositions`).
     if (holdsOrganizationAdmin(sets) && organizationId) {
       for (const id of await this.organizationBusinessUnitIds(organizationId)) {
         if (!placeableBusinessUnitIds.includes(id)) placeableBusinessUnitIds.push(id);
       }
       for (const positionName of await allPositions()) {
-        if (assignablePositions.includes(positionName) || isReservedIdentityName(positionName)) continue;
+        if (assignablePositions.includes(positionName)) continue;
         let failure: unknown;
         try {
           failure = await this.positionBoundaryFailure(positionName);

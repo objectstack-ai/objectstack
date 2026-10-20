@@ -69,6 +69,32 @@
  * apply on the runner too (the runner's own home holds the log; nothing is
  * shared with a seat container, and the twenty-action cap bounds the run).
  *
+ * ## Rule ⑤ on the runner — the executor announces the batch
+ *
+ * That log is fresh on every run and nothing reaches it from the seat, so a
+ * seat's `--announce-batch` never applies here: left to rule ① alone, a stroke
+ * of fifteen `issue_create` actions landed fifteen cards 3 s apart — 42 s from
+ * one identity, the burst rule ⑤ exists to prevent. This file holds the whole
+ * stroke, so it announces the batch itself: after the sender gate and before
+ * the first write, a stroke carrying `DEFAULT_BATCH_THRESHOLD` or more
+ * content-creating actions (`CONTENT_CREATING_OPS`, read off the op table in
+ * `dispatch.mjs`) gets ONE `announceBatch` (kind `BATCH_KIND`) for its writes
+ * from the first through the last content-creating one (`strokePacing`), so
+ * each of those leaves `DEFAULT_BATCH_GAP_MS` after the one before; below the
+ * threshold rule ①'s gap is unchanged. The transcript and the summary say so
+ * in one line (`batchAnnouncedText`). Two refusals guard it, both before the
+ * first write:
+ *
+ *   - a stroke whose pacing the relay job cannot hold — its `timeout-minutes`
+ *     less the allowance an ordinary stroke has — is REFUSED with zero writes
+ *     (exit 2, `strokeBudgetRefusal`), exactly as the packer refuses it at the
+ *     seat (`dispatch.mjs`, its batch-gap section): run anyway, it could
+ *     outlive the job, which the platform cancels mid-stroke with no summary.
+ *     ⛔ Never a shorter gap instead;
+ *   - an announcement the pace log cannot record is REFUSED (exit 10), the way
+ *     `paceWrite` refuses an unrecordable write: unpaced is the state the
+ *     throttle exists to prevent.
+ *
  * ## The base sync — `pr_update_branch`, confirmed by MEASURE
  *
  * `PUT /repos/{repo}/pulls/{n}/update-branch` answers 202 "Updating pull
@@ -154,12 +180,14 @@
  * ## Exit codes — capture them BEFORE any pipe
  *
  *   0   every action landed.
- *   2   the payload was refused (the reasons are printed and summarised); zero writes.
+ *   2   the payload was refused (the reasons are printed and summarised) — or the
+ *       stroke's rule ⑤ pacing is over the relay job's budget; zero writes.
  *   3   PREREQUISITE NOT MET — no token, no sender, the permission read did
  *       not answer, or the platform was unreachable; zero writes.
  *   4   the sender is not authorized on the target repo; zero writes.
  *   5   an action FAILED; the summary names it and which earlier ones landed.
- *  10   the write throttle refused (its prescription was printed).
+ *  10   the write throttle refused (its prescription was printed), or a stroke's
+ *       rule ⑤ batch could not be recorded; zero writes in that second case.
  */
 
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -169,8 +197,8 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../../invoked-as.mjs';
 import { scrub } from '../fleet-token.mjs';
 import { classifyHttp } from '../label-write.mjs';
-import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
-import { ANNOTATED_OPS, parseRelayAnnotation, RELAY_ANNOTATION_PREFIX, relayAnnotationMessage } from './dispatch.mjs';
+import { announceBatch, EXIT_WRITE_PACE_REFUSED, fmtDuration, isWriteMethod, noteResponse, paceFilePath, paceWrite, releaseWriteLease, unrecordableText } from '../write-pace.mjs';
+import { ANNOTATED_OPS, parseRelayAnnotation, RELAY_ANNOTATION_PREFIX, relayAnnotationMessage, strokeBudgetRefusal, strokePacing } from './dispatch.mjs';
 import { OPS, PERMISSIONS, PR_LANDED_STATE, answerPlaceholder, transferRemedy } from './ops.mjs';
 import { PAYLOAD_ENV, refusalText, tokenRepositoriesOf, validatePayload } from './validate.mjs';
 
@@ -185,6 +213,9 @@ export const EXIT_ACTION_FAILED = 5;
 
 /** The environment variable the workflow hands `github.event.sender.login` through. */
 export const SENDER_ENV = 'FLEET_WRITE_SENDER';
+
+/** The `kind` a stroke's rule ⑤ announcement is recorded under in the runner's pace log (header). */
+export const BATCH_KIND = 'fleet-write stroke';
 
 /** The roles that carry write permission on the target — GitHub's legacy base roles plus the exact role names. */
 export const ALLOWED_PERMISSIONS = Object.freeze(['admin', 'write']);
@@ -429,11 +460,20 @@ export function annotationCommand(note) {
   return `::notice title=${escapeCommandProperty(`${RELAY_ANNOTATION_PREFIX} ${note.op}`)}::${escapeCommandData(relayAnnotationMessage(note))}`;
 }
 
+/** The line a batched stroke's transcript and summary carry: rule ⑤ on the runner, said out loud. Pure. */
+export function batchAnnouncedText(p) {
+  return (
+    `rule ⑤ — ${p.creating} content-creating action(s), at or above the batch threshold of ${p.threshold}: a batch of ${p.batchWrites} ` +
+    `write(s) announced on the runner, each ${fmtDuration(p.gapMs)} after the one before (${fmtDuration(p.pacingMs)} of pacing) — the pauses are the contract, not a hang`
+  );
+}
+
 /** The summary table, as markdown lines. */
-export function summaryText({ payload, sender, role, rows, stoppedAt = null, notAttempted = 0, refusal = null, remedy = null, reaches = null }) {
+export function summaryText({ payload, sender, role, rows, stoppedAt = null, notAttempted = 0, refusal = null, remedy = null, reaches = null, pacing = null }) {
   const lines = [`### fleet-write \`${payload?.request_id ?? '?'}\``, ''];
   const also = Array.isArray(reaches) && reaches.length > 1 ? ` · the token also reaches ${reaches.slice(1).map((r) => `\`${r}\``).join(', ')}` : '';
   lines.push(`- sender: \`${sender ?? '?'}\`${role ? ` (${role})` : ''} · session: \`${payload?.session ?? '?'}\` · target: \`${payload?.repo ?? '?'}\`${also} · ${payload?.actions?.length ?? 0} action(s)`);
+  if (pacing?.batched) lines.push(`- pacing: ${batchAnnouncedText(pacing)}`);
   if (refusal) {
     lines.push('', `⛔ ${refusal} — zero writes.`);
     return `${lines.join('\n')}\n`;
@@ -540,6 +580,12 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
     return { exit: EXIT_REFUSED, rows: [], summary: summaryText({ payload: raw && typeof raw === 'object' ? raw : null, sender, rows: [], refusal: `payload refused (${judged.errors.length} problem(s))` }), lines };
   }
   const payload = judged.payload;
+  // Rule ⑤ on the runner (header): a stroke whose batch pacing the job cannot hold is refused before any request.
+  const pacing = strokePacing(payload);
+  if (!pacing.fits) {
+    log(refusalText([strokeBudgetRefusal(pacing)]));
+    return { exit: EXIT_REFUSED, rows: [], summary: summaryText({ payload, sender, rows: [], refusal: `the stroke's rule ⑤ pacing (${fmtDuration(pacing.pacingMs)}) is over the relay job's budget (${fmtDuration(pacing.budgetMs)})` }), lines, pacing };
+  }
   if (!token) {
     log('fleet-write/execute: PREREQUISITE NOT MET — no GITHUB_TOKEN in the environment (the workflow passes the minted App token through it). ⛔ zero writes.');
     return { exit: EXIT_PREREQUISITE, rows: [], summary: summaryText({ payload, sender, rows: [], refusal: 'no token' }), lines };
@@ -568,6 +614,19 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
   }
   const role = roles.length === 1 ? roles[0].role : roles.map((r) => `${r.role} on ${r.repo}`).join(', ');
   log(`fleet-write/execute: request ${payload.request_id} · sender ${sender} (${role}) · session ${payload.session} · target ${payload.repo}${reaches.length > 1 ? ` · the token also reaches ${reaches.slice(1).join(', ')}` : ''} · ${payload.actions.length} action(s)`);
+
+  // ── rule ⑤ on the runner — announced before the first write (header) ──────
+  if (pacing.batched) {
+    const pace = t.pace ?? {};
+    try {
+      announceBatch({ token, count: pacing.batchWrites, kind: BATCH_KIND }, pace);
+    } catch (e) {
+      // Unpaced is the state the throttle exists to prevent: refused before the first write, as `paceWrite` refuses an unrecordable one.
+      log(scrub(unrecordableText(pace.file ?? paceFilePath(pace.env ?? process.env, pace.home), e), [token]));
+      return { exit: EXIT_WRITE_PACE_REFUSED, rows: [], summary: summaryText({ payload, sender, role, rows: [], reaches, refusal: 'the rule ⑤ batch could not be recorded in the pace log' }), lines, role, pacing };
+    }
+    log(`fleet-write/execute: ${batchAnnouncedText(pacing)}.`);
+  }
 
   // ── the actions, in order ─────────────────────────────────────────────────
   const rows = [];
@@ -626,11 +685,11 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
   const notAttempted = stoppedAt ? payload.actions.length - stoppedAt.action : 0;
   const failedAction = stoppedAt ? payload.actions[stoppedAt.action - 1] : null;
   const remedy = failedAction && OPS[failedAction.op].secondRepo ? transferRemedy(payload.repo, failedAction[OPS[failedAction.op].secondRepo]) : null;
-  const summary = summaryText({ payload, sender, role, rows, stoppedAt, notAttempted, remedy, reaches });
+  const summary = summaryText({ payload, sender, role, rows, stoppedAt, notAttempted, remedy, reaches, pacing });
   if (stoppedAt) log(`fleet-write/execute: ✗ stopped at action ${stoppedAt.action} (${stoppedAt.op}); ${notAttempted} later action(s) NOT attempted. The board holds what the rows above say landed.`);
   else log(`fleet-write/execute: ✓ ${rows.length} request(s) landed, every action done.`);
   if (remedy) log(`fleet-write/execute: remedy — ${remedy}`);
-  return { exit: stoppedAt ? EXIT_ACTION_FAILED : EXIT_OK, rows, summary, lines, role, annotations };
+  return { exit: stoppedAt ? EXIT_ACTION_FAILED : EXIT_OK, rows, summary, lines, role, annotations, pacing };
 }
 
 // ---------------------------------------------------------------------------
@@ -654,8 +713,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure': 11,
   'the workflow_dispatch: ONE POST to the dispatch endpoint of the allowlisted file with { ref: main } under the App token, a bodiless 204 lands as accepted, a 422 or 403 is a failed action, no other actions/* request leaves, no annotation': 7,
   'the release.yml refresh: ONE POST to its dispatch endpoint carrying { ref: main, inputs: { refresh_version_pr: "true" } } under the App token, landing as accepted; force, false, absent, a string or any other input refused with ZERO requests, exit 2': 9,
+  "the batch gap on the runner: a stroke carrying DEFAULT_BATCH_THRESHOLD or more content-creating actions is announced as ONE rule ⑤ batch before its first write — on an injected clock every write through the last content-creating one leaves a full DEFAULT_BATCH_GAP_MS after the one before, and the pacing is exactly what the seat budgets; below the threshold, after the batch and on a landing stroke rule ①'s gap; a stroke the job cannot hold refused with ZERO requests; an announcement the log cannot record refused before the first write": 10,
 });
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 17;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1067,6 +1127,103 @@ export async function selfTest() {
       t('a transport error that echoed the token is scrubbed too', [thrown.summary, ...thrown.logs].join('\n').includes(TOKEN), false);
     }
 
+    // ── the batch gap on the runner ─────────────────────────────────────────
+    battery("the batch gap on the runner: a stroke carrying DEFAULT_BATCH_THRESHOLD or more content-creating actions is announced as ONE rule ⑤ batch before its first write — on an injected clock every write through the last content-creating one leaves a full DEFAULT_BATCH_GAP_MS after the one before, and the pacing is exactly what the seat budgets; below the threshold, after the batch and on a landing stroke rule ①'s gap; a stroke the job cannot hold refused with ZERO requests; an announcement the log cannot record refused before the first write");
+    {
+      const { DEFAULT_BATCH_GAP_MS, DEFAULT_BATCH_THRESHOLD, DEFAULT_MIN_GAP_MS } = await import('../write-pace.mjs');
+      const UI = 'objectstack-ai/objectui';
+      const PERM_UI = `GET /repos/${UI}/collaborators/os-support-ai/permission`;
+      const created = { [PERM_UI]: allowed[PERM], [`POST /repos/${UI}/issues`]: { status: 201, json: { number: 13122, html_url: `https://github.test/${UI}/issues/13122` } }, [`POST /repos/${UI}/issues/13122/labels`]: { status: 200, json: [{ name: 'x' }] } };
+      const cards = (n) => Array.from({ length: n }, (_, i) => ({ op: 'issue_create', title: `Card ${i + 1}`, body: 'B' }));
+      // The runner's throttle at its DEFAULTS, on a clock that moves only when the throttle sleeps — every request is stamped with it.
+      const clocked = async (actions, { file = join(dir, `batch-${paceCase++}.jsonl`), repo = UI, answers = created } = {}) => {
+        let nowMs = Date.UTC(2026, 9, 20, 4, 27, 43);
+        const paceLines = [];
+        const stamps = [];
+        const inner = platform(answers, []);
+        const logs = [];
+        const pace = {
+          file,
+          env: {},
+          now: () => nowMs,
+          sleep: async (ms) => {
+            nowMs += ms;
+          },
+          sleepSync: (ms) => {
+            nowMs += ms;
+          },
+          log: (l) => paceLines.push(l),
+          exit: (code) => {
+            throw Object.assign(new Error(`throttle refused with exit ${code}`), { throttleExit: code });
+          },
+        };
+        const fetchImpl = async (url, init) => {
+          stamps.push({ call: `${init?.method ?? 'GET'} ${new URL(url).pathname}`, at: nowMs });
+          return inner(url, init);
+        };
+        let r;
+        try {
+          r = await executeFleetWrite({ payload: { ...base(actions), repo }, sender: 'os-support-ai', token: TOKEN }, { fetch: fetchImpl, pace, log: (l) => logs.push(l) });
+        } catch (e) {
+          if (e?.throttleExit === undefined) throw e;
+          r = { exit: e.throttleExit, rows: [], summary: '', lines: [], throttled: true };
+        }
+        const w = stamps.filter((s) => !s.call.startsWith('GET '));
+        return { ...r, stamps, writes: w, gaps: w.slice(1).map((s, i) => s.at - w[i].at), logs, paceLines, file };
+      };
+
+      const five = await clocked(cards(DEFAULT_BATCH_THRESHOLD));
+      t(
+        `⛔ THE PIN: ${DEFAULT_BATCH_THRESHOLD} issue_create actions in one stroke — every write leaves at least ${DEFAULT_BATCH_GAP_MS} ms after the one before (injected clock)`,
+        [five.exit, five.writes.length, five.gaps.length, five.gaps.every((g) => g >= DEFAULT_BATCH_GAP_MS)],
+        [EXIT_OK, DEFAULT_BATCH_THRESHOLD, DEFAULT_BATCH_THRESHOLD - 1, true],
+        `gaps ${JSON.stringify(five.gaps)}`,
+      );
+      t("…and the pacing the runner pays is exactly the pacing the seat budgets for (strokePacing — the packer's refusal and the run-poller's wait)", five.gaps.reduce((a, b) => a + b, 0), strokePacing(base(cards(DEFAULT_BATCH_THRESHOLD))).pacingMs);
+      const announced = five.paceLines.findIndex((l) => l.includes(`batch of ${DEFAULT_BATCH_THRESHOLD} ${BATCH_KIND} item(s) announced`));
+      const firstLanded = five.logs.findIndex((l) => l.startsWith('  ✓ action 1 '));
+      const said = five.logs.findIndex((l) => l.includes('rule ⑤ —'));
+      t('ONE announcement, recorded by write-pace itself under this kind, before the first write — and the transcript says it before the first landing', [five.paceLines.filter((l) => l.includes('announced for token key')).length, announced >= 0, said >= 0 && said < firstLanded, firstLanded > 0], [1, true, true, true]);
+      t('…the summary names the pacing in one line, and the token reached neither the summary nor the pace log', [five.summary.includes(`- pacing: rule ⑤ — ${DEFAULT_BATCH_THRESHOLD} content-creating action(s)`), five.summary.includes(TOKEN), readReal(five.file, 'utf8').includes(TOKEN)], [true, false, false]);
+
+      const four = await clocked(cards(DEFAULT_BATCH_THRESHOLD - 1));
+      t(`one below the threshold: no announcement, rule ①'s ${DEFAULT_MIN_GAP_MS} ms gap — unchanged`, [four.exit, four.paceLines.some((l) => l.includes('announced')), four.gaps.every((g) => g === DEFAULT_MIN_GAP_MS), four.summary.includes('- pacing:')], [EXIT_OK, false, true, false], `gaps ${JSON.stringify(four.gaps)}`);
+
+      const trailing = await clocked([...cards(DEFAULT_BATCH_THRESHOLD), { op: 'labels_add', issue: 13122, labels: ['x'] }, { op: 'labels_add', issue: 13122, labels: ['x'] }]);
+      t(
+        'the batch covers the writes THROUGH the last content-creating one; the writes after it keep rule ①\'s gap',
+        [trailing.exit, trailing.gaps.slice(0, DEFAULT_BATCH_THRESHOLD - 1).every((g) => g >= DEFAULT_BATCH_GAP_MS), trailing.gaps.slice(DEFAULT_BATCH_THRESHOLD - 1)],
+        [EXIT_OK, true, [DEFAULT_MIN_GAP_MS, DEFAULT_MIN_GAP_MS]],
+        `gaps ${JSON.stringify(trailing.gaps)}`,
+      );
+
+      const landing = await clocked([{ op: 'pr_ready', pull: 12 }, { op: 'automerge_enable', pull: 12 }], {
+        repo: REPO,
+        answers: {
+          ...allowed,
+          [`GET /repos/${REPO}/pulls/12`]: { status: 200, json: { number: 12, node_id: 'PR_kwDO' } },
+          'POST /graphql': [
+            { status: 200, json: { data: { markPullRequestReadyForReview: { pullRequest: { number: 12, isDraft: false } } } } },
+            { status: 200, json: { data: { enablePullRequestAutoMerge: { pullRequest: { number: 12, autoMergeRequest: { enabledAt: 'now', mergeMethod: 'SQUASH' } } } } } },
+          ],
+        },
+      });
+      t('a landing stroke (pr_ready + automerge_enable) carries no content-creating action — no announcement, rule ①\'s gap', [landing.exit, landing.paceLines.some((l) => l.includes('announced')), landing.gaps], [EXIT_OK, false, [DEFAULT_MIN_GAP_MS]]);
+
+      const over = strokePacing(base(cards(1))).maxBatchWrites + 1;
+      const refused = await clocked(cards(over));
+      t(
+        `a stroke of ${over} content-creating actions — one batched write past what the job can hold — is exit 2 with ZERO requests, not even the permission read`,
+        [refused.exit, refused.stamps.length, refused.summary.includes("over the relay job's budget") && refused.summary.includes('zero writes')],
+        [EXIT_REFUSED, 0, true],
+      );
+      t('…and the refusal names the per-op doors and the announcement, never a shorter gap', refused.logs.some((l) => l.includes('REFUSED') && l.includes('scripts/pm/issue-create.mjs') && l.includes('--announce-batch N') && l.includes('Never a shorter gap')));
+
+      writeFileSync(join(dir, 'not-a-directory'), 'x', 'utf8');
+      const unrecordable = await clocked(cards(DEFAULT_BATCH_THRESHOLD), { file: join(dir, 'not-a-directory', 'pace.jsonl') });
+      t('an announcement the pace log cannot record is exit 10 before the first write — the sender gate read, ZERO writes, the throttle\'s own refusal printed', [unrecordable.exit, unrecordable.stamps.map((s) => s.call), unrecordable.logs.some((l) => l.includes('REFUSED — the throttle cannot write its log'))], [EXIT_WRITE_PACE_REFUSED, [PERM_UI], true]);
+    }
+
     // ── the wiring ──────────────────────────────────────────────────────────
     battery('the wiring: both halves around every write verb, on the roster');
     {
@@ -1215,7 +1372,8 @@ export async function selfTest() {
     `✓ fleet-write/execute self-test: ${cases.length} cases pass across ${declared.length} batteries — the sender gate from the target repo's answer, ` +
       'every op as the request the table declares, stop at the first failure with later actions untouched, the idempotent label DELETE, the GraphQL ' +
       'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a base sync confirmed by the head leaving its expected sha or measured as a no-op, an assignees leg sent to the number the create answered and landing only when its answer lists every login sent, a transfer gated on both repositories and landing only on its target, one summary row per request, ' +
-      "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, and a known " +
+      "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, a stroke at or " +
+      'above the batch threshold announced as ONE rule ⑤ batch and paced at the batch gap (one the job cannot hold refused with zero requests), and a known ' +
       'token that came back out of NO summary, log or error.',
   );
   selfTestReachedVerdict = true;

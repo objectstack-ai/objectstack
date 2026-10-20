@@ -226,7 +226,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.expression": {
         label: "式",
-        helpText: "CEL 数式"
+        helpText: "このフィールドの値を計算する CEL 式。数式フィールドでは読み取り時に計算され、列は保存されません。その他のフィールドでは、書き込みごとに保存される行からエンジンが計算して保存するため、クライアントが送信した値は反映されません。"
       },
       "fields.returnType": {
         label: "戻り値の型",
@@ -763,7 +763,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       expression: {
         label: "式",
-        helpText: "このフィールドを計算する CEL 式（読み取り専用化）"
+        helpText: "このフィールドの値を計算する CEL 式。数式フィールドでは読み取り時に計算され、列は保存されません。その他のフィールドでは、書き込みごとに保存される行からエンジンが計算して保存するため、クライアントが送信した値は反映されません。"
       },
       returnType: {
         label: "数式の戻り値型",
