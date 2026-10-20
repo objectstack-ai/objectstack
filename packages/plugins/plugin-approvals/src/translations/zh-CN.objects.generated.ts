@@ -25,7 +25,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       display_title: {
         label: "标题",
-        help: "记录标题：请求来源及其所涉记录（读取时计算）"
+        help: "记录标题：打开此请求的流程标签，未记录标签时为请求来源（读取时计算）"
       },
       organization_id: {
         label: "组织",

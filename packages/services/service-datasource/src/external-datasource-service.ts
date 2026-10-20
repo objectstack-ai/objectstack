@@ -215,6 +215,85 @@ function parseQualified(raw: string): { schema?: string; name: string } {
   return { schema: raw.slice(0, idx), name: raw.slice(idx + 1) };
 }
 
+/**
+ * The schemas a listed remote table may belong to, from the two filters
+ * `listRemoteTables` answers to: the caller's `?schema=` and the datasource's
+ * `external.allowedSchemas`. `undefined` means neither filter is in force. An
+ * EMPTY set means no table can pass whatever its schema is (an empty allow-list,
+ * or a requested schema the allow-list leaves out), so that answer needs no
+ * per-table schema at all.
+ */
+function admittedSchemas(
+  requested: string | undefined,
+  allowed: readonly string[] | undefined,
+): ReadonlySet<string> | undefined {
+  if (requested === undefined) return allowed === undefined ? undefined : new Set(allowed);
+  if (allowed === undefined || allowed.includes(requested)) return new Set([requested]);
+  return new Set();
+}
+
+/**
+ * The refusal `listRemoteTables` answers when a schema filter is in force and
+ * the driver's introspection named no schema for some of the tables it listed.
+ *
+ * A table's schema reaches this service only as a qualified name
+ * (`schema.table`): `IntrospectedTable` declares no schema of its own. The
+ * in-tree SQL driver emits bare names on every dialect. Measured on PostgreSQL
+ * 16 with tables in `public` and `sales`: on the default search path it lists
+ * `customers` only, and with `searchPath: ['sales']` it lists `orders` and
+ * `customers` with no schema, so a bare name cannot be attributed. Answering
+ * anyway is what this replaces. Both filters were skipped for an unattributed
+ * table, so `?schema=sales` answered 200 with the `public` tables and an
+ * `allowedSchemas` list let every table through.
+ *
+ * ⛔ Never an attribution guessed from the dialect (SQLite's `main`, MySQL's
+ * connection database, Postgres's search path): that is a second source of
+ * truth about the driver, kept in a consumer. A driver that reports
+ * schema-qualified names is narrowed below, unchanged.
+ *
+ * The throw carries `status` and `code`, like `importNameRefusedError` above:
+ * both route spellings answer a throw from this method as
+ * `400 EXTERNAL_DATASOURCE_ERROR`, the code registered for a refusal from this
+ * service, so the declaration and the served envelope agree.
+ */
+function unattributedSchemaFilterError(args: {
+  datasource: string;
+  dialect: string | undefined;
+  requested: string | undefined;
+  allowed: readonly string[] | undefined;
+  unattributed: readonly string[];
+  total: number;
+}): Error {
+  const { datasource, dialect, requested, allowed, unattributed, total } = args;
+  const allowList = allowed ? `external.allowedSchemas (${allowed.map((s) => `'${s}'`).join(', ')})` : undefined;
+  const target =
+    requested !== undefined && allowList
+      ? `schema '${requested}' and to ${allowList}`
+      : requested !== undefined
+        ? `schema '${requested}'`
+        : (allowList as string);
+  const driver = dialect ? `its driver's introspection (dialect '${dialect}')` : `its driver's introspection`;
+  const remedies: string[] = [];
+  if (requested !== undefined) {
+    remedies.push(`Drop the 'schema' parameter to list every table the connection reaches.`);
+  }
+  if (allowList) {
+    remedies.push(
+      `This driver cannot enforce external.allowedSchemas: limit what the connection itself can reach, ` +
+        `and remove external.allowedSchemas from datasource '${datasource}'.`,
+    );
+  }
+  const err = new Error(
+    `Cannot narrow the remote tables of datasource '${datasource}' to ${target}: ` +
+      `${driver} named no schema for ${unattributed.length} of its ${total} table(s), ` +
+      `for example '${unattributed[0]}', so whether they belong there is unknown, ` +
+      `and listing them anyway could show tables the filter excludes. ${remedies.join(' ')}`,
+  ) as Error & { code?: string; status?: number };
+  err.code = 'EXTERNAL_DATASOURCE_ERROR';
+  err.status = 400;
+  return err;
+}
+
 /** Normalise a remote table name into a snake_case object name. */
 function toObjectName(remoteName: string): string {
   const { name } = parseQualified(remoteName);
@@ -367,6 +446,16 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     return undefined;
   }
 
+  /**
+   * List the datasource's remote tables, narrowed by `opts.schema` and by the
+   * datasource's `external.allowedSchemas`.
+   *
+   * A filter in force is applied to every table or the call refuses: a table
+   * whose schema the driver did not name is never let through a filter it
+   * cannot be judged by. With no filter, every introspected table is listed.
+   * See {@link unattributedSchemaFilterError} for why the in-tree SQL driver
+   * lands on the refusal.
+   */
   async listRemoteTables(
     datasource: string,
     opts?: { schema?: string },
@@ -376,14 +465,33 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       this.config.getDatasource(datasource),
     ]);
     const allowed = ds?.external?.allowedSchemas;
+    const requested = opts?.schema ? opts.schema : undefined;
+    const admitted = admittedSchemas(requested, allowed);
+    if (admitted?.size === 0) return [];
 
     const tables: RemoteTable[] = [];
-    for (const table of Object.values(schema.tables)) {
+    const unattributed: string[] = [];
+    const introspected = Object.values(schema.tables);
+    for (const table of introspected) {
       const { schema: tableSchema, name } = parseQualified(table.name);
-      if (opts?.schema && tableSchema && tableSchema !== opts.schema) continue;
-      // allowedSchemas only filters tables we can attribute to a schema.
-      if (allowed && tableSchema && !allowed.includes(tableSchema)) continue;
+      if (admitted) {
+        if (!tableSchema) {
+          unattributed.push(table.name);
+          continue;
+        }
+        if (!admitted.has(tableSchema)) continue;
+      }
       tables.push({ schema: tableSchema, name, columnCount: table.columns.length });
+    }
+    if (unattributed.length > 0) {
+      throw unattributedSchemaFilterError({
+        datasource,
+        dialect: schema.dialect,
+        requested,
+        allowed,
+        unattributed,
+        total: introspected.length,
+      });
     }
     return tables;
   }

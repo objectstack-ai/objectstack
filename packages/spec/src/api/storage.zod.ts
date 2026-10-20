@@ -73,7 +73,12 @@ export const GetPresignedUrlRequestSchema = lazySchema(() => z.object({
 
 export const CompleteUploadRequestSchema = lazySchema(() => z.object({
   fileId: z.string().describe('File ID returned from presigned request'),
-  eTag: z.string().optional().describe('S3 ETag verification'),
+  eTag: z.string().optional().describe(
+    'ETag the client reports for the uploaded object. Stored on the file record as sent and not compared '
+    + 'with anything: no storage adapter reports a stored object\'s ETag. Before committing, the door checks '
+    + 'that the storage backend holds bytes under the file\'s key and, when the upload declared a size, '
+    + 'that the held size equals it.',
+  ),
 }));
 
 // ==========================================
