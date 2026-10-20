@@ -54,7 +54,7 @@ const stackWithList = (list: AnyRec, objects: unknown[] = [task, person]): AnyRe
   views: [{ name: 'task', objectName: 'duly_task', list }],
 });
 
-const retiredOf = (findings: Array<{ rule: string }>) => findings.filter((f) => f.rule === LIST_VIEW_KEY_RETIRED);
+const retiredOf = <F extends { rule: string }>(findings: F[]): F[] => findings.filter((f) => f.rule === LIST_VIEW_KEY_RETIRED);
 
 describe('the list view\'s retired `filterableFields` is reported by name, never as a field position', () => {
   const prescription = listViewRetiredKeyPrescription('filterableFields');
@@ -98,7 +98,7 @@ describe('the list view\'s retired `filterableFields` is reported by name, never
         { name: 'duly_task.item', object: 'duly_task', viewKind: 'list', config: lv },
       ],
     };
-    expect(retiredOf(validateListViewFieldRefs(stack)).map((f) => (f as { path: string }).path).sort()).toEqual([
+    expect(retiredOf(validateListViewFieldRefs(stack)).map((f) => f.path).sort()).toEqual([
       'objects[0].listViews.mine.filterableFields',
       'views[0].list.filterableFields',
       'views[0].listViews.open.filterableFields',
