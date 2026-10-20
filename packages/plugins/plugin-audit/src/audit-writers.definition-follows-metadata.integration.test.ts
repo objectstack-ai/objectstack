@@ -12,6 +12,7 @@ import { SECRET_MASK } from '@objectstack/objectql/core';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuditPlugin } from './audit-plugin.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /**
  * [#24565] A definition changed through the metadata door takes effect in the
@@ -95,6 +96,9 @@ describe('audit writers answer from the current definition after a metadata-door
       HARNESS_PACKAGE,
     );
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     protocol = kernel.getService('protocol') as typeof protocol;
   }, 120_000);
 

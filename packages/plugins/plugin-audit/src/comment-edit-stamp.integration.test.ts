@@ -41,6 +41,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { mapDataError } from '@objectstack/types';
 
 import { AuditPlugin } from './audit-plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const COMMENT = 'sys_comment';
 /** A parent object every caller reads. */
@@ -85,6 +86,9 @@ describe('sys_comment — the platform stamps an edit of the body (#23124)', () 
     engine.registerDriver(driver, true);
     engine.registry.registerObject(boardObject as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
   }, 120_000);
 
   afterAll(async () => {

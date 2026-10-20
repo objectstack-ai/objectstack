@@ -39,6 +39,7 @@ import { AuditPlugin } from './audit-plugin.js';
 import { redactActivityRows } from './activity-field-redaction.js';
 import { ACTIVITY_QUERY_GUARD, AUDIT_LOG_QUERY_GUARD, namedValueBearingColumns, pinnedParentObject } from './parent-field-query-guard.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const ACTIVITY = 'sys_activity';
 const ITEM = 'apg_item';
@@ -216,6 +217,9 @@ describe('[#21154] a query over the activity text by a reader withheld a parent 
       engine.registry.registerObject(object as any, HARNESS_PACKAGE);
     }
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     // Every row is written by the real audit writer's CRUD mirror.
     ids.item = (await engine.insert(

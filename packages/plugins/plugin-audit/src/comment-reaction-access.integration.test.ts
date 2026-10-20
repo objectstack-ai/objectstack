@@ -52,6 +52,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { mapDataError } from '@objectstack/types';
 
 import { AuditPlugin } from './audit-plugin.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const COMMENT = 'sys_comment';
 const REACTION = 'sys_comment_reaction';
@@ -126,6 +127,9 @@ describe('sys_comment_reaction — the plugin read and write paths', () => {
     engine.registry.registerObject(ownedObject as any, HARNESS_PACKAGE);
     engine.registry.registerObject(openObject as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     // Parent readability: a non-admin caller reads the ledger rows it owns.
     engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {

@@ -21,12 +21,14 @@ export const DEFAULT_ORGANIZATION_ID = 'org_default';
 export async function installDefaultOrganization(engine: {
   registry: { registerObject(def: unknown, owner: string): unknown };
   syncSchemas(): Promise<unknown>;
-  insert(object: string, data: Record<string, unknown>, options?: unknown): Promise<unknown>;
+  getDriverForObject(object: string): { create(object: string, data: Record<string, unknown>): Promise<unknown> } | undefined;
 }): Promise<void> {
   engine.registry.registerObject(
     { name: 'sys_organization', label: 'Organization', managedBy: 'better-auth', fields: { name: { type: 'text', label: 'Name' } } },
     '@objectstack/service-messaging',
   );
   await engine.syncSchemas();
-  await engine.insert('sys_organization', { id: DEFAULT_ORGANIZATION_ID, name: 'Default' }, { context: { isSystem: true } });
+  // Seeded through the driver: the organization is data at rest, not a write
+  // the suite under test should observe (an audit or activity mirror would).
+  await engine.getDriverForObject('sys_organization')!.create('sys_organization', { id: DEFAULT_ORGANIZATION_ID, name: 'Default' });
 }
