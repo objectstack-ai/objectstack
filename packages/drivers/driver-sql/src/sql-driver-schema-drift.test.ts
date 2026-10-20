@@ -30,38 +30,57 @@ describe('SqlDriver managed-schema drift (#2186)', () => {
     await knexInstance?.destroy();
   });
 
-  // Build an "existing DB" table where organization_id is NOT NULL (the shape
-  // a DB created while the field was `required: true` has — the #2178 repro).
+  // Build an "existing DB" table where an optional field's column is NOT NULL
+  // (the shape a DB created while the field was `required: true` has — the
+  // #2178 repro, re-keyed off `region_code`: the tenant column's
+  // nullability is the ownership ceremony's, never drift — pinned below).
   const seedLegacyTable = async (driver: SqlDriver) => {
     await knexInstance.schema.createTable('biz_unit', (t: any) => {
       t.string('id').primary();
       t.timestamp('created_at');
       t.timestamp('updated_at');
       t.string('name').notNullable();
-      t.string('organization_id').notNullable();
+      t.string('region_code').notNullable();
     });
-    await knexInstance('biz_unit').insert({ id: '1', name: 'Acme', organization_id: 'org1' });
+    await knexInstance('biz_unit').insert({ id: '1', name: 'Acme', region_code: 'emea' });
   };
 
-  // Metadata after #2178: organization_id is now optional.
+  // Metadata after #2178: the field is now optional.
   const relaxedMeta = [
     {
       name: 'biz_unit',
       fields: {
         name: { type: 'string', required: true },
-        organization_id: { type: 'string', required: false },
+        region_code: { type: 'string', required: false },
       },
     },
   ];
 
   describe('detectManagedDrift', () => {
+    it('a NOT NULL on the table\'s tenant column is no drift: its nullability is the ownership ceremony\'s (ruling ② A)', async () => {
+      const driver = makeDriver();
+      await knexInstance.schema.createTable('biz_owned', (t: any) => {
+        t.string('id').primary();
+        t.timestamp('created_at');
+        t.timestamp('updated_at');
+        t.string('organization_id').notNullable();
+        t.string('note').notNullable();
+      });
+      await driver.initObjects([
+        { name: 'biz_owned', fields: { organization_id: { type: 'string', required: false }, note: { type: 'string', required: false } } },
+      ]);
+      const drift = (await driver.detectManagedDrift()).filter((d) => d.table === 'biz_owned' && d.kind === 'nullability_mismatch');
+      // The ceremony's NOT NULL on organization_id is not reported; the same constraint on any other column still is.
+      expect(drift.map((d) => [d.column, d.op.type])).toEqual([['note', 'relax_not_null']]);
+    });
+
     it('flags a NOT NULL column on a non-required optional field as needs_confirm (ADR-0113 — ratify or relax, never auto-applied)', async () => {
       const driver = makeDriver();
       await seedLegacyTable(driver);
       await driver.initObjects(relaxedMeta);
 
       const drift = await driver.detectManagedDrift();
-      const orgDrift = drift.find((d) => d.column === 'organization_id');
+      const orgDrift = drift.find((d) => d.column === 'region_code');
       expect(orgDrift).toBeDefined();
       expect(orgDrift!.kind).toBe('nullability_mismatch');
       expect(orgDrift!.category).toBe('needs_confirm');
@@ -148,16 +167,16 @@ describe('SqlDriver managed-schema drift (#2186)', () => {
 
       // The column is NOT auto-relaxed...
       const info = await knexInstance('biz_unit').columnInfo();
-      expect(info.organization_id.nullable).toBe(false);
+      expect(info.region_code.nullable).toBe(false);
 
       // ...the pre-existing row is untouched...
       const rows = await knexInstance('biz_unit').select('*');
       expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({ id: '1', name: 'Acme', organization_id: 'org1' });
+      expect(rows[0]).toMatchObject({ id: '1', name: 'Acme', region_code: 'emea' });
 
       // ...and the divergence is reported for a human decision.
       const drift = await driver.detectManagedDrift();
-      const d = drift.find((x) => x.column === 'organization_id');
+      const d = drift.find((x) => x.column === 'region_code');
       expect(d?.category).toBe('needs_confirm');
       expect(d?.op.type).toBe('relax_not_null');
     });
@@ -188,7 +207,7 @@ describe('SqlDriver managed-schema drift (#2186)', () => {
         await seedLegacyTable(driver);
         await driver.initObjects(relaxedMeta);
         const info = await knexInstance('biz_unit').columnInfo();
-        expect(info.organization_id.nullable).toBe(false); // unchanged
+        expect(info.region_code.nullable).toBe(false); // unchanged
       } finally {
         process.env.NODE_ENV = prev;
       }
@@ -198,8 +217,8 @@ describe('SqlDriver managed-schema drift (#2186)', () => {
   describe('in-place ALTER SQL (Postgres / MySQL)', () => {
     // No live PG/MySQL in CI — assert the generated DDL by spying on knex.raw.
     const opFor = (type: string): any => ({
-      kind: 'x', table: 'biz_unit', column: 'organization_id', severity: 'warning',
-      category: 'safe', message: 'm', op: { type, table: 'biz_unit', column: 'organization_id', to: 120 },
+      kind: 'x', table: 'biz_unit', column: 'region_code', severity: 'warning',
+      category: 'safe', message: 'm', op: { type, table: 'biz_unit', column: 'region_code', to: 120 },
     });
 
     const spyDriver = (client: string, columnInfo?: any) => {
@@ -227,7 +246,7 @@ describe('SqlDriver managed-schema drift (#2186)', () => {
     });
 
     it('MySQL MODIFY reconstructs char length so a nullability change keeps it', async () => {
-      const { d, calls } = spyDriver('mysql2', { organization_id: { type: 'varchar', maxLength: 255 } });
+      const { d, calls } = spyDriver('mysql2', { region_code: { type: 'varchar', maxLength: 255 } });
       expect(await (d as any).applyDriftOpInPlace(opFor('relax_not_null').op)).toBe(true);
       expect(calls[0]).toMatch(/MODIFY \?\? varchar\(255\) NULL/);
     });
@@ -243,7 +262,7 @@ describe('SqlDriver managed-schema drift (#2186)', () => {
       const { applied, skipped } = await driver.applyMigrationEntries(drift, { allowDestructive: false });
       expect(applied.some((d) => d.op.type === 'relax_not_null')).toBe(true);
       expect(skipped).toHaveLength(0);
-      expect((await knexInstance('biz_unit').columnInfo()).organization_id.nullable).toBe(true);
+      expect((await knexInstance('biz_unit').columnInfo()).region_code.nullable).toBe(true);
     });
 
     it('skips destructive drops unless allowDestructive, then drops with it', async () => {
