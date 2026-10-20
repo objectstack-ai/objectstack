@@ -1927,7 +1927,7 @@
         ],
         "knownGaps": [
           "no showcase rule declares severity:'info' — it shares the identical non-error branch with 'warning' (rule-validator.ts tests `severity === 'error'` and logs everything else), so the warning leg is the driven proof; author a scratch info rule only if a distinct observation is wanted, and record which severities were actually driven",
-          "acceptance[5] stays red until #24782 lands: the unevaluable warning rule's write answers 201 and persists (correct), but the server log prints two lines naming the rule that both say \"write rejected\" — the predicate evaluator's fail-closed sentence, emitted before severity is consulted, and the advisory branch's warn, which embeds that violation message (packages/objectql/src/validation/rule-validator.ts). Measured at 580fd4ed (QA run #24779) and again at MAIN_SHA. When #24782's fix merges, re-run the clause and drop this line"
+          "acceptance[5] stays red until #24782 lands: the unevaluable warning rule's write answers 201 and persists (correct), but the server log prints two lines naming the rule that both say \"write rejected\" — the predicate evaluator's fail-closed sentence, emitted before severity is consulted, and the advisory branch's warn, which embeds that violation message (packages/objectql/src/validation/rule-validator.ts). Measured at 580fd4ed (QA run #24779) and again at a43405d596 (#24802). When #24782's fix merges, re-run the clause and drop this line"
         ]
       },
       "variants": [
@@ -1982,7 +1982,7 @@
         {
           "clause": "an UNEVALUABLE severity:'warning' rule lets the write land, and no log line beside it reports a rejection: the write answers 2xx, the row persists, and no server-log line naming the rule says the write was rejected or that the rule failed closed — the log must not state the opposite of what the server did. Red until #24782 lands",
           "oracle": "log",
-          "verify": "step-7 qa_vr_probe write: status 201 and a re-read finding the row; then every log line naming qa_unevaluable_warn — none may contain \"write rejected\" or \"fails closed\" (the fail-closed sentence belongs to the error-severity path; rule-validator.ts header: an unevaluable warning/info rule is logged, never thrown). Score the absence of the rejection wording, not whichever replacement sentence #24782 picks; a line saying the rule could not be evaluated is expected and passes. Control: the qa_vr_probe_err write answers 400 VALIDATION_FAILED naming qa_unevaluable_err and persists nothing — there the rejection wording is true",
+          "verify": "step-7 qa_vr_probe write: status 201 and a re-read finding the row; then every log entry naming qa_unevaluable_warn, read to its end — the predicate evaluator's entry spans lines (it embeds the CEL source with a caret) and its verdict sits after the caret — none may contain \"write rejected\" or \"fails closed\" (the fail-closed sentence belongs to the error-severity path; rule-validator.ts header: an unevaluable warning/info rule is logged, never thrown). Score the absence of the rejection wording, not whichever replacement sentence #24782 picks; a line saying the rule could not be evaluated is expected and passes. Control: the qa_vr_probe_err write answers 400 VALIDATION_FAILED naming qa_unevaluable_err and persists nothing — there the rejection wording is true",
           "evidence": "both responses + both re-reads + every log line naming either rule, quoted"
         }
       ],

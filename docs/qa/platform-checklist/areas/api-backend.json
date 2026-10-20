@@ -22,7 +22,7 @@
           "default maxBatchSize (200 unless RestServerConfig.batch overrides)"
         ],
         "knownGaps": [
-          "acceptance[5] (an empty-string id on an update or delete op) stays red until #24781 lands: the door's up-front id check tests `op.id == null` only (packages/rest/src/batch-routes.ts), so `\"id\": \"\"` reaches the engine and answers 500 — DATABASE_ERROR for update, INTERNAL_ERROR for delete. Measured at 580fd4ed (QA run #24779) and again at MAIN_SHA. When #24781's fix merges, re-run the clause and drop this line"
+          "acceptance[5] (an empty-string id on an update or delete op) stays red until #24781 lands: the door's up-front id check tests `op.id == null` only (packages/rest/src/batch-routes.ts), so `\"id\": \"\"` reaches the engine and answers 500 — DATABASE_ERROR for update, INTERNAL_ERROR for delete. Measured at 580fd4ed (QA run #24779) and again at a43405d596 (#24802). When #24781's fix merges, re-run the clause and drop this line"
         ]
       },
       "steps": [
