@@ -1123,7 +1123,7 @@
       "title": "A declared external datasource federates: its objects query in place over REST, read-only",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1136,7 +1136,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; sign in as admin",
+        "boot the showcase on its own port and DB; sign in as admin",
         "GET /api/v1/meta and confirm the federated objects are registered",
         "GET /api/v1/data/<external object> and read fixture rows",
         "attempt a write (POST/PATCH) against the read-only external object; capture the refusal",
@@ -1182,7 +1182,8 @@
         },
         { "revision": 2, "date": "2026-08-18", "change": "re-worded clause 3 and step 5 for this item's declared api surface. Both named the Setup → Datasources console page inside an item whose surface is api, so the clause could only ever be scored by a substitution the item did not authorize. The datasources admin API is what the page renders from, so it is now the oracle and the page is the optional substitution — surface left as api rather than widened to mixed, since every other clause here is a server read (#9417)", "ref": "#9386" },
         { "revision": 3, "date": "2026-10-16", "change": "acceptance[0].verify corrected (checklist-accuracy finding of QA run #23922, wave #23878): 'filters/$top work as on a native object' — OData $filter is refused 400 INVALID_FILTER on /data (the filter must be JSON), while the JSON filter param and top work, which is what #23922 used. The verify text names the working spellings and the refusal. Not loosened: a filter that returns the unfiltered set still FAILS", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-20", "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3; wave anchor #24579 §3). acceptance[2]'s oracle still read 'screenshot' and its evidence 'screenshot', although revision 2 made the datasources API the oracle; both now name the API reads. steps[4] names the console route for the substitution (…/setup/datasources is not one). fixtures.requires[0] says where the fixture DB is provisioned. Not loosened: the clause and its verify are unchanged", "ref": "#24717" }
+        { "revision": 4, "date": "2026-10-20", "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3; wave anchor #24579 §3). acceptance[2]'s oracle still read 'screenshot' and its evidence 'screenshot', although revision 2 made the datasources API the oracle; both now name the API reads. steps[4] names the console route for the substitution (…/setup/datasources is not one). fixtures.requires[0] says where the fixture DB is provisioned. Not loosened: the clause and its verify are unchanged", "ref": "#24717" },
+        { "revision": 5, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#PENDING-24579R17" }
       ]
     },
     {
@@ -1346,7 +1347,7 @@
       "title": "External-datasource schema introspection happy path: remote-tables lists live tables with columnCount (?schema= honoured since #7955), object-draft renders a reviewable *.object.ts, both route spellings answer as one operation behind the platform auth floor",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1365,7 +1366,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated via os dev; sign in as the admin holding manage_platform_settings; also mint an authenticated session holding no capability",
+        "boot the showcase on its own port and DB via os dev; sign in as the admin holding manage_platform_settings; also mint an authenticated session holding no capability",
         "GET /api/v1/datasources/showcase_external/remote-tables — record the table set with per-table columnCount",
         "repeat with ?schema=main and with a repeated ?schema=a&schema=b — record status + set for each (see knownGaps for what SQLite can and cannot show here)",
         "GET /api/v1/datasources/showcase_external/external/tables (the twin spelling) — compare the set against step 2",
@@ -1452,6 +1453,12 @@
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0] corrected — checklist-accuracy finding of QA run #24615 (18.0 sweep round 2, ba4afcc2; wave anchor #24579 §3, round 2 part 2). It said a schema-qualified Postgres fixture would make ?schema= narrowing live-scoreable; measured on PostgreSQL 16, the SQL driver's Postgres introspection returns bare names from current_schemas(false) too, so narrowing stays unobservable live. That is the product defect #24664, split from #24619 row (c); acceptance[1] states the #7955 contract and stays as written, scored by its pin. No clause changed",
           "ref": "#24717"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1588,7 +1595,7 @@
       "title": "A recipient preference muting the inbox channel for a topic suppresses delivery (no inbox row, no dead-letter fake); flipping it back resumes; a sys_notification_template renders through a delivery",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1608,7 +1615,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated; personas admin + assignee; establish the happy path first (or lean on notify-inbox-delivery): reassign a showcase_task to the assignee → showcase_task_assigned_notify fires topic 'task.assigned' on channel 'inbox' → one sys_inbox_message for the assignee, visible in GET /api/v1/notifications",
+        "boot the showcase on its own port and DB; personas admin + assignee; establish the happy path first (or lean on notify-inbox-delivery): reassign a showcase_task to the assignee → showcase_task_assigned_notify fires topic 'task.assigned' on channel 'inbox' → one sys_inbox_message for the assignee, visible in GET /api/v1/notifications",
         "author a suppression row via POST /api/v1/data/sys_notification_preference: { user_id: <assigneeId>, topic: 'task.assigned', channel: 'inbox', enabled: false } — this is the 'category' the task names; the model's field is `topic` (most-specific-wins over the built-in default-ON)",
         "re-fire the notify flow (reassign the task to the same assignee again); GET /api/v1/notifications as the assignee and confirm NO new inbox row landed",
         "read the messaging outbox / dead-letter surface and confirm there is no dead-letter row for the muted (recipient, 'inbox') — a deliberate mute is a DROP by the preference filter, not a dead-letter (dead-letter is reserved for unimplemented channels, #3197)",
@@ -1683,6 +1690,12 @@
           "date": "2026-10-16",
           "change": "steps[6] and acceptance[4].clause corrected (checklist-accuracy finding of QA run #23922, wave #23878). 'with locale fallback' overstated the ladder: the store walks only DOWN (en-US → en → en), so a recipient with no locale resolves the deployment default 'en' and an en-US-only template row is never used — #23922 authored its row at 'en'. The step now says where to author the row, and the clause names the ladder. Not loosened: the render must still carry the template's substituted subject and body",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1944,7 +1957,7 @@
       "title": "Setup → Datasources federation UI (ADR-0015 §6.4): SchemaBrowser mirrors the remote-table listing, ImportObjectDialog lands a REAL object through the metadata channel, Refresh catalog and ValidationPanel drive the three previously-uncovered federation routes (import / refresh-catalog / validate) behind their capability floors",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1966,7 +1979,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated via os dev with the console; sign in as the entitled admin; pre-capture the API ground truth: GET /api/v1/datasources/showcase_external/external/tables and POST .../external/validate",
+        "boot the showcase on its own port and DB via os dev with the console; sign in as the entitled admin; pre-capture the API ground truth: GET /api/v1/datasources/showcase_external/external/tables and POST .../external/validate",
         "type the datasource's engine EDIT route directly, /_console/apps/setup/metadata/datasource/showcase_external — no entry from the Setup list reaches it: Setup → Datasources (…/metadata/datasource, which the left-nav names, objectui#3660/register.ts) is the custom DatasourceResourcePage list, whose rows offer Test / Sync objects / Edit / Delete and neither open the item nor render the panel (objectui DatasourceResourcePage.tsx, at the sweep pin 4016370a and the shipped pin 12dc7b47c340; QA run #24615). On the edit route the ExternalDatasourcePanel renders (DatasourcePreview.tsx keys it off schemaMode !== 'managed') with the schemaMode badge and the read-only/writes-allowed pill; screenshot FIRST, then read the DOM",
         "Tables tab: SchemaBrowser loads the remote tables (mount + explicit Refresh only — never a timer); compare the rendered list name-by-name and columnCount-by-columnCount against the pre-captured listing",
         "header 'Refresh catalog': click it and capture the POST /api/v1/datasources/showcase_external/external/refresh-catalog on the network; the snapshot timestamp renders from the returned catalog.snapshotAt",
@@ -2070,6 +2083,12 @@
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24615 (18.0 sweep round 2, ba4afcc2, driven by hand at the console pin 4016370a; wave anchor #24579 §3, round 2 part 2), re-read in objectui at the shipped pin 12dc7b47c340. steps[1]: no entry from the Setup list reaches the panel (DatasourceResourcePage rows never open the item), so the step names the engine edit route. acceptance[0] (clause, verify, evidence): the save-first guidance is unreachable (datasource is not in CREATE_MODE_CANVAS_TYPES), so the clause scores the observable half, no name-less call, and records the guidance half not-run. steps[7]: the quoted refusal was POST /meta/_migrate-stored's; the item save door answers 403 FORBIDDEN 'Saving a metadata item requires…'. knownGaps[3] carries #24615's drift recipe that needs no scratch copy; knownGaps[4] (new) records that a repeated import answers 201 and overwrites, which no clause scores. acceptance[3].verify's comma-range line citation names the handler instead (the line-citation rot class). Not loosened: every other clause and negative is unchanged",
           "ref": "#24717"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
