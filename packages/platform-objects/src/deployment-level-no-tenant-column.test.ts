@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { SysJob, SysJobRun, SysJobQueue } from './audit/index.js';
-import { SysMigration, SysMigrationJournal, SysPlatformSettingAudit, SysSecret } from './system/index.js';
+import { SysMigration, SysMigrationJournal, SysPlatformSettingAudit, SysSecret, SysSettingAudit } from './system/index.js';
 
 /**
  * [ADR-0131 D7] The deployment-level plumbing this package declares carries no
@@ -16,9 +16,10 @@ import { SysMigration, SysMigrationJournal, SysPlatformSettingAudit, SysSecret }
  * on `fields` alone is a phantom check: an object that merely omits the field
  * still gets the column. `resolveInjectedSystemColumns` is the derivation
  * `applySystemFields` consumes to do the injecting, so it is the authority on
- * whether the column exists. The `sys_secret` control below is the same
- * question asked of an object that DOES keep the column (its writer stamps the
- * caller's organization), so the predicate is shown able to answer `true`.
+ * whether the column exists. The `sys_setting_audit` control below is the
+ * same question asked of an object that DOES keep the column (its writer
+ * stamps the caller's organization), so the predicate is shown able to answer
+ * `true`.
  *
  * ## Why the capability is pinned beside the column
  *
@@ -80,11 +81,20 @@ describe('[ADR-0131 D7] deployment-level plumbing: no tenant column, platform-on
   });
 
   it('control: a tenant-attributed object keeps the column, so the predicate can answer true', () => {
-    // `sys_secret` is written with the business write's driver options, so the
-    // SQL driver stamps the caller's organization on it. It is NOT
-    // deployment-level today; its fate is decided by the C7 inventory.
-    const plan = resolveInjectedSystemColumns(SysSecret);
+    // `sys_setting_audit` keeps a tenant or user setting's history: its writer
+    // stamps the caller's organization on every row it writes there.
+    const plan = resolveInjectedSystemColumns(SysSettingAudit);
     expect(plan.tenant).toBe(true);
     expect([...plan.names]).toContain('organization_id');
+  });
+
+  it('sys_secret is deployment-level too: no tenant column (every read is by id); its reads stay private by access', () => {
+    // 18.x step 6 (line fact F2): the flip lands with the open upgrade
+    // ceremony, whose column-drops step takes an upgraded database's column.
+    const plan = resolveInjectedSystemColumns(SysSecret);
+    expect(plan.tenant).toBe(false);
+    expect([...plan.names]).not.toContain('organization_id');
+    expect((SysSecret as { systemFields?: unknown }).systemFields).toEqual({ tenant: false });
+    expect((SysSecret as { access?: unknown }).access).toEqual({ default: 'private' });
   });
 });

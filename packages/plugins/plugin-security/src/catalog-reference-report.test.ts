@@ -15,8 +15,8 @@
  *
  * Every assertion reads the structured result, never the log's wording; the
  * wiring pin finds the plugin's lines by their structured meta. One pin reads
- * wording on purpose: the unnamed-grant line is 18.0 release text an operator
- * acts on, and that release says one sentence about a v17 database everywhere.
+ * wording on purpose: the unnamed-grant line is release text an operator acts
+ * on, and its fix is the ownership ceremony's reviewed plan and apply.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -322,19 +322,16 @@ describe('[ADR-0131 D4] the catalog reference report — references whose names 
   });
 });
 
-describe('[ADR-0131 D4] the unnamed-grant line says what 18.0 supports for a v17 database', () => {
-  // The one wording pin in this file. 18.0 supports fresh installs only and its
-  // `os migrate organization-ownership` refuses plan and apply on every
-  // database, so the line an operator reads at boot must not send them to it;
-  // it carries the sentence the drop-gate refusal of `os migrate apply
-  // --allow-destructive` carries (the boot refusal and the command's own
-  // refusal say the same in their own terms). Everything else in the line is
-  // the report's own: the count, the field, the D4 reason, and that nothing was
-  // changed.
-  const V17_SENTENCE = '18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a '
-    + '17.x release until the 18.x release that carries the upgrade path.';
+describe('[ADR-0131 D4] the unnamed-grant line prescribes the ownership ceremony', () => {
+  // The one wording pin in this file. The line an operator reads at boot sends
+  // them to the ceremony (open since #24581): its plan, then the apply of that
+  // reviewed plan, which names each legacy grant. It never says to keep the
+  // database on 17.x. Everything else in the line is the report's own: the
+  // count, the field, the D4 reason, and that nothing was changed.
+  const FIX = 'Fix: run the v18 ceremony. Plan it first, os migrate organization-ownership --out plan.json, and review '
+    + 'the file it writes; then run os migrate organization-ownership --apply --backup-taken --plan-file plan.json';
 
-  it('names the count, the empty field, the reason and "Nothing was changed", then the 18.0 sentence, and prescribes no command', async () => {
+  it('names the count, the empty field, the reason and "Nothing was changed", then the ceremony\'s plan and apply', async () => {
     const b = await boot();
     await insertUser(b, 'usr_a');
     await insertUser(b, 'usr_b');
@@ -352,11 +349,9 @@ describe('[ADR-0131 D4] the unnamed-grant line says what 18.0 supports for a v17
 
     expect(message).toContain(
       '[security] 2 sys_user_permission_set grant(s) name no permission set (permission_set is empty), '
-      + 'so each confers nothing (ADR-0131 D4). Nothing was changed. ' + V17_SENTENCE,
+      + 'so each confers nothing (ADR-0131 D4). Nothing was changed. ' + FIX,
     );
-    expect(message.endsWith(V17_SENTENCE), 'the sentence closes the line').toBe(true);
-    // The refused command and every step of it are gone, not merely qualified.
-    expect(message).not.toMatch(/organization-ownership|os migrate|--out|--apply|--plan-file|--backup-taken|plan\.json|ceremony/);
+    expect(message).not.toMatch(/fresh installs only|on a 17\.x release|carries the upgrade path/);
   });
 });
 

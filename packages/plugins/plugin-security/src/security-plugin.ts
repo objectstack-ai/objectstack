@@ -2571,6 +2571,12 @@ export class SecurityPlugin implements Plugin {
       // floor on exactly the terms its `where` scope does: step 3 composes the
       // bulk scope with no floor options either.
       let preImageFloorOpts: RlsFilterOptions | null = null;
+      // [ADR-0090 D10] Its twin for the DELEGATOR of an on-behalf-of write: the
+      // floor decision and coverage vouch the delegator's OWN direct by-id write
+      // of this row would get ({@link delegatorOwnWriteFloorOptions}). Null on
+      // the ordinary path and until step 2.7 runs; step 3.6 reads it so the
+      // post-image is held to the delegator's own check as well.
+      let delegatorPreImageFloorOpts: RlsFilterOptions | null = null;
 
       // [ADR-0066 D2/D3] Resolve the object's security posture (private flag,
       // platform-global flag, capability contract) once for the checks below.
@@ -3046,7 +3052,9 @@ export class SecurityPlugin implements Plugin {
           // would drop one principal's floor and not the other's: a half-state
           // no measurement on this card covers. The delegated by-id write keeps
           // BOTH floors, exactly as before, and that residual is recorded on the
-          // card rather than resolved by a guess.
+          // card rather than resolved by a guess. What bounds it by the
+          // delegator is the delegator's own composition ANDed below, never a
+          // dropped floor here.
           const masterGateCoversThisWrite = !delegatorSets;
           preImageFloorOpts = { dropPlatformOwnershipFloor, masterGateCoversThisWrite };
           const writeFilter = await this.computeRlsFilter(
@@ -3064,7 +3072,37 @@ export class SecurityPlugin implements Plugin {
           const delWriteFilter = delegatorSets
             ? await this.computeRlsFilter(delegatorSets, opCtx.object, rlsOperation, delegatorContext)
             : null;
-          const writeParts = [writeFilter, delWriteFilter].filter(Boolean) as Record<string, unknown>[];
+          // [ADR-0090 D10] ...and the delegator's OWN direct by-id write of this
+          // row must admit it as well. The filter above is composed with the
+          // delegated path's floor exclusion, which is not the composition the
+          // delegator's own write of this row gets, so it alone does not bound
+          // the on-behalf-of write by what the delegator may write. The
+          // delegator's own composition — its own floor decision and coverage
+          // vouch, {@link delegatorOwnWriteFloorOptions} — is ANDed beside it:
+          // the row must satisfy both, so this only ever narrows, and an
+          // on-behalf-of write never admits a row the delegator's own write
+          // refuses. The vouch holds on this path too: step 2.8 asks the master
+          // gate for the delegator below.
+          if (delegatorSets) {
+            delegatorPreImageFloorOpts = await this.delegatorOwnWriteFloorOptions(
+              rlsOperation,
+              opCtx.object,
+              String(targetId),
+              delegatorContext,
+              delegatorSets,
+              true,
+            );
+          }
+          const delOwnWriteFilter = delegatorSets && delegatorPreImageFloorOpts
+            ? await this.computeRlsFilter(
+                delegatorSets,
+                opCtx.object,
+                rlsOperation,
+                delegatorContext,
+                delegatorPreImageFloorOpts,
+              )
+            : null;
+          const writeParts = [writeFilter, delWriteFilter, delOwnWriteFilter].filter(Boolean) as Record<string, unknown>[];
           // [#21771] Ruling A on the write doors: a row the caller cannot READ
           // is a row that does not exist. For the by-id write the caller
           // addressed (see {@link addressedByIdWriteId}), "can you read it?" is
@@ -3603,7 +3641,21 @@ export class SecurityPlugin implements Plugin {
         const delCheckFilter = delegatorSets
           ? await this.computeWriteCheckFilter(delegatorSets, opCtx.object, opCtx.operation, delegatorContext)
           : null;
-        const checkParts = [checkFilter, delCheckFilter].filter(Boolean) as Record<string, unknown>[];
+        // [ADR-0090 D10] ...and the check the delegator's OWN direct by-id write
+        // of this row is held to, on the floor decision its own pre-image got
+        // (step 2.7, `delegatorPreImageFloorOpts`). ANDed beside the check
+        // above, so it only narrows: an on-behalf-of write never stores a row
+        // the delegator's own write could not.
+        const delOwnCheckFilter = delegatorSets && delegatorPreImageFloorOpts
+          ? await this.computeWriteCheckFilter(
+              delegatorSets,
+              opCtx.object,
+              opCtx.operation,
+              delegatorContext,
+              delegatorPreImageFloorOpts,
+            )
+          : null;
+        const checkParts = [checkFilter, delCheckFilter, delOwnCheckFilter].filter(Boolean) as Record<string, unknown>[];
         if (checkParts.length > 0) {
           // The ONE refusal, shared by every shape — so a write judged inside
           // the engine (an insert, a predicate update) and a by-id update
@@ -4985,8 +5037,12 @@ export class SecurityPlugin implements Plugin {
     // delegated principal at its agent-leg depth, then, if that admits, once
     // for the delegator at the delegator's own depth. The delegator's own
     // write filter, which step 2.7 ANDs into the pre-image re-read, is composed
-    // by the engine. The floor decision still excludes this path, as the gate
-    // does. The delegated READ depths are not modelled on explain's record
+    // by the engine, as the gate composes it: once with the floor standing
+    // (`computeRlsFilter`), once as the delegator's own record composition
+    // (`computeLayeredRlsFilter` below, asked with the delegator's context, so
+    // its floor decision is the delegator's own). The floor decision still
+    // excludes the delegated context itself, as the gate's does. The delegated
+    // READ depths are not modelled on explain's record
     // path: the read filter is asked with the delegated context as it stands.
     const actsOnBehalfOf = (c: any): boolean => !!c?.onBehalfOf?.userId;
     const recordWriteFloorOptions = async (
@@ -5413,7 +5469,9 @@ export class SecurityPlugin implements Plugin {
    *    delegated context (`hasWriteBypass`: "no D10 delegator intersection on
    *    this path", ADR-0111 D2), so composing here could only produce a verdict
    *    resolved against the wrong identity. The delegated write keeps both
-   *    principals' floors, exactly as before.
+   *    principals' floors, exactly as before — and beside the delegator's
+   *    floor-standing filter it also ANDs the delegator's own composition,
+   *    asked here AS the delegator ({@link delegatorOwnWriteFloorOptions}).
    */
   private async resolvePreImageFloorDrop(
     rlsOperation: string,
@@ -5436,6 +5494,48 @@ export class SecurityPlugin implements Plugin {
       (await this.resolveSharingWriteVerdict(rlsOperation, object, recordId, context, permissionSets)) ===
       'allow'
     );
+  }
+
+  /**
+   * [ADR-0090 D10] The composition knobs the DELEGATOR's own direct by-id
+   * write of `recordId` would get: its floor decision
+   * ({@link resolvePreImageFloorDrop}, asked as the delegator — its own sets,
+   * its own context, not delegated) and the coverage vouch the caller makes
+   * for that write.
+   *
+   * An on-behalf-of principal never exceeds its delegator. Every delegated
+   * row gate composes the delegator's filter with the floor standing (the
+   * delegated path's exclusion), which is a different composition from the one
+   * the delegator's own write of the same row gets, so on its own it does not
+   * bound the delegated write by what the delegator may write. Each such gate
+   * therefore also composes the delegator's filter with THESE options and ANDs
+   * the two: the by-id pre-image (step 2.7), its post-image check (step 3.6)
+   * and the master gate's delegator pass ({@link assertMasterRowEditable}).
+   * The AND only ever narrows — a row passes only where today's composition
+   * AND the delegator's own both admit it — so nothing refused before is
+   * admitted by it.
+   *
+   * `masterGateCoversThisWrite` is the vouch the caller's own direct
+   * composition makes, passed rather than assumed, because coverage is a fact
+   * about the call site ({@link RlsFilterOptions.masterGateCoversThisWrite}).
+   */
+  private async delegatorOwnWriteFloorOptions(
+    rlsOperation: string,
+    object: string,
+    recordId: string,
+    delegatorContext: any,
+    delegatorSets: PermissionSet[],
+    masterGateCoversThisWrite: boolean,
+  ): Promise<RlsFilterOptions> {
+    const dropPlatformOwnershipFloor = await this.resolvePreImageFloorDrop(
+      rlsOperation,
+      object,
+      recordId,
+      delegatorContext,
+      delegatorSets,
+      false,
+    );
+    return { dropPlatformOwnershipFloor, masterGateCoversThisWrite };
   }
 
   /**
@@ -9028,7 +9128,34 @@ export class SecurityPlugin implements Plugin {
       dropPlatformOwnershipFloor,
       masterGateCoversThisWrite: !delegatedWrite && this.declaresControlledByParent(rel.master),
     });
-    if (masterWriteFilter) {
+    // [ADR-0090 D10] On the DELEGATOR's pass of a delegated write — `context`
+    // is the delegator's own (no delegation link) while `opCtx` carries the
+    // link — the master must also be editable under the composition the
+    // delegator's OWN direct write of this detail gets on this hop: its own
+    // floor decision on the master row, and the vouch the direct hop makes
+    // ({@link delegatorOwnWriteFloorOptions}). ANDed beside the filter above,
+    // so it only narrows: an on-behalf-of detail write never passes a master
+    // the delegator's own detail write is refused on. The agent's pass is
+    // unchanged.
+    const delegatorPass = delegatedWrite && !context?.onBehalfOf?.userId;
+    const delegatorOwnMasterWriteFilter = delegatorPass
+      ? await this.computeRlsFilter(
+          permissionSets,
+          rel.master,
+          'update',
+          context,
+          await this.delegatorOwnWriteFloorOptions(
+            'update',
+            rel.master,
+            String(masterId),
+            context,
+            permissionSets,
+            this.declaresControlledByParent(rel.master),
+          ),
+        )
+      : null;
+    const masterWriteParts = [masterWriteFilter, delegatorOwnMasterWriteFilter].filter(Boolean) as Record<string, unknown>[];
+    if (masterWriteParts.length > 0) {
       let visible: unknown = null;
       // [#7505] This catch STAYS, and the difference from the existence probe
       // above is the whole per-caller distinction the ruling asks for. That
@@ -9041,7 +9168,7 @@ export class SecurityPlugin implements Plugin {
       // not as a site to change.
       try {
         visible = await this.ql.findOne(rel.master, {
-          where: { $and: [{ id: masterId }, masterWriteFilter] },
+          where: { $and: [{ id: masterId }, ...masterWriteParts] },
           context,
         });
       } catch {
