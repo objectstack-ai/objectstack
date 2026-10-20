@@ -384,9 +384,10 @@ export interface AuthoringRuleContext {
    * rule tell "outside what this package declared it may reference" from
    * "not in this stack": an object missing from a narrowed snapshot is the
    * first, one missing from a whole one may come from another package. Read
-   * by `validateListViewFieldRefs` only (through the reference-integrity
+   * by two rules: `validateListViewFieldRefs` (through the reference-integrity
    * suite), which refuses a list view bound outside the closure instead of
-   * skipping it.
+   * skipping it, and [#24669] `validateFlowTriggerReadiness`, which refuses a
+   * flow whose trigger object is outside it instead of advising.
    */
   packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
 }
@@ -1352,7 +1353,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // the flow fires. `flow-trigger-unknown-object` deliberately stayed `warning`
   // (the object may come from another installed package — a hedge this rule
   // cannot decide), as did `flow-draft-status-ambiguous` (draft flows DO fire;
-  // that one is ambiguity of intent, not a dead flow).
+  // that one is ambiguity of intent, not a dead flow). [#24669] The hedge is
+  // gone where the runtime publish gate states a package closure: the snapshot
+  // then IS that closure, so an unknown trigger object is one the package never
+  // declared it may reference, and the id is an `error` there — the dataset and
+  // view doors' verdict for the same reference. Without a stated closure (the
+  // three CLI commands, a write that names no package) it is still `warning`.
   //
   // Commit ecdfc9411 added a sixth id, `flow-schedule-organization-missing`, at
   // `warning`; #17396 RETIRED it. The criterion above is what retired it: this
@@ -1372,10 +1378,13 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // stayed `warning` keep being logged as advisories. The gate judges a
     // snapshot whose `flows` holds only the written item and subtracts the
     // baseline's findings, so this refuses the dead flow's own publish — never
-    // another flow's save on account of a stored one.
+    // another flow's save on account of a stored one. [#24669] The gate's
+    // stated package closure is handed on, so an out-of-closure trigger object
+    // refuses the publish too; the CLI never states one.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow'],
-    run: (stack) => validateFlowTriggerReadiness(stack),
+    run: (stack, ctx) =>
+      validateFlowTriggerReadiness(stack, ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
   },
   // #20553 — `flow-api-trigger-secret-missing`, split out of the entry above as
   // its own exported rule. Same family, same `error`, all three commands.

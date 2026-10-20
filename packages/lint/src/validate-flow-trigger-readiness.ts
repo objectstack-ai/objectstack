@@ -120,12 +120,29 @@
 //     criterion is what disqualified it in the end: this stack is NOT enough to
 //     know the flow is dead, because the deciding facts (the deployment switch,
 //     the tenancy posture) are not in any stack. See 1g.
-//   - `warning` — `flow-trigger-unknown-object`, both halves. An object name
-//     this stack does not define may be defined by another installed package,
-//     and this rule cannot see that package's objects. The hedge is real, so the
-//     rule advises and says so in its own hint. It is the deliberate control for
-//     the paragraph above: the family was reviewed together (#5762) and this is
-//     the one that stayed advisory.
+//   - `warning` — `flow-trigger-unknown-object`, both halves, when no package
+//     closure is stated. An object name this stack does not define may be
+//     defined by another installed package, and this rule cannot see that
+//     package's objects. The hedge is real, so the rule advises and says so in
+//     its own hint. It is the deliberate control for the paragraph above: the
+//     family was reviewed together (#5762) and this is the one that stayed
+//     advisory.
+//   - `error` — the same id, both halves, when the runtime publish gate states
+//     a package closure (#24669, `options.packageScope`). The gate then hands
+//     this rule a snapshot whose `objects` ARE that closure (ruling #9612: the
+//     written package, the packages its manifest declares in `dependencies`,
+//     platform/system objects and provenance-less overlay rows), so the hedge
+//     is gone: an object outside it is one the package never declared it may
+//     reference, and nothing it can install without editing its own manifest
+//     puts the object in reach. It is the verdict the dataset door
+//     (`object-reference-unknown`) and the view door
+//     (`list-view-object-outside-closure`) give the same reference under the
+//     same closure, so one mistake gets one answer at three doors. Measured
+//     before the change: no flow in this repository or in objectui triggers on
+//     an object outside its package's closure. A `sys_`-prefixed name stays
+//     unjudged under a closure too, exactly as without one. The CLI commands
+//     and a write that names no package state no closure and keep the advisory
+//     unchanged.
 //   - `warning` — `flow-draft-status-ambiguous`. Draft flows DO fire, so this is
 //     an ambiguity of intent, not a dead flow. Gating it would refuse a stack
 //     whose flows all work.
@@ -155,7 +172,7 @@ import {
   TimeRelativeTriggerSchema,
   resolveFlowTriggerKind,
 } from '@objectstack/spec/automation';
-import { recordsOf } from './object-graph.js';
+import { recordsOf, suggestName } from './object-graph.js';
 
 export type FlowTriggerReadinessSeverity = 'error' | 'warning';
 
@@ -405,8 +422,17 @@ function startNodeOf(flow: AnyRec): { node: AnyRec; index: number } | undefined 
  * post-parse stacks. Its one dependency is the `@objectstack/spec` schema that
  * owns the `timeRelative` descriptor's contract, which is the point: the rule
  * ASKS that schema rather than restating it.
+ *
+ * @param options.packageScope [#24669] The package closure the runtime publish
+ *   gate narrowed `stack.objects` to (`AuthoringRuleContext.packageScope`),
+ *   present only when one was in force. Stated, an unknown trigger object is
+ *   outside that closure and `flow-trigger-unknown-object` is an `error` (see
+ *   the Severity section at the top of this file). The CLI never sets it.
  */
-export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadinessFinding[] {
+export function validateFlowTriggerReadiness(
+  stack: AnyRec,
+  options: { packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] } } = {},
+): FlowTriggerReadinessFinding[] {
   const findings: FlowTriggerReadinessFinding[] = [];
   const flows = recordsOf(stack.flows);
   if (flows.length === 0) return findings;
@@ -416,6 +442,47 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
       .map((o) => (typeof o.name === 'string' ? o.name : undefined))
       .filter((n): n is string => !!n),
   );
+  const closure = options.packageScope;
+
+  /**
+   * [#24669] `flow-trigger-unknown-object` at one of its two positions, for a
+   * name the stack does not carry. With no closure stated it is the advisory
+   * it always was; under a stated closure the stack IS the closure, so the
+   * name is outside it and the finding refuses the publish, naming the
+   * remedy the dataset and view doors name: declare the dependency.
+   */
+  const unknownTriggerObject = (
+    flowName: string,
+    path: string,
+    objectName: string,
+    at: { verb: string; key: string },
+    advisory: { message: string; hint: string },
+  ): FlowTriggerReadinessFinding => {
+    if (!closure) {
+      return {
+        severity: 'warning',
+        rule: FLOW_TRIGGER_UNKNOWN_OBJECT,
+        where: `flow "${flowName}" › start node`,
+        path,
+        ...advisory,
+      };
+    }
+    const pkg = closure.packageId;
+    return {
+      severity: 'error',
+      rule: FLOW_TRIGGER_UNKNOWN_OBJECT,
+      where: `flow "${flowName}" › start node`,
+      path,
+      message:
+        `${at.verb} object '${objectName}', which is outside the closure of package '${pkg}' (its own ` +
+        `objects, the objects of the packages its manifest declares in \`dependencies\`, and platform ` +
+        `objects), so the package may not bind a flow to it.` +
+        suggestName(objectName, objectNames),
+      hint:
+        `Declare a dependency on the package that defines '${objectName}' in the manifest \`dependencies\` ` +
+        `of package '${pkg}', or set ${at.key} to an object inside that closure`,
+    };
+  };
 
   flows.forEach((flow, flowIndex) => {
     const flowName = typeof flow.name === 'string' ? flow.name : `#${flowIndex}`;
@@ -444,21 +511,25 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
     if (isRecordTriggered && start) {
       const objectName = typeof config.objectName === 'string' ? config.objectName : undefined;
       if (objectName && !objectNames.has(objectName) && !objectName.startsWith('sys_')) {
-        findings.push({
-          severity: 'warning',
-          rule: FLOW_TRIGGER_UNKNOWN_OBJECT,
-          where: `flow "${flowName}" › start node`,
-          path: `flows[${flowIndex}].nodes[${start.index}].config.objectName`,
-          message:
-            `targets object '${objectName}', which this stack does not define — if the name is wrong, ` +
-            `the flow will never fire (and the runtime stays silent about it).`,
-          // [#22161] One remedy line; that names match exactly, and why a
-          // name another package declares is not refused, are
-          // `os explain flow-trigger-unknown-object`.
-          hint:
-            `Set config.objectName to the object's exact registered name (e.g. 'app_candidate', not ` +
-            `'candidate'), or ignore this if another installed package declares it`,
-        });
+        findings.push(
+          unknownTriggerObject(
+            flowName,
+            `flows[${flowIndex}].nodes[${start.index}].config.objectName`,
+            objectName,
+            { verb: 'triggers on', key: 'config.objectName' },
+            {
+              message:
+                `targets object '${objectName}', which this stack does not define — if the name is wrong, ` +
+                `the flow will never fire (and the runtime stays silent about it).`,
+              // [#22161] One remedy line; that names match exactly, and why a
+              // name another package declares is not refused, are
+              // `os explain flow-trigger-unknown-object`.
+              hint:
+                `Set config.objectName to the object's exact registered name (e.g. 'app_candidate', not ` +
+                `'candidate'), or ignore this if another installed package declares it`,
+            },
+          ),
+        );
       }
     }
 
@@ -496,18 +567,22 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
       //     nothing forever with no runtime output.
       const objectName = typeof tr.object === 'string' ? tr.object : undefined;
       if (objectName && !objectNames.has(objectName) && !objectName.startsWith('sys_')) {
-        findings.push({
-          severity: 'warning',
-          rule: FLOW_TRIGGER_UNKNOWN_OBJECT,
-          where: `flow "${flowName}" › start node`,
-          path: `flows[${flowIndex}].nodes[${start.index}].config.timeRelative.object`,
-          message:
-            `sweeps object '${objectName}', which this stack does not define — if the name is wrong, ` +
-            `the sweep will match nothing (and the runtime stays quiet about it).`,
-          hint:
-            `Set config.timeRelative.object to the object's exact registered name, or ignore this if another ` +
-            `installed package declares it`,
-        });
+        findings.push(
+          unknownTriggerObject(
+            flowName,
+            `flows[${flowIndex}].nodes[${start.index}].config.timeRelative.object`,
+            objectName,
+            { verb: 'sweeps', key: 'config.timeRelative.object' },
+            {
+              message:
+                `sweeps object '${objectName}', which this stack does not define — if the name is wrong, ` +
+                `the sweep will match nothing (and the runtime stays quiet about it).`,
+              hint:
+                `Set config.timeRelative.object to the object's exact registered name, or ignore this if ` +
+                `another installed package declares it`,
+            },
+          ),
+        );
       }
 
       // 1b-ii. #5496 — the descriptor does not parse, so `TimeRelativeTrigger`
