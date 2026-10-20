@@ -1787,13 +1787,14 @@ function storedMetadataBodyHopMessage(
  * hop refusal alone.
  */
 function storedMetadataBodyReferenceMessage(field: string, type: string, target: string): string {
-  const parent = type === 'master_detail'
-    ? ', and this object\'s `parent` root stays unbound, so every write a `parent` rule judges is refused'
-    : '';
+  const consequence = type === 'master_detail'
+    ? 'a formula or a validation rule never reads through the field, and this object\'s `parent` root stays '
+      + 'unbound, so every write a `parent` rule judges is refused'
+    : 'and a formula or a validation rule never reads through the field';
   return `\`${field}\` is a \`${type}\` whose \`reference\` names '${target}', a table of stored metadata. `
     + 'A `lookup` or `master_detail` field may not target a stored-metadata-body table: the engine never '
-    + 'hydrates one, so `$expand` keeps the stored id and never nests the row, and a formula or a validation '
-    + `rule never reads through the field${parent}. Those rows carry stored metadata bodies, served only `
+    + `hydrates one, so \`$expand\` keeps the stored id and never nests the row, ${consequence}. `
+    + 'Those rows carry stored metadata bodies, served only '
     + 'through the metadata API (`GET /api/v1/meta/:type/:name`), where the body is projected; to point a '
     + 'record at a metadata item, store its type and name in `text` fields instead. '
     + STORED_METADATA_BODY_PRESCRIPTION;
