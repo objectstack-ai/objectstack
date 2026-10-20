@@ -65,17 +65,20 @@ const DELEGATOR_ADMITTED = 'u_cbp_mor_delegator_admitted';
 
 const CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } as const;
 
-/** Grant shapes, each named for what it holds on the MASTER object. */
+/**
+ * The permission sets. Every one admits the detail objects it is used on; they
+ * differ in whether the master object's read door admits the holder.
+ */
 const SET = {
-  /** Detail and line grants, nothing on the master. */
-  noMasterGrant: 'qa_cbp_mor_no_master_grant',
-  /** Detail and line grants, and an edit grant on the master that is not a read grant. */
-  masterEditNotRead: 'qa_cbp_mor_master_edit_not_read',
-  /** Detail and line grants, a master read grant, and a row policy scoping the master to its owner. */
+  /** The master object's read door does not admit the holder (first set). */
+  unadmittedA: 'qa_cbp_mor_unadmitted_a',
+  /** The master object's read door does not admit the holder (second set). */
+  unadmittedB: 'qa_cbp_mor_unadmitted_b',
+  /** Admitted to the master object, with its rows scoped to the holder's own. */
   masterReadRowScoped: 'qa_cbp_mor_master_read_row_scoped',
-  /** Detail and line grants, and a master read grant with no row policy. */
+  /** Admitted to the master object, rows unscoped. */
   masterRead: 'qa_cbp_mor_master_read',
-  /** Line and master grants, nothing on the detail between them. */
+  /** Admitted to the line and to the root master, not to the detail between them. */
   noMiddleGrant: 'qa_cbp_mor_no_middle_grant',
 } as const;
 
@@ -164,9 +167,9 @@ async function boot() {
   }
   const sets = [
     ...defaultPermissionSets,
-    PermissionSetSchema.parse({ name: SET.noMasterGrant, objects: { [DETAIL]: CRUD, [LINE]: CRUD } }),
+    PermissionSetSchema.parse({ name: SET.unadmittedA, objects: { [DETAIL]: CRUD, [LINE]: CRUD } }),
     PermissionSetSchema.parse({
-      name: SET.masterEditNotRead,
+      name: SET.unadmittedB,
       objects: { [MASTER]: { allowEdit: true }, [DETAIL]: CRUD, [LINE]: CRUD },
     }),
     PermissionSetSchema.parse({
@@ -186,13 +189,13 @@ async function boot() {
     }),
   ];
   // The delegators hold their sets through stored grants, as a user does.
-  for (const name of [SET.noMasterGrant, SET.masterRead]) {
+  for (const name of [SET.unadmittedA, SET.masterRead]) {
     await e.getDriver('sys_permission_set').create('sys_permission_set', {
       id: `ps_${name}`, name, label: name, organization_id: null, managed_by: 'admin', active: true,
       object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
     });
   }
-  for (const [user, set] of [[DELEGATOR_UNADMITTED, SET.noMasterGrant], [DELEGATOR_ADMITTED, SET.masterRead]] as const) {
+  for (const [user, set] of [[DELEGATOR_UNADMITTED, SET.unadmittedA], [DELEGATOR_ADMITTED, SET.masterRead]] as const) {
     await e.insert('sys_user_permission_set', { id: `ups_${user}`, user_id: user, permission_set: set, organization_id: ORG }, SYS);
   }
 
@@ -288,10 +291,10 @@ type Rig = Awaited<ReturnType<typeof boot>>;
 
 const member = (userId: string, set: string) => ({ userId, positions: [], permissions: [set], posture: 'MEMBER' });
 
-/** The two principals the master's own read door refuses at the object gate. */
+/** Two principals the master's own read door refuses at the object gate. */
 const UNADMITTED = [
-  { label: 'no grant on the master object', context: member(ME, SET.noMasterGrant) },
-  { label: 'an edit grant on the master object that is not a read grant', context: member(ME, SET.masterEditNotRead) },
+  { label: 'unadmitted principal A', context: member(ME, SET.unadmittedA) },
+  { label: 'unadmitted principal B', context: member(ME, SET.unadmittedB) },
 ] as const;
 
 describe('a controlled_by_parent detail is not read without object-level read on its master', () => {
