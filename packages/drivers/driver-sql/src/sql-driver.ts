@@ -5158,7 +5158,10 @@ export type SqliteJournalMode = 'wal' | 'delete';
  *   database instead, which introspects as a database with zero tables — the
  *   same thing a freshly-created empty file introspects as. For a read-only
  *   caller (`os migrate plan`) the report is therefore identical while the
- *   filesystem is left untouched.
+ *   filesystem is left untouched. Only a file that `'create'` could bring into
+ *   existence counts as absent: one that can be neither opened nor created is
+ *   refused, as `'create'`'s connect refuses it (#24961) — see
+ *   {@link resolveSqliteAbsentFileTarget}.
  *
  * `'empty-in-memory'` is for callers that only ever READ. A caller that may
  * write MUST leave it at `'create'`: writes land in the ephemeral database and
@@ -5189,8 +5192,9 @@ export type SqliteAbsentFileMode = 'create' | 'empty-in-memory';
  * directory this process may not write — is refused here with the
  * `SqliteDatabaseFileError` naming the file and the operating system's answer,
  * the refusal `SqlDriver.connect()` gives the same path on a boot that writes.
- * The judgement writes nothing: see {@link probeAbsentSqliteDatabaseFile},
- * which also names the one shape it cannot see without a write. It used to be
+ * The judgement writes nothing: see `probeAbsentSqliteDatabaseFile`
+ * (`sqlite-database-file.ts`), which also names the one shape it cannot see
+ * without a write. It used to be
  * `existsSync`, which answers `false` for every path it cannot stat, so a
  * read-only boot opened an empty in-memory database over a file that cannot
  * exist and reported the datasource connected.
