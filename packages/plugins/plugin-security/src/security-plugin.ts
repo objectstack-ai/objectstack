@@ -4980,10 +4980,14 @@ export class SecurityPlugin implements Plugin {
     // [#19986] The READ verdict's twin: plugin-sharing's read filter is asked
     // with `__readScope` stamped as step 2.6 stamps it for a find, so
     // `record.visible` for `read` is what the caller's find returns.
-    // The on-behalf-of path keeps its previous inputs on every half. The gate
-    // itself excludes it from the floor decision, and the middleware's
-    // delegated depths (the agent-leg intersection, plus a second gate call or
-    // filter as the delegator) are not modelled on explain's record path.
+    // [#24646] On the on-behalf-of path the per-record WRITE gate is asked as
+    // the by-id write asks it ({@link delegatedWriteGate}): once for the
+    // delegated principal at its agent-leg depth, then, if that admits, once
+    // for the delegator at the delegator's own depth. The delegator's own
+    // write filter, which step 2.7 ANDs into the pre-image re-read, is composed
+    // by the engine. The floor decision still excludes this path, as the gate
+    // does. The delegated READ depths are not modelled on explain's record
+    // path: the read filter is asked with the delegated context as it stands.
     const actsOnBehalfOf = (c: any): boolean => !!c?.onBehalfOf?.userId;
     const recordWriteFloorOptions = async (
       sets: PermissionSet[],
@@ -5009,6 +5013,55 @@ export class SecurityPlugin implements Plugin {
     };
     const withWriteScope = async (o: string, c: any): Promise<any> =>
       actsOnBehalfOf(c) ? c : { ...c, __writeScope: await this.resolveWriteScopeForSharing(o, c) };
+    /**
+     * [#24646 / ADR-0090 D10] The two contexts the by-id write path hands
+     * plugin-sharing's per-record gate for an on-behalf-of principal, built as
+     * the write path builds them:
+     *
+     * - `agent`: the delegated context with step 2.6's two stamps, the
+     *   agent-leg write depth ({@link intersectDelegatedScope} of the ceiling's
+     *   DECLARED depth and the delegator's effective one) as `__writeScope`, and
+     *   the delegator's effective depth as `__delegatorWriteScope`;
+     * - `delegator`: what the sharing middleware's second gate call hands the
+     *   service, that same context as the delegator (`userId` the delegator's,
+     *   no delegation link) at the delegator's depth.
+     *
+     * A delegation link naming no user (`missing`) answers `null`: the write
+     * path refuses such a principal before any gate runs, and so does every
+     * gate built on this.
+     */
+    const delegatedWriteContexts = async (o: string, c: any): Promise<{ agent: any; delegator: any } | null> => {
+      const del = await resolveDelegatorContext(this.ql, c);
+      if (del.kind !== 'resolved') return null;
+      const [sets, delegatorSets, meta] = await Promise.all([
+        this.resolvePermissionSetsForContext(c),
+        this.resolvePermissionSetsForContext(del.context),
+        this.getObjectSecurityMeta(o),
+      ]);
+      const delegatorScope = this.permissionEvaluator.getEffectiveScope('write', o, delegatorSets, { isPrivate: meta.isPrivate });
+      const declared = this.permissionEvaluator.getDeclaredScope('write', o, sets, { isPrivate: meta.isPrivate });
+      const agent = {
+        ...c,
+        __writeScope: intersectDelegatedScope(declared, delegatorScope).agentLegScope,
+        __delegatorWriteScope: delegatorScope,
+      };
+      return { agent, delegator: { ...agent, userId: c.onBehalfOf.userId, onBehalfOf: undefined, __writeScope: delegatorScope } };
+    };
+    /**
+     * [#24646] A per-record write gate of the sharing service, asked as the
+     * by-id write asks it: for an ordinary principal once, at its own write
+     * depth; for an on-behalf-of principal as the agent and then, only if that
+     * admits, as the delegator — the sharing middleware's two calls, in its
+     * order ({@link delegatedWriteContexts}).
+     */
+    const delegatedWriteGate = (gate: (o: string, rid: string, c: any) => Promise<boolean>) =>
+      async (o: string, rid: string, c: any): Promise<boolean> => {
+        if (!actsOnBehalfOf(c)) return gate(o, rid, await withWriteScope(o, c));
+        const legs = await delegatedWriteContexts(o, c);
+        if (!legs) return false;
+        if (!(await gate(o, rid, legs.agent))) return false;
+        return gate(o, rid, legs.delegator);
+      };
     // {@link resolveSharingReadFilter} IS the read-depth stamp step 2.6 makes
     // (the same two inputs to the same evaluator call); the analytics path
     // already asks it. The caller's own key is cleared first, so the depth
@@ -5077,23 +5130,28 @@ export class SecurityPlugin implements Plugin {
           ? { listRecordShares: (o: string, rid: string) => sharing.listShares(o, rid, { isSystem: true }) }
           : {}),
         ...(sharing && typeof sharing.canEdit === 'function'
-          ? { canEditRecord: async (o: string, rid: string, c: any) => sharing.canEdit(o, rid, await withWriteScope(o, c)) }
+          ? { canEditRecord: delegatedWriteGate((o, rid, c) => sharing.canEdit(o, rid, c)) }
           : {}),
         // [ADR-0111 D3] The narrower delete gate — an edit share opens update
         // but not delete, so a delete explanation must consult this.
         ...(sharing && typeof sharing.canDelete === 'function'
-          ? { canDeleteRecord: async (o: string, rid: string, c: any) => sharing.canDelete(o, rid, await withWriteScope(o, c)) }
+          ? { canDeleteRecord: delegatedWriteGate((o, rid, c) => sharing.canDelete(o, rid, c)) }
           : {}),
         // [#5493 / ADR-0105 D3] The by-id write gate's deferral, asked through
         // the sharing service's own probe, the member its middleware asks
         // after the gate above refuses, with the context that gate is asked
         // with. The probe passes through to {@link checkAuthoredRowWrite} and
         // abstains on every failure; a sharing service without it defers
-        // nothing, so explain reports the gate's refusal as before.
+        // nothing, so explain reports the gate's refusal as before. [#24646] An
+        // on-behalf-of principal's probe carries the agent leg's stamps, as the
+        // middleware's own context does when it asks.
         ...(sharing && typeof sharing.probeAuthoredRowWrite === 'function'
           ? {
-              probeAuthoredRowWrite: async (o: string, rid: string, op: AuthoredRowWriteOperation, c: any) =>
-                sharing.probeAuthoredRowWrite(o, rid, op, await withWriteScope(o, c)),
+              probeAuthoredRowWrite: async (o: string, rid: string, op: AuthoredRowWriteOperation, c: any) => {
+                if (!actsOnBehalfOf(c)) return sharing.probeAuthoredRowWrite(o, rid, op, await withWriteScope(o, c));
+                const legs = await delegatedWriteContexts(o, c);
+                return legs ? sharing.probeAuthoredRowWrite(o, rid, op, legs.agent) : 'abstain';
+              },
             }
           : {}),
         // [#21771] The by-id write path's read question, asked the same way:

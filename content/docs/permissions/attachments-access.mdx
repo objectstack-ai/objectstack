@@ -43,30 +43,30 @@ independent of the record-level checks below.
 Creating a `sys_attachment` requires that the caller may **edit** the parent
 record — Salesforce edit-on-parent parity — and "may edit" has one meaning
 here: **a by-id update of that parent record, by the same caller, would be
-admitted.** The gate asks three questions in order and admits only when all
-three do:
-
-1. record sharing (`ISharingService.checkEdit`);
-2. the master-detail check, for a `controlled_by_parent` parent
-   (`ISecurityService.checkControlledByParentWrite`);
-3. the security service's judgement of that update — the record-grained verdict
-   `security.explain` reports for `update` on the parent record (`allowed` and
-   `record.visible` both).
+admitted.** The gate asks exactly that question, of the security service: the
+record-grained verdict `security.explain` reports for `update` on the parent
+record (`allowed` and `record.visible` both). That verdict is the write path's
+own composition — the parent object's grant, its row-level security, its record
+sharing at the caller's write depth, the master of a `controlled_by_parent`
+parent, and both legs of an on-behalf-of (agent) request — so a caller who can
+update the parent record by id can also attach files to it, and a caller who
+cannot, still cannot. A caller whose write depth on the parent object is
+`unit`, `unit_and_below` or `org` attaches wherever that depth lets them update.
 
 The same rule governs every check that asks about the parent: attaching,
 detaching or editing another user's attachment, re-pointing an attachment to
 another record (judged on the new parent), and the file-attachments service's
-caller-scoped `assertMayAttach`. It never admits more than the parent's update
-does, and it can refuse more: record sharing is asked at the narrowest edit
-depth for these gates (the ruling recorded on `ISharingService`, "Write DEPTH
-is an input the CALLER supplies").
+caller-scoped `assertMayAttach`.
 
 When no sharing service is wired, a caller-scoped read of the parent (a
-`findOne`) stands in for step 1. A kernel with no security service asks no
-update judgement, as the parent's own update meets none there. A store fault in
-step 2 or 3 keeps its own status (a `503` stays a `503`); it is never reported
-as a refusal. `uploaded_by` is **server-stamped** from the session; a
-client-supplied value is ignored.
+`findOne`) is asked first. A security service that judges no by-id update (it
+serves no `explain`, or there is none) leaves the gate on the composition it
+had before: record sharing (`ISharingService.checkEdit`) at the narrowest edit
+depth, then, for a `controlled_by_parent` parent, the master-detail check
+(`ISecurityService.checkControlledByParentWrite`). A store fault keeps its own
+status (a `503` stays a `503`); it is never reported as a refusal.
+`uploaded_by` is **server-stamped** from the session; a client-supplied value
+is ignored.
 
 | Code | Status | When |
 | --- | --- | --- |

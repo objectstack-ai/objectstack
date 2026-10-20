@@ -264,6 +264,11 @@ export const InvoiceLine = ObjectSchema.create({
     // Paid, its lines are frozen. `readonlyWhen` here references the header as
     // `parent`, so the inline grid evaluates it per row against the live invoice
     // record and locks the cell — the "paid invoice → lock lines" case (#1581).
+    // It locks EDITS of a line, on the server too (the write drops the change).
+    // It is insert-exempt by design and judges field values, not whether a line
+    // exists, so adding, removing or moving a line under a paid header is locked
+    // elsewhere: by the `showcase_guard_paid_invoice_line_*` hooks
+    // (`src/data/hooks/index.ts`), which refuse each with a sentence.
     product: Field.lookup('showcase_product', {
       label: 'Product',
       required: true,

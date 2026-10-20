@@ -127,8 +127,9 @@ export const TASK_REOPEN_REFUSAL =
   'A finished task cannot be reopened. Create a follow-up task instead.';
 
 /**
- * beforeUpdate (gated) — the showcase's one hook that REFUSES a write, with a
- * sentence addressed to the user.
+ * beforeUpdate (gated) — the showcase's first hook that REFUSES a write, with a
+ * sentence addressed to the user. (The three paid-invoice line guards below
+ * refuse the same way.)
  *
  * `throw new Error('<sentence>')` from a sandboxed body is the business-refusal
  * shape: the write is aborted (`onError: 'abort'`) and the sentence travels to
@@ -159,10 +160,129 @@ export const GuardTaskReopenHook = {
   description: 'Refuses reopening a finished task (done true to false) with a user-facing sentence.',
 };
 
+/**
+ * The sentences the paid-invoice line guards refuse with. Exported so the
+ * fixture's test quotes the same strings the hooks throw.
+ */
+export const PAID_INVOICE_LINE_ADD_REFUSAL =
+  'This invoice is paid, so its lines are locked: a line cannot be added to it.';
+export const PAID_INVOICE_LINE_REMOVE_REFUSAL =
+  'This invoice is paid, so its lines are locked: a line cannot be removed from it.';
+export const PAID_INVOICE_LINE_MOVE_REFUSAL =
+  'A paid invoice\'s lines are locked: a line cannot be moved onto or off a paid invoice.';
+
+/**
+ * The shared prelude of the three guards: `paid(id)` reads the header's status.
+ *
+ * Two kinds of write pass every guard:
+ *  - a SYSTEM write (`ctx.session.isSystem`): the seed loads INV-1003's line
+ *    under a header that is already paid, and a migration or import restores
+ *    history. Every system writer passes by design — the seed, a script
+ *    action's `ctx.api`, a `runAs: 'system'` flow — and none writes
+ *    `showcase_invoice_line` in the showcase today. The platform's static
+ *    `readonly` strip exempts system writes the same way;
+ *  - a header that cannot be read: the engine's reference check answers a
+ *    dangling `invoice` with its own refusal, so the guard does not invent one.
+ */
+const PAID_HEADER_PRELUDE =
+  "if (ctx.session && ctx.session.isSystem) return;" +
+  "var paid = async function (id) {" +
+  "  if (!id) return false;" +
+  "  var header = await ctx.api.object('showcase_invoice').findOne({ where: { id: id } });" +
+  "  return !!header && header.status === 'paid';" +
+  "};";
+
+/**
+ * beforeInsert / beforeUpdate / beforeDelete — a PAID invoice's lines are
+ * locked against adding, moving and removing.
+ *
+ * `readonlyWhen: parent.status == 'paid'` on the line's `product`, `quantity`
+ * and `unit_price` (`invoice.object.ts`) locks EDITS of an existing line. It is
+ * insert-exempt by design, and it judges field values, not a line's existence,
+ * so it cannot stop a line from being added, removed, or repointed at another
+ * invoice. Each of those moves the paid `total`. A `validations[]` rule cannot
+ * hold these either: no `validations[]` rule binds `parent`, and none runs on
+ * delete. So the three guards are hooks, the mechanism
+ * `ValidationRuleSchema.events` prescribes for that case.
+ *
+ * Each guard reads the header itself, under `runAs: 'system'`. The verdict is
+ * the system's, and it must not depend on the writer's read grants on
+ * invoices.
+ */
+export const GuardPaidInvoiceLineAddHook = {
+  name: 'showcase_guard_paid_invoice_line_add',
+  label: 'Guard Paid Invoice Line Add',
+  object: 'showcase_invoice_line',
+  events: ['beforeInsert'] as LifecycleEvent[],
+  body: {
+    language: 'js' as const,
+    source:
+      PAID_HEADER_PRELUDE +
+      `if (await paid(ctx.input.invoice)) throw new Error(${JSON.stringify(PAID_INVOICE_LINE_ADD_REFUSAL)});`,
+    capabilities: ['api.read'] as ('api.read')[],
+  },
+  runAs: 'system' as const,
+  priority: 60,
+  onError: 'abort' as const,
+  description: 'Refuses adding a line to a paid invoice, with a user-facing sentence.',
+};
+
+/**
+ * The repoint half: an update that moves a line's `invoice` onto or off a paid
+ * header. The condition gates the hook to that write, so an ordinary line
+ * edit pays no header read.
+ */
+export const GuardPaidInvoiceLineMoveHook = {
+  name: 'showcase_guard_paid_invoice_line_move',
+  label: 'Guard Paid Invoice Line Move',
+  object: 'showcase_invoice_line',
+  events: ['beforeUpdate'] as LifecycleEvent[],
+  condition: 'record.invoice != previous.invoice',
+  body: {
+    language: 'js' as const,
+    source:
+      PAID_HEADER_PRELUDE +
+      "var before = ctx.previous ? ctx.previous.invoice : undefined;" +
+      `if ((await paid(before)) || (await paid(ctx.input.invoice))) throw new Error(${JSON.stringify(PAID_INVOICE_LINE_MOVE_REFUSAL)});`,
+    capabilities: ['api.read'] as ('api.read')[],
+  },
+  runAs: 'system' as const,
+  priority: 60,
+  onError: 'abort' as const,
+  description: 'Refuses moving a line onto or off a paid invoice, with a user-facing sentence.',
+};
+
+/**
+ * The remove half. A cascade delete (`ctx.referentialCascadeDelete`) passes:
+ * that is the header itself being deleted, not a line removed from a header
+ * that stays.
+ */
+export const GuardPaidInvoiceLineRemoveHook = {
+  name: 'showcase_guard_paid_invoice_line_remove',
+  label: 'Guard Paid Invoice Line Remove',
+  object: 'showcase_invoice_line',
+  events: ['beforeDelete'] as LifecycleEvent[],
+  body: {
+    language: 'js' as const,
+    source:
+      PAID_HEADER_PRELUDE +
+      "if (ctx.referentialCascadeDelete === true || !ctx.previous) return;" +
+      `if (await paid(ctx.previous.invoice)) throw new Error(${JSON.stringify(PAID_INVOICE_LINE_REMOVE_REFUSAL)});`,
+    capabilities: ['api.read'] as ('api.read')[],
+  },
+  runAs: 'system' as const,
+  priority: 60,
+  onError: 'abort' as const,
+  description: 'Refuses removing a line from a paid invoice, with a user-facing sentence.',
+};
+
 export const allHooks = [
   NormalizeTaskTitleHook,
   StampInquiryDefaultsHook,
   GuardTaskReopenHook,
+  GuardPaidInvoiceLineAddHook,
+  GuardPaidInvoiceLineMoveHook,
+  GuardPaidInvoiceLineRemoveHook,
   AuditTaskCompletionHook,
   WarnOverBudgetHook,
 ];

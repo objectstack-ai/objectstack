@@ -2162,7 +2162,7 @@
       "title": "Docs portal render: /docs lists the installed corpus, a doc body renders with working intra-corpus links, a flat-doc URL redirects to its canonical in-book path, the per-app index scopes to one package, and a lesser persona's rendered tree equals the API's pruned subset — never a blank region",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2233,7 +2233,7 @@
       ],
       "traps": ["hydration-race", "auth-state-leak", "stale-console-bundle", "wrong-persona"],
       "source": [
-        "objectui apps/console/src/App.tsx (/docs → DocsLayout with index/:slug/:slug/:name children) + AppContent.tsx,176-185 (app-scoped /apps/:packageId/docs — AppDocsIndex + the same DocsLayout children)",
+        "objectui apps/console/src/App.tsx (/docs → DocsLayout with index/:slug/:slug/:name children) + AppContent.tsx, its systemRoutes (app-scoped /apps/:packageId/docs — AppDocsIndex + the same DocsLayout children)",
         "objectui apps/console/src/pages/{DocsLayout,DocsIndex,DocsSlug,BookSidebar,AppDocsIndex}.tsx (DocsSlug: a non-book segment is a flat doc name, redirected to /docs/<home-book>/<name>)",
         "objectui apps/console/src/pages/doc-groups.ts (grouping by namespace prefix — the package is derived from the doc name, ADR-0046)",
         "objectui packages/app-shell/src/layout/AppHeader.tsx (the Help & Documentation menu: 'All documentation' → /docs for every persona, plus a contextual \"This app's docs\" entry when the current app ships docs) + packages/app-shell/src/console/home/HomeLayout.tsx (/home deliberately omits the sidebar). UnifiedSidebar's home navigation also lists Documentation, but it renders only inside ConsoleLayout, which sets the app context, so it is not the entry this item scores",
@@ -2252,6 +2252,12 @@
           "date": "2026-10-05",
           "change": "clause 5, step 5 and the member persona re-pointed (assertion defect, #21782 VF4). The clause sought the Documentation entry in a /home sidebar that no persona has: HomeLayout deliberately omits the sidebar, and UnifiedSidebar's home navigation renders only inside ConsoleLayout, which forces the app context. The entry every persona has is the top-bar Help menu → All documentation → /docs (AppHeader). The verifier's wording is used for the clause. The member persona now reads invite + sign-up, because the stock auth posture is invite_only. Re-read at objectui 9dfaca6543: unchanged from the run's 2e818d0b51ec",
           "ref": "#21797"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[0] cited lines 176-185 of objectui apps/console AppContent.tsx in the comma-range spelling (authored in 45397edf53 as the list 35-41 and 176-185). At the objectui pin that commit shipped, 9602dc820450, those lines were the app-scoped docs route (DocsLayout with its index, :slug and :slug/:name children); at the shipped pin 12dc7b47c340 that route sits further down in the same file's systemRoutes, which source[0] now names. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#24752"
         }
       ]
     },
