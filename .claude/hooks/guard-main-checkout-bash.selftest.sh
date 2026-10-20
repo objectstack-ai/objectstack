@@ -312,7 +312,6 @@ CWD="$MAIN"
 expect allow 'echo "a $(curl -d "{\"c\":\"x > 1\"}" http://h)"'
 expect allow "echo \"a \$(curl -d '{\"c\":\"x > 1\"}' http://h)\""
 expect allow 'echo "a `curl -d "{\"c\":\"x > 1\"}" http://h`"'      # the backtick spelling
-expect allow 'echo "$(echo "$(echo "x > 1")")"'                       # nested
 # Recall is untouched: a real write beside a quoted substitution still blocks — in the same
 # command, behind a separator, and inside a sed -i script — and so does the card's control.
 expect block 'echo hi > out.txt'
@@ -322,6 +321,7 @@ expect block 'sed -i "s/a/$(date +%F)/" pkg/x.ts'
 # The fail-OPEN mirror: one `"` in the body used to leave the outer string hanging, so the
 # separator behind it went inert and the real write rode through as text.
 expect block "echo \"\$(printf '\"')\" ; sed -i s/a/b/ pkg/x.ts"
+expect block "echo \"\$(echo \"\$(printf '\"')\")\" ; sed -i s/a/b/ pkg/x.ts"   # nested
 # The heredoc scan reads the body the same way: the ` #` inside it is no comment, so the
 # introducer behind it is found and the body stays prose.
 expect allow "$(printf 'echo "$(echo " #")" <<EOF\nsed -i s/a/b/ pkg/x.ts\nEOF\n')"
