@@ -51,11 +51,19 @@
  */
 
 import { ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';
+import type { StandardErrorCode } from '@objectstack/spec/api';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { GRANT_SET_NAME_FIELD } from './grant-set-name.js';
 
 /** The better-auth endpoint this module guards. */
 export const ORGANIZATION_DELETE_PATH = '/organization/delete';
+
+/**
+ * The refusal's wire code: the standard catalog's member for "a delete refused
+ * while dependents exist" (ADR-0112). Not a registered synonym of it: the
+ * ledger refuses one that merely re-spells a standard member.
+ */
+export const ORGANIZATION_DELETE_REFUSAL_CODE: StandardErrorCode = 'DELETE_RESTRICTED';
 
 /** The grant table; partly the organization's own structure (see {@link ORGANIZATION_AUTH_STRUCTURE}). */
 const GRANT_OBJECT = 'sys_user_permission_set';
@@ -126,12 +134,12 @@ export async function organizationDeleteRefusal(
   const tenantGrants = await engine.count(GRANT_OBJECT, {
     where: { organization_id: organizationId },
     context: SYSTEM_CTX,
-  } as any);
+  });
   if (tenantGrants > 0) {
     const adminGrants = await engine.count(GRANT_OBJECT, {
       where: { organization_id: organizationId, [GRANT_SET_NAME_FIELD]: { $in: [...ORGANIZATION_ADMIN_SET_NAMES] } },
       context: SYSTEM_CTX,
-    } as any);
+    });
     const others = tenantGrants - adminGrants;
     if (others > 0) owned.push({ object: GRANT_OBJECT, count: others });
   }
@@ -139,12 +147,12 @@ export async function organizationDeleteRefusal(
 }
 
 /**
- * The 409 body for a refused delete: the standard catalog's
- * `DELETE_RESTRICTED`, every table with its count, and the remedy.
+ * The 409 body for a refused delete, beside its code
+ * ({@link ORGANIZATION_DELETE_REFUSAL_CODE}, spelled at the throw site): every
+ * table with its count, and the remedy.
  */
 export function organizationNotEmptyBody(owned: readonly OrganizationOwnedRows[]): {
   message: string;
-  code: 'DELETE_RESTRICTED';
   dependents: OrganizationOwnedRows[];
 } {
   const named = owned.map((o) => `${o.object} (${o.count})`).join(', ');
@@ -152,7 +160,6 @@ export function organizationNotEmptyBody(owned: readonly OrganizationOwnedRows[]
     message:
       `This organization still owns records in ${named}. ` +
       'Delete or move those records first, then delete the organization.',
-    code: 'DELETE_RESTRICTED',
     dependents: owned.map((o) => ({ object: o.object, count: o.count })),
   };
 }
@@ -174,7 +181,7 @@ export async function isDefaultOrganizationTarget(
 ): Promise<boolean> {
   if (!organization || walled) return false;
   if (organization.slug === 'default') return true;
-  const total = await engine.count('sys_organization', { context: SYSTEM_CTX } as any);
+  const total = await engine.count('sys_organization', { context: SYSTEM_CTX });
   return total <= 1;
 }
 
@@ -193,7 +200,7 @@ export async function isDefaultOrganizationTarget(
  */
 export async function removeOrganizationAuthStructure(engine: IDataEngine, organizationId: string): Promise<void> {
   const teams = rowsOf(
-    await engine.find('sys_team', { where: { organization_id: organizationId }, fields: ['id'], context: SYSTEM_CTX } as any),
+    await engine.find('sys_team', { where: { organization_id: organizationId }, fields: ['id'], context: SYSTEM_CTX }),
   );
   const teamIds = teams.map((t) => t?.id).filter((id): id is string | number => id != null);
   if (teamIds.length > 0) {
@@ -201,14 +208,14 @@ export async function removeOrganizationAuthStructure(engine: IDataEngine, organ
       where: { team_id: { $in: teamIds } },
       multi: true,
       context: SYSTEM_CTX,
-    } as any);
+    });
     for (const id of teamIds) {
-      await engine.delete('sys_team', { where: { id }, context: SYSTEM_CTX } as any);
+      await engine.delete('sys_team', { where: { id }, context: SYSTEM_CTX });
     }
   }
   await engine.delete(GRANT_OBJECT, {
     where: { organization_id: organizationId, [GRANT_SET_NAME_FIELD]: { $in: [...ORGANIZATION_ADMIN_SET_NAMES] } },
     multi: true,
     context: SYSTEM_CTX,
-  } as any);
+  });
 }

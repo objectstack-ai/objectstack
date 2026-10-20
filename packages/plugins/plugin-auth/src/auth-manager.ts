@@ -211,6 +211,7 @@ import {
 } from './signing-key-read-cache.js';
 import {
   ORGANIZATION_DELETE_PATH,
+  ORGANIZATION_DELETE_REFUSAL_CODE,
   isDefaultOrganizationTarget,
   organizationDeleteRefusal,
   organizationNotEmptyBody,
@@ -8132,7 +8133,7 @@ export class AuthManager {
     const owned = await organizationDeleteRefusal(engine, organizationId);
     if (owned && owned.length > 0) {
       const { APIError } = await import('better-auth/api');
-      throw new APIError('CONFLICT', organizationNotEmptyBody(owned));
+      throw new APIError('CONFLICT', { code: ORGANIZATION_DELETE_REFUSAL_CODE, ...organizationNotEmptyBody(owned) });
     }
   }
 

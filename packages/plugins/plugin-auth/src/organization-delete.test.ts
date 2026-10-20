@@ -14,6 +14,7 @@ import { describe, it, expect } from 'vitest';
 import { ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';
 import {
   ORGANIZATION_AUTH_STRUCTURE,
+  ORGANIZATION_DELETE_REFUSAL_CODE,
   isDefaultOrganizationTarget,
   organizationDeleteRefusal,
   organizationNotEmptyBody,
@@ -101,12 +102,12 @@ describe('[#24948] organizationDeleteRefusal: the records the organization still
 });
 
 describe('[#24948] organizationNotEmptyBody: the 409 body', () => {
-  it('is the standard DELETE_RESTRICTED code with every table and its count, and the remedy', () => {
+  it('names every table with its count and the remedy, beside the standard DELETE_RESTRICTED code', () => {
     const body = organizationNotEmptyBody([
       { object: 'crm_account', count: 3 },
       { object: 'crm_contact', count: 1 },
     ]);
-    expect(body.code).toBe('DELETE_RESTRICTED');
+    expect(ORGANIZATION_DELETE_REFUSAL_CODE).toBe('DELETE_RESTRICTED');
     expect(body.dependents).toEqual([
       { object: 'crm_account', count: 3 },
       { object: 'crm_contact', count: 1 },
