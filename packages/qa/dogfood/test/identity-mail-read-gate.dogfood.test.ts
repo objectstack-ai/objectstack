@@ -115,7 +115,7 @@ describe('[#24625] identity-mail bodies over a ceremonied 18.0 database: princip
   };
 
   beforeAll(async () => {
-    const { file } = ceremoniedFixture(dir, fixtureSql, 'identity-mail-gate');
+    const { file } = await ceremoniedFixture(dir, fixtureSql, 'identity-mail-gate');
     stack = await bootFixture(file);
     ql = await stack.kernel.getServiceAsync<any>('objectql');
 

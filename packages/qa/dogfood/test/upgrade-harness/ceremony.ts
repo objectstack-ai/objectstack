@@ -12,6 +12,8 @@ import { copyFileSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isOrganizationOwnershipBootRefusal } from '@objectstack/runtime';
+import { bootFixture } from './populate-fixture.js';
 import { loadSqlIntoSqlite } from './sqlite-text-dump.js';
 
 const SHOWCASE_DIR = fileURLToPath(new URL('../../../../../examples/app-showcase/', import.meta.url));
@@ -41,13 +43,30 @@ export function runOwnershipCeremony(dir: string, file: string, tag: string): Re
 
 /**
  * A copy of the 18.0 fixture the ceremony has certified, at `dir/<tag>.db`,
- * ready to boot under the guard. The ceremony runs on a working copy and the
- * certified bytes are copied out, so no boot ever opens the path the
- * ceremony's process held (the stale-image hazard the harness measured).
+ * ready to boot under the guard — reached the way an operator reaches it.
+ * First a boot of this release over the 18.0 bytes: the guard refuses it, and
+ * its schema sync has already created the tables this release added (the
+ * sibling logs the ceremony's `sibling-moves` step moves rows into), which the
+ * ceremony asks for rather than creates. Then the plan and its apply. The
+ * ceremony runs on a working copy and the certified bytes are copied out, so
+ * no boot ever opens the path the ceremony's process held (the stale-image
+ * hazard the harness measured). Throws when the first boot is not refused by
+ * the ownership guard.
  */
-export function ceremoniedFixture(dir: string, fixtureSql: string, tag: string): { file: string; report: Record<string, unknown> } {
+export async function ceremoniedFixture(dir: string, fixtureSql: string, tag: string): Promise<{ file: string; report: Record<string, unknown> }> {
   const work = join(dir, `${tag}.ceremony.db`);
   loadSqlIntoSqlite(fixtureSql, work);
+  let refusal: unknown;
+  try {
+    const stack = await bootFixture(work);
+    await stack.stop();
+  } catch (error) {
+    for (let e = error, depth = 0; !!e && typeof e === 'object' && depth < 8; e = (e as { cause?: unknown }).cause, depth++) {
+      if (isOrganizationOwnershipBootRefusal(e)) refusal = e;
+    }
+    if (!refusal) throw error;
+  }
+  if (!refusal) throw new Error('the 18.0 fixture booted without the ceremony: the ownership guard did not refuse it');
   const report = runOwnershipCeremony(dir, work, tag);
   const file = join(dir, `${tag}.db`);
   copyFileSync(work, file);
