@@ -1054,7 +1054,7 @@
           "revision": 7,
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep), one of the leftovers round 6 (#24697) named. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: grid-conditional-rules.spec.ts passed, but it flags the Description cell on one row and never saves, so #24598 scored acceptance[0] not-run (round 1's QA run #24572 had scored it pass on that spec). The ref now says the spec claims acceptance[0]'s inline-flag half only, and that no pin covers acceptance[1] or [4]; QA run #24616 drove acceptance[1], [3] and [4] by hand. The spec is byte-identical at the shipped pin 12dc7b47c340. grid-parent-rules.spec.ts and grid-file-upload.spec.ts stay cited as they were, and the automated.stale record (grid-file-upload.spec.ts) is unchanged. No clause changed",
-          "ref": "#PENDING-24579R8"
+          "ref": "#24723"
         }
       ]
     },
@@ -1299,7 +1299,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "automated.ref and acceptance[2].verify corrected — §2 theme \"pins that cover no full clause\" of wave anchor #24579 (18.0 sweep), one of the leftovers round 6 (#24697) named. Tier 1 run #24598 at the sweep's console pin 4016370af3c9: summary-rollup.spec.ts passed 2/2, but it rolls showcase_task up into showcase_project through a direct batch and never reads invoice.total, so #24598 scored acceptance[2] not-run on it (round 1's QA run #24572 had scored acceptance[2] pass on it). It asserts no clause of this item, so it is dropped from the ref and named there, and acceptance[2].verify no longer says it pins the clause. The spec is byte-identical at the shipped pin 12dc7b47c340. QA run #24616 drove the invoice.total roll-up by hand. master-detail.spec.ts and form-view-subforms.spec.ts stay cited, and the automated.stale record (form-view-subforms.spec.ts) is unchanged. No clause text changed",
-          "ref": "#PENDING-24579R8"
+          "ref": "#24723"
         }
       ]
     },
