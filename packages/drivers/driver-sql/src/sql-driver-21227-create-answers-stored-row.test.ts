@@ -47,6 +47,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver, type SqlDriverConfig } from '../src/index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
 const TABLE = 'os21227_stored_row';
@@ -207,6 +208,9 @@ function suite(face: Face) {
       // own union (`IN ('org_b')`) would miss the unstamped row this call just
       // wrote. The read is scoped by that union only when every row carries a
       // tenant; here the call's own options (none) decide, and the ids bound it.
+      // The unstamped row lands only on a table built before 18.x (ADR-0131 D1
+      // makes a fresh tenant column NOT NULL): this table is that store's.
+      await asPre18TenantColumn(driver, TABLE);
       const batch = await driver.bulkCreate(TABLE, [
         { id: 't-m1', title: 'named', organization_id: 'org_b' },
         { id: 't-m2', title: 'unstamped' },
