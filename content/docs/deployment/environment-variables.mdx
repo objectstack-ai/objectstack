@@ -36,7 +36,7 @@ read at startup unless noted otherwise. Boolean variables accept `true` / `false
 > +100) and the banner prints the actual bound port. In **production**
 > (`os start`) a busy port is a hard error (exit 1) — it never silently
 > drifts, because a shifted port breaks reverse-proxy upstreams, `OS_AUTH_URL`
-> callbacks, and `OS_TRUSTED_ORIGINS` (CORS). Pin the port explicitly in
+> callbacks, and `OS_TRUSTED_ORIGINS` (auth CSRF). Pin the port explicitly in
 > production (`OS_PORT=8080 os start`) and keep `OS_AUTH_URL` / `OS_TRUSTED_ORIGINS`
 > in sync with it.
 
@@ -123,8 +123,8 @@ Auth settings precedence:
 | Variable | Type | Default | Description |
 |:---|:---|:---|:---|
 | `OS_CORS_ENABLED` | boolean | `true` | Enable CORS middleware. |
-| `OS_CORS_ORIGIN` | csv | `*` | Allowed origins (comma-separated, or `*`). |
-| `OS_CORS_CREDENTIALS` | boolean | `true` | Allow credentialed cross-origin requests. |
+| `OS_CORS_ORIGIN` | csv | — | Origins admitted to cross-origin requests: exact origins or patterns such as `https://*.example.com`, comma-separated. Unset, no cross-origin caller is admitted (loopback origins excepted on a development boot); same-origin requests, the Console included, need no entry. `*` is refused at boot unless `OS_CORS_CREDENTIALS=false`. |
+| `OS_CORS_CREDENTIALS` | boolean | `true` | Allow credentialed cross-origin requests from the admitted origins. Must be `false` to serve `OS_CORS_ORIGIN=*`. |
 | `OS_CORS_MAX_AGE` | number | `86400` | Preflight cache TTL in seconds. |
 
 ---

@@ -5,26 +5,29 @@
  * secrets out of `sys_webhook.definition_json` and into the encrypted
  * `signing_secret` column.
  *
- * ## Why a sweep and not just the seeder
+ * ## Which rows it can still find
  * The 18.0 seeder `bootstrapDeclaredWebhooks` (retired since: declared webhooks
  * are read from the registry, ADR-0131 D2) re-seeded package-declared rows on
- * every boot, so those healed themselves the moment the new mapping landed. The
- * rows that did NOT heal are exactly the ones most likely to hold a real
- * production key:
+ * every boot, so those healed themselves the moment the new mapping landed, and
+ * the ownership ceremony settles every copy of a declaration before a database
+ * is certified (18.x step 5a). The rows it leaves are the ones this sweep is
+ * for, and the ones most likely to hold a real production key:
  *
- *  - `managed_by: 'admin'` — authored in Setup, never touched by the seeder;
- *  - `customized: true` — a package row an admin edited, deliberately frozen
- *    against re-seeding (seed-not-clobber, #3461 / #2909).
+ *  - `managed_by: 'admin'` — authored in Setup, and the ceremony's clones of an
+ *    edited copy (renamed in place, their `definition_json` kept);
+ *  - a seeded row whose name no installed package declares — the ceremony
+ *    leaves it, an ordinary webhook, customized or not.
  *
  * Leaving those behind would make this a half-migration: the code path that
  * created the exposure would be fixed while the exposed values stayed in the
  * table. So the sweep is keyed off the DATA (does this blob contain a secret?),
- * not off provenance.
+ * not off provenance — which is why the ceremony's settlement narrows nothing
+ * here: each kind of row it leaves can still carry a blob.
  *
  * ## What it is careful about
  *  - **System context.** The provenance hook exempts `isSystem` writes, so
- *    migrating a package row does not stamp `customized: true` and freeze it
- *    against future seeding.
+ *    migrating a seeded row does not stamp `customized: true` on it — the sweep
+ *    is the platform's write, not an administrator's edit.
  *  - **Idempotent.** A row whose blob no longer carries a `secret` is skipped,
  *    so the sweep is free on every boot after the first.
  *  - **Fail-closed, per row.** With no CryptoProvider the encrypted write throws

@@ -1755,11 +1755,13 @@ const FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION: RuleExplanation = {
 };
 
 // `flow-trigger-unknown-object` lives in the same rule file but is not one of
-// the five: its verdict depends on packages a build cannot see, so it warns.
+// the five: its verdict depends on packages a build cannot see, so it warns —
+// except under a package closure the runtime publish gate states, where the
+// snapshot is that closure and the id refuses.
 
 const FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
   rule: 'flow-trigger-unknown-object',
-  covers: 'why an unknown trigger object only warns',
+  covers: 'why an unknown trigger object warns, and when it refuses',
   paragraphs: [
     'A record-triggered flow binds an ObjectQL hook filtered to the exact name in its start node\'s ' +
       '`config.objectName`, and a time-relative sweep queries the exact name in `config.timeRelative.object`. ' +
@@ -1769,8 +1771,16 @@ const FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
       'another installed package, which a build of this stack cannot see, so the finding is a warning and ' +
       'can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
       'not judged. Of the findings that say a flow never fires, it is the only one that stays advisory: ' +
-      'the others are settled by contracts this repository ships. At the runtime publish gate it is a save advisory, ' +
-      'judged against the live object registry, never a refusal.',
+      'the others are settled by contracts this repository ships. At the runtime publish gate a write that ' +
+      'names no package gets it as a save advisory, judged against the live object registry.',
+    'A write into a package is judged against that package\'s closure instead: its own objects, the objects ' +
+      'of the packages its manifest declares in `dependencies`, and platform objects. An object outside it ' +
+      'is one the package never declared it may reference, and nothing it installs puts the object in ' +
+      'reach until its manifest declares the dependency, so there the finding is an error and the publish ' +
+      'is refused, the verdict the dataset and view doors give the same reference. Declare a dependency on ' +
+      'the package that defines the object, or trigger the flow on an object inside the closure. A `sys_` ' +
+      'name is not judged there either, a draft save is not gated, and a stored flow is judged at its next ' +
+      'publish.',
   ],
 };
 

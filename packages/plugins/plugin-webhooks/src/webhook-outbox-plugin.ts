@@ -307,8 +307,9 @@ export class WebhookOutboxPlugin implements Plugin {
      * `sys_webhook` row for one, and the dispatcher, the redelivery veto and the
      * activation door read the declaration through one
      * {@link DeclaredWebhookSource}, bound here to the `declaredWebhooks` slot.
-     * The 18.0 seeder's rows stay until the ownership ceremony deletes them;
-     * `declared-webhooks.ts` says how they are read meanwhile.
+     * The ownership ceremony settles the 18.0 seeder's rows before a database
+     * is certified; `declared-webhooks.ts` says how a row holding a declared
+     * name is read.
      *
      * Gated on the DATA ENGINE alone — deliberately independent of the
      * auto-enqueue dispatch prerequisites (realtime + messaging): the write
@@ -322,9 +323,9 @@ export class WebhookOutboxPlugin implements Plugin {
             ctx.logger.warn?.('[webhook] sys_webhook write doors and the declared-webhook reader not bound — no data engine available');
             return;
         }
-        // Bind the provenance stamp so an admin edit freezes a seeded row: an
-        // 18.0 mirror an administrator edits stops being one, and answers as
-        // itself rather than for its declaration (`classifyDeclaredNameHolder`).
+        // Bind the provenance stamp so an admin edit of a seeded row is
+        // recorded: the ownership ceremony keeps an edited copy as a clone
+        // rather than deleting it (`webhook-provenance.ts`).
         this.boundEngine = engine;
         bindWebhookProvenanceStamp(engine as any, ctx.logger as any);
         // [#8566] And the headers_secret shape gate, BEFORE the sweep below
@@ -347,9 +348,9 @@ export class WebhookOutboxPlugin implements Plugin {
         // withhold the declaration for the whole deployment, so no non-system
         // write may take one (409 `RESOURCE_CONFLICT`).
         bindDeclaredWebhookNameGuard(engine as any, this.declaredSource);
-        // [#7799] Then heal the rows that still hold a key in cleartext: the
-        // ones an administrator authored or edited, and any 18.0 seeded row the
-        // seeder had not yet rewritten.
+        // [#7799] Then heal the rows that still hold a key in cleartext — the
+        // rows the ownership ceremony leaves: authored ones, clones, and seeded
+        // rows no package declares.
         try {
             await migrateLegacyWebhookSecrets(engine, ctx.logger as any);
         } catch (err: any) {

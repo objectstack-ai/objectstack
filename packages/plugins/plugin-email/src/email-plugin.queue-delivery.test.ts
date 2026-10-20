@@ -517,8 +517,7 @@ describe('mail/test is never queued', () => {
 
     const result = await h.settings.action('test')!({
       values: { provider: 'log', from_email: 'no-reply@example.test' },
-      payload: {},
-      ctx: { body: { to: 'ops@example.test' } },
+      payload: { to: 'ops@example.test' },
     });
 
     // The answer came from the TRANSPORT — it either sent or it did not —
@@ -542,8 +541,7 @@ describe('mail/test is never queued', () => {
 
     const result = await h.settings.action('test')!({
       values: { provider: 'log', from_email: 'no-reply@example.test' },
-      payload: {},
-      ctx: { body: { to: 'ops@example.test' } },
+      payload: { to: 'ops@example.test' },
     });
 
     expect(result.ok).toBe(false);

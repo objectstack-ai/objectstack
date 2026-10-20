@@ -3411,7 +3411,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "スコープ",
         help: "行が書き込まれたカスケードレイヤー。",
         options: {
-          global: "グローバル",
           tenant: "テナント",
           user: "ユーザー"
         }

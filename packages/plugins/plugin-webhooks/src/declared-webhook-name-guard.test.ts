@@ -13,8 +13,8 @@
  * declared sharing rules.
  *
  * Each refusal below carries its discriminating control: an undeclared name,
- * an update that keeps its name (the 18.0 mirror rows an upgraded database
- * holds), a system write — so a guard that refused everything goes red too.
+ * an update that keeps its name (a row that held the name before a package
+ * declared it), a system write — so a guard that refused everything goes red too.
  */
 
 import { describe, expect, it } from 'vitest';
