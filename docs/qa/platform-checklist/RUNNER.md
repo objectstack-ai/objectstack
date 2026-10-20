@@ -452,48 +452,52 @@ contradicts it, and correct it here when it does.
   strength of the `automated` field alone: an unrun pin is a claim, not evidence — which
   is the same "ticking on a label" failure clause-grained acceptance exists to prevent.
 
-- **18.0 boots the `single` tenancy posture only: a walled posture is refused before
-  anything is served, so a clause that needs a walled boot has no live leg on 18.0.**
-  `OS_TENANCY_POSTURE=group` or `isolated` — or the legacy `OS_MULTI_ORG_ENABLED=true`,
-  which `resolveTenancyPosture()` (`packages/types/src/env.ts`) reads as `isolated` — makes
-  `os serve` print `✖ FATAL: tenancy posture 'isolated' is not supported in 18.0
-  (NOT_IMPLEMENTED).` and exit **1** before a config is read, a plugin is mounted or the
-  HTTP server starts (`walledPostureRefusal()` in `packages/cli/src/commands/serve.ts`,
-  ruling record 6259698357 on the v18 epic; pinned by
-  `packages/cli/src/commands/serve-walled-posture-refusal.test.ts`). `os dev` and `os start`
-  boot through `serve`, and nothing skips it: `OS_ALLOW_DEGRADED_TENANCY` answers a
-  different refusal (an absent multi-org runtime), which this one now runs ahead of. The
-  refusal promises the walled postures for "an 18.x release" and names none. Kernel-level
-  boots (`@objectstack/verify`'s `bootStack`, the dogfood wall suites) never pass through
-  `serve` and still boot walled, which is why a walled clause is proven by its pins.
-  Measured at `bfc1539fe0`: `isolated`, `group` and `OS_MULTI_ORG_ENABLED=true` each exit 1
-  with that FATAL on `os serve` and on `os start`, `single` passes the gate, and the pin
-  reports 5 passed. **So:** score a walled clause from the pins its item names, and record
-  its live leg `skipped` with this entry cited — "not scored on a stock 18.0 boot" — as the
-  clauses of the withdrawn organization-ownership command are. ⛔ Never `blocked(fixture)`:
-  no fixture provisions a posture the release refuses. The 18.0 sweep's records met it and
-  scored the live leg both `blocked(environment)` (QA runs #24557, #24559) and
-  `blocked(fixture)` (QA run #24558); this entry is the one word. Each item that carries
-  such a leg names it in its own `fixtures.knownGaps`.
+- **A walled boot is a fixture of its own: `os serve` boots `group` and `isolated` once the
+  walled prerequisites are provisioned, and the stock showcase provisions none of them.**
+  18.0 refused a walled posture at boot; 18.x step 4 (#24580) removed that refusal, so
+  `OS_TENANCY_POSTURE=group` or `isolated` (or the legacy `OS_MULTI_ORG_ENABLED=true`, which
+  `resolveTenancyPosture()` in `packages/types/src/env.ts` reads as `isolated`) boots through
+  `os serve`, and so `os dev` and `os start`. Each prerequisite below refuses the boot with a
+  FATAL naming itself when absent, so a refusal tells the runner what is missing, never that
+  the posture is unsupported:
+  1. the multi-org runtime **declared by the app**: `@objectstack/organizations` in the app's
+     own `package.json` and installed there. Reachable only through `NODE_PATH` or a hoisted
+     store is refused on purpose (ADR-0093 D5). No example app declares it, so a walled run
+     uses a scratch app that does;
+  2. `OS_PLATFORM_OWNER_EMAIL`, the deployment's platform administrators: first-registrant
+     promotion is off under a wall;
+  3. a declared membership policy, `OS_AUTH_MEMBERSHIP_POLICY` (for example `invite-only`).
 
-- **A stock 18.0 boot holds exactly one organization, and no door mints a second — so an
-  org-switch clause has no live leg on a stock boot either.**
+  Measured at `45898dbf6`: a scratch app declaring the real runtime, booted by the built CLI
+  under `isolated` with the other two set, mounted `Organizations`, answered
+  `GET /api/v1/discovery` 200 and logged no system-write refusal. The seven walled
+  e2e cases in `packages/cli/test/serve-organizations-*.e2e.test.ts` spawn that boot.
+  **So:** score a walled clause's live leg on such a boot, and its pins as its item says.
+  A run that does not provision the walled boot records the leg `blocked(fixture)`, naming
+  this entry and the missing prerequisite — never `fail`, and never on a faked posture.
+  Each item that carries such a leg names it in its own `fixtures.knownGaps`.
+
+- **A stock `single` boot holds exactly one organization, and no door mints a second; a
+  walled boot mints them through the auth API.**
   `POST /api/v1/auth/organization/create` answers **`403 ORGANIZATION_CREATION_DISABLED`**
   wherever the effective posture enforces no organization wall (`beforeCreateOrganization`
   in `packages/plugins/plugin-auth/src/auth-manager.ts`, the same derivation `/auth/config`
   publishes as `features.multiOrgEnabled: false`; pinned by
-  `packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts`), which on 18.0 is
-  every boot, by the entry above. `sys_organization` offers no create over the data API
-  (`apiMethods: ['get', 'list', 'update']`,
-  `packages/platform-objects/src/identity/sys-organization.object.ts`), and 18.0 serves
-  fresh installs only (the same refusal's text; a 17.x database is refused at boot,
-  `platform-core.v18-boot-refusals`). `POST /api/v1/auth/organization/set-active` therefore
-  has the Default Organization, or null, to switch between. **So:** a clause that needs a
-  second organization — an org switch mid-flow, organization A against B — is not scored on
-  a stock 18.0 boot: record its live leg `skipped` with this entry cited, and score what its
-  pins prove. A run that stages the second organization itself (QA run #24560 wrote one with
-  a system write) scores a fixture of its own making, not a stock boot, and its record says
-  so. QA runs #24560 and #24558 met the 403; the pin reports 25 passed at `bfc1539fe0`.
+  `packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts`), which is every stock
+  boot: the stock showcase boots `single`. `sys_organization` offers no create over the
+  data API (`apiMethods: ['get', 'list', 'update']`,
+  `packages/platform-objects/src/identity/sys-organization.object.ts`). On a stock boot
+  `POST /api/v1/auth/organization/set-active` therefore has the Default Organization, or
+  null, to switch between. On a walled boot (the entry above) a signed-in user creates an
+  organization with that same `POST /api/v1/auth/organization/create` and switches to it
+  with `set-active`; the walled dogfood suites
+  (`packages/qa/dogfood/test/wall-*.dogfood.test.ts`) create two that way. **So:** a clause
+  that needs a second organization (an org switch mid-flow, organization A against B) is
+  scored on a walled boot. On a stock boot record its live leg `blocked(fixture)` with this
+  entry cited, and score what its pins prove. A run that stages the second organization
+  with a system write (QA run #24560 did) scores a fixture of its own making, not a stock
+  boot, and its record says so. QA runs #24560 and #24558 met the 403; the pin reports 25
+  passed at `bfc1539fe0`.
 
 - **One container builds one tree at a time: never run `pnpm build` and
   `pnpm objectui:build` together, and give the heavy steps a concurrency the shell's memory
