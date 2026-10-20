@@ -5482,9 +5482,19 @@ export class ApprovalService implements IApprovalService {
     // approver: a reminder names no channel, messaging's default materializes
     // it in the in-app inbox, and the inbox row carries the title, the body and
     // the deep link below, never links. The deep link is the approver's way in.
+    //
+    // [#24751] Each address once — the opening's rule (`openedOn`). A slate
+    // lists a person once per group they resolved into (per_group tagging), and
+    // `pending_approvers` keeps every one of those slots until the first vote,
+    // so one id can stand there twice. Messaging delivers that person ONE
+    // reminder (both emits carry the same dedup key), so counting per slot
+    // answered a `notified` the inbox contradicts. `notified` is the number of
+    // reminders handed over: one per distinct address. A user id and the same
+    // account's email are two addresses here, exactly as at the opening — two
+    // slots the person takes separately, and two reminders delivered.
     const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
     let notified = 0;
-    const concrete = pending.filter(a => a && !a.includes(':'));
+    const concrete = new Set(pending.filter(a => a && !a.includes(':')));
     const literals = pending.filter(a => a && a.includes(':'));
     for (const approver of concrete) {
       notified += await this.notify({
