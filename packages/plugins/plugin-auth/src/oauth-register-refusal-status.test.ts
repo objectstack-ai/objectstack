@@ -96,7 +96,7 @@ beforeAll(async () => {
     baseUrl: ORIGIN,
     dataEngine: engine,
     plugins: { oidcProvider: true },
-  } as ConstructorParameters<typeof AuthManager>[0]);
+  } as unknown as ConstructorParameters<typeof AuthManager>[0]);
 
   const direct = (path: string, body: unknown) =>
     manager.handleRequest(
