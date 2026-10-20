@@ -1190,7 +1190,7 @@
       "title": "The /api/v1/datasources admin lifecycle: all 11 routes behind ONE manage_platform_settings floor (drivers catalog included), runtime create with provenance+health, draft test probe, credential migration into the store, secret never echoes (hasSecret only), bad drafts 400 DATASOURCE_ADMIN_ERROR, unwired federation degrades 503 naming external-datasource",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1291,7 +1291,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/services/service-datasource/src/__tests__/admin-routes.test.ts + packages/services/service-datasource/src/__tests__/envelope.conformance.test.ts — pins route behavior + envelope; the LIVE-mount half is not pinned, drive os dev for it"
+        "ref": "packages/services/service-datasource/src/__tests__/admin-routes.test.ts + packages/services/service-datasource/src/__tests__/envelope.conformance.test.ts. Both mount the real route registrar on the real HonoHttpServer adapter over STUBBED datasource-admin and external-datasource services and a fake auth service: the route layer, and nothing below it runs. They score whole: acceptance[7] (its oracle is test: admin-routes' #4225 cases, each federation route's 503 naming external-datasource while datasource-admin still serves, and envelope's 'the external-datasource service is not wired'), negative[4] and negative[5] (attributions the route layer owns: the 503's service, and each route's refusal code, admin-routes' #4249 cases on both services). They hold route-layer halves only, evidence beside the live answer and never its pass (RUNNER rule 6): acceptance[0]'s admin half (the static catalog with its configSchema, mounted with no service), acceptance[2]'s inline secret split out of the draft, acceptance[4]'s 201 envelope, acceptance[6]'s service refusal answered 400 DATASOURCE_ADMIN_ERROR in the declared envelope, and acceptance[8]'s 404 RESOURCE_NOT_FOUND. Neither drives the capability floor (acceptance[1], and acceptance[0]'s anonymous 401), the real service, the secret binder or the store (acceptance[3], acceptance[5], and the persistence and health halves): drive os dev for every api clause"
       },
       "source": [
         "packages/services/service-datasource/src/admin-routes.ts#requireDatasourceAdmin (the eleven routes; the uniform floor docblock + requireDatasourceAdmin + DATASOURCE_ADMIN_CAPABILITY #9391/#9593; splitSecret keeps the secret out of the persisted draft; resolve()/badRequest() per-service attribution #4225/#4249; getDatasource credential-stripped + hasSecret; POST /test draft probe; POST /:name/migrate-credential)",
@@ -1332,6 +1332,12 @@
           "date": "2026-10-20",
           "change": "automated.ref respelled — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: a ref that misses its own pin), round 15 of wave anchor #24579. The second pin was spelled '(+ __tests__/envelope.conformance.test.ts)', a partial path in a parenthesis, so the run's ref parser missed it and ran it separately (24/24). It is now a full repo path after ' + ', as the other multi-pin refs spell it. The ref's scope is unchanged. Read at base b1676441ba. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause. PR #24891's carried finding (round 15 respelled this ref and left its scope, 'pins route behavior + envelope', unnarrowed), read under RUNNER rule 6 and the theme-B rule. Read at base feb09db14a: both pins mount registerDatasourceAdminRoutes on the real HonoHttpServer adapter over stubbed services and a fake auth service, so they score acceptance[7] (test oracle), negative[4] and negative[5] (attributions the route layer owns) whole, and hold only route-layer halves of acceptance[0], [2], [4], [6] and [8]. The capability floor has its own pin (admin-routes-auth-guard.test.ts), which this ref does not name. No clause changed",
+          "ref": "#PENDING-24579R16"
         }
       ]
     },
@@ -1828,7 +1834,7 @@
       "title": "Declarative connector static auth kinds (none/api-key/basic/bearer) resolve credentialRef at materialization and land on the wire in exactly their header/query shape; an unresolvable credentialRef is boot-fatal with the env-var prescription; oauth2 has NO authorable spelling (EE tier)",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -1839,7 +1845,7 @@
           "env vars set for each probe's credentialRef before boot (the open tier resolves credentialRef from environment variables — plugin.ts)"
         ],
         "knownGaps": [
-          "NO shipped connector declares a secret-bearing auth kind — all three showcase instances are auth:{type:'none'} on purpose (examples/app-showcase/src/system/connectors/index.ts#StatusApiConnector, and StatusOpenApiConnector and DevToolsMcpConnector beside it, each declare auth: { type: 'none' }; StatusApiConnector's own comment says a real upstream would use bearer+credentialRef). The per-kind instances are therefore scratch-authored in a writable package against the echo upstream; without the echo upstream the wire-shape clauses are blocked(fixture) and fall back to the unit pins (rest-connector.test.ts drives applyAuth through a stubbed fetch)"
+          "NO shipped connector declares a secret-bearing auth kind — all three showcase instances are auth:{type:'none'} on purpose (examples/app-showcase/src/system/connectors/index.ts#StatusApiConnector, and StatusOpenApiConnector and DevToolsMcpConnector beside it, each declare auth: { type: 'none' }; StatusApiConnector's own comment says a real upstream would use bearer+credentialRef). The per-kind instances are therefore scratch-authored in a writable package against the echo upstream; without the echo upstream the wire-shape clauses are blocked(fixture), with the unit pins cited beside them as evidence of their own layer only (rest-connector.test.ts drives applyAuth through a stubbed fetch), never their pass (RUNNER rule 6)"
         ]
       },
       "variants": [
@@ -1864,7 +1870,7 @@
         {
           "clause": "each static kind lands on the wire in exactly its shape, one verdict per variant, none inferred: bearer → Authorization: Bearer <secret>; basic → Authorization: Basic base64(username:password); api-key header form → X-API-Key (or the authored headerName); api-key query form → the key in the named query param AND no key header; none → no auth artifact",
           "oracle": "network",
-          "verify": "the echo upstream's captured headers/query per instance against applyAuth (packages/connectors/connector-rest/src/rest-connector.ts); unit fallback per shape in rest-connector.test.ts",
+          "verify": "the echo upstream's captured headers/query per instance against applyAuth (packages/connectors/connector-rest/src/rest-connector.ts). rest-connector.test.ts (applyAuth through a stubbed fetch) is evidence of the request the connector builds, never of what an upstream received: without the echo upstream the clause is blocked(fixture) with that pin beside it, never scored pass from it (RUNNER rule 6, a pin scores only the layer it drives)",
           "evidence": "the five echoed requests, keyed by kind"
         },
         {
@@ -1924,6 +1930,12 @@
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24615 (18.0 sweep round 2, ba4afcc2; wave anchor #24579 §3). steps[1] offered 'direct engine dispatch', which has no HTTP door; it names the runtime-flow vehicle #24615 used (POST /api/v1/automation, then POST /automation/NAME/trigger). fixtures.knownGaps[0] and source[5] cited the showcase connectors file by comma-separated line numbers, the rot class the line-citation limb exists for; both now anchor the declaring symbol. No clause changed",
           "ref": "#24717"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "acceptance[0].verify and fixtures.knownGaps[0] no longer fall back to the unit pin for the wire shapes. PR #24891's carried finding (round 15's acceptance notes: the 'score from the pin' spelling, wire-shape clauses), read under RUNNER rule 6. acceptance[0] is a network clause: what the echo upstream received. packages/connectors/connector-rest/src/rest-connector.test.ts drives applyAuth through a stubbed fetch (read at base feb09db14a), so without the echo upstream the clause is blocked(fixture), with the pin beside it. No clause changed",
+          "ref": "#PENDING-24579R16"
         }
       ]
     },
