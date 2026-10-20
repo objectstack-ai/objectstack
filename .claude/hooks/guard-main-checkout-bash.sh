@@ -133,8 +133,9 @@ fi
 # quotes, escapes and nested `(…)` / `$(…)` / backticks; when the input ends first, to the
 # last index — the rest is one inert run (bash refuses such a command anyway). The body is
 # kept verbatim as part of the word, so a target holding it still fails open on its `$`.
-# Boundary: a `(` or `)` bash would not count (a `case` pattern, a comment) moves the end, and
-# the text after it is then read exactly as before this function existed.
+# Boundary: a `(` or `)` bash would not count (a `case` pattern, a comment) moves the end —
+# too early, and the rest is read as it was before this function existed; too late, and the
+# text swallowed with the body is inert, i.e. fails open.
 SUBST_END=0
 subst_end() {
   local s="$1" i="$2" n=${#1} st ch top
