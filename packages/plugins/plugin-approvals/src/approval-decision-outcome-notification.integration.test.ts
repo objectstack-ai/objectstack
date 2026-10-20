@@ -40,6 +40,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationEngine, registerLogicNodes } from '@objectstack/service-automation';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { registerApprovalNode } from './approval-node.js';
@@ -167,12 +168,12 @@ describe('the decision that ends an approval tells its submitter (approval.appro
   const pendingOn = async (recordId: string): Promise<any> => {
     const rows: any[] = await engine.find('sys_approval_request', {
       where: { record_id: recordId, status: 'pending' }, context: SYSTEM,
-    } as any);
+    } satisfies EngineQueryOptions);
     expect(rows.length, `at most one pending request on ${recordId}`).toBeLessThanOrEqual(1);
     return rows[0];
   };
   const stored = async (requestId: string): Promise<any> =>
-    engine.findOne('sys_approval_request', { where: { id: requestId } }, { context: SYSTEM } as any);
+    engine.findOne('sys_approval_request', { where: { id: requestId } }, { context: SYSTEM });
   /** The outcome notices sent about one request. */
   const outcomesAbout = (requestId: string) =>
     emits.filter((e) => OUTCOME_TOPICS.includes(e.topic) && e.source?.id === requestId);
