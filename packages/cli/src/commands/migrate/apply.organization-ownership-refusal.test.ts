@@ -3,15 +3,13 @@
 /**
  * [ADR-0131 D10 item 5] What `os migrate apply --allow-destructive` tells the
  * operator when it holds back an `organization_id` drop the organization-ownership
- * ceremony owns, in 18.0.
+ * ceremony owns.
  *
- * 18.0 supports fresh installs only, and its registered
- * `os migrate organization-ownership` refuses on every database, plan and apply
- * alike (`organization-ownership.release-refusal.test.ts`). So the drop gate's
- * refusal, the human face and the `--json` `detail` both, names no step of that
- * command: it says what 18.0 supports for a v17 database, the 17.x release to
- * keep it on and the 18.x release that carries the upgrade path, as the boot
- * refusal does (`organizationOwnershipRefusalMessage`, `@objectstack/runtime`).
+ * The ceremony is the way on (18.x step 6 opened it), so the human face names
+ * its steps — the plan, then the reviewed apply with the backup acknowledged —
+ * as the boot refusal does (`organizationOwnershipRefusalMessage`,
+ * `@objectstack/runtime`), and names no release line to stay on. The `--json`
+ * `detail` names the ceremony and states the marker it read.
  *
  * ## What is real here
  *
@@ -70,7 +68,11 @@ const ORGANIZATION_DROP = {
 };
 
 /** A step of `os migrate organization-ownership`, which 18.0 refuses on every database. */
-const WITHDRAWN_COMMAND = /os migrate organization-ownership|--plan-file|organization-ownership --out/;
+/** The ceremony's two steps, as the refusal prescribes them. */
+const CEREMONY_STEPS = [
+  'os migrate organization-ownership --out PLAN',
+  'os migrate organization-ownership --apply --plan-file PLAN --backup-taken',
+];
 
 const UNVERIFIED = { id: 'adr-0131-organization-ownership', last_run_at: '2026-10-01T00:00:00.000Z', verified_at: null, blocking: 2 };
 const VERIFIED = { ...UNVERIFIED, verified_at: '2026-10-01T00:00:00.000Z', blocking: 0 };
@@ -143,7 +145,7 @@ const ARGV = ['--database-url', 'file:v17.db', '--allow-destructive', '--yes'];
 
 describe('os migrate apply --allow-destructive: the organization-ownership refusal names no command 18.0 refuses', () => {
   for (const [state, flag] of [['no ceremony run recorded', null], ['an unverified run recorded', UNVERIFIED]] as const) {
-    it(`${state}: the human face refuses, exit 1, saying what 18.0 supports, and nothing is written`, async () => {
+    it(`${state}: the human face refuses, exit 1, naming the ceremony's steps, and nothing is written`, async () => {
       bootWithOrganizationDrop();
       mocks.readOrganizationOwnershipMarker.mockResolvedValue({ verified: false, flag });
 
@@ -152,15 +154,14 @@ describe('os migrate apply --allow-destructive: the organization-ownership refus
       expect(exit).toBe(1);
       expect(refusal, 'the gate printed its refusal').toBeDefined();
       expect(refusal).toContain('sys_platform_setting');
-      expect(refusal).not.toMatch(WITHDRAWN_COMMAND);
-      expect(refusal).toContain('17.x release');
-      expect(refusal).toContain('18.x release');
+      for (const step of CEREMONY_STEPS) expect(refusal).toContain(step);
+      expect(refusal).not.toMatch(/17\.x|18\.0 supports/);
       if (flag) expect(refusal).toContain('2 blocking');
       expect(flushSchemaDdl).not.toHaveBeenCalled();
       expect(applyMigrationEntries).not.toHaveBeenCalled();
     }, RUN_TIMEOUT);
 
-    it(`${state}: under --json the refusal's detail names no command 18.0 refuses either`, async () => {
+    it(`${state}: under --json the refusal's detail names the ceremony and the marker it read`, async () => {
       bootWithOrganizationDrop();
       mocks.readOrganizationOwnershipMarker.mockResolvedValue({ verified: false, flag });
 
@@ -174,7 +175,7 @@ describe('os migrate apply --allow-destructive: the organization-ownership refus
         created: [],
         marker: flag,
       });
-      expect(payload.detail).not.toMatch(WITHDRAWN_COMMAND);
+      expect(payload.detail).toMatch(/organization-ownership ceremony/);
       expect(applyMigrationEntries).not.toHaveBeenCalled();
     }, RUN_TIMEOUT);
   }

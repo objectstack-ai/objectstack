@@ -319,6 +319,8 @@
     "OpenTelemetryCompatibilitySchema": "system/OpenTelemetryCompatibility",
     "OrganizationOwnershipAnchor": "system/OrganizationOwnershipAnchor",
     "OrganizationOwnershipAnchorSchema": "system/OrganizationOwnershipAnchor",
+    "OrganizationOwnershipBirthMarker": "system/OrganizationOwnershipBirthMarker",
+    "OrganizationOwnershipBirthMarkerSchema": "system/OrganizationOwnershipBirthMarker",
     "OrganizationOwnershipCategory": "system/OrganizationOwnershipCategory",
     "OrganizationOwnershipCategorySchema": "system/OrganizationOwnershipCategory",
     "OrganizationOwnershipDeparture": "system/OrganizationOwnershipDeparture",

@@ -27,6 +27,9 @@ export {
 
 export { AutoEnqueuer, type AutoEnqueuerOptions, type HttpEnqueueFn } from './auto-enqueuer.js';
 export { SysWebhook } from './sys-webhook.object.js';
+// [ADR-0131 D2] How a delivery names a declared webhook (`declared:NAME`); the upgrade ceremony
+// re-sources an 18.0 copy's deliveries to it and pins its own spelling equal to this one.
+export { DECLARED_WEBHOOK_REF_PREFIX, declaredWebhookRefId } from './declared-webhooks.js';
 
 /**
  * [#7799] The signing-secret seam. Exported so a host that boots the pieces

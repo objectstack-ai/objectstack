@@ -196,24 +196,12 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 | `--seed-admin` / `--no-seed-admin` | — | Seed a dev admin (`admin@objectos.ai` / `admin123`) on an empty DB — default on; override with `--admin-email` / `--admin-password` |
 | `-v, --verbose` | — | Verbose output |
 
-##### A 17.x development database
+##### A 17.x or 18.0 pre-release development database is upgraded in place
 
-A v18 server refuses to start on a database still in the v17
-organization-ownership shape until the [ownership ceremony](#os-migrate-organization-ownership)
-has run on it.
-
-<Callout type="warn">
-Fresh installs are supported under every tenancy posture; the upgrade path arrives in a later 18.x release. Until then the ceremony refuses, so `os dev` stops at step 2 with its
-refusal and changes nothing.
-18.0 does not upgrade a v17 database: keep a v17 database on a 17.x release
-until the 18.x release that carries the upgrade path. For a local SQLite file,
-`os dev` in 18.0 still takes step 1's copy first and prints where it is,
-beside the ceremony's `NOT_IMPLEMENTED` refusal; any other database gets no
-copy and the same answer.
-</Callout>
-
-In the 18.x release that carries the upgrade path, `os dev` runs that ceremony
-for you when the database is a local SQLite file:
+A v18 server refuses to start on a database with no birth marker, which 17.x
+and the 18.0 pre-releases (`18.0.0-next.*`) created, until the [ownership ceremony](#os-migrate-organization-ownership)
+has run on it. `os dev` runs that ceremony for you when the database is a local
+SQLite file:
 
 1. It copies the database file and its `telemetry` sibling (each with its
    `-wal` / `-shm`) into `<data dir>/backups/organization-ownership-<timestamp>/`.
@@ -222,14 +210,14 @@ for you when the database is a local SQLite file:
    beside the copy.
 3. It prints the ceremony's warnings and starts the server again.
 
-In that release, if a step blocks, or the post-check still holds rows (a row whose owner cannot
+If a step blocks, or the post-check still holds rows (a row whose owner cannot
 be derived, named per table with its remedy), `os dev` stops and prints what
 holds it, where the copy is, and the command that resumes the run. It tries once per session. A database that is
 not a local SQLite file (PostgreSQL, a remote libSQL, `:memory:`) is not
 upgraded in place: run the ceremony yourself.
 
-`os serve` and `os start` never run the ceremony: they refuse to start, and on
-a v17 database their 18.0 refusal says that 18.0 does not upgrade it.
+`os serve` and `os start` never run the ceremony: they refuse to start, and the
+refusal names the command.
 
 ##### Serving dev over https
 
@@ -1040,12 +1028,9 @@ safe. No flag skips these refusals:
   `sys_metadata` family among them. Dropping one first would turn every legacy
   organization row into an environment row. Under `--json` the refusal answers
   `message: 'refused_organization_ownership_unmigrated'` and lists the `tables`.
-  18.0 itself never records a verified run, so on a v17 database this refusal
-  holds on every run. 18.0 supports fresh installs only and does not upgrade a
-  v17 database: keep a v17 database on a 17.x release until the 18.x release
-  that carries the upgrade path. In that release, the ceremony's
-  `os migrate organization-ownership --apply --plan-file FILE` run drops these
-  columns itself, in its column-drops step, before it records the run verified.
+  The ceremony's `os migrate organization-ownership --apply --plan-file FILE`
+  run drops these columns itself, in its column-drops step, before it records
+  the run verified.
 
 Each refusal holds the whole `--allow-destructive` run: nothing in it is
 created, applied or dropped, the run's other changes included. A run without
@@ -1216,7 +1201,7 @@ where the data lives.
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
-| `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. A v18 server refuses to start until it has run. Fresh installs are supported under every tenancy posture; the upgrade path arrives in a later 18.x release. Until then the command refuses. See [below](#os-migrate-organization-ownership) |
+| `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. It upgrades a database 17.x or an 18.0 pre-release (`18.0.0-next.*`) created; a v18 server refuses to start on one until it has run. See [below](#os-migrate-organization-ownership) |
 | `os migrate activity-changed-fields` | Stamp the two read-rule columns (`changed_fields`, `milestone_key`) on the `sys_activity` rows written before they existed. Until it runs, those rows are withheld from every reader but the system, so run it at once after upgrading. No flag; idempotent |
 | `os migrate audit-mail-bodies` | Mask the mail bodies (`body_text`, `body_html`) that `sys_audit_log` and `sys_activity` copies of `sys_email` / `sys_identity_email` rows still hold in clear, written before the audit writer masked them. Reports counts only. No flag; idempotent. See [below](#os-migrate-audit-mail-bodies) |
 | `os migrate comment-parent-pair` | Stamp the parent pair (`object_name`, `record_id`) on the `sys_comment` rows written before it existed. Until it runs, a broad comment read past 2,000 candidate rows omits comments the reader may see, and its total agrees with the short list, so run it at once after upgrading. No flag; idempotent |
@@ -1521,18 +1506,20 @@ upgrading rather than wait for that.
 
 #### `os migrate organization-ownership`
 
-The v18 ownership ceremony (ADR-0131 D10). A v18 `os serve` / `os start` refuses
-to start on a database still in the v17 organization-ownership shape until this
-has run. In the 18.x release that carries the upgrade path, `os dev` runs it on
-its own for a local SQLite database (see [`os dev`](#os-dev)).
+The v18 ownership ceremony (ADR-0131 D10), and the upgrade path of a database
+17.x or an 18.0 pre-release (`18.0.0-next.*`) created. A v18 `os serve` / `os start` serves a database this release
+created itself, or one this ceremony certified; it refuses any other until the
+ceremony has run. Under `os dev` it runs on its own for a local SQLite
+database (see [`os dev`](#os-dev)).
 
-<Callout type="warn">
-Fresh installs are supported under every tenancy posture; the upgrade path arrives in a later 18.x release. Until then this command refuses, plan and apply alike: it exits `1` with
-`NOT_IMPLEMENTED` (under `--json`, `code` beside `error`) and reads and
-writes nothing. Keep a v17 database on a 17.x release until the 18.x release
-that carries the upgrade path. The invocations below, and what the list after
-them says the ceremony does, are that 18.x release's.
-</Callout>
+How a database is recognised: the first boot that creates a datastore from
+empty writes a **birth marker** into `sys_migration` (row
+`adr-0131-organization-ownership`) naming the ownership shape generation it was
+born in. The ceremony writes the same row, verified, when its post-check
+passes. A server decides on that generation alone: a database with no birth
+marker, which 17.x and the 18.0 pre-releases created, or one a shorter ceremony
+certified at an older
+generation, is refused, and the refusal names this command.
 
 ```bash
 os migrate organization-ownership --out plan.json            # the plan: reads only
