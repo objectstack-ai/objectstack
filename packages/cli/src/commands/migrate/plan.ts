@@ -2,6 +2,7 @@
 
 import { Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
+import type { ManagedDriftEntry } from '@objectstack/driver-sql';
 import {
   printHeader,
   printSuccess,
@@ -39,6 +40,7 @@ import {
 } from '../../utils/unmanaged-tables.js';
 import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { describeDriverSqliteFile } from '../../utils/connection-display.js';
+import { ceremonyOrganizationColumnDrops, readOrganizationOwnershipMarker } from '../../utils/organization-ownership-drop-gate.js';
 import {
   resolveTenancyPosture,
   collectGlobalUniques,
@@ -83,6 +85,18 @@ import {
  * driver that declares nothing (every database but a Turso REMOTE one) gets
  * the plan it always got, byte for byte. The `--json` document is the report
  * and is unchanged.
+ *
+ * [#24925, ADR-0131 D10 item 5] Nor a remedy the apply refuses. On a database
+ * the organization-ownership ceremony has not verified (a 17.x one before the
+ * ceremony), `os migrate apply --allow-destructive` refuses every run that
+ * would drop an `organization_id` column, the whole run, and no flag stands
+ * that down (`utils/organization-ownership-drop-gate.ts`). Each such drop is
+ * listed and counted as drift with the ceremony as its remedy, and the footer
+ * offers `--allow-destructive` for nothing while one is listed: it names the
+ * ceremony's two commands instead. Which drops are held, and whether the
+ * ceremony verified, are read through the two functions `apply` asks, never a
+ * second list. A verified database, or one with no such drop, gets the plan it
+ * always got, byte for byte; the `--json` document is unchanged.
  */
 export default class MigratePlan extends Command {
   static override description =
@@ -405,34 +419,48 @@ export default class MigratePlan extends Command {
       // but a drop (it runs no SQLite table rebuild). Empty for a driver that
       // declares nothing, and then everything below reads as it always has.
       const limits = collectDriftApplyLimits(stack, drift);
+      // [#24925] The `organization_id` drops `os migrate apply` refuses here
+      // until the organization-ownership ceremony has verified. Empty on a
+      // verified database and on one with no such drop, and then everything
+      // below reads as it always has.
+      const held = await ceremonyHeldDrops(stack, drift);
 
       await renderPendingSchemaWork(pending);
-      if (limits.size === 0) {
+      if (limits.size === 0 && held.size === 0) {
         renderPlan(drift);
       } else {
         // Still listed, still counted: it IS drift. Only the remedy changes,
         // from a command that cannot perform it here to the reason it cannot.
-        renderPlan(drift, await describeWithApplyLimits(limits));
+        const byLimit = limits.size === 0 ? (d: ManagedDriftEntry) => d.message : await describeWithApplyLimits(limits);
+        renderPlan(drift, held.size === 0 ? byLimit : await describeWithCeremonyHolds(held, byLimit));
       }
       if (pending.length > 0) printInfo(await summarizePendingSchemaWork(pending));
       printInfo(summarize(drift));
-      if (limits.size === 0) {
+      if (limits.size === 0 && held.size === 0) {
         console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') +
           chalk.dim(' (add --allow-destructive for drops / tightenings)'));
       } else {
         // `--allow-destructive` only for a destructive entry this database can
         // apply; no apply line at all when it can apply nothing listed here.
-        const appliable = drift.filter((d) => !limits.has(d));
+        const appliable = drift.filter((d) => !limits.has(d) && !held.has(d));
         const appliableDestructive = appliable.filter((d) => d.category === 'destructive').length;
-        if (appliable.length > 0 || pending.length > 0) {
-          console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') + (appliableDestructive > 0
+        // [#24925] While the ceremony holds a drop, `apply` refuses every
+        // --allow-destructive run, so it is offered for nothing: what `apply`
+        // performs now is the rest, and the destructive changes wait.
+        const appliableNow = held.size === 0 ? appliable : appliable.filter((d) => d.category !== 'destructive');
+        if (appliableNow.length > 0 || pending.length > 0) {
+          console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') + (held.size === 0 && appliableDestructive > 0
             ? chalk.dim(` (add --allow-destructive for the ${appliableDestructive} destructive change(s) it can apply on this database)`)
             : ''));
         }
-        printWarning(
-          `${limits.size} change(s) above cannot be applied on this database by "os migrate apply" (each says why), `
-          + 'so they remain drift after it runs.',
-        );
+        if (held.size > 0) printWarning(describeCeremonyHold(held.size, appliableDestructive));
+        const limited = [...limits.keys()].filter((d) => !held.has(d)).length;
+        if (limited > 0) {
+          printWarning(
+            `${limited} change(s) above cannot be applied on this database by "os migrate apply" (each says why), `
+            + 'so they remain drift after it runs.',
+          );
+        }
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
@@ -444,4 +472,58 @@ export default class MigratePlan extends Command {
       await stack.shutdown();
     }
   }
+}
+
+/**
+ * [#24925] The entries `os migrate apply` refuses on this database: each
+ * `organization_id` drop, while the organization-ownership ceremony has not
+ * verified. Answered by the two functions `apply`'s drop gate asks, through
+ * the same `objectql` service, so the plan and the refusal cannot disagree:
+ * `ceremonyOrganizationColumnDrops`, asked of one entry at a time, says which
+ * entries; `readOrganizationOwnershipMarker` says whether the ceremony
+ * verified, and answers "not verified" for a database with no `sys_migration`
+ * table or row. The marker is read only when such a drop is listed, so every
+ * other plan reads nothing it did not read before.
+ */
+async function ceremonyHeldDrops(
+  stack: { kernel: unknown },
+  drift: readonly ManagedDriftEntry[],
+): Promise<ReadonlySet<ManagedDriftEntry>> {
+  const drops = drift.filter((d) => ceremonyOrganizationColumnDrops([d]).length > 0);
+  if (drops.length === 0) return new Set();
+  const kernel = stack.kernel as { getService?: (n: string) => unknown };
+  const engine = kernel.getService?.call(kernel, 'objectql');
+  const marker = await readOrganizationOwnershipMarker(engine as never);
+  return marker.verified ? new Set() : new Set(drops);
+}
+
+/**
+ * [#24925] The {@link renderPlan} line for a held drop: the finding without
+ * its `--allow-destructive` sentence, then the ceremony as its remedy. Every
+ * other entry is described by `otherwise`. The driver package is imported at
+ * the point of use, never statically (`schema-migrate.lazy-driver-import.test.ts`).
+ */
+async function describeWithCeremonyHolds(
+  held: ReadonlySet<ManagedDriftEntry>,
+  otherwise: (d: ManagedDriftEntry) => string,
+): Promise<(d: ManagedDriftEntry) => string> {
+  const { driftFindingWithoutRemedy } = await import('@objectstack/driver-sql');
+  return (d) => (held.has(d)
+    ? `${driftFindingWithoutRemedy(d)} — a drop the organization-ownership ceremony owns, and it has not verified `
+      + 'on this database: the ceremony drops it itself (see below).'
+    : otherwise(d));
+}
+
+/**
+ * [#24925] The footer line for the held drops: why `--allow-destructive` is
+ * offered for nothing, and the ceremony's two commands, as `os migrate apply`'s
+ * refusal names them. `waiting` counts the other destructive entries that run
+ * could perform once the ceremony has verified.
+ */
+function describeCeremonyHold(drops: number, waiting: number): string {
+  return `${drops} organization_id drop(s) above are the organization-ownership ceremony's, and it has not verified `
+    + 'on this database, so "os migrate apply --allow-destructive" refuses every run until it has'
+    + (waiting > 0 ? ` (the other ${waiting} destructive change(s) above wait for it too)` : '')
+    + '. Run "os migrate organization-ownership --out PLAN" to write and review its plan, take a backup, then '
+    + '"os migrate organization-ownership --apply --plan-file PLAN --backup-taken"; it drops these columns itself.';
 }

@@ -9,7 +9,7 @@
       "title": "Showcase boots clean: health + ready 200, no degraded startup banners, console + app metadata served",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "mixed",
       "preconditions": [
@@ -44,16 +44,22 @@
           "evidence": "the grepped log excerpt"
         },
         {
-          "clause": "the console shell is served at /_console/ and the seeded app's merged metadata resolves",
+          "clause": "the seeded app's merged metadata resolves",
           "oracle": "api",
-          "verify": "GET /_console/ → 200 text/html; GET /api/v1/meta/app?id=showcase_app returns the merged app/nav metadata (dogfood skill §1 names this exact endpoint)",
-          "evidence": "response statuses + top-level keys"
+          "verify": "GET /api/v1/meta/app?id=showcase_app returns the merged app/nav metadata (dogfood skill §1 names this exact endpoint). The console shell is acceptance[5], so a run with no console build scores this clause in full",
+          "evidence": "the response status + top-level keys"
         },
         {
           "clause": "the served nav matches the authored app: every grp_data object entry from src/ui/apps/index.ts appears in the meta/app response — nothing silently dropped at merge",
           "oracle": "api",
           "verify": "diff the nav object names in the response against examples/app-showcase/src/ui/apps/index.ts",
           "evidence": "the diff (empty)"
+        },
+        {
+          "clause": "the console shell is served at /_console/",
+          "oracle": "api",
+          "verify": "GET /_console/ → 200 text/html (steps[4]). It needs a built Console: `pnpm objectui:build` at the framework repo root, which writes packages/console/dist (`pnpm build` never does). On an unbuilt tree the boot still reaches health, and /_console/ answers 503 text/plain 'The ObjectStack Console is not built, so this server has no Console to serve at /_console/.' with the build remedy (packages/cli/src/utils/console.ts#createConsoleNotBuiltPlugin): record this clause blocked(environment), never a FAIL",
+          "evidence": "the /_console/ status and content type"
         }
       ],
       "negative": [
@@ -96,6 +102,12 @@
           "date": "2026-10-07",
           "change": "acceptance[2].verify quoted the per-flow banner line `⚠ flow '<name>' declares a '<type>' trigger but is NOT bound — disabled by deployment policy …`. The banner now prints one line per (trigger type, reason) class with the flows listed, and Boot diagnostics no longer repeats the automation plugin's per-flow line, so the quoted shape moved with it. The clause is unchanged",
           "ref": "#22073"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "acceptance[3] narrowed to its server half, with the console half appended as acceptance[5]. Checklist-accuracy finding of QA run #24838 (18.0 sweep round 4 at 307ce4c4): acceptance[3] bundled GET /_console/ with the app-metadata read, so a run with no console build (QA runs #24838 and #24786: /_console/ answered 503) could never pass it, although the metadata half held. The two halves now score apart, and acceptance[5] says what an unbuilt tree answers and that it is blocked(environment) (console.ts createConsoleNotBuiltPlugin, read at base feb09db14a). No other clause changed",
+          "ref": "#24963"
         }
       ]
     },
@@ -1843,7 +1855,7 @@
       "title": "Marketplace install-local: the wiring matrix mounts the right arms per OS_CLOUD_URL, the air-gapped inline install works with NO control plane, reseed/purge touch exactly the sample rows, every mutating door is manage_metadata-gated both sides, and the listing projects installedBy/storageDir per principal",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1925,8 +1937,7 @@
         "runtime-config advertising marketplace:true on a boot whose browse namespace 404s (or installLocal:true where the route is absent) is the #8356/#8388 declared-vs-derived gap re-opening",
         "purge deleting a row the manifest's seed datasets do not declare is a data-loss FAIL — 'user-created records are never touched' is the handler's own contract",
         "a 2xx for the plain member or anonymous on ANY mutating door is a FAIL of the #8976 gate — UI absence is not the gate, the server refusal is",
-        "purged sample rows reappearing after a restart is a FAIL of the sampleDataPurged rehydrate guard",
-        "a browse-leg upstream fetch failure on an egress-blocked runner filed as a product defect is a false finding — the mount is this kernel's contract, the upstream's reachability is not (score blocked(environment))"
+        "purged sample rows reappearing after a restart is a FAIL of the sampleDataPurged rehydrate guard"
       ],
       "traps": ["dispatcher-vs-hono-route", "absence-inference", "destructive-in-place", "wrong-persona", "auth-state-leak"],
       "source": [
@@ -1972,6 +1983,12 @@
           "date": "2026-10-20",
           "change": "fixtures.requires[1], steps[2], steps[6]–[7] and acceptance[4].verify — checklist-accuracy findings of QA run #24779 (wave anchor #24579 round 12). The listing serves withSampleData, derived per request from the caller's rows (#21775), never sampleDataPurged, which lives in the ledger file (local-manifest-source.ts, marketplace-install-local-plugin.ts handleList at base 307ce4c4b4). The artifact step now says what a runner needs: the existing examples/app-crm/dist/objectstack.json the tree's build writes, rebuilt only when absent. No clause changed",
           "ref": "#24824"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "negative[5] removed. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4): it stated a recording rule (a browse-leg upstream failure on an egress-blocked runner is not a product defect; score blocked(environment)) with no product expectation, so it could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). Its text already stands, unchanged in substance, in fixtures.knownGaps[0] (on an egress-blocked or air-gapped runner the leg scores blocked(environment), never a product FAIL; what this item scores about browse is the MOUNT), so nothing was added. No acceptance clause changed",
+          "ref": "#24963"
         }
       ]
     },
@@ -2090,7 +2107,7 @@
       "title": "Runtime config boot read: GET /api/v1/runtime/config answers 200 ANONYMOUSLY with cloud URL, capability flags, branding and telemetry posture; the legacy /api/v1/studio/runtime-config alias is byte-identical (same handler); nothing credential-shaped is in the body",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["anonymous", "seeded admin (control only)"],
@@ -2106,7 +2123,8 @@
         "GET /api/v1/studio/runtime-config with the same (absent) auth — diff the two bodies byte for byte (the alias is mounted with the SAME handler instance; ledgered as its own row because it is its own wire path)",
         "scan the serialised body for credential-shaped content: no session token, no secret handle plaintext, no Authorization material, no sys_secret ciphertext; telemetry.errorReporting.dsn, when present, is a PUBLIC client key by design — record its presence, it is not a finding",
         "control: repeat the read WITH an admin session and confirm the payload is not silently enriched with anything the anonymous read withheld (the route is unauthenticated by construction — there is no per-principal projection to leak through)",
-        "repeat both reads on an OS_CLOUD_URL=off boot: still 200 anonymous, flags now reporting the offline truth (the flag/route agreement itself is scored by platform-core.marketplace-install-local-lifecycle clause 1 — here only that the route is served and anonymous on this boot shape too)"
+        "repeat both reads on an OS_CLOUD_URL=off boot: still 200 anonymous, flags now reporting the offline truth (the flag/route agreement itself is scored by platform-core.marketplace-install-local-lifecycle clause 1 — here only that the route is served and anonymous on this boot shape too)",
+        "filing, not a probe: flags asserted here that contradict the same boot's live route table belong to platform-core.marketplace-install-local-lifecycle's clause 1; do not double-file, cross-reference"
       ],
       "acceptance": [
         {
@@ -2137,8 +2155,7 @@
       "negative": [
         "a 401/403 on this route is a boot-breaking regression: the console reads it before any session exists — a client that must authenticate to learn where to authenticate is circular",
         "the alias drifting from the canonical body (or being dropped) breaks older Studio bundles silently — the ledger keeps them as separate rows precisely so a move is reported",
-        "session, secret-store, or credential material in this anonymous body is a security finding — capture and cross-file to access-security, do not tick past it",
-        "flags asserted here that contradict the same boot's live route table belong to the marketplace item's clause 1 — do not double-file, cross-reference"
+        "session, secret-store, or credential material in this anonymous body is a security finding — capture and cross-file to access-security, do not tick past it"
       ],
       "traps": ["dispatcher-vs-hono-route", "absence-inference", "cache-staleness"],
       "source": [
@@ -2160,6 +2177,12 @@
           "date": "2026-10-19",
           "change": "steps[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.runtime-config-boot-read steps[1]; wave anchor #24579 §3): the branding block carries logoUrl, faviconUrl and brandColor only when they are configured — runtime-config-plugin.ts reads each from the plugin config or its env var and serialises an unset one as undefined, which JSON drops — so their absence on a stock boot is the contract, not a missing key. No acceptance clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "negative[3] moved to steps[6]. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4): it stated a filing rule (a flag/route contradiction belongs to the marketplace item's clause 1; do not double-file) with no product expectation, so it could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). Its text moved, unchanged in substance, to steps[6]. No acceptance clause changed",
+          "ref": "#24963"
         }
       ]
     },
@@ -2703,7 +2726,7 @@
       "title": "Seed mode matrix (insert/update/upsert/replace/ignore): each mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and `replace` is DECLARED delete-all-then-insert but IMPLEMENTED as bare insert (no caller clears the table): the posture is recorded, never ticked as scoped deletion",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -2711,7 +2734,7 @@
         "app": "showcase",
         "requires": [
           "a runtime-created WRITABLE package (the metadata-authoring-roundtrip fixture) — `seed` is allowRuntimeCreate, so per-mode scratch seeds are authored as drafts (PUT /api/v1/meta/seed/<name> with an explicit `mode`) and applied by publish (applySeedBodies materializes published seed bodies through the SAME SeedLoaderService the boot path uses — packages/runtime/src/seed-loader.ts is a re-export shim of it). The seed BODY carries object, mode, records (and externalId when not the default) and NO `name` key — the URL names the seed, and SeedSchema is strict (packages/spec/src/data/seed.zod.ts#SeedSchema), so a body `name` answers 422 unrecognized_keys",
-          "a scratch target object in the same writable package (do NOT aim mode probes, least of all replace/insert replays, at seeded showcase objects — destructive-in-place)"
+          "a scratch target object in the same writable package (do NOT aim mode probes, least of all replace/insert replays, at seeded showcase objects — destructive-in-place: it contaminates platform-core.seed-integrity's baselines)"
         ],
         "knownGaps": [
           "the publish response's seedApplied summary surfaces inserted/updated/errors but not per-row skip detail — the `ignore says so` clause therefore reads the skip from effect (counts + untouched values) plus the loader's summary where surfaced, not from a UI report",
@@ -2720,7 +2743,7 @@
         ]
       },
       "steps": [
-        "author the scratch object (2 fields + a natural-key `name`, and a declared `sharingModel` — a draft without one is accepted, but its publish is refused (publish-drafts answers outcome 'refused', failed[0] code INVALID_METADATA, rule security-owd-unset) and so is an active save (422 INVALID_METADATA, rule security-owd-unset)) into the writable package and publish; note `externalId` defaults to 'name' and `defaultMode` to 'upsert' (SeedLoaderRequestSchema)",
+        "author the scratch object (2 fields + a natural-key `name`, and a declared `sharingModel` — a draft without one is accepted, but its publish is refused (publish-drafts answers outcome 'refused', failed[0] code INVALID_METADATA, rule security-owd-unset) and so is an active save (422 INVALID_METADATA, rule security-owd-unset)) into the writable package and publish, named with that package's namespace prefix: NS_SHORT, where NS is the package manifest's namespace, which a package created without one derives from its id's last segment (com.objectstack.qa.seedmodes gives seedmodes; packages/spec/src/kernel/namespace-prefix.ts#deriveNamespaceFromPackageId). An unprefixed draft is accepted, and its publish is refused 422 NAMESPACE_PREFIX with the spelling to use (packages/spec/src/kernel/namespace-prefix.ts#validateObjectNamespacePrefix, ADR-0129 D2); note `externalId` defaults to 'name' and `defaultMode` to 'upsert' (SeedLoaderRequestSchema)",
         "UPSERT: publish a seed draft (mode upsert) with rows A,B → both insert; edit the draft changing B's value and adding C; re-publish → A skipped (no-op replay — only seed-declared fields compared, so runtime edits to OTHER columns never block the skip), B updated in place (same id), C inserted; verify by id stability + values",
         "UPDATE: seed draft (mode update) touching A (changed value) and a nonexistent D → A updates, D is SKIPPED (update never creates); row count unchanged",
         "IGNORE: seed draft (mode ignore) with A (changed value) and new E → A untouched (still the update-mode value; existing rows are never rewritten), E inserted; the skip is visible as A's unchanged value + count",
@@ -2769,9 +2792,7 @@
       ],
       "negative": [
         "an upsert replay that bumps updated_at on identical rows is the churn isNoOpReplay exists to prevent (phantom edits in history, state-machine re-validation) — FAIL the skip clause",
-        "update creating a row, or ignore rewriting one, is a mode doing another mode's verb — FAIL",
-        "ticking the replace clause as 'deletion correctly scoped' is a FALSE PASS twice over: nothing is deleted at head, and the clause exists to record exactly that",
-        "aiming replace/insert replays at seeded showcase objects contaminates platform-core.seed-integrity's baselines — destructive-in-place; scratch objects only"
+        "update creating a row, or ignore rewriting one, is a mode doing another mode's verb — FAIL"
       ],
       "variants": [
         "mode insert — no matching, always writes (duplicates on replay unless the object's own unique constraint refuses)",
@@ -2813,6 +2834,12 @@
           "date": "2026-10-20",
           "change": "knownGaps[2] is new — QA run #24779's observation on acceptance[3] (wave anchor #24579 round 12): after insert mode duplicated a natural key, upsert bound the newer duplicate and left the original unconverged. Read at base 307ce4c4b4 in seed-loader.ts loadExistingRecords, which keys an unordered find by externalId (last row wins). No clause changed",
           "ref": "#24824"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] names the namespace prefix; negative[2] and negative[3] removed. Checklist-accuracy findings of QA run #24841 (18.0 sweep round 4 at 307ce4c4). (1) The scratch object needs the package namespace prefix: QA run #24841's unprefixed qa_seedprobe draft saved 200, and its publish answered 422 NAMESPACE_PREFIX. Read at base feb09db14a: the publish doors judge objectNamespacePrefixViolation (protocol.ts, ADR-0129 D2), and a runtime-created package with no namespace takes deriveNamespaceFromPackageId. (2) negative[2] and negative[3] stated a recording rule and a fixture rule with no product expectation, so they could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). negative[2]'s text already stands, unchanged in substance, in steps[5] and acceptance[4] (do not tick 'replace scoped to its own object'; there is no deletion to scope). negative[3]'s stands in fixtures.requires[1], which now carries its reason as well (it contaminates platform-core.seed-integrity's baselines). No acceptance clause changed",
+          "ref": "#24963"
         }
       ]
     },
@@ -3077,7 +3104,7 @@
       "title": "A v18 server refuses to boot rather than serve wrongly: against a 17.x-shaped database (a physical organization_id on a non-tenant table, no verified ADR-0131 ceremony marker) it stops before listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED, naming the tables and the ownership ceremony's plan and apply, and with security on but no identity objects it stops with AuthzIdentityObjectsMissingError",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -3088,6 +3115,9 @@
         "requires": [
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
           "a v17-shaped SQLite file: a DB created by a 17.x showcase boot (npm `@objectstack/cli@17.7.0`) — or the guard pin's fixture shape planted into a scratch DB — copied, never the original"
+        ],
+        "knownGaps": [
+          "an 18.0 pre-release database (18.0.0-next.*) is refused by the same guard, with the same absent-marker refusal (or, once a generation-0 ceremony certified it, the shape-generation refusal). Its path through refusal, ceremony and served boot, with its data carried over, is cli.organization-ownership-ceremony acceptance[5], scored there on that item's own fixture (its fixtures.requires[2]); this item's clauses judge the v17-shaped copy only"
         ]
       },
       "steps": [
@@ -3167,6 +3197,12 @@
           "date": "2026-10-20",
           "change": "title and acceptance[1] (clause, verify) re-worded for the open ownership ceremony (#24581). `os migrate organization-ownership` plans and applies again, and the boot guard decides on the ownership marker (a birth marker a fresh datastore writes, or the ceremony's verified one): a v17 database has none, so the refusal opens \"This database carries no organization-ownership marker\", names the tables still carrying organization_id, and names the ceremony's plan and apply (`--out PLAN`, then `--apply --plan-file PLAN --backup-taken`). Revision 4 asserted the 18.0 sentence and the absence of the command, so a run against the new text would have recorded FAIL on a correct product. It now asserts the marker sentence, the tables and the two steps, and that the refusal says nothing of staying on 17.x. The ⛔ on the code literal is kept. acceptance[0], acceptance[2], acceptance[3] and both steps are unchanged",
           "ref": "#24681"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0] added, a cross-reference. Checklist-accuracy finding of QA run #24838 (18.0 sweep round 4 at 307ce4c4): neither ceremony item had a clause for a real 18.0 pre-release database. The clause is cli.organization-ownership-ceremony acceptance[5], because that item's title names an 18.0 pre-release database and this item's names a 17.x-shaped one; this item points at it. Its scope does not cover fresh installs, so the order #24827 fixed (os migrate apply before the first os serve) is not added here. Read at base feb09db14a. No clause changed",
+          "ref": "#24963"
         }
       ]
     },

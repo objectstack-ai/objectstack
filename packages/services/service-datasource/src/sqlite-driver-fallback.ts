@@ -31,6 +31,39 @@
  * so it surfaces loudly (fail-closed) instead of an operator unknowingly running
  * on wasm/mingo. This mirrors the existing `serve.ts` default-dev fallback and
  * hoists it into one place shared by every sqlite construction site.
+ *
+ * ## Which probe failures step down, and which do not (#24950)
+ *
+ * The step-down exists for ONE cause: the native addon failing to LOAD. That is
+ * the only failure a different engine can cure. In development, then:
+ *
+ *   - **The addon cannot load — steps down.** An ABI mismatch (Node's
+ *     `ERR_DLOPEN_FAILED`, a `NODE_MODULE_VERSION` message), an addon that was
+ *     never built (`bindings`' "Could not locate the bindings file", which has
+ *     no code), or a missing `better-sqlite3` package. Today's path,
+ *     unchanged.
+ *   - **The database FILE cannot be opened or created — re-thrown, as in
+ *     production.** A path under a regular file, a parent directory the driver
+ *     cannot make, a permission refusal, a directory where the file should be.
+ *     `SqlDriver.connect()` names these with the operating system's code
+ *     (`EEXIST`, `ENOTDIR`, `ENOENT`, `EACCES`, …) or SQLite's
+ *     `SQLITE_CANTOPEN`; see {@link isSqliteFileOpenFailure}. Every rung opens
+ *     the same file, so no rung can cure this. Before, the step-down answered
+ *     in its place: the in-memory rung when wasm failed on the same path, or a
+ *     wasm driver whose connect resolved over a file it could not read. So a
+ *     declared datasource that could not answer one query read `connected`,
+ *     and a maintenance command reported a store it never opened as examined
+ *     and clean. Now the datasource's connect fails and its connection state
+ *     says so. That holds for every datasource, the primary included.
+ *     `connect()` makes the directory before the addon loads, so a path the
+ *     driver cannot make is refused at the native rung even when the addon
+ *     could not have loaded.
+ *
+ * An ABSENT file in a directory that exists, or can be made, is not an open
+ * failure: the driver makes the directory and SQLite creates the file. A dev
+ * boot on a fresh checkout keeps working.
+ *
+ * Every other probe failure keeps today's path.
  */
 
 import type { SqliteAbsentFileMode } from '@objectstack/driver-sql';
@@ -101,8 +134,49 @@ function isEphemeralFilename(filename: string): boolean {
 }
 
 /**
+ * Is this probe failure the database FILE failing to open or be created, as
+ * opposed to the native addon failing to load (#24950)? Judged on the thrown
+ * value's own `code` alone, never on its message. `SqlDriver.connect()` is what
+ * refuses such a file, with a `SqliteDatabaseFileError` whose `code` is the
+ * answer it got:
+ *
+ *   - an operating-system error code (`EEXIST`, `ENOTDIR`, `ENOENT`, `EACCES`,
+ *     `EPERM`, `EROFS`, …), from making the file's directory. These codes are
+ *     `E` plus capital letters and digits, with no underscore;
+ *   - SQLite's `SQLITE_CANTOPEN`: the directory is there, and SQLite still
+ *     cannot open the file. Only a LOADED addon can answer with a SQLite code.
+ *
+ * An addon that cannot load never carries either. It surfaces at the probe's
+ * `SELECT 1`, whose failure `SqlDriver.execute()` hands back as
+ * `DATABASE_ERROR`, with the load error as its `cause`: Node's
+ * `ERR_DLOPEN_FAILED`, `MODULE_NOT_FOUND`, or no code at all (`bindings`'
+ * "Could not locate the bindings file"). A missing `better-sqlite3` package
+ * fails at construction with knex's install hint, which has no code. None of
+ * these matches.
+ *
+ * ⛔ No message text is read. A failure this misses keeps today's path.
+ */
+function isSqliteFileOpenFailure(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  if (typeof code !== 'string') return false;
+  return /^E[A-Z0-9]+$/.test(code) || code === 'SQLITE_CANTOPEN';
+}
+
+/** Best-effort close of a probe driver that failed; its own error is not the answer. */
+async function closeQuietly(driver: any): Promise<void> {
+  if (typeof driver?.disconnect !== 'function') return;
+  try {
+    await driver.disconnect();
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
  * Probe a `better-sqlite3` SQLite construction and, in dev, step down to wasm
- * SQLite (then in-memory) when the native addon cannot load.
+ * SQLite (then in-memory) when the native addon cannot load. A database file
+ * that cannot be opened or created is re-thrown instead, in dev as in
+ * production (#24950).
  *
  * @see {@link ResolveSqliteDriverOptions}
  */
@@ -149,29 +223,29 @@ export async function resolveSqliteDriver(
     return { driver: buildNative(), engine: 'better-sqlite3', label: 'SqlDriver(sqlite)' };
   }
 
-  // ── Dev: probe-by-connect, step down on native ABI/load failure. ──────────
+  // ── Dev: probe-by-connect, step down on native ABI/load failure only. ─────
 
   // 1. Native better-sqlite3.
   let nativeDriver: any;
   let nativeOk = false;
   try {
     nativeDriver = buildNative();
-    // connect() runs mkdir (so a SELECT on a file DB whose dir is missing does
-    // not false-positive as an ABI failure) + a PRAGMA whose error it swallows;
-    // the raw SELECT 1 below is what reliably forces the native addon to load
-    // and PROPAGATES an ABI mismatch.
+    // connect() makes the file's directory (so a missing directory is not an
+    // open failure) and refuses a file it cannot open or create, naming it; a
+    // PRAGMA whose load error it swallows follows. The raw SELECT 1 below is
+    // what reliably forces the native addon to load and PROPAGATES an ABI
+    // mismatch.
     await nativeDriver.connect();
     await nativeDriver.execute('SELECT 1');
     nativeOk = true;
-  } catch {
+  } catch (err) {
     nativeOk = false;
-    if (typeof nativeDriver?.disconnect === 'function') {
-      try {
-        await nativeDriver.disconnect();
-      } catch {
-        /* ignore */
-      }
-    }
+    await closeQuietly(nativeDriver);
+    // The FILE cannot be opened or created: no other engine can cure that, so
+    // the datasource's connect fails here, as it does in production (#24950).
+    // Every other failure, a native addon that cannot load first among them,
+    // goes on down the chain as before.
+    if (isSqliteFileOpenFailure(err)) throw err;
   }
   if (nativeOk) {
     return { driver: nativeDriver, engine: 'better-sqlite3', label: 'SqlDriver(sqlite)' };
@@ -193,13 +267,7 @@ export async function resolveSqliteDriver(
     wasmOk = true;
   } catch {
     wasmOk = false;
-    if (typeof wasmDriver?.disconnect === 'function') {
-      try {
-        await wasmDriver.disconnect();
-      } catch {
-        /* ignore */
-      }
-    }
+    await closeQuietly(wasmDriver);
   }
   if (wasmOk) {
     warn(NATIVE_SQLITE_WASM_FALLBACK_WARNING);
