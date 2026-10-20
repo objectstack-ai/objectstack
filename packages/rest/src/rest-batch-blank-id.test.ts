@@ -90,7 +90,7 @@ async function boot() {
     await route!.handler({ method: 'POST', params: {}, query: {}, headers: {}, body: { operations, ...extra } } as any, res);
     return { status: res._status ?? 200, body: res._json };
   };
-  const row = (id: string) => engine.findOne('blank_id_task', { where: { id } } as any);
+  const row = (id: string) => engine.findOne('blank_id_task', { where: { id } });
   return { batch, row, transaction };
 }
 
