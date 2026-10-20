@@ -159,12 +159,15 @@ const DROPPED_REASON_LABEL: Record<DroppedFieldsEvent['reason'], string> = {
 };
 
 function droppedFieldsWarning(nodeType: string, e: DroppedFieldsEvent): string {
-    // A `stored_expression` field was written — with its computed value — so
-    // "succeeded without them" would be false of it.
-    const outcome = e.reason === 'stored_expression'
-        ? 'The write succeeded with the computed value(s).'
-        : 'The write succeeded without them.';
-    return `${nodeType}(${e.object}): requested field(s) [${e.fields.join(', ')}] were NOT written — ${DROPPED_REASON_LABEL[e.reason] ?? e.reason}. ${outcome}`;
+    const fields = `[${e.fields.join(', ')}]`;
+    const why = DROPPED_REASON_LABEL[e.reason] ?? e.reason;
+    // A `stored_expression` field WAS written — with its computed value — so
+    // both "were NOT written" and "succeeded without them" would be false of
+    // it: what did not land is the requested VALUE, not the field.
+    if (e.reason === 'stored_expression') {
+        return `${nodeType}(${e.object}): the requested value(s) for field(s) ${fields} were NOT stored — ${why}. The write succeeded with the computed value(s).`;
+    }
+    return `${nodeType}(${e.object}): requested field(s) ${fields} were NOT written — ${why}. The write succeeded without them.`;
 }
 
 /**

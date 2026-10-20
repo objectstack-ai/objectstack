@@ -142,6 +142,7 @@ describe('update_record surfaces silently-stripped write fields (#3407)', () => 
         expect(step.warnings![0]).toContain('declared expression');
         expect(step.warnings![0]).toContain('with the computed value');
         expect(step.warnings![0]).not.toContain('without them');
+        expect(step.warnings![0]).not.toContain('were NOT written');
     });
 
     it('emits NO warnings and NO droppedFields output when nothing was stripped', async () => {
