@@ -543,9 +543,12 @@ describe('GET … listing — `withSampleData` is the caller\'s own scope, read 
         reads.length = 0;
         opts.activeOrg = 'org_b';
         expect(await listedSampleData(list)).toEqual({ status: 200, withSampleData: true, items: 1 });
-        // B's answer came from B's rows, and from no other organization's.
-        expect(reads.length).toBeGreaterThan(0);
-        for (const r of reads) expect(r.query.where).toEqual({ organization_id: 'org_b' });
+        // B's answer came from B's rows, and from no other organization's. (The
+        // resolver's Default Organization read — the installer's grant is owned
+        // by it — is an authorization read, not a row of the listing's.)
+        const rowReads = reads.filter((r) => r.object !== 'sys_organization');
+        expect(rowReads.length).toBeGreaterThan(0);
+        for (const r of rowReads) expect(r.query.where).toEqual({ organization_id: 'org_b' });
 
         // A keeps a user-authored row in a seeded object; it is not a seed row.
         opts.activeOrg = 'org_a';

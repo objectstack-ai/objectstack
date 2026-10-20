@@ -250,17 +250,18 @@ const settle = async (p: Promise<unknown>): Promise<'fulfilled' | 'rejected'> =>
 // Healthy production wiring — the baseline every fault is injected into.
 // ---------------------------------------------------------------------------
 
-/** A better-auth-shaped service that resolves a real session. */
-const AUTH_OK = async () => ({ api: { getSession: async () => ({ user: { id: 'u_admin' } }) } });
+/** A better-auth-shaped service that resolves a real session, acting in `o1`. */
+const AUTH_OK = async () => ({ api: { getSession: async () => ({ user: { id: 'u_admin' }, session: { userId: 'u_admin', activeOrganizationId: 'o1' } }) } });
 
 /**
  * A permission store that actually grants the package capabilities, through
  * the SHIPPED aggregation (`sys_user_permission_set` → `sys_permission_set`
  * → `system_permissions`) rather than by handing the door a ready-made context.
+ * The grant is owned by `o1`, the session's active organization.
  */
 const qlHealthy = () => bindTestSecurityCatalog({
   find: async (object: string) => {
-    if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps_pkg', permission_set: 'pkg_admin' }];
+    if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps_pkg', permission_set: 'pkg_admin', organization_id: 'o1' }];
     if (object === 'sys_permission_set') return [{ id: 'ps_pkg', name: 'pkg_admin' }];
     return [];
   },

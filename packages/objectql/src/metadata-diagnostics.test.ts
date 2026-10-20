@@ -30,7 +30,6 @@ describe('computeViewReferenceDiagnostics (ADR-0047)', () => {
         fields: [{ field: 'industry' }, { field: 'is_active' }],
         tabs: [{ name: 't', filter: [{ field: 'status', operator: 'equals', value: 'x' }] }],
       },
-      filterableFields: ['status'],
       kanban: { groupByField: 'status', columns: ['name'] },
     }, objectDef);
     expect(result.valid).toBe(true);
@@ -68,11 +67,11 @@ describe('computeViewReferenceDiagnostics (ADR-0047)', () => {
 
   it('supports array-shaped field definitions', () => {
     const result = computeViewReferenceDiagnostics({
-      filterableFields: ['priority', 'missing'],
+      userFilters: { element: 'dropdown', fields: [{ field: 'priority' }, { field: 'missing' }] },
     }, { fields: [{ name: 'priority', type: 'select' }] });
     expect(result.valid).toBe(false);
     expect(result.errors).toHaveLength(1);
-    expect(result.errors?.[0].path).toBe('filterableFields.1');
+    expect(result.errors?.[0].path).toBe('userFilters.fields.1.field');
   });
 
   it('is permissive when the view has no filter surface', () => {

@@ -85,6 +85,11 @@ function makeTables(): Record<string, any[]> {
       { id: 'u_member', email: 'member@x.com', ai_access: 1 },
       { id: 'u_outsider', email: 'outsider@x.com' },
     ],
+    sys_organization: [
+      { id: 'org_default', slug: 'default' },
+      { id: 'org_a', slug: 'org-a' },
+      { id: 'org_b', slug: 'org-b' },
+    ],
     sys_member: [
       { user_id: 'u_owner', organization_id: 'org_a', role: 'owner' },
       { user_id: 'u_admin', organization_id: 'org_a', role: 'admin' },
@@ -94,7 +99,7 @@ function makeTables(): Record<string, any[]> {
     ],
     sys_user_position: [
       { user_id: 'u_member', position: 'auditor', organization_id: 'org_a' },
-      { user_id: 'u_member', position: 'temp_role', organization_id: null, valid_until: iso(T0 + DAY) },
+      { user_id: 'u_member', position: 'temp_role', organization_id: 'org_a', valid_until: iso(T0 + DAY) },
       { user_id: 'u_outsider', position: 'auditor', organization_id: 'org_a' },
     ],
     sys_position: [
@@ -110,7 +115,8 @@ function makeTables(): Record<string, any[]> {
       { position_id: 'p_everyone', permission_set_id: 'ps_base' },
     ],
     sys_user_permission_set: [
-      { user_id: 'u_padmin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
+      // The `single` posture's platform-standing anchor: owned by the Default Organization.
+      { user_id: 'u_padmin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: 'org_default' },
       { user_id: 'u_member', permission_set_id: 'ps_tools', permission_set: 'org_tools', organization_id: 'org_a' },
     ],
     sys_permission_set: [
@@ -284,7 +290,7 @@ interface CallerClass {
 
 const CALLER_CLASSES: CallerClass[] = [
   {
-    name: 'platform administrator — unscoped admin_full_access grant (single posture)',
+    name: 'platform administrator — the Default Organization\'s admin_full_access grant (single posture)',
     fixture: sessionOf('u_padmin', 'padmin@x.com', null),
     expect: (ctx) => {
       expect(ctx.posture).toBe('PLATFORM_ADMIN');

@@ -70,9 +70,13 @@ function makeQl(seed: { users?: any[]; grants?: any[]; sets?: any[]; accounts?: 
     ['sys_organization', [{ id: 'org_default', slug: 'default' }]],
   ]);
   const rowsOf = (object: string) => tables.get(object) ?? [];
+  /** Every read, by object — so a case can say which tables a pass asked. */
+  const reads: string[] = [];
   return {
     tables,
+    reads,
     async find(object: string, q: any) {
+      reads.push(object);
       const where = q?.where ?? {};
       return rowsOf(object).filter((r) =>
         Object.entries(where).every(([k, v]) => {
@@ -388,7 +392,7 @@ describe('walled posture — the legacy grant is no longer an anchor (#11663 L5)
     expect(sinkWarns).toEqual([]);
     // Nothing is revoked and nothing new is minted: the one legacy row stays
     // exactly where it is. ⛔ Retiring the ANCHOR is not deleting the ROW —
-    // that row's ownership is ADR-0131 C3's, on the v18 line.
+    // that row's ownership is ADR-0131 D10's ceremony's.
     expect(ql.grants()).toHaveLength(1);
     expect(r1.reason).toBe('walled_config_derived');
     expect(r2.reason).toBe('walled_config_derived');
@@ -407,28 +411,38 @@ describe('walled posture — the legacy grant is no longer an anchor (#11663 L5)
     expect(log.error).toHaveBeenCalledTimes(1);
     const line = String(log.error.mock.calls[0][0]);
     expect(line).toContain('OS_PLATFORM_OWNER_EMAIL');
-    // …and it names the row and its holder, so the operator can tell WHOSE
-    // standing just ended rather than only that nobody is declared.
-    expect(line).toContain('u_legacy');
-    expect(line).toContain('admin_full_access');
+    // The line no longer names the row or its holder: under a wall no grant
+    // anchors standing, so the holder scan asks NOTHING — not one read of the
+    // grant table — and the line is the general one, byte-for-byte what a rig
+    // holding no such row is told (the CONTROL below).
+    expect(ql.reads).not.toContain('sys_user_permission_set');
+    expect(line).not.toContain('u_legacy');
+    expect(line).toBe(await undeclaredLineWithoutLegacyRow());
     // The row is untouched, and no deprecation pointer came back through the
     // module sink either.
     expect(ql.grants()).toHaveLength(1);
     expect(sinkWarns).toEqual([]);
   });
 
-  it('the holder clause is CONDITIONAL — a walled rig with no legacy row says only the general line', async () => {
-    // The control for the arm above: the extra sentence must come from the row
-    // actually being there, not from the message having grown unconditionally.
-    process.env.OS_TENANCY_POSTURE = 'isolated';
+  /** The fail-closed line a walled rig holding NO legacy row is told. */
+  async function undeclaredLineWithoutLegacyRow(): Promise<string> {
     const log = logger();
     const ql = makeQl({
       users: [user('u_stranger', 'stranger@evil.example', '2026-08-23T01:00:00Z')],
     });
     const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: log });
     expect(r.reason).toBe('walled_owner_email_undeclared');
-    const line = String(log.error.mock.calls[0][0]);
+    expect(log.error).toHaveBeenCalledTimes(1);
+    return String(log.error.mock.calls[0][0]);
+  }
+
+  it('CONTROL: a walled rig with no legacy row says the same general line, naming the variable', async () => {
+    // The control for the arm above: the line it is compared to is a real
+    // fail-closed line naming the remedy, not an empty string both sides share.
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    const line = await undeclaredLineWithoutLegacyRow();
     expect(line).toContain('OS_PLATFORM_OWNER_EMAIL');
+    expect(line).toContain('ZERO config-derived platform administrators');
     expect(line).not.toContain('legacy unscoped');
   });
 
@@ -540,10 +554,12 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
   });
 
   it('an existing human admin short-circuits as already_have_admin — the single-posture no-op-forever shape', async () => {
+    // [ADR-0131 D5] The anchoring grant is the Default Organization's — the
+    // only grant the holder scan reads.
     const ql = makeQl({
       sets: [{ id: 'ps_admin', name: 'admin_full_access', active: true }],
       users: [user('u_admin', 'admin@corp.example', '2026-08-23T01:00:00Z')],
-      grants: [{ id: 'ups_1', user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null }],
+      grants: [{ id: 'ups_1', user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: 'org_default' }],
     });
     const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: logger() });
     expect(r.adminPromoted).toBe(false);

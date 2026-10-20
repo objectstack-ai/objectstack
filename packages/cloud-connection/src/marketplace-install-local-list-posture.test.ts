@@ -85,6 +85,11 @@ function makeRawApp() {
     };
 }
 
+/** The Default Organization — the owner of the one `admin_full_access` grant that anchors platform standing. */
+const DEFAULT_ORG = 'org_default';
+/** The tenant organization the member shape administers, and its session is active in. */
+const TENANT_ORG = 'org_acme';
+
 /** The three caller shapes the ruling names, as the shared resolver sees them. */
 type Shape = 'anonymous' | 'member' | 'operator';
 
@@ -96,6 +101,11 @@ type Shape = 'anonymous' | 'member' | 'operator';
  * through the same `find` production calls is what keeps this file honest about
  * the resolution path: a gate rewired to some other aggregate would not see
  * these and would fail here rather than silently keep passing.
+ *
+ * Every grant is owned by an organization: the operator's by the Default
+ * Organization (the platform-admin shape, which applies with no active
+ * organization), the member's by {@link TENANT_ORG}, the organization its
+ * session is active in — so the narrowed row really holds its capabilities.
  */
 function grantRows(shape: Shape): Record<string, any[]> {
     // `organization_admin` deliberately withholds `manage_metadata` — the
@@ -106,6 +116,7 @@ function grantRows(shape: Shape): Record<string, any[]> {
             ? ['setup.access', 'manage_org_users']
             : [];
     return {
+        sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }, { id: TENANT_ORG, slug: 'acme' }],
         sys_user: [{ id: `usr_${shape}`, email: `${shape}@acme.test` }],
         sys_member: [],
         sys_user_position: [],
@@ -115,7 +126,8 @@ function grantRows(shape: Shape): Record<string, any[]> {
         sys_user_permission_set: held.length
             ? [{
                 id: 'ups1', user_id: `usr_${shape}`, permission_set_id: 'ps1',
-                permission_set: shape === 'operator' ? 'admin_full_access' : 'organization_admin', organization_id: null,
+                permission_set: shape === 'operator' ? 'admin_full_access' : 'organization_admin',
+                organization_id: shape === 'operator' ? DEFAULT_ORG : TENANT_ORG,
             }]
             : [],
         sys_permission_set: held.length
@@ -164,7 +176,13 @@ async function mount(shape: Shape, storageDir: string) {
 
     const services: Record<string, any> = {
         manifest: { register: vi.fn() },
-        auth: { api: { getSession: async () => (sessionUser ? { user: sessionUser, session: {} } : null) } },
+        auth: {
+            api: {
+                getSession: async () => (sessionUser
+                    ? { user: sessionUser, session: shape === 'member' ? { activeOrganizationId: TENANT_ORG } : {} }
+                    : null),
+            },
+        },
         objectql: bindCatalogFromTables({ syncSchemas: vi.fn(async () => undefined), find: async (object: string) => rows[object] ?? [] }, rows),
         metadata: {},
     };

@@ -176,20 +176,6 @@ export function grantSetNameOf(row: unknown): string | undefined {
   return name === '' ? undefined : name;
 }
 
-/**
- * The organization a stored grant (or catalog row) belongs to, or `null` for
- * one that belongs to none. A blank value is the legacy organization-less
- * spelling, read the way every grant reader already reads it
- * (`!organization_id`).
- */
-export function grantOrganizationOf(row: unknown): string | null {
-  if (!row || typeof row !== 'object') return null;
-  const r = row as Record<string, unknown>;
-  const value = r.organization_id ?? r.organizationId;
-  if (value === null || value === undefined || value === '') return null;
-  return String(value);
-}
-
 interface GrantNameEngine {
   registerHook?: (
     event: string,

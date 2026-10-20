@@ -14,11 +14,14 @@
  *
  * ⚠️ [#11663 L5] That last clause is L2's, and its WALLED half has since EXPIRED.
  * L2/L4 opened a time-boxed migration window; L5 closed it. Under a walled
- * posture the legacy unscoped `admin_full_access` row is no longer an anchor and
- * there is no deprecation pointer left to log — both symbols that carried it are
- * gone from `@objectstack/core`. Under `single` the row still confers, exactly as
- * it always did (Choice 4A, the zero-config path); its disposition is #11979's.
- * The suites at the end of this file are the measurement of that boundary.
+ * posture the legacy grant-row anchor — the `admin_full_access` row first-user
+ * promotion mints — is no longer an anchor and there is no deprecation pointer
+ * left to log — both symbols that carried it are gone from `@objectstack/core`.
+ * Under `single` the row still confers (Choice 4A, the zero-config path). Since
+ * ADR-0131 D5 that row is OWNED BY THE DEFAULT ORGANIZATION; the
+ * organization-less row an earlier promotion wrote anchors nothing any more (the
+ * D10 ownership ceremony attributes it to the Default Organization). The suites
+ * at the end of this file are the measurement of that boundary.
  *
  * ⭐ The single most important test in this file is
  * "a session payload carrying a configured address over a sys_user row that
@@ -336,27 +339,32 @@ describe('⭐ [#11663 L2 pin P1] the derivation reads the STORED row, never the 
   });
 });
 
+/** The Default Organization every grant-row fixture below owns its anchor by. */
+const DEFAULT_ORGANIZATION = 'org_default';
+
 /**
- * A principal whose PLATFORM_ADMIN rests on the LEGACY unscoped
- * `admin_full_access` grant row and nothing else — the shape
- * `bootstrapPlatformAdmin` mints when it promotes the first human user.
+ * A principal whose PLATFORM_ADMIN rests on the LEGACY grant-row route (L5's
+ * name for it, as opposed to the config anchor) and nothing else: the
+ * `admin_full_access` row `bootstrapPlatformAdmin` mints when it promotes the
+ * first human user, owned by the Default Organization (ADR-0131 D5).
  * Hoisted out of the `#11663 L2 / P5` suite so the `#13667` posture suite below
  * drives the identical fixture rather than a second copy of it.
  */
 const legacyTables = () => ({
   sys_user: [{ id: 'usr_1', email: 'legacy@corp.example', email_verified: true }],
+  sys_organization: [{ id: DEFAULT_ORGANIZATION, slug: 'default' }],
   sys_member: [],
   sys_user_position: [],
   sys_position: [],
   sys_position_permission_set: [],
   sys_user_permission_set: [
-    { id: 'ups_1', user_id: 'usr_1', permission_set_id: 'pst_1', permission_set: ADMIN_FULL_ACCESS, organization_id: null },
+    { id: 'ups_1', user_id: 'usr_1', permission_set_id: 'pst_1', permission_set: ADMIN_FULL_ACCESS, organization_id: DEFAULT_ORGANIZATION },
   ],
   sys_permission_set: [{ id: 'pst_1', name: ADMIN_FULL_ACCESS, active: true }],
 });
 
 describe('[#11663 L5] the legacy grant row is an anchor under `single`, and NOWHERE else', () => {
-  it('an unscoped admin_full_access grant still confers PLATFORM_ADMIN with no config at all', async () => {
+  it('the Default Organization\'s admin_full_access grant still confers PLATFORM_ADMIN with no config at all', async () => {
     // ⭐ The zero-config path, and the reason this card is walled-only. The
     // harness clears both tenancy inputs, so this rig resolves `single` — what a
     // deployment that configured no tenancy at all looks like. Choice 4A rules
@@ -417,9 +425,12 @@ describe('[#11663 L5] the legacy grant row is an anchor under `single`, and NOWH
     // ROW, which is ADR-0131 C3's on the v18 line and #11979's under `single` —
     // ⛔ not this card's. If a later leg widens to the row, this pin is the one
     // that should be re-authored deliberately rather than deleted in passing.
+    // Resolved IN the organization that owns the row: an organization-owned
+    // grant applies in its own organization, and with no anchor that is the
+    // only place it applies.
     declare(undefined);
     requestPosture('isolated');
-    const grants = await resolveUserAuthzGrants(makeQl(legacyTables()), 'usr_1', { nowMs: NOW });
+    const grants = await resolveUserAuthzGrants(makeQl(legacyTables()), 'usr_1', { nowMs: NOW, tenantId: DEFAULT_ORGANIZATION });
     expect(grants.permissions).toContain(ADMIN_FULL_ACCESS);
     expect(grants.posture).toBe('MEMBER');
     expect(grants.positions).not.toContain('platform_admin');
@@ -453,11 +464,11 @@ describe('[#11663 L2] the sys_user read stays CONDITIONAL on config', () => {
 
 // ───────────────────────────────────────────────────────────────────────────
 /**
- * [#11663 L5] The legacy unscoped anchor is POSTURE-KEYED — the request side
+ * [#11663 L5] The legacy grant-row anchor is POSTURE-KEYED — the request side
  * matching the boot side, on the standing itself rather than on a log line.
  *
  * `bootstrapPlatformAdmin` has always been posture-keyed: under `single` a
- * pre-existing unscoped `admin_full_access` holder is `already_have_admin` and
+ * pre-existing Default Organization `admin_full_access` holder is `already_have_admin` and
  * the boot exits silently, because under Choice 4A that row IS that rig's
  * anchor — first-user promotion mints it and is ruled correct and unchanged.
  * Only under a walled posture is the same row the LEGACY anchor, and L4 stopped
@@ -537,22 +548,31 @@ describe('[#11663 L5] the legacy anchor confers only on the rigs Choice 4A keeps
     }
   });
 
-  it('adds NO read: the recorded query multiset is identical under both answers of the gate', async () => {
+  it('adds NO read of its own: the gate\'s two answers differ by the Default Organization read alone', async () => {
     // The in-place claim at the call site — the posture gate "asks the
-    // ENVIRONMENT, so it issues no query and the pinned batch-equivalence query
-    // multiset cannot move whichever way it answers" — re-MEASURED rather than
-    // quoted. #13667 owed this measurement for a gate on a LOG line; L5 owes it
-    // again because the gate moved onto the derivation itself, where a stray
-    // engine read would be a per-request cost on every walled rig.
-    const reads: Record<string, unknown[]> = {};
+    // ENVIRONMENT, so it issues no query" — re-MEASURED rather than quoted.
+    // #13667 owed this measurement for a gate on a LOG line; L5 owes it again
+    // because the gate moved onto the derivation itself, where a stray engine
+    // read would be a per-request cost on every walled rig. The one read the
+    // two answers do not share is the anchor's own question — which
+    // organization is the Default Organization — and `single` asks it because
+    // its anchor is that organization's grant, while a walled rig has no row
+    // anchor to ask it for (the D5 suite below pins the walled half). Resolved
+    // IN the organization that owns the grant, so the grant applies under both
+    // answers and every other read — the activation ledger's question included
+    // — is asked about the same names.
+    const reads: Record<string, Array<{ object: string; where: unknown }>> = {};
     for (const p of ['single', 'isolated'] as const) {
       declare(undefined);
       requestPosture(p);
       const ql = makeQl(legacyTables());
-      await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
+      await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW, tenantId: DEFAULT_ORGANIZATION });
       reads[p] = ql.calls.map((c) => ({ object: c.object, where: c.where }));
     }
-    expect(reads.single).toEqual(reads.isolated);
+    const notOrganization = (r: { object: string }) => r.object !== 'sys_organization';
+    expect(reads.single.filter(notOrganization)).toEqual(reads.isolated.filter(notOrganization));
+    expect(reads.single.filter((r) => !notOrganization(r))).toEqual([{ object: 'sys_organization', where: { slug: 'default' } }]);
+    expect(reads.isolated.filter((r) => !notOrganization(r))).toEqual([]);
     expect(reads.single.length).toBeGreaterThan(0); // the fixture really did resolve
   });
 
@@ -662,7 +682,8 @@ describe('[#11663 L5] standing across postures — three arms invariant, the leg
  * row — one derivation site, the posture its parameter. Before this, the anchor
  * read the organization-less row only, so a promoted rig whose grant D10's
  * ceremony (or the promotion itself) had given the Default Organization resolved
- * a zero-admin deployment.
+ * a zero-admin deployment. That organization-less row is no anchor now: the
+ * ceremony attributes it, so one still carrying no organization is invalid state.
  */
 describe('[ADR-0131 D5] under `single` the Default Organization\'s admin_full_access grant is the anchor', () => {
   const ownedBy = (organizationId: string, organizations: Array<Record<string, unknown>>) => ({
@@ -679,8 +700,8 @@ describe('[ADR-0131 D5] under `single` the Default Organization\'s admin_full_ac
       const grants = await resolveUserAuthzGrants(makeQl(ownedBy('org_default', DEFAULT_ONLY)), 'usr_1', { nowMs: NOW, tenantId });
       expect(grants.posture, String(tenantId)).toBe('PLATFORM_ADMIN');
       expect(grants.positions[0]).toBe('platform_admin');
-      // The anchoring grant applies wherever the principal acts, as the
-      // organization-less row it replaces did: the set comes with the standing.
+      // The anchoring grant applies wherever the principal acts, and with no
+      // organization active: the set comes with the standing.
       expect(grants.permissions).toContain(ADMIN_FULL_ACCESS);
     }
   });
@@ -714,10 +735,24 @@ describe('[ADR-0131 D5] under `single` the Default Organization\'s admin_full_ac
     expect(ql.calls.map((c) => c.object)).not.toContain('sys_organization');
   });
 
-  it('the organization-less row a pre-D5 promotion wrote still anchors, and asks no organization read', async () => {
-    const ql = makeQl({ ...legacyTables(), sys_organization: DEFAULT_ONLY });
-    const grants = await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
-    expect(grants.posture).toBe('PLATFORM_ADMIN');
-    expect(ql.calls.map((c) => c.object)).not.toContain('sys_organization');
+  it('⛔ the organization-less row a pre-D5 promotion wrote anchors NOTHING, confers nothing, and asks no organization read', async () => {
+    // The D10 ownership ceremony attributes that row to the Default Organization
+    // before an upgraded database boots, so a row still carrying no organization
+    // is invalid state, not an anchor. The CONTROL is the ⭐ arm above: the same
+    // grant owned by the Default Organization confers, on the same fixture.
+    for (const tenantId of [undefined, 'org_default']) {
+      const ql = makeQl({
+        ...legacyTables(),
+        sys_organization: DEFAULT_ONLY,
+        sys_user_permission_set: [
+          { id: 'ups_1', user_id: 'usr_1', permission_set_id: 'pst_1', permission_set: ADMIN_FULL_ACCESS, organization_id: null },
+        ],
+      });
+      const grants = await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW, tenantId });
+      expect(grants.posture, String(tenantId)).toBe('MEMBER');
+      expect(grants.positions, String(tenantId)).not.toContain('platform_admin');
+      expect(grants.permissions, String(tenantId)).not.toContain(ADMIN_FULL_ACCESS);
+      expect(ql.calls.map((c) => c.object), String(tenantId)).not.toContain('sys_organization');
+    }
   });
 });

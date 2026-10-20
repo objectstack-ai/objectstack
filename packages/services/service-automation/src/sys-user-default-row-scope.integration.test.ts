@@ -20,8 +20,11 @@
  * The default applies only where the caller's sets carry no row policy for
  * `sys_user`. Every human holds the platform baseline (`member_default`),
  * which carries both literals, so this deployment composes no baseline and
- * grants one authored `'*'` read set with no row policy of its own — the
- * ruling's no-baseline principal. Explain names the object default, so the
+ * binds one authored `'*'` read set with no row policy of its own to the
+ * `everyone` anchor — the ruling's no-baseline principal. The anchor is the
+ * one channel that holds in every resolution, an organisation or none: a
+ * stored grant row applies only in its own organisation, and an
+ * organisation-less one applies nowhere. Explain names the object default, so the
  * rows read are the declaration's, not a set's.
  *
  * The REAL stack, as its two twins beside it compose it: ObjectKernel,
@@ -148,12 +151,13 @@ describe("sys_user's one `||` default keeps the reader's own row on every user-c
     for (const [id, userId, organizationId] of memberships) {
       await ql.insert('sys_member', { id, user_id: userId, organization_id: organizationId, role: 'member' }, { context: SYS });
     }
-    // The one grant: a global (organisation-less) assignment of the `'*'` reader,
-    // written straight into the table — a system write here must name one of
-    // the two organisations, and a global grant names none.
-    await (driver as unknown as { knex: (t: string) => { insert(r: object): Promise<unknown> } })
-      .knex('sys_user_permission_set')
-      .insert({ id: 'ups_me', user_id: 'usr_me', permission_set: STAR_READER.name, organization_id: null });
+    // The one grant: the `'*'` reader bound to the `everyone` anchor, declared
+    // in the registry's bare slot (where an environment definition answers
+    // first). A stored `sys_user_permission_set` row would apply only in its own
+    // organisation, so it could not reach the "acting in no organisation" arms
+    // below; the anchor reaches every authenticated resolution.
+    (ql as unknown as { registry: { registerItem(type: string, item: Record<string, unknown>, key: string): void } })
+      .registry.registerItem('position', { name: 'everyone', label: 'Everyone', permissionSets: [STAR_READER.name] }, 'name');
 
     hookSeen = [];
     readContexts = [];

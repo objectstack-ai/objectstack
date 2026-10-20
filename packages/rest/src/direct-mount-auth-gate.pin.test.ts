@@ -122,6 +122,9 @@ async function bootDirectMounts() {
     package: { list: async () => [], publish: vi.fn(async () => ({ success: true })) },
   };
 
+  const SET = 'ps_gate_pin';
+  const ORG = 'o1';
+
   /** Session reads per request for the outage token; reset by `call`. */
   const outage = { reads: 0 };
   const auth = {
@@ -133,17 +136,17 @@ async function bootDirectMounts() {
         // The identity read is the request's first; REST's gate re-read is its second.
         if (token === 'sess-outage' && ++outage.reads > 1) throw new Error('session backend unavailable');
         const authGate = SESSIONS[token];
-        return { user: { id: USER, ...(authGate ? { authGate } : {}) }, session: { userId: USER } };
+        // The caller acts in `o1`, the organization its grant is stamped with.
+        return { user: { id: USER, ...(authGate ? { authGate } : {}) }, session: { userId: USER, activeOrganizationId: ORG } };
       },
     },
   };
 
-  const SET = 'ps_gate_pin';
   const engine = {
     find: async (object: string, query: any) => {
       if (object === 'sys_user_permission_set') {
         return query?.where?.user_id === USER
-          ? [{ id: 'ups_1', user_id: USER, permission_set_id: SET, permission_set: 'gate_pin_caller', organization_id: null }]
+          ? [{ id: 'ups_1', user_id: USER, permission_set_id: SET, permission_set: 'gate_pin_caller', organization_id: ORG }]
           : [];
       }
       if (object === 'sys_permission_set') {

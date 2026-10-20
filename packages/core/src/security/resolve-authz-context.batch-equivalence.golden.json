@@ -386,6 +386,14 @@
         "isSystem": true
       },
       {
+        "object": "sys_organization",
+        "where": {
+          "slug": "default"
+        },
+        "limit": 1,
+        "isSystem": true
+      },
+      {
         "object": "sys_metadata_activation",
         "where": {
           "metadata_type": {
