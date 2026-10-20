@@ -127,8 +127,9 @@ export const TASK_REOPEN_REFUSAL =
   'A finished task cannot be reopened. Create a follow-up task instead.';
 
 /**
- * beforeUpdate (gated) — the showcase's one hook that REFUSES a write, with a
- * sentence addressed to the user.
+ * beforeUpdate (gated) — the showcase's first hook that REFUSES a write, with a
+ * sentence addressed to the user. (The three paid-invoice line guards below
+ * refuse the same way.)
  *
  * `throw new Error('<sentence>')` from a sandboxed body is the business-refusal
  * shape: the write is aborted (`onError: 'abort'`) and the sentence travels to
@@ -176,8 +177,10 @@ export const PAID_INVOICE_LINE_MOVE_REFUSAL =
  * Two kinds of write pass every guard:
  *  - a SYSTEM write (`ctx.session.isSystem`): the seed loads INV-1003's line
  *    under a header that is already paid, and a migration or import restores
- *    history. The platform's own read-only strips exempt system writes the
- *    same way;
+ *    history. Every system writer passes by design — the seed, a script
+ *    action's `ctx.api`, a `runAs: 'system'` flow — and none writes
+ *    `showcase_invoice_line` in the showcase today. The platform's static
+ *    `readonly` strip exempts system writes the same way;
  *  - a header that cannot be read: the engine's reference check answers a
  *    dangling `invoice` with its own refusal, so the guard does not invent one.
  */
