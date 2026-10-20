@@ -426,6 +426,7 @@ export {
   validateObjectReferences,
   OBJECT_REFERENCE_UNKNOWN,
   OBJECT_REFERENCE_UNREGISTERED_PLATFORM,
+  USER_FIELD_FOREIGN_REFERENCE,
 } from './validate-object-references.js';
 export type { ObjectRefFinding, ObjectRefSeverity } from './validate-object-references.js';
 

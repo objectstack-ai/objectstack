@@ -242,16 +242,20 @@ framework surface you install:
 | Package | What it does |
 |:---|:---|
 | `@objectstack/spec` | The protocol: `defineStack`, `ObjectSchema`, `Field.*` builders, all Zod schemas. Your metadata imports only this. |
-| `@objectstack/runtime` | The kernel that interprets metadata at runtime. Brings the database drivers with it — you do not install one separately. |
+| `@objectstack/runtime` | The kernel that interprets metadata at runtime. Brings the database drivers with it — SQLite and MongoDB work as installed; PostgreSQL and MySQL also need their client package (below). |
 | `@objectstack/plugin-hono-server` | The HTTP server that mounts the generated REST API. |
 | `@objectstack/connector-rest` · `-openapi` · `-mcp` | The three generic connector executors — register the `rest` / `openapi` / `mcp` provider factories so declarative `connectors:` entries materialize ([ADR-0097](/docs/automation/flows)). |
 | `@objectstack/cli` *(dev)* | The `os` / `objectstack` CLI: `dev`, `validate`, `build`, `start`. |
 | `@objectstack/verify` *(dev)* | The test harness: `bootStack` boots this app's own stack in-process, on an in-memory database and with no server port, and returns the handle a test asserts through. `npm test` runs the starter test `note.test.ts` with it. |
 
 No driver package is listed because none is installed directly: `@objectstack/runtime`
-depends on `driver-sql`, `driver-sqlite-wasm` and `driver-memory`, and the CLI carries
-them too. `objectstack dev` resolves **SQLite** by default; point `OS_DATABASE_URL` at
-Postgres / MySQL / MongoDB for production — [no code changes](/docs/data-modeling/drivers).
+depends on `driver-sql`, `driver-sqlite-wasm` and `driver-memory` and installs
+`driver-mongodb` as an optional dependency, and the CLI carries them too.
+`objectstack dev` resolves **SQLite** by default, which needs nothing more. For
+production, MongoDB needs only `OS_DATABASE_URL` pointed at it. Postgres and MySQL need
+one install first: their database client (`npm install pg`, or `npm install mysql2`) is
+an optional peer of `driver-sql` that your project adds itself, and without it the boot
+is refused. No code changes either way — see [Drivers](/docs/data-modeling/drivers).
 
 ## 3. Run it
 
