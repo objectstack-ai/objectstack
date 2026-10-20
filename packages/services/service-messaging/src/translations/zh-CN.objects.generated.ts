@@ -245,44 +245,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
-  sys_notification_subscription: {
-    label: "通知订阅",
-    pluralLabel: "通知订阅",
-    description: "主体(角色/团队/用户)对通知主题的长期订阅。",
-    fields: {
-      id: {
-        label: "订阅 ID"
-      },
-      display_title: {
-        label: "Title",
-        help: "Record title: the subscribing principal and the topic (computed on read)"
-      },
-      topic: {
-        label: "主题",
-        help: "该主体订阅的通知主题。"
-      },
-      principal: {
-        label: "主体",
-        help: "订阅者选择器:'role:x' | 'team:x' | 'user:id' | 'owner_of:object:id' | 邮箱地址 | 裸用户 ID。"
-      },
-      enabled: {
-        label: "启用",
-        help: "为 false 时,订阅不生效。"
-      },
-      created_at: {
-        label: "创建时间"
-      }
-    },
-    _views: {
-      all: {
-        label: "全部",
-        emptyState: {
-          title: "尚无通知订阅",
-          message: "订阅记录某个角色、团队或用户关注某个通知主题。"
-        }
-      }
-    }
-  },
   sys_notification_template: {
     label: "通知模板",
     pluralLabel: "通知模板",

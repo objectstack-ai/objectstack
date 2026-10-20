@@ -245,44 +245,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
-  sys_notification_subscription: {
-    label: "Notification Subscription",
-    pluralLabel: "Notification Subscriptions",
-    description: "Standing subscription of a principal (role/team/user) to a notification topic.",
-    fields: {
-      id: {
-        label: "Subscription ID"
-      },
-      display_title: {
-        label: "Title",
-        help: "Record title: the subscribing principal and the topic (computed on read)"
-      },
-      topic: {
-        label: "Topic",
-        help: "Notification topic this principal subscribes to."
-      },
-      principal: {
-        label: "Principal",
-        help: "Subscriber selector: 'role:x' | 'team:x' | 'user:id' | 'owner_of:object:id' | an email | a bare user id."
-      },
-      enabled: {
-        label: "Enabled",
-        help: "When false, the subscription is inactive."
-      },
-      created_at: {
-        label: "Created At"
-      }
-    },
-    _views: {
-      all: {
-        label: "All",
-        emptyState: {
-          title: "No subscriptions yet",
-          message: "A subscription records that a role, a team or a user follows a notification topic."
-        }
-      }
-    }
-  },
   sys_notification_template: {
     label: "Notification Template",
     pluralLabel: "Notification Templates",

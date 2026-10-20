@@ -245,44 +245,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
-  sys_notification_subscription: {
-    label: "Notification Subscription",
-    pluralLabel: "Notification Subscriptions",
-    description: "Standing subscription of a principal (role/team/user) to a notification topic.",
-    fields: {
-      id: {
-        label: "Subscription ID"
-      },
-      display_title: {
-        label: "Title",
-        help: "Record title: the subscribing principal and the topic (computed on read)"
-      },
-      topic: {
-        label: "Topic",
-        help: "Notification topic this principal subscribes to."
-      },
-      principal: {
-        label: "Principal",
-        help: "サブスクライバーセレクター: 'role:x' | 'team:x' | 'user:id' | 'owner_of:object:id' | メールアドレス | プレフィックスなしのユーザー ID。"
-      },
-      enabled: {
-        label: "Enabled",
-        help: "When false, the subscription is inactive."
-      },
-      created_at: {
-        label: "Created At"
-      }
-    },
-    _views: {
-      all: {
-        label: "すべて",
-        emptyState: {
-          title: "まだ通知の購読がありません",
-          message: "購読は、ロール、チーム、またはユーザーが通知トピックをフォローしていることを記録します。"
-        }
-      }
-    }
-  },
   sys_notification_template: {
     label: "Notification Template",
     pluralLabel: "Notification Templates",
