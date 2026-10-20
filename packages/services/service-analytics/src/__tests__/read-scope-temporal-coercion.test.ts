@@ -35,6 +35,7 @@ import { DatasetSchema } from '@objectstack/spec/ui';
 import { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
 import { compileScopedFilterToSql, type ReadScopeCompileOptions } from '../read-scope-sql.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 // ── Where the pair applies: after the lowering, on the value comparisons ─────
 
@@ -199,6 +200,9 @@ for (const cell of DB_CELLS) {
         await engine.init();
         engine.registry.registerObject(LEDGER as never);
         await engine.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(engine);
         for (const row of ROWS) await engine.insert(OBJECT, { ...row } as never);
         const realExecute = (engine as any).execute.bind(engine);
         (engine as any).execute = (sql: string, opts?: { object?: string }) => {

@@ -40,6 +40,7 @@ import { ApprovalsServicePlugin } from '@objectstack/plugin-approvals';
 import type { ApprovalService } from '@objectstack/plugin-approvals';
 import { createHonoApp } from '@objectstack/hono';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const PREFIX = '/api/v1';
 const ACT_PATH = `${PREFIX}/approvals/act`;
@@ -103,6 +104,9 @@ async function bootKernel(opts: { selfHosted: boolean; approvals?: boolean }) {
     (objectql as any).registerDriver(driver, true);
     objectql.registry.registerObject(leaveRequest as any, 'approvals-act-test', 'approvals-act-test');
     await (objectql as any).syncSchemas();
+    // A real `single` install's Default Organization: the writes below derive
+    // it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(objectql as any);
 
     let n = 0;
     /** A pending request with live action tokens for {@link APPROVER}. */

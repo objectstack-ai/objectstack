@@ -40,6 +40,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { HttpDispatcher } from '@objectstack/runtime';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { createHonoApp } from '@objectstack/hono';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const PREFIX = '/api/v1';
 const MEMBER = { userId: 'u_member', isSystem: false, systemPermissions: [] as string[] };
@@ -85,6 +86,9 @@ async function boot(auth?: Record<string, unknown>) {
     const ql = kernel.getService<ObjectQL>('objectql');
     ql.registerObject(TASK as any);
     await ql.syncObjectSchema(TASK.name);
+    // A real `single` install's Default Organization: the writes below derive
+    // it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(ql as any);
 
     vi.spyOn(HttpDispatcher.prototype as any, 'timedResolveExecutionContext')
         .mockImplementation(async () => ({ ...MEMBER }));

@@ -41,6 +41,7 @@ import { DatasetSchema } from '@objectstack/spec/ui';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { AnalyticsServicePlugin } from '../plugin.js';
 import { AnalyticsService } from '../analytics-service.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const HIDDEN = 'exposure_hidden';
 const NO_LIST = 'exposure_nolist';
@@ -246,6 +247,9 @@ describe.each(STRATEGIES)('the analytics door honours the generic-exit declarati
       engine.registry.registerObject(obj as any);
     }
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     for (const [object, rows] of Object.entries(ROWS)) {
       for (const row of rows) await engine.insert(object, { ...row } as any);
     }
