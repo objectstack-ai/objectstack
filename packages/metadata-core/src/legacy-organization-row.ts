@@ -75,7 +75,10 @@ export class LegacyOrganizationRowsUnreadable extends Error {
   constructor(readonly table: string, detail: string) {
     super(
       `Could not tell ${table}'s legacy organization rows from the environment's: ${detail}. ` +
-        'Nothing was listed or written. Run `os migrate organization-ownership` on this database first.',
+        'Nothing was listed or written. A fresh 18.0 install holds no legacy organization rows: there, the ' +
+        'cause is the one named above, and the fix is in the SQL driver or the caller that met it. A database ' +
+        'that does hold them is a v17 one. 18.0 supports fresh installs only and does not upgrade a v17 ' +
+        'database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path.',
     );
     this.name = 'LegacyOrganizationRowsUnreadable';
   }

@@ -1,7 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { ADMIN_FULL_ACCESS } from '@objectstack/spec';
+import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { SysUserPermissionSet, SysUserPosition, defaultPermissionSets } from './index.js';
+import { DelegatedAdminGate } from '../delegated-admin-gate.js';
+import { bindTestSecurityCatalog } from '../__tests__/security-catalog.testkit.js';
 
 /**
  * RBAC object + default-permission-set assertions. Moved here with the objects
@@ -60,20 +64,91 @@ describe('default permission sets', () => {
     expect(sys).not.toContain('manage_platform_settings');
   });
 
-  it('organization_admin is read-only on global RBAC tables to prevent privilege escalation', () => {
-    const orgAdmin = defaultPermissionSets.find((p) => p.name === 'organization_admin')!;
-    // [C3 stage 8] The catalog row objects are retired (ADR-0131 D3); the
-    // assignment and grant tables are what is left to protect.
-    for (const obj of [
-      'sys_user_permission_set',
-      'sys_user_position',
-    ]) {
-      const perms = (orgAdmin.objects as any)[obj];
-      expect(perms, `${obj} explicit perms missing`).toBeDefined();
-      expect(perms.allowRead).toBe(true);
-      expect(perms.allowCreate).toBe(false);
-      expect(perms.allowEdit).toBe(false);
-      expect(perms.allowDelete).toBe(false);
+  // [ADR-0090 D12, amended 2026-10-17] The boundary pin. The overrides open
+  // create and remove on both assignment tables and keep edit closed; what an
+  // org admin may create there is decided by the delegated-administration
+  // gate, judged here against the sets this package actually ships.
+  it('organization_admin creates and removes assignment rows, never edits them — both variants', () => {
+    for (const name of ['organization_admin', 'organization_admin_no_bypass']) {
+      const set = defaultPermissionSets.find((p) => p.name === name)!;
+      for (const obj of ['sys_user_permission_set', 'sys_user_position']) {
+        const perms = (set.objects as any)[obj];
+        expect(perms, `${name}.${obj} explicit perms missing`).toBeDefined();
+        expect([perms.allowRead, perms.allowCreate, perms.allowEdit, perms.allowDelete], `${name}.${obj}`)
+          .toEqual([true, true, false, true]);
+      }
+    }
+  });
+
+  describe('the organization boundary over the shipped sets', () => {
+    const ADMIN_SCOPED = {
+      name: 'qa_delegated_admin',
+      objects: {},
+      adminScope: { businessUnit: 'hq', includeSubtree: true, manageAssignments: true, assignablePermissionSets: [] },
+    };
+    const PLATFORM_CAPABLE = { name: 'qa_platform_capable', objects: {}, systemPermissions: ['manage_users'] };
+    const ORG_CAPABLE = { name: 'qa_org_capable', objects: {}, systemPermissions: ['manage_org_users'] };
+
+    function harness(orgAdminSet: string) {
+      const ql: any = { async find() { return []; }, async findOne() { return null; } };
+      bindTestSecurityCatalog(ql, {
+        permissions: [...defaultPermissionSets, ADMIN_SCOPED, PLATFORM_CAPABLE, ORG_CAPABLE] as any,
+        positions: [
+          { name: 'qa_platform_seat', permissionSets: [ADMIN_FULL_ACCESS] },
+          { name: 'qa_member_seat', permissionSets: ['member_default'] },
+        ],
+        capabilities: PLATFORM_CAPABILITIES as any,
+      });
+      const orgAdmin = defaultPermissionSets.find((p) => p.name === orgAdminSet)!;
+      const gate = new DelegatedAdminGate({ ql, resolveSets: async () => [orgAdmin] });
+      const ctx = { userId: 'u_org_admin', tenantId: 'org_a', permissions: [orgAdminSet] };
+      const grant = (setName: string, userId: string) => gate.assert({
+        object: 'sys_user_permission_set', operation: 'insert',
+        data: { user_id: userId, permission_set: setName }, context: ctx,
+      });
+      const assign = (position: string, userId: string) => gate.assert({
+        object: 'sys_user_position', operation: 'insert',
+        data: { user_id: userId, position }, context: ctx,
+      });
+      return { grant, assign };
+    }
+
+    async function refusal(run: () => Promise<unknown>): Promise<any> {
+      try { await run(); } catch (e) { return e; }
+      throw new Error('expected the write to be refused, but it was admitted');
+    }
+
+    for (const orgAdminSet of ['organization_admin', 'organization_admin_no_bypass']) {
+      it(`${orgAdminSet}: admin_full_access, an adminScope set and a platform-capability set are refused — to anyone, itself included`, async () => {
+        const h = harness(orgAdminSet);
+        const cases: Array<[string, RegExp]> = [
+          [ADMIN_FULL_ACCESS, /outside the organization boundary by name/],
+          ['qa_delegated_admin', /condition \(b\)/],
+          ['qa_platform_capable', /condition \(c\).*'manage_users'/],
+          ['organization_admin', /outside the organization boundary by name/],
+          ['organization_admin_no_bypass', /outside the organization boundary by name/],
+        ];
+        for (const [setName, why] of cases) {
+          for (const userId of ['u_org_admin', 'u_member']) {
+            const err = await refusal(() => h.grant(setName, userId));
+            expect([err.code, err.status], `${setName} → ${userId}`).toEqual(['PERMISSION_DENIED', 403]);
+            expect(err.message, `${setName} → ${userId}`).toContain(`'${setName}'`);
+            expect(err.message, `${setName} → ${userId}`).toMatch(why);
+          }
+        }
+        // …and a position that carries admin_full_access, likewise.
+        const err = await refusal(() => h.assign('qa_platform_seat', 'u_org_admin'));
+        expect([err.code, err.status]).toEqual(['PERMISSION_DENIED', 403]);
+        expect(err.message).toMatch(/position 'qa_platform_seat' carries permission set 'admin_full_access'/);
+      });
+
+      it(`${orgAdminSet}: CONTROL — member_default, viewer_readonly and an org-capability set are inside`, async () => {
+        const h = harness(orgAdminSet);
+        for (const setName of ['member_default', 'viewer_readonly', 'qa_org_capable']) {
+          await expect(h.grant(setName, 'u_member'), setName).resolves.toBeUndefined();
+        }
+        await expect(h.assign('qa_member_seat', 'u_member')).resolves.toBeUndefined();
+      });
     }
   });
 

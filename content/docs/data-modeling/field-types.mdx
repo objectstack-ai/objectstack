@@ -415,6 +415,15 @@ Calculated field using a CEL expression (see [Expressions](/docs/data-modeling/f
 { name: 'total', label: 'Total', type: 'formula', expression: 'record.quantity * record.unit_price', returnType: 'number' }
 ```
 
+#### `expression` on a stored field
+
+`expression` is not only a `formula` key. On a field of any other type, the engine computes it from the row each write stores and **stores** the result in the field's column, so a `summary` can roll the column up. It is computed on every insert and every update by id (the stored row merged with the patch). On a predicate update it is computed only when the patch moves an input: one value is stored for every matched row, and the update is refused (`VALIDATION_FAILED`, an `invalid_value` error on the field) when the rows would compute different values. Update those rows by id instead. A value a client sends for the field never stands: it is overwritten by the computed one, with no refusal and no dropped-field report. The full contract is the `expression` row of [`FieldSchema`](/docs/references/data/field).
+
+```typescript
+// Stored, so a parent `summary` can sum it. A client-sent amount is overwritten.
+Field.currency({ label: 'Amount', expression: 'record.quantity * record.unit_price' })
+```
+
 ### `summary`
 Roll-up summary from child records.
 

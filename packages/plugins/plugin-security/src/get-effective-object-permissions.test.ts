@@ -476,16 +476,19 @@ describe('[#20083] parity: can() over the member\'s map answers what checkObject
     });
   }
 
-  it('[#20136] the reported case, spelled out: the walled org admin may not write its RBAC rows, and can() says so', async () => {
+  // [ADR-0090 D12, amended 2026-10-17] Since the organization boundary the
+  // walled org admin creates and removes assignment rows (the gate bounds
+  // which), and still never edits one — the object grant and can() agree.
+  it('[#20136] the reported case, spelled out: the walled org admin may not EDIT its RBAC rows, and can() says so', async () => {
     const context = { userId: USER.id };
     for (const label of ['[#20136 row a] walled org admin', '[#20136 row b] walled org admin WITHOUT member_default']) {
       const sets = SUBJECTS[label];
       const { svc, plugin } = await locate({ schemas: REGISTERED });
       vi.spyOn(plugin as any, 'resolvePermissionSetsForContext').mockResolvedValue(sets);
       const permissions = toEvalPermissions(await svc.getEffectiveObjectPermissions!(context));
-      for (const [verb, operation] of [['edit', 'update'], ['create', 'insert'], ['delete', 'delete']] as const) {
-        expect(evaluator.checkObjectPermission(operation, SysUserPosition.name, sets), `${label} ${verb}`).toBe(false);
-        expect(can(permissions, SysUserPosition.name, verb), `${label} ${verb}`).toBe(false);
+      for (const [verb, operation, granted] of [['edit', 'update', false], ['create', 'insert', true], ['delete', 'delete', true]] as const) {
+        expect(evaluator.checkObjectPermission(operation, SysUserPosition.name, sets), `${label} ${verb}`).toBe(granted);
+        expect(can(permissions, SysUserPosition.name, verb), `${label} ${verb}`).toBe(granted);
       }
       // …and still reads them, on both sides.
       expect(evaluator.checkObjectPermission('find', SysUserPosition.name, sets)).toBe(true);
