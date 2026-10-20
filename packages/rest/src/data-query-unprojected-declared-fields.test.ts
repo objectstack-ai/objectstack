@@ -37,6 +37,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'rq_contact';
 const LADDER = 'rq_ladder';
@@ -122,6 +123,9 @@ async function bootOne(): Promise<void> {
   engine.registry.registerObject(CONTACT_V1 as any);
   engine.registry.registerObject(LADDER_V1 as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   await engine.insert(OBJECT, [
     { id: 'c1', name: 'Ada', email: 'ada@example.com', mailing_street: '1 Retired Way', mailing_city: 'Oldtown' },
     { id: 'c2', name: 'Bo', email: 'bo@example.com', mailing_street: '2 Retired Way', mailing_city: 'Oldtown' },
@@ -138,6 +142,9 @@ async function bootTwo() {
   await engine.init();
   engine.registry.registerObject(CONTACT_V2 as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   engine.registry.registerObject(LADDER_V2 as any);
 
   const protocol = new ObjectStackProtocolImplementation(engine as any);

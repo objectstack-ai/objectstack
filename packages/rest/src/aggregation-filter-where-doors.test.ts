@@ -46,6 +46,7 @@ import { ObjectQL, applyInMemoryAggregation } from '@objectstack/objectql';
 import { SqlDriver, withheldFilterDiagnosticOf } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'ledger_order';
 
@@ -114,6 +115,9 @@ async function boot(
   await engine.init();
   engine.registry.registerObject(object as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   if (populated) await engine.insert(OBJECT, rows as any);
 
   const calls = { aggregate: 0, find: 0 };

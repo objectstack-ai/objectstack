@@ -23,6 +23,7 @@ import { RestServer } from './rest-server';
 import { parseXlsxToRows } from './import-prepare.js';
 import { isTemplateRequired, templateInsertDefault } from './import-template.js';
 import { loadXlsxWorkbook } from './xlsx-test-loader.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 function makeSqliteDriver() {
   return new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
@@ -124,6 +125,9 @@ async function boot(opts: BootOptions = {}) {
   await engine.init();
   for (const o of [ACCOUNT, LINE, DEAL]) engine.registry.registerObject(o as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   await engine.insert('account', { id: 'a1', name: 'Acme' });
   // [#21516] The protocol reads the stored-metadata family; the engine refuses a
   // name its registry does not hold, so the harness registers the family as a boot
@@ -489,6 +493,9 @@ describe('?template=true — a required field the engine fills from its option d
     const { get, importRoute, engine } = await boot();
     engine.registry.registerObject(TICKET as any);
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     const bytes = (await get({ template: 'true' }, 'ticket')).body();
     const wb = await loadXlsxWorkbook(bytes);
@@ -603,6 +610,9 @@ describe('the `*` agrees with the engine: starred exactly when the import door r
       } as any);
     }
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
 
     const disagreements: string[] = [];
     for (const [key, { def: authored, blank, stored, served }] of Object.entries(PARITY)) {
@@ -752,6 +762,9 @@ async function bootExportFixture(security?: Record<string, unknown>) {
     },
   } as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   await engine.insert('user', { id: 'u1', name: '张三' });
   await engine.insert('user', { id: 'u2', name: '李四' });
   await engine.insert('task', { id: '1', title: '写代码', done: true, priority: 'high', due: '2026-06-30T00:00:00.000Z', owner: 'u1' });

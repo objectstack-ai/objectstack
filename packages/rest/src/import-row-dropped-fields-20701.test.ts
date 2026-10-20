@@ -41,6 +41,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysImportJob } from '@objectstack/platform-objects/audit';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'proj_drops_20701';
 
@@ -91,6 +92,9 @@ async function boot() {
   engine.registry.registerObject(PROJ as any);
   engine.registry.registerObject(SysImportJob as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   await engine.insert(OBJECT, { id: 'e1', title: 'open one', n: 1, status: 'open' } as any);
   // A record whose `readonlyWhen` is already true; seeded under `isSystem`.
   await engine.insert(OBJECT, { id: 'e2', title: 'closed one', n: 1, status: 'closed', locked: 'L' } as any, { context: { isSystem: true } } as any);

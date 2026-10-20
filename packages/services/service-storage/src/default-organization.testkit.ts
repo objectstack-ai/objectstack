@@ -20,15 +20,26 @@ export const DEFAULT_ORGANIZATION_ID = 'org_default';
 
 export async function installDefaultOrganization(engine: {
   registry: { registerObject(def: unknown, owner: string): unknown };
+  getSchema(object: string): unknown;
   syncSchemas(): Promise<unknown>;
-  getDriverForObject(object: string): { create(object: string, data: Record<string, unknown>): Promise<unknown> } | undefined;
+  getDriverForObject(object: string):
+    | {
+        create(object: string, data: Record<string, unknown>): Promise<unknown>;
+        findOne(object: string, query: unknown): Promise<unknown>;
+      }
+    | undefined;
 }): Promise<void> {
-  engine.registry.registerObject(
-    { name: 'sys_organization', label: 'Organization', managedBy: 'better-auth', fields: { name: { type: 'text', label: 'Name' } } },
-    '@objectstack/service-storage',
-  );
+  // Idempotent: a suite that syncs one engine more than once may call it each time.
+  if (!engine.getSchema('sys_organization')) {
+    engine.registry.registerObject(
+      { name: 'sys_organization', label: 'Organization', managedBy: 'better-auth', fields: { name: { type: 'text', label: 'Name' } } },
+      '@objectstack/service-storage',
+    );
+  }
   await engine.syncSchemas();
   // Seeded through the driver: the organization is data at rest, not a write
   // the suite under test should observe (an audit or activity mirror would).
-  await engine.getDriverForObject('sys_organization')!.create('sys_organization', { id: DEFAULT_ORGANIZATION_ID, name: 'Default' });
+  const driver = engine.getDriverForObject('sys_organization')!;
+  if (await driver.findOne('sys_organization', { where: { id: DEFAULT_ORGANIZATION_ID } })) return;
+  await driver.create('sys_organization', { id: DEFAULT_ORGANIZATION_ID, name: 'Default' });
 }

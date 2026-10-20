@@ -18,6 +18,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'pv_repr';
 
@@ -53,6 +54,9 @@ async function boot() {
   await engine.init();
   engine.registry.registerObject({ name: OBJECT, label: 'Preview Representation', fields } as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   const stored: Record<string, unknown> = { title: 'stored' };
   for (const [column, [, , value]] of Object.entries(COLUMNS)) {
     stored[column] = value;

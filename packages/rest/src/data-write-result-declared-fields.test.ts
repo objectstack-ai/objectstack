@@ -35,6 +35,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'rq_contact';
 const RETIRED = ['mailing_street', 'mailing_city'] as const;
@@ -102,6 +103,9 @@ async function bootOne(): Promise<void> {
   await engine.init();
   engine.registry.registerObject(CONTACT_V1 as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   await engine.insert(OBJECT, SEEDED.map((id) => ({
     id, name: id, email: `${id}@example.com`, api_token: `tok_${id}`,
     mailing_street: `${id} Retired Way`, mailing_city: 'Oldtown',
@@ -120,6 +124,9 @@ async function bootTwo() {
   await engine.init();
   engine.registry.registerObject(CONTACT_V2 as any);
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
 
   const events: Captured[] = [];
   engine.setRealtimeService({
