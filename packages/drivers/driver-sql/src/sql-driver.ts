@@ -20414,6 +20414,8 @@ export class SqlDriver implements IDataDriver {
   private tenantKeyCertifiedResolver?: () => boolean | Promise<boolean>;
   /** Set once the resolver has answered yes — a certificate is never withdrawn. */
   private tenantKeyCertified?: true;
+  /** The resolver's failure is reported once per driver. */
+  private tenantKeyCertifiedReadFailureReported = false;
 
   /**
    * Asked lazily — only a table carrying the NULL-safe tenant key part needs
@@ -20429,7 +20431,18 @@ export class SqlDriver implements IDataDriver {
       // yet answers with a refused read, which is not a fault (see
       // {@link PRE_DDL_QUESTION_SCOPE}).
       if ((await PRE_DDL_QUESTION_SCOPE.run(true, resolver)) !== true) return false;
-    } catch {
+    } catch (e: any) {
+      // Not knowing reads as "not certified" — the reading that never proposes
+      // a rebuild on a guess — and is said once, so a drift report that then
+      // names an 18.0 index is not taken for a verdict on a certified store.
+      if (!this.tenantKeyCertifiedReadFailureReported) {
+        this.tenantKeyCertifiedReadFailureReported = true;
+        this.logger.warn(
+          `[schema-drift] could not read whether this database is certified for the organization-ownership shape ` +
+            `(${e?.message ?? e}); an index keyed COALESCE(<tenant>, …) on a nullable tenant column is compared ` +
+            `as a different constraint from the plain key until it can be read.`,
+        );
+      }
       return false;
     }
     this.tenantKeyCertified = true;

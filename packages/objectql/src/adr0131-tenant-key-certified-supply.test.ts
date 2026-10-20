@@ -41,7 +41,7 @@ interface Sink {
   resolver: (() => Promise<boolean>) | null;
 }
 
-function boot(rows: Rows, opts: { sink?: Sink; readThrows?: boolean; withFlagObject?: boolean } = {}): ObjectQL {
+function boot(rows: Rows, opts: { sink?: Sink; readThrows?: string; withFlagObject?: boolean } = {}): ObjectQL {
   const driver: Record<string, unknown> = {
     name: 'default',
     version: '1.0.0',
@@ -52,7 +52,7 @@ function boot(rows: Rows, opts: { sink?: Sink; readThrows?: boolean; withFlagObj
       return typeof ast?.limit === 'number' ? found.slice(0, ast.limit) : found;
     },
     async findOne(_object: string, ast: any) {
-      if (opts.readThrows) throw new Error('relation "sys_migration" does not exist');
+      if (opts.readThrows) throw new Error(opts.readThrows);
       return rows.find((r) => matches(r, ast?.where)) ?? null;
     },
     async count() {
@@ -130,9 +130,18 @@ describe('[ADR-0131 D1] isOrganizationOwnershipCertified()', () => {
       'an older shape generation',
     ).toBe(false);
     expect(await boot([certified({ details: null })]).isOrganizationOwnershipCertified(), 'no generation named').toBe(false);
-    expect(await boot([certified()], { readThrows: true }).isOrganizationOwnershipCertified(), 'unreadable').toBe(false);
+    expect(
+      await boot([certified()], { readThrows: 'relation "sys_migration" does not exist' }).isOrganizationOwnershipCertified(),
+      'no ledger table yet',
+    ).toBe(false);
     expect(await boot([certified()], { withFlagObject: false }).isOrganizationOwnershipCertified(), 'no ledger object').toBe(
       false,
+    );
+  });
+
+  it('any other read failure is thrown, never answered as "not certified"', async () => {
+    await expect(boot([certified()], { readThrows: 'connection reset' }).isOrganizationOwnershipCertified()).rejects.toThrow(
+      'connection reset',
     );
   });
 

@@ -614,7 +614,7 @@ describe('SqlDriver unique × tenancy (#3696)', () => {
       // bucket rather than rebuilding it…
       const second = await driver.create('template', { key: 'welcome' });
       expect(second.key).toBe('welcome');
-      expect(await driver.count('template', { where: { key: 'welcome' } } as any)).toBe(3);
+      expect(await driver.count('template', { where: { key: 'welcome' } })).toBe(3);
       // …while the organization itself is still held to one row per value.
       await expect(driver.create('template', { organization_id: 'org_a', key: 'welcome' })).rejects.toThrow(
         /UNIQUE constraint failed|duplicate key value/,

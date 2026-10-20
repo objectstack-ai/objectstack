@@ -12223,8 +12223,10 @@ export class ObjectQL implements IObjectQLEngine {
    * shape — a verified `sys_migration` row for the ceremony's id (the birth
    * marker a store created from empty receives, or the ceremony's completion
    * marker) at this release's shape generation or above? The same reading the
-   * runtime's boot guard boots on. Every way of not knowing (no ledger object,
-   * no row, an unreadable read, an unverified or older row) answers `false`.
+   * runtime's boot guard boots on. No ledger object, no ledger table yet, no
+   * row, or an unverified or older row answers `false`. Any other read failure
+   * is thrown: "I could not check" is not "not certified", and the driver
+   * asking reports it (`SqlDriver.isTenantKeyCertified`).
    */
   async isOrganizationOwnershipCertified(): Promise<boolean> {
     if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) return false;
@@ -12241,8 +12243,10 @@ export class ObjectQL implements IObjectQLEngine {
         blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
       });
       return verified && organizationOwnershipShapeGenerationOf(row.details) >= ORGANIZATION_OWNERSHIP_SHAPE_GENERATION;
-    } catch {
-      return false;
+    } catch (error) {
+      // A store whose ledger table does not exist yet has no certificate.
+      if (isMissingTableError(error, DATA_MIGRATION_FLAG_OBJECT)) return false;
+      throw error;
     }
   }
 
