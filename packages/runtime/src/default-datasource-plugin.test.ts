@@ -193,7 +193,8 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
       expect(defaultName).toBeDefined();
       // Identity, not equivalence: the engine's default driver IS the host's instance.
       expect(engine.getDriverByName?.(defaultName!)).toBe(hostBuilt);
-      await engine.insert('note', { title: 'through-the-adopted-default' });
+      // Written in an organization: a fresh tenant column is NOT NULL (ADR-0131 D1).
+      await engine.insert('note', { title: 'through-the-adopted-default' }, { context: { tenantId: 'org_a' } } as never);
       const rows = await engine.find('note');
       expect(rows.map((r: any) => r.title)).toContain('through-the-adopted-default');
       // [commit 13a6cb4ad] The capture is a PIN, not a mute: the probe's two log lines

@@ -42,6 +42,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SeedLoaderRequestSchema, type EngineQueryOptions } from '@objectstack/spec/data';
 import type { PluginContext } from '@objectstack/core';
 import { AppPlugin } from './app-plugin';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const ORG = 'org_twdefaultk3x9qfa2';
 const OTHER_ORG = 'org_twotherorgp4w8m2';
@@ -125,6 +126,9 @@ async function boot() {
   await engine.init();
   for (const o of OBJECTS) engine.registry.registerObject(o as any, 'com.objectstack.test.24301');
   await raw.initObjects(OBJECTS.map((o) => engine.registry.getObject(o.name) ?? o) as any);
+  // The 17.x residue this file plants lands only on a store built before 18.x,
+  // whose tenant columns are nullable (ADR-0131 D1 makes a fresh one NOT NULL).
+  await relaxTenantColumns(raw as any, OBJECTS.filter((o) => (engine.registry.getObject(o.name) as any)?.fields?.organization_id).map((o) => o.name));
   cleanups.push(() => engine.destroy());
 
   const systemRead: EngineQueryOptions = { context: { isSystem: true } };
