@@ -25,6 +25,11 @@ import { type InboxCaller, resolveInboxRecipient } from './inbox-caller.js';
 import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 import { INBOX_SYSTEM_CONTEXT } from './inbox-system-context.js';
 import { assertActorReferenceResolves } from './actor-reference.js';
+import {
+    assertNotificationTextKeys,
+    type NotificationTextKeys,
+    type NotificationTextRenderer,
+} from './notification-text.js';
 
 /** The L2 event object every `emit()` writes one row to (ADR-0030). */
 export const NOTIFICATION_EVENT_OBJECT = 'sys_notification';
@@ -73,6 +78,24 @@ export interface EmitInput {
     readonly audience: Audience;
     /** Template inputs carried to channels (title/body/url/actor/source/…). */
     readonly payload?: Record<string, unknown>;
+    /**
+     * [#24978] The text as CATALOG KEYS, rendered per recipient at delivery in
+     * that recipient's language (`sys_user.locale`, else the deployment
+     * default — #13881), through the `i18n` service's catalog. See
+     * `notification-text.ts` for the contract.
+     *
+     * Beside the literal text, never in place of it: `payload.title` /
+     * `payload.body` stay what a recipient reads whenever a key cannot be
+     * rendered (no `i18n` service, no entry for the key, a member left
+     * unkeyed). Absent, the notification is delivered exactly as before this
+     * member existed, on every channel. A malformed value is refused by
+     * `emit()` before anything is written.
+     *
+     * It is not a payload member: the delivery snapshot carries it under its
+     * own reserved name, so a producer's free-form payload (a flow's `notify`
+     * node) cannot reach it.
+     */
+    readonly keyedText?: NotificationTextKeys;
     /** Severity hint for rendering / filtering. */
     readonly severity?: 'info' | 'warning' | 'critical';
     /** Idempotency key within a topic window; a repeat `emit` is a no-op. */
@@ -184,6 +207,13 @@ export interface MessagingServiceContext extends MessagingChannelContext {
      * fans out inline (best-effort, no retry) — the P0 behavior.
      */
     outbox?: INotificationOutbox;
+    /**
+     * [#24978] Renders {@link EmitInput.keyedText} per recipient on the inline
+     * fan-out. The plugin hands the dispatcher the same instance, so both paths
+     * answer one recipient one way. Absent, keyed text is delivered as its
+     * literal (said once).
+     */
+    textRenderer?: NotificationTextRenderer;
 }
 
 /**
@@ -231,6 +261,8 @@ export class MessagingService {
     private onHttpDeliveryEnqueued?: () => void;
     /** [#8069] Producer vetoes over redelivery, keyed by `HttpDelivery.source`. */
     private readonly redeliverGuards = new Map<string, RedeliverGuard>();
+    /** [#24978] Whether keyed text met a composition with no renderer — said once. */
+    private keyedTextWithoutRendererAnnounced = false;
 
     constructor(private readonly ctx: MessagingServiceContext) {
         this.now = ctx.now ?? (() => new Date().toISOString());
@@ -1053,6 +1085,11 @@ export class MessagingService {
      * member — fans out exactly as before.
      */
     async emit(input: EmitInput): Promise<EmitResult> {
+        // [#24978] A malformed keyed text is a producer bug: refused before
+        // anything is written, never delivered as a literal that silently
+        // never renders.
+        if (input.keyedText !== undefined) assertNotificationTextKeys(input.keyedText);
+
         const data = this.ctx.getData?.();
 
         // 1) Idempotency — a prior event with the same dedup_key is a no-op.
@@ -1198,7 +1235,7 @@ export class MessagingService {
 
         // Inline (P0): every channel has already answered, so `delivered` is a
         // real terminal count and nothing is left in flight.
-        const { deliveries, delivered, failed } = await this.fanOut(notification, targets);
+        const { deliveries, delivered, failed } = await this.fanOut(notification, targets, input.keyedText);
         return { notificationId, deduped: false, deliveries, delivered, enqueued: 0, failed, suppressed };
     }
 
@@ -1298,8 +1335,17 @@ export class MessagingService {
     ): Promise<DeliveryOutcome[]> {
         // Snapshot the rendered content onto each delivery so a later event edit
         // can't rewrite an in-flight send.
+        //
+        // [#24978] `keyedText` is a name this snapshot RESERVES, the way it
+        // already owns `title` / `body` / `severity` / `actionUrl` / `actorId`:
+        // it carries `EmitInput.keyedText` and nothing else, so a producer's
+        // free-form payload member of that name is dropped here and can never
+        // be rendered as keys. Present only when the emit keyed its text — the
+        // literal-only snapshot is byte-for-byte what it was before.
+        const { keyedText: _reserved, ...producerPayload } = payload;
         const deliveryPayload = {
-            ...payload,
+            ...producerPayload,
+            ...(input.keyedText ? { keyedText: input.keyedText } : {}),
             title: str(payload.title) ?? input.topic,
             body: str(payload.body) ?? '',
             severity: input.severity ?? 'info',
@@ -1459,10 +1505,18 @@ export class MessagingService {
     private async fanOut(
         notification: Notification,
         targets: PreferenceTarget[],
+        keyedText?: NotificationTextKeys,
     ): Promise<{ deliveries: DeliveryOutcome[]; delivered: number; failed: number }> {
         const deliveries: DeliveryOutcome[] = [];
 
         for (const { recipient, channels } of targets) {
+            // [#24978] The recipient's own text, rendered once for all of their
+            // channels — so one notification cannot reach one person in two
+            // languages. A literal-only emit hands every channel the very
+            // object it always did.
+            const unit = keyedText
+                ? await this.renderedFor(notification, recipient, keyedText)
+                : notification;
             for (const channelId of channels) {
                 const channel = this.getChannel(channelId);
                 if (!channel) {
@@ -1476,7 +1530,7 @@ export class MessagingService {
                     continue;
                 }
                 try {
-                    const result = await channel.send(this.ctx, { notification, channel: channelId, recipient });
+                    const result = await channel.send(this.ctx, { notification: unit, channel: channelId, recipient });
                     deliveries.push({
                         channel: channelId,
                         recipient,
@@ -1497,6 +1551,34 @@ export class MessagingService {
 
         const delivered = deliveries.filter((d) => d.ok).length;
         return { deliveries, delivered, failed: deliveries.length - delivered };
+    }
+
+    /**
+     * [#24978] `notification` with its title and body rendered from `keys` in
+     * `recipient`'s language, each member falling back to the literal. With
+     * no renderer composed, the literal itself — said once, because a
+     * producer that keyed its text is then reaching every recipient in the
+     * language it emitted in.
+     */
+    private async renderedFor(
+        notification: Notification,
+        recipient: string,
+        keys: NotificationTextKeys,
+    ): Promise<Notification> {
+        const renderer = this.ctx.textRenderer;
+        if (!renderer) {
+            if (!this.keyedTextWithoutRendererAnnounced) {
+                this.keyedTextWithoutRendererAnnounced = true;
+                this.ctx.logger.warn(
+                    '[messaging] emit: keyed notification text arrived at a messaging service composed without a ' +
+                    'text renderer; recipients get the literal title/body. Compose MessagingServiceContext.textRenderer ' +
+                    '(MessagingServicePlugin does) to render it in each recipient\'s language.',
+                );
+            }
+            return notification;
+        }
+        const text = await renderer.renderFor(recipient, keys, { title: notification.title, body: notification.body });
+        return { ...notification, title: text.title, body: text.body };
     }
 }
 
