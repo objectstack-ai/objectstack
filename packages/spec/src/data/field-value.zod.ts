@@ -167,6 +167,17 @@ export const REFERENCE_VALUE_TYPES: ReadonlySet<string> = new Set([
  * `reference` on a `user` field materializes that constant; it does not supply
  * it. Metadata authored without it (hand-written JSON, an AI author, a Studio
  * form) is fully specified, not under-specified.
+ *
+ * ⚠️ [#24808] Declared, not yet enforced: `FieldSchema` admits any string on a
+ * `user` field's `reference`, and {@link referenceTargetOf} returns an
+ * authored carrier FIRST, so `{ type: 'user', reference: 'probe_account' }`
+ * resolves to `probe_account`. Under the 「甲」 ruling that stays so for
+ * protocol 18 — no ADR-0087 conversion can rewrite such a field losslessly (a
+ * `lookup` joins the referential delete walk a `user` field sits outside), so
+ * re-targeting it here would change a loading field's behaviour unannounced.
+ * The loud half ships instead: `@objectstack/lint`'s
+ * `user-field-foreign-reference` warning. The refusal, and with it the
+ * carrier ceasing to matter here, is the next protocol major's.
  */
 const IMPLICIT_REFERENCE_TARGETS: ReadonlyMap<string, string> = new Map([
   ['user', SystemObjectName.USER],

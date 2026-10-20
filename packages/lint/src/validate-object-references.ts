@@ -83,6 +83,7 @@ import {
   hasPlatformObjectPrefix,
   isPlatformProvidedObjectName,
   PLATFORM_PROVIDED_OBJECT_NAMES,
+  SystemObjectName,
 } from '@objectstack/spec/system';
 import { referenceCarrierOf, referenceTargetOf } from '@objectstack/spec/data';
 
@@ -106,6 +107,31 @@ const RELATIONSHIP_TARGET_FIELD_TYPES: ReadonlySet<string> = new Set(['lookup', 
 
 export const OBJECT_REFERENCE_UNKNOWN = 'object-reference-unknown';
 export const OBJECT_REFERENCE_UNREGISTERED_PLATFORM = 'object-reference-unregistered-platform';
+
+/**
+ * [#24808 — ruled A on #24854, timed by the 「甲」 standing ruling] A `user`
+ * field whose `reference` names an object other than `sys_user`.
+ *
+ * The spec declares a `user` field's target FIXED to `sys_user`
+ * (`Field.user()`'s docblock, `IMPLICIT_REFERENCE_TARGETS` in
+ * `field-value.zod.ts`), and nothing enforces it: `FieldSchema` admits any
+ * string, and `referenceTargetOf` returns the authored carrier first, so the
+ * runtime's target-following readers (`$expand`, the import runner, the seed
+ * loader, the object graph) resolve the field against the authored object
+ * while every reader that branches on the TYPE treats its values as users —
+ * the person picker, the `current_user` default, a sharing rule's
+ * `fieldHoldsUsers`. The field is half a lookup and half a user.
+ *
+ * WARNING, not error, by the 「甲」 rule: a narrowing ships its refusal in an
+ * 18.x minor only when an ADR-0087 conversion carries it, and this one has no
+ * lossless rewrite — `user` sits outside the referential delete walk
+ * (`DELETE_SEMANTICS_REFERENCE_TYPES`, objectql) while a `lookup` materializes
+ * `deleteBehavior: 'set_null'` and joins it, and `deleteBehavior` has no value
+ * meaning "do nothing", so `{ type: 'lookup', reference }` would start nulling
+ * child columns on a delete that leaves them untouched today. The refusal is
+ * the next protocol major's; this is its loud half.
+ */
+export const USER_FIELD_FOREIGN_REFERENCE = 'user-field-foreign-reference';
 
 export type ObjectRefSeverity = 'error' | 'warning';
 
@@ -182,6 +208,55 @@ function artifactProvidedObjectNames(stack: AnyRec): string[] {
  * Validate every object-name reference on the surfaces listed in the module
  * header. Returns findings (empty = clean).
  */
+/**
+ * The {@link USER_FIELD_FOREIGN_REFERENCE} findings for one stack: every
+ * `user` field, on an object or an object extension, whose `reference` names
+ * an object other than `sys_user`.
+ *
+ * Reads the CARRIER (`referenceCarrierOf`), not `referenceTargetOf`: the
+ * question is what the author wrote, and the arbiter would answer the same
+ * string for this shape anyway. An absent carrier and `reference: 'sys_user'`
+ * are the two legal spellings and produce nothing; an unreadable carrier
+ * throws through the accessor exactly as it does for the resolution leg.
+ * Interpolated targets are not exempted: the type fixes the target, so no
+ * render-time value can make another object right.
+ */
+function userFieldForeignReferenceFindings(stack: AnyRec): ObjectRefFinding[] {
+  const out: ObjectRefFinding[] = [];
+  const legs: Array<{ key: 'objects' | 'objectExtensions'; ownName: (rec: AnyRec) => string | undefined }> = [
+    { key: 'objects', ownName: (rec) => strName(rec.name) },
+    { key: 'objectExtensions', ownName: (rec) => strName(rec.extend) },
+  ];
+  for (const { key, ownName } of legs) {
+    const containers = recordsOf(stack[key]);
+    for (let ci = 0; ci < containers.length; ci++) {
+      const container = containers[ci];
+      const containerName = ownName(container) ?? `#${ci}`;
+      const fields = recordsOf(container.fields);
+      for (let fi = 0; fi < fields.length; fi++) {
+        const field = fields[fi];
+        if (field.type !== 'user') continue;
+        const target = referenceCarrierOf(field, 'validateObjectReferences');
+        if (!target || target === SystemObjectName.USER) continue;
+        const fieldName = strName(field.name) ?? `#${fi}`;
+        out.push({
+          severity: 'warning',
+          rule: USER_FIELD_FOREIGN_REFERENCE,
+          where: `${key === 'objects' ? 'object' : 'object extension'} "${containerName}" · field "${fieldName}"`,
+          path: `${key}[${ci}].fields.${fieldName}.reference`,
+          message:
+            `user field "${fieldName}" names reference "${target}", but a user field's target is fixed to ` +
+            `sys_user; it acts as a link to "${target}" whose values user-only readers take for users.`,
+          hint:
+            `Declare a lookup instead, { type: 'lookup', reference: '${target}' }, or drop \`reference\` ` +
+            'if a person was meant.',
+        });
+      }
+    }
+  }
+  return out;
+}
+
 export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
   const findings: ObjectRefFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
@@ -339,6 +414,13 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
       );
     }
   }
+
+  // ── `user` fields → a target other than `sys_user` (#24808) ──
+  // See {@link userFieldForeignReferenceFindings}. Walks `objectExtensions`
+  // too: unlike the resolution leg above, this verdict needs no artifact
+  // context — a `user` field naming any object but `sys_user` is the same
+  // contradiction wherever the field is declared.
+  findings.push(...userFieldForeignReferenceFindings(stack));
 
   // ── View containers → the container's own `object` (#20216) ──
   // `ViewSchema.object` is `z.string()`, and nothing resolved it: `defineStack`'s
