@@ -784,6 +784,17 @@ describe('[#24808] validateObjectReferences — a `user` field naming another ob
       .toThrow(/`reference` is an object/);
   });
 
+  it('prints one line each, and `os explain` carries the reasoning the verdict leaves out', () => {
+    const [f] = validateObjectReferences(stackWith(PROBE));
+    for (const text of [f.message, f.hint]) {
+      expect(text).not.toContain('\n');
+      expect(text.length, text).toBeLessThanOrEqual(200);
+    }
+    const entry = explainRule(USER_FIELD_FOREIGN_REFERENCE);
+    expect(entry?.rule).toBe(USER_FIELD_FOREIGN_REFERENCE);
+    expect(entry!.paragraphs.join('\n')).toContain("deleteBehavior: 'set_null'");
+  });
+
   for (const command of ['validate', 'build', 'lint'] as const) {
     it(`reaches \`os ${command}\` through the authoring registry, as an advisory and never a gate`, () => {
       const { errors, advisories } = splitBySeverity(runAuthoringRules(command, { normalized: stackWith(PROBE) as never }));
