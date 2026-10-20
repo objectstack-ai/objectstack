@@ -161,11 +161,30 @@ describe('SmsServicePlugin', () => {
 
     const test = harness.actions.get('sms/test');
     expect(test).toBeDefined();
+    const send = vi.spyOn((harness.services.get('sms') as SmsService).options.transport, 'send');
     const bad = await test!({ values: { provider: 'log' }, payload: { to: 'not-a-phone' }, ctx: {} });
-    expect(bad.ok).toBe(false);
-    const good = await test!({ values: { provider: 'log' }, payload: { to: '+15005550006' }, ctx: {} });
-    expect(good.ok).toBe(true);
-    expect(good.message).not.toContain('5550006'); // masked
+    expect(bad).toMatchObject({ ok: false, severity: 'error' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('never reports success while only the LogSmsTransport is active', async () => {
+    // The mail/test rule: a log "send" is not a delivery. `log` is this
+    // namespace's default, so this is the answer a fresh install's button gives.
+    const harness = fakeCtx({ settingsValues: { provider: 'log' } });
+    const plugin = new SmsServicePlugin();
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    const svc = harness.services.get('sms') as SmsService;
+    expect(svc.options.transport).toBeInstanceOf(LogSmsTransport);
+    const send = vi.spyOn(svc.options.transport, 'send');
+    const result = await harness.actions.get('sms/test')!({
+      values: { provider: 'log' }, payload: { to: '+15005550006' }, ctx: {},
+    });
+    expect(result).toMatchObject({ ok: false, severity: 'warning' });
+    expect(send).not.toHaveBeenCalled();
+    expect(result.message).not.toContain('5550006');
   });
 });
 

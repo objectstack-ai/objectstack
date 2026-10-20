@@ -148,10 +148,75 @@ interface MailSettingsSurface {
     action: string,
     handler: (input: {
       values?: Record<string, unknown>;
+      /** The request body the action was invoked with — the console posts its unsaved form edits here. */
       payload?: Record<string, unknown>;
-      ctx?: { body?: Record<string, unknown> };
+      /** The caller's settings context; `userId` is the signed-in admin who pressed the button. */
+      ctx?: { userId?: string };
     }) => Promise<unknown>,
   ): void;
+}
+
+/** The identity object a `mail/test` press reads the caller's own address from. */
+const ACCOUNT_OBJECT = 'sys_user';
+
+/**
+ * Who a `mail/test` press sends to: the `to` the request names, else the
+ * signed-in admin's own account address.
+ *
+ * The served form has no recipient input — a settings manifest cannot declare
+ * a value an action posts without storing it — so the console's request
+ * carries no `to`. This used to fall back to `from_email`, the SENDER address
+ * (usually a no-reply mailbox nobody reads), so "Sent test email to no-reply@…"
+ * reported a delivery the operator could not observe, and with From empty the
+ * button refused by asking for a "to" field the page does not have. The person
+ * who pressed the button is the one recipient who can confirm the delivery,
+ * and a signed-in admin has an account address.
+ *
+ * The read is pinned to the CALLER's own row — `where.id` is the request's
+ * own `userId`, never a value the body names — and projects `email` alone. It
+ * runs as the system because resolving who the caller is must not depend on
+ * the caller holding read permission on the identity table (the reason the
+ * shared authz resolver's own `sys_user` read gives); the one value it yields
+ * reaches the caller in the result message, and it is their own address, so
+ * nothing the caller could not already read is disclosed.
+ *
+ * Every refusal says that nothing was sent and what to supply. A read that
+ * fails is reported as a failed read, never as "you have no address".
+ */
+async function resolveMailTestRecipient(
+  payload: unknown,
+  userId: unknown,
+  engine: IDataEngine,
+): Promise<{ to: string } | { refusal: string }> {
+  const named = payload && typeof payload === 'object' ? (payload as { to?: unknown }).to : undefined;
+  if (typeof named === 'string' && named.trim() !== '') return { to: named.trim() };
+  if (typeof userId !== 'string' || userId === '') {
+    return {
+      refusal: 'No recipient — nothing was sent. This call names no "to" address and carries no signed-in '
+        + 'user whose own address the test could go to; pass "to" in the request body.',
+    };
+  }
+  let row: Record<string, unknown> | null;
+  try {
+    row = await engine.findOne(
+      ACCOUNT_OBJECT,
+      { where: { id: userId }, fields: ['email'] },
+      { context: SYSTEM_CTX },
+    );
+  } catch (err: any) {
+    return {
+      refusal: `Could not read your account's email address to send the test to (${err?.message ?? String(err)}) `
+        + '— nothing was sent. Pass "to" in the request body to name a recipient.',
+    };
+  }
+  const email = row?.email;
+  if (typeof email !== 'string' || email.trim() === '') {
+    return {
+      refusal: 'Your account has no email address, and the test is sent to the signed-in admin\'s own address '
+        + '— nothing was sent. Add an email address to your account, or pass "to" in the request body.',
+    };
+  }
+  return { to: email.trim() };
 }
 
 /**
@@ -562,17 +627,20 @@ export class EmailServicePlugin implements Plugin {
           // provider/credentials differ from what the live `svc` is bound
           // to, a one-shot temporary `EmailService` is built so the
           // operator can validate edits before hitting "Save".
+          //
+          // The recipient is the request's `to`, else the signed-in admin's
+          // own address — see `resolveMailTestRecipient` for why it is not
+          // `from_email`.
           if (typeof settings.registerAction === 'function') {
             const svc = this.service;
             settings.registerAction('mail', 'test', async ({ values, payload, ctx: actionCtx }: any) => {
               const overrides = extractOverrides(payload);
               const merged: Record<string, unknown> = { ...(values ?? {}), ...overrides };
-              const to = (actionCtx?.body?.to as string | undefined)
-                ?? (payload?.to as string | undefined)
-                ?? (merged.from_email as string | undefined);
-              if (!to) {
-                return { ok: false, severity: 'error', message: 'Provide a "to" address (or set from_email).' };
+              const recipient = await resolveMailTestRecipient(payload, actionCtx?.userId, engine);
+              if ('refusal' in recipient) {
+                return { ok: false, severity: 'error', message: recipient.refusal };
               }
+              const { to } = recipient;
 
               // Build a temporary service from the merged values when
               // the form differs from the live svc — covers the

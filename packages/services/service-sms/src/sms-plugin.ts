@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import type { ISmsTransport } from '@objectstack/spec/contracts';
+import type { IDataEngine, ISmsTransport } from '@objectstack/spec/contracts';
 import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 import { SmsService, LogSmsTransport, maskPhoneNumber, normalizeSmsRecipient } from './sms-service.js';
 import { SmsDailyQuota } from './sms-daily-quota.js';
@@ -49,6 +49,88 @@ function providerFromSettings(values: Record<string, unknown>): {
     return { provider, options };
   }
   return { provider: 'log', options: {} };
+}
+
+/** The identity object an `sms/test` press reads the caller's own number from. */
+const ACCOUNT_OBJECT = 'sys_user';
+
+/**
+ * The system opt-in for the one `sys_user` read below: resolving who the
+ * caller is must not depend on the caller holding read permission on the
+ * identity table.
+ */
+const SYSTEM_CTX = { isSystem: true } as const;
+
+/**
+ * Who an `sms/test` press sends to: the `to` the request names, else the
+ * signed-in admin's own number (`sys_user.phone_number`, the column the
+ * messaging `sms` channel delivers to).
+ *
+ * The served form has no recipient input — a settings manifest cannot declare
+ * a value an action posts without storing it — so the console's request
+ * carries no `to`, and this button used to refuse every press by asking for a
+ * "to" field the page does not have. The person who pressed it is the one
+ * recipient who can confirm the delivery.
+ *
+ * The read is pinned to the CALLER's own row — `where.id` is the request's own
+ * `userId`, never a value the body names — and projects `phone_number` alone;
+ * the success message masks it. A user carries a number only where phone
+ * sign-in is enabled, so the refusal for a caller without one says exactly
+ * that, and that nothing was sent. A read that fails is reported as a failed
+ * read, never as "you have no number".
+ */
+async function resolveSmsTestRecipient(
+  payload: unknown,
+  userId: unknown,
+  getEngine: () => IDataEngine | undefined,
+): Promise<{ to: string } | { refusal: string }> {
+  const named = payload && typeof payload === 'object' ? (payload as { to?: unknown }).to : undefined;
+  if (typeof named === 'string' && named.trim() !== '') {
+    const to = normalizeSmsRecipient(named);
+    return to ? { to } : { refusal: 'Provide a valid "to" phone number (E.164 recommended).' };
+  }
+  if (typeof userId !== 'string' || userId === '') {
+    return {
+      refusal: 'No recipient — nothing was sent. This call names no "to" number and carries no signed-in '
+        + 'user whose own number the test could go to; pass "to" in the request body.',
+    };
+  }
+  const engine = getEngine();
+  if (!engine) {
+    return {
+      refusal: 'No data engine is available to read your account\'s phone number — nothing was sent. '
+        + 'Pass "to" in the request body to name a recipient.',
+    };
+  }
+  let row: Record<string, unknown> | null;
+  try {
+    row = await engine.findOne(
+      ACCOUNT_OBJECT,
+      { where: { id: userId }, fields: ['phone_number'] },
+      { context: SYSTEM_CTX },
+    );
+  } catch (err: any) {
+    return {
+      refusal: `Could not read your account's phone number to send the test SMS to (${err?.message ?? String(err)}) `
+        + '— nothing was sent. Pass "to" in the request body to name a recipient.',
+    };
+  }
+  const raw = row?.phone_number;
+  const to = typeof raw === 'string' ? normalizeSmsRecipient(raw) : undefined;
+  if (!to) {
+    return {
+      refusal: 'Your account has no phone number, and the test SMS is sent to the signed-in admin\'s own number '
+        + '— nothing was sent. A number is on an account only where phone sign-in is enabled; otherwise pass '
+        + '"to" in the request body.',
+    };
+  }
+  return { to };
+}
+
+/** The data engine, looked up when an action runs — `objectql`, else `data`. */
+function resolveDataEngine(ctx: PluginContext): IDataEngine | undefined {
+  try { return ctx.getService<IDataEngine>('objectql') ?? undefined; } catch { /* fall through */ }
+  try { return ctx.getService<IDataEngine>('data') ?? undefined; } catch { return undefined; }
 }
 
 /**
@@ -236,6 +318,9 @@ export class SmsServicePlugin implements Plugin {
         // the `mail/test` handler in EmailServicePlugin. Still skipped when the
         // host injected its own transport: the form's provider fields describe
         // nothing that composition uses, so testing them would be theatre.
+        //
+        // The recipient is the request's `to`, else the signed-in admin's own
+        // number — see `resolveSmsTestRecipient`.
         if (!this.options.transport && typeof settings.registerAction === 'function') {
           const svc = this.service;
           settings.registerAction('sms', 'test', async ({ values, payload, ctx: actionCtx }: any) => {
@@ -243,11 +328,11 @@ export class SmsServicePlugin implements Plugin {
               ? payload.values
               : (payload ?? {});
             const merged: Record<string, unknown> = { ...(values ?? {}), ...overrides };
-            const rawTo = (actionCtx?.body?.to as string | undefined) ?? (payload?.to as string | undefined);
-            const to = rawTo ? normalizeSmsRecipient(rawTo) : undefined;
-            if (!to) {
-              return { ok: false, severity: 'error', message: 'Provide a valid "to" phone number (E.164 recommended).' };
+            const recipient = await resolveSmsTestRecipient(payload, actionCtx?.userId, () => resolveDataEngine(ctx));
+            if ('refusal' in recipient) {
+              return { ok: false, severity: 'error', message: recipient.refusal };
             }
+            const { to } = recipient;
 
             const resolved = providerFromSettings(merged);
             if (resolved.missing) {
@@ -262,6 +347,18 @@ export class SmsServicePlugin implements Plugin {
               } catch (err: any) {
                 return { ok: false, severity: 'error', message: `Failed to build ${resolved.provider} transport: ${err?.message ?? String(err)}` };
               }
+            }
+            // A LogSmsTransport "send" is not a delivery — say so instead of
+            // reporting a success it never had (the mail/test rule). Reachable
+            // from the served form now that the recipient defaults to the
+            // admin's own number, and `log` is this namespace's default.
+            if (target === svc && svc.options.transport instanceof LogSmsTransport) {
+              return {
+                ok: false,
+                severity: 'warning',
+                message: 'No SMS delivery transport is active (provider: None — log only), so the test SMS was NOT sent. '
+                  + 'Pick a provider, fill in its credentials and save before testing.',
+              };
             }
 
             try {
