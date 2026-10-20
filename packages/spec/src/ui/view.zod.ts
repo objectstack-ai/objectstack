@@ -2497,6 +2497,44 @@ const LIST_VIEW_SORT_STRING_RETIRED =
   + 'key, in the same order. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
+/**
+ * [#24640] Prescription for the retired `filterableFields` key on the
+ * list-view shape (ADR-0049 enforce-or-remove; maintainer ruling C, record
+ * 6278975049, pulled into 18.0 by record 6279033298).
+ *
+ * The key carried two meanings and the declared one was never delivered. This
+ * schema described it as the "legacy shorthand for `userFilters.fields`" — the
+ * quick-filter bar — and the Studio form offered it as "Field names available
+ * for filtering", while its one renderer (objectui's `ListView`, the
+ * `filterFields` memo, fed by the app shell's object view) read it as the
+ * Filter panel's field WHITELIST: the fields "Add filter" offers, a hidden
+ * field included when named. No quick-filter chip ever came of it. The ruling
+ * is that the platform carries no per-view Filter-panel whitelist at all, so
+ * the key retires rather than being redescribed, and NO key replaces it.
+ *
+ * What covers the need now, and what the prescription says:
+ *   - a curated end-user filter bar is `userFilters` (`userFilters.fields`);
+ *   - the Filter panel offers every field the user may read — field read
+ *     security decides, and a field the object marks `hidden: true` is not
+ *     offered.
+ *
+ * ⛔ No conversion rewrites the key to `userFilters.fields`: that keeps
+ * nothing an author saw (the whitelist goes and quick-filter chips appear).
+ * The D2 conversion `view-list-filterable-fields-removed` DROPS it from stored
+ * and authored view sources instead; the D3 entry
+ * `list-view-filterable-fields-retired` carries the judgement it cannot make.
+ */
+const LIST_VIEW_FILTERABLE_FIELDS_RETIRED =
+  '`view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — '
+  + 'the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one '
+  + 'renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one '
+  + 'key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel '
+  + 'whitelist replaces it. For a curated end-user filter bar, declare '
+  + "`userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel "
+  + 'offers every field the user may read: field read security decides, and a field the object '
+  + 'definition marks `hidden: true` is not offered. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
 const VIEW_CALENDAR_ALLOWED_NEEDS_START_DATE =
   "`appearance.allowedVisualizations` includes 'calendar', so end users can switch this view to a "
   + 'calendar — but no `calendar:` block says which field supplies the event date. There is no '
@@ -2841,7 +2879,23 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   
   /** Search & Filter */
   searchableFields: z.array(z.string()).optional().describe('Fields enabled for search'),
-  filterableFields: z.array(z.string()).optional().describe('Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters'),
+  /**
+   * [#24640] REMOVED — described here as the `userFilters.fields` shorthand,
+   * read by its one renderer as the Filter panel's field whitelist; ruled
+   * retired with no replacement key (see
+   * {@link LIST_VIEW_FILTERABLE_FIELDS_RETIRED}). Tombstoned rather than
+   * deleted so the removal is audible in both channels an upgrading author
+   * hits: `tsc` (the input type is `never`) and the parse (the prescription,
+   * not a bare unrecognized-key report). The tombstone reaches every
+   * list-view door built from this shape: `ListViewSchema`,
+   * `ObjectListViewSchema` (a container's `list` / `listViews`, an object's
+   * `listViews`), the flattened overlay arm and a page `list-view` node's
+   * `properties`. ⚠️ Not a react page: the react `ListView` block's schema is
+   * `ListViewSchema` (its curated `dataProps` never listed this key), but a
+   * react page's props live in an opaque `source` string no door parses
+   * against it — a boundary, stated rather than left to be discovered.
+   */
+  filterableFields: retiredKey(LIST_VIEW_FILTERABLE_FIELDS_RETIRED),
 
   /** User Filters (ADR-0047, Airtable Interface parity) */
   userFilters: UserFiltersSchema.optional()

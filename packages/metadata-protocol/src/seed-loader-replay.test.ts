@@ -5,6 +5,7 @@ import { SeedLoaderService } from './seed-loader.js';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { temporalComparandKind, temporalStorageForm } from '@objectstack/core';
+import { SECRET_MASK, isMaskedOnReadFieldType } from '@objectstack/spec/data';
 
 /**
  * Replay regression: seeds with lookup natural keys must survive a dev-server
@@ -489,5 +490,247 @@ describe('seed replay — a temporal value spelled short is the value the driver
     expect(updatedNames(engine, store, object)).toEqual(['short-datetime', 'short-time']);
     expect(replay.result.summary.totalUpdated).toBe(2);
     expect(replay.result.summary.totalSkipped).toBe(3);
+  });
+});
+
+/**
+ * [#24624] A `password` or `secret` value replayed over the row the engine
+ * stored for it.
+ *
+ * The engine never reads a credential back: `ObjectQL.maskSecretFields` serves
+ * every `secret` field, and every `password` field on an object that is not
+ * `managedBy: 'better-auth'`, as `SECRET_MASK` on `find` / `findOne` — in every
+ * context, the seed's system read included (ADR-0100) — and an unset one as
+ * `null`. So the replay holds the seed's plaintext on one side and the mask on
+ * the other, and no comparison of the two can say whether the value changed.
+ * Ruled (letter B): such a field never blocks the skip, and a load that skipped
+ * a row without comparing one says so in one line.
+ *
+ * The engine below stores what a real one stores — a `password` verbatim, a
+ * `secret` as an opaque ref — stamps `updated_at` on every write, and masks on
+ * read by the spec's declaration (`isMaskedOnReadFieldType`, the predicate the
+ * engine's own collector asks), returning copies so the mask never reaches the
+ * store.
+ */
+describe('seed replay — a credential the read path masks never blocks the skip', () => {
+  const VAULT_FIELDS = {
+    name: { type: 'text' },
+    note: { type: 'text' },
+    pin: { type: 'password' },
+    api_key: { type: 'secret' },
+  };
+  const VAULT = { name: 'cred_replay_vault', fields: VAULT_FIELDS };
+  const TREE_VAULT = {
+    name: 'cred_replay_tree_vault',
+    fields: { ...VAULT_FIELDS, parent: { type: 'lookup', reference: 'cred_replay_tree_vault' } },
+  };
+  type VaultObject = { name: string; managedBy?: string; fields: Record<string, { type: string }> };
+  const PATHS: Array<{ path: string; object: VaultObject; sequential: boolean }> = [
+    { path: 'batched decideWriteAction', object: VAULT, sequential: false },
+    { path: 'sequential writeRecord', object: TREE_VAULT, sequential: true },
+  ];
+
+  const SEED_ROWS: Array<Record<string, unknown>> = [
+    { name: 'with-password', note: 'n1', pin: 'hunter2' },
+    { name: 'with-secret', note: 'n2', api_key: 'sk-live-1' },
+    { name: 'with-both', note: 'n3', pin: 'swordfish', api_key: 'sk-live-2' },
+    { name: 'no-credential', note: 'n4' },
+  ];
+
+  function createMaskingEngine(object: VaultObject) {
+    const { engine, store } = createFaithfulEngine();
+    let clock = 0;
+    let handle = 0;
+    const stored = (row: Record<string, unknown>) => {
+      const out: Record<string, unknown> = { ...row, updated_at: `stamp-${++clock}` };
+      for (const [key, value] of Object.entries(row)) {
+        if (object.fields[key]?.type === 'secret' && value != null) out[key] = `secret:h${++handle}`;
+      }
+      return out;
+    };
+    const masked = (row: Record<string, unknown>) => {
+      const out = { ...row };
+      for (const [key, def] of Object.entries(object.fields)) {
+        if (key in out && isMaskedOnReadFieldType(def.type, object.managedBy)) {
+          out[key] = out[key] == null ? null : SECRET_MASK;
+        }
+      }
+      return out;
+    };
+    const insert = (engine.insert as any).getMockImplementation();
+    (engine.insert as any).mockImplementation(async (o: string, data: any, opts?: any) =>
+      insert(o, Array.isArray(data) ? data.map(stored) : stored(data), opts));
+    const update = (engine.update as any).getMockImplementation();
+    (engine.update as any).mockImplementation(async (o: string, data: any, opts?: any) => update(o, stored(data), opts));
+    const find = (engine.find as any).getMockImplementation();
+    (engine.find as any).mockImplementation(async (o: string, query?: any) =>
+      ((await find(o, query)) as Array<Record<string, unknown>>).map(masked));
+    return { engine, store };
+  }
+
+  function metadataOf(object: VaultObject): IMetadataService {
+    return {
+      getObject: vi.fn(async (name: string) => (name === object.name ? object : undefined)),
+      listObjects: vi.fn(async () => [object]),
+      register: vi.fn(async () => {}),
+      get: vi.fn(async (_t: string, name: string) => (name === object.name ? object : undefined)),
+      list: vi.fn(async () => []),
+      unregister: vi.fn(async () => {}),
+      exists: vi.fn(async () => false),
+      listNames: vi.fn(async () => []),
+    } as unknown as IMetadataService;
+  }
+
+  async function load(
+    engine: IDataEngine,
+    object: VaultObject,
+    mode: string,
+    records: Array<Record<string, unknown>>,
+  ) {
+    const logger = createLogger();
+    const writeRecord = vi.spyOn(SeedLoaderService.prototype as any, 'writeRecord');
+    try {
+      const result = await new SeedLoaderService(engine, metadataOf(object), logger).load({
+        seeds: [{ object: object.name, externalId: 'name', mode, env: ['prod', 'dev', 'test'], records }] as any,
+        config: CONFIG,
+      });
+      return { result, logger, writeRecordCalls: writeRecord.mock.calls.length };
+    } finally {
+      writeRecord.mockRestore();
+    }
+  }
+
+  const rowOf = (store: Record<string, any[]>, object: VaultObject, name: string) =>
+    store[object.name].find((r) => r.name === name)!;
+  const updatedNames = (engine: IDataEngine, store: Record<string, any[]>, object: VaultObject) =>
+    (engine.update as any).mock.calls
+      .map(([, data]: [string, any]) => store[object.name].find((r) => r.id === data.id)?.name)
+      .sort();
+  /** The load's notice lines: the ones naming the uncompared credential rule. */
+  const credentialNotices = (logger: ReturnType<typeof createLogger>) =>
+    [...logger.info.mock.calls, ...logger.warn.mock.calls]
+      .map(([message]) => String(message))
+      .filter((message) => message.includes('masked on read'));
+
+  it.each(PATHS.flatMap((p) => ['upsert', 'update'].map((mode) => ({ ...p, mode }))))(
+    '$path, mode $mode: replaying the unchanged seed issues no update and moves no updated_at',
+    async ({ object, sequential, mode }) => {
+      const { engine, store } = createMaskingEngine(object);
+      const first = await load(engine, object, 'upsert', SEED_ROWS);
+      expect(first.result.summary.totalInserted).toBe(4);
+      // The premise: the store holds the credential, the read hands back the mask.
+      expect(rowOf(store, object, 'with-password').pin).toBe('hunter2');
+      expect(String(rowOf(store, object, 'with-secret').api_key)).toMatch(/^secret:h\d+$/);
+      expect((await engine.find(object.name, {}))[0].pin).toBe(SECRET_MASK);
+      (engine.update as any).mockClear();
+      const before = structuredClone(store);
+
+      const replay = await load(engine, object, mode, SEED_ROWS);
+
+      expect(replay.writeRecordCalls > 0).toBe(sequential);
+      expect(engine.update).not.toHaveBeenCalled();
+      expect(replay.result.summary.totalUpdated).toBe(0);
+      expect(replay.result.summary.totalSkipped).toBe(4);
+      expect(replay.result.summary.totalErrored).toBe(0);
+      expect(store).toEqual(before);
+    },
+  );
+
+  it.each(PATHS)('$path: a credential-only seed change is not rewritten, and the load says so in one line', async ({ object, sequential }) => {
+    const { engine, store } = createMaskingEngine(object);
+    await load(engine, object, 'upsert', SEED_ROWS);
+    (engine.update as any).mockClear();
+    const before = structuredClone(store);
+    const credentialOnly = SEED_ROWS.map((r) =>
+      r.name === 'with-password' ? { ...r, pin: 'hunter3' }
+        : r.name === 'with-secret' ? { ...r, api_key: 'sk-live-9' }
+          : r);
+
+    const replay = await load(engine, object, 'upsert', credentialOnly);
+
+    expect(replay.writeRecordCalls > 0).toBe(sequential);
+    expect(engine.update).not.toHaveBeenCalled();
+    expect(replay.result.summary.totalSkipped).toBe(4);
+    expect(store).toEqual(before);
+    // ONE line for the whole load, naming every field it left uncompared,
+    // the rule, and the two ways a credential-only change takes effect.
+    const notices = credentialNotices(replay.logger);
+    expect(notices).toHaveLength(1);
+    expect(replay.logger.info.mock.calls.map(([m]) => String(m))).toContain(notices[0]);
+    expect(notices[0]).toContain(`${object.name}.pin`);
+    expect(notices[0]).toContain(`${object.name}.api_key`);
+    expect(notices[0]).toMatch(/another field/);
+    expect(notices[0]).toMatch(/rebuild/);
+  });
+
+  it.each(PATHS)('$path: a change to another field rewrites the row, and the credential lands as the seed declares it', async ({ object, sequential }) => {
+    const { engine, store } = createMaskingEngine(object);
+    await load(engine, object, 'upsert', SEED_ROWS);
+    (engine.update as any).mockClear();
+    const secretRefBefore = rowOf(store, object, 'with-secret').api_key;
+    const changed = SEED_ROWS.map((r) =>
+      r.name === 'with-password' ? { ...r, note: 'n1-edited', pin: 'hunter3' }
+        : r.name === 'with-secret' ? { ...r, note: 'n2-edited', api_key: 'sk-live-9' }
+          : r);
+
+    const replay = await load(engine, object, 'upsert', changed);
+
+    expect(replay.writeRecordCalls > 0).toBe(sequential);
+    expect(updatedNames(engine, store, object)).toEqual(['with-password', 'with-secret']);
+    expect(replay.result.summary.totalUpdated).toBe(2);
+    expect(rowOf(store, object, 'with-password').pin).toBe('hunter3');
+    expect(rowOf(store, object, 'with-password').note).toBe('n1-edited');
+    // The update carried the seed's plaintext, so the engine wrote a new ref.
+    expect((engine.update as any).mock.calls.find(([, d]: [string, any]) => d.note === 'n2-edited')[1].api_key).toBe('sk-live-9');
+    expect(rowOf(store, object, 'with-secret').api_key).not.toBe(secretRefBefore);
+  });
+
+  it.each(PATHS)('$path: the read still tells set from unset, so setting or clearing a credential is written', async ({ object, sequential }) => {
+    const { engine, store } = createMaskingEngine(object);
+    await load(engine, object, 'upsert', SEED_ROWS);
+    (engine.update as any).mockClear();
+    const presenceChanged = SEED_ROWS.map((r) =>
+      r.name === 'no-credential' ? { ...r, pin: 'first-pin' }
+        : r.name === 'with-password' ? { ...r, pin: null }
+          : r);
+
+    const replay = await load(engine, object, 'upsert', presenceChanged);
+
+    expect(replay.writeRecordCalls > 0).toBe(sequential);
+    expect(updatedNames(engine, store, object)).toEqual(['no-credential', 'with-password']);
+    expect(rowOf(store, object, 'no-credential').pin).toBe('first-pin');
+    expect(rowOf(store, object, 'with-password').pin).toBeNull();
+  });
+
+  it('a field the declaration does not mask keeps comparing, even when it holds the mask\'s text', async () => {
+    const object = VAULT;
+    const { engine, store } = createMaskingEngine(object);
+    await load(engine, object, 'upsert', [{ name: 'literal-bullets', note: SECRET_MASK }]);
+    (engine.update as any).mockClear();
+
+    const replay = await load(engine, object, 'upsert', [{ name: 'literal-bullets', note: 'plain note' }]);
+
+    expect(updatedNames(engine, store, object)).toEqual(['literal-bullets']);
+    expect(rowOf(store, object, 'literal-bullets').note).toBe('plain note');
+    expect(credentialNotices(replay.logger)).toEqual([]);
+  });
+
+  it('a load that skips no row with an uncompared credential says nothing about the rule', async () => {
+    const object = VAULT;
+    const { engine } = createMaskingEngine(object);
+    await load(engine, object, 'upsert', SEED_ROWS);
+
+    const changedOnly = await load(
+      engine,
+      object,
+      'upsert',
+      SEED_ROWS.filter((r) => 'pin' in r || 'api_key' in r).map((r) => ({ ...r, note: `${r.note}-edited` })),
+    );
+    const noCredential = await load(engine, object, 'upsert', SEED_ROWS.filter((r) => r.name === 'no-credential'));
+
+    expect(changedOnly.result.summary.totalUpdated).toBe(3);
+    expect(credentialNotices(changedOnly.logger)).toEqual([]);
+    expect(noCredential.result.summary.totalSkipped).toBe(1);
+    expect(credentialNotices(noCredential.logger)).toEqual([]);
   });
 });

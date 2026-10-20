@@ -559,15 +559,26 @@ const SHARING_READER = { userId: 'u_reader', positions: ['qa_pos'], permissions:
 const SHARING_WRITER = { userId: 'u_writer', positions: ['qa_pos'], permissions: ['qa_line_writer'], posture: 'MEMBER' };
 /** Read and write depth `own`: the control. */
 const SHARING_OWN = { userId: 'u_own', positions: ['qa_pos'], permissions: ['qa_line_own'], posture: 'MEMBER' };
+/**
+ * Read depth `org`, write depth `own`, and an app-authored row-level `update`
+ * and `delete` policy admitting every line not named `unnamed`
+ * ({@link bootSharing}'s `authored` rows): record sharing refuses this writer
+ * every line owned by someone else, and the by-id write gate defers that
+ * refusal to the policy.
+ */
+const AUTHORED_WRITER = { userId: 'u_authored', positions: ['qa_pos'], permissions: ['qa_line_authored'], posture: 'MEMBER' };
 
 /**
  * A `private`-OWD object with an `owner_id`, the real `SharingService` as the
  * kernel's `sharing` service and its middleware on the engine after this
  * plugin's, as the platform boots them. Row `l_other` is owned by nobody the
  * rig explains. `faultReadFilter` makes the sharing service's read filter
- * reject, as a share store that cannot be read does.
+ * reject, as a share store that cannot be read does. `authored` adds
+ * {@link AUTHORED_WRITER}'s set and three lines: `l_theirs` (owned by
+ * someone else, admitted by the policy), `l_unnamed` (owned by someone else,
+ * not admitted) and `l_mine` (owned by the writer).
  */
-async function bootSharing(opts: { faultReadFilter?: boolean } = {}) {
+async function bootSharing(opts: { faultReadFilter?: boolean; authored?: boolean } = {}) {
   const LINE = `qa_parity_line_${next()}`;
   const engine = new ObjectQL();
   engine.registerDriver(
@@ -601,6 +612,13 @@ async function bootSharing(opts: { faultReadFilter?: boolean } = {}) {
     { id: 'l_other', name: 'owned by someone else', owner_id: 'u_somebody' },
     { id: 'l_own', name: 'owned by the control', owner_id: 'u_own' },
   ], SYS);
+  if (opts.authored) {
+    await engine.insert(LINE, [
+      { id: 'l_theirs', name: 'theirs', owner_id: 'u_somebody' },
+      { id: 'l_unnamed', name: 'unnamed', owner_id: 'u_somebody' },
+      { id: 'l_mine', name: 'mine', owner_id: AUTHORED_WRITER.userId },
+    ], SYS);
+  }
 
   const sets = [
     MEMBER_DEFAULT,
@@ -613,6 +631,18 @@ async function bootSharing(opts: { faultReadFilter?: boolean } = {}) {
       name: 'qa_line_own',
       objects: { [LINE]: { allowRead: true, allowEdit: true, readScope: 'own', writeScope: 'own' } },
     }),
+    ...(opts.authored
+      ? [PermissionSetSchema.parse({
+          name: 'qa_line_authored',
+          objects: {
+            [LINE]: { allowRead: true, allowEdit: true, allowDelete: true, allowTransfer: true, readScope: 'org', writeScope: 'own' },
+          },
+          rowLevelSecurity: [
+            { name: 'qa_line_named_updates', object: LINE, operation: 'update', using: "name != 'unnamed'" },
+            { name: 'qa_line_named_deletes', object: LINE, operation: 'delete', using: "name != 'unnamed'" },
+          ],
+        })]
+      : []),
   ];
   let security: unknown;
   let sharing: SharingService | undefined;
@@ -645,11 +675,21 @@ async function bootSharing(opts: { faultReadFilter?: boolean } = {}) {
   engine.registerMiddleware(buildSharingMiddleware(sharing, ctx.logger) as never, { object: '*' });
 
   return {
-    explain: (caller: object, operation: 'read' | 'update', recordId: string) =>
+    explain: (caller: object, operation: 'read' | 'update' | 'delete' | 'transfer', recordId: string) =>
       explained(plugin.explainAccessForCaller({ object: LINE, operation, recordId }, { ...caller })),
     find: (caller: object, id: string) => rowsOf(engine.find(LINE, { where: { id }, context: { ...caller } } as never)),
     update: (caller: object, id: string) =>
       landed(engine.update(LINE, { name: 'renamed' }, { where: { id }, context: { ...caller } } as never)),
+    remove: (caller: object, id: string) => landed(engine.delete(LINE, { where: { id }, context: { ...caller } } as never)),
+    /** A transfer is a by-id update of `owner_id`, gated by the transfer grant. */
+    transfer: (caller: object, id: string) =>
+      landed(engine.update(LINE, { owner_id: 'u_recipient' }, { where: { id }, context: { ...caller } } as never)),
+    /**
+     * Record sharing's tri-state update verdict, asked as the `sys_attachment`
+     * and `sys_comment` parent gates ask it before anything else: the caller's
+     * envelope with no operation-private key.
+     */
+    checkEdit: (caller: object, id: string) => sharing!.checkEdit(LINE, id, { ...caller } as never),
     teardown: async () => {
       try { await engine.destroy(); } catch { /* noop */ }
       releaseAsyncContexts(engine, plugin);
@@ -700,7 +740,7 @@ const withRls = (predicate: string, f: (rig: RlsRig) => Promise<RowFaces>, opts:
   try { return { ...(await f(rig)), teardown: rig.teardown }; } catch (e) { await rig.teardown(); throw e; }
 };
 const withSharing = (
-  opts: { faultReadFilter?: boolean },
+  opts: { faultReadFilter?: boolean; authored?: boolean },
   f: (rig: Awaited<ReturnType<typeof bootSharing>>) => Promise<RowFaces>,
 ): RowRun => async () => {
   const rig = await bootSharing(opts);
@@ -935,6 +975,49 @@ const TABLE: Row[] = [
       explain: await r.explain(SHARING_OWN, 'update', 'l_other'), enforce: await r.update(SHARING_OWN, 'l_other'),
     })),
   },
+  // #24647: the by-id write gate defers record sharing's refusal to an
+  // app-authored row-level write policy that admits the row (ADR-0105 D3).
+  {
+    card: '#24647', shape: 'private OWD, an `own` writer whose authored update policy admits a row owned by someone else, update',
+    position: 'record.visible',
+    enforced: 'admitted',
+    run: withSharing({ authored: true }, async (r) => ({
+      explain: await r.explain(AUTHORED_WRITER, 'update', 'l_theirs'), enforce: await r.update(AUTHORED_WRITER, 'l_theirs'),
+    })),
+  },
+  {
+    card: '#24647', shape: 'private OWD, an `own` writer whose authored delete policy admits a row owned by someone else, delete',
+    position: 'record.visible',
+    enforced: 'admitted',
+    run: withSharing({ authored: true }, async (r) => ({
+      explain: await r.explain(AUTHORED_WRITER, 'delete', 'l_theirs'), enforce: await r.remove(AUTHORED_WRITER, 'l_theirs'),
+    })),
+  },
+  {
+    card: '#24647 control', shape: 'private OWD, the same writer, a row owned by someone else that no authored policy admits, update',
+    position: 'record.visible',
+    enforced: REFUSED_DENIED,
+    run: withSharing({ authored: true }, async (r) => ({
+      explain: await r.explain(AUTHORED_WRITER, 'update', 'l_unnamed'), enforce: await r.update(AUTHORED_WRITER, 'l_unnamed'),
+    })),
+  },
+  {
+    card: '#24647 control', shape: 'private OWD, the same writer, a row owned by someone else that no authored policy admits, delete',
+    position: 'record.visible',
+    enforced: REFUSED_DENIED,
+    run: withSharing({ authored: true }, async (r) => ({
+      explain: await r.explain(AUTHORED_WRITER, 'delete', 'l_unnamed'), enforce: await r.remove(AUTHORED_WRITER, 'l_unnamed'),
+    })),
+  },
+  {
+    // A transfer's door is the by-id update of `owner_id`, deferred as an update.
+    card: '#24647', shape: 'private OWD, an `own` writer holding the transfer grant whose authored update policy admits a row owned by someone else, transfer',
+    position: 'record.visible',
+    enforced: 'admitted',
+    run: withSharing({ authored: true }, async (r) => ({
+      explain: await r.explain(AUTHORED_WRITER, 'transfer', 'l_theirs'), enforce: await r.transfer(AUTHORED_WRITER, 'l_theirs'),
+    })),
+  },
   // #20002: a dependency enforcement shares with explain throws.
   {
     card: '#20002', shape: 'the sharing read filter throws, the caller\'s own row, read', position: 'record.visible',
@@ -998,4 +1081,66 @@ describe('security.explain answers what enforcement does — the enumeration', (
       }
     }, 60_000);
   }
+});
+
+/**
+ * #24647's row, beyond the verdict the table compares: what the record story
+ * names, and what the `sys_attachment` and `sys_comment` parent gates answer.
+ *
+ * Both gates ask record sharing's `checkEdit` FIRST, with the caller's envelope
+ * and no operation-private key, refuse on its `deny` without asking anything
+ * further, and ask explain's record-grained `update` verdict only once that
+ * step admits (each gate's own parity table pins it: its `sharing deny` row
+ * refuses with explain never called, though the double would admit). So on a
+ * row the deferral admits, record sharing's own `deny` still decides both
+ * gates: explain admitting it cannot widen either one. That holds for today's
+ * gate composition only, and the case below says which card changes it.
+ */
+describe('an app-authored row-level write policy the by-id write gate defers to (ADR-0105 D3)', () => {
+  it('the update story names the deferral: record sharing excludes the row, row-level security admits it', async () => {
+    const rig = await bootSharing({ authored: true });
+    try {
+      const x = await rig.explain(AUTHORED_WRITER, 'update', 'l_theirs');
+      expect(x.kind, describeExplained(x)).toBe('decision');
+      if (x.kind !== 'decision') return;
+      expect(x.decision.record).toEqual({ recordId: 'l_theirs', visible: true, decidedBy: 'rls' });
+      const sharingRecord = x.decision.layers.find((l) => l.layer === 'sharing')?.record;
+      expect(sharingRecord?.outcome).toBe('excluded');
+      expect(sharingRecord?.detail).toMatch(/app-authored row-level update policy admits this record/);
+      expect(x.decision.layers.find((l) => l.layer === 'rls')?.record?.outcome).toBe('admitted');
+    } finally {
+      await rig.teardown();
+    }
+  }, 60_000);
+
+  it("the parent gates' first question, record sharing, still refuses the row explain now admits", async () => {
+    const rig = await bootSharing({ authored: true });
+    try {
+      // ⚠️ A sibling card flips this pin: #24646 (ruling B, comment 6279880675)
+      // drops both gates' own-depth record-sharing step and their master step,
+      // so they ask only explain's record-grained by-id `update` verdict. The
+      // gate then admits exactly what the parent's by-id update admits; for
+      // this scenario, with #24647's deferral, that is ADMITTED. Until then the
+      // gates' first question below is record sharing's, and it refuses.
+      expect(await rig.checkEdit(AUTHORED_WRITER, 'l_theirs')).toBe('deny');
+      const x = await rig.explain(AUTHORED_WRITER, 'update', 'l_theirs');
+      expect(x.kind === 'decision' ? x.decision.record?.visible : x.kind, describeExplained(x)).toBe(true);
+      expect(await rig.update(AUTHORED_WRITER, 'l_theirs')).toEqual({ kind: 'admitted' });
+    } finally {
+      await rig.teardown();
+    }
+  }, 60_000);
+
+  it('the positive control: a row record sharing admits is admitted by the first question, by explain and by the door', async () => {
+    const rig = await bootSharing({ authored: true });
+    try {
+      expect(await rig.checkEdit(AUTHORED_WRITER, 'l_mine')).toBe('allow');
+      const x = await rig.explain(AUTHORED_WRITER, 'update', 'l_mine');
+      expect(x.kind === 'decision' ? x.decision.record : x.kind, describeExplained(x))
+        .toEqual({ recordId: 'l_mine', visible: true, decidedBy: 'rls' });
+      expect(await rig.update(AUTHORED_WRITER, 'l_mine')).toEqual({ kind: 'admitted' });
+    } finally {
+      await rig.teardown();
+    }
+  }, 60_000);
 });

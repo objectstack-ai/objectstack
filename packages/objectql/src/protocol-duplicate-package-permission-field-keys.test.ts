@@ -198,6 +198,24 @@ describe('ADR-0070 D4 — duplicatePackage re-points a copied permission set\'s 
         expect(res.success).toBe(true);
     }
 
+    /**
+     * [#24547] Store an object the direct save now refuses: ADR-0129 D2 holds
+     * at that door too, so a bare name under a namespaced package is a row
+     * stored before it read the rule. Staged while the package's installed
+     * manifest declares no namespace, then the derived one is put back, so
+     * every read after it sees the package exactly as installed.
+     */
+    async function saveStoredBeforeRule(packageId: string, type: string, item: { name: string }): Promise<void> {
+        const manifest = engine.registry.getPackage(packageId)!.manifest as { namespace?: string };
+        const namespace = manifest.namespace;
+        delete manifest.namespace;
+        try {
+            await save(packageId, type, item);
+        } finally {
+            manifest.namespace = namespace;
+        }
+    }
+
     /** Seeds the source and the third package, duplicates, and returns the copy's `fields`. */
     async function duplicate(): Promise<Record<string, unknown>> {
         await protocol.installPackage({ manifest: { id: R, name: 'Other', type: 'app' } });
@@ -205,7 +223,7 @@ describe('ADR-0070 D4 — duplicatePackage re-points a copied permission set\'s 
         await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'app' } });
         expect(engine.registry.getPackage(P)?.manifest?.namespace).toBe('dupsrc');
         await save(P, 'object', customerBody);
-        await save(P, 'object', ticketBody);
+        await saveStoredBeforeRule(P, 'object', ticketBody);
         await save(P, 'permission', flsBody);
 
         const res = await protocol.duplicatePackage({ sourcePackageId: P, targetPackageId: Q });

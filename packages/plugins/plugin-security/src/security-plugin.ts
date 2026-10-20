@@ -4964,6 +4964,9 @@ export class SecurityPlugin implements Plugin {
     //  - plugin-sharing's per-record gate is asked with `__writeScope` stamped
     //    as the middleware stamps it (step 2.6), always overwritten, so an
     //    `org` / unit writer is not judged owner-only.
+    //  - [#5493 / ADR-0105 D3] A refusal of that gate is deferred as the
+    //    middleware defers it: to an app-authored row-level policy that admits
+    //    the row for the gate's verb (`probeAuthoredRowWrite`, wired below).
     // [#19986] The READ verdict's twin: plugin-sharing's read filter is asked
     // with `__readScope` stamped as step 2.6 stamps it for a find, so
     // `record.visible` for `read` is what the caller's find returns.
@@ -5070,6 +5073,18 @@ export class SecurityPlugin implements Plugin {
         // but not delete, so a delete explanation must consult this.
         ...(sharing && typeof sharing.canDelete === 'function'
           ? { canDeleteRecord: async (o: string, rid: string, c: any) => sharing.canDelete(o, rid, await withWriteScope(o, c)) }
+          : {}),
+        // [#5493 / ADR-0105 D3] The by-id write gate's deferral, asked through
+        // the sharing service's own probe, the member its middleware asks
+        // after the gate above refuses, with the context that gate is asked
+        // with. The probe passes through to {@link checkAuthoredRowWrite} and
+        // abstains on every failure; a sharing service without it defers
+        // nothing, so explain reports the gate's refusal as before.
+        ...(sharing && typeof sharing.probeAuthoredRowWrite === 'function'
+          ? {
+              probeAuthoredRowWrite: async (o: string, rid: string, op: AuthoredRowWriteOperation, c: any) =>
+                sharing.probeAuthoredRowWrite(o, rid, op, await withWriteScope(o, c)),
+            }
           : {}),
         // [#21771] The by-id write path's read question, asked the same way:
         // the caller-context by-id read, every data middleware included.

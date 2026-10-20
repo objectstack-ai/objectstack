@@ -431,8 +431,12 @@ contradicts it, and correct it here when it does.
   by name and exits **1**, where it used to exit **0** in silence — the entry point is
   `packages/cli/bin/run.js`.
 
-- **23 items carry an `automated.ref` that lives ENTIRELY in the `objectui` repo — from
-  this checkout they are neither runnable nor pin-evidenced.** Their refs name only
+- **Some items carry an `automated.ref` that lives ENTIRELY in the `objectui` repo — from
+  this checkout they are neither runnable nor pin-evidenced.** No count is kept here: the
+  set moves with every pin re-point and every `automated` edit, and the count this line
+  used to carry went stale with nothing to notice it (wave anchor #24579). **Find them by
+  the rule, not by a number:** an item is in the set when its `automated.ref` names an
+  objectui path and no path that exists in this checkout. Their refs name only
   objectui paths (`e2e/live/*.spec.ts`, `e2e/import-console/*`, `e2e/import-harness/*`,
   and unit suites under `packages/plugin-grid`, `plugin-gantt`, `plugin-calendar`,
   `plugin-form`, `fields`, `core`, `app-shell`). This repository builds no console bundle

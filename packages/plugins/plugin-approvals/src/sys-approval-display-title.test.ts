@@ -11,25 +11,28 @@
  * `sys_approval_approver` and `sys_approval_request`, because each of them
  * declared `nameField: 'id'` beside a composite `titleFormat`.
  *
- * Each object now points at `display_title`, a text formula over the same
- * columns. This file asserts, per object, through the real engine:
+ * `sys_approval_action` and `sys_approval_approver` point at `display_title`,
+ * a text formula over the same columns. This file asserts, per object, through
+ * the real engine:
  *
- *  1. the title field ADR-0079's order resolves is `display_title`, not `id`;
+ *  1. the title field ADR-0079's order resolves is not `id`;
  *  2. a seeded row read back through `findOne` carries the H1 the
  *     `titleFormat` intended, and that H1 is not the row's id;
  *  3. the server-side title accessor (`resolveRecordTitle`) agrees;
- *  4. the formula adds no stored column.
+ *  4. a formula title adds no stored column.
  *
  * Where a source column is nullable, a row without it is titled by the other
  * column rather than failing to evaluate.
  *
- * `sys_approval_request` is the one object whose formula and `titleFormat`
- * name different columns (#24007): the formula's flow half is the flow's label
- * (`process_label`, nullable), with `process_name` as its fallback, while
- * `titleFormat` keeps `{process_name}` because a template cannot express that
- * fallback. So for that object point 2 is asserted where they agree — a row
- * with no stored label, where both draw `process_name` — and a row with a
- * label pins the formula's own text and the template's difference from it.
+ * `sys_approval_request` points at `process_label`, the flow's label, a
+ * STORED column: the approvals get serves no formula value, so a formula
+ * pointer left the request page with no title and the page drew `titleFormat`
+ * (#24665). Its title names no subject record. `titleFormat` is
+ * `{process_name}`, the fallback a renderer draws where no label is stored,
+ * and `display_title` (kept declared) computes the same text on every row: the
+ * label where one is stored, else `process_name`. So for that object point 2
+ * is asserted on a row with a label (the pointer's value) and on a row
+ * without one (the template's), and neither carries the record id.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -89,49 +92,64 @@ describe('[#20015] approval objects resolve a real record title under ADR-0079 o
     try { await engine?.destroy(); } catch { /* noop */ }
   });
 
-  it('points all three objects at display_title, a text formula', () => {
-    for (const schema of [SysApprovalRequest, SysApprovalAction, SysApprovalApprover]) {
+  it('points sys_approval_request at process_label, a stored text column, and the other two at display_title, a text formula', () => {
+    expect(resolveDisplayField(SysApprovalRequest as any)).toBe('process_label');
+    expect(SysApprovalRequest.displayNameField).toBe('process_label');
+    expect((SysApprovalRequest.fields as Record<string, any>).process_label?.type).toBe('text');
+    for (const schema of [SysApprovalAction, SysApprovalApprover]) {
       expect(resolveDisplayField(schema as any)).toBe('display_title');
+    }
+    for (const schema of [SysApprovalRequest, SysApprovalAction, SysApprovalApprover]) {
       const field = (schema.fields as Record<string, any>).display_title;
       expect(field?.type).toBe('formula');
       expect(field?.returnType).toBe('text');
     }
   });
 
-  it('sys_approval_request: with a flow label stored, the H1 is "{process_label} · {record_id}"', async () => {
+  it('sys_approval_request: with a flow label stored, the H1 is the label alone, never the record id', async () => {
     // An authored label that is not the humanized machine name ("Deal Desk"),
     // so the title can only have come from the stored label.
     const created = await engine.insert('sys_approval_request', {
       process_name: 'flow:deal_desk', process_label: 'Discount Sign-off',
       object_name: 'opportunity', record_id: 'opp_45', status: 'pending',
     }, SYS);
-    expect(created.display_title).toBe('Discount Sign-off · opp_45');
+    // `display_title` computes the same text (read-your-write).
+    expect(created.display_title).toBe('Discount Sign-off');
     const row = await engine.findOne('sys_approval_request', { where: { id: created.id } }, SYS);
     expect(row).not.toBeNull();
 
-    expect(h1Of(SysApprovalRequest, row!)).toBe('Discount Sign-off · opp_45');
+    expect(h1Of(SysApprovalRequest, row!)).toBe('Discount Sign-off');
     expect(h1Of(SysApprovalRequest, row!)).not.toBe(row!.id);
-    expect(resolveRecordTitle(SysApprovalRequest, storedOnly(row!))).toBe('Discount Sign-off · opp_45');
-    // The pairing, restated: `titleFormat` keeps the machine source, so a
-    // renderer that reads it first draws a different text for this row.
-    expect(renderTitleFormat(SysApprovalRequest.titleFormat, row!)).toBe('flow:deal_desk · opp_45');
+    expect(String(h1Of(SysApprovalRequest, row!))).not.toContain('opp_45');
+    expect(row!.display_title).toBe('Discount Sign-off');
+    expect(resolveRecordTitle(SysApprovalRequest, storedOnly(row!))).toBe('Discount Sign-off');
+    // The pairing, restated: `titleFormat` keeps the machine source, and a
+    // renderer reaches it only where the pointer's value is empty — not here.
+    expect(renderTitleFormat(SysApprovalRequest.titleFormat, row!)).toBe('flow:deal_desk');
   });
 
-  it('sys_approval_request: with no flow label stored, the H1 is "{process_name} · {record_id}", never "null · …"', async () => {
+  it('sys_approval_request: with no flow label stored, the H1 is the template\'s "{process_name}", which display_title matches, never "null" and never the record id', async () => {
     const created = await engine.insert('sys_approval_request', {
       process_name: 'flow:deal_desk', object_name: 'opportunity', record_id: 'opp_42',
       status: 'pending',
     }, SYS);
-    // The write response carries the title too (read-your-write).
-    expect(created.display_title).toBe('flow:deal_desk · opp_42');
+    // The write response carries the computed text too (read-your-write).
+    expect(created.display_title).toBe('flow:deal_desk');
     const row = await engine.findOne('sys_approval_request', { where: { id: created.id } }, SYS);
     expect(row).not.toBeNull();
     expect(row!.process_label ?? null).toBeNull();
 
-    expect(h1Of(SysApprovalRequest, row!)).toBe('flow:deal_desk · opp_42');
-    expect(h1Of(SysApprovalRequest, row!)).not.toBe(row!.id);
-    expect(h1Of(SysApprovalRequest, row!)).toBe(renderTitleFormat(SysApprovalRequest.titleFormat, row!));
-    expect(resolveRecordTitle(SysApprovalRequest, storedOnly(row!))).toBe('flow:deal_desk · opp_42');
+    // The pointer's value is empty, so ADR-0079's order falls through to the
+    // deprecated template: the machine source, the same text the formula draws.
+    expect(h1Of(SysApprovalRequest, row!) ?? null).toBeNull();
+    const fallback = renderTitleFormat(SysApprovalRequest.titleFormat, row!);
+    expect(fallback).toBe('flow:deal_desk');
+    expect(fallback).not.toContain('opp_42');
+    expect(fallback).not.toContain('null');
+    expect(row!.display_title).toBe(fallback);
+    // The server-side accessor reads the pointer and never invents a title:
+    // no label stored, no title (the boot fill labels such a row).
+    expect(resolveRecordTitle(SysApprovalRequest, storedOnly(row!))).toBeUndefined();
   });
 
   it('sys_approval_action: the H1 is "{action} · {step_name}", and the action alone without a step', async () => {

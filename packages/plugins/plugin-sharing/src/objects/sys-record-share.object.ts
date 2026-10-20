@@ -42,14 +42,26 @@ export const SysRecordShare = ObjectSchema.create({
   // Each row widens one record beyond the object's sharing model (its OWD
   // baseline) for one recipient; the sentence below is what Setup shows.
   description: 'Records shared beyond their owner, one row per grant.',
-  titleFormat: '{object_name}/{record_id} → {recipient_id} ({access_level})',
-  highlightFields: ['object_name', 'record_id', 'recipient_id', 'access_level', 'source'],
+  // [#24611] The record title is the recipient, the principal the grant is
+  // for. Declared, because the registry's designate-only pass otherwise
+  // derives `object_name` (the first `*_name` text field), and a record share's
+  // page H1 read the shared record's object API name. The shared record itself
+  // is named on the record page by the Details tab's pointer card, which heads
+  // it with its object's label. No `titleFormat`: a declared, required pointer
+  // outranks it on every title reader, so it would only be dead text.
+  nameField: 'recipient_id',
+  // Neither half of the `record_id` / `object_name` pointer pair is listed. The
+  // record page's strip draws a listed field as its stored text, so the type
+  // half read as an API name and the id half as a raw id; a field the strip
+  // draws is also hidden from the Details tab, which is where `record_id`
+  // draws as the labelled pointer card (`sharing-pointer-pairs.test.ts`).
+  highlightFields: ['recipient_id', 'access_level', 'source'],
 
   // A list names the shared record with the pointer's id half, `record_id`:
   // the console draws it as the target record and fetches the type half
   // `object_name` for that cell without a column (objectui#13036). No list
-  // view shows the type half, which would draw the stored API name as text
-  // (`sharing-pointer-pairs.test.ts`).
+  // view shows the type half or groups on it, which would draw the stored API
+  // name as text or as a group header (`sharing-pointer-pairs.test.ts`).
   listViews: {
     // [#21972] Declared FIRST on purpose: a route that names no view opens the
     // first declared list view, so a caller-scoped view (`granted_to_me`,
@@ -95,8 +107,11 @@ export const SysRecordShare = ObjectSchema.create({
       label: 'By Object',
       data: { provider: 'object', object: 'sys_record_share' },
       columns: ['record_id', 'recipient_id', 'access_level', 'source', 'created_at'],
+      // [#24611] Ordered by the shared record's object, not grouped on it: a
+      // group header draws `object_name` as its stored API name, and no column
+      // holds the object's label. The sort keeps one object's grants together,
+      // and each Record cell draws its target with that object's icon.
       sort: [{ field: 'object_name', order: 'asc' }, { field: 'created_at', order: 'desc' }],
-      grouping: { fields: [{ field: 'object_name', order: 'asc', collapsed: false }] },
       pagination: { pageSize: 100 },
     },
     manual_grants: {

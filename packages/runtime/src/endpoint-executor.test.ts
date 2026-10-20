@@ -135,7 +135,7 @@ describe('buildEndpointExecutionContext — a projection, not an interpretation'
         expect(ctx.remoteAddress).toBe('203.0.113.9');
     });
 
-    it('carries the match: the parsed endpoint, and `params` — always {} in 17.x', () => {
+    it('carries the match: the parsed endpoint, and `params` — always {}', () => {
         const ep = endpoint({});
         const ctx = contextFor(ep);
         expect(ctx.endpoint).toBe(ep);
@@ -204,7 +204,7 @@ describe('planEndpointTarget — the unsupported subset is enumerated once', () 
         expect((plan as any).reason).toContain(expected);
     });
 
-    it.each(['script', 'proxy'])('refuses `%s` — declared by the vocabulary, not executed in 17.x', (type) => {
+    it.each(['script', 'proxy'])('refuses `%s` — declared by the vocabulary, not executed by this runtime', (type) => {
         const plan = planEndpointTarget(endpoint({ type, objectParams: undefined }));
         expect(plan.kind).toBe('unsupported');
         // The reason names the type so an author is not left guessing which of

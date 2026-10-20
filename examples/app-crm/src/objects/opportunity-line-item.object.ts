@@ -51,11 +51,12 @@ export const OpportunityLineItem = ObjectSchema.create({
     }),
     // Amount = Qty × Unit Price. Kept as a *stored* currency column (so the
     // parent Opportunity.line_total summary can roll it up — summary aggregation
-    // reads stored columns, not on-read formula fields), but the `expression`
-    // makes the line-item grid render it READ-ONLY and recompute it live
-    // client-side as quantity/unit_price change, then persist the computed
-    // value. The server stores the client-sent value as-is. (Mirrors the
-    // showcase InvoiceLine.amount pattern.)
+    // reads stored columns, not on-read formula fields). The server computes a
+    // stored field's `expression` on every insert and update, from the stored
+    // line merged with the change, so a client-sent amount never stands and
+    // line_total always agrees with the lines. The line-item grid renders it
+    // READ-ONLY and recomputes it live client-side as quantity/unit_price
+    // change. (Mirrors the showcase InvoiceLine.amount pattern.)
     amount: Field.currency({
       label: 'Amount',
       min: 0,

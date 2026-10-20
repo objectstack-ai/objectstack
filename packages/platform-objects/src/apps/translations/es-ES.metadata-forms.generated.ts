@@ -1109,10 +1109,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Campos buscables",
         helpText: "Nombres de campo disponibles para búsqueda rápida"
       },
-      filterableFields: {
-        label: "Campos filtrables",
-        helpText: "Nombres de campo disponibles para filtrado"
-      },
       resizable: {
         label: "Redimensionable"
       },

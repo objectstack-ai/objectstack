@@ -78,7 +78,12 @@ export const viewForm = defineForm({
           ],
         },
         { field: 'searchableFields', widget: 'string-tags', helpText: 'Field names available for quick search' },
-        { field: 'filterableFields', widget: 'string-tags', helpText: 'Field names available for filtering' },
+        // [#24640] The `filterableFields` input was REMOVED with the key it
+        // wrote — now a `retiredKey()` tombstone on `ListViewSchema` (ruled
+        // retired with no replacement: the platform carries no per-view
+        // Filter-panel whitelist). A form input for an unwritable key is the
+        // false-compliant UI half of a retirement; a curated end-user filter
+        // bar is `userFilters`, under End-user controls below.
       ],
     },
     {
