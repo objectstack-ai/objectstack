@@ -223,7 +223,7 @@
       "title": "os migrate: bare command is a read-only plan, apply is safe-by-default, re-runs are idempotent, and --json exits 0 on success (#4873)",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -231,6 +231,9 @@
         "app": "showcase",
         "requires": [
           "a scratch app + persistent sqlite DB whose base schema was synced by one prior `os dev` boot (plan itself defers DDL since #3917, so the tables must pre-exist), e.g. -d file:/tmp/<run>/migrate.db"
+        ],
+        "knownGaps": [
+          "no pin scores a clause of this item at its layer (RUNNER rule 6, a pin scores only the layer it drives), so the item carries no automated ref. Every clause's oracle is the CLI's own output or exit code. packages/cli/src/utils/format.exit-code.test.ts calls emitJson / emitText in-process (unit): it shows that the success path leaves process.exitCode alone and that a duration can no longer reach the exit-code slot (#4873). That is unit-layer evidence for acceptance[2], never its pass: acceptance[2] is scored on the `echo $?` collected after each subcommand's --json success. automated may return when a pin spawns `os migrate … --json` and asserts the shell's exit code"
         ]
       },
       "steps": [
@@ -313,7 +316,6 @@
         "audit-mail-bodies"
       ],
       "traps": ["stale-dist"],
-      "automated": { "kind": "unit", "ref": "packages/cli/src/utils/format.exit-code.test.ts — covers acceptance[2] ONLY (#4873: emitJson / emitText leave the exit code alone on success and a duration can no longer reach the exit-code slot); acceptance[0], [1] and [3]–[6] need the run" },
       "source": [
         "packages/cli/src/commands/migrate/index.ts + plan.ts (#2186 bare-command-is-plan; #3917 enforced never-mutates; occupancy warning) + apply.ts (--allow-destructive / --force / --yes / in_sync)",
         "packages/cli/src/utils/format.ts#CliExitCode (CliExitCode narrows the emitJson exit slot — the #4873 fix, commit 83df2fd)",
@@ -346,6 +348,12 @@
           "date": "2026-10-20",
           "change": "variants: audit-mail-bodies added, the 19th registered subcommand (#24693: the one-off mask of the mail bodies that sys_audit_log / sys_activity copies of sys_email and sys_identity_email rows still hold in clear). The source note's count moves from 18 to 19 with it. No clause changed",
           "ref": "#24693"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "automated removed, fixtures.knownGaps[0] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4, 'Refs that claim more than their pins assert'), round 15 of wave anchor #24579. The ref said format.exit-code.test.ts covers acceptance[2]. That pin calls emitJson / emitText in-process, while acceptance[2] asks for `echo $?` after each subcommand's --json success, which only a spawned CLI answers. By RUNNER rule 6 (a pin scores only the layer it drives) it scores no clause, so automated is dropped (theme-B rule) and the knownGap says what the pin does assert. Read at base b1676441ba. No clause changed",
+          "ref": "#PENDING-24579R15"
         }
       ]
     },
@@ -354,7 +362,7 @@
       "title": "objectstack verify: verdict vocabulary is closed, exit is nonzero exactly on failure verdicts, and the inconclusive split (needs-fixture/skipped) never fails the run",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -362,7 +370,8 @@
         "app": "showcase",
         "requires": ["examples/app-showcase as the verified app (its config is the stock target)"],
         "knownGaps": [
-          "no stock fixture ships a GUARANTEED-failing app, so the exit-1 side of the hardFailures mapping must be staged (point --app at a scratch config engineered to produce a fidelity gap or 5xx create) — record how it was staged in the evidence rather than skipping the side silently"
+          "no stock fixture ships a GUARANTEED-failing app, so the exit-1 side of the hardFailures mapping must be staged (point --app at a scratch config engineered to produce a fidelity gap or 5xx create) — record how it was staged in the evidence rather than skipping the side silently",
+          "no pin scores a clause of this item at its layer (RUNNER rule 6, a pin scores only the layer it drives), so the item carries no automated ref. packages/cli/src/commands/verify-tenancy-posture.test.ts asserts resolveVerifyMultiTenant, the exported decision, under the real tenancy-posture resolver; its own docblock says it is 'not an end-to-end `os verify` invocation'. That is unit-layer evidence for acceptance[4], never its pass: acceptance[4] scores the posture run's payload (multiTenant) or its loud error. automated may return when a pin runs os verify under a walled OS_TENANCY_POSTURE and reads that payload"
         ]
       },
       "steps": [
@@ -419,7 +428,6 @@
         "skipped (inconclusive — never fails)"
       ],
       "traps": ["stale-dist", "wrong-persona"],
-      "automated": { "kind": "unit", "ref": "packages/cli/src/commands/verify-tenancy-posture.test.ts — covers acceptance[4] ONLY (#5262: a walled OS_TENANCY_POSTURE selects the multi-tenant suite, and single-org deployments keep the single-org suite); acceptance[0]–[3] (the verdict vocabulary, the hardFailures mapping, the needs-fixture split, the --rls hole) need the run" },
       "source": [
         "packages/cli/src/commands/verify.ts#hardFailures (hardFailures sum, exit contract, resolveVerifyMultiTenant / #5262 / ADR-0105 D1, separate RLS stack rationale)",
         "packages/verify/src/verify.ts#ObjectVerifyResult (the six-member status union; 400-VALIDATION_FAILED→needs-fixture vs 5xx→create-failed classification — re-pointed #18104: VALIDATION_FAILED survives in this file only inside a regex literal; the union this item means is declared on ObjectVerifyResult and the classification that reads it is isValidation)",
@@ -427,7 +435,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: verdict-to-exit-code mapping read from verify.ts + verify.ts (verdict union), with the inconclusive split and the #5262 posture-honesty negative as load-bearing clauses; the unstageable always-failing fixture recorded as a knownGap", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-10-19", "change": "automated.ref says which clause its pin covers — round 2's Tier 1 record (#24598, via wave anchor #24579 §3, comment 6272032736) names this ref among those that over-claim clause coverage: its seven tests assert the #5262 posture selection (acceptance[4]) and nothing of acceptance[0]–[3]. Re-read at base 9a7838edf5. No clause changed", "ref": "#24649" }
+        { "revision": 2, "date": "2026-10-19", "change": "automated.ref says which clause its pin covers — round 2's Tier 1 record (#24598, via wave anchor #24579 §3, comment 6272032736) names this ref among those that over-claim clause coverage: its seven tests assert the #5262 posture selection (acceptance[4]) and nothing of acceptance[0]–[3]. Re-read at base 9a7838edf5. No clause changed", "ref": "#24649" },
+        { "revision": 3, "date": "2026-10-20", "change": "automated removed, fixtures.knownGaps[1] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4, 'Refs that claim more than their pins assert'), round 15 of wave anchor #24579. The ref said verify-tenancy-posture.test.ts covers acceptance[4]. Its seven tests call resolveVerifyMultiTenant only, while acceptance[4] scores the os verify run's payload or error. By RUNNER rule 6 (a pin scores only the layer it drives) it scores no clause, so automated is dropped (theme-B rule) and the knownGap says what the pin asserts. Read at base b1676441ba. No clause changed", "ref": "#PENDING-24579R15" }
       ]
     },
     {
@@ -1717,7 +1726,7 @@
       "title": "autoMigrate off|safe: a dev boot self-heals ONLY the safe-categorized drift and reports each applied op, `off` (the driver default) and NODE_ENV=production never touch the schema, and a duplicates-blocked tighten is never auto-applied",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -1730,7 +1739,8 @@
         ],
         "knownGaps": [
           "the duplicates-BLOCKED leg (ADR-0120 D4 tightenNullSafeOnly recreate: duplicate rows found by the pre-flight probe → op blocked with a row report, old index left in place) needs planted duplicate rows under a legacy platform-wide unique index — stageable only by writing rows directly into the scratch sqlite file before boot. The leg is unit-pinned (sql-driver-unique-tenancy.test.ts 'auto-tightens at boot … when the probe is clean' + its duplicates sibling); a run may cite the pin per RUNNER rule 6 instead of hand-staging, and must record WHICH it did",
-          "`autoMigrate` is honoured by the native sqlite / postgres / mysql drivers only — the sqlite-wasm driver is constructed without it (the guidance entry on SqliteWasmConfigSchema says writing it there changes nothing), and turso's config declares no such key (standalone-stack.ts). Do not stage the wasm/turso arms expecting behavior"
+          "`autoMigrate` is honoured by the native sqlite / postgres / mysql drivers only — the sqlite-wasm driver is constructed without it (the guidance entry on SqliteWasmConfigSchema says writing it there changes nothing), and turso's config declares no such key (standalone-stack.ts). Do not stage the wasm/turso arms expecting behavior",
+          "DEFECTIVE PIN, scores no clause (QA run #24840; routed to the wave anchor #24579 as a test fix, not repaired by a ledger edit): sql-driver-schema-drift.test.ts 'is force-disabled under NODE_ENV=production (warns, does not alter)' stages relax_not_null, which ADR-0113 made needs_confirm. A safe reconcile never applies needs_confirm, so the column stays NOT NULL with or without the production guard: its sibling case 'does NOT auto-relax a stray NOT NULL — needs_confirm survives dev auto-reconcile' asserts that same outcome with no NODE_ENV set. The case also asserts no warning. Its green says nothing about the production arm of reconcileAndWarnDrift (packages/drivers/driver-sql/src/sql-driver.ts). Score acceptance[2] only from steps[3]'s live boot, which re-plants the legacy index: replace_unique_index is the safe-category drift that arm must hold back"
         ]
       },
       "variants": [
@@ -1796,7 +1806,7 @@
         "an authored `autoMigrate` on a sqlite-wasm datasource appearing to DO something is a FAIL of the declared boundary (the wasm driver is constructed without it — the guidance entry says writing it changes nothing); conversely, do not file the wasm no-op as a missing capability"
       ],
       "traps": ["stale-dist", "destructive-in-place"],
-      "automated": { "kind": "unit", "ref": "packages/drivers/driver-sql/src/sql-driver-schema-drift.test.ts" },
+      "automated": { "kind": "unit", "ref": "packages/drivers/driver-sql/src/sql-driver-unique-tenancy.test.ts — acceptance[4] and negative[2], at the driver: its 'bare-composite tightening + duplicate pre-flight (ADR-0120 D4)' describe, where 'auto-tightens at boot under autoMigrate: safe when the probe is clean' converges with zero drift, and 'BLOCKS the tightening on duplicate NULL-organization rows — old index kept, rows reported' keeps the old index through initObjects, reports the op BLOCKED naming the duplicate group, and refuses even an allowDestructive apply until the duplicate is gone; + packages/drivers/driver-sql/src/sql-driver-schema-drift.test.ts — negative[0] ONLY ('does NOT auto-apply destructive drift (orphan column kept; warned instead)'). Its 'is force-disabled under NODE_ENV=production (warns, does not alter)' case scores NOTHING (knownGaps[2]). acceptance[0]–[3] and [5], and negative[1] and [3], are boot-log and schema-dump clauses: they need the scratch boots" },
       "source": [
         "packages/spec/src/data/driver/common.zod.ts#SqlAutoMigrateSchema (SqlAutoMigrateSchema z.enum(['off','safe']) — 'Dev-only, loosen-only schema self-heal (#2186) … force-disabled under NODE_ENV=production') + sqlite.zod.ts (the authored key; the wasm not-honoured guidance)",
         "packages/drivers/driver-sql/src/sql-driver.ts#SqlDriverConfig (SqlDriverConfig.autoMigrate docblock: non-destructive alters only), (default 'off'), (reconcileAndWarnDrift — the managed+safe gate, the production ignore warning verbatim, safe-only applyMigrationEntries allowDestructive:false, per-op auto-reconciled info line, post-reconcile re-detect, warn-once loop)",
@@ -1809,7 +1819,8 @@
         { "revision": 1, "date": "2026-08-30", "change": "new item (sweep 2026-08-30, angle 2): the autoMigrate off|safe policy had no coverage although it is the one path that mutates a dev database at boot. Grounded verify-first, correcting the register's sketch on two points: (1) 'safe' is the LOOSEN-only subset (relax NOT NULL, widen varchar, index ops, clean-probe tighten) — not 'additive' diffs; (2) the register's sql-driver.ts/4652-4654 cites the config/field declarations, but the enforcement lives in reconcileAndWarnDrift with the managed-mode gate, the production force-off warning, and allowDestructive:false — all now pinned as clauses. The dev-injection arm (storage-driver.ts / serve.ts, 'safe' only when isDev) was found while grounding and added as its own clause so a keyless dev boot's self-heal is not misread as a driver default. enumSource pins SqlAutoMigrateSchema expect 2", "ref": "#sweep-2026-08-30" },
         { "revision": 2, "date": "2026-10-17", "change": "fixture and steps re-pointed (checklist-accuracy finding, #23878 close-out): a config-declared datasource named `default` is refused by defineStack, `required: true` no longer makes a NOT NULL column (storage.notNull, ADR-0113), and relax_not_null is needs_confirm, so the step-0 drift the safe leg relied on was never auto-appliable. The fixture now names a datasource routed by datasourceMapping default:true; step 0 stages one drift per category (storage.notNull relax = needs_confirm, a planted legacy platform-wide unique index = safe, a removed field = destructive); the steps read a schema dump instead of `os migrate plan`, which composes no driver for a config-declared primary and says its plan is PARTIAL; the safe variant lists the real safe ops; clauses 0, 1 and 3's verify follow. No clause's ruling changed. Re-run on main c91af8ed6 on a minimal scratch stack: datasource named default → build exit 2 with the reserved-name refusal; qa_main + mapping built. off and omitted boots each warned all three drifts and left the dump byte-identical; `os migrate plan` (also with --database-url) reported 'Examined 0 managed table(s)' and a PARTIAL plan. safe boot: '[schema-drift] auto-reconciled replace_unique_index on qa_thing.code', the legacy qa_thing_code_unique gone from the dump, the relax and orphan warnings still printed; the second safe boot printed no reconcile line. NODE_ENV=production with safe: the named ignore warning verbatim, all three warnings, dump unchanged. Keyless os dev over a planted legacy index: auto-reconciled replace_unique_index; non-dev os start over a re-planted one: the warning only, the index kept. Duplicates leg on the pin: driver-sql sql-driver-unique-tenancy.test.ts (incl. 'auto-tightens at boot under autoMigrate: safe when the probe is clean' and 'BLOCKS the tightening on duplicate NULL-organization rows') + sql-driver-schema-drift.test.ts, 38 passed", "ref": "#24036" },
         { "revision": 3, "date": "2026-10-19", "change": "steps[4], acceptance[5] (clause, verify) and source[3] re-pointed to the injection site that exists — checklist-accuracy finding of the 18.0 QA sweep (QA run #24551, cli.dev-automigrate-policy acceptance[5] / steps[4]; wave anchor #24579 §3): the cited storage-driver.ts `isDev ? { autoMigrate: 'safe' } : {}` and serve.ts telemetry branch moved. Re-derived at base 9a7838edf5: since #21733 the decision lives in packages/runtime/src/dev-auto-migrate.ts (devAutoMigrateConfig), read by createStandaloneStack's default datasource, resolveStorageDefinition's fallback and the telemetry sibling. The run found the behaviour matching the clause; the clause now names the one decision and the three readers", "ref": "#24649" },
-        { "revision": 4, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[4] cited lines 322-342 of sql-driver-index-drift.test.ts in the comma-range spelling (authored in 45397edf53 as the list 112-113 and 322-342). Those lines are unchanged at this base: the describe block \"dev auto-reconcile (autoMigrate: 'safe')\", which source[4] now names. A test file declares no symbol worth anchoring, so the block is named in prose. The count of passed tests that history[1] records after a file name is not a citation, and that row is a dated record, so it is left. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" }
+        { "revision": 4, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[4] cited lines 322-342 of sql-driver-index-drift.test.ts in the comma-range spelling (authored in 45397edf53 as the list 112-113 and 322-342). Those lines are unchanged at this base: the describe block \"dev auto-reconcile (autoMigrate: 'safe')\", which source[4] now names. A test file declares no symbol worth anchoring, so the block is named in prose. The count of passed tests that history[1] records after a file name is not a citation, and that row is a dated record, so it is left. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
+        { "revision": 5, "date": "2026-10-20", "change": "automated.ref narrowed per clause, fixtures.knownGaps[2] added — checklist-accuracy findings of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4), round 15 of wave anchor #24579. (1) The bare ref named sql-driver-schema-drift.test.ts alone. By RUNNER rule 6 (a pin scores only the layer it drives) that pin scores negative[0] only. (2) Its production force-off case stages relax_not_null, needs_confirm since ADR-0113, so it passes with or without the guard and asserts no warning. It scores no clause, and the knownGap records it for the anchor to route as a test fix. (3) sql-driver-unique-tenancy.test.ts, which acceptance[4].verify and knownGaps[0] already named, was missing from the ref. Its ADR-0120 D4 cases assert acceptance[4] and negative[2] at the driver, the layer that test-oracle clause names. Read at base b1676441ba. No clause changed", "ref": "#PENDING-24579R15" }
       ]
     },
     {
