@@ -588,11 +588,15 @@ export class DeferSchemaDdlPlugin {
   }
 }
 
-/** What the birth half reports through: the kernel logger's two levels it uses. */
-type BirthLogger = { info?: (msg: string) => void; error?: (msg: string) => void };
-
 /** `@objectstack/runtime`'s birth half, loaded lazily as the rest of the runtime is here. */
 type RecordOrganizationOwnershipBirth = typeof import('@objectstack/runtime').recordOrganizationOwnershipBirth;
+
+/**
+ * What the birth half reports through: the runtime's own parameter, which reads
+ * `info` alone. A failure is never logged on this path — it is thrown to the
+ * caller ({@link recordBirthOfFlushedStore}) — so the sink has no error channel.
+ */
+type BirthLogger = Parameters<RecordOrganizationOwnershipBirth>[1];
 
 /**
  * [ADR-0131 D10; ruling record 6269955919, ① A] The organization-ownership
