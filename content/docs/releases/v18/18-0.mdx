@@ -100,12 +100,14 @@ instead: this list is written for 17.x.
 ### 18.0.0
 
 <Callout type="warn">
-**How far this list has been walked.** Once, on 2026-10-20, from 17.7.0: an app
-scaffolded with `create-objectstack@17.7.0` (the `blank` template, pnpm, its
-skills installed by `skills add`), booted once on 17.7.0 with
-`objectstack start` so that it created a SQLite database holding one admin and
-three records, then moved to 18.0.0 from npm by following steps 1 and 2 below.
-Each line says how it was measured:
+**How far this list has been walked.** On 2026-10-20, from 17.7.0, twice: an
+app scaffolded with `create-objectstack@17.7.0` (the `blank` template, pnpm, its
+skills installed by `skills add`) was booted once on 17.7.0 with
+`objectstack start`, so that it created a SQLite database holding one admin and
+three records (the second time also an API key and a comment with an emoji
+reaction), and was then moved to 18.0.0 from npm. The first pass drafted steps
+1 and 2; the second, on a fresh scaffold, followed them as written, and both
+printed the numbers quoted below. Each line says how it was measured:
 
 - **Measured in the walk** — the step was run, and the quoted text is what 18.0.0
   printed.
@@ -164,16 +166,22 @@ no upgrade of a production application was run for this page.
   npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
   ```
 
-  Measured in the walk: before the removal, the sync printed
-  `Skipped objectstack-ai from @objectstack/skills: installed with 'skills add' from objectstack-ai/objectstack`
-  for each of the ten skills, then `Nothing to sync.`, and exited `0` — so
-  bumping the packages alone keeps the 17.x-era skill text. After it, the sync
-  printed `Synced 10 skills`. In the walk's pnpm project,
+  Run before the removal, the sync skips every skill a `skills add` installed,
+  exits `0`, and leaves the 17.x-era skill text in place:
+
+  ```text
+  !  Skipped objectstack-ai from @objectstack/skills: installed with `skills add` from objectstack-ai/objectstack
+  …  (one line for each of the ten skills)
+  —  Nothing to sync.
+  ```
+
+  After the removal it printed `Synced 10 skills`. In the walk's pnpm project
   `npm install --save-dev` exited `1` with
-  `npm error Cannot read properties of null (reading 'edgesOut')`, so use the
-  manager that installed the project (`create-objectstack` uses pnpm when it is
-  available). The command writes the exact version, `"@objectstack/skills": "18.0.0"`:
-  move it with the other pins at the next upgrade. *Measured in the walk.*
+  `npm error Cannot read properties of null (reading 'edgesOut')`, so add the
+  package with the manager that installed the project (`create-objectstack`
+  uses pnpm when it is available). The command writes the exact version,
+  `"@objectstack/skills": "18.0.0"`: move it with the other pins at the next
+  upgrade. *Measured in the walk.*
 - **Run `os validate`, then `os build`.** On the walk's app both passed on 18.0.0
   once the declarations read `'^18'`. Step 3 lists what fails a richer app.
   *Measured in the walk.*
@@ -190,8 +198,10 @@ birth marker and needs none of this. The command's reference is
   `os migrate security-catalog-overlays` lists the environment's stored
   permission-set and position rows whose name a package now holds, which a v18
   cold boot refuses with `422 NAMESPACE_CONFLICT`; the preview exits `1` when it
-  lists a row, and `--apply` deletes them (`db9cf80`, `e030d43`).
-  *Measured in the walk — see the note under this list.*
+  lists a row, and `--apply` deletes them (`db9cf80`, `e030d43`). On the walk's
+  17.7.0-created database it exited `0`:
+  `✓ No environment-wide permission-set or position row is stored over a package-held name — nothing here refuses the cold boot`.
+  *Measured in the walk.*
 - **Start 18.0.0 against the database once.** It is refused before it listens,
   exit `1`, from the `com.objectstack.organization-ownership-boot-guard` plugin
   (error code `ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED`):
@@ -228,23 +238,407 @@ birth marker and needs none of this. The command's reference is
   set, deleted 49 mirror rows (the retired catalog rows and the seeded email
   templates), dropped 14 `organization_id` columns, set `NOT NULL` on 32 tables,
   and ended `✓ The ceremony is complete; recorded as adr-0131-organization-ownership.`
-  It refuses to run beside a process that holds the SQLite file open
-  (`0b9391b`): stop the server first. *Measured in the walk.*
+  The walk ran it with no server running. *Measured in the walk.*
 - **Start the server.** In the walk 18.0.0 served the database: the 17.7.0
-  admin signed in with the same password, kept `platform_admin`, `org_owner`
-  and `admin_full_access`, read the three notes with their organization, and
-  wrote a fourth. *Measured in the walk.*
+  admin signed in with the same password and kept `platform_admin`,
+  `org_owner` and `admin_full_access`; the three notes read back with their
+  organization, and a fourth was written; an API key minted on 17.7.0 still
+  answered `200`. *Measured in the walk.*
 - **Then clear the drift that remains.** The first served boot still logged
   three orphaned columns (`sys_comment.reactions`,
-  `sys_sso_provider.created_by` / `updated_by`). Carry the reactions first —
-  `os migrate comment-reactions` to preview, `os migrate comment-reactions --apply --yes`
-  to record a verified run (`9963322`, `6673c80`) — then
-  `os migrate apply --allow-destructive --yes`, which dropped the three. The next
-  boot logged no drift. *Measured in the walk.*
+  `sys_sso_provider.created_by` / `updated_by`). Carry the stored emoji
+  reactions into `sys_comment_reaction` records first —
+  `os migrate comment-reactions` to preview, then
+  `os migrate comment-reactions --apply --yes`, which printed
+  `✓ Converted 1 reaction(s); … the run is recorded as verified` (`9963322`,
+  `6673c80`) — then `os migrate apply --allow-destructive --yes`, which dropped
+  the three columns. The next boot logged no drift, and the reaction read back
+  from `sys_comment_reaction`. *Measured in the walk.*
 
-`os migrate security-catalog-overlays` was run in the walk against the
-17.7.0-created database before its first 18.0.0 boot; see the walk record in the
-pull request that wrote this page for its output. `os dev` runs the ceremony on
-its own for a local SQLite development database, according to the
+`os dev` runs the ceremony on its own for a local SQLite development database,
+according to the
 [CLI reference](/docs/deployment/cli#os-migrate-organization-ownership); the
 walk used `objectstack start` and did not exercise that path.
+
+#### 3. Edit what 18.0.0 refuses
+
+Grouped by what you edit. Each line names the change in the 18.0.0 CHANGELOG
+(grep its hash) and what 18.0.0 answers when the old shape is still there. Most
+are refused at author time, so `os validate` finds them before a deploy: a
+schema refusal throws `STACK_SCHEMA_INVALID` (422) from `defineStack`, a
+cross-reference one `STACK_CROSS_REFERENCE_INVALID` (422), and an author-time
+rule fails `os validate` with exit `1`. The metadata save door (Studio,
+`/api/v1/meta`, MCP) refuses the same shapes on a save.
+
+##### Flows: one expression dialect per slot
+
+```text
+✗ flows.0.nodes.1.config.outputVariable: This `get_record` node's config is refused at `outputVariable` by the get_record contract: `$deal` is a `$` name, and the `$` names are reserved for the flow engine's own variables …
+• flow 'pp_f1' · node 'u' (update_record) update_record field value at config.fields.owner: A value slot no longer reads the `{…}` template dialect: a string here is the literal text it spells, so a `{…}` token in it is refused rather than stored with its braces. …
+• flow 'pp_f5' · node 'u' (notify) notify title at config.title: A flow text slot reads `{{ }}` template holes (ADR-0032 §3), not the single-brace `{…}` dialect …
+• flow 'pp_f7' · node 'u' (update_record) update_record field value at config.fields.owner: `user` is not bound in a flow expression, so the run fails with `Unknown variable: user` …
+```
+
+- **Value slots take a CEL value envelope.** The `fields` of `create_record` /
+  `update_record`, `assignment` values, each operand of a CRUD node's `filter`,
+  a `notify` node's `recipients`, `sourceId` and `templateData` values, a
+  `loop` (with a `body`) or `map` `collection`, a `subflow` / `map` `input`, a
+  `script` node's `inputs`, a `screen` node's `defaults`, `defaultValue` and
+  `recordId`, and an `http` node's `body`. `'{record.owner}'` →
+  `{ dialect: 'cel', source: 'record.owner' }`; `'{$User.Id}'` →
+  `current_user.id` (guard it with `current_user != null` in a flow that can
+  run without a user); `'{TODAY()}'` → `isoDate(today())`, `'{TODAY() + 7}'` →
+  `isoDate(daysFromNow(7))`, `'{NOW()}'` → `isoDatetime(now())`. CEL fails the
+  run on an absent variable where the template wrote nothing: guard one that may
+  be absent, `has(vars.x) ? vars.x : null`. A query placeholder in a CRUD filter
+  (`'{current_user_id}'`, `'{today}'`) stays as it is. The refusal names the CEL
+  spelling of each token (`0e9e7b7`, `6a06e3b`, `d85615d`, `615c696`,
+  `111ffff`, `9fdb127`, `f66fdc7`, `12b9daf`, `968acc8`). *Probed on 18.0.0
+  (`os validate`).*
+- **Text slots take `{{ }}` holes.** A `notify` node's `title`, `message` and
+  `actionUrl`, a `screen` node's `title` and `description`, a refusing `end`
+  node's `message`, an `http` node's `url` and `headers` values, and the
+  translated screen heading `flows.FLOW.screens.NODE.title`: `{x}` → `{{ x }}`.
+  Compute anything else into a variable first, and a run-user value too —
+  `{{ $User.Id }}` is refused (`2b61f2d`, `3073b72`, `968acc8`, `d973c34`).
+  *Probed on 18.0.0 (`os validate`).*
+- **CEL reads only the roots the flow binds.** `user.id`, `ctx.user.id`,
+  `os.user.id` → `current_user.id`. `record` is bound only on a flow an
+  entrance hands a record (a record trigger, a `type: 'flow'` action, an inbound
+  hook, …): elsewhere read the variable by its name or as `vars.NAME`. A
+  condition is CEL: `'{amount} > 100'` → `'amount > 100'` (`5fb1746`,
+  `0f77ff5`, `243dd3c`, `7958bdf`). *Probed on 18.0.0 (`os validate`).*
+- **No `$` names of your own.** An `outputVariable`, an `errorVariable` other
+  than the default `$error`, an `iteratorVariable` / `indexVariable`, an
+  `idVariable`, a screen field's `name` and a declared variable's `name` drop
+  the `$`, and every read of them follows (`3e72f93`, `9f5eca5`). *Probed on
+  18.0.0 (`defineStack`).*
+- **Node config is held to its executor's contract.** An undeclared key, or a
+  value of the wrong type, is refused at its location: `fieldValues` → `fields`;
+  `bulk` / `all` / `multiple` → `multi: true`; a screen field's `visibleIf` →
+  `visibleWhen`; a loop's `itemVariable` → `iteratorVariable`; delete an `http`
+  node's `outputVariable`; a `subflow` `config.timeoutMs` moves onto the node;
+  `limit: '10'` → `limit: 10`; a `{token}` in a literal key (`limit: '{x}'`) →
+  the literal (`2f70c22`, `78f841b`, `ac9f8bd`, `ca0bdbc`). *Probed on 18.0.0
+  (`defineStack`).*
+- **The retired aliases are refused with their rename.** A CRUD node's
+  `config.object` → `objectName` and `config.filters` → `filter`; a `notify`
+  node's `to` / `subject` / `body` / `url` → `recipients` / `title` / `message`
+  / `actionUrl`, and `source: { object, id }` → `sourceObject` / `sourceId`;
+  `map` / `subflow` `flow` → `flowName`; `script` `functionName` / `input` →
+  `function` / `inputs`; node types `http_request`, `http_call` and `webhook` →
+  `http`; a `wait` node's loose `config` keys → `waitEventConfig`
+  (`duration` → `timerDuration`, `signal` → `signalName`, `timeoutMs` →
+  `timerDuration` as a string) and a `connector_action` node's →
+  `connectorConfig`. `os migrate meta --from 16 --write` writes the ones it can
+  prove (`5fd2c76`, `f901746`, `d176b0a`). *Probed on 18.0.0 (`defineStack`).*
+- **An edge names two nodes of its graph, once.** An edge whose `source` or
+  `target` is no node, or that repeats an earlier edge, is refused: delete it or
+  re-point it (`db4c45b`). *Probed on 18.0.0 (`defineStack`).*
+- **A retry block states its retries.** A job `retryPolicy` with no
+  `maxRetries`, or `0`, is refused: write `maxRetries: 3` (what such a block ran
+  with before 17), or delete the block for a single attempt;
+  `backoffMultiplier` defaults to `1`, so state `2` to keep the old curve. A
+  retry policy refuses a key it does not declare (`retry.maxRetry`) (`f606ba2`,
+  `ac8f2c5`). *Probed on 18.0.0 (`defineStack`).*
+
+##### Pages, views and actions
+
+```text
+• page "pp_a14" · page:header: `bogusProp` is not a prop `page:header` declares (ComponentPropsMap, @objectstack/spec/ui): Unrecognized key(s) on this `page:header`: `bogusProp`. …
+• page "pp_a3" · element:record_picker: dataSource.object: `element:record_picker` reads its records from the node-level `dataSource` binding only, and this node names no object there …
+✗ pages.0.kind: Page `kind: 'jsx'` was removed in @objectstack/spec 18 (ADR-0087 D2) … Use `kind: 'html'`. …
+✗ Object 'pp_deal' has two default record pages in `pages`: 'pp_r1' (stack.pages[0]) and 'pp_r2' (stack.pages[1]). Set `isDefault: false` on all but one of them. …
+```
+
+- **A page component's props are errors, not advisories.** A prop its
+  `ComponentPropsMap` row does not declare, a value the row refuses, a retired
+  prop, or a missing data binding fails `os validate`, `os build` and `os lint`,
+  and the metadata save door refuses the page (`4f68ba1`, `32fa194`,
+  `d0c09e4`). The `component-props-*` advisories you left from 17.7.0 now stop
+  the build. *Probed on 18.0.0 (`os validate`).*
+- **Elements bind data through `dataSource`.** The flat `object` / `filter` /
+  `sort` / `limit` of `element:record_picker`, `element:number` and
+  `element:repeater` move to the node-level `dataSource`, a sibling of `type`;
+  `object-grid` `defaultFilters` → `filter` where `filter` is empty, deleted
+  where it is not (`317cddd`). *Probed on 18.0.0 (`os validate`).*
+- **Renamed and retired page keys.** `kind: 'jsx'` → `'html'` (`c5dd7fc`); a
+  page component's `visibility` and a form field's `visibleOn` → `visibleWhen`
+  (`105902f`); `page:header` `description` → `subtitle` (`8693110`); delete
+  `page:header` `showStar` (`ae0ca66`); delete a `marketplace:installed-list`
+  component (`14a8bd2`). *Probed on 18.0.0.*
+- **Page layout refusals.** A `main` region takes only `width: 'full'` — delete
+  `width` to keep the page as it rendered (`3a734e0`); a record page that
+  authors both `slots.details` and `slots.tabs` is refused — move
+  `record:details` into the first tab's `children` (`e223152`); at most one
+  `isDefault: true` record page per object (`5f37d36`). *Probed on 18.0.0
+  (`defineStack`).*
+- **List views.** A `type: 'chart'` view binds `chart: { dataset, values }`
+  (`20e7d52`); delete `filterableFields` — `userFilters.fields` declares a quick
+  filter bar (`4bc3bec`); `data: { provider: 'api' }` is retired — bind the view
+  to its object or static rows, and move an endpoint read onto a page
+  component's `dataSource` (`1912af4`, `05ab9ef`). *Probed on 18.0.0
+  (`defineStack`).*
+- **List views are editable in place by default.** A `userActions` block that
+  leaves `editInline` out now parses to `editInline: true`: write
+  `userActions: { editInline: false }` on a list that must stay read-only in
+  place — a log, an audit trail (`f53f14b`). *Probed on 18.0.0
+  (`ListViewSchema`).*
+- **A url target opens an address or an in-app path.** A `type: 'url'` action's
+  `target`, a page action row's url target, a dashboard header action's
+  `actionUrl` and `onSuccess.navigate` take `http://`, `https://`, `mailto:` or
+  a path starting `/` or `./`; `javascript:`, `data:` and every other scheme are
+  refused (`9b37edb`, `f931e76`). *Probed on 18.0.0 (`defineStack`).*
+
+##### Objects, fields, formulas and validation rules
+
+- **Retired object and index keys.** Delete `externalSharingModel` (`301eec6`).
+  A declared index's `unique: true` → `unique: 'global'` (the same index, nothing
+  on disk changes) or `unique: 'organization'` (`ef1fcb2`). *Probed on 18.0.0
+  (`defineStack`).*
+- **A `controlled_by_parent` object has exactly one required `master_detail`.**
+  Anything else is refused, as an object or as an `objectExtensions` entry; if
+  the rows must outlive their parent, give the object its own `sharingModel`
+  (`76815b9`, `4e0838d`, `ace0a53`). *Probed on 18.0.0 (`defineStack`).*
+- **A stage field's options declare their lifecycle.** Every option of the field
+  an object names as `stageField` carries `kind: 'open' | 'won' | 'lost'`
+  (`adad73f`). *Probed on 18.0.0 (`defineStack`).*
+- **Formulas and validation rules read one hop, and only declared fields.** A
+  second relationship hop (`record.acct.parent.name`) is refused — store the
+  value one hop away; an unknown field is refused in every spelling
+  (`record['typo']`, `record.?typo`), and through a reference a field the
+  target does not declare (`d537a31`, `94379f4`, `45bec43`, `913fd6d`). *Probed
+  on 18.0.0 (`os validate`).*
+- **A select option's `visibleWhen` reads what the server binds:** `record`,
+  `previous` and the acting user (`current_user`, and its aliases `user`, `ctx`,
+  `os`). `parent`, `ctx.locale`, `os.env`, `current_user.roles` (now
+  `positions`) and `current_user.email` are refused, and a gate the server
+  cannot evaluate refuses the write instead of admitting the value (`bb4f5cc`,
+  `b1f7a7a`, `46692c1`, `440bed6`). *Probed on 18.0.0 (`os validate`).*
+- **A relationship does not target a stored-metadata table** (`sys_metadata` and
+  its siblings): store the item's type and name instead (`3983965`). *Probed on
+  18.0.0 (`os validate`).*
+- **One name, one entry.** Two entries with one name in one of 27 stack
+  collections, and two `functions` with one `name`, are refused, naming both
+  (`1959aac`, `147a0d1`). `defineSeed()` refuses a record key that is no column
+  of the object (`9ad3d24`). *Probed on 18.0.0.*
+
+##### Positions, permission sets and sharing rules
+
+- **A position names its permission sets** in `permissionSets` on its
+  definition. A boot-time binder that wrote `sys_position_permission_set` rows
+  has nothing left to write to: the four catalog row objects are retired
+  (`bfc15d2`, `66949b7`). *Probed on 18.0.0 (`defineStack` accepts
+  `permissionSets`); see the data line below for the rows.*
+- **Permission-set keys.** Delete `managedBy` (`bbdfc05`) and
+  `adminScope.manageBindings` / `adminScope.authorEnvironmentSets` (`be48c5e`); a
+  body `packageId` that disagrees with the package shipping the set is refused —
+  drop it (`eeb95f7`); a field-permission key with no object part (`'.name'`) is
+  refused — write `'OBJECT.FIELD'` (`30b0fc2`). *Probed on 18.0.0.*
+- **One holder per name.** A package that registers a position, permission-set
+  or capability name another package, the environment catalog or a built-in
+  holds is refused `422 NAMESPACE_CONFLICT`, naming both (`fe98cc6`, `e030d43`).
+  *Read off the 18.0.0 tarball (`@objectstack/objectql`).*
+- **Sharing rules.** `accessLevel: 'full'` → `'edit'` (`5fd2c76`). A declared
+  rule (`defineStack({ sharingRules })`) is read from the registry and is
+  read-only: `sharing_rule` is no longer written through `/api/v1/meta`, and no
+  stored rule may take a declared name — clone it under a new name to customize
+  it, and switch the declared one off through the activation ledger (`1e8b628`,
+  `964a237`, `5e97907`). *`'full'` probed on 18.0.0; the rest read off the
+  tarball (`@objectstack/plugin-sharing`).*
+- **A package manifest's `permissions` is the structured block**
+  `{ services, hooks, network, fs }`; a flat list of strings is refused
+  (`fec87e7`). *Probed on 18.0.0 (`defineStack`).*
+
+##### Datasources, email templates, webhooks and inbound hooks
+
+- **`driver: 'mongo'` → `'mongodb'`,** and `OS_DATABASE_DRIVER=mongo` no longer
+  selects a driver (`bc0538a`). *Probed on 18.0.0 (`defineStack`).*
+- **Email templates.** Delete `category` and `isSystem` (`ec7f7f8`). Templates
+  resolve from the registry: declare them in code — an organization can no
+  longer create or edit a `sys_email_template` row, and the built-in seed is
+  gone (`7de0265`, `8c5aa50`). *`category` probed on 18.0.0; the row refusal
+  (`an organization cannot … an email template row`) read off the 18.0.0
+  tarball (`@objectstack/plugin-email`). The ceremony deleted the 24 seeded
+  template rows in the walk.*
+- **Declared webhooks are read from the registry.** No `sys_webhook` row is
+  written for one, a `sys_webhook` row cannot take a declared name
+  (`409 RESOURCE_CONFLICT`), and one is switched on and off through the
+  activation ledger (`191e043`, `fc34d00`). *Read off the 18.0.0 tarball
+  (`DeclaredWebhookNameConflictError`, `@objectstack/plugin-webhooks`).*
+- **An inbound `api` hook verifies only the timestamped signature.** Send
+  `x-objectstack-signature: t=UNIX_SECONDS,v1=HEX`, the HMAC-SHA256 of
+  `UNIX_SECONDS.RAW_BODY` under the flow's secret, within 300 seconds of the
+  server clock; the body-only `sha256=…` form is refused (`5ce6773`). *Read off
+  the 18.0.0 tarball (`signature-body-only`, `@objectstack/trigger-api`).*
+
+##### Hooks and code against the published packages
+
+- **`objectstack build` refuses some hook bodies it used to lower:** one that
+  reaches `ctx.dispatch.scope` or `ctx.submitted` — do the work at
+  `ctx.dispatch.index === 0` and read `ctx.previous` — and a parameter list it
+  cannot rebind to the sandbox's `ctx` (`1eff322`, `6d36017`). *Read off the
+  18.0.0 tarball (`@objectstack/cli`, `utils/extract-hook-body.js`).*
+- **An in-process engine call carries a context:** the caller's, or
+  `{ isSystem: true }`. A context with no principal that is not a system context
+  is refused (`a3bcbcf`). *Read off the 18.0.0 tarball
+  (`@objectstack/plugin-security`).*
+- **Removed exports** — each is a `TS2305` after the upgrade: delete the import.
+  `normalizeVisibleWhen`, `VISIBILITY_ALIAS_KEYS` and `VISIBILITY_STRICT_OPTIONS`
+  (read `visibleWhen`; `2c702fd`, `ef1fcb2`); `CONVERSION_CONFLICT_CODE` and the
+  conversion-conflict channel (`a65a59b`); `checkPageComponentViewData`
+  (`a35f7a6`); `RunProvenanceContext` (`746637e`); the zero-reader document
+  schemas (`326a90a`); `ISecurityService.discardPermissionSetOverlay` (`60bcfe7`).
+  *Probed on 18.0.0 for the first five names (absent from the package).*
+- **Renamed registry key.** A custom metadata type registration's
+  `allowOrgOverride` → `allowEnvironmentOverlay`, also on `GET /meta/types`
+  (`e23eccb`). *Read off the 18.0.0 tarball (`@objectstack/spec`).*
+- **Hand-built kernels.** `I18nServicePlugin` loses `registerRoutes` /
+  `basePath` — the runtime dispatcher owns `/api/v1/i18n` (`249130f`);
+  `SecurityPlugin` refuses a kernel that registers no `sys_user` / `sys_member`
+  (`c6fe02d`). *Read off the 18.0.0 tarball (`@objectstack/service-i18n`,
+  `@objectstack/plugin-security`).*
+- **`os meta resync` is deleted** (`9e9e6f9`): it answers
+  `Error: command meta:resync not found`, exit `2`. *Measured in the walk.*
+- **Tests on `@objectstack/verify`.** `bootStack` composes what
+  `objectstack serve` composes from the same configuration, and boots the
+  production `single` shape (`7098aca`, `97610a5`, `34dba5a`);
+  `runDashboardWindowProofs` takes no options (`06dbc4e`);
+  `hooks.run(object, 'delete', …)` resolves with the engine's answer
+  (`a6f3a13`). *Read off the 18.0.0 tarball (`@objectstack/verify`).*
+
+##### Clients of the REST API, the SDK and API keys
+
+Every line here was answered by the walk's 18.0.0 server after the ceremony.
+
+- **API keys expire.** A key minted with no `expires_at` gets 90 days, and the
+  response echoes the date; one asked for beyond a year is refused; a key unused
+  for 90 days answers `403 API_KEY_INACTIVE`; a revoked or expired key answers
+  `403 API_KEY_REVOKED` / `API_KEY_EXPIRED` where it used to answer `401`. A key
+  that existed with no expiry keeps working for one year from the first 18.0.0
+  boot, which stamps that date on it: rotate those keys within the year. The
+  windows are the `auth` settings `api_key_default_expiry_days`,
+  `api_key_max_expiry_days` and `api_key_inactivity_days` (`1d79556`). In the
+  walk the 17.7.0 key still answered `200`, with `expires_at` stamped one year
+  after the first 18.0.0 boot; a new key got `expires_at` 90 days out; and a
+  two-year key was refused:
+
+  ```text
+  400 API_KEY_EXPIRY_TOO_LONG: expires_at 2028-10-20T00:00:00.000Z is further away than this deployment allows: an API key lives at most 365 days, so the latest expiry a key signed now may have is 2027-10-20T14:27:27.641Z. …
+  ```
+
+  *Measured in the walk; the `403` codes read off the 18.0.0 tarball
+  (`@objectstack/core`).*
+- **Name your cross-origin callers.** With no origin list, the CORS answer
+  admits no other origin: the walk's GET and preflight from
+  `https://app.example.com` came back with no `access-control-allow-origin`.
+  Set `OS_CORS_ORIGIN=https://app.example.com` (comma-separated for several), or
+  the server plugin's `cors.origins`. A list holding `'*'` while credentials are
+  on fails the boot: name the origins, or set `OS_CORS_CREDENTIALS=false`. A
+  loopback origin is admitted on a development boot only. Same-origin requests,
+  the Console included, need nothing (`f7546a4`). *Measured in the walk.*
+- **No anonymous reads of the API description or the translations.**
+  `GET /api/v1/openapi.json` and `GET /api/v1/i18n/locales` answered
+  `401 UNAUTHENTICATED` with no session (`166a94f`, `b53b949`). *Measured in
+  the walk.*
+- **Request bodies are read as sent.** A JSON body sent as `text/plain` answered
+  `400 INVALID_REQUEST` (`The request body was sent as text/plain, which this server does not read into a request body.`);
+  a `null` or non-record body on a `/data` create answered
+  `400 VALIDATION_FAILED`, as did a `PATCH` whose `expectedVersion` was the
+  number `3` — send the version you read as a string (`76d9dca`, `75ced06`,
+  `7c6b7f4`, `cac0be8`, `1f3ac4f`). *Measured in the walk.*
+- **The catalog row objects are gone.** `GET /api/v1/data/sys_permission_set`,
+  `sys_position`, `sys_position_permission_set` and `sys_capability` answered
+  `404`; read positions and permission sets through
+  `/api/v1/meta/position` and `/api/v1/meta/permission`. A grant row in
+  `sys_user_permission_set` names its set in `permission_set` (the set's name),
+  and carries no `permission_set_id` (`66949b7`, `6f21216`, `0253192`).
+  *Measured in the walk.*
+- **Upload scopes are a closed list:** `user`, `tenant`, `private`, `temp`,
+  `attachments`. `scope: 'public'` answered `400 INVALID_REQUEST` (`scope 'public' is not accepted: a storage scope never made a file publicly readable.`):
+  a file is served without sign-in only when its file record carries
+  `acl: 'public_read'`. The storage settings' `max_upload_mb` is enforced
+  (`413 PAYLOAD_TOO_LARGE`) (`6a3fe25`, `ee8751d`, `59d993c`). *Scope measured
+  in the walk; `PAYLOAD_TOO_LARGE` read off the 18.0.0 tarball
+  (`@objectstack/service-storage`).*
+- **Emoji reactions are records.** `sys_comment.reactions` is retired: read and
+  write `sys_comment_reaction` (`9963322`). *Measured in the walk.*
+- **A public form's submit answers `{ id }` only,** not the stored record
+  (`7806a14`). An import's `runAutomations: false` and
+  `treatAsHistorical: true` are honoured only for the system principal and
+  refused `403 PERMISSION_DENIED` to any other caller (`741aa85`). A search over
+  an object with no searchable field is refused `400 INVALID_FIELD` instead of
+  answering every row (`ec749fb`). *Read off the 18.0.0 tarball
+  (`@objectstack/rest`, `@objectstack/objectql`).*
+
+#### 4. What 18.0.0 does not carry yet, and what it carries unlisted
+
+The v18 line keeps landing on `main`, and the version commit did not take
+everything that landed before it. Read on `main` at `fcb40ad673`: 18 pending
+changesets, five of them `minor`, so the release that publishes them is
+**18.1.0**. They fall in two sets.
+
+**Shipped in 18.0.0, listed in no 18.0.0 CHANGELOG.** Eight of the 18 belong to
+commits that landed before the 18.0.0 version commit (`06cab4849a`), so their
+code is in the 18.0.0 packages while their entries will first appear in
+18.1.0's CHANGELOG. Two of them reach an upgrade:
+
+- **A production server boot with no auth secret is refused** (18.x step 7,
+  part 7b-3, #24845; it also stops an organization-less row drawing its
+  autonumber from the `__global__` counter). Measured on 18.0.0 — `os serve`
+  exited `1` before it listened:
+
+  ```text
+  ✗ This stack enables auth, but no auth secret is set, so AuthPlugin was not composed and no caller can authenticate — anonymous access to object data is always denied, so the data API would be unusable, and with no organization every row this boot writes would have no owner.
+  ```
+
+  Set `OS_AUTH_SECRET` to a long random value, identical across restarts and
+  nodes (the walk set the older `AUTH_SECRET`, which 18.0.0 still reads); `os dev`
+  uses a development fallback. *Measured on 18.0.0.*
+- **A declared sharing rule served under `single` carries
+  `deploymentWide: true`** where it carried `organization_id: null`, and the
+  organization-less readers of sharing rules, approval units and the seed
+  loader retire (18.x step 7, part 7a-3, #24828). *Read off the 18.0.0 tarball
+  (`deploymentWide`, `@objectstack/plugin-sharing`).*
+
+The other six are fixes with no edit for an upgrader, among them
+`invite-member`'s refusal of an unknown role with `code: 'ROLE_NOT_FOUND'`
+(#24846, in the 18.0.0 `@objectstack/plugin-auth`).
+
+**Not in 18.0.0.** Ten changesets belong to commits after the version commit,
+and only 18.1.0 carries them. One is `minor`:
+`POST /api/v1/packages/:id/adopt-orphans` refuses a read-only package with
+`422 WRITABLE_PACKAGE_REQUIRED` (#24861; absent from the 18.0.0
+`@objectstack/runtime`). The rest are fixes: masked password inputs in the
+identity action dialogs, an impersonation session that a target's forced
+password reset no longer holds, `server.trustProxy` read for the vendored auth
+library's client address, and others.
+
+**18.x step 7, part 7a-2** — "a grant applies only in its own organization; the
+organization-less grant readers retire" — is an open pull request (#24872) and
+is not on `main`: neither 18.0.0 nor the pending set carries it.
+
+**The walled postures on 18.0.0, measured.** `os serve` 18.0.0 boots `group`
+and `isolated` on a fresh database (the `18.0.0-next.5` refusal of a walled
+posture is gone). Each prerequisite it names is refused at boot, in this order,
+until it is met:
+
+```text
+✖ FATAL: tenancy posture 'group' was requested but @objectstack/organizations could not be loaded, so the organization wall is INACTIVE. Refusing to boot …
+✗ [auth] tenancy posture 'group' requires OS_PLATFORM_OWNER_EMAIL to be set. …
+✗ ✖ FATAL: tenancy posture 'group' is walled, but this deployment never declared a membership policy. …
+```
+
+With `@objectstack/organizations@18.0.0` declared in the app,
+`OS_PLATFORM_OWNER_EMAIL` set, a membership policy declared
+(`OS_AUTH_MEMBERSHIP_POLICY=invite-only`) and a stable `OS_SECRET_KEY`, both
+postures printed `✓ Server is ready` with `Tenancy: group` /
+`Tenancy: isolated`. *Measured on a fresh database.* Upgrading a **walled**
+17.x database runs the same ceremony, whose walled branch the 18.0.0 CLI
+carries; it was not walked for this page.
+
+#### 5. The npm tags
+
+`latest` is `18.0.0`; `next` still names `18.0.0-next.5`, which is older — see
+[Release facts](#release-facts-as-measured). Pin `18.0.0` or `^18.0.0`, and ⛔
+never `@next`. *Measured with `npm view`.*

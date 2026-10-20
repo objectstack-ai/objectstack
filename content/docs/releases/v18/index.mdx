@@ -55,13 +55,23 @@ too, under the same rules.
   npx skills remove objectstack-ai objectstack-api objectstack-automation \
     objectstack-data objectstack-formula objectstack-i18n objectstack-platform \
     objectstack-pm-dispatch objectstack-query objectstack-ui objectstack-upgrade -y
-  npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+  pnpm add -D "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
   npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
   ```
 
-  `npx skills remove --all` replaces the first command when these are the only
-  skills the project has.
+  Add the package with the manager that installed the project: in a pnpm
+  project, `npm install --save-dev` fails (`npm error Cannot read properties of
+  null (reading 'edgesOut')`, measured on the [18.0.0 upgrade
+  walk](/docs/releases/v18/18-0#1-move-the-pins)). `npx skills remove --all`
+  replaces the first command when these are the only skills the project has.
 - **18.0.0 ends the prerelease.** It is the GA cut: it leaves pre mode and
-  publishes the line to `latest`. Curated notes for the line's releases are
-  compiled at release time and are not written yet; until then, the changesets
-  are the record.
+  publishes the line to `latest`.
+
+## Per-release notes
+
+Each release below is a self-contained page: what it changed, what breaks, and
+its own upgrade checklist.
+
+- **[18.0.0](/docs/releases/v18/18-0)** — current; the GA cut. Its
+  [upgrade checklist](/docs/releases/v18/18-0#upgrade-checklist) moves a 17.x
+  app and its database to 18.0.0, and was walked from 17.7.0.
