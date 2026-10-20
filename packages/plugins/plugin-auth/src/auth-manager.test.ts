@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthManager, ipMatchesRange } from './auth-manager';
+import { vendorClientAddressOptions } from './client-address-vendor';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/objectql';
 
 // Mock better-auth so we can control the handler behaviour
@@ -2116,6 +2117,7 @@ describe('AuthManager', () => {
           domain: '.objectos.app',
         },
         useSecureCookies: true,
+        ipAddress: vendorClientAddressOptions(),
       });
     });
 
@@ -2142,7 +2144,7 @@ describe('AuthManager', () => {
       expect(capturedConfig.advanced.cookiePrefix).toBe('objectos');
     });
 
-    it('should NOT include advanced when not provided', async () => {
+    it('carries only the library client-address source when no advanced option is provided', async () => {
       let capturedConfig: any;
       (betterAuth as any).mockImplementation((config: any) => {
         capturedConfig = config;
@@ -2157,7 +2159,7 @@ describe('AuthManager', () => {
       await manager.getAuthInstance();
       warnSpy.mockRestore();
 
-      expect(capturedConfig).not.toHaveProperty('advanced');
+      expect(capturedConfig.advanced).toEqual({ ipAddress: vendorClientAddressOptions() });
     });
   });
 
@@ -3669,7 +3671,7 @@ describe('AuthManager', () => {
       findOne: vi.fn(),
     }, { permissions: [{ name: ADMIN_FULL_ACCESS, ...ADMIN_FULL_ACCESS_CAPABILITIES }] });
 
-    const getSessionCallback = async (dataEngine: any) => {
+    const getSessionCallback = async (dataEngine: any, extra: Record<string, unknown> = {}) => {
       let capturedConfig: any;
       (betterAuth as any).mockImplementation((config: any) => {
         capturedConfig = config;
@@ -3681,6 +3683,7 @@ describe('AuthManager', () => {
         secret: 'test-secret-at-least-32-chars-long',
         baseUrl: 'http://localhost:3000',
         dataEngine,
+        ...extra,
       });
       await manager.getAuthInstance();
       warnSpy.mockRestore();
@@ -3776,6 +3779,56 @@ describe('AuthManager', () => {
       const result = await callback({ user, session: {} });
       expect(result.user).toBe(user);
       expect(result.user.positions).toBeUndefined();
+    });
+
+    // [#24762, ruling 6288774214 items 1–3] What `user.authGate` the producer
+    // stamps on an impersonation session (`session.impersonatedBy` set) of a
+    // held user: only an `account`-scope posture (`AUTH_GATE_SCOPES`) holds
+    // it, the first one the user's list reports. The user's own session keeps
+    // the list's first entry. The same cases on a real boot, through the
+    // transport seams' 403 envelope, are `@objectstack/verify`'s
+    // `held-session-impersonation-target.pin.test.ts`.
+    describe('the posture stamped on an impersonation session (ADR-0069, AUTH_GATE_SCOPES)', () => {
+      const LAPSED = () => new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const IMPERSONATION = { impersonatedBy: 'u-admin' };
+      // Every posture computable at once: enforced MFA with no grace, and a
+      // one-day expiry. Each row below decides which postures its user holds.
+      const POLICY = { mfaRequired: true, mfaGracePeriodDays: 0, passwordExpiryDays: 1 };
+      const sessionGateFor = async (row: Record<string, unknown>, session: Record<string, unknown>) => {
+        const engine = makeDataEngine({ platformAdmin: false });
+        // The block's double, its `findOne` answering the posture read of the user row.
+        engine.findOne = vi.fn(async (object: string, q?: any) => {
+          assertEngineFindOnePredicate(object, q);
+          return object === 'sys_user' && q?.where?.id === 'u-1' ? { id: 'u-1', ...row } : null;
+        }) as any;
+        const callback = await getSessionCallback(engine, POLICY);
+        const result = await callback({ user: { id: 'u-1', email: 'a@b.com' }, session });
+        return result.user.authGate?.code;
+      };
+      const RESET = { must_change_password: true, two_factor_enabled: true, password_changed_at: new Date().toISOString() };
+      const EXPIRED = { must_change_password: false, two_factor_enabled: true, password_changed_at: LAPSED() };
+      const MFA = { must_change_password: false, two_factor_enabled: false, mfa_required_at: LAPSED(), password_changed_at: new Date().toISOString() };
+      const RESET_AND_MFA = { ...MFA, must_change_password: true };
+
+      it('a forced-reset user: their own session is held, an impersonation session of them is not', async () => {
+        expect(await sessionGateFor(RESET, {})).toBe('PASSWORD_RESET_REQUIRED');
+        expect(await sessionGateFor(RESET, IMPERSONATION)).toBeUndefined();
+      });
+
+      it('an expired-password user: the same, the other credential-scope posture', async () => {
+        expect(await sessionGateFor(EXPIRED, {})).toBe('PASSWORD_EXPIRED');
+        expect(await sessionGateFor(EXPIRED, IMPERSONATION)).toBeUndefined();
+      });
+
+      it('an MFA-held user: the account-scope posture holds the impersonation session too', async () => {
+        expect(await sessionGateFor(MFA, {})).toBe('MFA_REQUIRED');
+        expect(await sessionGateFor(MFA, IMPERSONATION)).toBe('MFA_REQUIRED');
+      });
+
+      it('a user held by both: their own session shows the reset, the impersonation session MFA_REQUIRED', async () => {
+        expect(await sessionGateFor(RESET_AND_MFA, {})).toBe('PASSWORD_RESET_REQUIRED');
+        expect(await sessionGateFor(RESET_AND_MFA, IMPERSONATION)).toBe('MFA_REQUIRED');
+      });
     });
   });
 

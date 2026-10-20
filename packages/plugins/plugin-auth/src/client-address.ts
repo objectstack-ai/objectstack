@@ -26,7 +26,8 @@
  *    the key of an anonymous caller's bucket.
  *  - `AuthManager.resolveClientAddress` (this package): the address the
  *    ADR-0069 D5 allow-list judges and the D7 login audit stamps as
- *    `last_login_ip`.
+ *    `last_login_ip` — and the only address `AuthManager.handleRequest` hands
+ *    the vendored auth library's own reader (`client-address-vendor.ts`).
  *
  * ## Why it lives here
  *

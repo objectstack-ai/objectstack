@@ -20,9 +20,9 @@
  *
  * Under a walled posture that row is invalid state. It was measured to be
  * unreadable by anyone: plugin-security's Layer 0 composes a STRICT
- * `organization_id = :tenant` and the middleware ANDs it over the driver's
- * `(organization_id = :tenant OR organization_id IS NULL)`, and the conjunction
- * of the two is the strict equality alone — so on a walled deployment every
+ * `organization_id = :tenant` and the middleware ANDed it over the driver's
+ * v17 predicate `(organization_id = :tenant OR organization_id IS NULL)`, and
+ * the conjunction of the two is the strict equality alone — so on a walled deployment every
  * principal, at every rung, listed ZERO positions, permission sets and sharing
  * rules while the tables held rows.
  *
@@ -34,14 +34,18 @@
  * ## The doctrine this file implements
  *
  * An organization-less row is INVALID STATE — never a platform-wide default.
- * The 18.0 ownership ceremony (ADR-0131 D10) attributes every one an earlier
- * release wrote before an upgraded database boots, and makes the column NOT
- * NULL; a fresh install that registers the organization object never writes
- * one (ADR-0131 D9: a system write with no organization of its own is stamped
- * with the derivable one, or refused). So
- * {@link resolveOwnOrganizationRow} answers one question — which row is this
- * organization's own — and a row of any other shape that a read happens to
- * return never answers for the organization.
+ * The older reading, in which a NULL organization marked a platform row visible
+ * to every tenant, is retired at every layer: ADR-0131 D8 removed the driver's
+ * `OR organization_id IS NULL` arm from `applyTenantScope` (and
+ * `check-tenant-chokepoint` refuses it), so a per-organization pass no longer
+ * sees an organization-less row at all; the 18.0 ownership ceremony (ADR-0131
+ * D10) attributes every one an earlier release wrote before an upgraded
+ * database boots, and makes the column NOT NULL; and a fresh install that
+ * registers the organization object never writes one (ADR-0131 D9: a system
+ * write with no organization of its own is stamped with the derivable one, or
+ * refused). So {@link resolveOwnOrganizationRow} answers one question — which
+ * row is this organization's own — and a row of any other shape that a read
+ * happens to return never answers for the organization.
  */
 
 /**
@@ -77,11 +81,13 @@ export function rowOrganizationId(row: any): string | null {
  * Resolve THIS organization's own row for a name, out of what a tenant-scoped
  * read returned: the row stamped with `organizationId`, or `null`.
  *
- * Any other row the read returned — another organization's, from a driver with
- * no tenant scoping, or an organization-less one — is never the organization's
- * own and never answers for it. An organization-less row is invalid state
- * after the ownership ceremony (ADR-0131 D10), so it is not reported either:
- * there is no residue to report.
+ * A scoped read passes through `applyTenantScope`, which since ADR-0131 D8
+ * returns the caller's rows only — the driver's NULL arm is retired. Any other
+ * row a read can still return — another organization's or an organization-less
+ * one, from a driver with no native tenant scoping or from an unscoped read —
+ * is never the organization's own and never answers for it. An
+ * organization-less row is invalid state after the ownership ceremony
+ * (ADR-0131 D10), so it is not reported either: there is no residue to report.
  *
  * Under a pass with no organization (`organizationId` undefined) there is
  * nothing to tell apart, and the first row is the row.

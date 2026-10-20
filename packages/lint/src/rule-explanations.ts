@@ -2695,8 +2695,9 @@ const UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION: RuleExplanation = {
       'predates the scope vocabulary (ADR-0120 S6). It reads as "unique per organization" but ' +
       'materializes as a plain composite, and SQL UNIQUE is NULL-distinct: it enforces nothing on a ' +
       'row whose organization column is NULL — every row a 17.x single-organization deployment ' +
-      'wrote. Since ADR-0131 D9 a new row carries its organization, so what the gap still admits is ' +
-      'that residue.',
+      'wrote. Since ADR-0131 D9 a new row carries its organization wherever the organization object ' +
+      'is registered, so what the gap still admits there is that residue; a composition that ' +
+      'registers no organization object still writes rows whose organization column is NULL.',
     'Respelled `unique: \'organization\'`, the NULL rows become one bucket ' +
       '(`COALESCE(organization_id, \'__global__\')`) that is unique among themselves, which is what ' +
       'closes the hole. The respelling keeps `fields` exactly as they are: the driver makes the listed ' +

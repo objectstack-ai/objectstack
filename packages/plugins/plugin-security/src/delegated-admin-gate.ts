@@ -1297,9 +1297,11 @@ export class DelegatedAdminGate {
    *    `{ isSystem: true }`;
    * 2. the candidates that come back are reduced to the caller's OWN row by
    *    {@link resolveOwnOrganizationRow}. That arm is load-bearing on its own:
-   *    a driver with no tenant scoping at all returns every organization's
-   *    rows, and an organization-less business unit is invalid state
-   *    (`organization-scope.ts`), so neither may answer a delegation
+   *    a driver with no native tenant scoping returns every organization's
+   *    rows, organization-less ones included (the SQL driver's NULL arm, which
+   *    also returned organization-less rows, is retired — ADR-0131 D8), and an
+   *    organization-less business unit is invalid state
+   *    (`organization-scope.ts`), so neither class may answer a delegation
    *    boundary.
    *
    * Fail closed on both axes: a name that resolves to no row of the caller's
