@@ -30,11 +30,15 @@
  *    organization) and two organization owners who each create their OWN
  *    organization, so the two tenants carry different active organizations —
  *    asserted, not assumed.
- *  - namespaces: the shipped `branding` manifest (tenant scope, read
- *    `setup.access`, write `setup.write`) for 1 and 3; two fixture manifests
- *    registered on the booted service for 2 and 4, because no shipped manifest
- *    has a global key an organization may read, or a read capability stricter
- *    than its write capability.
+ *  - namespaces: the shipped `company` manifest (tenant scope, read
+ *    `setup.access`, write `setup.write`; its `legal_name` key, which declares
+ *    no default) for 1 and 3; two fixture manifests registered on the booted
+ *    service for 2 and 4, because no shipped manifest has a global key an
+ *    organization may read, or a read capability stricter than its write
+ *    capability. ⛔ Not `branding`: since #24766 the settings service does not
+ *    offer that namespace under a walled posture (it answers
+ *    `404 UNKNOWN_NAMESPACE` here), so a suite booting `isolated` cannot use it
+ *    as its tenant-scope fixture.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -132,35 +136,35 @@ describe('settings values are per organization, and the generic read door applie
   });
 
   it('two organizations each set and read their own tenant-scope value', async () => {
-    const putA = await settingsCall(tenantAToken, 'PUT', 'branding', { workspace_name: 'Org A Workspace' });
+    const putA = await settingsCall(tenantAToken, 'PUT', 'company', { legal_name: 'Org A Ltd' });
     expect(putA.status, await putA.clone().text()).toBe(200);
     // Organization B has written nothing: it does not read A's value.
-    expect((await readValue(tenantBToken, 'branding', 'workspace_name')).source).toBe('default');
+    expect((await readValue(tenantBToken, 'company', 'legal_name')).source).toBe('default');
 
-    const putB = await settingsCall(tenantBToken, 'PUT', 'branding', { workspace_name: 'Org B Workspace' });
+    const putB = await settingsCall(tenantBToken, 'PUT', 'company', { legal_name: 'Org B Ltd' });
     expect(putB.status, await putB.clone().text()).toBe(200);
 
-    expect((await readValue(tenantAToken, 'branding', 'workspace_name')).value).toBe('Org A Workspace');
-    expect((await readValue(tenantBToken, 'branding', 'workspace_name')).value).toBe('Org B Workspace');
+    expect((await readValue(tenantAToken, 'company', 'legal_name')).value).toBe('Org A Ltd');
+    expect((await readValue(tenantBToken, 'company', 'legal_name')).value).toBe('Org B Ltd');
 
     // Two stored rows, each carrying the organization that wrote it.
-    const rows = (await storedRows('branding')).filter((r) => r.key === 'workspace_name');
+    const rows = (await storedRows('company')).filter((r) => r.key === 'legal_name');
     expect(rows.map((r) => [r.organization_id, r.value]).sort()).toEqual(
-      [[orgAId, 'Org A Workspace'], [orgBId, 'Org B Workspace']].sort(),
+      [[orgAId, 'Org A Ltd'], [orgBId, 'Org B Ltd']].sort(),
     );
   });
 
   it('one organization\'s write, and its reset, leave the other\'s value unchanged', async () => {
-    const putA = await settingsCall(tenantAToken, 'PUT', 'branding', { workspace_name: 'Org A Renamed' });
+    const putA = await settingsCall(tenantAToken, 'PUT', 'company', { legal_name: 'Org A Renamed Ltd' });
     expect(putA.status, await putA.clone().text()).toBe(200);
-    expect((await readValue(tenantBToken, 'branding', 'workspace_name')).value).toBe('Org B Workspace');
+    expect((await readValue(tenantBToken, 'company', 'legal_name')).value).toBe('Org B Ltd');
 
-    const reset = await settingsCall(tenantAToken, 'POST', 'branding/reset', {});
+    const reset = await settingsCall(tenantAToken, 'POST', 'company/reset', {});
     expect(reset.status, await reset.clone().text()).toBe(200);
-    expect((await readValue(tenantAToken, 'branding', 'workspace_name')).source).toBe('default');
+    expect((await readValue(tenantAToken, 'company', 'legal_name')).source).toBe('default');
 
-    const other = await readValue(tenantBToken, 'branding', 'workspace_name');
-    expect(other.value).toBe('Org B Workspace');
+    const other = await readValue(tenantBToken, 'company', 'legal_name');
+    expect(other.value).toBe('Org B Ltd');
     expect(other.source).toBe('tenant');
   });
 
@@ -176,20 +180,20 @@ describe('settings values are per organization, and the generic read door applie
   });
 
   it('a tenant-scope write that names no organization is refused under the walled posture, and writes nothing; the same write from an organization lands', async () => {
-    const before = (await storedRows('branding')).length;
+    const before = (await storedRows('company')).length;
 
-    const refused = await settingsCall(adminToken, 'PUT', 'branding', { workspace_name: 'No Organization' });
+    const refused = await settingsCall(adminToken, 'PUT', 'company', { legal_name: 'No Organization' });
     expect(refused.status).toBe(400);
     const body = (await refused.json()) as ApiError;
     expect(body.error?.code).toBe('SETTINGS_VALIDATION');
-    expect(body.error?.details?.fields?.[0]).toMatchObject({ field: 'workspace_name', code: 'invalid_value' });
-    expect((await storedRows('branding')).length).toBe(before);
-    expect((await storedRows('branding')).some((r) => r.value === 'No Organization')).toBe(false);
+    expect(body.error?.details?.fields?.[0]).toMatchObject({ field: 'legal_name', code: 'invalid_value' });
+    expect((await storedRows('company')).length).toBe(before);
+    expect((await storedRows('company')).some((r) => r.value === 'No Organization')).toBe(false);
 
     // Positive control: the identical write, from inside an organization.
-    const landed = await settingsCall(tenantAToken, 'PUT', 'branding', { workspace_name: 'No Organization' });
+    const landed = await settingsCall(tenantAToken, 'PUT', 'company', { legal_name: 'No Organization' });
     expect(landed.status, await landed.clone().text()).toBe(200);
-    expect((await readValue(tenantAToken, 'branding', 'workspace_name')).value).toBe('No Organization');
+    expect((await readValue(tenantAToken, 'company', 'legal_name')).value).toBe('No Organization');
   });
 
   it('the generic data-API read of sys_setting withholds a namespace\'s rows from a principal lacking its readPermission', async () => {
@@ -214,7 +218,7 @@ describe('settings values are per organization, and the generic read door applie
 
     // Positive control 1: the same principal reads its own row of a namespace
     // whose read capability it holds.
-    const own = await stack.apiAs(tenantAToken, 'GET', '/data/sys_setting?namespace=branding');
+    const own = await stack.apiAs(tenantAToken, 'GET', '/data/sys_setting?namespace=company');
     expect(own.status, await own.clone().text()).toBe(200);
     const ownRows = ((await own.json()) as { data?: Array<Record<string, unknown>>; records?: Array<Record<string, unknown>> });
     expect((ownRows.data ?? ownRows.records ?? []).some((r) => r.organization_id === orgAId)).toBe(true);
