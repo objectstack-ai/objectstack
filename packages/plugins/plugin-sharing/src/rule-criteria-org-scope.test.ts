@@ -29,8 +29,7 @@
  * ## Why a real driver
  *
  * The scope is a DRIVER decision: `SqlDriver.applyTenantScope` turns
- * `DriverOptions.tenantId` into `(organization_id = ? OR organization_id IS
- * NULL)`, and the engine threads it as the projection of the tenant wall's
+ * `DriverOptions.tenantId` into `organization_id = ?`, and the engine threads it as the projection of the tenant wall's
  * verdict (ADR-0131 D8, `ObjectQLEngine.buildDriverOptions`) — so only under
  * a walled posture: the org-stamped cases boot `isolated`, and under `single`
  * there is no organization scope for a sweep to keep.
@@ -48,34 +47,23 @@
  * declared to perform (#7795, documented at the `deleteRule` guard). So each
  * org-stamped case is stated beside the null-org case it must not become.
  *
- * The NULL-org RECORD is here for the third direction: `applyTenantScope`
- * emits `field = ? OR field IS NULL`, so a scope "fixed" with a bare equality
- * would pass the cross-org assertions and silently lose that record. `deal_p1`
- * is what distinguishes ROUTING THROUGH THE CHOKEPOINT from reimplementing a
- * worse copy of it — and that is the whole of what it pins.
+ * The NULL-org RECORD is here for the third direction. [ADR-0131 D1, D14]
+ * NULL is not an owner: `applyTenantScope` emits `field = ?` alone, since 18.x
+ * retired the v17 `OR field IS NULL` arm after the upgrade ceremony, so an
+ * org-stamped sweep routed through the chokepoint does NOT reach `deal_p1`,
+ * while the platform-global sweep, which carries no scope, still does. A sweep
+ * that kept its own copy of the retired arm would grant it.
  *
  * ## What `deal_p1` does and does NOT assert (#10103)
  *
- * It used to be justified as the platform bucket: a NULL organization marks a
- * platform row that must stay visible to every tenant (#2734, ADR-0120 D3).
- * That reading is HISTORICAL BEHAVIOUR, SUPERSEDED as a general rule. The
- * ruling on #10103 makes the single general rule the opposite one — a row
- * belonging to no organization is INVALID STATE, to be refused or warned about
- * loudly, never a platform-wide default — and demotes NULL-means-global to a
- * DRIVER-LEVEL COMPATIBILITY NOTE. The RBAC catalog that reading was invented
- * for (#2734's "every tenant admin saw ZERO RBAC rows") is now materialized per
- * organization instead, so no NULL row is load-bearing anywhere.
- *
- * The assertion is nevertheless CORRECT and is kept verbatim, because the wall
- * is untouched at both layers: `applyTenantScope` still emits its `OR ... IS
- * NULL` arm — that arm IS the compatibility behaviour — so an org-stamped rule
- * routed through it still matches an organization-less record. What changed is
- * the JUSTIFICATION, not the behaviour: this case pins that the scope goes
- * through the driver's chokepoint, and it would be equally load-bearing if the
- * arm existed for no reason at all. Reading `deal_p1` as an endorsement of
- * NULL-means-global is what is now wrong; deleting it would cost this suite its
- * most valuable axis, and weakening it to a bare-equality expectation would
- * pin the defect.
+ * It used to be justified as the platform bucket: a NULL organization marked a
+ * platform row that had to stay visible to every tenant (#2734, ADR-0120 D3).
+ * The ruling on #10103 superseded that reading (a row belonging to no
+ * organization is INVALID STATE, never a platform-wide default) and kept the
+ * arm as a driver-level compatibility note; ADR-0131 D14 retired the note with
+ * the ceremony that removes the rows it served. `deal_p1` stays as the record
+ * no organization's sweep reaches: a certified database holds no such row, so
+ * this is the shape a stray one would take, not a population a tenant relies on.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -165,11 +153,9 @@ const open: SqlDriver[] = [];
  *   deal_a2  ORG_A   stage=lost   <- ORG_A's own non-match (criteria still bite)
  *   deal_b1  ORG_B   stage=won    <- the cross-org match this card is about
  *   deal_b2  ORG_B   stage=won    <- second one, so a count cannot pass by luck
- *   deal_p1  (null)  stage=won    <- organization-less row, still returned by
- *                                    `applyTenantScope`'s compatibility arm.
- *                                    [#10103] Kept as the chokepoint-vs-bare-
- *                                    equality probe, no longer as a claim that
- *                                    NULL means platform-wide — see the header.
+ *   deal_p1  (null)  stage=won    <- organization-less row: no org-stamped
+ *                                    sweep reaches it (ADR-0131 D1), the
+ *                                    platform-global one does — see the header.
  */
 async function boot(posture?: 'single' | 'isolated' | 'group'): Promise<Booted> {
   const driver = new SqlDriver({
@@ -266,16 +252,13 @@ describe('[#10119] sharing-rule criteria sweep is scoped to the rule\'s organiza
       // failure names them rather than printing a set diff.
       expect(granted).not.toContain('deal_b1');
       expect(granted).not.toContain('deal_b2');
-      // ORG_A's own match, plus the organization-less row that `applyTenantScope`
-      // still returns through its compatibility arm. [#10103] That arm is
-      // driver-level COMPATIBILITY behaviour, not the platform-bucket rule it
-      // was once justified as — see this file's header. `deal_p1` earns its
-      // place here by distinguishing a scope routed through the chokepoint from
-      // one reimplemented as a bare equality, which is true either way.
-      // `deal_a2` is absent because the CRITERIA still bite — scoping did not
-      // replace them.
-      expect(granted).toEqual(['deal_a1', 'deal_p1']);
-      expect(result.matchedRecords).toBe(2);
+      // ORG_A's own match, and not the organization-less row: NULL is not an
+      // owner (ADR-0131 D1), so the scope routed through the chokepoint does
+      // not reach `deal_p1` — see this file's header. `deal_a2` is absent
+      // because the CRITERIA still bite — scoping did not replace them.
+      expect(granted).not.toContain('deal_p1');
+      expect(granted).toEqual(['deal_a1']);
+      expect(result.matchedRecords).toBe(1);
     });
 
     it('a NULL-ORG (platform-global) rule still sweeps EVERY organization', async () => {
