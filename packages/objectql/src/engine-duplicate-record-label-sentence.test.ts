@@ -29,8 +29,6 @@ vi.mock('./registry', async () => {
 
 const registryDouble = SchemaRegistry as unknown as { getObject: ReturnType<typeof vi.fn> };
 
-type Row = Record<string, unknown>;
-
 /** better-sqlite3: names the column, so the envelope carries `field`. */
 const namedColumn = () =>
   Object.assign(
