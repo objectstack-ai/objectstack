@@ -66,6 +66,16 @@ import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
  * half keeps the defect while the plan reads as applied. Section 3 is therefore
  * the load-bearing part of this file: it builds installations that ALREADY HAVE
  * the old index and real rows, then migrates them.
+ *
+ * ## The organization key part is PLAIN (ADR-0131 D1)
+ *
+ * The replacement once keyed `COALESCE(organization_id, '')` — ADR-0120 D3's
+ * NULL-safe part, which made the organization-less rows one more bucket that
+ * refused duplicates among themselves. Since 18.x a fresh tenant column is NOT
+ * NULL and the driver keys the PLAIN column: `(organization_id, …listed)`. On a
+ * pre-18 database whose tenant column is still nullable, rows with no
+ * organization are not constrained at all — SQL UNIQUE is NULL-distinct — and
+ * this file pins that exemption rather than the retired bucket.
  */
 
 /** The wire shape a duplicate insert must produce, per `rest-server.ts`. */
@@ -338,12 +348,14 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
       // 1. Materialized shape — both spellings, kept side by side
       // ───────────────────────────────────────────────────────────────────
 
-      it('the fixed declaration keys on the NULL-safe organization part', async () => {
+      it('the fixed declaration keys on the PLAIN organization part (ADR-0131 D1)', async () => {
+        // No COALESCE: a fresh tenant column is NOT NULL, so the plain column
+        // is already a total key part.
         const d = makeDriver();
         await d.initObjects(app(sub, 'fixed') as any);
 
         expect(await uniqueKeyParts(sub.table)).toEqual({
-          [sub.replacementName]: ['COALESCE(organization_id)', ...sub.keyColumns],
+          [sub.replacementName]: ['organization_id', ...sub.keyColumns],
         });
       });
 
@@ -410,11 +422,12 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
         expect(await d.count(sub.table, {})).toBe(1);
       });
 
-      it('AFTER: rows with no organization stay unique among THEMSELVES (ADR-0120 D3)', async () => {
-        // Platform/seed rows carry no organization. A bare
-        // `(organization_id, …)` composite would be NULL-DISTINCT under SQL, so
-        // every seeded row could be duplicated at will; the NULL-safe key part
-        // is what prevents that, and seed upsert-by-name relies on it.
+      it('AFTER: on a pre-18 nullable column, rows with no organization are NOT constrained (ADR-0131 D1)', async () => {
+        // Platform/seed rows carry no organization. ADR-0120 D3's NULL-safe
+        // key part once made them a bucket that refused duplicates among
+        // themselves; ADR-0131 D1 retires it. The key is the PLAIN
+        // `(organization_id, …)` composite, NULL-DISTINCT under SQL, so on a
+        // database that still holds such rows they are exempt from the key.
         const d = makeDriver();
         await d.initObjects(app(sub, 'fixed') as any);
         // Rows with no organization exist only on a database built before 18.x
@@ -422,13 +435,15 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
         await asPre18TenantColumn(d, sub.table);
 
         expect((await createAsApi(d, sub.table, row(sub, 'seed1', undefined, sub.key))).status).toBe(201);
-        expect(await createAsApi(d, sub.table, row(sub, 'seed2', undefined, sub.key))).toMatchObject(
+        expect((await createAsApi(d, sub.table, row(sub, 'seed2', undefined, sub.key))).status).toBe(201);
+
+        // A tenant may still hold its OWN row of the same key, and the
+        // organization's key stays enforced on the very same table — the
+        // exemption is the NULL organization's alone, not a dropped constraint.
+        expect((await createAsApi(d, sub.table, row(sub, 'own1', 'org_jia', sub.key))).status).toBe(201);
+        expect(await createAsApi(d, sub.table, row(sub, 'own2', 'org_jia', sub.key))).toMatchObject(
           CONFLICT_ENVELOPE,
         );
-
-        // A tenant may still hold its OWN row of the same key — the platform
-        // bucket and the organization buckets are separate namespaces.
-        expect((await createAsApi(d, sub.table, row(sub, 'own1', 'org_jia', sub.key))).status).toBe(201);
       });
 
       if (sub.trailingControl) {
@@ -497,8 +512,9 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
             dropIndexNames: [sub.legacyName],
             createIndexName: sub.replacementName,
             createColumns: ['organization_id', ...sub.keyColumns],
-            nullSafeColumns: ['organization_id'],
           });
+          // ADR-0131 D1: the replacement keys the PLAIN organization column.
+          expect((entry!.op as any).nullSafeColumns).toBeUndefined();
 
           // ⛔ The old index must NOT ALSO surface as an orphan. An orphan drop
           // is `destructive`, so an operator applying only the safe half would
@@ -521,8 +537,10 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
           expect(applied.some((e) => e.op.type === 'replace_unique_index')).toBe(true);
           expect(skipped).toHaveLength(0);
 
+          // The PLAIN organization part (ADR-0131 D1), even on this pre-18
+          // nullable column.
           expect(await uniqueKeyParts(sub.table)).toEqual({
-            [sub.replacementName]: ['COALESCE(organization_id)', ...sub.keyColumns],
+            [sub.replacementName]: ['organization_id', ...sub.keyColumns],
           });
           expect(await d.count(sub.table, {})).toBe(3);
 
@@ -545,10 +563,11 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
             CONFLICT_ENVELOPE,
           );
 
-          // …and the organization-less bucket survived the migration intact:
-          // the seeded platform row still blocks a duplicate of ITSELF.
-          expect(await createAsApi(d, sub.table, row(sub, 'z3', undefined, sub.platformKey))).toMatchObject(
-            CONFLICT_ENVELOPE,
+          // …and the seeded organization-less row is exempt from the PLAIN key
+          // (ADR-0131 D1): SQL UNIQUE is NULL-distinct, so a duplicate of it is
+          // accepted — the retired ADR-0120 D3 bucket did not survive.
+          expect((await createAsApi(d, sub.table, row(sub, 'z3', undefined, sub.platformKey))).status).toBe(
+            201,
           );
         });
 
@@ -619,9 +638,10 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
               name: sub.replacementName,
               columns: ['organization_id', ...sub.keyColumns],
               unique: true,
-              nullSafeColumns: ['organization_id'],
             },
           });
+          // ADR-0131 D1: no NULL-safe part — the organization column is keyed plain.
+          expect(entry!.replacement.nullSafeColumns).toBeUndefined();
         });
 
         it('claims nothing for an EXPLICITLY NAMED index — that transition is a recreate', () => {
@@ -681,7 +701,7 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
           const d = makeDriver();
           await d.initObjects(app(sub, 'fixed') as any);
           expect(await uniqueKeyParts(sub.table), `${sub.table} posture=${posture}`).toEqual({
-            [sub.replacementName]: ['COALESCE(organization_id)', ...sub.keyColumns],
+            [sub.replacementName]: ['organization_id', ...sub.keyColumns],
           });
           await d.disconnect();
           driver = undefined;
