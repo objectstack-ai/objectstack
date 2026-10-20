@@ -2886,14 +2886,20 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // still refused by the pass that owned that verdict first. NOT fenced on
     // an object write: the field is the object's own body, so the object save
     // door gives the build's verdict, at the build's position in this walk.
+    // The type is read from the field-type index, never off the field again:
+    // the #5017 receiver meta-test pins the keys this walk reads off `f`. The
+    // collector admits only a field whose `type` is a string, and the index
+    // records every such field, so each collected field has its type here.
     if (objectName) {
       const familyRefs = storedMetadataBodyReferencesFor(objectName);
-      for (const [fname, f] of fieldList) {
+      const ownFieldTypes = fieldTypeIndex.get(objectName);
+      for (const [fname] of fieldList) {
         const target = familyRefs.get(fname);
-        if (!target) continue;
+        const type = ownFieldTypes?.[fname];
+        if (!target || !type) continue;
         issues.push({
           where: `object '${objectName}' · field '${fname}' reference`,
-          message: storedMetadataBodyReferenceMessage(fname, String(f.type), target),
+          message: storedMetadataBodyReferenceMessage(fname, type, target),
           source: '',
           severity: 'error',
         });
