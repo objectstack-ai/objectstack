@@ -70,6 +70,7 @@
 import { SystemObjectName } from '@objectstack/spec/system';
 import type { AuthSessionApi } from '@objectstack/spec/contracts';
 import { inProcessSessionReadInput } from '@objectstack/types';
+import { FORWARDED_CLIENT_ADDRESS_HEADERS } from './client-address.js';
 import { inProcessRedispatchUrl } from './in-process-redispatch.js';
 import {
   PLATFORM_ADMIN_REFUSAL_MESSAGES,
@@ -209,10 +210,25 @@ export function sysSessionRevokeDepsFor(manager: SysSessionRevokeManager, basePa
 }
 
 /**
+ * [#24877] Carry the forwarding facts the client-address trust rule reads
+ * (`FORWARDED_CLIENT_ADDRESS_HEADERS`) from the request this route serves onto
+ * the request the owner lane re-dispatches, as the incoming request had them,
+ * so `AuthManager.handleRequest` judges both on the same facts: the forwarded
+ * client address behind a declared `server.trustProxy`, the connection peer
+ * otherwise.
+ */
+function carryForwardedClientAddress(from: Headers, to: Headers): void {
+  for (const name of FORWARDED_CLIENT_ADDRESS_HEADERS) {
+    const value = from.get(name);
+    if (value !== null) to.set(name, value);
+  }
+}
+
+/**
  * Owner lane: better-auth's `/revoke-session`, with the resolved token and the
- * caller's own credentials. Only status and body come back from here, so the
- * re-dispatch carries `disableRefresh` for a cookie request
- * (`inProcessRedispatchUrl`).
+ * caller's own credentials and forwarding facts. Only status and body come
+ * back from here, so the re-dispatch carries `disableRefresh` for a cookie
+ * request (`inProcessRedispatchUrl`).
  */
 async function revokeAsOwner(
   deps: SysSessionRevokeDeps,
@@ -226,6 +242,7 @@ async function revokeAsOwner(
   const authorization = request.headers.get('authorization');
   if (authorization) headers.set('authorization', authorization);
   headers.set('origin', request.headers.get('origin') || incoming.origin);
+  carryForwardedClientAddress(request.headers, headers);
 
   const url = new URL(`${deps.basePath}/revoke-session`, incoming.origin).href;
   const response = await deps.handle(

@@ -41,6 +41,17 @@
  * dependency of every consumer of the entry.
  */
 
+/**
+ * The forwarded headers the rule reads, in the order it believes them, and
+ * only when the deployment declares `server.trustProxy`: `X-Forwarded-For`
+ * (its leftmost entry), then `X-Real-IP`. Lower-cased, as every adapter
+ * delivers them. {@link resolveClientAddress} reads exactly this list, so a
+ * seam that builds a request of its own from one it was handed — an
+ * in-process re-dispatch — carries the facts the rule reads by iterating it,
+ * never a hand-copied set of names (#24877).
+ */
+export const FORWARDED_CLIENT_ADDRESS_HEADERS: readonly string[] = Object.freeze(['x-forwarded-for', 'x-real-ip']);
+
 /** The three facts the rule decides from. */
 export interface ClientAddressInput {
   /** Request headers, lower-cased as every adapter delivers them. */
@@ -71,9 +82,13 @@ function firstHeader(
  * when it has established none. See the module header for the rule.
  */
 export function resolveClientAddress(input: ClientAddressInput): string | undefined {
-  const forwarded = input.trustProxy
-    ? firstHeader(input.headers, 'x-forwarded-for') ?? firstHeader(input.headers, 'x-real-ip')
-    : undefined;
+  let forwarded: string | undefined;
+  if (input.trustProxy) {
+    for (const name of FORWARDED_CLIENT_ADDRESS_HEADERS) {
+      forwarded = firstHeader(input.headers, name);
+      if (forwarded !== undefined) break;
+    }
+  }
   const address = forwarded ?? input.remoteAddress;
   return address ? address : undefined;
 }
