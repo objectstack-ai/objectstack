@@ -122,11 +122,14 @@ function matchesWhere(row: any, where: any): boolean {
 /**
  * A permission store in the SHIPPED aggregation shapes: keys in `sys_api_key`,
  * memberships in `sys_member`, capabilities through `sys_user_permission_set`
- * → `sys_permission_set`. All three principals hold `manage_metadata` through
- * the Default Organization's `admin_full_access` grant — the platform-admin
- * shape, which applies whichever organization the caller acts in and carries
- * the platform-operator rung a walled install demands — so a refusal below can
- * only be the tenancy wall — never a missing capability.
+ * → `sys_permission_set`. All three principals hold `manage_metadata` twice
+ * over: in `org_A`, the organization every key is stamped with and the session
+ * is active in (a grant applies only in its own organization), and through the
+ * Default Organization's `admin_full_access` grant — the platform-admin shape,
+ * which applies whichever organization the caller acts in and carries the
+ * platform-operator rung a walled install demands wherever the REQUESTED
+ * posture is not walled. So a refusal below can only be the tenancy wall —
+ * never a missing capability.
  *
  * `u_exmember`'s key still carries `active_organization_id: 'org_A'`; the row
  * that made that stamp true is simply gone from `sys_member`. That is the whole
@@ -155,9 +158,13 @@ function permissionStore(opts: { syncSchemas: () => Promise<void> }) {
         sys_position_permission_set: [],
         sys_user_permission_set: [
             { id: 'ups_member', user_id: 'u_member', permission_set_id: 'ps_install', permission_set: 'admin_full_access', organization_id: 'org_default' },
+            { id: 'ups_member_org_a', user_id: 'u_member', permission_set_id: 'ps_install', permission_set: 'admin_full_access', organization_id: 'org_A' },
             { id: 'ups_exmember', user_id: 'u_exmember', permission_set_id: 'ps_install', permission_set: 'admin_full_access', organization_id: 'org_default' },
+            { id: 'ups_exmember_org_a', user_id: 'u_exmember', permission_set_id: 'ps_install', permission_set: 'admin_full_access', organization_id: 'org_A' },
             { id: 'ups_orgless', user_id: 'u_orgless', permission_set_id: 'ps_install', permission_set: 'admin_full_access', organization_id: 'org_default' },
+            { id: 'ups_orgless_org_a', user_id: 'u_orgless', permission_set_id: 'ps_install', permission_set: 'admin_full_access', organization_id: 'org_A' },
             { id: 'ups_session', user_id: 'u_session', permission_set_id: 'ps_install', permission_set: 'admin_full_access', organization_id: 'org_default' },
+            { id: 'ups_session_org_a', user_id: 'u_session', permission_set_id: 'ps_install', permission_set: 'admin_full_access', organization_id: 'org_A' },
         ],
         sys_permission_set: [
             { id: 'ps_install', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access'] },
