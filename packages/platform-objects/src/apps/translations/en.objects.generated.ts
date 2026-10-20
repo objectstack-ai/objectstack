@@ -930,7 +930,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "Parent Business Unit",
-        help: "Self-reference for the org tree. Null = root of tenant."
+        help: "Self-reference for the org tree. Null = root of tenant. A unit that still has child units cannot be deleted until they are re-parented or deleted."
       },
       timezone: {
         label: "Timezone",
