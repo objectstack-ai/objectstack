@@ -22900,11 +22900,13 @@ export class ObjectStackProtocolImplementation implements
      * `name` lacks the `${namespace}_` prefix of the package it is written
      * under, else `null`.
      *
-     * ONE judge for both runtime doors that ask the rule — the publish
-     * pre-flight of {@link publishPackageDrafts} and the direct (publish-mode)
-     * save of {@link saveMetaItem} — so they cannot give opposite verdicts on
-     * one name in one package again, nor tell the author two different things
-     * about it.
+     * ONE judge for the three runtime doors that make an object live under a
+     * package — the publish pre-flight of {@link publishPackageDrafts}, the
+     * direct (publish-mode) save of {@link saveMetaItem}, and the per-item
+     * publish of {@link publishMetaItem} (asked in
+     * {@link promoteDraftForPublish}, on the package the promotion writes
+     * under) — so they cannot give opposite verdicts on one name in one
+     * package again, nor tell the author different things about it.
      *
      * The namespace is the one the package DECLARES: its installed manifest,
      * where {@link installPackage} derives and persists one when the author
@@ -23376,9 +23378,12 @@ export class ObjectStackProtocolImplementation implements
         // ({@link publishPackageDrafts}) refused an unprefixed object draft
         // with `NAMESPACE_PREFIX`, while this save stored the very same name
         // `active` under the very same package — an object live under a name
-        // its own package's drafts could never publish again. Both doors now
-        // ask one judge ({@link objectNamespacePrefixViolation}) and answer
-        // its one authored prescription.
+        // its own package's drafts could never publish again. The three doors
+        // that make an object live under a package — this save, the publish
+        // pre-flight and the per-item publish ({@link publishMetaItem}, asked
+        // in {@link promoteDraftForPublish}) — ask one judge
+        // ({@link objectNamespacePrefixViolation}) and answer its one authored
+        // prescription.
         //
         // Judged against the package this save WRITES: the one it names, or
         // the one a package-less publish save resolved to above — the save IS
@@ -23388,9 +23393,10 @@ export class ObjectStackProtocolImplementation implements
         // wrong one. Before every gate that reads or reshapes the body, so a
         // refused name costs no parse and writes nothing.
         //
-        // Asked of a publish-mode save only. A draft is not live: the publish
-        // pre-flight judges it, batch-atomically and in one report with every
-        // other violation, which is that door's contract. Not asked of the
+        // Asked of a publish-mode save only. A draft is not live: whichever
+        // door promotes it judges it — the publish pre-flight batch-atomically
+        // and in one report with every other violation, the per-item publish
+        // before its promotion writes. Not asked of the
         // server-stated rewrites of a row this store already holds (`source`
         // set: the stored-metadata migration, the stored flow-credential move)
         // — they define no object, and refusing one would strand a repair of a
@@ -25618,6 +25624,31 @@ export class ObjectStackProtocolImplementation implements
                 );
             }
         }
+        // [#24547 · ADR-0129 D2] …and the namespace-prefix rule, the third
+        // door's turn: the per-item publish (`POST /meta/object/:name/publish`)
+        // made an object `active` under a namespaced package although its name
+        // lacks the `${namespace}_` prefix — the name the direct save and the
+        // publish pre-flight refuse. Asked with their judge
+        // ({@link objectNamespacePrefixViolation}) and their envelope
+        // (`NAMESPACE_PREFIX` / 422, the judge's sentence), on `promoteInto` —
+        // the package the active row is written under, as the D9.9 refusal
+        // above is — and before `repo.promoteDraft` writes, so nothing is
+        // promoted and the draft stays a draft. A promotion into no package,
+        // or into a package that declares no namespace, is not judged; nor is
+        // sealed managed content, for the D9.9 block's reason (its store
+        // refusal is that row's one answer). `publishPackageDrafts` also
+        // promotes through here, but its pre-flight has refused the same name
+        // with the same judge before any promotion runs, so this answers the
+        // per-item publish alone.
+        if (draftForGate && singularType === 'object' && !this.isSealedManagedItem(singularType, request.name)) {
+            const prefixViolation = this.objectNamespacePrefixViolation(request.name, promoteInto);
+            if (prefixViolation) {
+                const err: any = new Error(prefixViolation);
+                err.code = 'NAMESPACE_PREFIX';
+                err.status = 422;
+                throw err;
+            }
+        }
         // [#21470] …and the divergent `name` refusal, on the same body and for
         // the same reason: a draft stored before `saveMetaItem` judged every
         // type can carry a `name` that is not its row's, and promoting it
@@ -26598,8 +26629,9 @@ export class ObjectStackProtocolImplementation implements
         // one by the time they publish.
         //
         // [#24547] The verdict is {@link objectNamespacePrefixViolation}'s, the
-        // judge the direct save in {@link saveMetaItem} asks too, so the two
-        // doors give one verdict and one sentence for one name in one package.
+        // judge the direct save in {@link saveMetaItem} and the per-item
+        // publish ({@link promoteDraftForPublish}) ask too, so the three doors
+        // give one verdict and one sentence for one name in one package.
         /**
          * Every PRE-FLIGHT refusal of this batch, in one report.
          *

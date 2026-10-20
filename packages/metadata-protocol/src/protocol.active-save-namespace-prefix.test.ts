@@ -9,8 +9,9 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 /**
- * [#24547 · ADR-0129 D2] The package namespace-prefix rule holds at BOTH
- * runtime doors that make an object live.
+ * [#24547 · ADR-0129 D2] The package namespace-prefix rule holds at ALL THREE
+ * runtime doors that make an object live under a package: the direct save,
+ * the package draft publish, and the per-item publish.
  *
  * ADR-0129 D2: a package declares its prefix once (`manifest.namespace`), and
  * every object it defines MUST be named `${namespace}_${shortName}`. The
@@ -38,7 +39,10 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
  *  - a package-less publish save the door resolves INTO a namespaced package
  *    is judged as a save naming that package;
  *  - a draft save is unchanged, and the publish door still refuses its draft —
- *    with the same sentence the active door now answers.
+ *    with the same sentence the active door now answers;
+ *  - the per-item publish (`POST /meta/object/:name/publish`), which promoted
+ *    that draft `active` as well, refuses it with the same envelope and
+ *    sentence and promotes nothing, while a prefixed draft still publishes.
  */
 
 interface Row {
@@ -272,8 +276,8 @@ describe('[#24547 · ADR-0129 D2] the active save door refuses an object without
             packageId: PKG,
         }).then(() => undefined, (e: Error) => e);
 
-        // The draft save stores, as before — the publish pre-flight is the
-        // gate a draft answers to.
+        // The draft save stores, as before — the door that promotes a draft
+        // is the gate it answers to.
         await protocol.saveMetaItem({
             type: 'object',
             name: 'v1_report',
@@ -284,14 +288,67 @@ describe('[#24547 · ADR-0129 D2] the active save door refuses an object without
         expect(rowsFor(rows, 'v1_report')).toEqual([{ state: 'draft', package_id: PKG }]);
 
         const res = await protocol.publishPackageDrafts({ packageId: PKG } as any);
+        const itemRefusal = await protocol.publishMetaItem({
+            type: 'object',
+            name: 'v1_report',
+            packageId: PKG,
+        }).then(() => undefined, (e: Error) => e);
 
         expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0, failedCount: 1 });
         expect(res.failed[0]).toMatchObject({ type: 'object', name: 'v1_report', code: 'NAMESPACE_PREFIX' });
-        // ONE rule, ONE sentence: the two doors cannot disagree on the verdict
-        // or on what the author is told to do about it.
+        // ONE rule, ONE sentence: the three doors cannot disagree on the
+        // verdict or on what the author is told to do about it.
         expect(activeRefusal).toBeInstanceOf(Error);
+        expect(itemRefusal).toBeInstanceOf(Error);
         expect(res.failed[0].error).toBe(activeRefusal!.message);
+        expect(itemRefusal!.message).toBe(activeRefusal!.message);
         // Nothing went live.
         expect(rowsFor(rows, 'v1_report')).toEqual([{ state: 'draft', package_id: PKG }]);
+    });
+
+    it('the per-item publish refuses an unprefixed object draft under a namespaced package — NAMESPACE_PREFIX / 422, the draft stays a draft', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await protocol.saveMetaItem({
+            type: 'object',
+            name: 'v1_report',
+            item: objectBody('v1_report'),
+            packageId: PKG,
+            mode: 'draft',
+        });
+
+        const outcome = await protocol.publishMetaItem({
+            type: 'object',
+            name: 'v1_report',
+            packageId: PKG,
+        }).then(() => 'published', (e: unknown) => e);
+
+        expect(outcome).toMatchObject({ code: 'NAMESPACE_PREFIX', status: 422 });
+        expect((outcome as Error).message).toMatch(/^Object 'v1_report' is missing the package namespace prefix\. /);
+        expect((outcome as Error).message).toContain(`Rename it to '${NS}_v1_report'`);
+        // Nothing promoted: no active row, the draft untouched.
+        expect(rowsFor(rows, 'v1_report')).toEqual([{ state: 'draft', package_id: PKG }]);
+    });
+
+    it('control: the per-item publish promotes a prefixed object draft under the same package', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await protocol.saveMetaItem({
+            type: 'object',
+            name: `${NS}_v1_report`,
+            item: objectBody(`${NS}_v1_report`),
+            packageId: PKG,
+            mode: 'draft',
+        });
+
+        const res = await protocol.publishMetaItem({
+            type: 'object',
+            name: `${NS}_v1_report`,
+            packageId: PKG,
+        });
+
+        expect(res.success).toBe(true);
+        expect(rowsFor(rows, `${NS}_v1_report`)).toContainEqual({ state: 'active', package_id: PKG });
+        expect(rowsFor(rows, `${NS}_v1_report`)).not.toContainEqual({ state: 'draft', package_id: PKG });
     });
 });
