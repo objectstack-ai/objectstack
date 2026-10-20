@@ -41,6 +41,14 @@
  *  5. **A keyring write is seen on the very next signing** — the key the
  *     header was signed with is retired through the engine, and the next
  *     `/get-session` signs with a new one.
+ *  6. **A principal holding a direct grant pays the same prelude** — the
+ *     same 8 reads in 4 round trips, whatever display formula
+ *     `sys_user_permission_set` declares. The resolver's grant read projects
+ *     the columns it decides on, so a formula it does not name is never
+ *     computed there: the case declares a title that reads ONE hop through
+ *     `user_id`, which a read that computes it pays for with a `sys_user` read
+ *     and a round trip. Case 1 cannot see this — its principal holds no grant
+ *     row, so no formula is ever computed for it.
  *
  * The counts are exact on purpose: a change that issues a read the prelude did
  * not issue turns 1 or 2 red. A change that REMOVES one turns them red too —
@@ -118,6 +126,24 @@ function probeDriver(driver: Record<string, any>) {
   };
 }
 
+/**
+ * A `sys_user_permission_set` title that reads one hop through `user_id` —
+ * the person's name, or their email — which a read computing it pays for with
+ * a batched `sys_user` read.
+ */
+const ONE_HOP_GRANT_TITLE =
+  "(isBlank(trim(record.user_id.name)) ? record.user_id.email : record.user_id.name) + ' → ' + record.permission_set";
+
+/** `sys_user_permission_set` as declared, with its `display_title` reading {@link ONE_HOP_GRANT_TITLE}. */
+function withOneHopGrantTitle(object: any): unknown {
+  const title = object.fields.display_title;
+  expect(title?.type, 'the declared grant table carries a display_title formula').toBe('formula');
+  return {
+    ...object,
+    fields: { ...object.fields, display_title: { ...title, expression: { dialect: 'cel', source: ONE_HOP_GRANT_TITLE } } },
+  };
+}
+
 /** The grant tables, as `SecurityPlugin` declares them. */
 async function grantTables(): Promise<unknown[]> {
   let manifest: { objects?: unknown[] } = {};
@@ -149,15 +175,24 @@ const kidOf = (jwt: string | null): string | undefined =>
 const tally = (objects: string[]): Record<string, number> =>
   objects.reduce<Record<string, number>>((acc, o) => ({ ...acc, [o]: (acc[o] ?? 0) + 1 }), {});
 
+interface RigOptions {
+  /** Grant the signed-in user one permission set in the active organization. */
+  directGrant?: boolean;
+  /** Declare `sys_user_permission_set.display_title` as {@link ONE_HOP_GRANT_TITLE}. */
+  oneHopGrantTitle?: boolean;
+}
+
 /** A signed-in user whose session has an active organization, on a warmed engine. */
-async function signedInRig() {
+async function signedInRig(options: RigOptions = {}) {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   const engine = new ObjectQL();
   engines.push(engine);
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   engine.registerDriver(driver, true);
   await engine.init();
-  for (const object of [...authIdentityObjects, SysMetadataActivation, ...(await grantTables())]) {
+  const grants = (await grantTables()).map((o: any) =>
+    options.oneHopGrantTitle && o.name === 'sys_user_permission_set' ? withOneHopGrantTitle(o) : o);
+  for (const object of [...authIdentityObjects, SysMetadataActivation, ...grants]) {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
   }
   await engine.syncSchemas();
@@ -178,6 +213,11 @@ async function signedInRig() {
   await engine.insert('sys_organization', { id: 'org_prelude', name: 'Prelude', slug: 'prelude', created_at: now }, SYS);
   await engine.insert('sys_member', { id: 'mem_prelude', organization_id: 'org_prelude', user_id: session.user.id, role: 'owner', created_at: now }, SYS);
   await engine.update('sys_session', { id: session.session.id, active_organization_id: 'org_prelude' }, SYS);
+  if (options.directGrant) {
+    await engine.insert('sys_user_permission_set', {
+      id: 'ups_prelude', user_id: session.user.id, permission_set: 'prelude_editor', organization_id: 'org_prelude', created_at: now,
+    }, SYS);
+  }
 
   const api: any = await manager.getApi();
   const headers = new Headers({ cookie });
@@ -230,6 +270,27 @@ describe('[#24061] one authenticated request\'s prelude, counted on a real engin
     expect(tally(run.objects)).toEqual(PRELUDE_READS);
     expect(run.legs).toBe(4);
   }, 60_000);
+
+  describe.each([
+    ['as declared', false],
+    ['with a title that reads one hop through user_id', true],
+  ])('a principal holding a direct grant, its title %s', (_title, oneHopGrantTitle) => {
+    it('the shared prelude: the same 8 reads in 4 round trips', async () => {
+      const { engine, probe, prelude, userId } = await signedInRig({ directGrant: true, oneHopGrantTitle });
+      // The grant is real, and its title formula is computed on a read that does
+      // not project it — so the hop, where declared, is live on this engine.
+      const [held] = (await engine.find('sys_user_permission_set', { where: { user_id: userId }, ...SYS })) as any[];
+      expect(held?.permission_set).toBe('prelude_editor');
+      expect(held?.display_title).toBe(oneHopGrantTitle ? 'Prelude → prelude_editor' : `${userId} → prelude_editor`);
+
+      const run = await probe.measure(prelude);
+
+      expect((run.result as any).userId).toBe(userId);
+      expect((run.result as any).tenantId).toBe('org_prelude');
+      expect(tally(run.objects)).toEqual(PRELUDE_READS);
+      expect(run.legs).toBe(4);
+    }, 60_000);
+  });
 
   it('the HTTP /get-session still carries set-auth-jwt, and reads the keyring once', async () => {
     const { engine, manager, probe, cookie, userId } = await signedInRig();
