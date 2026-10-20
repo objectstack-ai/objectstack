@@ -13,12 +13,16 @@
  * grant the shared record's. It wrote nothing to existing rows, and on a WALLED
  * deployment that asymmetry is the cliff that commit pins:
  *
- *   - the SQL driver's own tenant predicate is NULL-TOLERANT —
+ *   - the SQL driver's own tenant predicate was then NULL-TOLERANT —
  *     `(organization_id = :tenantId OR organization_id IS NULL)` — so an
  *     unstamped grant stayed readable by every bare-context reader;
  *   - but Layer 0 (`plugin-security`'s `computeTenantLayer0Filter`) AND-composes
  *     a STRICT `organization_id = <active org>` above it, and the conjunction is
  *     the strict equality alone.
+ *
+ * (ADR-0131 D8 has since retired the driver's NULL arm: both layers now
+ * compile the equality alone, so an unstamped grant is unreachable by every
+ * tenant-scoped read.)
  *
  * ⇒ the day anything reads this table under a tenant context, every
  * organization-less grant becomes invisible — not refused, simply "this person
@@ -591,9 +595,12 @@ function finish(
  *
  * The derived organization is threaded as `tenantId` on the write context too,
  * beside the elevation: the shape #8844 prescribes for a system write and the
- * one the repaired writer uses. On this verb the driver's scope keeps the NULL
- * row in reach (`organization_id = ? OR IS NULL`, #2734), so the write lands
- * exactly on the row the plan named.
+ * one the repaired writer uses. ⚠️ That shape predates ADR-0131 D8: it relied
+ * on the driver's v17 scope `organization_id = ? OR IS NULL` keeping the NULL
+ * row in reach. D8 retired that arm, so under the SQL driver a write threaded
+ * with `tenantId` no longer reaches an organization-less row. No runtime path
+ * calls this pass; the 18.x upgrade ceremony's attribution fate (ADR-0131
+ * D10) is what stamps these rows now.
  *
  * A row whose write throws is RECORDED and the sweep continues: a driver
  * rejecting one row must not cost the other N-1 their repair, and a half-done

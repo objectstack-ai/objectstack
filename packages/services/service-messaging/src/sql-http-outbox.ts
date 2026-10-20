@@ -75,8 +75,9 @@ interface DeliveryRow {
     payload_json: string;
     /**
      * [#13546] Kernel-provisioned tenant column — the predicate of the
-     * cross-organization wall on `redeliver()` (#10740). NULL = global row,
-     * visible to every organization (the driver's deliberate fail-open arm).
+     * cross-organization wall on `redeliver()` (#10740). NULL = a row of no
+     * organization, which no tenant-scoped read reaches (ADR-0131 D8 retired
+     * the driver's NULL arm).
      */
     organization_id?: string | null;
     partition_key: number;
@@ -194,8 +195,8 @@ export class SqlHttpOutbox implements IHttpOutbox {
             // line `SqlOutbox.enqueue` writes. There is no execution context on
             // this path (both producers run off the write path), so the row
             // value is the ONE seam that can scope this row; without it every
-            // row lands in the driver's `organization_id IS NULL` global-row
-            // arm and the redeliver() wall (#10740) excludes nothing. The
+            // row lands organization-less, which no tenant-scoped redeliver()
+            // reaches (ADR-0131 D8 — the driver has no NULL arm). The
             // explicit `?? null` normalizes "producer has no organization"
             // to NULL exactly once, here.
             organization_id: input.organizationId ?? null,

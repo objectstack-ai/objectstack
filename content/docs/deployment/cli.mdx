@@ -1797,12 +1797,12 @@ this report reads. Half of what it can tell you does not survive that:
 
 | Reported | Survives the repair? |
 | :--- | :--- |
-| **The duplicates themselves** — every value held across two partitions, with the id, organization and creation time of each holder | **Yes.** The repair deliberately refuses to adopt a row whose identifier is already taken in the destination partition, so those rows keep `organization_id = NULL` and stay visible |
-| **The live condition** — an object still running a global counter beside an organization-scoped one, and therefore about to mint more duplicates | **No.** The repair merges the two counters and deletes the global one. Once that has happened, this line can never be produced again |
+| **The duplicates themselves** — every value held across two partitions, with the id, organization and creation time of each holder | **Yes.** The repair deliberately refuses to adopt a row whose identifier is already taken in the destination partition, so those rows keep `organization_id = NULL` and stay findable by this report |
+| **The live condition** — an object still holding a global counter beside an organization-scoped one: the record of which counter minted the duplicates above. Under 17.x it also forecast more; since the counter refuses an organization-less row on a tenant table wherever the organization object is registered, nothing mints from the global counter there | **No.** The repair merges the two counters and deletes the global one. Once that has happened, this line can never be produced again |
 
 Running it afterwards is still worth doing — the inventory is what you act on,
-and it is complete either way. What you cannot recover is the forward-looking
-half.
+and it is complete either way. What you cannot recover is the counter
+evidence.
 
 A deployment holding **more than one organization** is skipped by that repair
 rather than guessed at: there is no derivable answer to which organization owns
