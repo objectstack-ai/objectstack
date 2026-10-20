@@ -164,10 +164,12 @@ describe('the read-only boot os migrate plan composes: a declared SQLite datasou
     const factory = createDefaultDatasourceDriverFactory({ dev: true, sqliteAbsentFile: 'empty-in-memory' });
     const filename = join(dir, 'plain', 'archive.db');
     let refusal: unknown;
-    await factory
-      .create({ name: 'archive', driver: 'sqlite', config: { filename } } as any)
-      .then((handle) => { opened.push({ driver: handle.driver ?? handle } as any); })
-      .catch((e: unknown) => { refusal = e; });
+    try {
+      const handle = await factory.create({ name: 'archive', driver: 'sqlite', config: { filename } } as any);
+      opened.push({ driver: handle.driver ?? handle } as any);
+    } catch (e) {
+      refusal = e;
+    }
     expectFileRefusal(refusal, filename, 'ENOTDIR');
   });
 
