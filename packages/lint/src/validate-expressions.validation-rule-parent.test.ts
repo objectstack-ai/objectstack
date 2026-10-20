@@ -1,8 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #24720 — a `validations[]` rule's predicate that reads `parent` is refused
- * at authoring, at `os validate` / `os build` and at the object save door.
+ * #24720 — a `validations[]` rule's predicate that reads `parent` is reported
+ * at authoring, at `os validate` / `os build` and at the object save door, at
+ * `warning` in 18.x (the standing post-GA ruling 甲: a narrowing no ADR-0087
+ * conversion carries ships its loud half first; the refusal comes in 19.0).
  *
  * ## The state this closes
  *
@@ -20,7 +22,7 @@
  * ## The verdict
  *
  * One root verdict over every predicate the rule carries, located where
- * `check()` locates the same predicate, refusing `parent` at error, with the
+ * `check()` locates the same predicate, reporting `parent` at warning, with the
  * prescription that is true for it: the field-rule slots where `parent` IS
  * bound, or a denormalised column. The runtime is unchanged.
  */
@@ -76,12 +78,12 @@ const dump = (r: unknown) => JSON.stringify(r, null, 2);
 
 const WHERE = "object 'fx_line' · validation 'paid_lock'";
 
-describe('#24720 — a `validations[]` predicate reading `parent` is refused at authoring', () => {
-  it('⭐ LIT — a `script` rule\'s `condition` reading `parent` is refused at error, located at the rule', () => {
+describe('#24720 — a `validations[]` predicate reading `parent` is reported at authoring', () => {
+  it('⭐ LIT — a `script` rule\'s `condition` reading `parent` is reported at warning, located at the rule', () => {
     const issues = validateStackExpressions(stackOf(header, line([script(PARENT)])));
 
     expect(issues, dump(issues)).toHaveLength(1);
-    expect(issues[0]).toMatchObject({ where: WHERE, severity: 'error', source: PARENT });
+    expect(issues[0]).toMatchObject({ where: WHERE, severity: 'warning', source: PARENT });
     expect(issues[0]!.message).toContain("validation rule 'paid_lock' reads `parent`");
   });
 
@@ -93,11 +95,15 @@ describe('#24720 — a `validations[]` predicate reading `parent` is refused at 
     expect(issue!.message).toContain("denormalise the header value you need onto 'fx_line'");
   });
 
-  it('⭐ the `os validate` and `os build` commands both give the finding', () => {
+  it('⭐ the `os validate` and `os build` commands both give the finding, at warning: nothing they gate on', () => {
     for (const command of ['validate', 'build'] as const) {
-      const found = commandFindings(command, header, line([script(PARENT)]));
+      const stack = stackOf(header, line([script(PARENT)]));
+      const all = runAuthoringRules(command, { normalized: stack, parsed: stack });
+      const found = expressionFindings(all);
       expect(found, `${command}: ${dump(found)}`).toHaveLength(1);
-      expect(found[0]).toMatchObject({ severity: 'error', where: WHERE });
+      expect(found[0]).toMatchObject({ severity: 'warning', where: WHERE });
+      // The 18.x half of the ruling: no `error` anywhere, so the command does not fail.
+      expect(all.filter((f) => f.severity === 'error'), `${command}: ${dump(all)}`).toEqual([]);
     }
   });
 
@@ -106,7 +112,7 @@ describe('#24720 — a `validations[]` predicate reading `parent` is refused at 
     const issues = validateStackExpressions(stackOf(header, line([rule])));
 
     expect(issues, dump(issues)).toHaveLength(1);
-    expect(issues[0]).toMatchObject({ where: WHERE, severity: 'error' });
+    expect(issues[0]).toMatchObject({ where: WHERE, severity: 'warning' });
   });
 
   it('⭐ a `conditional` rule\'s `when`, and the rules in its `then` / `otherwise`, are judged at their own locations', () => {
@@ -125,7 +131,7 @@ describe('#24720 — a `validations[]` predicate reading `parent` is refused at 
       "object 'fx_line' · validation rule 'gate' then → 'inner'",
     ]);
     for (const i of issues) {
-      expect(i.severity).toBe('error');
+      expect(i.severity).toBe('warning');
       expect(i.message).toContain('reads `parent`');
     }
   });
@@ -142,7 +148,7 @@ describe('#24720 — a `validations[]` predicate reading `parent` is refused at 
       const issues = validateStackExpressions(stackOf(header, line([script(PARENT)], {}, masters)));
       const here = issues.filter((i) => i.where === WHERE);
       expect(here, `${masters} masters: ${dump(issues)}`).toHaveLength(1);
-      expect(here[0]!.severity).toBe('error');
+      expect(here[0]!.severity).toBe('warning');
     }
   });
 
@@ -169,19 +175,20 @@ describe('#24720 — a `validations[]` predicate reading `parent` is refused at 
 });
 
 describe('#24720 — the object door gives the build\'s verdict', () => {
-  it('⭐ LIT — the measured body is REFUSED at the door, located at the rule, naming the root', () => {
+  it('⭐ LIT — the measured body is ADMITTED at the door with the finding as an advisory, located at the rule', () => {
     const result = gateObject(line([script(PARENT)]), [header]);
 
     expect(result.rulesRun).toContain('validateStackExpressions');
-    const errs = expressionFindings(result.errors);
-    expect(errs, dump(result)).toHaveLength(1);
-    expect(errs[0]).toMatchObject({ severity: 'error', where: WHERE, path: WHERE });
-    expect(errs[0]!.message).toContain("validation rule 'paid_lock' reads `parent`");
+    expect(result.errors, dump(result)).toEqual([]);
+    const advs = expressionFindings(result.advisories);
+    expect(advs, dump(result)).toHaveLength(1);
+    expect(advs[0]).toMatchObject({ severity: 'warning', where: WHERE, path: WHERE });
+    expect(advs[0]!.message).toContain("validation rule 'paid_lock' reads `parent`");
   });
 
   it('⭐ PARITY — the door finding IS the build finding', () => {
     const atBuild = commandFindings('build', header, line([script(PARENT)]));
-    const atDoor = expressionFindings(gateObject(line([script(PARENT)]), [header]).errors);
+    const atDoor = expressionFindings(gateObject(line([script(PARENT)]), [header]).advisories);
 
     expect(atBuild, dump(atBuild)).toHaveLength(1);
     expect(atDoor, dump(atDoor)).toEqual(atBuild);
