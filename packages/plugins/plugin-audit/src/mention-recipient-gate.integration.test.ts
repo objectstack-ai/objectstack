@@ -26,6 +26,13 @@
  *   vetted — the stand-in admits whatever envelope it is handed.
  * - the `messaging` service, played by a recorder of `emit()` calls (the
  *   inbox materialisation is service-messaging's to pin).
+ *
+ * plugin-security also owns the two grant tables the resolver reads beside
+ * `sys_member` (`sys_user_position`, `sys_user_permission_set`). They are
+ * registered here with the columns the resolver reads and left EMPTY — no
+ * user holds a position or a permission set, so membership alone decides the
+ * wall. Unregistered, the resolver refuses (an unreadable authorization store
+ * is an outage, not a denial) and the gate withholds every notification.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
@@ -55,12 +62,21 @@ const tenancy: { posture: Posture } = { posture: 'isolated' };
 
 const READ_OPS = new Set(['find', 'findOne', 'count']);
 
-/** plugin-security's read enforcement on TASK, as the module header sets out. */
-function admits(row: Record<string, any>, context: any): boolean {
-  if (tenancy.posture === 'isolated' && row.organization_id !== context.tenantId) return false;
-  if (tenancy.posture === 'group' && !(context.accessible_org_ids ?? []).includes(row.organization_id)) return false;
-  if (row.confidential && row.owner_id !== context.userId) return false;
-  return true;
+/**
+ * plugin-security's read enforcement on TASK, as the module header sets out —
+ * composed into the read's WHERE, as the real layers are, so a read that
+ * projects only `id` is narrowed exactly like one that reads every column.
+ */
+function enforcement(context: any): Record<string, unknown> {
+  const clauses: Array<Record<string, unknown>> = [];
+  const deny = '__no_organization__';
+  if (tenancy.posture === 'isolated') clauses.push({ organization_id: context.tenantId ?? deny });
+  if (tenancy.posture === 'group') {
+    const reach: string[] = context.accessible_org_ids ?? [];
+    clauses.push({ organization_id: { $in: reach.length > 0 ? reach : [deny] } });
+  }
+  clauses.push({ $or: [{ confidential: false }, { owner_id: context.userId ?? deny }] });
+  return { $and: clauses };
 }
 
 const emits: Array<Record<string, any>> = [];
@@ -128,6 +144,20 @@ describe('@mention notifications reach only mentioned users who can read the rec
     engine.registerDriver(driver, true);
     engine.registry.registerObject(SysUser as any, HARNESS_PACKAGE);
     engine.registry.registerObject(SysMember as any, HARNESS_PACKAGE);
+    for (const [name, grantColumn] of [['sys_user_position', 'position'], ['sys_user_permission_set', 'permission_set']]) {
+      engine.registry.registerObject(
+        {
+          name,
+          label: name,
+          fields: {
+            user_id: { name: 'user_id', label: 'User', type: 'text' },
+            organization_id: { name: 'organization_id', label: 'Organization', type: 'text' },
+            [grantColumn]: { name: grantColumn, label: grantColumn, type: 'text' },
+          },
+        } as any,
+        HARNESS_PACKAGE,
+      );
+    }
     engine.registry.registerObject(
       {
         name: TASK,
@@ -144,11 +174,11 @@ describe('@mention notifications reach only mentioned users who can read the rec
     await engine.syncSchemas();
 
     engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {
-      await next();
-      if (!READ_OPS.has(op.operation) || !op.context || op.context.isSystem) return;
-      if (op.operation === 'count') return;
-      if (Array.isArray(op.result)) op.result = op.result.filter((r: any) => admits(r, op.context));
-      else if (op.result && !admits(op.result, op.context)) op.result = null;
+      if (READ_OPS.has(op.operation) && op.ast && !op.context?.isSystem) {
+        const narrowing = enforcement(op.context ?? {});
+        op.ast.where = op.ast.where ? { $and: [op.ast.where, narrowing] } : narrowing;
+      }
+      return next();
     }, { object: TASK });
 
     for (const u of [ALICE, CAROL, BOB]) {
@@ -157,7 +187,7 @@ describe('@mention notifications reach only mentioned users who can read the rec
     for (const [user, org] of [[ALICE, ORG_A], [CAROL, ORG_A], [BOB, ORG_B]] as const) {
       await engine.insert('sys_member', { user_id: user.id, organization_id: org, role: 'member' }, { context: SYS } as any);
     }
-    openTask = (await engine.insert(TASK, { name: 'open', organization_id: ORG_A, owner_id: ALICE.id }, { context: SYS } as any)).id;
+    openTask = (await engine.insert(TASK, { name: 'open', organization_id: ORG_A, owner_id: ALICE.id, confidential: false }, { context: SYS } as any)).id;
     confidentialTask = (
       await engine.insert(TASK, { name: 'confidential', organization_id: ORG_A, owner_id: ALICE.id, confidential: true }, { context: SYS } as any)
     ).id;
