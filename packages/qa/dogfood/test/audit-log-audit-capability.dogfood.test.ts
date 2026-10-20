@@ -429,7 +429,10 @@ describe('[#21260] the ledger audit capability is bounded by its holder’s orga
     }
     const userA = await ql.findOne('sys_user', { where: { email: 'alc-org-a@verify.test' }, context: { ...SYS } });
     expect(await catalogPermissionSet(ql, capOnly.name), 'fixture permission set served by the security catalog').toBeTruthy();
-    await ql.insert('sys_user_permission_set', { user_id: userA.id, permission_set: capOnly.name }, { context: { ...SYS } });
+    // The grant is owned by the first organization: a grant applies only in its
+    // own organization, and under the wall an organization-less system insert is
+    // refused (ADR-0131 D9).
+    await ql.insert('sys_user_permission_set', { user_id: userA.id, permission_set: capOnly.name, organization_id: org.a }, { context: { ...SYS } });
     for (const who of ['a', 'b'] as const) {
       const res = await stack.apiAs(tok[who], 'POST', `/data/${OBJ}`, { name: `gone ${who}` });
       expect(res.status).toBeLessThan(300);

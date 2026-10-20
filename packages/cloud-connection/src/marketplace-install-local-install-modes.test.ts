@@ -34,7 +34,7 @@ import { tmpdir } from 'node:os';
 // top, never inside a clocked `it` (`scripts/check-test-source-alias.mjs`).
 import '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
-import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
+import { declareInstallerPlatformOwner, installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 
 const ROUTE = '/api/v1/marketplace/install-local';
@@ -251,6 +251,11 @@ describe('install-local — the package must permit the mode (`installModes`)', 
 });
 
 describe('install-local — `unmanaged` under a walled REQUESTED posture', () => {
+    // The request carries no organization, so under a wall the installer is
+    // the deployment's declared platform owner.
+    let restoreOwner: () => void;
+    beforeEach(() => { restoreOwner = declareInstallerPlatformOwner(INSTALLER); });
+    afterEach(() => restoreOwner());
     // An UNRECOGNISED posture value is read as walled by the same function
     // (pinned in `package-unmanaged-install.test.ts`); at this door the
     // install-capability admission refuses such a boot first, so it is not a

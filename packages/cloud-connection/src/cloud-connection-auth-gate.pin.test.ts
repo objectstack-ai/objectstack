@@ -267,9 +267,14 @@ const APP = {
 };
 const LEDGER_FILE = 'com.acme.gated.json';
 
-/** Every test user holds the authoring capability, so a refusal below is the gate's alone. */
+/**
+ * Every test user holds the authoring capability, so a refusal below is the gate's alone:
+ * the `admin_full_access` grant owned by the Default Organization, which applies with no
+ * active organization.
+ */
 function grantRows(): Record<string, any[]> {
     return {
+        sys_organization: [{ id: 'org_default', slug: 'default' }],
         sys_user: Object.keys(POSTURES).map((id) => ({ id, email: `${id}@acme.test` })),
         sys_member: [],
         sys_user_position: [],
@@ -277,7 +282,7 @@ function grantRows(): Record<string, any[]> {
         sys_metadata_activation: [],
         sys_position_permission_set: [],
         sys_user_permission_set: Object.keys(POSTURES).map((id, i) => ({
-            id: `ups${i}`, user_id: id, permission_set_id: 'ps1', permission_set: 'admin_full_access', organization_id: null,
+            id: `ups${i}`, user_id: id, permission_set_id: 'ps1', permission_set: 'admin_full_access', organization_id: 'org_default',
         })),
         sys_permission_set: [{ id: 'ps1', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access'] }],
     };

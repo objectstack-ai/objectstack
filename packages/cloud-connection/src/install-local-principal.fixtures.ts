@@ -70,7 +70,9 @@ export const INSTALLER_ORGANIZATION = { id: 'org_default', slug: 'default' };
  */
 export function installerGrantRows(userId: string = INSTALLER_USER_ID): Record<string, unknown[]> {
     return {
-        sys_user: [{ id: userId, email: `${userId}@objectstack.test` }],
+        // Verified, so a suite that declares the installer the platform owner
+        // ({@link declareInstallerPlatformOwner}) is read as one.
+        sys_user: [{ id: userId, email: installerEmail(userId), email_verified: true }],
         sys_member: [],
         sys_user_position: [],
         sys_position: [],
@@ -91,18 +93,61 @@ export function installerGrantRows(userId: string = INSTALLER_USER_ID): Record<s
 
 /**
  * The resolver's Default Organization read — `sys_organization` where
- * `{ slug: 'default' }` — answered with {@link INSTALLER_ORGANIZATION} when the
- * suite's own engine answered it with nothing. `undefined` for every other read
- * (and for a suite that does hold a `default` organization), so a suite's own
- * `sys_organization` rows and probes are never overridden.
+ * `{ slug: 'default' }` — answered with {@link INSTALLER_ORGANIZATION} unless
+ * the suite's own engine answered it with an organization that IS slugged
+ * `default` (a catch-all `find` that answers every read with the same rows
+ * names no Default Organization). `undefined` for every other read, so a
+ * suite's own `sys_organization` rows and probes are never overridden.
  */
 export function answerDefaultOrganizationRead(object: string, options: unknown, innerRows: unknown): unknown[] | undefined {
     if (object !== 'sys_organization') return undefined;
     const where = (options as { where?: Record<string, unknown> } | undefined)?.where;
     if (!where || Object.keys(where).length !== 1 || where.slug !== 'default') return undefined;
     const rows = innerRows && (innerRows as { value?: unknown }).value !== undefined ? (innerRows as { value: unknown }).value : innerRows;
-    if (Array.isArray(rows) && rows.length > 0) return undefined;
+    if (Array.isArray(rows) && rows.some((row) => (row as { slug?: unknown } | null)?.slug === 'default')) return undefined;
     return [{ ...INSTALLER_ORGANIZATION }];
+}
+
+/**
+ * A suite's real registry, except that it holds `sys_organization`: the
+ * resolver reads no Default Organization out of a composition whose registry
+ * lacks the object, and every deployment the installer exists in registers it.
+ * Every other member answers from the suite's registry, bound to it.
+ */
+function registryHoldingOrganizations(registry: any): any {
+    if (!registry || typeof registry.getObject !== 'function') return registry;
+    return new Proxy(registry, {
+        get(target, prop) {
+            if (prop === 'getObject') {
+                return (name: string, ...rest: unknown[]) =>
+                    target.getObject(name, ...rest) ?? (name === 'sys_organization' ? { name: 'sys_organization', fields: {} } : undefined);
+            }
+            const value = Reflect.get(target, prop, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+        },
+    });
+}
+
+/** The installer's stored address. */
+export function installerEmail(userId: string = INSTALLER_USER_ID): string {
+    return `${userId}@objectstack.test`;
+}
+
+/**
+ * [#11663 L5] Declare the installer the deployment's platform owner
+ * (`OS_PLATFORM_OWNER_EMAIL`) — the one platform administrator a WALLED posture
+ * (`group` / `isolated`) has: there no stored grant anchors standing, and with
+ * no active organization no grant applies, so a walled suite whose request
+ * carries no organization installs as the declared owner, exactly as a walled
+ * deployment's operator does. Returns the restore; call it in `afterEach`.
+ */
+export function declareInstallerPlatformOwner(userId: string = INSTALLER_USER_ID): () => void {
+    const previous = process.env.OS_PLATFORM_OWNER_EMAIL;
+    process.env.OS_PLATFORM_OWNER_EMAIL = installerEmail(userId);
+    return () => {
+        if (previous === undefined) delete process.env.OS_PLATFORM_OWNER_EMAIL;
+        else process.env.OS_PLATFORM_OWNER_EMAIL = previous;
+    };
 }
 
 /** The `auth` service shape the plugin resolves a session through. */
@@ -114,8 +159,9 @@ export function installerAuthService(userId: string = INSTALLER_USER_ID) {
  * Wrap an existing `objectql` fake so the authorization tables answer from
  * {@link installerGrantRows}, the resolver's Default Organization read answers
  * {@link INSTALLER_ORGANIZATION} when the suite names none
- * ({@link answerDefaultOrganizationRead}), and EVERY other object falls through
- * to whatever the suite already wired.
+ * ({@link answerDefaultOrganizationRead}; a suite registry is made to hold
+ * `sys_organization` so the read is issued), and EVERY other object falls
+ * through to whatever the suite already wired.
  *
  * Wrapping rather than replacing is the point: these suites' engines carry
  * behaviour their own assertions depend on (seed lookups, ledger probes,
@@ -131,9 +177,19 @@ export function withInstallerGrants<T extends Record<string, any>>(
     const inner = typeof engine?.find === 'function' ? engine.find.bind(engine) : undefined;
     const wrapped = {
         ...engine,
+        ...(engine?.registry ? { registry: registryHoldingOrganizations(engine.registry) } : {}),
         find: async (object: string, options?: unknown) => {
             if (Object.prototype.hasOwnProperty.call(rows, object)) return rows[object];
-            const answered = inner ? await inner(object, options) : [];
+            let answered: unknown;
+            try {
+                answered = inner ? await inner(object, options) : [];
+            } catch (err) {
+                // An engine that registers no organization object refuses the read;
+                // the installer's Default Organization is still the one it names.
+                const supplied = answerDefaultOrganizationRead(object, options, []);
+                if (supplied) return supplied;
+                throw err;
+            }
             return answerDefaultOrganizationRead(object, options, answered) ?? answered;
         },
     } as T;
