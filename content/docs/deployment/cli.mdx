@@ -1218,6 +1218,7 @@ where the data lives.
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
 | `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. A v18 server refuses to start until it has run. 18.0 supports fresh `single` installs; upgrades and walled postures arrive in 18.x. In 18.0 the command refuses. See [below](#os-migrate-organization-ownership) |
 | `os migrate activity-changed-fields` | Stamp the two read-rule columns (`changed_fields`, `milestone_key`) on the `sys_activity` rows written before they existed. Until it runs, those rows are withheld from every reader but the system, so run it at once after upgrading. No flag; idempotent |
+| `os migrate audit-mail-bodies` | Mask the mail bodies (`body_text`, `body_html`) that `sys_audit_log` and `sys_activity` copies of `sys_email` / `sys_identity_email` rows still hold in clear, written before the audit writer masked them. Reports counts only. No flag; idempotent. See [below](#os-migrate-audit-mail-bodies) |
 | `os migrate comment-parent-pair` | Stamp the parent pair (`object_name`, `record_id`) on the `sys_comment` rows written before it existed. Until it runs, a broad comment read past 2,000 candidate rows omits comments the reader may see, and its total agrees with the short list, so run it at once after upgrading. No flag; idempotent |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 | `os migrate security-catalog-overlays` | List the environment-wide permission-set and position rows (the legacy plurals `permissions` / `positions` included) stored over a name a configured package holds — the rows a v18 cold boot refuses — each with the package that holds its name; `--apply` deletes them, one history tombstone per row. Run it before the first v18 boot, with the flags and environment the deployment boots with: the platform security plugin's sets are held only where `os serve` composes it (an auth secret set, and the `auth` tier on), and the step takes `serve`'s `--preset` and `--dev` with `serve`'s meaning. Adopts nothing; exits 1 while it lists a row |
@@ -1236,8 +1237,8 @@ holds nothing, and answers with empty work and exit 0. `os migrate value-shapes`
 clean over zero records and names the objects it did not read. `os migrate
 recorded-by` has nothing to convert and `os migrate resume` no interrupted runs.
 `os migrate meta --stored` has no stored metadata to examine, `os migrate
-audit-metadata-bodies` no audit copy to rewrite, and `os migrate account-issuer` no
-account to collide. `os secret orphans`, `os secret rewrap` and `os storage orphans`
+audit-metadata-bodies` and `os migrate audit-mail-bodies` no audit copy to rewrite, and
+`os migrate account-issuer` no account to collide. `os secret orphans`, `os secret rewrap` and `os storage orphans`
 report no secret and no file. A read the command cannot avoid and that fails for any
 other reason still refuses and exits 1. Point `--database-url` at the deployment's
 database, or boot the deployment once first, to see what it holds.
@@ -1487,6 +1488,36 @@ and re-running is how an interrupted run is finished. The columns arrive with
 the upgraded deployment's schema sync, which an `--apply` run performs itself:
 a dry run against a database no upgraded process has opened cannot read them,
 reports the failed read and exits `1`. A failed read or write exits `1`.
+
+#### `os migrate audit-mail-bodies`
+
+The audit trail keeps a copy of each audited row: `sys_audit_log` in
+`new_value` / `old_value`, and the activity feed in both halves of
+`sys_activity.metadata`. For a mail-log row (`sys_email`, `sys_identity_email`)
+that copy used to carry the mail **body**, so password-reset, verification,
+magic-link and invitation links sat in the audit tables in clear. New copies
+mask `body_text` and `body_html` the way a credential field is masked
+(`••••••••`; an empty body stays empty). This command masks the copies written
+before that.
+
+```bash
+os migrate audit-mail-bodies                    # Dry run: counts, writes no rows
+os migrate audit-mail-bodies --apply            # Mask the copies (prompts)
+os migrate audit-mail-bodies --apply --yes --json   # CI / scripts
+```
+
+Every copy of either mail log is masked; no mail is told apart from another, so
+the command does not depend on `os migrate organization-ownership` and gives the
+same result run before or after it. Only the body keys of the copy change: every
+other key of the copy, and every other column of the row (its `updated_at`
+included), stays as it was. The report holds counts only and never prints a
+value.
+
+**Idempotent**: a masked body is the mask, so a second run masks nothing, and
+re-running is how an interrupted run is finished. A failed read or write exits
+`1`. The copies age out with each table's retention (14 days for activity, 90
+for the audit log, unless the deployment lengthens it); run it once after
+upgrading rather than wait for that.
 
 #### `os migrate organization-ownership`
 

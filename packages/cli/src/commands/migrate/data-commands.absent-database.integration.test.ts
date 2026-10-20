@@ -71,6 +71,11 @@
  * [#21573] `os migrate unmapped-columns` joined the roster later, born with
  * the same answer: it asks `tableAbsent` before the differ. Its control row is
  * a retired field's column on `os21529_contact`, holding a value.
+ *
+ * [#24693] `os migrate audit-mail-bodies` joined it born with the answer too:
+ * it reads `sys_audit_log` and `sys_activity` through the view
+ * `audit-metadata-bodies` reads them through. Its control rows are an 18.0
+ * writer's copies of a mail-log row, planted below the writer.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -433,6 +438,18 @@ await k(shard.name).insert({
     },
   }),
 });
+// [#24693] An 18.0 writer's copies of a mail-log row: the body in clear, a
+// sentinel. The activity row carries its read-rule stamp, so it is no row of
+// work for \`activity-changed-fields\`.
+await k('sys_audit_log').insert({
+  id: 'aud_24693', object_name: 'sys_email', record_id: 'em_24693', action: 'create',
+  new_value: JSON.stringify({ id: 'em_24693', subject: 's', body_text: 'mail-body-sentinel-24693', body_html: null }),
+});
+await k(shard.name).insert({
+  id: 'act_24693', timestamp: new Date().toISOString(), type: 'create', summary: 'created', object_name: 'sys_email', record_id: 'em_24693',
+  changed_fields: '[]',
+  metadata: JSON.stringify({ old: null, new: { id: 'em_24693', subject: 's', body_text: 'mail-body-sentinel-24693', body_html: null } }),
+});
 await k('sys_comment').insert({
   id: 'cmt_23857', thread_id: 'sys_metadata:m_21552', body: 'planted below the writer', author_id: 'u1',
   created_at: new Date().toISOString(),
@@ -493,6 +510,21 @@ const DOORS: readonly Door[] = [
       // table to create: skipping it would answer "nothing to rewrite" over this row.
       expect(doc.report.byObject.sys_activity.scanned).toBeGreaterThanOrEqual(1);
       expect(doc.report.byObject.sys_activity.rewritten).toBe(1);
+    },
+  },
+  {
+    name: 'migrate audit-mail-bodies',
+    argv: ['migrate', 'audit-mail-bodies'],
+    empty: (doc) => {
+      expect(doc).toMatchObject({ apply: false, report: { scanned: 0, rewritten: 0, failures: 0 } });
+      expect(Object.keys(doc.report.byObject).sort()).toEqual(['sys_activity', 'sys_audit_log']);
+    },
+    humanEmpty: /Nothing to mask/,
+    tables: ['sys_audit_log', 'sys_activity'],
+    work: (doc) => {
+      // The seeded clear mail-log copy is the one row to mask on each table;
+      // the rotation-managed table's rows are READ, as for audit-metadata-bodies.
+      expect(doc.report).toMatchObject({ failures: 0, byObject: { sys_audit_log: { rewritten: 1 }, sys_activity: { rewritten: 1 } } });
     },
   },
   {
