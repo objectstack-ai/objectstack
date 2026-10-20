@@ -1157,6 +1157,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       addRecord: {
         label: "Add Record"
       },
+      "addRecord.enabled": {
+        label: "Enabled"
+      },
+      "addRecord.position": {
+        label: "Position"
+      },
       showRecordCount: {
         label: "Show Record Count"
       },
@@ -1303,6 +1309,12 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "interfaceConfig.addRecord": {
         label: "Add Record",
         helpText: "Add-record entry point"
+      },
+      "interfaceConfig.addRecord.enabled": {
+        label: "Enabled"
+      },
+      "interfaceConfig.addRecord.position": {
+        label: "Position"
       },
       "interfaceConfig.emptyState": {
         label: "Empty State",
