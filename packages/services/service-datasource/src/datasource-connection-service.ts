@@ -220,6 +220,38 @@ export function availabilityOf(status: ConnectStatus): DatasourceAvailability {
 }
 
 /**
+ * The host-reserved name of the platform's primary datasource (ADR-0062,
+ * #3826): the one {@link DatasourceConnectionService.connect} connects
+ * `asDefault`, and the one runtime-admin create and app bundles may not use.
+ */
+export const DEFAULT_DATASOURCE_NAME = 'default';
+
+/**
+ * The name the engine's driver registry holds `datasource`'s driver under —
+ * this package's ONE spelling of ADR-0062's default-driver rule.
+ *
+ * Every datasource but the default is registered under its own name
+ * ({@link DatasourceConnectionService.connect} stamps it). The default keeps
+ * its driver's NATURAL name and registers with `isDefault: true`, so
+ * `getDriverByName('default')` can never find it: it is reached through the
+ * engine's default-driver name instead. `undefined` when the default is asked
+ * for and the engine has no default driver (or cannot say).
+ *
+ * `asDefault` defaults to "is this the reserved name". `disconnect` passes its
+ * own flag through unchanged; the saved-datasource Test probe
+ * (`ExternalDatasourceServicePlugin`, #24772) asks by name. ⛔ Never a second
+ * copy of this rule at a call site: a copy is how the Test probe came to answer
+ * "no registered driver" for a default that was live.
+ */
+export function registeredDriverName(
+  engine: Pick<ConnectionEngineLike, 'getDefaultDriverName'> | undefined,
+  datasource: string,
+  asDefault: boolean = datasource === DEFAULT_DATASOURCE_NAME,
+): string | undefined {
+  return asDefault ? engine?.getDefaultDriverName?.() : datasource;
+}
+
+/**
  * ADR-0062 D2 — is this declared datasource "meaningfully addressed", such that
  * auto-connecting it is safe and intended?
  *
@@ -714,7 +746,7 @@ export class DatasourceConnectionService {
    */
   async disconnect(name: string, opts: { asDefault?: boolean } = {}): Promise<void> {
     const engine = this.cfg.engine();
-    const driverName = opts.asDefault ? engine?.getDefaultDriverName?.() : name;
+    const driverName = registeredDriverName(engine, name, opts.asDefault === true);
     // [commit 77b91bdb4] Cast-free: `getDriverByName` now answers the contract's
     // `IDataDriver | undefined` instead of a locally re-declared `unknown`.
     // The `typeof … === 'function'` guard below stays — a host-built driver in
@@ -883,7 +915,7 @@ export class DatasourceConnectionService {
       .filter(([, st]) => st.status === 'connected')
       .map(([n]) => n);
     for (const n of names) {
-      await this.disconnect(n, { asDefault: n === 'default' });
+      await this.disconnect(n, { asDefault: n === DEFAULT_DATASOURCE_NAME });
     }
   }
 

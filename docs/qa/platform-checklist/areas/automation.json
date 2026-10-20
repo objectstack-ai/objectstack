@@ -38,7 +38,7 @@
             "edges": []
           },
           "expect": "2xx. The definition is deliberately AUTHORABLE-but-unexecutable: FlowSchema declares `nodes: z.array(FlowNodeSchema)` with no `.min(1)` and no refinement requiring a `start` member (packages/spec/src/automation/flow.zod.ts), and nothing rejects a start-less flow at publish, so this lands. It is the engine that refuses it at DISPATCH — `flow.nodes.find(n => n.type === 'start')` misses and execute() returns { success:false, code:'FLOW_NO_START_NODE' } (packages/services/service-automation/src/engine.ts). ⚠️ If a publish-time structural check lands later this step will start 4xx-ing — that is a FINDING about where the refusal moved, not a rotted recipe.",
-          "source": "flow is NOT in the org-overlay-allowed set (RUNNER.md's overlay fact — view/dashboard/report/translation/email_template only), so the `?package=` route is required exactly as qa-scratch-authz uses it for objects; `?package=` is read as query.package and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts,319)"
+          "source": "flow is NOT in the org-overlay-allowed set (RUNNER.md's overlay fact — view/dashboard/report/translation/email_template only), so the `?package=` route is required exactly as qa-scratch-authz uses it for objects; `?package=` is read as query.package and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts#handleMetadataRequest, its PUT /metadata/:type/:name save branch, through packages/rest/src/rest-server.ts#metaItemPackageBinding)"
         },
         {
           "step": 3,
@@ -400,7 +400,7 @@
       "title": "Every demonstrable flow node type authors in the designer, executes in a run, and surfaces its step in run logs",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -413,7 +413,8 @@
         ],
         "knownGaps": [
           "parallel_gateway / join_gateway / boundary_event are deliberately NOT in the matrix: BPMN-interop lowering targets whose author-facing forms are the ADR-0031 structured containers — waived with reasons in examples/app-showcase/src/coverage.ts FLOW_NODE_WAIVERS, and the coverage test enforces every OTHER enum member is authored",
-          "showcase_fan_out_notify (the parallel + http owner in the map above) posts to Slack and needs outbound egress. On an egress-denied runner, prove parallel on another run that carries it (showcase_nested_fan_out_reminders — a loop-body parallel), and record http as blocked(environment) rather than FAIL when its only located steps failed for want of egress (#21784 FE13). http itself is provable without egress on a SELF-PINGING scratch flow: register (POST /api/v1/automation) start → http {method: 'GET', url: 'http://127.0.0.1:<OS_PORT>/api/v1/health'} → end, trigger it (POST /api/v1/automation/<name>/trigger), read the run (http step success), then DELETE /api/v1/automation/<name> — measured on main c91af8ed6: 200, run completed, http success"
+          "showcase_fan_out_notify (the parallel + http owner in the map above) posts to Slack and needs outbound egress. On an egress-denied runner, prove parallel on another run that carries it (showcase_nested_fan_out_reminders — a loop-body parallel), and record http as blocked(environment) rather than FAIL when its only located steps failed for want of egress (#21784 FE13). http itself is provable without egress on a SELF-PINGING scratch flow: register (POST /api/v1/automation) start → http {method: 'GET', url: 'http://127.0.0.1:<OS_PORT>/api/v1/health'} → end, trigger it (POST /api/v1/automation/<name>/trigger), read the run (http step success), then DELETE /api/v1/automation/<name> — measured on main c91af8ed6: 200, run completed, http success",
+          "no pin scores a full clause of this item (RUNNER rule 6, a pin scores only the layer it drives; the theme-B rule), so the item carries no automated ref. packages/qa/dogfood/test/flow-node.dogfood.test.ts runs ONE update_record node over the HTTP trigger, with its input variable wired into the filter (the target stamped, the bystander untouched). That is one variant of acceptance[1]'s twenty, and no clause scores a single variant. automated may return when a pin drives the whole matrix, the palette feed or the unknown-type contract"
         ]
       },
       "variants": [
@@ -497,10 +498,6 @@
         "seed-data-thin",
         "automation-input"
       ],
-      "automated": {
-        "kind": "e2e",
-        "ref": "packages/qa/dogfood/test/flow-node.dogfood.test.ts — covers ONE variant of acceptance[1] only: an update_record node runs over the HTTP trigger with its input variable wired into the filter (the target stamped, the bystander untouched); the matrix, the palette, the suspending types, the region tags and the unknown-type contract need the run"
-      },
       "source": [
         "packages/spec/src/automation/flow.zod.ts#FlowNodeAction (FlowNodeAction — the built-in seed set; type validated at registerFlow, not by a closed enum)",
         "packages/spec/src/automation/flow.zod.ts#FLOW_STRUCTURAL_NODE_TYPES (start / end: structural — no executor, no descriptor, so absent from GET /automation/actions; end logs no step)",
@@ -555,6 +552,12 @@
           "date": "2026-10-19",
           "change": "acceptance[1] (clause, verify), steps[1] and automated.ref corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24545, automation.flow-node-type-matrix acceptance[1] and steps[1]) and round 2's Tier 1 record (#24598, via wave anchor #24579 §3, comment 6272032736), which names this ref among those that over-claim clause coverage. \"end logs no step\" is true only of a taken end: an untaken branch's end is logged skipped (recordSkipped, service-automation engine.ts, at base 9a7838edf5); the palette has no Add node on the read-only package; and the one dogfood pin runs a single update_record node",
           "ref": "#24649"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "automated removed, fixtures.knownGaps[2] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: Tier 1 in name only), round 15 of wave anchor #24579. The ref already said its one dogfood pin covers ONE variant of acceptance[1]. A variant is not a clause, so no full clause is pinned: automated is dropped (theme-B rule), and the knownGap says what the pin asserts. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ],
       "enumSource": {
@@ -568,7 +571,7 @@
       "title": "Every flow trigger type fires and produces a run of its bound flow; the run's trigger block records the launch event",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -639,7 +642,7 @@
         }
       ],
       "negative": [
-        "anonymous POST /api/v1/automation/:name/trigger must be denied (401) with NO run row created — a 2xx or a run row is a FAIL (pinned by packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts)",
+        "anonymous POST /api/v1/automation/:name/trigger must be denied (401) with NO run row created — a 2xx or a run row is a FAIL (its 401 half is pinned at the HTTP door by packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts 'anonymous POST /automation/:name/trigger is denied (401)'; that case reads no run rows afterwards, so the no-run-row half is driven by hand)",
         "an intake POST with a wrong or missing HMAC signature must be refused (not 202) and create no task — a silent 202 on a bad signature is a FAIL"
       ],
       "traps": [
@@ -687,6 +690,12 @@
           "date": "2026-10-19",
           "change": "acceptance[4].verify and automated.ref corrected — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.trigger-type-matrix acceptance[4] / steps[5]: the screen flow launches through the action door, as screen-flow-roundtrip revision 4 already records) and round 2's Tier 1 record (#24598, via wave anchor #24579 §3, comment 6272032736), which names this ref among those that over-claim clause coverage: its two tests are the ledger ratchet only. Re-read at base 9a7838edf5. No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "negative[0]'s pin note narrowed, automated.ref unchanged — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: negative[0]'s pin is not in the ref), round 15 of wave anchor #24579. Read at base b1676441ba: the dogfood case asserts the anonymous trigger's 401 on the served showcase composition and never reads the runs after it. So it asserts half of negative[0] ('denied (401) with NO run row created'). A pin joins the ref only for a full clause at its layer, so it stays out, and negative[0] now says which half it pins. negative[0]'s FAIL condition is unchanged",
+          "ref": "#24891"
         }
       ]
     },
@@ -1401,7 +1410,7 @@
       "title": "The flow-dispatch HTTP status contract: every never-dispatched, ran-and-failed and non-terminal outcome answers its own status + ADR-0112 code, at every door that dispatches a flow",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)", "org member for the resume 403 arm — created by the admin with POST /api/v1/auth/admin/create-user and past its password change (POST /api/v1/auth/change-password): a held session answers 403 PASSWORD_RESET_REQUIRED, the right status for the wrong reason"],
@@ -1422,19 +1431,19 @@
       "steps": [
         "read the table first, from its single definition: packages/runtime/src/flow-dispatch-status.ts (FLOW_NOT_FOUND_STATUS, classifyFlowRefusal, isPausedRun) — it is a module rather than a route mapper precisely because three doors must agree on it, and a second copy of it is a defect by construction. The resume arms are a separate list, read them from packages/runtime/src/domains/automation.ts (the `POST /:name/runs/:runId/resume` branch and its code→status arms)",
         "boot showcase isolated (dogfood §0) with OS_PORT exported as well as -p (RUNNER.md's connector self-URL fact), sign in as the dev admin, and run the qa-flow-status-doors recipe",
-        "TRIGGER, per row, against BOTH doors — POST /api/v1/automation/:name/trigger and the legacy POST /api/v1/automation/trigger/:name (the shape client.automation.trigger() calls): a name the deployment does not hold; qa_always_fails; the disabled showcase_urgent_task_alert; qa_no_start_node; a flow that succeeds — showcase_notify_owner with {\"params\": {\"ownerId\": <a user id>, \"message\": \"…\"}} answers 200 (not showcase_resilient_sync, whose CEL condition reads the record's status and answers a bare trigger 400 FLOW_FAILED); showcase_reassign_wizard (pauses)",
+        "TRIGGER, per row, against BOTH doors — POST /api/v1/automation/:name/trigger and the legacy POST /api/v1/automation/trigger/:name (the shape client.automation.trigger() calls): a name the deployment does not hold (404 RESOURCE_NOT_FOUND: the status table's 404 row names no code of its own, so the envelope carries the spec's status default, HttpStatusErrorCodeMap in packages/spec/src/api/errors.zod.ts); qa_always_fails; the disabled showcase_urgent_task_alert; qa_no_start_node; a flow that succeeds — showcase_notify_owner with {\"params\": {\"ownerId\": <a user id>, \"message\": \"…\"}} answers 200 (not showcase_resilient_sync, whose CEL condition reads the record's status and answers a bare trigger 400 FLOW_FAILED); showcase_reassign_wizard (pauses)",
         "record for every response the HTTP status AND error.code together — neither alone is the contract, and a run that captured only the status cannot tell 409 FLOW_DISABLED from any other 409",
         "on the 400 FLOW_FAILED responses, additionally record error.details.errorMessage and error.details.summary (the flow author's own text and the per-node accounting) — they are the documented payload of that row and the console reads them from exactly there",
-        "RESUME: trigger showcase_reassign_wizard with {\"params\": {\"recordId\": <a task id>, \"objectName\": \"showcase_task\"}} to obtain a live paused runId (without recordId the valid resume fails 400 FLOW_FAILED: its update_record filters on recordId), then drive each refusal arm against POST /api/v1/automation/:name/runs/:runId/resume — a bodyless/valid resume (200, next screen or completion); a resume missing a required screen input (400 INVALID_SCREEN_INPUT); a resume whose signal writes the engine's `$` namespace (400 INVALID_SIGNAL) — spelled {\"output\": {\"$x\": 1}}, which lands as collect.$x: a `$` key inside `inputs` meets the screen check first and answers INVALID_SCREEN_INPUT, and a body carrying both `inputs` and `variables` is refused 400 VALIDATION_FAILED since #24594; a resume of an unknown runId (404 RUN_NOT_FOUND); a resume as the member persona, neither the trigger identity nor a resumeAuthority holder (403 PERMISSION_DENIED); and 409 RESUME_IN_PROGRESS, reproducible with a scratch screen flow start → screen(collect, required x) → http GET a local delay server (e.g. http://127.0.0.1:FREE-PORT/slow?s=6) → screen(collect2, required y) → end: send a second resume while the first is inside the http node (the engine's `resuming` guard holds for the whole continuation), and the second screen makes the intact suspension and a later resume observable (QA run #24596)",
+        "RESUME: trigger showcase_reassign_wizard with {\"params\": {\"recordId\": <a task id>, \"objectName\": \"showcase_task\"}} to obtain a live paused runId (without recordId the valid resume fails 400 FLOW_FAILED: its update_record filters on recordId), then drive each refusal arm against POST /api/v1/automation/:name/runs/:runId/resume — a bodyless/valid resume (200, next screen or completion); a resume missing a required screen input (400 INVALID_SCREEN_INPUT); a resume whose signal writes the engine's `$` namespace (400 INVALID_SIGNAL) — spelled {\"inputs\": {\"new_assignee\": \"…\"}, \"output\": {\"$x\": 1}}, which lands as collect.$x. The screen check runs first (refuseInvalidScreenInput before applyResumeSignal, engine.ts), so the body must also satisfy the screen's required new_assignee: {\"output\": {\"$x\": 1}} alone answers 400 INVALID_SCREEN_INPUT (QA run #24779), as does a `$` key inside `inputs`; and a body carrying both `inputs` and `variables` is refused 400 VALIDATION_FAILED since #24594; a resume of an unknown runId (404 RUN_NOT_FOUND); a resume as the member persona, neither the trigger identity nor a resumeAuthority holder (403 PERMISSION_DENIED); and 409 RESUME_IN_PROGRESS, reproducible with a scratch screen flow start → screen(collect, required x) → http GET a local delay server (e.g. http://127.0.0.1:FREE-PORT/slow?s=6) → screen(collect2, required y) → end: send a second resume while the first is inside the http node (the engine's `resuming` guard holds for the whole continuation), and the second screen makes the intact suspension and a later resume observable (QA run #24596)",
         "after each RETRYABLE refusal, re-read the run and confirm the suspension is STILL PAUSED and a later valid resume still works — 'the refusal left the suspension intact' is half of what those arms mean, and a status alone does not show it",
         "cross-door: dispatch the SAME disabled flow through POST /api/v1/actions/... with a type:'flow' action and through a declared type:'flow' endpoint, and record what each answers",
         "capture the per-row × per-door verdict table"
       ],
       "acceptance": [
         {
-          "clause": "every TRIGGER row answers its own status and code, on BOTH trigger routes: 404 (no such flow), 409 FLOW_DISABLED, 422 FLOW_NO_START_NODE, 400 FLOW_FAILED — and a successful run answers 200",
+          "clause": "every TRIGGER row answers its own status and code, on BOTH trigger routes: 404 RESOURCE_NOT_FOUND (no such flow), 409 FLOW_DISABLED, 422 FLOW_NO_START_NODE, 400 FLOW_FAILED — and a successful run answers 200",
           "oracle": "api",
-          "verify": "one request per row per route; the observed (status, error.code) pair equals the row in flow-dispatch-status.ts. ⚠️ The dangerous direction is a 200 whose body carries an inner {success:false}: that is the pre-17.1.0 double envelope these rows replaced, and a caller branching on HTTP status alone reads a failed or refused run as a successful one — so a 200 on any of the four refusal rows is a FAIL, not a formatting difference",
+          "verify": "one request per row per route; the observed (status, error.code) pair equals the row in flow-dispatch-status.ts, whose 404 row names no code of its own: that row's code is the spec's status default RESOURCE_NOT_FOUND (HttpStatusErrorCodeMap, packages/spec/src/api/errors.zod.ts). ⚠️ The dangerous direction is a 200 whose body carries an inner {success:false}: that is the pre-17.1.0 double envelope these rows replaced, and a caller branching on HTTP status alone reads a failed or refused run as a successful one — so a 200 on any of the four refusal rows is a FAIL, not a formatting difference",
           "evidence": "the per-row per-route status + code table, with one full response body per row"
         },
         {
@@ -1527,6 +1536,12 @@
           "date": "2026-10-19",
           "change": "personas, steps[2] and steps[5] name the specimens and spellings each arm needs — checklist-accuracy findings of the 18.0 QA sweep (QA run #24545 steps[2] and steps[5], QA run #24596 acceptance[4]'s 409 arm; wave anchor #24579 §3, comment 6272314386). The success row now names showcase_notify_owner; the wizard is triggered with recordId + objectName; INVALID_SIGNAL is spelled through `output`, since a `$` key in `inputs` meets the screen check first (refuseInvalidScreenInput runs before applyResumeSignal, engine.ts) and the `inputs` + `variables` body #24545 measured as silently dropped is refused since PR #24594 (c3954057fe, the fix of #24546); the 403 member must be past its password change; and 409 RESUME_IN_PROGRESS reproduces with a slow http node before a second screen. Re-derived at base 9a7838edf5. The 503 STORE_UNAVAILABLE arm stays blocked(fixture) (§4)",
           "ref": "#24649"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[5]'s INVALID_SIGNAL body and the 404 row's code — checklist-accuracy findings of QA run #24779 (wave anchor #24579 round 12). {\"output\":{\"$x\":1}} alone answers 400 INVALID_SCREEN_INPUT on the wizard, whose screen requires new_assignee, because refuseInvalidScreenInput runs before applyResumeSignal (engine.ts at base 307ce4c4b4); the body now satisfies the input too. The 404 row answers RESOURCE_NOT_FOUND: flow-dispatch-status.ts names no code for it, and the envelope takes the spec's HttpStatusErrorCodeMap default. steps[2] and acceptance[0] (clause, verify) state it. No other clause changed",
+          "ref": "#24824"
         }
       ]
     },
@@ -1642,7 +1657,7 @@
       "title": "Disabling a packaged flow that packaged callers invoke as a subflow is refused 409 DELETE_RESTRICTED naming every caller; the refused attempt writes no ledger row; enabling the subflow itself is never guarded",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1713,7 +1728,7 @@
         "packages/services/service-automation/src/engine.ts#packagedSubflowCallers (packagedSubflowCallers — definition scan at disable time, subflow AND map via config.flowName, non-packaged and self skipped), (the guard, before the durable write; the thrown {code:'DELETE_RESTRICTED', status:409, subflowCallers})",
         "packages/spec/src/api/errors.zod.ts#DELETE_RESTRICTED (DELETE_RESTRICTED — standard 409 catalog member, no new code minted; its DELETE_ prefix fits per the #10243 ruling quoted at the throw site)",
         "packages/services/service-automation/src/flow-activation-ledger.test.ts#engine (the engine-level pins: names every caller, map counts, non-packaged and self do not guard, enable never guarded, no-callers lands)",
-        "examples/app-showcase/src/automation/flows/index.ts,707,795,816,1322,1339 (the three stock caller→child pairs)",
+        "examples/app-showcase/src/automation/flows/index.ts#TaskDoneNotifyOwnerFlow + examples/app-showcase/src/automation/flows/index.ts#ProjectClosureFlow + examples/app-showcase/src/automation/flows/index.ts#ReleaseSignoffFlow (the three stock caller→child pairs: each caller's subflow or map node names its child by config.flowName — showcase_notify_owner, showcase_closure_signoff and showcase_one_task_signoff)",
         "#12438 (sweep) · Epic #12150",
         "cross-ref: automation.packaged-flow-disable-durable (what a disable that LANDS must do); automation.setup-packaged-automation-board (the refusal rendered in the UI)"
       ],
@@ -1726,7 +1741,8 @@
         },
         { "revision": 2, "date": "2026-10-02", "change": "retired clause 5's expected-fail note and re-ordered step 6. The remedy sequence now holds (36d043b #20724, 0d9349f #20759): on 17.6.0 the caller's disable then the child's retry both answer 200 and the ledger reads active=false. Step 6's caller-first enable is refused by design since 679f95e (#20711, 409 RESOURCE_CONFLICT naming the disabled subflow), so the step enables the child first and clause 4 is scoped to a child's enable. Measured by the 17.6.0 release-verification run", "ref": "#21330" },
         { "revision": 3, "date": "2026-10-16", "change": "the 'still armed' probe patched a showcase_task to done without saying how to get there (#23878 automation slice finding 2, re-measured on main c91af8ed6): showcase_task requires `project` (a create without it answers 400 VALIDATION_FAILED 'Project is required'), and task_status_flow allows status→done only from in_review (a PATCH from the default backlog answers 400 invalid_transition). A create with project and status 'in_review' answers 201 (create is not transition-checked) and the PATCH to done answers 200, firing the record-change flows. Step 4 now creates the task with project and status 'in_review' first; on that path showcase_task_done_notify_owner ran and completed", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-19", "change": "acceptance[0].clause quotes the remedy the engine writes — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.packaged-flow-subflow-disable-refusal acceptance[0]; wave anchor #24579 §3): the remedy names the calling flow, so a substring match on the generic quote fails although the meaning is identical. Re-derived at base 9a7838edf5 (packages/services/service-automation/src/engine.ts, the subflow-caller refusal: 'disable the calling flow 'NAME' first' … ' — or leave this one armed.')", "ref": "#24649" }
+        { "revision": 4, "date": "2026-10-19", "change": "acceptance[0].clause quotes the remedy the engine writes — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.packaged-flow-subflow-disable-refusal acceptance[0]; wave anchor #24579 §3): the remedy names the calling flow, so a substring match on the generic quote fails although the meaning is identical. Re-derived at base 9a7838edf5 (packages/services/service-automation/src/engine.ts, the subflow-caller refusal: 'disable the calling flow 'NAME' first' … ' — or leave this one armed.')", "ref": "#24649" },
+        { "revision": 5, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[4] cited lines 707, 795, 816, 1322 and 1339 of the showcase flows index.ts in the comma-range spelling (authored in e0abc386a4 as the list 678 to 1339). At that commit those lines were the names and child flowName values of the three stock caller flows; at this base all of them have moved. source[4] now anchors the three callers, index.ts#TaskDoneNotifyOwnerFlow, #ProjectClosureFlow and #ReleaseSignoffFlow, and names each child in prose. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" }
       ]
     },
     {
@@ -1734,7 +1750,7 @@
       "title": "POST /automation/:name/clone: whole-definition copy mutating exactly name/label/status, protection envelope dropped, no ancestry, draft-but-armed (double-fire notice verbatim), 409/404/400 refusal arms — and the honest clause: the clone must survive a restart and reach Studio",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1780,7 +1796,7 @@
         {
           "clause": "the refusal arms answer their own status+code: same/taken name → 409 RESOURCE_CONFLICT with the shadow-rationale message suggesting a free name; unknown source → 404 RESOURCE_NOT_FOUND; an illegal machine name → 400 (the definition goes through registerFlow's own validation, one policy not two)",
           "oracle": "api",
-          "verify": "step 2's remaining arms: the 409 message explains WHY same-name clones are refused (engine keys flows by bare name — silent order-dependent shadowing, flowCloneNameTakenMessage flow-clone.ts) and suggests '<name>_copy'; 404 for the unknown source; 400 for 'Bad-Name!' (FlowSchema name regex ^[a-z_][a-z0-9_]*$, flow.zod.ts). Codes pinned at automation-flow-clone.test.ts,439",
+          "verify": "step 2's remaining arms: the 409 message explains WHY same-name clones are refused (engine keys flows by bare name — silent order-dependent shadowing, flowCloneNameTakenMessage flow-clone.ts) and suggests '<name>_copy'; 404 for the unknown source; 400 for 'Bad-Name!' (FlowSchema name regex ^[a-z_][a-z0-9_]*$, flow.zod.ts). Codes pinned in packages/runtime/src/domains/automation-flow-clone.test.ts#RESOURCE_CONFLICT and packages/runtime/src/domains/automation-flow-clone.test.ts#RESOURCE_NOT_FOUND (its same-name 409 cases and its unknown-source 404 case)",
           "evidence": "the three bodies (status + code + message)"
         },
         {
@@ -1832,7 +1848,8 @@
         },
         { "revision": 2, "date": "2026-10-02", "change": "clause 7's expected-fail note now names only the reachability half. The durability half was fixed by cb4c31d (#20907, with #20761): on 17.6.0 the clone survives a cold restart, reads back with its edited label and still fires (release-verification run). The reachability half still fails — no Studio surface lists a package-less flow — and is now filed as #21332 instead of resting on the #12438 sweep", "ref": "#21330" },
         { "revision": 3, "date": "2026-10-17", "change": "clause 6's reachability EXPECTED FAIL is stale (checklist-accuracy finding, automation slice report on #23878): objectui#11553 gave Studio an org scope whose Automations rail lists package-less flows, and #21332 closed as a duplicate. The verify now asserts the clone is listed and opens at /_console/studio/~org/automations, steps[7] drives it after the restart, and the objectui source line names the org scope and its pin. Re-run on main c91af8ed6 with the console at objectui f8267df93aba, file DB: POST …/showcase_urgent_task_alert/clone {name qa_urgent_alert_clone, label} → 200 status draft; the Organization flows rail listed 'QA urgent alert clone' and opened it (Trigger: Record created or updated · showcase_task, Enabled, no lock banner); after a cold restart over the same DB the GET answered 200, the rail listed and opened it again, and one urgent task create added one run to the clone (0 → 1) and one to the base (1 → 2); teardown DELETE → deleted true", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-19", "change": "acceptance[1] (clause, verify) counts the dropped keys the clone really drops — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.packaged-flow-clone-contract acceptance[1]; wave anchor #24579 §3): FLOW_CLONE_DROPPED_KEYS is 10, not 9, since packages/runtime/src/flow-clone.ts appends 'protection' (#23120, ADR-0010 §3.5) to the 2 read decorations and 7 protection fields. Re-derived at base 9a7838edf5", "ref": "#24649" }
+        { "revision": 4, "date": "2026-10-19", "change": "acceptance[1] (clause, verify) counts the dropped keys the clone really drops — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.packaged-flow-clone-contract acceptance[1]; wave anchor #24579 §3): FLOW_CLONE_DROPPED_KEYS is 10, not 9, since packages/runtime/src/flow-clone.ts appends 'protection' (#23120, ADR-0010 §3.5) to the 2 read decorations and 7 protection fields. Re-derived at base 9a7838edf5", "ref": "#24649" },
+        { "revision": 5, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[3].verify cited line 439 of automation-flow-clone.test.ts in the comma-range spelling (authored in e0abc386a4 as the list 368-401 and 439). Those lines are unchanged at this base: the same-name 409 cases and the unknown-source 404 assertion. The verify now anchors the two codes those cases assert, automation-flow-clone.test.ts#RESOURCE_CONFLICT and #RESOURCE_NOT_FOUND. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" }
       ]
     },
     {
@@ -1840,7 +1857,7 @@
       "title": "The Setup packaged-automation page: reachable from Setup nav, lists packaged flows + packaged actions, toggle persists, clone on flow rows only, no lineage surface, server refusals verbatim in role=alert",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1911,7 +1928,7 @@
         {
           "clause": "the clone dialog requires BOTH machine name and label before submit is possible, and a server-refused name surfaces legibly: the illegal-name 400 renders in the dialog's alert — record exactly what text arrives, because the per-field details[] are dropped client-side",
           "oracle": "dom",
-          "verify": "the submit control is disabled until both fields are non-empty (cloneNameValid, PackagedAutomationPage.tsx,529 — so the 'required' 400s of the API item are unreachable from this dialog); submitting 'Bad-Name!' round-trips the server 400 and the dialog alert (role=alert) shows the message actionErrorDetail extracted — details[] never reach the DOM, so if the rendered sentence does not state the ^[a-z_][a-z0-9_]*$ constraint legibly, record what DID render as the finding rather than inventing a pass. A legal clone then shows the server's post-clone notice verbatim",
+          "verify": "the submit control is disabled until both fields are non-empty (cloneNameValid, which disables the clone dialog's submit button in objectui PackagedAutomationPage.tsx — so the 'required' 400s of the API item are unreachable from this dialog); submitting 'Bad-Name!' round-trips the server 400 and the dialog alert (role=alert) shows the message actionErrorDetail extracted — details[] never reach the DOM, so if the rendered sentence does not state the ^[a-z_][a-z0-9_]*$ constraint legibly, record what DID render as the finding rather than inventing a pass. A legal clone then shows the server's post-clone notice verbatim",
           "evidence": "dialog screenshots: disabled submit, the 400 alert text, the post-clone notice"
         },
         {
@@ -1938,7 +1955,7 @@
       },
       "source": [
         "docs/adr/0126-packaged-metadata-customization-model.md §7.4 (the Setup surface: on/off + clone, authoring stays in Studio; ⛔ no drift/ancestry surface)",
-        "objectui packages/app-shell/src/views/setup/PackagedAutomationPage.tsx (529 clone-dialog validation,516 role=alert refusal rendering) + PackagedActionsSection.tsx (header: ⛔ no clone on actions) + packagedFlows.ts (isPackagedFlowItem + runtime-spine join)",
+        "objectui packages/app-shell/src/views/setup/PackagedAutomationPage.tsx (the clone dialog's validation — cloneNameValid, which disables its submit button — and its role=alert rendering of clone.refusal) + PackagedActionsSection.tsx (header: ⛔ no clone on actions) + packagedFlows.ts (isPackagedFlowItem + runtime-spine join)",
         "objectui packages/app-shell/src/services/builtinComponents.tsx (registerAppComponent ref 'automation:packaged') + views/ComponentNavView.tsx (ref resolution, no gate) + views/setup/PackagedAutomationPage.navContribution.test.tsx (ref→URL resolution — the mocked half of the nav clause)",
         "objectui packages/core/src/actions/actionErrorDetail.ts (error → error.message → message; details[] dropped)",
         "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_packaged_automation (nav_packaged_automation → componentRef 'automation:packaged', landed by #12457; the entry's comment records why it lives in platform-objects, not service-automation) + setup-packaged-automation-nav.test.ts (the framework-half pin)",
@@ -1972,6 +1989,12 @@
           "date": "2026-10-19",
           "change": "steps[2], steps[3] and acceptance[1].clause corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24545, automation.setup-packaged-automation-board steps[1] and acceptance[1] / steps[3]; wave anchor #24579 §3). The fallback URL was spelled with the app name where the sidebar lands on the package-id path, and \"every switch reads On\" did not exempt showcase_approver_bindings, authored status 'obsolete'. Re-derived at base 9a7838edf5: the engine reports a flow enabled: false when its status is obsolete (getFlowRuntimeStates, service-automation engine.ts)",
           "ref": "#24649"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[6].verify and source[1] cited objectui PackagedAutomationPage.tsx by the lines 529 and 516 in the comma-range spelling (authored in e0abc386a4; source[1]'s list also left a bare 529). At objectui 9602dc820450, the file's latest commit when the item was authored, 529 was the clone dialog's submit button disabled by cloneNameValid and 516 its role=alert rendering of clone.refusal; at the shipped pin 12dc7b47c340 both have moved. Each now names that code of the PackagedAutomationPage component. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#24752"
         }
       ]
     },
@@ -2047,7 +2070,7 @@
       "title": "Flow authoring contract on v18, refused at `os validate` — and at PUT /meta/flow for every flow-body arm but the CEL root scope, which only `os validate` judges: single-brace {…} value tokens (CEL only; text slots use {{ }}), $-prefixed bound variable names, builtin node config keys/values the executor does not declare, dangling or repeated edges, `record`/`user.id` roots a flow cannot bind, retryPolicy.maxRetry, and an anonymous endpoint targeting a runAs:\"system\" flow",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -2097,7 +2120,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/spec/src/automation/flow-value-slot-template.test.ts + packages/spec/src/automation/flow-text-slot-template.test.ts + packages/spec/src/automation/flow-builtin-node-config-keys.test.ts + packages/spec/src/automation/flow-builtin-node-config-values.test.ts + packages/spec/src/automation/flow-bound-variable-name.test.ts + packages/spec/src/automation/flow.test.ts + packages/lint/src/validate-expressions.flow-cel-root.test.ts + packages/spec/src/shared/retry-policy.test.ts + packages/spec/src/api/anonymous-elevated-flow-gate.test.ts"
+        "ref": "packages/spec/src/automation/flow-value-slot-template.test.ts + packages/spec/src/automation/flow-text-slot-template.test.ts + packages/spec/src/automation/flow-builtin-node-config-keys.test.ts + packages/spec/src/automation/flow-builtin-node-config-values.test.ts + packages/spec/src/automation/flow-bound-variable-name.test.ts + packages/spec/src/automation/flow.test.ts + packages/lint/src/validate-expressions.flow-cel-root.test.ts + packages/spec/src/shared/retry-policy.test.ts + packages/spec/src/api/anonymous-elevated-flow-gate.test.ts — acceptance[0] ONLY, the clause that scores these nine spec and lint unit files themselves. None of them runs `os validate` or the PUT /api/v1/meta/flow door, so no pin covers acceptance[1] (each arm's `os validate` exit and located refusal), acceptance[2] (the door's 422s with nothing stored, and the two root-scope arms' 200) or acceptance[3] (the three controls validate and save): drive them by hand with the CLI and a boot"
       },
       "source": [
         "packages/spec/src/automation/flow-value-slot-template.ts#flowNodeValueTemplateRefusals",
@@ -2124,6 +2147,12 @@
           "date": "2026-10-19",
           "change": "steps[0] and acceptance[1] (clause, verify) name arms and verdict shapes os validate really has — checklist-accuracy findings of the 18.0 QA sweep (QA run #24545 acceptance[1], QA run #24558 steps; wave anchor #24579 §3). \"A REST-triggered flow reading record.x\" was ambiguous: an api-type flow binds record (packages/lint/src/flow-cel-root-scope.ts hands record to the api kind); the refused shape is an autolaunched flow. The anonymous-endpoint arm needs an armed rateLimit or ADR-0121 D6 fires beside it (packages/spec/src/api/endpoint-publish-gate.ts). Schema-layer arms surface as STACK_SCHEMA_INVALID with the contract sentence, not a rule id. Re-derived at base 9a7838edf5; round 1's acceptance[2] re-point is unchanged",
           "ref": "#24649"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause — checklist-accuracy finding C8 of QA run #24786 (wave anchor #24579 round 12, round 6's theme-B rule): the ref listed nine spec and lint unit pins with no clause qualifier, though acceptance[1]–[3] need the CLI or the PUT door. The pins are acceptance[0]'s own subject, so `automated` stays, narrowed to it. No clause changed",
+          "ref": "#24824"
         }
       ]
     },

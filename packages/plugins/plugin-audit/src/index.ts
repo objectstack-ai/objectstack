@@ -26,6 +26,8 @@ export type {
   ReadAuditWriterOptions,
 } from './read-audit.js';
 export type {
+  AuthAccountAuditAction,
+  AuthEventAuditAction,
   AuthEventAuditLogger,
   AuthEventAuditSink,
   AuthEventAuditSinkOptions,

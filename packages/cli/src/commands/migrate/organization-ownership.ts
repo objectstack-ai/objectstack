@@ -204,11 +204,10 @@ class ReportFileReservation {
 }
 
 /**
- * The v18 organization-ownership ceremony behind `os migrate
- * organization-ownership` — in 18.0 the registered command refuses before
- * this class runs (see {@link MigrateOrganizationOwnership} at the end of this
- * file). This class is the ceremony itself, kept whole for the 18.x release
- * that carries the upgrade path; its tests run it directly.
+ * `os migrate organization-ownership` — the v18 organization-ownership
+ * ceremony, the upgrade path of a v17 or an 18.0 database (18.x step 6): the
+ * boot guard refuses such a database until this ceremony has verified it at the
+ * current ownership shape generation.
  *
  * The ceremony's preflight (ADR-0131 D10, ceremony item 1): per table, the fate,
  * the row counts each fate will touch, the rows whose owner cannot be derived
@@ -261,8 +260,10 @@ class ReportFileReservation {
  * through plugin-auth's boot invariant, as the plan's warnings say; ADR-0131
  * D3), the authored catalog conversion,
  * the promotion of organization customizations and public-form withdrawals,
- * the template promotion, the settings global-rung move, the verified id→name
- * rewrite, mirror deletion, column drops — through `../../utils/organization-ownership-apply.ts`,
+ * the template promotion, the settings global-rung move, the sibling moves,
+ * the settlement of declared webhooks and of declared sharing rules' stored
+ * copies, the verified id→name rewrite, mirror deletion, column drops, NOT
+ * NULL on `organization_id` — through `../../utils/organization-ownership-apply.ts`,
  * checkpointing each finished step in the deployment ledger (`sys_migration`,
  * row {@link ORGANIZATION_OWNERSHIP_MIGRATION_ID}) so an interrupted run
  * resumes where it stopped, and ends with the post-check. The ledger row is
@@ -316,16 +317,16 @@ class ReportFileReservation {
  * the drops go through the remote face's own drift detector and migration
  * door (`@objectstack/driver-turso`).
  */
-export class OrganizationOwnershipCeremony extends Command {
+export default class OrganizationOwnershipCeremony extends Command {
   static override description =
     'The v18 organization-ownership ceremony (ADR-0131 D10). Without --apply, the read-only plan: per table, the fate, ' +
     'the row counts, the rows whose owner cannot be derived (by id), and which tables will receive NOT NULL, written ' +
     'to a file — never a row or a column changed; it refuses, naming it, any table it cannot enumerate. With --apply ' +
     '(the reviewed plan file in --plan-file, and a backup), only that plan: attribution, the authored catalog ' +
     'conversion, the promotion of organization customizations and form withdrawals, the template promotion, the ' +
-    'settings move, the ' +
-    'verified id-to-name rewrite, mirror deletion and column drops, in that order, ' +
-    'resumable from a recorded checkpoint, then the post-check.';
+    'settings move, the sibling moves (global settings audit, identity mail), the settlement of declared webhooks and ' +
+    'of declared sharing rules\' stored copies, the verified id-to-name rewrite, mirror deletion, column drops and ' +
+    'NOT NULL on organization_id, in that order, resumable from a recorded checkpoint, then the post-check.';
 
   static override examples: Command.Example[] = [
     '$ os migrate organization-ownership',
@@ -357,8 +358,9 @@ export class OrganizationOwnershipCeremony extends Command {
     }),
     apply: Flags.boolean({
       description:
-        'Perform the ceremony: attribution, the verified id-to-name rewrite, mirror deletion, column drops, then the ' +
-        'post-check. Idempotent; an interrupted run resumes from its recorded checkpoint. Requires a backup',
+        'Perform the ceremony: attribution, the moves and settlements, the verified id-to-name rewrite, mirror deletion, ' +
+        'column drops and NOT NULL, then the post-check. Idempotent; an interrupted run resumes from its recorded ' +
+        'checkpoint. Requires a backup',
       default: false,
     }),
     'plan-file': Flags.string({
@@ -830,6 +832,60 @@ export class OrganizationOwnershipCeremony extends Command {
             return judgeDeclaredSharingRules(items);
           },
         },
+        declaredWebhooks: {
+          // [18.x step 5a] What plugin-webhooks serves: the registry's declared
+          // webhooks, else the metadata service's, each parsed by the spec's
+          // own schema — an item the plugin cannot parse is not served, so a
+          // copy is never settled onto it.
+          list: async () => {
+            const { WebhookSchema } = await import('@objectstack/spec/automation');
+            const registry = (engine.registry ?? (engine as { _registry?: unknown })._registry) as
+              | { listItems?(type: string): unknown[] | undefined }
+              | undefined;
+            let items: unknown[] = registry?.listItems?.('webhook') ?? [];
+            if (items.length === 0) {
+              const metadata = kernel.getService('metadata') as { list?(type: string): unknown } | undefined;
+              const listed = await metadata?.list?.('webhook');
+              items = Array.isArray(listed) ? listed : [];
+            }
+            const out = new Map<string, string | null>();
+            for (const item of items) {
+              const parsed = WebhookSchema.safeParse(item);
+              if (!parsed.success || out.has(parsed.data.name)) continue;
+              const packageId = (item as { _packageId?: unknown })._packageId;
+              out.set(parsed.data.name, typeof packageId === 'string' && packageId ? packageId : null);
+            }
+            return [...out].map(([name, packageId]) => ({ name, packageId }));
+          },
+        },
+        notNull: {
+          // [18.x step 5d] NOT NULL through the drift apply door of the driver
+          // that holds the table, for a table this composition declares.
+          apply: async (columns) => {
+            const { StorageNameMapping } = await import('@objectstack/spec/system');
+            const { rotationBaseOf } = await import('../../utils/unmanaged-tables.js');
+            const { applyNotNullThroughDrift } = await import('../../utils/organization-ownership-not-null.js');
+            const declared = new Set(
+              (liveStack.allObjects() as Array<{ name?: unknown } | null>)
+                .map((o) => o?.name)
+                .filter((name): name is string => typeof name === 'string' && name.length > 0)
+                .map((name) => StorageNameMapping.resolveTableName({ name })),
+            );
+            return applyNotNullThroughDrift(
+              {
+                isDeclared: (table) => declared.has(rotationBaseOf(table) ?? table),
+                shardBaseOf: (table) => rotationBaseOf(table) ?? null,
+                driverFor: (database) =>
+                  (database === undefined
+                    ? liveStack.driver
+                    : database === TELEMETRY_DATASOURCE && liveStack.telemetryDatabase
+                      ? liveStack.drivers[1]
+                      : undefined) as never,
+              },
+              columns,
+            );
+          },
+        },
         door: {
           save: async (type, name, body, target) => {
             if (typeof protocol?.saveMetaItem !== 'function') {
@@ -1091,75 +1147,5 @@ export class OrganizationOwnershipCeremony extends Command {
     }
     console.log(chalk.dim(`  ${timer.display()}`));
     if (verdictCode !== 0) this.exit(1);
-  }
-}
-
-/**
- * What `os migrate organization-ownership` answers in 18.0, plan and apply
- * alike (ruling record 6259608309 on the v18 epic, item 1).
- *
- * 18.0 supports fresh installs only. Its ceremony is knowingly incomplete:
- * several fates, and the moves they carry, were deferred to 18.x. An
- * incomplete ceremony must never certify an old database, because the boot
- * guard (`OrganizationOwnershipBootGuardPlugin`) would then serve it. So the
- * registered command refuses before it reads anything. It opens no database,
- * reads no plan, supplement or report file, writes nothing, and boots nothing.
- * The code is the standard `NOT_IMPLEMENTED` (ADR-0112): the capability is
- * not in this release. No flag and no environment variable lifts the refusal.
- */
-export const ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE =
-  'os migrate organization-ownership is not available in 18.0. 18.0 supports fresh installs only; the v17 → v18 ' +
-  'upgrade path ships in an 18.x release. Keep a v17 database on a 17.x release until then. Nothing was read or written.';
-
-/** The ADR-0112 code the 18.0 refusal carries: the standard code for a capability this release does not implement. */
-export const ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE_CODE = 'NOT_IMPLEMENTED' as const;
-
-/**
- * `os migrate organization-ownership` in 18.0: the ceremony's flags and help,
- * and a refusal instead of the ceremony
- * ({@link ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE}). The 18.x release that
- * carries the upgrade path deletes this class and registers the ceremony.
- */
-export default class MigrateOrganizationOwnership extends OrganizationOwnershipCeremony {
-  static override description =
-    'Refused in 18.0, which supports fresh installs only: the v17 → v18 upgrade path ships in an 18.x release. ' +
-    OrganizationOwnershipCeremony.description;
-
-  /**
-   * The ceremony's own examples show a plan and an apply, which 18.0 refuses on
-   * every database, fresh or not, so `--help` shows what an invocation answers
-   * in this release instead. The ceremony class keeps its examples for the 18.x
-   * release that registers it.
-   */
-  static override examples: Command.Example[] = [
-    {
-      description:
-        'Refused in 18.0, plan and apply alike: exit 1 with NOT_IMPLEMENTED, nothing read or written. Keep a v17 ' +
-        'database on a 17.x release until the 18.x release that carries the upgrade path',
-      command: '<%= config.bin %> migrate organization-ownership',
-    },
-    {
-      description: 'The same refusal as JSON: error, reason upgrade-unavailable, code NOT_IMPLEMENTED, and the detail',
-      command: '<%= config.bin %> migrate organization-ownership --json',
-    },
-  ];
-
-  override async run(): Promise<void> {
-    const { flags } = await this.parse(MigrateOrganizationOwnership);
-    if (flags.json) {
-      await emitJson(
-        {
-          error: flags.apply ? 'apply_refused' : 'plan_refused',
-          reason: 'upgrade-unavailable',
-          code: ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE_CODE,
-          detail: ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE,
-        },
-        1,
-        { compact: true },
-      );
-      return;
-    }
-    printError(`${ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE} (${ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE_CODE})`);
-    this.exit(1);
   }
 }

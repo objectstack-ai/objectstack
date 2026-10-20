@@ -22,6 +22,12 @@
  * (which reads as a guard and is not one) never reaches a production write.
  * See `validate-null-guards.ts` for the decision procedure and its scope.
  *
+ * Since #24677 it also refuses the one declaration the #24316 hop refusal
+ * presupposes: a `lookup` / `master_detail` field whose `reference` is a
+ * stored-metadata-body table, located at that field's `reference`. It is not a
+ * predicate, but it is judged here so that `os validate`, `os build` and the
+ * object save door, which all run this rule's object passes, refuse it alike.
+ *
  * ## Scope — the keys this rule reads, and the ones it deliberately does not
  *
  * This rule is registered `input: 'parsed'` (`authoring-rules.ts`), so what it
@@ -116,7 +122,7 @@ import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automatio
 // shared refusal to prevent.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
 import { referenceCarrierOf, referenceTargetOf, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
-import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
+import { isStoredMetadataBodyObject, STORED_METADATA_BODY_PRESCRIPTION } from '@objectstack/spec/kernel';
 // [#22394] The acting user's declared members — the contract half of the option
 // verdict's member allowlist for `current_user` and its ADR-0068 aliases. Read
 // off the schema at first use, never restated here.
@@ -1788,9 +1794,12 @@ function singleMasterOf(obj: AnyRec): string | undefined {
  * serve a hop, so the lint refuses it where it is written.
  *
  * The literal `.reference` read stays in the argument for the #5017 receiver
- * scan, exactly as in {@link masterDetailCount}. A type whose target is implied
- * (`user`, `tree`) never names the family, so the authored carrier is the only
- * one read.
+ * scan, exactly as in {@link masterDetailCount}. Only the authored carrier is
+ * read: a type whose target is implied never implies the family. A `tree`
+ * field's authored `reference` cannot name it (the object schema refuses any
+ * target but the declaring object); a `user` field's authored `reference` is
+ * not refused at parse, so a `user` naming the family is collected too
+ * (#24677 measured it).
  */
 function storedMetadataBodyReferencesOf(obj: AnyRec): Map<string, string> {
   const out = new Map<string, string>();
@@ -1823,6 +1832,35 @@ function storedMetadataBodyHopMessage(
     + 'metadata bodies, which are served only through the metadata API (`GET /api/v1/meta/:type/:name`), '
     + `where the body is projected. Remove the read through \`${field}\`; ${read} alone is the `
     + 'stored id, if the id is what you need.';
+}
+
+/**
+ * [#24677] The refusal of the declaration every hop above presupposes: a
+ * `lookup` or `master_detail` field (or any other type the collector admits)
+ * whose `reference` is a stored-metadata-body table
+ * ({@link storedMetadataBodyReferencesOf}). The engine never hydrates
+ * such a field — `expand` keeps its stored id, and a master-detail `parent`
+ * root over a family header stays unbound — so the field saves and never
+ * works. It names the field, its type, the target and the rule, and ends on
+ * the family's one prescription, as the hook-body and flow-write refusals do.
+ *
+ * Worded apart from {@link storedMetadataBodyHopMessage} on purpose ("a table
+ * of stored metadata", never that message's "a stored-metadata table"), so
+ * the hop refusal's pins, which select its findings by that phrase, read the
+ * hop refusal alone.
+ */
+function storedMetadataBodyReferenceMessage(field: string, type: string, target: string): string {
+  const consequence = type === 'master_detail'
+    ? 'a formula or a validation rule never reads through the field, and this object\'s `parent` root stays '
+      + 'unbound, so every write a `parent` rule judges is refused'
+    : 'and a formula or a validation rule never reads through the field';
+  return `\`${field}\` is a \`${type}\` whose \`reference\` names '${target}', a table of stored metadata. `
+    + 'A relationship field may not target a stored-metadata-body table: the engine never '
+    + `hydrates one, so \`$expand\` keeps the stored id and never nests the row, ${consequence}. `
+    + 'Those rows carry stored metadata bodies, served only '
+    + 'through the metadata API (`GET /api/v1/meta/:type/:name`), where the body is projected; to point a '
+    + 'record at a metadata item, store its type and name in `text` fields instead. '
+    + STORED_METADATA_BODY_PRESCRIPTION;
 }
 
 /**
@@ -1987,9 +2025,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   const fieldTypeIndex = buildFieldTypeIndex(objects);
   const nullableIndex = buildNullableFieldIndex(objects);
   // [#24316] object name → its references into a stored-metadata-body table,
-  // read the first time a site of that object serves a hop — never before the
-  // walk reaches the object, so a carrier the spec cannot read is refused by the
-  // pass that owned that verdict before this one existed.
+  // read the first time a site of that object serves a hop, or (#24677) when
+  // the walk reaches the object's fields, whichever comes first — never before
+  // the walk reaches the object, so a carrier the spec cannot read is refused
+  // by the pass that owned that verdict before this one existed.
   const storedMetadataBodyReferenceIndex = new Map<string, Map<string, string>>();
   const storedMetadataBodyReferencesFor = (objectName: string): Map<string, string> => {
     let familyRefs = storedMetadataBodyReferenceIndex.get(objectName);
@@ -2916,6 +2955,34 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // [#4889] How many masters this object has, for the `parent`-scope gate
     // below. Computed once per object, not per field.
     const masters = masterDetailCount(obj);
+
+    // [#24677] A `lookup` / `master_detail` whose `reference` is a
+    // stored-metadata-body table is refused where it is declared: the engine
+    // never hydrates it, so it saves and never works. Read through the hop
+    // refusal's own collector and index, so the two verdicts judge one set,
+    // and AFTER `masterDetailCount`, so an unreadable `reference` carrier is
+    // still refused by the pass that owned that verdict first. NOT fenced on
+    // an object write: the field is the object's own body, so the object save
+    // door gives the build's verdict, at the build's position in this walk.
+    // The type is read from the field-type index, never off the field again:
+    // the #5017 receiver meta-test pins the keys this walk reads off `f`. The
+    // collector admits only a field whose `type` is a string, and the index
+    // records every such field, so each collected field has its type here.
+    if (objectName) {
+      const familyRefs = storedMetadataBodyReferencesFor(objectName);
+      const ownFieldTypes = fieldTypeIndex.get(objectName);
+      for (const [fname] of fieldList) {
+        const target = familyRefs.get(fname);
+        const type = ownFieldTypes?.[fname];
+        if (!target || !type) continue;
+        issues.push({
+          where: `object '${objectName}' · field '${fname}' reference`,
+          message: storedMetadataBodyReferenceMessage(fname, type, target),
+          source: '',
+          severity: 'error',
+        });
+      }
+    }
 
     // [#20078] The roots a field-level predicate binds, each with the record
     // shape it binds: `record` / `previous` are this object's, `parent` is its

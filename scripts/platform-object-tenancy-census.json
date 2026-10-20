@@ -25,12 +25,12 @@
   "population": "every object registered by a tracked packages/**/*.object.ts module whose name carries a platform prefix (sys_ / cloud_ / ai_). The cloud repository's own cloud_ objects are not in this tree and so not in this census.",
   "totals": {
     "registered": 85,
-    "inReach": 44,
-    "outOfReach": 41
+    "inReach": 42,
+    "outOfReach": 43
   },
   "reasonTotals": {
     "managedBy: 'better-auth'": 25,
-    "systemFields.tenant: false": 16,
+    "systemFields.tenant: false": 18,
     "tenancy.enabled: false": 2
   },
   "unexplained": [],
@@ -187,9 +187,11 @@
     {
       "name": "sys_flow_credential",
       "file": "packages/services/service-automation/src/sys-flow-credential.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_flow_dispatch",
@@ -589,9 +591,11 @@
     {
       "name": "sys_secret",
       "file": "packages/platform-objects/src/system/sys-secret.object.ts",
-      "reach": "in",
-      "tenantField": "organization_id",
-      "reasons": []
+      "reach": "out",
+      "tenantField": null,
+      "reasons": [
+        "systemFields.tenant: false"
+      ]
     },
     {
       "name": "sys_session",

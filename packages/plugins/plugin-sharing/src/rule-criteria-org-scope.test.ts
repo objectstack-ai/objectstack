@@ -2,7 +2,7 @@
 
 /**
  * [#10119] A sharing rule's CRITERIA sweep is scoped to the rule's own
- * organization — and a platform-global rule's is still not.
+ * organization — and a declared rule's deployment-wide projection is not.
  *
  * ## The defect
  *
@@ -29,8 +29,7 @@
  * ## Why a real driver
  *
  * The scope is a DRIVER decision: `SqlDriver.applyTenantScope` turns
- * `DriverOptions.tenantId` into `(organization_id = ? OR organization_id IS
- * NULL)`, and the engine threads it as the projection of the tenant wall's
+ * `DriverOptions.tenantId` into `organization_id = ?`, and the engine threads it as the projection of the tenant wall's
  * verdict (ADR-0131 D8, `ObjectQLEngine.buildDriverOptions`) — so only under
  * a walled posture: the org-stamped cases boot `isolated`, and under `single`
  * there is no organization scope for a sweep to keep.
@@ -44,38 +43,29 @@
  *
  * A suite that only pinned "an org-stamped rule stops sweeping other orgs"
  * would stay green against an implementation that scoped EVERY rule — silently
- * killing the platform-global sweep that `organization_id = null` rules are
- * declared to perform (#7795, documented at the `deleteRule` guard). So each
- * org-stamped case is stated beside the null-org case it must not become.
+ * killing the deployment-wide sweep a DECLARED rule performs under `single`.
+ * So each org-stamped case is stated beside the deployment-wide case it must
+ * not become.
  *
- * The NULL-org RECORD is here for the third direction: `applyTenantScope`
- * emits `field = ? OR field IS NULL`, so a scope "fixed" with a bare equality
- * would pass the cross-org assertions and silently lose that record. `deal_p1`
- * is what distinguishes ROUTING THROUGH THE CHOKEPOINT from reimplementing a
- * worse copy of it — and that is the whole of what it pins.
+ * ## [ADR-0131 D2/D8] Deployment-wide is a typed marker, never a NULL
  *
- * ## What `deal_p1` does and does NOT assert (#10103)
+ * A declared rule is deployment-wide by nature (D2) and carries a typed
+ * marker on its `single` projection (`deploymentWide`); under a wall it is
+ * served once per organization, each projection inside that organization's
+ * one predicate (D8). A STORED row with no organization, in a deployment that
+ * has organizations, is invalid state (certification leaves none): it sweeps
+ * nothing and grants nothing, said once, loudly. Only a composition with no
+ * organization object at all (a lean embedding) has no organization to scope
+ * by, and there every rule is the deployment's.
  *
- * It used to be justified as the platform bucket: a NULL organization marks a
- * platform row that must stay visible to every tenant (#2734, ADR-0120 D3).
- * That reading is HISTORICAL BEHAVIOUR, SUPERSEDED as a general rule. The
- * ruling on #10103 makes the single general rule the opposite one — a row
- * belonging to no organization is INVALID STATE, to be refused or warned about
- * loudly, never a platform-wide default — and demotes NULL-means-global to a
- * DRIVER-LEVEL COMPATIBILITY NOTE. The RBAC catalog that reading was invented
- * for (#2734's "every tenant admin saw ZERO RBAC rows") is now materialized per
- * organization instead, so no NULL row is load-bearing anywhere.
+ * ## The organization-less RECORD, `deal_p1`
  *
- * The assertion is nevertheless CORRECT and is kept verbatim, because the wall
- * is untouched at both layers: `applyTenantScope` still emits its `OR ... IS
- * NULL` arm — that arm IS the compatibility behaviour — so an org-stamped rule
- * routed through it still matches an organization-less record. What changed is
- * the JUSTIFICATION, not the behaviour: this case pins that the scope goes
- * through the driver's chokepoint, and it would be equally load-bearing if the
- * arm existed for no reason at all. Reading `deal_p1` as an endorsement of
- * NULL-means-global is what is now wrong; deleting it would cost this suite its
- * most valuable axis, and weakening it to a bare-equality expectation would
- * pin the defect.
+ * [ADR-0131 D1] NULL is not an owner: the driver's tenant predicate is
+ * `field = ?` alone, so no sweep scoped to an organization reaches `deal_p1`,
+ * and a sweep that kept a copy of its own wider predicate would grant it. Only
+ * the deployment-wide sweep, which carries no tenant, reaches it, and stamps
+ * nothing on its grant. A certified database holds no such record: this is
+ * the shape a stray one would take, not a population a tenant relies on.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -85,6 +75,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 
 import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
+import type { DeclaredSharingRule } from './declared-sharing-rules.js';
 
 const OBJECT = 'os10119_deal';
 
@@ -153,6 +144,30 @@ interface Booted {
   rules: SharingRuleService;
   /** Every `sys_record_share` row in the database, read straight off the driver. */
   sharedRecordIds: () => Promise<string[]>;
+  /** `[record_id, organization_id]` of every `sys_record_share` row, sorted. */
+  grantsAtRest: () => Promise<Array<[string, unknown]>>;
+  /** What the rule service logged at `error`. */
+  errors: string[];
+}
+
+/** A DECLARED rule, as the registry serves it: `won` deals to `u_decl`. */
+const DECLARED: DeclaredSharingRule = {
+  name: 'os10119_declared_won',
+  label: 'Declared won deals',
+  description: null,
+  object: OBJECT,
+  criteria: { stage: 'won' },
+  recipientType: 'user',
+  recipientId: 'u_decl',
+  accessLevel: 'read',
+  active: true,
+};
+
+interface BootOptions {
+  /** Register `sys_organization`: a deployment WITH organizations, not a lean embedding. */
+  organizations?: boolean;
+  /** Declared rules the registry serves. */
+  declared?: DeclaredSharingRule[];
 }
 
 const open: SqlDriver[] = [];
@@ -165,13 +180,11 @@ const open: SqlDriver[] = [];
  *   deal_a2  ORG_A   stage=lost   <- ORG_A's own non-match (criteria still bite)
  *   deal_b1  ORG_B   stage=won    <- the cross-org match this card is about
  *   deal_b2  ORG_B   stage=won    <- second one, so a count cannot pass by luck
- *   deal_p1  (null)  stage=won    <- organization-less row, still returned by
- *                                    `applyTenantScope`'s compatibility arm.
- *                                    [#10103] Kept as the chokepoint-vs-bare-
- *                                    equality probe, no longer as a claim that
- *                                    NULL means platform-wide — see the header.
+ *   deal_p1  (null)  stage=won    <- organization-less row: no org-stamped
+ *                                    sweep reaches it (ADR-0131 D1), the
+ *                                    deployment-wide one does — see the header.
  */
-async function boot(posture?: 'single' | 'isolated' | 'group'): Promise<Booted> {
+async function boot(posture?: 'single' | 'isolated' | 'group', opts: BootOptions = {}): Promise<Booted> {
   const driver = new SqlDriver({
     client: 'better-sqlite3',
     connection: { filename: ':memory:' },
@@ -201,6 +214,14 @@ async function boot(posture?: 'single' | 'isolated' | 'group'): Promise<Booted> 
     isSystem: true,
     fields: RULE_FIELDS,
   } as never);
+  if (opts.organizations) {
+    ql.registerObject({
+      name: 'sys_organization',
+      label: 'Organization',
+      isSystem: true,
+      fields: { id: { type: 'text', name: 'id', label: 'Id', primary: true }, name: { type: 'text', name: 'name', label: 'Name' } },
+    } as never);
+  }
   await driver.initObjects([
     { name: OBJECT, fields: DEAL_FIELDS } as never,
     { name: 'sys_record_share', fields: SHARE_FIELDS } as never,
@@ -217,15 +238,28 @@ async function boot(posture?: 'single' | 'isolated' | 'group'): Promise<Booted> 
   await driver.create(OBJECT, { id: 'deal_p1', stage: 'won', owner_id: 'u_p' } as never);
 
   const sharing = new SharingService({ engine: ql as never });
-  const rules = new SharingRuleService({ engine: ql as never, sharing });
+  const errors: string[] = [];
+  const rules = new SharingRuleService({
+    engine: ql as never,
+    sharing,
+    ...(opts.declared ? { declaredRules: { list: async () => opts.declared! } } : {}),
+    logger: { warn: () => {}, error: (m: unknown) => { errors.push(String(m)); } },
+  });
 
   return {
     driver,
     ql,
     rules,
+    errors,
     sharedRecordIds: async () => {
       const rows = await driver.find('sys_record_share', {} as never);
       return rows.map((r: any) => String(r.record_id)).sort();
+    },
+    grantsAtRest: async () => {
+      const rows = await driver.find('sys_record_share', {} as never);
+      return rows
+        .map((r: any): [string, unknown] => [String(r.record_id), r.organization_id ?? null])
+        .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     },
   };
 }
@@ -266,27 +300,79 @@ describe('[#10119] sharing-rule criteria sweep is scoped to the rule\'s organiza
       // failure names them rather than printing a set diff.
       expect(granted).not.toContain('deal_b1');
       expect(granted).not.toContain('deal_b2');
-      // ORG_A's own match, plus the organization-less row that `applyTenantScope`
-      // still returns through its compatibility arm. [#10103] That arm is
-      // driver-level COMPATIBILITY behaviour, not the platform-bucket rule it
-      // was once justified as — see this file's header. `deal_p1` earns its
-      // place here by distinguishing a scope routed through the chokepoint from
-      // one reimplemented as a bare equality, which is true either way.
-      // `deal_a2` is absent because the CRITERIA still bite — scoping did not
-      // replace them.
-      expect(granted).toEqual(['deal_a1', 'deal_p1']);
-      expect(result.matchedRecords).toBe(2);
+      // ORG_A's own match, and not the organization-less row: NULL is not an
+      // owner (ADR-0131 D1), so the scope routed through the chokepoint does
+      // not reach `deal_p1` — see this file's header. `deal_a2` is absent
+      // because the CRITERIA still bite — scoping did not replace them.
+      expect(granted).not.toContain('deal_p1');
+      expect(granted).toEqual(['deal_a1']);
+      expect(result.matchedRecords).toBe(1);
     });
 
-    it('a NULL-ORG (platform-global) rule still sweeps EVERY organization', async () => {
-      const { rules, sharedRecordIds } = await boot();
+    it('a DECLARED rule under `single` is deployment-wide: it sweeps every organization, each grant its record\'s', async () => {
+      // [ADR-0131 D2/D8] The typed marker's sweep carries no tenant — the
+      // predicate D8 computes under `single` is none — and each grant is
+      // stamped with the organization of the record it shares.
+      const { rules, grantsAtRest } = await boot(undefined, { declared: [DECLARED] });
 
-      // Defined under the system context, which is what stamps
-      // `organization_id: null` — the platform-global class (#7795).
+      const result = await rules.evaluateRule(DECLARED.name, SYSTEM);
+
+      expect(result.matchedRecords).toBe(4);
+      expect(await grantsAtRest()).toEqual([
+        ['deal_a1', ORG_A],
+        ['deal_b1', ORG_B],
+        ['deal_b2', ORG_B],
+        ['deal_p1', null],
+      ]);
+    });
+
+    it('a DECLARED rule under a wall is served per organization: each projection sweeps only its own', async () => {
+      // [ADR-0131 D8] No projection sweeps the deployment under a wall: one
+      // per organization, each inside that organization's one predicate, its
+      // grants stamped with it. No organization's projection reaches the
+      // organization-less RECORD `deal_p1` (ADR-0131 D1, see the header).
+      const { rules, grantsAtRest } = await boot('isolated', { declared: [DECLARED] });
+      rules.setDeclaredRuleScopes([ORG_A, ORG_B]);
+
+      await rules.evaluateRule(DECLARED.name, SYSTEM);
+
+      expect(await grantsAtRest()).toEqual([
+        ['deal_a1', ORG_A],
+        ['deal_b1', ORG_B],
+        ['deal_b2', ORG_B],
+      ]);
+    });
+
+    it('a STORED rule with NO organization, in a deployment with organizations, sweeps nothing and says so once', async () => {
+      // Invalid state — certification leaves no such row, and the engine
+      // stamps or refuses every new one (D9) — so it is planted through the
+      // driver. ⛔ It must not become the deployment-wide sweep: that is the
+      // organization-less branch the marker replaced.
+      const { driver, rules, sharedRecordIds, errors } = await boot(undefined, { organizations: true });
+      await driver.create('sys_sharing_rule', {
+        id: 'srule_orgless', name: 'os10119_orgless_won', label: 'Org-less won deals', object_name: OBJECT,
+        criteria_json: JSON.stringify(WON), recipient_type: 'user', recipient_id: 'u_plat', access_level: 'read',
+        active: true, managed_by: 'admin', customized: false,
+      } as never);
+
+      const result = await rules.evaluateRule('srule_orgless', SYSTEM);
+      await rules.evaluateRule('srule_orgless', SYSTEM);
+
+      expect(result.matchedRecords).toBe(0);
+      expect(result.grantsCreated).toBe(0);
+      expect(await sharedRecordIds()).toEqual([]);
+      expect(errors.filter((m) => m.includes("'os10119_orgless_won' is a stored row with no organization"))).toHaveLength(1);
+    });
+
+    it('CONTROL: a composition with NO organization object (a lean embedding) sweeps the deployment for that row', async () => {
+      // The one composition with no organization to scope by
+      // (`no-organization-object`): there every rule is the deployment's.
+      const { rules, sharedRecordIds, errors } = await boot();
+
       const rule = await rules.defineRule(
         {
-          name: 'os10119_platform_won',
-          label: 'Platform won deals',
+          name: 'os10119_lean_won',
+          label: 'Lean won deals',
           object: OBJECT,
           criteria: WON,
           recipientType: 'user',
@@ -295,15 +381,11 @@ describe('[#10119] sharing-rule criteria sweep is scoped to the rule\'s organiza
         } as never,
         SYSTEM,
       );
-      expect(rule.organization_id).toBeNull();
 
       const result = await rules.evaluateRule(rule.id, SYSTEM);
-      const granted = await sharedRecordIds();
-
-      // The declared platform-global behaviour, pinned so scoping the
-      // org-stamped case above cannot quietly take it away.
-      expect(granted).toEqual(['deal_a1', 'deal_b1', 'deal_b2', 'deal_p1']);
       expect(result.matchedRecords).toBe(4);
+      expect(await sharedRecordIds()).toEqual(['deal_a1', 'deal_b1', 'deal_b2', 'deal_p1']);
+      expect(errors).toEqual([]);
     });
   });
 
@@ -334,27 +416,29 @@ describe('[#10119] sharing-rule criteria sweep is scoped to the rule\'s organiza
       expect(await sharedRecordIds()).toEqual([]);
     });
 
-    it('a NULL-ORG rule still matches every organization\'s record', async () => {
-      const { rules, sharedRecordIds } = await boot();
-
-      await rules.defineRule(
-        {
-          name: 'os10119_platform_won_hook',
-          label: 'Platform won deals',
-          object: OBJECT,
-          criteria: WON,
-          recipientType: 'user',
-          recipientId: 'u_plat',
-          accessLevel: 'read',
-        } as never,
-        SYSTEM,
-      );
+    it('a DECLARED rule under `single` matches every organization\'s record', async () => {
+      const { rules, grantsAtRest } = await boot(undefined, { declared: [DECLARED] });
 
       const results = await rules.evaluateAllForRecord(OBJECT, 'deal_b1', SYSTEM);
 
       expect(results).toHaveLength(1);
       expect(results[0]!.grantsCreated).toBe(1);
-      expect(await sharedRecordIds()).toEqual(['deal_b1']);
+      expect(await grantsAtRest()).toEqual([['deal_b1', ORG_B]]);
+    });
+
+    it('a STORED rule with NO organization matches no record where the deployment has organizations', async () => {
+      const { driver, rules, sharedRecordIds } = await boot(undefined, { organizations: true });
+      await driver.create('sys_sharing_rule', {
+        id: 'srule_orgless_hook', name: 'os10119_orgless_won_hook', label: 'Org-less won deals', object_name: OBJECT,
+        criteria_json: JSON.stringify(WON), recipient_type: 'user', recipient_id: 'u_plat', access_level: 'read',
+        active: true, managed_by: 'admin', customized: false,
+      } as never);
+
+      const results = await rules.evaluateAllForRecord(OBJECT, 'deal_b1', SYSTEM);
+
+      expect(results).toHaveLength(1);
+      expect(results[0]!.grantsCreated).toBe(0);
+      expect(await sharedRecordIds()).toEqual([]);
     });
   });
 });

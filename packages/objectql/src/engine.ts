@@ -7043,7 +7043,7 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * 2. **`external != null`** — a federated object (ADR-0015), whose schema
    *    is owned by the REMOTE database (#7738). The driver turns `tenantId`
-   *    into `(organization_id = :tenant OR organization_id IS NULL)`, and
+   *    into `organization_id = :tenant`, and
    *    against a remote table that carries no such column that is a SQL error
    *    on Postgres/MySQL — or worse on SQLite, whose quoted-identifier
    *    fallback reinterprets the unresolvable identifier as the string
@@ -7110,8 +7110,9 @@ export class ObjectQL implements IObjectQLEngine {
     const hasTenant = tenantScope !== undefined;
     const hasTz = execCtx?.timezone !== undefined;
     const isSystem = execCtx?.isSystem === true;
-    // [#13491] The object's tenancy classification — the ONE reading both the
-    // mute below and `resolveSystemInsertOrganization` narrow by. An object
+    // [#13491] The object's tenancy classification — the reading the mute
+    // below narrows by (ADR-0131 C8 stage 8b retired its other reader, the
+    // system-insert exemption, under every posture). An object
     // with no tenant field is out by construction; a platform object is out
     // unless the inventory adjudicated it tenant-scoped.
     const isTenantAuditInScope =
@@ -7388,20 +7389,16 @@ export class ObjectQL implements IObjectQLEngine {
     // system write that threaded one. Nothing to resolve; this is the shape the
     // ruling asks every system write to reach.
     if (carriesOrganization(execCtx?.tenantId)) return undefined;
-    // [ADR-0131 D9, C8 stage 8b] Under `single` a platform object has no
+    // [ADR-0131 D9, C8 stage 8b] Under every posture a platform object has no
     // exemption: with a tenant column it is in scope like any other object, so
-    // its organization-less system insert is stamped with the Default
-    // Organization or refused below — never left NULL.
-    //
-    // ⚠️ WALLED POSTURES ONLY: #13491's per-object exemption still stands under
-    // `group` / `isolated` (epic ruling record 6259899486 on #15194, item 4).
-    // 18.0 refuses a walled posture at the operator's boot path, and the walled
-    // half of the lift lands in 18.x, after the stages that give the walled
-    // writers an organization of their own. The cut is a POSTURE condition on
-    // purpose — ⛔ never re-narrow it with a per-table list.
-    if (isPlatformObjectOutOfTenantAuditScope(object) && this.resolveEnginePosture() !== 'single') {
-      return undefined;
-    }
+    // its organization-less system insert is stamped with the derived
+    // organization or refused below — never left NULL. The walled half landed
+    // in 18.x, after the stages that gave the walled writers (identity mail,
+    // global audit, declared webhooks) an organization or a sibling of their
+    // own. ⛔ Never re-introduce a per-table or per-posture cut here: a table
+    // whose rows are deployment-level declares no organization column
+    // (`sys_secret` and `sys_flow_credential` since the steps 5+6 landing,
+    // #24582) and exits below, on the missing tenant field.
     const objectSchema = this._registry.getObject(object) as any;
     // A federated object's schema is the REMOTE's (ADR-0015); the platform's
     // injected column says nothing about it, which is the same reason
@@ -9696,8 +9693,9 @@ export class ObjectQL implements IObjectQLEngine {
    * `reference_not_found`. The tenancy exemptions stay where they are decided:
    * `buildDriverOptions` withholds `tenantId` for a `tenancy.enabled: false`
    * (platform-global) object and for a federated one, so a reference to either
-   * still resolves from an org-bound caller, and a NULL-organization row passes
-   * the driver's `OR … IS NULL` term.
+   * still resolves from an org-bound caller. A row with no organization is no
+   * tenant's (ADR-0131 D1): the driver's scope is the organization equality,
+   * with no `IS NULL` arm, so an org-bound caller's probe does not find one.
    *
    * ## …except a master-detail header, which the caller must be able to read (#22519)
    *
@@ -10075,8 +10073,9 @@ export class ObjectQL implements IObjectQLEngine {
    * organization outside that scope — another organization, or under `group`
    * one outside the caller's membership set — is not found, and it binds
    * exactly as a header that exists nowhere does — absent. The tenancy exemptions stay where they are decided:
-   * a `tenancy.enabled: false` or federated master gets no `tenantId`, and a
-   * NULL-organization header passes the driver's `OR … IS NULL` term. A system
+   * a `tenancy.enabled: false` or federated master gets no `tenantId`. A
+   * header with no organization is no tenant's (ADR-0131 D1): the driver's
+   * scope carries no `IS NULL` arm, so a scoped read does not find it. A system
    * caller with no `tenantId` (seed replay, boot) still reads unscoped.
    *
    * `null` on any failure — no relation, no id, header not returned by the

@@ -710,10 +710,17 @@ the written item's **package closure** — the written package, its declared
 dependencies, and unconditionally both platform/system objects and rows carrying
 no package provenance (#9612); a provenance it cannot read narrows nothing at all.
 That changes what a rule can **resolve**, never which rules run, and nothing at
-this door walks `packages[]`. One rule is told the closure is in force: a list
+this door walks `packages[]`. Two rules are told the closure is in force. A flow
+whose trigger object is outside it is refused with `flow-trigger-unknown-object`
+instead of advised (#24669), and a list
 view bound to an object outside it is refused with
 `list-view-object-outside-closure` instead of having its field references
-skipped (#24563). So "runs per package" names one thing at the three
+skipped (#24563). With no closure in force — a write that names no package —
+the context is the whole collection the deployment serves, so the same rule
+refuses a list view bound to an object that exists nowhere in it with
+`list-view-object-unknown` (#24668); the three CLI doors keep skipping such a
+binding, because there it may be a dependency package's object. So "runs per
+package" names one thing at the three
 CLI doors and another one here, and the `runtime publish` column says neither.
 
 A clean run walks the registry and reports timing:

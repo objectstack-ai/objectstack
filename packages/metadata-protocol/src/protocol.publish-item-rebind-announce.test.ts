@@ -163,6 +163,13 @@ function makeStubEngine() {
             // manifest declares no namespace → the ADR-0028 prefix check is
             // skipped (legacy-grandfathered path).
             getPackage: (id: string) => (id === PKG ? { manifest: { id: PKG } } : undefined),
+            // [#24669] The flows' trigger object, owned by that package. A batch
+            // publish judges each draft against the package's closure, where a
+            // trigger object the registry does not carry is refused.
+            listItems: (type: string) =>
+                type === 'object'
+                    ? [{ name: 'ticket', label: 'Ticket', _packageId: PKG, fields: [{ name: 'title', type: 'text', label: 'Title' }] }]
+                    : [],
         },
     };
     return { engine, rows, historyRows };

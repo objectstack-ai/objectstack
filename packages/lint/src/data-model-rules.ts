@@ -592,11 +592,14 @@ export function lintUniqueDeclarations(objects: any[]): LocatedLintIssue[] {
  * before protocol 18 — the conversion respells it, zero drift) says "per
  * organization" to a reader and materializes as a plain composite — and SQL
  * UNIQUE is NULL-distinct, so on every row where the organization column is
- * NULL it enforces **nothing** (#5030, measured). On a single-organization
- * deployment that is *every* row. The `'organization'` respelling is what closes
- * that hole: the driver makes the LISTED organization column NULL-safe in place
- * (`COALESCE(organization_id, '__global__')`), so the NULL rows become one
- * platform bucket that is unique among themselves.
+ * NULL it enforces **nothing** (#5030, measured). A 17.x single-organization
+ * deployment wrote *every* row that way; since ADR-0131 D9 a new row carries its
+ * organization wherever the organization object is registered, so there the gap
+ * now admits that residue (a composition that registers no organization object
+ * still writes NULL-organization rows). The `'organization'`
+ * respelling is what closes the hole: the driver makes the LISTED organization
+ * column NULL-safe in place (`COALESCE(organization_id, '__global__')`), so the
+ * NULL rows become one bucket that is unique among themselves.
  *
  * **Advisory, and deliberately no auto-fix.** ADR-0120 D5c is explicit that the
  * legacy spelling stays valid and unmigrated forever if untouched — zero forced

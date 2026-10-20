@@ -51,7 +51,9 @@
  * Everything else is deliberately NOT recomputed. That exclusion is a
  * requirement, not an optimisation: a fix that recomputed every rule on every
  * BU write would close the security hole and replace it with a load problem —
- * see {@link BU_TREE_RECIPIENT_TYPES}.
+ * see {@link BU_TREE_RECIPIENT_TYPES}. The `position` and `team` kinds are
+ * recomputed by writes to THEIR membership tables instead, per affected user —
+ * `recipient-membership-recompute.ts`.
  *
  * ## The design: synchronous revoke, asynchronous re-grant
  *

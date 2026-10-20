@@ -9,8 +9,11 @@
  *
  * The fixture is HotCRM's measured shape: eleven uncustomized declared rules
  * the seeder wrote organization-less (`managed_by 'package'`, `customized 0`),
- * beside an organization-authored rule and a customized declared rule with no
- * organization, plus a column-drop table still carrying `organization_id` —
+ * beside an organization-authored rule and a customized seeded rule with no
+ * organization whose declaration its package has since dropped (a customized
+ * copy of a rule still declared is the `declared-rule-copies` step's, pinned in
+ * `organization-ownership-apply.declared-rule-copies.test.ts`), plus a
+ * column-drop table still carrying `organization_id` —
  * and the grants those rules materialised, each naming its rule row by id.
  *
  *  - The mirror-deletion step renames every grant naming a mirror to the
@@ -123,8 +126,8 @@ function ledger(): CeremonyLedgerPort & { verdicts: Verdict[] } {
   };
 }
 
-/** Every rule the fixture's packages declare: the eleven mirrors' names and the customized one's. */
-const DECLARED = [...Array.from({ length: MIRRORS }, (_, i) => `share_declared_${i + 1}`), 'share_custom'];
+/** Every rule the fixture's packages declare: the eleven mirrors' names (the customized rule's is no longer declared). */
+const DECLARED = Array.from({ length: MIRRORS }, (_, i) => `share_declared_${i + 1}`);
 
 /**
  * Plan, then apply that reviewed plan, under `single`, as the command does.
@@ -352,11 +355,26 @@ describe('the declared sharing-rule mirrors, once their seeder has retired', () 
     const l = ledger();
     const report = await apply(l, undefined, null);
     expect(report.complete).toBe(false);
+    // The customized seeded rule stops it first: whether it is a copy of a
+    // declared rule is read from the same registry.
+    expect(report.steps.find((s) => s.step === 'declared-rule-copies')).toMatchObject({
+      status: 'blocked',
+      blockers: [expect.stringMatching(/no registry to read them from/)],
+    });
+    expect(report.steps.find((s) => s.step === 'mirror-deletion')).toMatchObject({ status: 'not-reached' });
+    expect(rows(`SELECT COUNT(*) AS n FROM sys_sharing_rule`)).toEqual([{ n: MIRRORS + 2 }]);
+  });
+
+  it('with no customized copy to stop it first, the mirror-deletion step blocks on the missing registry itself', async () => {
+    db.exec(`DELETE FROM sys_sharing_rule WHERE id = 'rule_customized'`);
+    const report = await apply(ledger(), undefined, null);
+    expect(report.complete).toBe(false);
+    expect(report.steps.find((s) => s.step === 'declared-rule-copies')).toMatchObject({ status: 'done' });
     expect(report.steps.find((s) => s.step === 'mirror-deletion')).toMatchObject({
       status: 'blocked',
       blockers: [expect.stringMatching(/no registry to read the declared sharing rules from/)],
     });
-    expect(rows(`SELECT COUNT(*) AS n FROM sys_sharing_rule`)).toEqual([{ n: MIRRORS + 2 }]);
+    expect(rows(`SELECT COUNT(*) AS n FROM sys_sharing_rule`)).toEqual([{ n: MIRRORS + 1 }]);
   });
 
   it('an organization-stamped mirror (a walled seeder\'s copy) goes too, its grant renamed; a customized one stays', async () => {

@@ -24,6 +24,16 @@
  * neither `required` nor `storage.notNull`, never as a verdict on this column.
  * ⚠️ Not pinned: telling the two cases apart. That needs a registry read, which
  * the mapper does not make.
+ *
+ * [#24715] The door now makes that read, and pins it in
+ * `data-not-null-field-label-24715.test.ts`: the field's label in the sentence,
+ * and a declared `storage.notNull` column's own hint. THIS harness registers no
+ * stored-metadata family, so the protocol's object read fails, the door's
+ * relabel declines, and the classification's answer goes out as it is — which
+ * makes these cases the fail-safe control for that read. The hint they pin
+ * changed with #24715 too: its first sentence no longer adds "or declare the
+ * field `required`", which for a column a hook populates is the move ADR-0113
+ * D1 / D2 rule out.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -112,10 +122,11 @@ function sentencesOf(hint: unknown): string[] {
 function expectHintLeadsWithTheRemedy(hint: unknown) {
   const sentences = sentencesOf(hint);
   const text = String(hint);
-  // First: the column requires a value, so provide it or declare the field `required`.
+  // First: the column requires a value, so provide one. [#24715] …and nothing
+  // more: `required` is not the remedy for a column declared NOT NULL on purpose.
   expect(sentences[0], text).toMatch(/\brequires a value\b/i);
   expect(sentences[0], text).toMatch(/provide/i);
-  expect(sentences[0], text).toContain('`required`');
+  expect(sentences[0], text).not.toContain('`required`');
   expect(sentences[0], text).not.toMatch(/drift|os migrate/i);
   // Then drift, in exactly one sentence, and only as a condition on the declaration.
   const drift = sentences.filter((s) => /drift|os migrate/i.test(s));

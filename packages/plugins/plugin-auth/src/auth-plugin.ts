@@ -29,7 +29,7 @@ import {
 } from '@objectstack/platform-objects/apps';
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
 import { PLATFORM_OWNER_EMAIL_ENV, resolvePlatformOwnerEmail, resolveTenancyPosture } from '@objectstack/types';
-import { inProcessSessionReadInput } from '@objectstack/types';
+import { inProcessSessionReadInput, resolveThrownHttpError } from '@objectstack/types';
 import { postureEnforcesWall, type OrgScopingEntitlement } from '@objectstack/spec/security';
 import type { AuthSessionApi, IDataEngine, IEmailService, II18nService, IObjectQLEngine, ISmsService } from '@objectstack/spec/contracts';
 import {
@@ -71,6 +71,7 @@ import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js
 import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
+import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import type { CounterStore } from './rate-limit-storage.js';
 import { authIdentityManifest } from './manifest.js';
@@ -332,6 +333,35 @@ function isLoopbackIssuer(issuer: string): boolean {
 }
 
 /**
+ * The transport's peer address for a Hono context, when the runtime exposes
+ * one: the value `IHttpRequest.remoteAddress` carries on every request the
+ * transport's own seams build.
+ *
+ * This plugin's auth routes are raw-app mounts (`getRawApp()`), which receive
+ * the Hono context rather than an `IHttpRequest`, so the peer is read here the
+ * way the transport reads it (`@objectstack/plugin-hono-server` `adapter.ts`
+ * `readRemoteAddress`: `@hono/node-server` puts the Node `IncomingMessage` on
+ * `c.env.incoming`). Every access is guarded: a runtime that exposes nothing
+ * yields `undefined`, which the client-address trust rule reads as "no peer",
+ * never as a value to fabricate.
+ */
+function readTransportPeerAddress(c: any): string | undefined {
+  try {
+    const incoming = c?.env?.incoming;
+    const address = incoming?.socket?.remoteAddress ?? incoming?.connection?.remoteAddress;
+    return typeof address === 'string' && address.length > 0 ? address : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** What the transport knows about a raw-app request that its Fetch `Request` does not carry. */
+function transportOf(c: any): { remoteAddress?: string } {
+  const remoteAddress = readTransportPeerAddress(c);
+  return remoteAddress ? { remoteAddress } : {};
+}
+
+/**
  * Authentication Plugin
  *
  * Provides authentication and identity services for ObjectStack applications.
@@ -429,6 +459,14 @@ export class AuthPlugin implements Plugin {
   private tenancy: TenancyService | null = null;
   /** [ADR-0131 D3] Whether `start()` created the Default Organization (a fresh install). */
   private defaultOrganizationCreatedAtBoot = false;
+  /**
+   * ADR-0069 D5 — each operator-facing allow-list refusal explanation is logged
+   * once per process: the first refusal of an undetermined address, and the
+   * first refusal that judged the peer while an untrusted forwarded header was
+   * present.
+   */
+  private allowListUndeterminedWarned = false;
+  private allowListUntrustedHeaderWarned = false;
   private configuredSocialProviders: SocialProviderConfig | undefined;
   // ADR-0092 D6 — the EFFECTIVE better-auth secondaryStorage (host-supplied or
   // the kernel-cache adapter wired in init). The identity write guard's
@@ -2610,8 +2648,59 @@ export class AuthPlugin implements Plugin {
   }
 
   /**
+   * ADR-0069 D5 — the operator-facing explanation of an allow-list refusal,
+   * for the two cases where the reason is not simply "an address outside the
+   * ranges". Logged at `warn` (a refusal the requester was told about, not a
+   * durability loss) and ONCE per process per case, so a refused flood does not
+   * repeat the same sentence per request.
+   *
+   *  - the address could not be established at all, so the request was refused
+   *    as undetermined;
+   *  - the allow-list judged the transport's peer address while the request
+   *    carried a forwarded header that was not believed because
+   *    `server.trustProxy` is not declared: the shape a deployment behind a
+   *    proxy takes before it declares the proxy trusted.
+   */
+  private explainAllowListRefusal(
+    ctx: PluginContext,
+    mgr: AuthManager,
+    ip: string | undefined,
+    headers: Record<string, string>,
+  ): void {
+    const trustProxy = mgr.trustsForwardedHeaders();
+    if (!ip) {
+      if (this.allowListUndeterminedWarned) return;
+      this.allowListUndeterminedWarned = true;
+      ctx.logger.warn(
+        '[auth] auth request refused (403 IP_NOT_ALLOWED): the `allowed_ip_ranges` setting (ADR-0069 D5) is set, '
+          + 'but the server could not establish this request\'s client address. '
+          + (trustProxy
+            ? '`server.trustProxy` is declared, yet the request carried no X-Forwarded-For / X-Real-IP header '
+              + 'and the transport reported no peer address. '
+            : 'The transport reported no peer address, and forwarded headers are not believed because '
+              + '`server.trustProxy` is not declared. ')
+          + 'While the allow-list is set, every request whose address cannot be established is refused. Fix: '
+          + 'serve through a transport that reports the socket address, or terminate on a reverse proxy you '
+          + 'control that sets X-Forwarded-For and declare `server.trustProxy: true`; or clear `allowed_ip_ranges`.',
+      );
+      return;
+    }
+    if (trustProxy || this.allowListUntrustedHeaderWarned) return;
+    if (!headers['x-forwarded-for'] && !headers['x-real-ip']) return;
+    this.allowListUntrustedHeaderWarned = true;
+    ctx.logger.warn(
+      '[auth] auth request refused (403 IP_NOT_ALLOWED) by the `allowed_ip_ranges` setting (ADR-0069 D5): the '
+        + 'allow-list judged the connection\'s peer address, because `server.trustProxy` is not declared and so the '
+        + 'request\'s X-Forwarded-For / X-Real-IP header was not believed. If this deployment sits behind a reverse '
+        + 'proxy you control, declare `server.trustProxy: true`; until then the allow-list judges the proxy\'s own '
+        + 'address.',
+      { judgedAddress: ip },
+    );
+  }
+
+  /**
    * Register authentication routes with HTTP server
-   * 
+   *
    * Uses better-auth's universal handler for all authentication requests.
    * This forwards all requests under basePath to better-auth, which handles:
    * - Email/password authentication
@@ -2639,23 +2728,35 @@ export class AuthPlugin implements Plugin {
     const rawApp = (httpServer as any).getRawApp();
 
     // ── ADR-0069 D5 — network gating (IP allow-list) ──────────────────────
-    // Reject auth requests from a client IP outside the configured ranges,
-    // BEFORE they reach better-auth. Registered first so it runs ahead of the
-    // routes below. The public render helpers (/config, /bootstrap-status) are
-    // exempt so a blocked client still gets a clean login page + error. No-op
-    // (and no IP parse) when no ranges are configured.
+    // Reject auth requests from a client address outside the configured
+    // ranges, BEFORE they reach better-auth. Registered first so it runs ahead
+    // of the routes below. The public render helpers (/config,
+    // /bootstrap-status) are exempt so a blocked client still gets a clean
+    // login page + error. Nothing is judged when no ranges are configured.
+    //
+    // The address judged is the one the server ESTABLISHED, by the platform's
+    // client-address trust rule (`AuthManager.resolveClientAddress`, shared
+    // with the runtime's inbound rate limiter): forwarded headers only when
+    // `server.trustProxy` is declared, the transport's peer address otherwise.
+    // An address that cannot be established is refused like one outside the
+    // ranges (`isClientIpAllowed`), with an operator log line naming both
+    // settings. The wildcard route below hands the same peer to
+    // `handleRequest`, so the D7 login audit stamps this same address.
     if (typeof rawApp.use === 'function') rawApp.use(`${basePath}/*`, async (c: any, next: any) => {
       const mgr = this.authManager;
-      if (!mgr || typeof mgr.isClientIpAllowed !== 'function') return next();
+      if (
+        !mgr ||
+        typeof mgr.isClientIpAllowed !== 'function' ||
+        typeof mgr.resolveClientAddress !== 'function'
+      ) {
+        return next();
+      }
       const path: string = c.req.path || '';
       if (path.endsWith('/config') || path.endsWith('/bootstrap-status')) return next();
-      const fwd = c.req.header('x-forwarded-for');
-      const ip =
-        (typeof fwd === 'string' && fwd.split(',')[0].trim()) ||
-        c.req.header('cf-connecting-ip') ||
-        c.req.header('x-real-ip') ||
-        undefined;
+      const headers = (c.req.header() ?? {}) as Record<string, string>;
+      const ip = mgr.resolveClientAddress({ headers, ...transportOf(c) });
       if (!mgr.isClientIpAllowed(ip)) {
+        this.explainAllowListRefusal(ctx, mgr, ip, headers);
         return c.json(
           { success: false, error: { code: 'IP_NOT_ALLOWED', message: 'Sign-in is not allowed from your network.' } },
           403,
@@ -3523,7 +3624,17 @@ export class AuthPlugin implements Plugin {
             ...inProcessSessionReadInput(c.req.raw.headers),
           });
         } catch (err: any) {
-          const status = typeof err?.status === 'number' ? err.status : 500;
+          // [#24773] Answer the status the refusal DECLARED, by the repo's one
+          // rule for a thrown error's status (`resolveThrownHttpError`).
+          // better-call's `APIError` — every refusal better-auth raises —
+          // carries its status twice: as the NUMBER `statusCode` (400) and as
+          // the NAME `status` ('BAD_REQUEST'). This door used to read only a
+          // numeric `status`, so each named refusal answered 500 — an
+          // `invalid_redirect_uri` redirect URI, a request with no session
+          // (`UNAUTHORIZED`) — while the body-schema `ValidationError`, whose
+          // `status` is the number 400, answered 400 from the same door. A
+          // throw that declares no status is a server fault and stays 500.
+          const { status } = resolveThrownHttpError(err, 500);
           // better-auth's `body.error` is an arbitrary upstream string, so it
           // cannot be `error.code` — that field is a closed set (ADR-0112) and
           // an unbounded source defeats it. Keep the code ours and carry the
@@ -3546,6 +3657,30 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sys-oauth-application/register failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // Revoke ONE session, named by its `sys_session.id` — the door behind the
+    // `sys_session` Revoke Session row action (Setup → Sessions, Account →
+    // Active Sessions). The server resolves the session from the id, so the
+    // session token never travels to or from the console. The owner lane
+    // re-dispatches to better-auth's own `/revoke-session`; another user's
+    // session is revocable by a platform administrator only (ADR-0068 D2
+    // judge). Same family as `sys-oauth-application/register` above: an
+    // object-scoped mount outside `/admin/`, because it admits the owner.
+    // See `sys-session-revoke.ts` for the lanes and refusals.
+    rawApp.post(`${basePath}/sys-session/revoke`, async (c: any) => {
+      try {
+        const { status, body } = await runSysSessionRevoke(
+          sysSessionRevokeDepsFor(this.authManager!, basePath),
+          c.req.raw,
+        );
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sys-session/revoke failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });
@@ -3605,8 +3740,11 @@ export class AuthPlugin implements Plugin {
     // path it implements, and only its leftovers are up for grabs.
     rawApp.all(`${basePath}/*`, async (c: any, next: any) => {
       try {
-        // Forward the original request to better-auth handler
-        const response = await this.authManager!.handleRequest(c.req.raw);
+        // Forward the original request to better-auth handler, with the
+        // transport's peer address: `handleRequest` establishes the client
+        // address from it by the same trust rule the D5 gate above judged
+        // with, and the D7 login audit stamps that address.
+        const response = await this.authManager!.handleRequest(c.req.raw, transportOf(c));
 
         // [#15417] Yield only a 404 that DISCLAIMS OWNERSHIP. `ownsRoute` asks
         // better-auth's live `auth.api` — the same seam the route ledger and the

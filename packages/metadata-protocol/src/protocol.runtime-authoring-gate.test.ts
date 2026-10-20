@@ -3069,6 +3069,123 @@ describe('runtime authoring gate on OBJECT writes — the object action predicat
     });
 });
 
+/**
+ * [#24677] The object save door refuses a `lookup` or `master_detail` whose
+ * `reference` is a stored-metadata-body table.
+ *
+ * The engine never hydrates such a field (`expand` keeps the stored id; a
+ * master-detail `parent` root over a family header stays unbound), and this
+ * door saved it with a 200, as `os validate` and `os build` built it. The
+ * refusal is in `@objectstack/lint`'s expression rule, beside the refusal of a
+ * formula reading through such a field; no code here moves. Pinned through
+ * the REAL `saveMetaItem` / `publishMetaItem`:
+ *
+ *  (a) each family table, as a `lookup` and as a `master_detail`, is refused
+ *      with the 422 `INVALID_METADATA` envelope carrying the build's located
+ *      finding, on an active save AND on a draft's promotion, and nothing
+ *      lands;
+ *  (b) the control: a reference to an ordinary platform table still saves;
+ *  (d) the door's issue and the build's finding are the same finding.
+ *
+ * The rule's own pins are `@objectstack/lint`'s
+ * `validate-expressions.stored-metadata-body-reference.test.ts`.
+ *
+ * ⚠️ As in the #22019 block above: this package reaches `@objectstack/lint`
+ * through its built `dist/`, so an edit to the rule is invisible here until
+ * `pnpm --filter @objectstack/lint build` has run.
+ */
+describe('runtime authoring gate on OBJECT writes — a relationship into a stored-metadata-body table (#24677)', () => {
+    /** `sharingModel` is authored so `security-owd-unset` stays quiet and the refusal is the reference's. */
+    const fxRef = (type: string, target: string) => ({
+        name: 'fx_ref',
+        label: 'Reference Probe',
+        sharingModel: 'private',
+        fields: {
+            name: { type: 'text', label: 'Name' },
+            meta: { type, label: 'Meta', reference: target },
+        },
+    });
+    const FAMILY = ['sys_metadata', 'sys_metadata_history'] as const;
+    const TYPES = ['lookup', 'master_detail'] as const;
+    /** Where the build locates the refusal — the KEY the author edits. */
+    const WHERE = "object 'fx_ref' · field 'meta' reference";
+
+    const refRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'object' && r.name === 'fx_ref');
+    const buildFindings = (obj: unknown) => {
+        const stack = { objects: [obj] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack })
+            .filter((f) => f.rule === EXPRESSION_INVALID && f.where === WHERE);
+    };
+
+    for (const target of FAMILY) {
+        for (const type of TYPES) {
+            it(`(a) REFUSES an active save of a \`${type}\` to '${target}' with a 422 carrying the build's located finding`, async () => {
+                const { protocol, rows } = makeProtocol();
+
+                const err = await protocol
+                    .saveMetaItem({ type: 'object', name: 'fx_ref', item: fxRef(type, target) })
+                    .catch((e: any) => e);
+
+                expect(err, 'the save resolved — the door still accepts the reference').toBeInstanceOf(Error);
+                expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+                expect(err.rulesRun).toContain('validateStackExpressions');
+                const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID && i.where === WHERE);
+                expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+                expect(issue.path).toBe(WHERE);
+                expect(issue.severity).toBe('error');
+                // The named subjects: the field, its type and the target.
+                expect(issue.message).toContain(`\`meta\` is a \`${type}\` whose \`reference\` names '${target}'`);
+                // And nothing landed.
+                expect(refRows(rows)).toEqual([]);
+            });
+        }
+    }
+
+    it("(a) REFUSES the same body on a draft's PROMOTION — the draft door is not a bypass", async () => {
+        const { protocol, rows } = makeProtocol();
+        await expect(
+            protocol.saveMetaItem({ type: 'object', name: 'fx_ref', item: fxRef('master_detail', 'sys_metadata'), mode: 'draft' }),
+        ).resolves.toMatchObject({ success: true });
+
+        const err = await protocol.publishMetaItem({ type: 'object', name: 'fx_ref' }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = err.issues.find((i: any) => i.rule === EXPRESSION_INVALID && i.where === WHERE);
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(refRows(rows).map((r) => r.state)).not.toContain('active');
+    });
+
+    for (const type of TYPES) {
+        it(`(b) the control: a \`${type}\` to an ordinary platform table (\`sys_user\`) still saves, and the row lands`, async () => {
+            const { protocol, rows } = makeProtocol();
+
+            const result = await protocol.saveMetaItem({ type: 'object', name: 'fx_ref', item: fxRef(type, 'sys_user') });
+
+            expect(result.success).toBe(true);
+            expect(refRows(rows).map((r) => r.state)).toEqual(['active']);
+        });
+    }
+
+    it('(d) the door and `os build` give the SAME finding for the same field', async () => {
+        const { protocol } = makeProtocol();
+        const err = await protocol
+            .saveMetaItem({ type: 'object', name: 'fx_ref', item: fxRef('lookup', 'sys_metadata') })
+            .catch((e: any) => e);
+        const atDoor = (err.issues ?? []).filter((i: any) => i.rule === EXPRESSION_INVALID && i.where === WHERE);
+
+        const atBuild = buildFindings(fxRef('lookup', 'sys_metadata'));
+
+        expect(atBuild).toHaveLength(1);
+        expect(atBuild[0]!.severity).toBe('error');
+        expect(atDoor).toHaveLength(1);
+        for (const k of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+            expect(atDoor[0][k], `door and build disagree on '${k}'`).toBe(atBuild[0]![k]);
+        }
+        expect(buildFindings(fxRef('lookup', 'sys_user'))).toEqual([]);
+    });
+});
+
 // #23388 — the two page component rules at the runtime save door, ruling of
 // record 6161173492 (letter B): `validateComponentProps` and
 // `validateComponentTypes` run on a `page` write (`runtimeTypes: ['page']`),
@@ -3629,17 +3746,21 @@ describe('runtime authoring gate on VIEW writes into a package — the closure v
         }
     });
 
-    it('(c) a write that names no package is unchanged — the overlay door refuses the stranger column and stays silent on nowhere', async () => {
+    it('(c) a write that names no package gets no closure verdict — the overlay door refuses the stranger column, and nowhere as nowhere', async () => {
         const overlay = makePackagedProtocol();
         const err = await saveView(overlay.protocol, listView('showcase_task')).catch((e: any) => e);
         expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
         expect(err.issues.map((i: any) => [i.rule, i.path])).toEqual([[FIELD_UNKNOWN, 'views[0].columns[1].field']]);
         expect(activeViewRows(overlay.rows)).toEqual([]);
 
+        // [#24668] No closure, so no closure verdict: the binding is judged
+        // against the whole collection and refused as existing nowhere (the
+        // block below pins that door in full).
         const nowhere = makePackagedProtocol();
-        const result = await saveView(nowhere.protocol, listView('nosuch_obj'));
-        expect(result).toMatchObject({ success: true });
-        expect(rulesOf(result.advisories)).toEqual([]);
+        const refused = await saveView(nowhere.protocol, listView('nosuch_obj')).catch((e: any) => e);
+        expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(rulesOf(refused.issues)).toEqual(['list-view-object-unknown']);
+        expect(activeViewRows(nowhere.rows)).toEqual([]);
     });
 
     it('(d) the draft → active promotion refuses the out-of-closure binding, and the in-closure unknown field', async () => {
@@ -3719,5 +3840,166 @@ describe('runtime authoring gate on VIEW writes into a package — the closure v
         const causal = refused.failed.find((f: any) => f.name === 'crm_ticket.qavfy_r1');
         expect(causal?.code).toBe('INVALID_METADATA');
         expect(rulesOf(causal.issues)).toEqual([FIELD_UNKNOWN]);
+    });
+});
+
+// [#24668] The overlay twin of the block above: a list view written with NO
+// package is judged against the WHOLE collection the host serves — every
+// registry object (every package's and the platform's) folded with the stored
+// rows — so a binding missing from it exists nowhere, and the real
+// `saveMetaItem` refuses it `422 INVALID_METADATA` at the binding
+// (`list-view-object-unknown`), with nothing stored. The verdict the closure
+// door gives the same body (`list-view-object-outside-closure`) and the dataset
+// door gives an unknown base object (`object-reference-unknown`). A binding
+// that resolves — a package's object, a platform object, a stored overlay
+// object — is admitted with its field verdict unchanged. Drafts are not gated;
+// a stored row is judged at its next save.
+describe('runtime authoring gate on VIEW writes that name no package — the whole-collection verdict (#24668)', () => {
+    const OWN = 'com.acme.crm';
+    const STRANGER = 'com.other.analytics';
+    const PLATFORM = 'com.objectstack.platform';
+    const UNKNOWN = 'list-view-object-unknown';
+    const FIELD_UNKNOWN = 'list-view-field-unknown';
+
+    const object = (name: string, packageId?: string) => ({
+        name,
+        label: name,
+        ...(packageId === undefined ? {} : { _packageId: packageId }),
+        fields: [{ name: 'title', type: 'text', label: 'Title' }],
+    });
+    /** The card's body: a flattened list overlay bound to `bound`, one known and by default one unknown column. */
+    const listView = (bound: string, columns: readonly string[] = ['title', 'zzz_nope']) => ({
+        name: `${bound}.qavfy_r1`,
+        object: bound,
+        viewKind: 'list',
+        label: 'r1',
+        type: 'grid',
+        data: { provider: 'object', object: bound },
+        columns: columns.map((field) => ({ field })),
+    });
+
+    /** A registry holding two packages' objects and a platform object; `tenant_ticket` lives only in the store. */
+    function makeOverlayProtocol() {
+        const { engine, rows } = makeStubEngine();
+        const packages: Record<string, { manifest: Record<string, unknown> }> = {
+            [OWN]: { manifest: { name: OWN, version: '1.0.0' } },
+            [STRANGER]: { manifest: { name: STRANGER, version: '1.0.0' } },
+        };
+        engine.registry.listItems = (type: string) =>
+            type === 'object'
+                ? [object('crm_account', OWN), object('showcase_task', STRANGER), object('sys_widget_log', PLATFORM)]
+                : [];
+        engine.registry.getPackage = (id: string) => packages[id];
+        // A tenant-authored object, stored and never registered: the gate's
+        // universe is the registry FOLDED with the store, so it is there.
+        rows.set(keyOf({ type: 'object', name: 'tenant_ticket', organization_id: null, state: 'active' }), {
+            id: 'r_obj', type: 'object', name: 'tenant_ticket', organization_id: null, state: 'active',
+            metadata: JSON.stringify({
+                name: 'tenant_ticket',
+                label: 'Tenant Ticket',
+                sharingModel: 'private',
+                fields: { title: { type: 'text', label: 'Title' } },
+            }),
+        });
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        return { protocol, rows };
+    }
+
+    const saveView = (protocol: any, item: { name: string }, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'view', name: item.name, item, ...extra });
+    const activeViewRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'view' && r.state === 'active');
+    const rulesOf = (findings: any[] | undefined) => (findings ?? []).map((f: any) => f.rule);
+    /** A refused publish-mode write: the 422 envelope, carrying the one unknown-object issue at the binding. */
+    const expectRefusedUnknown = (err: any, what: string) => {
+        expect(err, `${what}: the write resolved — the overlay door still accepts a binding that exists nowhere`).toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(rulesOf(err.issues), JSON.stringify(err.issues)).toEqual([UNKNOWN]);
+        expect(err.issues[0]).toMatchObject({ severity: 'error', path: 'views[0].data.object' });
+        expect(err.issues[0].message).toContain('"nosuch_obj"');
+    };
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('(a) REFUSES an active overlay save bound to an object that exists nowhere — 422 at the binding, nothing stored', async () => {
+        const { protocol, rows } = makeOverlayProtocol();
+
+        const err = await saveView(protocol, listView('nosuch_obj')).catch((e: any) => e);
+
+        expectRefusedUnknown(err, 'overlay write');
+        // A gate that refuses after persisting is a log line.
+        expect(activeViewRows(rows)).toEqual([]);
+    });
+
+    it('(a) the control: a binding that resolves is admitted — package, stranger, platform and stored overlay objects', async () => {
+        for (const bound of ['crm_account', 'showcase_task', 'sys_widget_log', 'tenant_ticket']) {
+            const { protocol, rows } = makeOverlayProtocol();
+
+            const result = await saveView(protocol, listView(bound, ['title']));
+
+            expect(result, bound).toMatchObject({ success: true });
+            expect(rulesOf(result.advisories), bound).toEqual([]);
+            expect(activeViewRows(rows), bound).toHaveLength(1);
+        }
+    });
+
+    it('(b) a binding that resolves keeps its field verdict: an unknown column is refused as before', async () => {
+        for (const bound of ['crm_account', 'tenant_ticket']) {
+            const { protocol, rows } = makeOverlayProtocol();
+
+            const err = await saveView(protocol, listView(bound)).catch((e: any) => e);
+
+            expect({ code: err?.code, status: err?.status }, bound).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect(err.issues.map((i: any) => [i.rule, i.path]), bound).toEqual([[FIELD_UNKNOWN, 'views[0].columns[1].field']]);
+            expect(activeViewRows(rows), bound).toEqual([]);
+        }
+    });
+
+    it('(c) a DRAFT save of the same body is not gated; its promotion is judged and refused', async () => {
+        const { protocol, rows } = makeOverlayProtocol();
+
+        await expect(saveView(protocol, listView('nosuch_obj'), { mode: 'draft' })).resolves.toMatchObject({ success: true });
+        const promoted = await protocol
+            .publishMetaItem({ type: 'view', name: 'nosuch_obj.qavfy_r1' })
+            .catch((e: any) => e);
+
+        expectRefusedUnknown(promoted, 'promotion');
+        expect(activeViewRows(rows)).toEqual([]);
+    });
+
+    it('(d) a write naming a package the registry cannot produce narrows nothing — the whole-collection verdict', async () => {
+        const { protocol, rows } = makeOverlayProtocol();
+
+        const err = await saveView(protocol, listView('nosuch_obj'), { packageId: 'com.unregistered.pkg' }).catch((e: any) => e);
+
+        expectRefusedUnknown(err, 'unresolvable package');
+        expect(activeViewRows(rows)).toEqual([]);
+    });
+
+    it('(e) a stored view with the binding keeps loading; its next save is refused, the row untouched', async () => {
+        const { protocol, rows } = makeOverlayProtocol();
+        // Stored before the crossing, seeded straight into the store because the
+        // save door now refuses this body.
+        const stored = listView('nosuch_obj', ['title']);
+        rows.set(keyOf({ type: 'view', name: stored.name, organization_id: null, state: 'active' }), {
+            id: 'r_seed', type: 'view', name: stored.name, organization_id: null, state: 'active',
+            metadata: JSON.stringify(stored),
+        });
+
+        // The boot path runs no authoring rule.
+        await expect(protocol.loadMetaFromDb()).resolves.toMatchObject({ loaded: 2, errors: 0, invalid: 0 });
+
+        // The next save is a write, and is judged.
+        const err = await saveView(protocol, stored).catch((e: any) => e);
+        expectRefusedUnknown(err, 'next save of a stored row');
+        expect(JSON.parse(activeViewRows(rows)[0]!.metadata)).toEqual(stored);
     });
 });

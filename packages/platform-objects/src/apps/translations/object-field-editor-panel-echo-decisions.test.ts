@@ -217,10 +217,10 @@ const DECISIONS: readonly Decision[] = [
     type: 'object',
     key: 'fields.expression',
     prop: 'helpText',
-    en: 'CEL formula expression',
+    en: "CEL expression the field's value is computed from. On a formula field: computed on read, no stored column. On any other field: computed by the engine from the row each write stores, and stored, so a client-sent value never stands.",
     verdict: ALL_TRANSLATE,
     reason:
-      'CEL is a language name and stays verbatim; the rest is prose. The formula vocabulary already exists on this very panel — returnType.helpText ("Result type for formulas") is authored in all three locales — so this leaf was simply never reached.',
+      'CEL is a language name and stays verbatim; the rest is prose. The formula vocabulary already exists on this very panel — returnType.helpText ("Result type for formulas") is authored in all three locales — so this leaf was simply never reached. Re-translated when the row widened past `formula` to every type: the sentence is the field designer\'s own expression.helpText, authored in the same words in all three locales.',
   },
   {
     type: 'object',

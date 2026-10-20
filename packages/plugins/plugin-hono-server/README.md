@@ -35,6 +35,24 @@ await kernel.bootstrap();
 
 The Hono server plugin supports flexible CORS configuration with wildcard pattern matching.
 
+### Default: no cross-origin caller
+
+The CORS middleware is mounted by default, and it admits only the origins you name
+(`cors.origins`, else `OS_CORS_ORIGIN`). With neither set, **no cross-origin caller is
+admitted**. Same-origin requests need no CORS answer, so pages this server serves are
+unaffected. On a development boot (`NODE_ENV=development`, which `os dev` sets), loopback
+origins (`localhost`, `127.0.0.1`, `[::1]`, any port) are admitted too.
+
+`'*'` while credentials are on (the default) is **refused at init**, so the boot fails.
+Name the origins instead, or turn credentials off to serve `'*'` to callers that send no
+cookies:
+
+```typescript
+kernel.use(new HonoServerPlugin({
+  cors: { origins: '*', credentials: false }
+}));
+```
+
 ### Basic CORS
 
 ```typescript
@@ -79,18 +97,20 @@ CORS can also be configured via environment variables:
 
 ```bash
 # Single origin
-CORS_ORIGIN=https://app.example.com
+OS_CORS_ORIGIN=https://app.example.com
 
 # Wildcard patterns (comma-separated)
-CORS_ORIGIN=https://*.objectui.org,https://*.objectstack.ai
+OS_CORS_ORIGIN=https://*.objectui.org,https://*.objectstack.ai
 
 # Disable CORS
-CORS_ENABLED=false
+OS_CORS_ENABLED=false
 
 # Additional options
-CORS_CREDENTIALS=true
-CORS_MAX_AGE=86400
+OS_CORS_CREDENTIALS=true   # default; must be false for OS_CORS_ORIGIN=*
+OS_CORS_MAX_AGE=86400
 ```
+
+The legacy `CORS_*` names are still read.
 
 ### Disable CORS
 

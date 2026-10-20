@@ -24,6 +24,26 @@
 > (need named presets on an object → use `listViews`). Enforced by a new
 > `ObjectUserFiltersSchema` (element narrowed to `dropdown`/`toggle`, `tabs`/
 > `showAllRecords` omitted), which `ObjectListViewSchema` now `.extend`s back in.
+>
+> **Amendment (2026-10-20) — `filterableFields` is retired in 18.0, with no
+> replacement key and no rewrite (#24640: the maintainer ruled 「C」, record
+> 6278975049, and pulled it into 18.0 with 「提前」, record 6279033298;
+> executed by PR #24721, `4bc3becd5`).** §3.3 item 1 below said
+> `filterableFields` "stays as the legacy shorthand; loaders auto-upgrade it to
+> `userFilters.fields` entries". That loader was never built: on the tree the
+> retirement replaced, the key was declared, offered as a Studio form input and
+> checked for field references, and nothing rewrote it into
+> `userFilters.fields`; its one renderer, objectui's `ListView`, read it as the
+> Filter panel's field whitelist instead. The ruling retires the key with no
+> replacement key: the list-view shapes (`ListViewSchema`,
+> `ObjectListViewSchema`) refuse it at parse with a `retiredKey()` tombstone
+> that names the fix, and the conversion `view-list-filterable-fields-removed`
+> drops it from stored views. No conversion rewrites it to
+> `userFilters.fields`: that rewrite keeps nothing an author saw — the
+> whitelist would vanish and quick-filter chips would appear (record
+> 6278907207). A curated end-user filter bar is authored as `userFilters`.
+> §3.3 item 1's sentence is struck in place, not deleted; §4 already called
+> the alias a one-release courtesy, not a commitment.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source per type, org overlay), [ADR-0017](./0017-object-has-many-view.md) (independent view entities, `viewKind`), [ADR-0019](./0019-app-as-consumer-unit.md) (App is the consumer-facing unit — navigation decides what users see), [ADR-0027](./0027-metadata-authoring-lifecycle.md) (draft · publish lifecycle), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (**AI is the long-term author of metadata — the design center this ADR inherits**)
 **Consumers**: `@objectstack/spec` (view + page Zod schemas), `@objectstack/objectql` (registry validation/diagnostics), `../objectui` (console `ObjectView` / `PageView`, `plugin-list`), framework templates (`hotcrm`, `app-showcase`), the `objectstack-ui` authoring skill
@@ -151,8 +171,10 @@ have; we do not rely on lint to forbid what the type can simply not express.
 
    Attached as `ListViewSchema.userFilters` (view-level convenience) and
    `InterfacePageConfigSchema.userFilters` (the primary home).
-   `filterableFields` stays as the legacy shorthand; loaders auto-upgrade it
-   to `userFilters.fields` entries.
+   ~~`filterableFields` stays as the legacy shorthand; loaders auto-upgrade it
+   to `userFilters.fields` entries.~~ *(Struck by the 2026-10-20 amendment —
+   `filterableFields` retired in 18.0 by ruling C on #24640, with no
+   replacement key and no rewrite; see the status block above.)*
 
 2. **Runtime visualization whitelist.**
    `UserActionsConfigSchema.visualizations?: z.union([z.boolean(), z.array(ViewTypeEnum)])`

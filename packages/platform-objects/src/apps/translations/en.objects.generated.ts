@@ -1557,7 +1557,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         description: "Rotate this OAuth client's secret? The previous secret will stop working immediately and any integrations using it will break until they are updated with the new secret. The new secret is shown only once.",
         resultDialog: {
           title: "Client secret rotated",
-          description: "Save the new secret now — it is shown only once. Update every integration before the previous secret's grace period ends.",
+          description: "Save the new secret now — it is shown only once. The previous secret has already stopped working: update every integration with the new secret.",
           acknowledge: "I have updated my integrations",
           fields: {
             client_secret: "New Client Secret"
@@ -3411,7 +3411,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Scope",
         help: "Cascade layer the row was written to.",
         options: {
-          global: "Global",
           tenant: "Tenant",
           user: "User"
         }

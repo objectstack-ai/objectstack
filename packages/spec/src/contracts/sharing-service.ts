@@ -217,34 +217,41 @@ export type SharingWriteVerdict = 'allow' | 'abstain' | 'deny';
  * not that middleware hands over no depth, and the owner-match then runs at its
  * NARROWEST — owner-only, i.e. `own`.
  *
- * **For the PARENT-record gates that is deliberate, not an oversight.** The
- * `sys_comment` gates (`@objectstack/plugin-audit`) and the `sys_attachment`
- * kit (`@objectstack/service-storage`) ask this service about the PARENT
- * record's object while the operation in flight is on the CHILD, so the stamped
- * depth was resolved for a different object and is dropped rather than carried
- * across. Stated as behaviour: a caller whose write depth on the parent object
- * is `unit` / `unit_and_below` / `org` can edit that parent directly through
- * the CRUD path, and is REFUSED when editing or deleting a comment or
- * attachment on it. The divergence runs in the RESTRICTIVE direction —
- * refusals, never a leak — and the maintainer ruling of 2026-08-10 (#7144,
- * split from #7141 / PR #7143) is that these gates STAY at `own`.
+ * **The PARENT-record gates no longer ask this service (#24646).** The
+ * `sys_comment` moderation gate (`@objectstack/plugin-audit`) and the
+ * `sys_attachment` parent gate (`@objectstack/service-storage`) ask about the
+ * PARENT record's object while the operation in flight is on the CHILD, so no
+ * depth stamped for the child could serve them. They used to ask
+ * {@link checkEdit} with no depth, at `own`, and then the ADR-0055 master
+ * check: a caller whose write depth on the parent object is `unit` /
+ * `unit_and_below` / `org` could edit that parent directly through the CRUD
+ * path, and was REFUSED when editing or deleting a comment or attachment on
+ * it. The maintainer ruling of 2026-08-10 (#7144, split from #7141 / PR #7143)
+ * kept them there; for the parent gates it is superseded by the ruling on
+ * #24646 (letter B). "May edit the parent" is the security service's
+ * record-grained by-id `update` judgement of the parent alone
+ * (`ISecurityService.explain`, admitting only `allowed === true` and
+ * `record.visible === true`), which resolves the caller's depth on the parent
+ * object as the CRUD path does. Stated as behaviour: a caller who can update
+ * the parent record by id can also attach files to it and moderate its
+ * comments; a caller who cannot, still cannot. Only a gate whose kernel serves
+ * no `explain` still asks this service, through {@link checkEdit} at `own` —
+ * the narrow direction.
  *
- * **Why the obvious "fix" is off the table** — recorded here so the next reader
- * can tell "deliberately tighter" from "nobody got round to it". Making these
- * gates inherit the parent's real edit authority means resolving the parent's
- * depth through the only tool a package outside `plugin-security` has,
- * `ISecurityService.resolveWriteScope` — and that fails OPEN on one input:
- * `getEffectiveScope` returns `'org'` when NO permission set mentions the
- * object at all (`plugin-security/src/permission-evaluator.ts` —
+ * **Why the gates never resolve the parent's depth themselves** — recorded
+ * here so the next reader does not reach for it. The only depth tool a package
+ * outside `plugin-security` has, `ISecurityService.resolveWriteScope`, fails
+ * OPEN on one input: `getEffectiveScope` returns `'org'` when NO permission set
+ * mentions the object at all (`plugin-security/src/permission-evaluator.ts` —
  * `if (!matched) return 'org'`), which is byte-identical to what a genuine
  * `modifyAllRecords` holder gets. That is why the method's own doc block calls
  * `'org'` authoritative ONLY when paired with an explicit
  * `ISecurityService.hasWriteBypass` check. Handed to a write gate as the depth
  * it becomes fully authoritative on its own, and the owner-match short-exits
  * `true` for EVERY owned row of an unmatched object — a real widening, not a
- * theoretical one. So inheriting the parent's depth starts with a depth
- * primitive that can tell "org depth" from "nothing matched", never with these
- * gates.
+ * theoretical one. The by-id update judgement does not meet it: it asks the
+ * object-level grant first, so an object no permission set mentions is refused
+ * before any depth is consulted.
  */
 export interface ISharingService {
   /**
@@ -298,11 +305,11 @@ export interface ISharingService {
    *
    * [#7144] The write DEPTH in that first sentence is an INPUT this service is
    * handed, never one it resolves — so a caller outside the CRUD middleware
-   * (the `sys_comment` and `sys_attachment` PARENT-record gates, which both
-   * reach this service through {@link checkEdit}) matches ownership at `own`.
-   * That is the ruled shape, and the fail-open that blocks widening it is
-   * written up once in "Write DEPTH is an input the CALLER supplies" on this
-   * interface.
+   * matches ownership at `own`. The `sys_comment` and `sys_attachment`
+   * PARENT-record gates no longer ask this service where the security service
+   * judges a by-id update (#24646); "Write DEPTH is an input the CALLER
+   * supplies" on this interface records what they ask instead, and the
+   * fail-open that keeps them from resolving a depth themselves.
    *
    * [#6428] The two-state PROJECTION of {@link checkEdit}: `true` for every
    * verdict that is not `deny`, i.e. `allow` and `abstain` alike. That
@@ -468,12 +475,25 @@ export interface ISharingService {
 export type SharingRuleRecipientType = 'user' | 'team' | 'business_unit' | 'position' | 'unit_and_subordinates' | 'queue' | 'field';
 
 /**
- * Stored shape of a sharing rule. Maps 1-to-1 to `sys_sharing_rule`
- * with `criteria` lifted out of the JSON column.
+ * A sharing rule as the service serves it: a stored `sys_sharing_rule` row
+ * (`criteria` lifted out of the JSON column), or a DECLARED rule's
+ * projection. Every member but one maps to a `sys_sharing_rule` column;
+ * {@link SharingRuleRow.deploymentWide} has no column there — it marks a
+ * declared rule's deployment-wide projection and is absent on every stored
+ * row.
  */
 export interface SharingRuleRow {
   id: string;
   organization_id?: string | null;
+  /**
+   * [ADR-0131 D2/D8] `true` on a DECLARED rule's projection that sweeps the
+   * whole deployment — the one projection a declared rule is served as under
+   * the `single` posture. Such a projection carries no `organization_id`:
+   * deployment-wide is this typed marker, never a NULL organization. Absent on
+   * every stored `sys_sharing_rule` row, and on a declared rule's
+   * per-organization projections under a walled posture.
+   */
+  deploymentWide?: true;
   name: string;
   label: string;
   description?: string | null;

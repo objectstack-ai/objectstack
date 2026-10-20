@@ -110,6 +110,8 @@ const sysPermissionSet = {
 const sysMetadataActivation = {
   name: 'sys_metadata_activation',
   label: 'Metadata Activation',
+  // Deployment-level, as the platform object declares it: no organization column.
+  systemFields: { tenant: false },
   fields: {
     id: { name: 'id', type: 'text' as const, primaryKey: true },
     metadata_type: { name: 'metadata_type', type: 'text' as const },
@@ -195,10 +197,9 @@ function requestPosture(value: 'single' | 'group' | 'isolated' | undefined): voi
 async function boot(opts: { unguarded?: boolean } = {}): Promise<ObjectQL> {
   const engine = new ObjectQL();
   engines.push(engine);
-  engine.registerDriver(
-    new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
-    true,
-  );
+  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+  driverOf.set(engine, driver);
+  engine.registerDriver(driver, true);
   await engine.init();
   for (const o of [sysUser, sysMember, sysPermissionSet, sysUserPermissionSet, sysMetadataActivation]) {
     engine.registry.registerObject(o as never);
@@ -210,6 +211,22 @@ async function boot(opts: { unguarded?: boolean } = {}): Promise<ObjectQL> {
     registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, { packageId: 'test.last-admin-guard' });
   }
   return engine;
+}
+
+/** The driver behind each booted engine, for {@link seedLegacyRow}. */
+const driverOf = new WeakMap<ObjectQL, SqlDriver>();
+
+/**
+ * [#11663 L5] Seed an organization-less legacy row — the unscoped
+ * `admin_full_access` grant and its catalog row — as a database written before
+ * the walled half of ADR-0131 C8 stage 8b holds it. Since that lift a system
+ * write can no longer create such a row under a wall (the engine refuses the
+ * organization-less insert), so it goes straight through the driver. Under
+ * `single` with no organization object the engine left the same row NULL, so
+ * the rig is unchanged there.
+ */
+async function seedLegacyRow(engine: ObjectQL, object: string, row: Record<string, unknown>): Promise<void> {
+  await driverOf.get(engine)!.create(object, row as never);
 }
 
 async function seedUser(
@@ -427,11 +444,11 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     const engine = await boot();
     await seedUser(engine, 'usr_owner', OWNER, true);
     await seedUser(engine, 'usr_legacy', 'legacy@corp.example', true);
-    await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true }, SYSTEM);
-    await engine.insert(
+    await seedLegacyRow(engine, 'sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true });
+    await seedLegacyRow(
+      engine,
       'sys_user_permission_set',
       { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
-      SYSTEM,
     );
     return engine;
   }
@@ -479,11 +496,11 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     declare(undefined);
     const engine = await boot();
     await seedUser(engine, 'usr_legacy', 'legacy@corp.example', true);
-    await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true }, SYSTEM);
-    await engine.insert(
+    await seedLegacyRow(engine, 'sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true });
+    await seedLegacyRow(
+      engine,
       'sys_user_permission_set',
       { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
-      SYSTEM,
     );
 
     await expect(
@@ -500,11 +517,11 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     declare(undefined);
     const engine = await boot();
     await seedUser(engine, 'usr_legacy', 'legacy@corp.example', true);
-    await engine.insert('sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true }, SYSTEM);
-    await engine.insert(
+    await seedLegacyRow(engine, 'sys_permission_set', { id: 'ps_a', name: ADMIN_FULL_ACCESS, active: true });
+    await seedLegacyRow(
+      engine,
       'sys_user_permission_set',
       { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
-      SYSTEM,
     );
 
     await expect(
@@ -543,10 +560,10 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     const engine = await boot();
     await seedUser(engine, 'usr_legacy', 'legacy@corp.example', true);
     await switchAdminSetOff(engine);
-    await engine.insert(
+    await seedLegacyRow(
+      engine,
       'sys_user_permission_set',
       { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
-      SYSTEM,
     );
 
     await expect(
@@ -562,10 +579,10 @@ describe('[#11663 L5] under a WALLED posture the legacy grant is not an administ
     const engine = await boot();
     await seedUser(engine, 'usr_legacy', 'legacy@corp.example', true);
     await switchAdminSetOff(engine);
-    await engine.insert(
+    await seedLegacyRow(
+      engine,
       'sys_user_permission_set',
       { id: 'ups_1', user_id: 'usr_legacy', permission_set_id: 'ps_a', permission_set: ADMIN_FULL_ACCESS },
-      SYSTEM,
     );
 
     let message = '';

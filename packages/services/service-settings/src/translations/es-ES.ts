@@ -125,7 +125,10 @@ export const esES: PlatformTranslationData = {
       },
       keys: {
         email_password_enabled: { label: 'Habilitar inicio de sesión con correo/contraseña' },
-        signup_enabled: { label: 'Permitir registro de autoservicio' },
+        signup_enabled: {
+          label: 'Permitir el registro por correo',
+          help: 'Abre el formulario de registro con correo y contraseña. A quién admite lo decide la «Audiencia de autorregistro» inferior: con «Solo por invitación», solo a una dirección con una invitación pendiente; con «Dominios de correo», a los dominios de la lista y a las direcciones invitadas; con «Abierto», a cualquiera. Desactivado, cierra el formulario con cualquier audiencia, invitaciones incluidas.',
+        },
         require_email_verification: { label: 'Requerir verificación de correo' },
         membership_policy: {
           label: 'Pertenencia de los usuarios nuevos',
@@ -214,7 +217,7 @@ export const esES: PlatformTranslationData = {
         },
         allowed_ip_ranges: {
           label: 'Rangos de IP permitidos',
-          help: 'Rangos CIDR o IP exactas (una por línea o separadas por comas), p. ej. 203.0.113.0/24. Cuando se define, se rechaza el inicio de sesión desde fuera de estos rangos. Vacío = sin restricción. Requiere un proxy de confianza que defina X-Forwarded-For.',
+          help: 'Rangos CIDR o IP exactas (una por línea o separadas por comas), p. ej. 203.0.113.0/24. Cuando se define, se rechaza el inicio de sesión desde fuera de estos rangos, y también cualquier solicitud cuya dirección de cliente el servidor no pueda determinar. Vacío = sin restricción. Se evalúa la dirección del extremo de la conexión; detrás de un proxy inverso, declare server.trustProxy en el stack para que se evalúe en su lugar la dirección de cliente reenviada.',
         },
         api_key_default_expiry_days: {
           label: 'Duración predeterminada de la clave (días)',
@@ -234,7 +237,7 @@ export const esES: PlatformTranslationData = {
         },
         google_enabled: {
           label: 'Habilitar inicio de sesión con Google',
-          help: 'Requiere un ID de cliente y un secreto de OAuth de Google desde Google Cloud Console.',
+          help: 'Ofrece el inicio de sesión con Google cuando se resuelven tanto un ID de cliente como un secreto de cliente: los guardados abajo, o GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET en el servidor, que tienen prioridad sobre los valores guardados. Hasta que ambos se resuelvan, la página de inicio de sesión no muestra el botón de Google, aunque esta opción esté activada. Desactivada, retira el inicio de sesión con Google aunque el servidor defina ambos. Crea el cliente OAuth en Google Cloud Console.',
         },
         google_client_id: {
           label: 'ID de cliente de Google',

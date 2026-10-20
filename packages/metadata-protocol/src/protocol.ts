@@ -32494,11 +32494,13 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * Edit an installed package's manifest (name / description / version) — the
-     * durable half of `PATCH /packages/:id`. Merges the patch into the registry
-     * (preserving lifecycle state — see {@link SchemaRegistry.updatePackageManifest})
-     * then re-persists the merged manifest to `sys_packages` via the `package`
-     * service so the edit survives a restart.
+     * Edit an installed package's manifest (name / description / version /
+     * dependencies) — the durable half of `PATCH /packages/:id`. Merges the
+     * patch into the registry (preserving lifecycle state — see
+     * {@link SchemaRegistry.updatePackageManifest}; `dependencies` replaces the
+     * stored row whole) then re-persists the merged manifest to `sys_packages`
+     * via the `package` service so the edit survives a restart. The
+     * `dependencies` row arrives judged by the door (`ManifestSchema`'s row).
      *
      * [#21243] A failed persist FAILS the edit, exactly as it fails
      * `installPackage`: the registry row is put back to what it held before the
@@ -32511,7 +32513,7 @@ export class ObjectStackProtocolImplementation implements
      */
     async updatePackage(request: {
         packageId: string;
-        patch: { name?: string; description?: string; version?: string };
+        patch: { name?: string; description?: string; version?: string; dependencies?: Record<string, string> };
     }): Promise<{ package: any; message: string }> {
         // [#21243] The row as it stood before the patch — copied, because
         // `updatePackageManifest` edits the row and its manifest IN PLACE.

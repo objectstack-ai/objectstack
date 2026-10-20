@@ -17,11 +17,13 @@
 // [ADR-0131 D7] Since the global rung moved to the tenant-less
 // `sys_platform_setting`, this table stores the cascade's OTHER layers: its
 // option list is the spec enum minus `global`, and that difference is pinned
-// as such. The audit trail still records every layer, `global` included.
+// as such. The audit trail follows the same split: `sys_setting_audit` keeps
+// the tenant and user rungs, `sys_platform_setting_audit` the global one.
 import { describe, expect, it } from 'vitest';
 import { SpecifierScopeSchema } from '@objectstack/spec/system';
 import { SysSetting } from './sys-setting.object.js';
 import { SysSettingAudit } from './sys-setting-audit.object.js';
+import { SysPlatformSettingAudit } from './sys-platform-setting-audit.object.js';
 
 /** Declared option values of a select field, in declaration order. */
 function optionValues(object: unknown, field: string): string[] {
@@ -59,13 +61,16 @@ describe('sys_setting.scope — value domain (#6036)', () => {
     );
   });
 
-  it('the audit trail object records EVERY layer — the global rung\'s changes included', () => {
-    // `buildSettingAuditWriter` writes the changed key's scope, and a
-    // global-scope change is still a change: the audit option list is the
-    // full spec enum, not this table's subset.
+  it('[18.x step 7] the audit trail splits the layers as the values do: global in the sibling, the rest here', () => {
+    // `buildSettingAuditWriter` routes a global-scope change to
+    // `sys_platform_setting_audit`, and the upgrade ceremony moved every
+    // global-rung row an 18.0 install wrote to `sys_setting_audit`. So the
+    // tenant table's option list is this table's subset, and the sibling's is
+    // the rung it holds; together they are the full spec enum.
     expect([...optionValues(SysSettingAudit, 'scope')].sort()).toEqual(
-      [...SpecifierScopeSchema.options].sort(),
+      SpecifierScopeSchema.options.filter((s) => s !== 'global').sort(),
     );
+    expect(optionValues(SysPlatformSettingAudit, 'scope')).toEqual(['global']);
   });
 
   it('keeps `tenant` as the default, and the default is a declared option', () => {

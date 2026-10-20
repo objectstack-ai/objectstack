@@ -32,13 +32,13 @@ import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import '@objectstack/runtime';
 import '@objectstack/metadata-protocol';
 
-type Command = (typeof import('./organization-ownership.js'))['OrganizationOwnershipCeremony'];
+type Command = (typeof import('./organization-ownership.js'))['default'];
 let MigrateOrganizationOwnership: Command;
 
 // The command's module graph is large, and oclif reads the package's config on
 // the first run: both are paid outside the case timeout.
 beforeAll(async () => {
-  ({ OrganizationOwnershipCeremony: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
+  ({ default: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
 }, 60_000);
 
 const CASE_TIMEOUT_MS = 60_000;

@@ -313,16 +313,35 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // reference, or nowhere at all — and the member's skip 1 used to read that as
   // "another package's object" and judge nothing. It now refuses the binding
   // instead (`list-view-object-outside-closure`, `error`: the verdict the
-  // dataset door gives an out-of-closure base object under the same closure;
-  // the flow door's trigger-object advisory is a separate question). The
+  // dataset door gives an out-of-closure base object under the same closure,
+  // and [#24669] the one the flow door gives an out-of-closure trigger object,
+  // from its own rule outside this suite). The
   // missing-collection argument above is unchanged: the binding is judged
   // against `stack.objects`, the collection every per-write snapshot carries,
   // and the gate states the scope only when it narrowed that collection.
+  //
+  // [#24668] And the other half of that sentence: a runtime write with NO
+  // closure in force is judged against the whole collection the host serves
+  // (`RuntimeStackContext.objects`: registry plus stored rows, unnarrowed), so
+  // a binding missing from it exists nowhere, and the member refuses it
+  // (`list-view-object-unknown`, `error`) — stated as `wholeCollection`.
+  // `runtimeWriteType` is the signal because the gate sets it on every gated
+  // write and the CLI commands never do, and `packageScope` is absent exactly
+  // when the gate narrowed nothing (one predicate, `packageScopeInForce`). The
+  // CLI keeps skip 1: its stack is one app, and an unresolved binding there
+  // may be a dependency package's object.
   {
     name: 'validateListViewFieldRefs',
     runtimeTypes: ['flow', 'view', 'object'],
     run: (stack, ctx) =>
-      validateListViewFieldRefs(stack, ctx?.packageScope ? { packageScope: ctx.packageScope } : undefined),
+      validateListViewFieldRefs(
+        stack,
+        ctx?.packageScope
+          ? { packageScope: ctx.packageScope }
+          : ctx?.runtimeWriteType !== undefined
+            ? { wholeCollection: true }
+            : undefined,
+      ),
   },
   // [#15254] The same question, one surface IN: the field-name lists the
   // OBJECT itself carries (`highlightFields`, `publicSharing.redactFields`),
@@ -679,7 +698,8 @@ export interface ReferenceIntegrityRunOptions {
    * `stack.objects` to — spells the same key as
    * `AuthoringRuleContext.packageScope`. Present only when a closure was in
    * force; ABSENT on the CLI commands and on a write that names no package.
-   * Read by `validateListViewFieldRefs` only.
+   * Read by `validateListViewFieldRefs` only — which reads its absence beside
+   * a set `runtimeWriteType` as the whole collection (#24668).
    */
   packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
 }

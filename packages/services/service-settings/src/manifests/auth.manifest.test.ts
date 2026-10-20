@@ -2,7 +2,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
+import type { CryptoAdapter } from '../crypto-adapter.js';
 import { SettingsService } from '../settings-service.js';
+import { en } from '../translations/index.js';
 import { authSettingsManifest } from './auth.manifest.js';
 
 describe('authSettingsManifest', () => {
@@ -220,5 +222,142 @@ describe('authSettingsManifest', () => {
     });
     await expect(svc.setMany('auth', { audience_posture: 'email_domain' })).resolves.toBeDefined();
     expect((await svc.get('auth', 'audience_posture')).value).toBe('email_domain');
+  });
+
+  // The sign-up toggle and the audience posture are two doors in series on the
+  // email/password sign-up route: plugin-auth binds `signup_enabled` to
+  // `emailAndPassword.disableSignUp` and the posture to the audience gate, and
+  // a registrant passes only when both admit. ON beside "Invitation only"
+  // therefore means "the form is open to invited addresses", which the page
+  // must say rather than leave reading as a contradiction.
+  it('signup_enabled states its conjunction with every audience posture, and stays a door of its own', () => {
+    const specs = authSettingsManifest.specifiers as any[];
+    const signup = specs.find((s) => s.key === 'signup_enabled');
+    const posture = specs.find((s) => s.key === 'audience_posture');
+
+    // The runtime's own default: no explicit value leaves `disableSignUp`
+    // unset, so the route is open.
+    expect(signup.default).toBe(true);
+    // Never hidden behind the posture: under `invite_only` it still decides
+    // whether an invited address may register through the form, so a value
+    // hidden there would close or open that door out of the admin's sight.
+    expect(signup.visible).toBe('${data.email_password_enabled !== false}');
+
+    // The help names every posture the select declares, read from the option
+    // table, so a posture added later reds here until the help covers it.
+    expect(typeof signup.description).toBe('string');
+    for (const value of posture.options.map((o: any) => o.value)) {
+      expect(signup.description, `signup_enabled help names posture ${value}`).toContain(value);
+    }
+    expect(signup.description).toContain(posture.label);
+  });
+
+  // plugin-auth registers Google only when the toggle is on AND a client ID and
+  // secret both resolve, from the stored keys or from GOOGLE_CLIENT_ID /
+  // GOOGLE_CLIENT_SECRET, which the settings service cannot see. The page can
+  // only say so; the help is where it does.
+  it('google_enabled keeps the runtime default and names the env credentials that complete it', () => {
+    const specs = authSettingsManifest.specifiers as any[];
+    const google = specs.find((s) => s.key === 'google_enabled');
+
+    // `true` is what the runtime assumes for an undeclared toggle; a `false`
+    // default would read OFF on a deployment that signs in with Google through
+    // the env credentials, and hide its stored credentials behind `visible`.
+    expect(google.default).toBe(true);
+    expect(google.description).toContain('GOOGLE_CLIENT_ID');
+    expect(google.description).toContain('GOOGLE_CLIENT_SECRET');
+  });
+
+  // The console resolves `settings.auth.keys.<key>.label` / `.help` from the
+  // served bundle BEFORE the manifest literal, in every locale, English
+  // included. An `en` entry that lags the manifest therefore shadows it: the
+  // corrected text never reaches an English admin.
+  it('the en bundle carries the manifest label and help verbatim for the sign-up and Google toggles', () => {
+    const specs = authSettingsManifest.specifiers as any[];
+    const keys = (en.settings as any).auth.keys;
+    for (const key of ['signup_enabled', 'google_enabled']) {
+      const spec = specs.find((s) => s.key === key);
+      expect(keys[key].label, `${key} label`).toBe(spec.label);
+      expect(keys[key].help, `${key} help`).toBe(spec.description);
+    }
+  });
+});
+
+/**
+ * A confidential stand-in, so the stored-credential control below can hold the
+ * `password`-typed secret: the write path refuses a secret-valued key on an
+ * adapter that declares no confidentiality.
+ */
+class ConfidentialTestAdapter implements CryptoAdapter {
+  readonly confidential = true;
+  async encrypt(plaintext: string): Promise<string> {
+    return 'kms:' + Buffer.from(plaintext, 'utf8').toString('base64');
+  }
+  async decrypt(ciphertext: string): Promise<string> {
+    return Buffer.from(ciphertext.replace(/^kms:/, ''), 'base64').toString('utf8');
+  }
+  digest(): string {
+    return 'fnv32:deadbeef';
+  }
+}
+
+// plugin-auth offers Google once the toggle is on and a client ID and secret
+// both resolve, saved here or from GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET,
+// with the env pair winning. The settings service reads only OS_* names, so
+// it cannot see that pair; a `required` on the two keys made it refuse
+// `google_enabled: true` on every deployment whose credentials come from it.
+describe('authSettingsManifest — Google credentials may come from the server (not required)', () => {
+  // FAKE values. This is the env map such a deployment hands the service.
+  const ENV_CREDENTIALS = {
+    GOOGLE_CLIENT_ID: 'fake-env-client-id.apps.googleusercontent.test',
+    GOOGLE_CLIENT_SECRET: 'fake-env-client-secret',
+  };
+  const serviceWith = (env: Record<string, string>) => {
+    const svc = new SettingsService({ env, crypto: new ConfidentialTestAdapter() });
+    svc.registerManifest(authSettingsManifest as any);
+    return svc;
+  };
+
+  it('declares neither credential key required', () => {
+    const specs = authSettingsManifest.specifiers as any[];
+    for (const key of ['google_client_id', 'google_client_secret']) {
+      expect(specs.find((s) => s.key === key).required, key).toBe(false);
+    }
+  });
+
+  it('saves Google ON with both credential fields empty, from unset and after an OFF', async () => {
+    const svc = serviceWith({ ...ENV_CREDENTIALS });
+
+    await expect(svc.setMany('auth', { google_enabled: true })).resolves.toBeDefined();
+    const { values } = await svc.getNamespace('auth');
+    expect(values.google_enabled).toMatchObject({ value: true, source: 'global' });
+    // Nothing is stored for the pair, so plugin-auth resolves it from the env.
+    expect(values.google_client_id?.source).toBe('default');
+    expect(values.google_client_secret?.source).toBe('default');
+
+    // The admin's round trip: OFF, then back ON.
+    await expect(svc.setMany('auth', { google_enabled: false })).resolves.toBeDefined();
+    await expect(svc.setMany('auth', { google_enabled: true })).resolves.toBeDefined();
+    expect(await svc.get('auth', 'google_enabled')).toMatchObject({ value: true, source: 'global' });
+  });
+
+  it('control: a stored credential pair still saves and reads back', async () => {
+    const svc = serviceWith({});
+
+    await expect(
+      svc.setMany('auth', {
+        google_enabled: true,
+        google_client_id: 'fake-stored-client-id',
+        google_client_secret: 'fake-stored-client-secret',
+      }),
+    ).resolves.toBeDefined();
+    expect(await svc.get('auth', 'google_client_id')).toMatchObject({
+      value: 'fake-stored-client-id',
+      source: 'global',
+    });
+    expect(await svc.get('auth', 'google_client_secret')).toMatchObject({
+      value: 'fake-stored-client-secret',
+      source: 'global',
+    });
   });
 });

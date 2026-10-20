@@ -1755,11 +1755,13 @@ const FLOW_API_TRIGGER_SECRET_MISSING_EXPLANATION: RuleExplanation = {
 };
 
 // `flow-trigger-unknown-object` lives in the same rule file but is not one of
-// the five: its verdict depends on packages a build cannot see, so it warns.
+// the five: its verdict depends on packages a build cannot see, so it warns —
+// except under a package closure the runtime publish gate states, where the
+// snapshot is that closure and the id refuses.
 
 const FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
   rule: 'flow-trigger-unknown-object',
-  covers: 'why an unknown trigger object only warns',
+  covers: 'why an unknown trigger object warns, and when it refuses',
   paragraphs: [
     'A record-triggered flow binds an ObjectQL hook filtered to the exact name in its start node\'s ' +
       '`config.objectName`, and a time-relative sweep queries the exact name in `config.timeRelative.object`. ' +
@@ -1769,8 +1771,16 @@ const FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
       'another installed package, which a build of this stack cannot see, so the finding is a warning and ' +
       'can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
       'not judged. Of the findings that say a flow never fires, it is the only one that stays advisory: ' +
-      'the others are settled by contracts this repository ships. At the runtime publish gate it is a save advisory, ' +
-      'judged against the live object registry, never a refusal.',
+      'the others are settled by contracts this repository ships. At the runtime publish gate a write that ' +
+      'names no package gets it as a save advisory, judged against the live object registry.',
+    'A write into a package is judged against that package\'s closure instead: its own objects, the objects ' +
+      'of the packages its manifest declares in `dependencies`, and platform objects. An object outside it ' +
+      'is one the package never declared it may reference, and nothing it installs puts the object in ' +
+      'reach until its manifest declares the dependency, so there the finding is an error and the publish ' +
+      'is refused, the verdict the dataset and view doors give the same reference. Declare a dependency on ' +
+      'the package that defines the object, or trigger the flow on an object inside the closure. A `sys_` ' +
+      'name is not judged there either, a draft save is not gated, and a stored flow is judged at its next ' +
+      'publish.',
   ],
 };
 
@@ -2684,9 +2694,11 @@ const UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION: RuleExplanation = {
       'object\'s `tenancy.tenantField` — is the hand-written per-organization composite that ' +
       'predates the scope vocabulary (ADR-0120 S6). It reads as "unique per organization" but ' +
       'materializes as a plain composite, and SQL UNIQUE is NULL-distinct: it enforces nothing on a ' +
-      'row whose organization column is NULL, which on a single-organization deployment is every ' +
-      'row.',
-    'Respelled `unique: \'organization\'`, the NULL rows become one platform bucket ' +
+      'row whose organization column is NULL — every row a 17.x single-organization deployment ' +
+      'wrote. Since ADR-0131 D9 a new row carries its organization wherever the organization object ' +
+      'is registered, so what the gap still admits there is that residue; a composition that ' +
+      'registers no organization object still writes rows whose organization column is NULL.',
+    'Respelled `unique: \'organization\'`, the NULL rows become one bucket ' +
       '(`COALESCE(organization_id, \'__global__\')`) that is unique among themselves, which is what ' +
       'closes the hole. The respelling keeps `fields` exactly as they are: the driver makes the listed ' +
       'organization column NULL-safe in place rather than prepending a second organization key part, ' +
@@ -3132,7 +3144,9 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'view bound to a provider other than `object`, and the positions other rules own: `sort` ' +
       '(`sort-field-unknown`), `searchableFields` (`searchable-field-unknown`), the `chart` ' +
       'bindings, action names, `conditionalFormatting` predicates and `addRecord.formView`. An ' +
-      'unresolvable `data.object` skips the whole list view, so one typo yields one finding.',
+      'unresolvable binding skips the whole list view on `os validate`, `os build` and `os lint`, so one ' +
+      'typo yields one finding; the runtime save door refuses it once instead, as `list-view-object-unknown` ' +
+      'or, for a write into a package, `list-view-object-outside-closure`.',
   ],
 };
 
@@ -3163,6 +3177,64 @@ const LIST_VIEW_FIELD_DOTTED_EXPLANATION: RuleExplanation = {
       'walks an embedded record: `gantt.quickFilters[].field`, `gantt.tooltipFields[]` and every ' +
       'renderer binding. `sort` keeps its own rule. Always an error: every judged position is ' +
       'refused outright by its door.',
+  ],
+};
+
+/** Which keys a list view's binding is read from, and what stays unjudged (both binding ids write it out). */
+const LIST_VIEW_BINDING_SCOPE =
+  'One finding per list view, at the key the binding was read from: the view\'s `object`, or a list ' +
+  'view\'s own `data.object` where it sets one. The view\'s field references stay unjudged while the ' +
+  'binding does not resolve, so a wrong name is reported once per list view rather than once per ' +
+  'position. Not judged: a draft save, and a stored view until its next save — the door judges ' +
+  'writes only.';
+
+const LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-object-outside-closure',
+  covers: 'what a package closure holds, and why the view refuses',
+  paragraphs: [
+    'A view written into a package at the runtime save door is judged against that package\'s ' +
+      'closure, never the whole deployment: the package\'s own objects, the objects of the packages its ' +
+      'manifest declares in `dependencies`, platform objects, and tenant-authored objects that carry no ' +
+      'package. The declared `dependencies` bound what the package MAY reference, so a list view bound ' +
+      'to an object outside that closure is not resolvable by declaration — whether the object belongs ' +
+      'to a package the manifest never declared or exists nowhere at all, because the closure is all ' +
+      'the door can see.',
+    'An error, so the publish is refused (`422`): it is the verdict the dataset door gives a base ' +
+      'object outside the same closure (`object-reference-unknown`). Judging the view\'s field ' +
+      'references against an object the package may not reference would judge the package against the ' +
+      'wrong set; declaring the dependency puts the object, and the field judgement with it, inside the ' +
+      'closure.',
+    LIST_VIEW_BINDING_SCOPE,
+    'To fix it, declare a dependency on the package that defines the object in the `dependencies` of ' +
+      'the written package\'s manifest, or bind the view to an object inside the closure; when the name ' +
+      'is a typo, the verdict names the nearest object in reach. A write that names no package is ' +
+      'judged against the whole collection instead (`list-view-object-unknown`), and `os validate`, ' +
+      '`os build` and `os lint` judge neither: a stack there is one app, and an unresolved binding may ' +
+      'be a dependency package\'s object the stack does not carry.',
+  ],
+};
+
+const LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-object-unknown',
+  covers: 'why the save door can say an object exists nowhere',
+  paragraphs: [
+    'A view written at the runtime save door with no package named (an overlay write) is judged ' +
+      'against the whole collection the deployment serves: every installed package\'s objects, enabled ' +
+      'or not, the platform\'s, and the objects saved at run time — the same merge the object metadata ' +
+      'listing answers from. Nothing narrows it, so a list view bound to an object missing from it is ' +
+      'bound to an object that exists nowhere: there is no other package for it to come from.',
+    'An error, so the publish is refused (`422`): left in, the view would be stored with none of its ' +
+      'field references checked and fail only when it renders. The nearest object name rides the ' +
+      '`fix:` line, never the verdict, so a stored view\'s verdict does not change when an unrelated ' +
+      'write creates an object with a similar name.',
+    LIST_VIEW_BINDING_SCOPE,
+    'To fix it, bind the view to an object that exists, or save the object before you publish the ' +
+      'view. Not judged: a write into a package, which is judged against that package\'s closure ' +
+      'instead (`list-view-object-outside-closure`); an empty collection, which means the host supplied ' +
+      'none, because no deployment serves zero objects; and `os validate`, `os build` and `os lint`, ' +
+      'where a stack is one app and an unresolved binding may be a dependency package\'s object the ' +
+      'stack does not carry, so the list view is skipped and the binding left to the object-reference ' +
+      'checks.',
   ],
 };
 
@@ -4775,6 +4847,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FILTER_EMPTY_NODE_EXPLANATION.rule]: FILTER_EMPTY_NODE_EXPLANATION,
   [LIST_VIEW_FIELD_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_FIELD_UNKNOWN_EXPLANATION,
   [LIST_VIEW_FIELD_DOTTED_EXPLANATION.rule]: LIST_VIEW_FIELD_DOTTED_EXPLANATION,
+  [LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION.rule]: LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION,
+  [LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION,
   [TRANSLATION_TARGET_UNKNOWN_EXPLANATION.rule]: TRANSLATION_TARGET_UNKNOWN_EXPLANATION,
   [TRANSLATION_OPTION_KEY_UNKNOWN_EXPLANATION.rule]: TRANSLATION_OPTION_KEY_UNKNOWN_EXPLANATION,
   [TRANSLATION_SECTION_NAME_MISSING_EXPLANATION.rule]: TRANSLATION_SECTION_NAME_MISSING_EXPLANATION,

@@ -110,10 +110,49 @@ selector handed you has a verdict; planned ids are listed, not chased.
    and cite its output as the evidence; drive the browser only for what the pin doesn't
    cover. The reverse also holds: when a sweep hand-proves something repeatedly,
    propose promoting it to a permanent test and set `automated` in a revision.
+
+   **A pin scores only the layer it drives.** Before a pin scores a clause whose oracle
+   is a public door's answer (an HTTP status, an error envelope, a row the door left
+   behind), name the layer the pin reaches — a **plugin unit** (one plugin's hooks or
+   middleware over a stub), the **engine** (a real ObjectQL engine and driver, no HTTP),
+   or **HTTP** (a booted server answering the door) — and write that layer in the
+   clause's evidence. Read it off the pin's own harness, never off its file name or its
+   `automated.ref` prose: a stub terminal standing in for the engine means "lands" is
+   "the middleware called `next()`", and nothing below it ran. A pin that stops above
+   the layer the clause's oracle sits at scores that clause **`partial`**, naming the
+   missing layer, and the live leg is driven, or recorded `blocked` with its fixture
+   cited. It never scores `pass`. The instance that made this a rule is
+   `access-security.no-active-org-session-semantics`: the `group` CONTROL of
+   `no-active-organization-write-refusal.test.ts` "lands" a write by a member with no
+   active organization at the plugin-security layer, two rounds scored the walled legs
+   from it while a walled boot was refused, and on a full walled `group` boot the engine
+   answers that same write with a 500 (#24784).
 7. **Verify pass for high-stakes claims.** For P0 `fail`s and any finding that would
    ship or block a release: a second, independent agent re-derives the verdict from the
    captured evidence alone (not from the first agent's narrative) before it is acted
    on. Disagreement → re-run the item.
+8. **Keep an off-clause probe budget.** Clauses only ask what someone already thought
+   to ask. Every run keeps time AFTER its clauses have verdicts for probing the doors its
+   selector covers past those clauses — on the same boot, as the same personas. Probe
+   where a clause stops:
+   - **boundary values** on the inputs the clauses drive: the empty string, a missing
+     id, an unknown id;
+   - **the opposite severity or posture** of a path a clause asserts: the `warning`
+     twin of an `error` rule, `group` beside `isolated`;
+   - **recipients or readers outside the asserted scope**: who else a notification,
+     share or read reaches.
+
+   A probe is not a clause, so it scores nothing and no item verdict moves on it. A
+   finding that passes the filing gate is extracted like any other product defect (see
+   "Extraction obligation" below), and its card carries
+   `QA-source: #<run record> · <area.item> · observed beside the clauses`, naming the
+   item whose doors were probed. A probe that finds a gap the ledger should have asked
+   about is also a checklist-accuracy finding for the wave's anchor card: the clause it
+   was missing. The run record states how long the probes took and what they covered
+   (doors, personas, the boundary classes tried), and says so when the budget was
+   spent on nothing. A record that omits the probe line reads as a run that skipped it.
+   Round 3 of the 18.0 sweep (QA run #24779) found #24781 and #24782 this way, beside
+   items whose clauses all passed.
 
 ### Environment facts the runner should not re-derive
 
@@ -302,6 +341,25 @@ contradicts it, and correct it here when it does.
   the real port). This is "zero hits needs a positive control" applied to one tool: a
   negative from a command that never ran is not evidence.
 
+- **A SIGTERM to the `pnpm` wrapper does not stop the server under it — start a
+  backgrounded boot with `setsid` and stop its process group.** The canonical boot (in the
+  `--no-ui` entry below) is `pnpm -C … exec objectstack dev …`: pnpm spawns `os dev`, which
+  spawns `serve --dev` (`packages/cli/src/commands/dev.ts`). `os dev` forwards a SIGINT or
+  SIGTERM sent to its own pid to that child (its `process.on('SIGTERM', …)` handler calls
+  `beginShutdown()` of `ServeRestartCoordinator`, `packages/cli/src/utils/dev-restart.ts`),
+  but nothing forwards one sent to pnpm, so `kill` on the pnpm pid leaves the `serve`
+  grandchild listening. Both runners of the 18.0 sweep's round 3 met it (wave anchor
+  #24579 §6). Measured at
+  `46bb5e3e54` with a stand-in tree, `pnpm -C examples/app-showcase exec node parent.js`
+  where `parent.js` forwards SIGTERM to an HTTP child as `os dev` does: two seconds after a
+  SIGTERM to the pnpm pid the child still answered 200, and a SIGTERM to the process group
+  stopped all four processes. ⚠️ `$!` is not the group id: a backgrounded `setsid` forks
+  when the shell made it a group leader, so `$!` names a process that has already exited.
+  **So:** `setsid pnpm -C … exec objectstack dev … > LOG 2>&1 &`; once the port answers,
+  read the group from the listener, `PGID=$(ps -o pgid= -p "$(lsof -ti tcp:PORT)" | tr -d ' ')`;
+  stop it with `kill -TERM -- -$PGID`, and confirm `lsof -ti tcp:PORT` then prints nothing.
+  ⛔ Never stop a server by name (`pkill`), and never a group you did not start.
+
 - **Console session auth is a bearer token in `localStorage`, and a form sign-in ALSO
   sets a cookie — you need both halves.** The console's auth client stores the session
   under `auth-session-token` (objectui `packages/auth/src/createAuthClient.ts`:
@@ -456,48 +514,107 @@ contradicts it, and correct it here when it does.
   strength of the `automated` field alone: an unrun pin is a claim, not evidence — which
   is the same "ticking on a label" failure clause-grained acceptance exists to prevent.
 
-- **18.0 boots the `single` tenancy posture only: a walled posture is refused before
-  anything is served, so a clause that needs a walled boot has no live leg on 18.0.**
-  `OS_TENANCY_POSTURE=group` or `isolated` — or the legacy `OS_MULTI_ORG_ENABLED=true`,
-  which `resolveTenancyPosture()` (`packages/types/src/env.ts`) reads as `isolated` — makes
-  `os serve` print `✖ FATAL: tenancy posture 'isolated' is not supported in 18.0
-  (NOT_IMPLEMENTED).` and exit **1** before a config is read, a plugin is mounted or the
-  HTTP server starts (`walledPostureRefusal()` in `packages/cli/src/commands/serve.ts`,
-  ruling record 6259698357 on the v18 epic; pinned by
-  `packages/cli/src/commands/serve-walled-posture-refusal.test.ts`). `os dev` and `os start`
-  boot through `serve`, and nothing skips it: `OS_ALLOW_DEGRADED_TENANCY` answers a
-  different refusal (an absent multi-org runtime), which this one now runs ahead of. The
-  refusal promises the walled postures for "an 18.x release" and names none. Kernel-level
-  boots (`@objectstack/verify`'s `bootStack`, the dogfood wall suites) never pass through
-  `serve` and still boot walled, which is why a walled clause is proven by its pins.
-  Measured at `bfc1539fe0`: `isolated`, `group` and `OS_MULTI_ORG_ENABLED=true` each exit 1
-  with that FATAL on `os serve` and on `os start`, `single` passes the gate, and the pin
-  reports 5 passed. **So:** score a walled clause from the pins its item names, and record
-  its live leg `skipped` with this entry cited — "not scored on a stock 18.0 boot" — as the
-  clauses of the withdrawn organization-ownership command are. ⛔ Never `blocked(fixture)`:
-  no fixture provisions a posture the release refuses. The 18.0 sweep's records met it and
-  scored the live leg both `blocked(environment)` (QA runs #24557, #24559) and
-  `blocked(fixture)` (QA run #24558); this entry is the one word. Each item that carries
-  such a leg names it in its own `fixtures.knownGaps`.
+- **A walled boot is a fixture of its own: `os serve` boots `group` and `isolated` once the
+  walled prerequisites are provisioned, and the stock showcase provisions none of them.**
+  18.0.0 boots a walled posture: under ruling record 6282882793 on the v18 epic it is
+  published only after 18.x step 4 (#24580) has merged, and step 4 deleted the boot refusal
+  (`walledPostureRefusal()` in `packages/cli/src/commands/serve.ts`). Of the builds published
+  so far, only the `18.0.0-next.5` prerelease carries that refusal, as `main` did from
+  `ae6bd1a6` until step 4: `next.0` to `next.3` predate it, and no `next.4` was published.
+  So on 18.0.0
+  `OS_TENANCY_POSTURE=group` or `isolated` (or the legacy `OS_MULTI_ORG_ENABLED=true`, which
+  `resolveTenancyPosture()` in `packages/types/src/env.ts` reads as `isolated`) boots through
+  `os serve`, and so `os dev` and `os start`. Through `os dev`, each prerequisite below
+  refuses the boot with a FATAL naming itself when absent (QA run #24783 measured all three),
+  so a refusal tells the runner what is missing, never that the posture is unsupported:
+  1. the multi-org runtime **declared by the app**: `@objectstack/organizations` in the app's
+     own `package.json` and installed there. Reachable only through `NODE_PATH` or a hoisted
+     store is refused on purpose (ADR-0093 D5). No example app declares it, so a walled run
+     uses a scratch app that does: a **full copy** of `examples/app-showcase`, `src/`
+     included (without `node_modules`, `.objectstack` or `dist`), whose own `package.json`
+     carries every showcase dependency as a `link:` to its workspace package plus
+     `"@objectstack/organizations": "link:<abs>/packages/plugins/organizations"`, installed
+     from the copy with `pnpm install --ignore-workspace` (QA run #24783). A scratch config
+     that only re-exports the showcase's `objectstack.config.ts` does not boot: a package-file
+     reference resolves against the root being served, and the showcase's OpenAPI connector
+     names its document that way (`spec: './src/system/connectors/status-openapi.json'` in
+     `examples/app-showcase/src/system/connectors/index.ts`, read relative to the package
+     root at materialization, where a missing document fails the boot);
+  2. `OS_PLATFORM_OWNER_EMAIL`, the deployment's platform administrators: first-registrant
+     promotion is off under a wall;
+  3. a declared membership policy, `OS_AUTH_MEMBERSHIP_POLICY` (for example `invite-only`).
 
-- **A stock 18.0 boot holds exactly one organization, and no door mints a second — so an
-  org-switch clause has no live leg on a stock boot either.**
+  ⚠️ **A bare `os serve` in production mode judges none of the three until it has an auth
+  secret.** Without `--dev`, and with `NODE_ENV` anything but `development`, `serve` composes
+  the auth family only when `OS_AUTH_SECRET` (or a legacy spelling) resolves —
+  `resolvePlatformAuthComposition()` in `packages/core/src/stack-auth.ts`, reason
+  `no-secret` — and all three checks sit behind it: the multi-org runtime is loaded inside
+  `serve.ts`'s auth-composition branch, the owner-email check runs in `AuthPlugin`'s `init()`
+  (`packages/plugins/plugin-auth/src/auth-plugin.ts`), and the membership-policy gate skips a
+  kernel with no `auth` service (`assertWalledMembershipPolicyDeclared()` in
+  `packages/plugins/organizations/src/membership-policy-gate.ts`). With the secret unset the
+  boot prints `⚠ AuthPlugin skipped — set OS_AUTH_SECRET …` and comes up
+  `⚠ Server is ready — DEGRADED: missing core services: auth` (`printServerReady()` in
+  `packages/cli/src/utils/format.ts`), not a FATAL: QA run #24783 measured it with
+  `os serve --no-ui` from the scratch app, once with prerequisite 2 absent and once with
+  prerequisite 3 absent. A production `serve` also needs a stable encryption key,
+  `OS_SECRET_KEY` or a key file an earlier boot persisted; without one `LocalCryptoProvider`
+  refuses the boot naming `OS_SECRET_KEY`
+  (`packages/services/service-settings/src/local-crypto-provider.ts`). `os dev` needs
+  neither: it spawns `serve --dev`, whose development boot falls back to
+  `DEV_AUTH_SECRET_FALLBACK` (`resolveAuthSecret()`, same `stack-auth.ts`) and persists a key.
+  `os start` hands its `serve` child an auth secret (its `--auth-secret` flag, the
+  environment, or the `auth-secret` file it persists in its home directory) and opts the
+  provider into a persisted key (`OS_CRYPTO_AUTOKEY`), in `packages/cli/src/commands/start.ts`
+  — read from the code, not booted. **So:** boot a walled run through `os dev`, or give a bare
+  `serve` `OS_AUTH_SECRET` and a stable key first. ⛔ Never read a DEGRADED walled boot as
+  "the prerequisites are met", and never score a walled clause on it.
+
+  **Walled personas come from the admin door.** The walled boot keeps self-registration
+  closed: the showcase declares no `auth.audience`, so `POST /api/v1/auth/sign-up/email`
+  answers **`403 SELF_REGISTRATION_CLOSED`** exactly as on a stock boot
+  (`decideAudienceAdmission()` in `packages/plugins/plugin-auth/src/audience-posture.ts`; the
+  entry "A stock showcase boot refuses self-registration" above). QA run #24783 minted every
+  walled persona as the operator (the seeded admin, the address `OS_PLATFORM_OWNER_EMAIL`
+  names) with `POST /api/v1/auth/admin/create-user` (`runAdminCreateUser()` in
+  `packages/plugins/plugin-auth/src/admin-user-endpoints.ts`), then had each persona
+  `POST /api/v1/auth/change-password`. Under `invite-only` each lands with
+  `membershipCreated: false` and in no organization (the reconciler's `policy-skip`,
+  `reconcileMembership()` in `packages/plugins/plugin-auth/src/reconcile-membership.ts`); a
+  persona that needs an organization creates its own with
+  `POST /api/v1/auth/organization/create` and switches to it with `set-active` (the next
+  entry).
+
+  Measured at `45898dbf6`: a scratch app declaring the real runtime, booted by the built CLI
+  under `isolated` with the other two set, mounted `Organizations`, answered
+  `GET /api/v1/discovery` 200 and logged no system-write refusal. The seven walled
+  e2e cases in `packages/cli/test/serve-organizations-*.e2e.test.ts` spawn that boot.
+  **So:** score a walled clause's live leg on such a boot, and its pins as its item says.
+  A run that does not provision the walled boot records the leg `blocked(fixture)`, naming
+  this entry and the missing prerequisite — never `fail`, and never on a faked posture.
+  Each item that carries such a leg names it in its own `fixtures.knownGaps`.
+
+- **A stock `single` boot holds exactly one organization, and no door mints a second; a
+  walled boot mints them through the auth API.**
   `POST /api/v1/auth/organization/create` answers **`403 ORGANIZATION_CREATION_DISABLED`**
   wherever the effective posture enforces no organization wall (`beforeCreateOrganization`
   in `packages/plugins/plugin-auth/src/auth-manager.ts`, the same derivation `/auth/config`
   publishes as `features.multiOrgEnabled: false`; pinned by
-  `packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts`), which on 18.0 is
-  every boot, by the entry above. `sys_organization` offers no create over the data API
-  (`apiMethods: ['get', 'list', 'update']`,
-  `packages/platform-objects/src/identity/sys-organization.object.ts`), and 18.0 serves
-  fresh installs only (the same refusal's text; a 17.x database is refused at boot,
-  `platform-core.v18-boot-refusals`). `POST /api/v1/auth/organization/set-active` therefore
-  has the Default Organization, or null, to switch between. **So:** a clause that needs a
-  second organization — an org switch mid-flow, organization A against B — is not scored on
-  a stock 18.0 boot: record its live leg `skipped` with this entry cited, and score what its
-  pins prove. A run that stages the second organization itself (QA run #24560 wrote one with
-  a system write) scores a fixture of its own making, not a stock boot, and its record says
-  so. QA runs #24560 and #24558 met the 403; the pin reports 25 passed at `bfc1539fe0`.
+  `packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts`), which is every stock
+  boot: the stock showcase boots `single`. `sys_organization` offers no create over the
+  data API (`apiMethods: ['get', 'list', 'update']`,
+  `packages/platform-objects/src/identity/sys-organization.object.ts`). On a stock boot
+  `POST /api/v1/auth/organization/set-active` therefore has the Default Organization, or
+  null, to switch between. On a walled boot (the entry above) a signed-in user creates an
+  organization with that same `POST /api/v1/auth/organization/create` and switches to it
+  with `set-active`; the walled dogfood suites
+  (`packages/qa/dogfood/test/wall-*.dogfood.test.ts`) create two that way. **So:** a clause
+  that needs a second organization (an org switch mid-flow, organization A against B) is
+  scored on a walled boot. On a stock boot record its live leg `blocked(fixture)` with this
+  entry cited, and score what its pins prove. A run that stages the second organization
+  with a system write (QA run #24560 did) scores a fixture of its own making, not a stock
+  boot, and its record says so. QA runs #24560 and #24558 met the 403; the pin reports 25
+  passed at `bfc1539fe0`.
 
 - **One container builds one tree at a time: never run `pnpm build` and
   `pnpm objectui:build` together, and give the heavy steps a concurrency the shell's memory
@@ -639,7 +756,8 @@ The in-environment JSON scratch (RUNNER shape, never committed):
 
 The issue body is: env fingerprint · scope (selector + per-item `revision`) · the
 per-clause verdict table (text oracle evidence) · a reproduction rule per `fail` (rule 2's
-carve-out excepted) · derived item verdicts + fixture gaps. The durable,
+carve-out excepted) · derived item verdicts + fixture gaps · the off-clause probe line
+(rule 8: how long, which doors and boundary classes, what it found). The durable,
 version-controlled truth is still the checklist under `areas/`; a run is a dated assertion
 about one build, and it lives in its issue, not the tree.
 

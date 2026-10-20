@@ -267,7 +267,10 @@ export const zhCN: PlatformTranslationData = {
       },
       keys: {
         email_password_enabled: { label: '启用邮箱/密码登录' },
-        signup_enabled: { label: '允许自助注册' },
+        signup_enabled: {
+          label: '允许邮箱注册',
+          help: '开启邮箱与密码注册表单。它接纳谁由下方的「自助注册受众」决定:「仅限邀请」下只接纳持有待处理邀请的地址;「邮箱域名」下接纳允许列表中的域名与受邀地址;「开放」下接纳任何人。关闭后,在任何受众下该表单都会关闭,受邀者也不例外。',
+        },
         require_email_verification: { label: '要求邮箱验证' },
         membership_policy: {
           label: '新用户的成员归属',
@@ -356,7 +359,7 @@ export const zhCN: PlatformTranslationData = {
         },
         allowed_ip_ranges: {
           label: '允许的 IP 段',
-          help: 'CIDR 段或精确 IP(每行一个,或用逗号分隔),例如 203.0.113.0/24。设置后,来自这些范围之外的登录将被拒绝。留空表示不限制。需要可信代理设置 X-Forwarded-For。',
+          help: 'CIDR 段或精确 IP(每行一个,或用逗号分隔),例如 203.0.113.0/24。设置后,来自这些范围之外的登录将被拒绝,服务器无法确定客户端地址的请求同样会被拒绝。留空表示不限制。判定的是连接的对端地址;部署在反向代理之后时,请在 stack 中声明 server.trustProxy,以改为判定转发的客户端地址。',
         },
         api_key_default_expiry_days: {
           label: '默认密钥有效期(天)',
@@ -376,7 +379,7 @@ export const zhCN: PlatformTranslationData = {
         },
         google_enabled: {
           label: '启用 Google 登录',
-          help: '需要在 Google Cloud Console 中创建的 Google OAuth 客户端 ID 与密钥。',
+          help: '客户端 ID 与客户端密钥都能解析时才提供 Google 登录:来自下方保存的值,或服务器上的 GOOGLE_CLIENT_ID 与 GOOGLE_CLIENT_SECRET(优先于保存的值)。两者都能解析之前,即使此开关已开启,登录页也不显示 Google 按钮。关闭后,即使服务器设置了两者,也会撤下 Google 登录。请在 Google Cloud Console 中创建 OAuth 客户端。',
         },
         google_client_id: {
           label: 'Google 客户端 ID',

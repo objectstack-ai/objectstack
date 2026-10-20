@@ -365,6 +365,87 @@ describe('[#8144] createAuthEventAuditSink writes a login row that names its act
  * The helpers are `audit-writers.ts`'s, imported rather than re-spelled: a
  * second copy of this key is how the defect got here in the first place.
  */
+describe('a refused sign-in and a lockout each land as a ledger row about the account', () => {
+  it('login_failed names the account as user and target, credits no principal, and keeps outcome and client', async () => {
+    const { engine } = await boot();
+    const sink = createAuthEventAuditSink({ getEngine: () => engine as any });
+
+    await sink.recordAuthEvent({
+      action: 'login_failed',
+      userId: 'usr_1',
+      ipAddress: '203.0.113.7',
+      userAgent: 'Mozilla/5.0 (probe)',
+      context: { endpoint: '/sign-in/email', reason: 'INVALID_EMAIL_OR_PASSWORD' },
+    });
+
+    const rows = await ledgerRows(engine, { action: 'login_failed' });
+    expect(rows).toHaveLength(1);
+    const [row] = rows;
+    // The account attempted: the subject lookup, and the record the row is about.
+    expect(row.user_id).toBe('usr_1');
+    expect(row.object_name).toBe('sys_user');
+    expect(row.record_id).toBe('usr_1');
+    // A refused attempt authenticated nobody, so no principal is credited with
+    // it — and in particular not the account holder.
+    expect(row.actor ?? null).toBeNull();
+    // The outcome and the client.
+    expect(JSON.parse(String(row.metadata))).toEqual({
+      endpoint: '/sign-in/email',
+      reason: 'INVALID_EMAIL_OR_PASSWORD',
+    });
+    expect(row.ip_address).toBe('203.0.113.7');
+    expect(row.user_agent).toBe('Mozilla/5.0 (probe)');
+    // No session, no organization context, no field diff.
+    expect(row.tenant_id ?? null).toBeNull();
+    expect(row.old_value ?? null).toBeNull();
+    expect(row.new_value ?? null).toBeNull();
+  });
+
+  it('account_locked is its own row about the account, carrying the lock', async () => {
+    const { engine } = await boot();
+    const sink = createAuthEventAuditSink({ getEngine: () => engine as any });
+
+    await sink.recordAuthEvent({
+      action: 'login_failed',
+      userId: 'usr_1',
+      context: { endpoint: '/sign-in/email', reason: 'INVALID_EMAIL_OR_PASSWORD' },
+    });
+    await sink.recordAuthEvent({
+      action: 'account_locked',
+      userId: 'usr_1',
+      ipAddress: '203.0.113.7',
+      context: { endpoint: '/sign-in/email', locked_until: '2026-10-20T12:15:00.000Z', threshold: 3 },
+    });
+
+    expect(await ledgerRows(engine, { action: 'login_failed' })).toHaveLength(1);
+    const locks = await ledgerRows(engine, { action: 'account_locked' });
+    expect(locks).toHaveLength(1);
+    expect(locks[0].user_id).toBe('usr_1');
+    expect(locks[0].object_name).toBe('sys_user');
+    expect(locks[0].record_id).toBe('usr_1');
+    expect(locks[0].actor ?? null).toBeNull();
+    expect(locks[0].ip_address).toBe('203.0.113.7');
+    expect(JSON.parse(String(locks[0].metadata))).toEqual({
+      endpoint: '/sign-in/email',
+      locked_until: '2026-10-20T12:15:00.000Z',
+      threshold: 3,
+    });
+  });
+
+  it('a session event still names its session and credits its subject', async () => {
+    // The account target must not leak onto the session class.
+    const { engine } = await boot();
+    const sink = createAuthEventAuditSink({ getEngine: () => engine as any });
+
+    await sink.recordAuthEvent({ action: 'login', userId: 'usr_1', sessionId: 'ses_1' });
+
+    const [row] = await ledgerRows(engine, { action: 'login' });
+    expect(row.object_name).toBe('sys_session');
+    expect(row.record_id).toBe('ses_1');
+    expect(row.actor).toBe('usr_1');
+  });
+});
+
 describe('auth-event audit — reported once per CAUSE, not once per process (#17452)', () => {
   interface LogLine {
     level: string;

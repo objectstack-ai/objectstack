@@ -302,10 +302,9 @@ Be precise about what is lost, because the two halves behave differently:
 | | Survives the repair? |
 | :--- | :--- |
 | The inventory of identifiers **already** minted twice | **Yes.** Colliding rows deliberately keep `organization_id = NULL`, so they remain in two partitions and remain findable. |
-| The **live condition** — an install still holding a `__global__` counter beside an organization-scoped one, i.e. *about to mint more* | **No.** The repair deletes that counter row. Once it has run, this condition can never be produced again. |
+| The **live condition** — an install still holding a `__global__` counter beside an organization-scoped one: the record of which counter minted the duplicates. Under 17.x it also forecast more; since the counter refuses an organization-less row on a tenant table wherever the organization object is registered, nothing mints from that counter there | **No.** The repair deletes that counter row. Once it has run, this condition can never be produced again. |
 
-The live condition is the only forward-looking line in the report, and it is the
-perishable one. On a deployment you have not yet restarted since discovering the
+The live condition is the perishable line in the report. On a deployment you have not yet restarted since discovering the
 problem, run the report first.
 
 `os migrate duplicates` writes no row: it boots read-only, declares itself out

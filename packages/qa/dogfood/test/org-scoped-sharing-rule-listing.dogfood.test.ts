@@ -7,8 +7,9 @@
 // #7676: `sys_sharing_rule` rows seeded by the package/app seeder carried
 // `organization_id = null` (`bootstrapDeclaredSharingRules` defined under
 // `SYSTEM_CTX`, before any org id existed; ADR-0131 D2 has since retired it,
-// and a declared rule is now read from the registry, served organization-less
-// under `single` — the same platform-global class). The admin read path scoped with a
+// and a declared rule is now read from the registry, served under `single` as
+// ONE deployment-wide projection — a typed `deploymentWide` marker, never a
+// NULL organization, ADR-0131 D8). The admin read path scoped with a
 // strict `organization_id = <request org>` equality, so on a stock boot
 // `GET /api/v1/sharing/rules` answered `{data: []}` over four active seeded
 // rules, by-name GET and evaluate 404'd, and only the org-unfiltered by-id
@@ -34,7 +35,7 @@
 // organization wall (SecurityPlugin strips the wildcard `organization_id` RLS
 // policies with no `org-scoping` service present) — see the option's doc block
 // in `packages/verify/src/harness.ts`. This file proves that an org-scoped READ
-// FILTER engages and admits the platform-global rows it must; it proves nothing
+// FILTER engages and serves the declared rules beside it; it proves nothing
 // about tenant B's rows, and must never be extended to claim that.
 //
 // @proof: org-scoped-sharing-rule-listing
@@ -47,7 +48,7 @@ const RULES = '/sharing/rules';
 const SYS = { isSystem: true } as const;
 
 /**
- * The rules `examples/app-showcase` declares, all served org-less.
+ * The rules `examples/app-showcase` declares, all served deployment-wide.
  *
  * [#9237] Two of the former four were retired rather than re-homed: they sat
  * on `showcase_project` / `showcase_task`, whose `public_read_write` OWD
@@ -63,7 +64,8 @@ const SEEDED_RULE_NAMES = [
 interface RuleRow {
   id: string;
   name: string;
-  organization_id: string | null;
+  organization_id?: string | null;
+  deploymentWide?: boolean;
 }
 
 describe('#7676 — package-seeded (org-less) sharing rules stay visible to an ORG-BOUND admin', () => {
@@ -124,11 +126,14 @@ describe('#7676 — package-seeded (org-less) sharing rules stay visible to an O
     for (const name of SEEDED_RULE_NAMES) {
       expect(names, `seeded rule ${name} must be listed`).toContain(name);
     }
-    // They really are the platform-global rows, not org-stamped copies — which
-    // is what makes them invisible to a strict `organization_id = orgId`.
+    // They really are the declarations, not org-stamped copies: the
+    // deployment-wide marker and NO organization key — never a NULL one
+    // (ADR-0131 D8). The org-scoped row read cannot see them; the registry
+    // read serves them beside it.
     for (const name of SEEDED_RULE_NAMES) {
       const row = body.data.find((r) => r.name === name);
-      expect(row?.organization_id, `${name} is seeded org-less`).toBeNull();
+      expect(row?.deploymentWide, `${name} is served deployment-wide`).toBe(true);
+      expect(row, `${name} carries no organization key`).not.toHaveProperty('organization_id');
     }
   });
 
@@ -137,7 +142,8 @@ describe('#7676 — package-seeded (org-less) sharing rules stay visible to an O
     expect(res.status).toBe(200);
     const row = (await res.json()) as RuleRow;
     expect(row.name).toBe(SEEDED_RULE_NAMES[0]);
-    expect(row.organization_id).toBeNull();
+    expect(row.deploymentWide).toBe(true);
+    expect(row).not.toHaveProperty('organization_id');
   });
 
   it('a declared org-less rule can be EVALUATED by name — read from the registry, never stored', async () => {
@@ -157,8 +163,8 @@ describe('#7676 — package-seeded (org-less) sharing rules stay visible to an O
 
   it('the scope still SCOPES — another organization\'s rule is not listed', async () => {
     // The counterweight, and the reason this is a scope rather than a hole:
-    // widening the read to `this org ∪ platform-global` must not also admit a
-    // THIRD org's row. Written at the storage seam because the harness mints
+    // serving the declared rules beside the organization's rows must not also
+    // admit a THIRD org's row. Written at the storage seam because the harness mints
     // exactly one organization — this is a read-filter assertion, NOT a
     // tenant-isolation proof (see the header).
     const foreignId = 'srule_7762_foreign';

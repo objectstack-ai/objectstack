@@ -52,7 +52,7 @@ import {
 // The posture vocabulary, read from the package that DEFINES it (#5359) — the
 // boot gate's fix list enumerates the accepted values, and a second literal
 // list would be free to drift the day a posture is added.
-import { TENANCY_POSTURES, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
+import { TENANCY_POSTURES, type TenancyPosture } from '@objectstack/spec/security';
 // #17329 — the PUBLISHED settlement contract, READ rather than re-derived, so
 // the `objectstack:seed-settled` announcement below asks the one component that
 // knows whether this boot's seeding has come to rest. The service is registered
@@ -2408,20 +2408,6 @@ export default class Serve extends Command {
     }
     const tenancyPosture = postureGate.posture;
 
-    // ── 18.0: the `single` posture only (ruling record 6259698357) ─────
-    // A walled posture is refused here, at the same point and in the same
-    // shape as an unrecognized one: before a config is read, a plugin is
-    // mounted or anything is written. `os dev` and `os start` both boot
-    // through this command, so this is every operator's boot. Kernel-level
-    // boots (`@objectstack/verify`'s `bootStack`, the standalone stack)
-    // never pass here, which is what keeps the walled test suites running for
-    // the 18.x release that lifts this. No flag and no variable skips it.
-    const walledRefusal = walledPostureRefusal(tenancyPosture);
-    if (walledRefusal) {
-      console.error(walledRefusal);
-      process.exit(1);
-    }
-
     // [#22371] `--dev`, or NODE_ENV exactly `development` — `isDevelopmentBoot`
     // (`@objectstack/core`), the reading the auth secret's development fallback
     // is decided by here and in `os migrate security-catalog-overlays --dev`.
@@ -4269,6 +4255,12 @@ export default class Serve extends Command {
               appName: resolveDeploymentAppName((config as any).email ?? {}, process.env, (config as any).appName),
               socialProviders: Object.keys(socialProviders).length > 0 ? socialProviders : undefined,
               trustedOrigins: trustedOrigins.length ? trustedOrigins : undefined,
+              // The stack's `server.trustProxy`, the same authored value the
+              // dispatcher's inbound rate limiter receives below: whether the
+              // ADR-0069 D5 IP allow-list and the D7 login audit may believe
+              // X-Forwarded-For / X-Real-IP when establishing a client address.
+              // Undeclared, both judge the transport's peer address.
+              trustProxy: (config as any).server?.trustProxy === true,
               // Enable the admin plugin by default so the Setup app's
               // ban/unban/set-password/impersonate/set-role row actions
               // resolve to real endpoints. The plugin self-gates by role
@@ -4680,6 +4672,29 @@ export default class Serve extends Command {
           + '  • or serve without the data API — run with --no-server, or drop the REST/dispatcher plugins.\n'
           + "Publishing a genuinely public surface does not need anonymous data access: use a public form "
           + "view, a share link, or `book.audience: 'public'`.",
+        );
+      }
+      // [ADR-0131 D9] The same case reached the other way: the `auth` tier is
+      // on, but a production boot resolved no secret, so AuthPlugin is not
+      // composed (rule 4 of `resolvePlatformAuthComposition`). A1's conclusion
+      // holds unchanged — no security model, so no data API — and it holds for
+      // a second reason too: with no AuthPlugin there is no organization
+      // object, so every write the boot makes (the inline seed first) would land
+      // with no organization and draw its autonumbers from an organization-less
+      // counter. Refused here, while the kernel has only been composed: no
+      // plugin has started, so nothing has been written. The `host-kernel`
+      // reason (the cloud runtime, where auth is each project's) is not this
+      // case and still only warns above.
+      if (flags.server && !authComposition.composes && authComposition.reason === 'no-secret') {
+        throw new Error(
+          'This stack enables auth, but no auth secret is set, so AuthPlugin was not composed and no caller '
+          + 'can authenticate — anonymous access to object data is always denied, so the data API would be '
+          + 'unusable, and with no organization every row this boot writes would have no owner.\n'
+          + 'Fix it one of two ways:\n'
+          + '  • set OS_AUTH_SECRET (a long random value, identical across restarts and nodes), e.g. '
+          + 'OS_AUTH_SECRET=$(openssl rand -hex 32);\n'
+          + '  • or serve without the data API — run with --no-server, or drop the REST/dispatcher plugins.\n'
+          + 'A local trial does not need the secret: `os dev` (or `os serve --dev`) uses a development fallback.',
         );
       }
 
@@ -6251,39 +6266,6 @@ export function resolveTenancyPostureOrRefusal(): TenancyPostureGateVerdict {
   }
 }
 
-
-/**
- * The FATAL text `os serve` refuses a walled posture with in 18.0, or `null`
- * for a posture 18.0 supports (ruling record 6259698357 on the v18 epic).
- *
- * 18.0 supports the `single` posture only, on fresh installs. The walled
- * postures (`group`, `isolated`) arrive in an 18.x release: under `single`
- * every system insert is stamped with the Default Organization, and the
- * walled-only prerequisites were deferred. The code is the standard
- * `NOT_IMPLEMENTED` (ADR-0112). The walled set is read off the spec's posture
- * vocabulary (`postureEnforcesWall`), never listed here.
- */
-export function walledPostureRefusal(posture: TenancyPosture): string | null {
-  if (!postureEnforcesWall(posture)) return null;
-  const walled = TENANCY_POSTURES.filter(postureEnforcesWall).join(', ');
-  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {};
-  const raw = env.OS_TENANCY_POSTURE;
-  const source = raw != null && String(raw).trim() !== ''
-    ? `OS_TENANCY_POSTURE=${JSON.stringify(String(raw))}`
-    : `OS_MULTI_ORG_ENABLED=${JSON.stringify(String(env.OS_MULTI_ORG_ENABLED ?? ''))} (OS_TENANCY_POSTURE is unset)`;
-  return chalk.red(
-    `\n  ✖ FATAL: tenancy posture '${posture}' is not supported in 18.0 (NOT_IMPLEMENTED).\n`
-    + `    Refusing to boot. 18.0 supports the 'single' posture only, on fresh installs; the walled\n`
-    + `    postures (${walled}) arrive in an 18.x release.\n\n`
-    + '    No config has been loaded, no plugin has been mounted, and the HTTP server was\n'
-    + '    never started — this deployment has not served a single request.\n\n'
-    + '    Fix one of:\n'
-    + '      • set OS_TENANCY_POSTURE=single, or unset both OS_TENANCY_POSTURE and OS_MULTI_ORG_ENABLED;\n'
-    + '      • keep this deployment on a 17.x release until the 18.x release that carries walled postures.\n\n'
-    + `    The posture was read from ${source}, in the process environment or a .env file\n`
-    + '    dotenv-flow loaded for this mode.\n',
-  );
-}
 
 /**
  * The diagnosis the optional i18n service load prints when it fails — a

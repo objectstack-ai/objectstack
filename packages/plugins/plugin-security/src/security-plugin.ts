@@ -79,6 +79,7 @@ import {
   tenantLayer0FilterOf,
   andComposeLayers,
   intersectTenantLayer0Verdicts,
+  type TenantLayer0Input,
 } from './tenant-layer.js';
 import {
   PLATFORM_OWNER_WALL_BYPASS_EVENT,
@@ -652,12 +653,28 @@ const AUTHORED_ROW_WRITE_PROBE_CONTEXT = { isSystem: true, positions: [], permis
  * {@link isTenantWallDenial} over the Layer 0 filter, which is the one place
  * that knows about platform-admin exemptions, non-tenant objects and phantom
  * anchors.
+ *
+ * It answers the SCOPE question only. Under a union-scope posture a caller
+ * scoped by membership can still lack the organization a NEW row lands in —
+ * the active one ({@link carriesActiveOrganization}) — and step 3.7 judges
+ * that separately, on the stored image of an insert.
  */
 function callerHasOrganizationScope(context: any, posture: TenancyPosture): boolean {
   if (postureUsesUnionScope(posture)) {
     const orgIds = context?.accessible_org_ids;
     return Array.isArray(orgIds) && orgIds.length > 0;
   }
+  return carriesActiveOrganization(context);
+}
+
+/**
+ * [ADR-0105 D5 · ADR-0123 D2] Does this execution context carry an ACTIVE
+ * organization (`tenantId`)? In every posture that is where a new row lands:
+ * the engine stamps an insert's organization from it. Under `isolated` it is
+ * also the whole read scope; under `group` the membership set is the read
+ * scope and the active organization stays the write target (ADR-0105 D2).
+ */
+function carriesActiveOrganization(context: any): boolean {
   const tenantId = context?.tenantId;
   return tenantId != null && tenantId !== '';
 }
@@ -2571,6 +2588,12 @@ export class SecurityPlugin implements Plugin {
       // floor on exactly the terms its `where` scope does: step 3 composes the
       // bulk scope with no floor options either.
       let preImageFloorOpts: RlsFilterOptions | null = null;
+      // [ADR-0090 D10] Its twin for the DELEGATOR of an on-behalf-of write: the
+      // floor decision and coverage vouch the delegator's OWN direct by-id write
+      // of this row would get ({@link delegatorOwnWriteFloorOptions}). Null on
+      // the ordinary path and until step 2.7 runs; step 3.6 reads it so the
+      // post-image is held to the delegator's own check as well.
+      let delegatorPreImageFloorOpts: RlsFilterOptions | null = null;
 
       // [ADR-0066 D2/D3] Resolve the object's security posture (private flag,
       // platform-global flag, capability contract) once for the checks below.
@@ -3046,7 +3069,9 @@ export class SecurityPlugin implements Plugin {
           // would drop one principal's floor and not the other's: a half-state
           // no measurement on this card covers. The delegated by-id write keeps
           // BOTH floors, exactly as before, and that residual is recorded on the
-          // card rather than resolved by a guess.
+          // card rather than resolved by a guess. What bounds it by the
+          // delegator is the delegator's own composition ANDed below, never a
+          // dropped floor here.
           const masterGateCoversThisWrite = !delegatorSets;
           preImageFloorOpts = { dropPlatformOwnershipFloor, masterGateCoversThisWrite };
           const writeFilter = await this.computeRlsFilter(
@@ -3064,7 +3089,37 @@ export class SecurityPlugin implements Plugin {
           const delWriteFilter = delegatorSets
             ? await this.computeRlsFilter(delegatorSets, opCtx.object, rlsOperation, delegatorContext)
             : null;
-          const writeParts = [writeFilter, delWriteFilter].filter(Boolean) as Record<string, unknown>[];
+          // [ADR-0090 D10] ...and the delegator's OWN direct by-id write of this
+          // row must admit it as well. The filter above is composed with the
+          // delegated path's floor exclusion, which is not the composition the
+          // delegator's own write of this row gets, so it alone does not bound
+          // the on-behalf-of write by what the delegator may write. The
+          // delegator's own composition — its own floor decision and coverage
+          // vouch, {@link delegatorOwnWriteFloorOptions} — is ANDed beside it:
+          // the row must satisfy both, so this only ever narrows, and an
+          // on-behalf-of write never admits a row the delegator's own write
+          // refuses. The vouch holds on this path too: step 2.8 asks the master
+          // gate for the delegator below.
+          if (delegatorSets) {
+            delegatorPreImageFloorOpts = await this.delegatorOwnWriteFloorOptions(
+              rlsOperation,
+              opCtx.object,
+              String(targetId),
+              delegatorContext,
+              delegatorSets,
+              true,
+            );
+          }
+          const delOwnWriteFilter = delegatorSets && delegatorPreImageFloorOpts
+            ? await this.computeRlsFilter(
+                delegatorSets,
+                opCtx.object,
+                rlsOperation,
+                delegatorContext,
+                delegatorPreImageFloorOpts,
+              )
+            : null;
+          const writeParts = [writeFilter, delWriteFilter, delOwnWriteFilter].filter(Boolean) as Record<string, unknown>[];
           // [#21771] Ruling A on the write doors: a row the caller cannot READ
           // is a row that does not exist. For the by-id write the caller
           // addressed (see {@link addressedByIdWriteId}), "can you read it?" is
@@ -3603,7 +3658,21 @@ export class SecurityPlugin implements Plugin {
         const delCheckFilter = delegatorSets
           ? await this.computeWriteCheckFilter(delegatorSets, opCtx.object, opCtx.operation, delegatorContext)
           : null;
-        const checkParts = [checkFilter, delCheckFilter].filter(Boolean) as Record<string, unknown>[];
+        // [ADR-0090 D10] ...and the check the delegator's OWN direct by-id write
+        // of this row is held to, on the floor decision its own pre-image got
+        // (step 2.7, `delegatorPreImageFloorOpts`). ANDed beside the check
+        // above, so it only narrows: an on-behalf-of write never stores a row
+        // the delegator's own write could not.
+        const delOwnCheckFilter = delegatorSets && delegatorPreImageFloorOpts
+          ? await this.computeWriteCheckFilter(
+              delegatorSets,
+              opCtx.object,
+              opCtx.operation,
+              delegatorContext,
+              delegatorPreImageFloorOpts,
+            )
+          : null;
+        const checkParts = [checkFilter, delCheckFilter, delOwnCheckFilter].filter(Boolean) as Record<string, unknown>[];
         if (checkParts.length > 0) {
           // The ONE refusal, shared by every shape — so a write judged inside
           // the engine (an insert, a predicate update) and a by-id update
@@ -3930,6 +3999,12 @@ export class SecurityPlugin implements Plugin {
         // System / boot writes never reach this line at all (`isSystem`
         // short-circuits the middleware). Under `group`, "no organization scope"
         // means an EMPTY membership set — ADR-0105 D2's own fail-closed rule.
+        // A member WITH a membership set but no active organization passes this
+        // pre-test and still has nowhere for a NEW row to land; that insert is
+        // refused with this same answer on its stored image, below ([#24784]).
+        // So is the insert of a platform operator crossing the wall with no
+        // active organization: crossing exempts it from this pre-test, not
+        // from needing somewhere to land ([#24821]).
         //
         // The cheap posture/context pre-test comes first on purpose: the common
         // deployment is `single` (Layer 0 inert), and the common caller HAS an
@@ -3944,16 +4019,13 @@ export class SecurityPlugin implements Plugin {
         // tenant, so its target is selected through the Layer 0 ROW wall, which
         // already resolves to nothing (ADR-0123 D2, stated there as a boundary
         // rather than left as an omission).
-        const denied = await this.organizationWallRefusal(
-          permissionSets,
-          opCtx.object,
-          opCtx.operation,
-          opCtx.context,
-          delegatorSets,
-          delegatorContext,
-        );
-        if (denied) {
-          const principal = denied === 'delegator' ? 'the delegating principal' : 'this session';
+        //
+        // The refusal has ONE spelling, thrown from two points: here on the
+        // scope pre-test, and on the stored image of a union-scope insert with
+        // no active organization (below). Only the operator half differs,
+        // because the two say different things about the context.
+        const refuseNoActiveOrganization = (refused: 'caller' | 'delegator', developerMessage: string): never => {
+          const principal = refused === 'delegator' ? 'the delegating principal' : 'this session';
           this.logger.warn?.(
             `[Security] Layer 0 tenant wall REFUSED ${opCtx.operation} '${opCtx.object}' — ` +
               `${principal} has no active organization to place the record in (ADR-0123 D2, fail-closed)`,
@@ -3963,6 +4035,20 @@ export class SecurityPlugin implements Plugin {
               `${principal} has no active organization — so this ${opCtx.operation} has no ` +
               `organization to place the record in. Join or select an active organization and retry.`,
             { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+            developerMessage,
+          );
+        };
+        const denied = await this.organizationWallRefusal(
+          permissionSets,
+          opCtx.object,
+          opCtx.operation,
+          opCtx.context,
+          delegatorSets,
+          delegatorContext,
+        );
+        if (denied) {
+          refuseNoActiveOrganization(
+            denied,
             `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
               `organization: tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', and ` +
               `${denied === 'delegator' ? "the delegator's" : "the caller's"} context resolved neither ` +
@@ -3993,13 +4079,24 @@ export class SecurityPlugin implements Plugin {
         // below). The `single` posture composes no Layer 0 at all, so it pays
         // for nothing it did not already pay for.
         let tenantParts: Record<string, unknown>[] = [];
+        // The CALLER's own Layer 0 for this write — `null` where the wall does
+        // not apply to it (a non-tenant object, a phantom anchor, a platform
+        // operator crossing on a posture-permitting object, `single`).
+        let callerTenantCheck: Record<string, unknown> | null = null;
+        // Whether that `null` is a platform operator CROSSING the wall on a
+        // posture-permitting object (ADR-0095 D3) — the wall stands for every
+        // other caller on the object.
+        let callerCrossesTenantWall = false;
         if (suppliedRows.length > 0 || this.orgScopingEnabled) {
-          const tenantCheck = await this.computeWriteTenantCheckFilter(
+          const callerWall = await this.computeWriteTenantWall(
             permissionSets,
             opCtx.object,
             opCtx.operation,
             opCtx.context,
           );
+          const tenantCheck = callerWall.layer0;
+          callerTenantCheck = tenantCheck;
+          callerCrossesTenantWall = callerWall.crossedByPlatformAdmin;
           // [ADR-0090 D10] The post-image must also satisfy the delegator's tenant
           // wall — an on-behalf-of write may not land a row in a tenant the
           // delegator itself could not reach.
@@ -4041,6 +4138,62 @@ export class SecurityPlugin implements Plugin {
               `every organization. System contexts and platform operators on posture-permitting objects are unaffected.`,
           );
         };
+        // ── [ADR-0123 D2 · ADR-0105 D2/D5 · #24784] A union-scope INSERT with no active organization ──
+        //
+        // Under a union-scope posture (`group`) the scope pre-test above reads
+        // the MEMBERSHIP SET, so a member whose session has no active
+        // organization passes it — rightly, for everything the set bounds:
+        // reads, and updates and deletes, whose rows the membership wall
+        // selected and which keep the organization they already have. An
+        // insert is the one write that needs somewhere NEW to land, and that is
+        // the ACTIVE organization: the engine stamps a new row from `tenantId`
+        // (ADR-0105 D5), and the column is read-only to a session payload. So
+        // that member's row had no organization to land in, and the engine met
+        // it as an organization-less SYSTEM write and refused it
+        // `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` with a 500. ADR-0123 D2's
+        // answer for the state is the 403 `isolated` gives the same session;
+        // this gives it here, before the engine is reached.
+        //
+        // Judged on the STORED image (the seam below), not on the payload: the
+        // image is the row after the `beforeInsert` chain, the same rows the
+        // engine's own organization check reads one step later. So the refusal
+        // covers exactly the rows that would have met that 500, and nothing the
+        // store admitted before is refused now. Only the CALLER's own wall
+        // decides whether the object is walled for it — a platform operator
+        // crossing on a posture-permitting object is the arm below — and the
+        // delegator keeps the pre-test's leg, unchanged. `isolated` never
+        // reaches this: its pre-test reads the active organization itself.
+        const insertLacksActiveOrganization =
+          opCtx.operation === 'insert' &&
+          postureUsesUnionScope(this.tenancyPosture) &&
+          callerTenantCheck != null &&
+          !carriesActiveOrganization(opCtx.context);
+        // ── [ADR-0123 D2/D4 · ADR-0131 D9 · ADR-0095 D3 · #24821] …and a platform operator's ──
+        //
+        // A true `PLATFORM_ADMIN` CROSSES the wall on a posture-permitting
+        // object (ADR-0095 D3): its Layer 0 is `null` there, so neither the
+        // pre-test nor the arm above reaches it, under `isolated` or `group`.
+        // Crossing lets the operator read every organization's rows and update
+        // them where they are; it does not give a NEW row an organization. The
+        // row lands where the session's does — the engine stamps it from
+        // `tenantId` and strips the column from a session payload — and with
+        // no active organization it has none. ADR-0131 D9 refuses that write in
+        // every walled posture ("nothing defaults to any owner other than the
+        // derivable one"), and the engine did refuse it, as an
+        // organization-less SYSTEM write: `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`,
+        // status 500, its prose withheld from the wire. The condition is the
+        // member's — no active organization, a row with nowhere to land — so
+        // the answer is the member's too: one refusal, one spelling (ADR-0112
+        // D3), naming what is missing (ADR-0123 D4).
+        //
+        // On the same STORED image as the arm above, for the same reason: a
+        // row a hook places, or one that names its organization where the
+        // engine keeps a session's value, carries one and lands as before.
+        // Reads and updates by the operator are untouched.
+        const operatorInsertLacksActiveOrganization =
+          opCtx.operation === 'insert' &&
+          callerCrossesTenantWall &&
+          !carriesActiveOrganization(opCtx.context);
         // EVERY supplied row must clear the wall — one forged row in a bulk
         // payload denies the whole write (fail closed, no partial landing).
         if (tenantParts.length > 0 && !suppliedRows.every(clearsWall)) denyTenantPlacement('a supplied');
@@ -4094,10 +4247,47 @@ export class SecurityPlugin implements Plugin {
         // leaves the column alone hands over the row's own organization — the
         // one the pre-image or the composed AST selected it under — so it
         // clears this exactly as before.
-        if (tenantParts.length > 0 && (opCtx.operation === 'insert' || !Array.isArray(opCtx.data))) {
+        //
+        // [#24821] A crossing platform operator's insert with no active
+        // organization installs the seam too: its own Layer 0 is `null`, so
+        // `tenantParts` can be empty while its rows still need somewhere to
+        // land. With no wall part the per-row loop below admits every row.
+        if (
+          (tenantParts.length > 0 || operatorInsertLacksActiveOrganization) &&
+          (opCtx.operation === 'insert' || !Array.isArray(opCtx.data))
+        ) {
           const businessCheck = writeImageCheckSeam;
           writeImageCheckSeam = {
             evaluate: (rows) => {
+              // First, as the pre-test's refusal is first: the session's state
+              // is the actionable half. One row with nowhere to land refuses
+              // the whole write — no partial landing.
+              const someRowHasNowhereToLand = (): boolean =>
+                rows.some((row) => !!row && typeof row === 'object' && !namesOrganization(row));
+              if (operatorInsertLacksActiveOrganization && someRowHasNowhereToLand()) {
+                refuseNoActiveOrganization(
+                  'caller',
+                  `[ADR-0123 D2 · ADR-0131 D9] Tenant-scoped inserts are refused when the execution context carries ` +
+                    `no active organization: tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', and ` +
+                    `this caller is a platform operator crossing the wall there (ADR-0095 D3). Crossing lets it read ` +
+                    `every organization's rows and update them where they are; a new row still lands in the active ` +
+                    `organization, and the caller's context carries no \`tenantId\` while the stored row names no ` +
+                    `organization, so this insert has none to land in. It is refused rather than reaching the engine ` +
+                    `as an organization-less system write. System contexts are unaffected.`,
+                );
+              }
+              if (insertLacksActiveOrganization && someRowHasNowhereToLand()) {
+                refuseNoActiveOrganization(
+                  'caller',
+                  `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
+                    `organization: tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', and the ` +
+                    `caller's context carries no \`tenantId\`. Under this posture the membership set ` +
+                    `(\`accessible_org_ids\`) bounds what the caller reads, while a new row lands in the active ` +
+                    `organization (ADR-0105 D5), so this insert has none to land in. Reads under this state keep ` +
+                    `spanning the membership set; the insert is refused rather than reaching the engine as an ` +
+                    `organization-less system write. System contexts and platform operators are unaffected.`,
+                );
+              }
               businessCheck?.evaluate(rows);
               for (const row of rows) {
                 if (!row || typeof row !== 'object') continue;
@@ -4980,10 +5170,18 @@ export class SecurityPlugin implements Plugin {
     // [#19986] The READ verdict's twin: plugin-sharing's read filter is asked
     // with `__readScope` stamped as step 2.6 stamps it for a find, so
     // `record.visible` for `read` is what the caller's find returns.
-    // The on-behalf-of path keeps its previous inputs on every half. The gate
-    // itself excludes it from the floor decision, and the middleware's
-    // delegated depths (the agent-leg intersection, plus a second gate call or
-    // filter as the delegator) are not modelled on explain's record path.
+    // [#24646] On the on-behalf-of path the per-record WRITE gate is asked as
+    // the by-id write asks it ({@link delegatedWriteGate}): once for the
+    // delegated principal at its agent-leg depth, then, if that admits, once
+    // for the delegator at the delegator's own depth. The delegator's own
+    // write filter, which step 2.7 ANDs into the pre-image re-read, is composed
+    // by the engine, as the gate composes it: once with the floor standing
+    // (`computeRlsFilter`), once as the delegator's own record composition
+    // (`computeLayeredRlsFilter` below, asked with the delegator's context, so
+    // its floor decision is the delegator's own). The floor decision still
+    // excludes the delegated context itself, as the gate's does. The delegated
+    // READ depths are not modelled on explain's record
+    // path: the read filter is asked with the delegated context as it stands.
     const actsOnBehalfOf = (c: any): boolean => !!c?.onBehalfOf?.userId;
     const recordWriteFloorOptions = async (
       sets: PermissionSet[],
@@ -5009,6 +5207,55 @@ export class SecurityPlugin implements Plugin {
     };
     const withWriteScope = async (o: string, c: any): Promise<any> =>
       actsOnBehalfOf(c) ? c : { ...c, __writeScope: await this.resolveWriteScopeForSharing(o, c) };
+    /**
+     * [#24646 / ADR-0090 D10] The two contexts the by-id write path hands
+     * plugin-sharing's per-record gate for an on-behalf-of principal, built as
+     * the write path builds them:
+     *
+     * - `agent`: the delegated context with step 2.6's two stamps, the
+     *   agent-leg write depth ({@link intersectDelegatedScope} of the ceiling's
+     *   DECLARED depth and the delegator's effective one) as `__writeScope`, and
+     *   the delegator's effective depth as `__delegatorWriteScope`;
+     * - `delegator`: what the sharing middleware's second gate call hands the
+     *   service, that same context as the delegator (`userId` the delegator's,
+     *   no delegation link) at the delegator's depth.
+     *
+     * A delegation link naming no user (`missing`) answers `null`: the write
+     * path refuses such a principal before any gate runs, and so does every
+     * gate built on this.
+     */
+    const delegatedWriteContexts = async (o: string, c: any): Promise<{ agent: any; delegator: any } | null> => {
+      const del = await resolveDelegatorContext(this.ql, c);
+      if (del.kind !== 'resolved') return null;
+      const [sets, delegatorSets, meta] = await Promise.all([
+        this.resolvePermissionSetsForContext(c),
+        this.resolvePermissionSetsForContext(del.context),
+        this.getObjectSecurityMeta(o),
+      ]);
+      const delegatorScope = this.permissionEvaluator.getEffectiveScope('write', o, delegatorSets, { isPrivate: meta.isPrivate });
+      const declared = this.permissionEvaluator.getDeclaredScope('write', o, sets, { isPrivate: meta.isPrivate });
+      const agent = {
+        ...c,
+        __writeScope: intersectDelegatedScope(declared, delegatorScope).agentLegScope,
+        __delegatorWriteScope: delegatorScope,
+      };
+      return { agent, delegator: { ...agent, userId: c.onBehalfOf.userId, onBehalfOf: undefined, __writeScope: delegatorScope } };
+    };
+    /**
+     * [#24646] A per-record write gate of the sharing service, asked as the
+     * by-id write asks it: for an ordinary principal once, at its own write
+     * depth; for an on-behalf-of principal as the agent and then, only if that
+     * admits, as the delegator — the sharing middleware's two calls, in its
+     * order ({@link delegatedWriteContexts}).
+     */
+    const delegatedWriteGate = (gate: (o: string, rid: string, c: any) => Promise<boolean>) =>
+      async (o: string, rid: string, c: any): Promise<boolean> => {
+        if (!actsOnBehalfOf(c)) return gate(o, rid, await withWriteScope(o, c));
+        const legs = await delegatedWriteContexts(o, c);
+        if (!legs) return false;
+        if (!(await gate(o, rid, legs.agent))) return false;
+        return gate(o, rid, legs.delegator);
+      };
     // {@link resolveSharingReadFilter} IS the read-depth stamp step 2.6 makes
     // (the same two inputs to the same evaluator call); the analytics path
     // already asks it. The caller's own key is cleared first, so the depth
@@ -5077,23 +5324,28 @@ export class SecurityPlugin implements Plugin {
           ? { listRecordShares: (o: string, rid: string) => sharing.listShares(o, rid, { isSystem: true }) }
           : {}),
         ...(sharing && typeof sharing.canEdit === 'function'
-          ? { canEditRecord: async (o: string, rid: string, c: any) => sharing.canEdit(o, rid, await withWriteScope(o, c)) }
+          ? { canEditRecord: delegatedWriteGate((o, rid, c) => sharing.canEdit(o, rid, c)) }
           : {}),
         // [ADR-0111 D3] The narrower delete gate — an edit share opens update
         // but not delete, so a delete explanation must consult this.
         ...(sharing && typeof sharing.canDelete === 'function'
-          ? { canDeleteRecord: async (o: string, rid: string, c: any) => sharing.canDelete(o, rid, await withWriteScope(o, c)) }
+          ? { canDeleteRecord: delegatedWriteGate((o, rid, c) => sharing.canDelete(o, rid, c)) }
           : {}),
         // [#5493 / ADR-0105 D3] The by-id write gate's deferral, asked through
         // the sharing service's own probe, the member its middleware asks
         // after the gate above refuses, with the context that gate is asked
         // with. The probe passes through to {@link checkAuthoredRowWrite} and
         // abstains on every failure; a sharing service without it defers
-        // nothing, so explain reports the gate's refusal as before.
+        // nothing, so explain reports the gate's refusal as before. [#24646] An
+        // on-behalf-of principal's probe carries the agent leg's stamps, as the
+        // middleware's own context does when it asks.
         ...(sharing && typeof sharing.probeAuthoredRowWrite === 'function'
           ? {
-              probeAuthoredRowWrite: async (o: string, rid: string, op: AuthoredRowWriteOperation, c: any) =>
-                sharing.probeAuthoredRowWrite(o, rid, op, await withWriteScope(o, c)),
+              probeAuthoredRowWrite: async (o: string, rid: string, op: AuthoredRowWriteOperation, c: any) => {
+                if (!actsOnBehalfOf(c)) return sharing.probeAuthoredRowWrite(o, rid, op, await withWriteScope(o, c));
+                const legs = await delegatedWriteContexts(o, c);
+                return legs ? sharing.probeAuthoredRowWrite(o, rid, op, legs.agent) : 'abstain';
+              },
             }
           : {}),
         // [#21771] The by-id write path's read question, asked the same way:
@@ -5355,7 +5607,9 @@ export class SecurityPlugin implements Plugin {
    *    delegated context (`hasWriteBypass`: "no D10 delegator intersection on
    *    this path", ADR-0111 D2), so composing here could only produce a verdict
    *    resolved against the wrong identity. The delegated write keeps both
-   *    principals' floors, exactly as before.
+   *    principals' floors, exactly as before — and beside the delegator's
+   *    floor-standing filter it also ANDs the delegator's own composition,
+   *    asked here AS the delegator ({@link delegatorOwnWriteFloorOptions}).
    */
   private async resolvePreImageFloorDrop(
     rlsOperation: string,
@@ -5378,6 +5632,48 @@ export class SecurityPlugin implements Plugin {
       (await this.resolveSharingWriteVerdict(rlsOperation, object, recordId, context, permissionSets)) ===
       'allow'
     );
+  }
+
+  /**
+   * [ADR-0090 D10] The composition knobs the DELEGATOR's own direct by-id
+   * write of `recordId` would get: its floor decision
+   * ({@link resolvePreImageFloorDrop}, asked as the delegator — its own sets,
+   * its own context, not delegated) and the coverage vouch the caller makes
+   * for that write.
+   *
+   * An on-behalf-of principal never exceeds its delegator. Every delegated
+   * row gate composes the delegator's filter with the floor standing (the
+   * delegated path's exclusion), which is a different composition from the one
+   * the delegator's own write of the same row gets, so on its own it does not
+   * bound the delegated write by what the delegator may write. Each such gate
+   * therefore also composes the delegator's filter with THESE options and ANDs
+   * the two: the by-id pre-image (step 2.7), its post-image check (step 3.6)
+   * and the master gate's delegator pass ({@link assertMasterRowEditable}).
+   * The AND only ever narrows — a row passes only where today's composition
+   * AND the delegator's own both admit it — so nothing refused before is
+   * admitted by it.
+   *
+   * `masterGateCoversThisWrite` is the vouch the caller's own direct
+   * composition makes, passed rather than assumed, because coverage is a fact
+   * about the call site ({@link RlsFilterOptions.masterGateCoversThisWrite}).
+   */
+  private async delegatorOwnWriteFloorOptions(
+    rlsOperation: string,
+    object: string,
+    recordId: string,
+    delegatorContext: any,
+    delegatorSets: PermissionSet[],
+    masterGateCoversThisWrite: boolean,
+  ): Promise<RlsFilterOptions> {
+    const dropPlatformOwnershipFloor = await this.resolvePreImageFloorDrop(
+      rlsOperation,
+      object,
+      recordId,
+      delegatorContext,
+      delegatorSets,
+      false,
+    );
+    return { dropPlatformOwnershipFloor, masterGateCoversThisWrite };
   }
 
   /**
@@ -6217,8 +6513,9 @@ export class SecurityPlugin implements Plugin {
    *  - **Row-level and post-image refusals — the preview names no stored row.**
    *    The step 2.7 `using` pre-image, the ADR-0055 controlled-by-parent master
    *    edit (2.8), the RLS `check` post-image (3.6) and the Layer 0 tenant
-   *    post-image (3.7), none of which this method can judge because it is
-   *    asked about no ROW.
+   *    post-image (3.7) — its union-scope no-active-organization insert arm
+   *    included, which judges the row a hook may still place — none of which
+   *    this method can judge because it is asked about no ROW.
    *  - **Payload-VALUE refusals the same caller passes by not sending the
    *    value** — the masked echo (2.5a) and the `owner_id` forge (3.5), which
    *    therefore widen the caller class by nothing.
@@ -7201,6 +7498,12 @@ export class SecurityPlugin implements Plugin {
      * reads the wall's decision instead of re-deriving the wall.
      */
     tenantLayer0Verdict: TenantLayer0Verdict;
+    /**
+     * [ADR-0095 D3 · #24821] True only when a true `PLATFORM_ADMIN` crossing on
+     * a posture-permitting object is what made {@link tenantLayer0Verdict}
+     * `none` — the wall stands for every other caller on this object.
+     */
+    crossedByPlatformAdmin: boolean;
   }> {
     // [ADR-0095 D1] Effective filter = Layer0(tenant) AND Layer1(business RLS).
     // The two are computed independently and never share a compiler, a merge
@@ -7490,7 +7793,7 @@ export class SecurityPlugin implements Plugin {
     // global object correctly contributes nothing (ADR-0095 delta c).
     // [#15813] The verdict is computed ONCE; the filter injected below is its
     // projection. Recording the verdict costs no second computation.
-    const tenantLayer0Verdict = computeTenantLayer0Verdict({
+    const tenantLayer0Input: TenantLayer0Input = {
       tenancyPosture: this.tenancyPosture,
       organizationId: context?.tenantId,
       // [ADR-0105 D2] The `group` wall's predicate. Resolved by
@@ -7518,8 +7821,20 @@ export class SecurityPlugin implements Plugin {
       tenancyDisabled,
       posturePermitsCrossTenant: posturePermits,
       isPlatformAdmin,
-    });
+    };
+    const tenantLayer0Verdict = computeTenantLayer0Verdict(tenantLayer0Input);
     const layer0 = tenantLayer0FilterOf(tenantLayer0Verdict);
+    // [ADR-0095 D3 · ADR-0123 D2 · #24821] Did the platform operator's crossing,
+    // and nothing else, make this verdict `none`? Asked of the ONE ladder a
+    // second time with only the exemption's own fact withheld, so no rung —
+    // posture, tenant object, phantom anchor — is re-derived here. A `single`
+    // posture or a non-tenant object answers `none` both ways and is not a
+    // crossing. Step 3.7 reads it: crossing lets an operator read and update
+    // every organization's rows, and does not give a NEW row an organization.
+    const crossedByPlatformAdmin =
+      tenantLayer0Verdict.kind === 'none' &&
+      isPlatformAdmin &&
+      computeTenantLayer0Verdict({ ...tenantLayer0Input, isPlatformAdmin: false }).kind !== 'none';
 
     // [#12974] Verified platform OWNER crosses the Layer 0 org wall — READS
     // ONLY. Maintainer ruling 2026-08-29, verbatim and untranslated: 「能不能
@@ -7575,10 +7890,10 @@ export class SecurityPlugin implements Plugin {
       // [#15813] The recorded verdict follows the wall as APPLIED: lifted here,
       // so `none` — a reader must not learn an organization from a wall that
       // was not appended.
-      return { layer0: null, layer1, tenantLayer0Verdict: { kind: 'none' } };
+      return { layer0: null, layer1, tenantLayer0Verdict: { kind: 'none' }, crossedByPlatformAdmin };
     }
 
-    return { layer0, layer1, tenantLayer0Verdict };
+    return { layer0, layer1, tenantLayer0Verdict, crossedByPlatformAdmin };
   }
 
   /**
@@ -7837,8 +8152,28 @@ export class SecurityPlugin implements Plugin {
     operation: string,
     context: any,
   ): Promise<Record<string, unknown> | null> {
-    const { layer0 } = await this.computeLayeredRlsFilter(permissionSets, object, operation, context);
-    return layer0;
+    return (await this.computeWriteTenantWall(permissionSets, object, operation, context)).layer0;
+  }
+
+  /**
+   * The caller's Layer 0 for a write — {@link computeWriteTenantCheckFilter}'s
+   * filter — together with whether a platform operator's crossing is why it
+   * is `null` (ADR-0095 D3). One computation answers both, so step 3.7 never
+   * pays for the layered compile twice.
+   */
+  private async computeWriteTenantWall(
+    permissionSets: PermissionSet[],
+    object: string,
+    operation: string,
+    context: any,
+  ): Promise<{ layer0: Record<string, unknown> | null; crossedByPlatformAdmin: boolean }> {
+    const { layer0, crossedByPlatformAdmin } = await this.computeLayeredRlsFilter(
+      permissionSets,
+      object,
+      operation,
+      context,
+    );
+    return { layer0, crossedByPlatformAdmin };
   }
 
   /**
@@ -8970,7 +9305,34 @@ export class SecurityPlugin implements Plugin {
       dropPlatformOwnershipFloor,
       masterGateCoversThisWrite: !delegatedWrite && this.declaresControlledByParent(rel.master),
     });
-    if (masterWriteFilter) {
+    // [ADR-0090 D10] On the DELEGATOR's pass of a delegated write — `context`
+    // is the delegator's own (no delegation link) while `opCtx` carries the
+    // link — the master must also be editable under the composition the
+    // delegator's OWN direct write of this detail gets on this hop: its own
+    // floor decision on the master row, and the vouch the direct hop makes
+    // ({@link delegatorOwnWriteFloorOptions}). ANDed beside the filter above,
+    // so it only narrows: an on-behalf-of detail write never passes a master
+    // the delegator's own detail write is refused on. The agent's pass is
+    // unchanged.
+    const delegatorPass = delegatedWrite && !context?.onBehalfOf?.userId;
+    const delegatorOwnMasterWriteFilter = delegatorPass
+      ? await this.computeRlsFilter(
+          permissionSets,
+          rel.master,
+          'update',
+          context,
+          await this.delegatorOwnWriteFloorOptions(
+            'update',
+            rel.master,
+            String(masterId),
+            context,
+            permissionSets,
+            this.declaresControlledByParent(rel.master),
+          ),
+        )
+      : null;
+    const masterWriteParts = [masterWriteFilter, delegatorOwnMasterWriteFilter].filter(Boolean) as Record<string, unknown>[];
+    if (masterWriteParts.length > 0) {
       let visible: unknown = null;
       // [#7505] This catch STAYS, and the difference from the existence probe
       // above is the whole per-caller distinction the ruling asks for. That
@@ -8983,7 +9345,7 @@ export class SecurityPlugin implements Plugin {
       // not as a site to change.
       try {
         visible = await this.ql.findOne(rel.master, {
-          where: { $and: [{ id: masterId }, masterWriteFilter] },
+          where: { $and: [{ id: masterId }, ...masterWriteParts] },
           context,
         });
       } catch {

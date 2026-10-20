@@ -9,7 +9,7 @@
       "title": "os dev boots to healthy with a loginable seeded admin, honest DB selection, reported port shifts, and a staleness warning",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -17,7 +17,8 @@
         "app": "showcase",
         "requires": [
           "a free non-default port (lsof -nP -iTCP:<port> -sTCP:LISTEN empty first — dogfood skill §0) and a scratch DB path under /tmp/<run>/",
-          "⚠️ an app directory NO other runner boots, for steps[4], steps[6] and steps[7]: each writes into the directory it runs in. steps[4] bumps a tracked source file's mtime, so every other runner booting that tree reads its artifact as stale — and an `os dev` already running there is watching `objectstack.config.ts, src` and rebuilds and restarts on the change; steps[6] creates the unified default DB under .objectstack/data/ in it; steps[7] plants a legacy dev.db. Use your own worktree, or a worktree copy of examples/app-showcase (the same prescription cli.build-own-contract carries), and discard it after"
+          "⚠️ an app directory NO other runner boots, for steps[4], steps[6] and steps[7]: each writes into the directory it runs in. steps[4] bumps a tracked source file's mtime, so every other runner booting that tree reads its artifact as stale — and an `os dev` already running there is watching `objectstack.config.ts, src` and rebuilds and restarts on the change; steps[6] creates the unified default DB under .objectstack/data/ in it; steps[7] plants a legacy dev.db. Use your own worktree, or a worktree copy of examples/app-showcase (the same prescription cli.build-own-contract carries), and discard it after",
+          "for acceptance[0]'s console leg, a BUILT Console: in the framework repo run `pnpm objectui:build` at the repo root first (scripts/build-console.sh builds @object-ui/console at the .objectui-sha pin into packages/console/dist, which `pnpm build` never produces). On an unbuilt tree the boot still reaches health and ready, and GET /_console/ answers 503 text/plain 'The ObjectStack Console is not built, so this server has no Console to serve at /_console/.' followed by that build remedy (packages/cli/src/utils/console.ts#createConsoleNotBuiltPlugin): record the console leg blocked(environment), not a FAIL of the clause"
         ]
       },
       "steps": [
@@ -88,7 +89,7 @@
         "OS_DATABASE_URL / DATABASE_URL / TURSO_DATABASE_URL env (env wins over the default)",
         "-d :memory: (SQLite's own in-memory database — the replacement for the retired in-memory engine; nothing persists across restarts)",
         "--database-driver memory / OS_DATABASE_DRIVER=memory|mingo|in-memory / -d memory:// or mingo:// → REFUSED (the retired in-memory engine; see the negative for where each is refused and what it names)",
-        "config-declared default datasource (the project config's default home wins over the unified default) — authored as a NAMED datasource plus a datasourceMapping rule { default: true, datasource: NAME } (readConfigDeclaredDefault); a datasource literally named `default` is refused by defineStack as reserved for the host's primary, and a mapping rule naming 'default' is declined, so neither can stand for this variant",
+        "config-declared default datasource (the project config's default home wins over the unified default) — authored as a NAMED datasource plus a datasourceMapping rule { default: true, datasource: NAME } (readConfigDeclaredDefault); a datasource literally named `default` is refused by defineStack as reserved for the host's primary, and a mapping rule naming 'default' is declined, so neither can stand for this variant. The scratch stack's object must declare sharingModel (e.g. 'private'): without one the boot's compile refuses the stack on the error rule security-owd-unset (packages/lint/src/validate-security-posture.ts#SECURITY_OWD_UNSET) and `os dev` exits 1 with 'Compile failed — fix errors above before starting dev server' (packages/cli/src/commands/dev.ts)",
         "legacy compat-read: an existing dev.db / standalone.db when no objectstack.db exists (resolved WITH one loud notice line; probe order objectstack.db → dev.db → standalone.db)"
       ],
       "traps": ["stale-dist", "stale-console-bundle", "shared-browser-tab"],
@@ -118,6 +119,12 @@
           "date": "2026-10-17",
           "change": "the config-declared-default variant named no authorable shape, and the obvious one fails (checklist-accuracy finding, #23878 close-out): a datasource literally named `default` is refused by defineStack, so the variant is a named datasource routed by datasourceMapping { default: true, datasource: NAME }, the shape readConfigDeclaredDefault reads. Re-run of that variant on main c91af8ed6 on a minimal scratch stack: datasources [{ name: 'qa_main', driver: 'sqlite', config: { filename: SCRATCH/data.db } }] with the default mapping rule, os dev -p PORT with no -d and no env database → '🗄️ Database: file:SCRATCH/data.db', and no .objectstack/data file was created; a datasource named 'default' → build exit 2 with the reserved-name refusal",
           "ref": "#24036"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "fixtures.requires[2] added and variants[6] extended — checklist-accuracy findings C3 and C4 of QA run #24786 (wave anchor #24579 round 13), re-read at base 7697ddcf94. C3: acceptance[0]'s console leg needs `pnpm objectui:build` in the framework repo; on an unbuilt tree /_console/ answers 503 'The ObjectStack Console is not built …' (console.ts createConsoleNotBuiltPlugin), which QA run #24786 met, so the requirement now says so and how to record the leg. C4: the config-declared-default variant's scratch object must declare sharingModel, or the compile fails on security-owd-unset and os dev exits 1 (dev.ts). No clause changed",
+          "ref": "#24850"
         }
       ]
     },
@@ -126,7 +133,7 @@
       "title": "os build's own contract: no computed value in the exit slot, located errors for schema and author-time rule failures, artifact + stats output, warnings never flip the exit",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "build",
       "personas": ["operator (local shell)"],
@@ -134,6 +141,9 @@
         "app": "showcase",
         "requires": [
           "a scratch copy of a known-good app config (scaffolded blank app or a worktree copy of examples/app-showcase) so deliberate breakage never touches shared fixtures"
+        ],
+        "knownGaps": [
+          "no spec docblock or ADR states the --json payload shape of os build or os validate; the one governed element is the conversion notice both publish under conversions (packages/spec/src/stack-provenance.ts#stackConversionsOf). So acceptance[3] follows the code at base 7697ddcf94 (the emitJson payloads in compile.ts and validate.ts): the two commands spell the verdict (success / valid) and the finding list (issues / errors) differently, and build's own failure exits differ among themselves — the author-time rule and --strict-body failures carry issues, while the post-lowering schema parse, the container-name and the picklist refusals carry errors. A refusal at load carries its message and code only: packages/cli/src/utils/format.ts#errorCodeFields copies code and httpStatus, so the zod issues the STACK_SCHEMA_INVALID ledger row says that error carries ('issues carries the zod issues structurally', packages/spec/src/api/error-code-ledger.zod.ts) reach neither payload. Which spelling is canonical is unruled: score acceptance[3] on the warnings/conversions parity, and record both payloads as they are"
         ]
       },
       "steps": [
@@ -167,9 +177,9 @@
           "evidence": "the rule-failure output + exit code"
         },
         {
-          "clause": "--json failure and advisory shapes match os validate --json (same warnings/conversions keys) — the #3782 parity class: the two surfaces must not disagree about what an author is told",
+          "clause": "--json failure and advisory payloads carry the same warnings and conversions keys os validate --json carries — the #3782 parity class: the two surfaces must not disagree about what an author is told. The verdict and finding keys differ by command: os build answers success and, for an author-time rule failure, issues; os validate answers valid and errors; and a config that throws at load answers error and code on both, with no finding list",
           "oracle": "log",
-          "verify": "the failure payload is { success: false, … issues } and success payloads carry warnings + conversions under the same keys validate emits",
+          "verify": "pair each fixture's two --json payloads. The author-time rule failure (the steps[3] flow): build answers { success: false, error: 'author-time rules failed', issues, warnings, conversions } and validate { valid: false, errors, warnings, conversions, duration }. The schema break (steps[2], refused by defineStack at load): build answers { success: false, error, code: 'STACK_SCHEMA_INVALID', warnings, conversions } and validate { valid: false, error, code, warnings, conversions, duration }, neither with issues or errors. The clean config: build's { success: true, …, warnings, conversions } beside validate's { valid: true, …, warnings, conversions }. The parity judged is warnings and conversions, key for key; success/valid and issues/errors are each command's own spelling (packages/cli/src/commands/compile.ts, packages/cli/src/commands/validate.ts) and never a FAIL of this clause",
           "evidence": "the paired --json payloads"
         },
         {
@@ -204,7 +214,8 @@
         { "revision": 3, "date": "2026-08-18", "change": "reconciled clause 2 with clause 5, which contradicted each other. Clause 2 demanded exit 1 on a schema violation while clause 5 explicitly blesses 'an oclif 2 from a this.error() path'. Measured in compile.ts (build is an alias of it): the --json failure path emits the payload and calls this.exit(1); the human path falls through the same catch to this.error(), which exits 2. The clause now names both and asks which was run (#9417)", "ref": "#9386" },
         { "revision": 4, "date": "2026-10-03", "change": "text refresh only, no status change: six live texts named compile.ts's this.error() as the mechanism of the human path's exit 2. Since bf36edd0a1 that catch prints its own ✗ line and ends in this.exit(2), which raises the same status without oclif's second Error: rendering; every oracle (exit 2 on the human path, 1 under --json) still holds. Revisions 2 and 3 above keep their wording: they record what was true when written", "ref": "#21492" },
         { "revision": 5, "date": "2026-10-17", "change": "steps[5] re-pointed (checklist-accuracy finding, #23878 close-out): as written ('add one undeclared authoring key') it is now a hard refusal, because object, field, report and enable shapes are closed, so it could only fail clause 5 for the wrong reason. The step now places the key at a nested strip-mode site (a field's object-form visibleWhen) under defineStack(…, { strict: false }) and names what the closed site does instead; clause 5's verify says the same. Re-run on main c91af8ed6 on a scratch stack: the key on a field → exit 2 'Unrecognized key(s) on this field: qaUndeclared' (default) and exit 1 'Validation failed … unrecognized_keys' (strict:false); the key inside visibleWhen under strict:false → exit 0 with '⚠ Undeclared authoring keys (1) — dropped at load; reported here, never refused' naming objects.qa_thing.fields.note.visibleWhen.qaUndeclared, and the artifact's visibleWhen without it; the same key under the default defineStack → exit 0 with defineStack's own one-line warning and no compile-side block", "ref": "#24036" },
-        { "revision": 6, "date": "2026-10-19", "change": "steps[2] and steps[5] name where the deliberate breaks must sit — checklist-accuracy findings of the 18.0 QA sweep (QA run #24551, cli.build-own-contract; wave anchor #24579 §3). Both plants were helper-authored on the stock fixtures, and ObjectSchema.create() parses at import (re-derived at base 9a7838edf5, packages/spec/src/data/object.zod.ts): the schema break died at config load with a raw Zod issue dump, and the nested strip-mode key was dropped by the helper with no advisory. The plants now sit on plain-literal objects. No clause changed", "ref": "#24649" }
+        { "revision": 6, "date": "2026-10-19", "change": "steps[2] and steps[5] name where the deliberate breaks must sit — checklist-accuracy findings of the 18.0 QA sweep (QA run #24551, cli.build-own-contract; wave anchor #24579 §3). Both plants were helper-authored on the stock fixtures, and ObjectSchema.create() parses at import (re-derived at base 9a7838edf5, packages/spec/src/data/object.zod.ts): the schema break died at config load with a raw Zod issue dump, and the nested strip-mode key was dropped by the helper with no advisory. The plants now sit on plain-literal objects. No clause changed", "ref": "#24649" },
+        { "revision": 7, "date": "2026-10-20", "change": "acceptance[3] (clause, verify) states what each command answers, and fixtures.knownGaps[0] names the gap — checklist-accuracy finding B6 of QA run #24787 (wave anchor #24579 round 13). No spec docblock or ADR states either command's --json shape, so the clause follows the code at base 7697ddcf94 (compile.ts, validate.ts): os validate answers valid/errors where os build answers success/issues, and a refusal at load answers error and code (STACK_SCHEMA_INVALID) with no finding list on both. The '{ success: false, … issues }' the verify promised held for the author-time rule failure only. The parity the clause judges, warnings and conversions, is unchanged", "ref": "#24850" }
       ]
     },
     {
@@ -212,7 +223,7 @@
       "title": "os migrate: bare command is a read-only plan, apply is safe-by-default, re-runs are idempotent, and --json exits 0 on success (#4873)",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -220,6 +231,9 @@
         "app": "showcase",
         "requires": [
           "a scratch app + persistent sqlite DB whose base schema was synced by one prior `os dev` boot (plan itself defers DDL since #3917, so the tables must pre-exist), e.g. -d file:/tmp/<run>/migrate.db"
+        ],
+        "knownGaps": [
+          "no pin scores a clause of this item at its layer (RUNNER rule 6, a pin scores only the layer it drives), so the item carries no automated ref. Every clause's oracle is the CLI's own output or exit code. packages/cli/src/utils/format.exit-code.test.ts calls emitJson / emitText in-process (unit): it shows that the success path leaves process.exitCode alone and that a duration can no longer reach the exit-code slot (#4873). That is unit-layer evidence for acceptance[2], never its pass: acceptance[2] is scored on the `echo $?` collected after each subcommand's --json success. automated may return when a pin spawns `os migrate … --json` and asserts the shell's exit code"
         ]
       },
       "steps": [
@@ -302,7 +316,6 @@
         "audit-mail-bodies"
       ],
       "traps": ["stale-dist"],
-      "automated": { "kind": "unit", "ref": "packages/cli/src/utils/format.exit-code.test.ts — covers acceptance[2] ONLY (#4873: emitJson / emitText leave the exit code alone on success and a duration can no longer reach the exit-code slot); acceptance[0], [1] and [3]–[6] need the run" },
       "source": [
         "packages/cli/src/commands/migrate/index.ts + plan.ts (#2186 bare-command-is-plan; #3917 enforced never-mutates; occupancy warning) + apply.ts (--allow-destructive / --force / --yes / in_sync)",
         "packages/cli/src/utils/format.ts#CliExitCode (CliExitCode narrows the emitJson exit slot — the #4873 fix, commit 83df2fd)",
@@ -335,6 +348,12 @@
           "date": "2026-10-20",
           "change": "variants: audit-mail-bodies added, the 19th registered subcommand (#24693: the one-off mask of the mail bodies that sys_audit_log / sys_activity copies of sys_email and sys_identity_email rows still hold in clear). The source note's count moves from 18 to 19 with it. No clause changed",
           "ref": "#24693"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "automated removed, fixtures.knownGaps[0] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4, 'Refs that claim more than their pins assert'), round 15 of wave anchor #24579. The ref said format.exit-code.test.ts covers acceptance[2]. That pin calls emitJson / emitText in-process, while acceptance[2] asks for `echo $?` after each subcommand's --json success, which only a spawned CLI answers. By RUNNER rule 6 (a pin scores only the layer it drives) it scores no clause, so automated is dropped (theme-B rule) and the knownGap says what the pin does assert. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ]
     },
@@ -343,7 +362,7 @@
       "title": "objectstack verify: verdict vocabulary is closed, exit is nonzero exactly on failure verdicts, and the inconclusive split (needs-fixture/skipped) never fails the run",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -351,7 +370,8 @@
         "app": "showcase",
         "requires": ["examples/app-showcase as the verified app (its config is the stock target)"],
         "knownGaps": [
-          "no stock fixture ships a GUARANTEED-failing app, so the exit-1 side of the hardFailures mapping must be staged (point --app at a scratch config engineered to produce a fidelity gap or 5xx create) — record how it was staged in the evidence rather than skipping the side silently"
+          "no stock fixture ships a GUARANTEED-failing app, so the exit-1 side of the hardFailures mapping must be staged (point --app at a scratch config engineered to produce a fidelity gap or 5xx create) — record how it was staged in the evidence rather than skipping the side silently",
+          "no pin scores a clause of this item at its layer (RUNNER rule 6, a pin scores only the layer it drives), so the item carries no automated ref. packages/cli/src/commands/verify-tenancy-posture.test.ts asserts resolveVerifyMultiTenant, the exported decision, under the real tenancy-posture resolver; its own docblock says it is 'not an end-to-end `os verify` invocation'. That is unit-layer evidence for acceptance[4], never its pass: acceptance[4] scores the posture run's payload (multiTenant) or its loud error. automated may return when a pin runs os verify under a walled OS_TENANCY_POSTURE and reads that payload"
         ]
       },
       "steps": [
@@ -408,7 +428,6 @@
         "skipped (inconclusive — never fails)"
       ],
       "traps": ["stale-dist", "wrong-persona"],
-      "automated": { "kind": "unit", "ref": "packages/cli/src/commands/verify-tenancy-posture.test.ts — covers acceptance[4] ONLY (#5262: a walled OS_TENANCY_POSTURE selects the multi-tenant suite, and single-org deployments keep the single-org suite); acceptance[0]–[3] (the verdict vocabulary, the hardFailures mapping, the needs-fixture split, the --rls hole) need the run" },
       "source": [
         "packages/cli/src/commands/verify.ts#hardFailures (hardFailures sum, exit contract, resolveVerifyMultiTenant / #5262 / ADR-0105 D1, separate RLS stack rationale)",
         "packages/verify/src/verify.ts#ObjectVerifyResult (the six-member status union; 400-VALIDATION_FAILED→needs-fixture vs 5xx→create-failed classification — re-pointed #18104: VALIDATION_FAILED survives in this file only inside a regex literal; the union this item means is declared on ObjectVerifyResult and the classification that reads it is isValidation)",
@@ -416,7 +435,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: verdict-to-exit-code mapping read from verify.ts + verify.ts (verdict union), with the inconclusive split and the #5262 posture-honesty negative as load-bearing clauses; the unstageable always-failing fixture recorded as a knownGap", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-10-19", "change": "automated.ref says which clause its pin covers — round 2's Tier 1 record (#24598, via wave anchor #24579 §3, comment 6272032736) names this ref among those that over-claim clause coverage: its seven tests assert the #5262 posture selection (acceptance[4]) and nothing of acceptance[0]–[3]. Re-read at base 9a7838edf5. No clause changed", "ref": "#24649" }
+        { "revision": 2, "date": "2026-10-19", "change": "automated.ref says which clause its pin covers — round 2's Tier 1 record (#24598, via wave anchor #24579 §3, comment 6272032736) names this ref among those that over-claim clause coverage: its seven tests assert the #5262 posture selection (acceptance[4]) and nothing of acceptance[0]–[3]. Re-read at base 9a7838edf5. No clause changed", "ref": "#24649" },
+        { "revision": 3, "date": "2026-10-20", "change": "automated removed, fixtures.knownGaps[1] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4, 'Refs that claim more than their pins assert'), round 15 of wave anchor #24579. The ref said verify-tenancy-posture.test.ts covers acceptance[4]. Its seven tests call resolveVerifyMultiTenant only, while acceptance[4] scores the os verify run's payload or error. By RUNNER rule 6 (a pin scores only the layer it drives) it scores no clause, so automated is dropped (theme-B rule) and the knownGap says what the pin asserts. Read at base b1676441ba. No clause changed", "ref": "#24891" }
       ]
     },
     {
@@ -504,14 +524,14 @@
       "title": "os test: a Quality Protocol suite is validated at LOAD, executed against a booted app, and its verdict is the exit code — capture/interpolation thread state, an unevaluable assertion FAILS",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)", "suite author (writes qa/*.test.json)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a free non-default port and an ephemeral boot: `pnpm dev -- --fresh -p <port>` from the repo root (showcase + --seed-admin; dogfood skill §0)",
+          "a free non-default port and an ephemeral boot: `pnpm dev -- --fresh -p <port>` from the repo root (showcase + --seed-admin; dogfood skill §0). It needs a built workspace and NO console build: the root dev chain runs scripts/check-dev-prereqs.mjs first, which refuses an unbuilt workspace and prescribes `pnpm build`, then `pnpm check:console-sha`, which on an unbuilt console prints 'ℹ No console dist at packages/console/dist — skipping SHA check. Build it with: pnpm objectui:build' and exits 0 (scripts/check-console-sha.mjs), before the showcase boots. Every step here drives REST and the CLI, never /_console/, so that line is no blocker",
           "a session token for the data steps — POST /api/v1/auth/sign-in/email with the seeded admin (admin@objectos.ai / admin123) and read `.token`; pass it as `os test --token <token>` (the CLI sends it as `Authorization: Bearer`)",
           "the shipped fixture suite examples/app-showcase/qa/platform-smoke.test.json — the repo's only Quality Protocol suite, authored so `os test`'s DEFAULT glob (`qa/*.test.json`) finds it from that directory with no argument",
           "a scratch directory with its own qa/ for the negative and variant probes — deliberately broken suites are STAGED per run, never committed, so the repo's own suite stays green"
@@ -626,7 +646,8 @@
         { "revision": 4, "date": "2026-08-18", "change": "corrected the flag count from two to three. packages/cli/src/commands/test.ts declares url, token AND fail-on-empty; the same revision's own acceptance already describes --fail-on-empty, so the knownGap contradicted its own item. The gap's point is unchanged and now stated directly: none of the three flags selects scenarios (#9417)", "ref": "#9386" },
         { "revision": 5, "date": "2026-09-28", "change": "the knownGap and the qa.json source note were falsified by #20289 (PR #20341) and are corrected: `os test` gained `--tags` (any-of, exact, case-sensitive; deselected scenarios are counted and never passed; a selection that matches no scenario exits 0, or 1 under --fail-on-empty), and the report now heads each suite with its `name` and prints each scenario's `name` beside its id. What stays true is narrower: `scenario.requires` is declared but NOT CHECKED, pending the maintainer's decision on #20289. Steps and acceptance are unchanged — the green-path clause's scenarioId is still on every scenario line, now in brackets after the name, or bare when the name equals the id", "ref": "#20289" },
         { "revision": 6, "date": "2026-09-28", "change": "the knownGap and the qa.json source note were falsified again by #20289's `requires` round (ruling B) and are corrected: `scenario.requires` is now CHECKED before the first step — `params` against the `os test` process environment, `services` against the target's discovery `services` (enabled and `available`) — and an unmet entry SKIPS the scenario with its reason, counted apart and never passed; an all-skipped run exits 0, or 1 under --fail-on-empty. `requires.plugins` is retired (refused at load, prescription names `requires.services`). Steps and acceptance are unchanged: the fixture suite declares no `requires`, so the green path runs every scenario exactly as before", "ref": "#20289" },
-        { "revision": 7, "date": "2026-10-19", "change": "steps[6] names an oracle that can be consulted — checklist-accuracy finding of the 18.0 QA sweep (QA run #24551, cli.qa-suite-execution steps[6]; wave anchor #24579 §3): \"the server log carries no request attributable to it\" cannot be read, because the stock dev boot logs no per-request lines. Re-derived at base 9a7838edf5: the Hono server plugin logs a handler throw with method and path and no access line (packages/plugins/plugin-hono-server), and os test prints one `Scenario:` line per executed scenario under its suite heading (packages/cli/src/commands/test.ts). The step now reads the transcript. No clause changed", "ref": "#24649" }
+        { "revision": 7, "date": "2026-10-19", "change": "steps[6] names an oracle that can be consulted — checklist-accuracy finding of the 18.0 QA sweep (QA run #24551, cli.qa-suite-execution steps[6]; wave anchor #24579 §3): \"the server log carries no request attributable to it\" cannot be read, because the stock dev boot logs no per-request lines. Re-derived at base 9a7838edf5: the Hono server plugin logs a handler throw with method and path and no access line (packages/plugins/plugin-hono-server), and os test prints one `Scenario:` line per executed scenario under its suite heading (packages/cli/src/commands/test.ts). The step now reads the transcript. No clause changed", "ref": "#24649" },
+        { "revision": 8, "date": "2026-10-20", "change": "fixtures.requires[0] states what the boot needs — checklist-accuracy finding C9 of QA run #24786 (wave anchor #24579 round 13): `pnpm dev -- --fresh -p PORT` boots without a console build (check:console-sha skips with 'No console dist' and exits 0), and the root dev chain refuses an unbuilt workspace first (check-dev-prereqs.mjs), read at base 7697ddcf94. No clause changed", "ref": "#24850" }
       ]
     },
     {
@@ -732,7 +753,7 @@
       "title": "os migrate meta replays the spec migration chain over authored sources and PRINTS the mechanical edit list the retirement messages prescribe — by default it rewrites no source file, and --write rewrites in place exactly the edits it can prove, held to a re-run of the chain; its --out snapshot is schema-valid, replay is idempotent, and a below-floor --from is refused",
       "since": "v14.7",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "cli",
       "personas": ["build-time author (no session)"],
@@ -755,7 +776,7 @@
         "run `os migrate meta --from <previous major>` and capture stdout + the exit code",
         "confirm every planted spelling appears in the printed `Applied <N> mechanical change(s):` block as `<path>: <from> → <to> (<conversionId>)`, naming the successor the registry declares",
         "re-checksum the scratch tree and confirm every authored file is byte-identical — the run's only file write is --out",
-        "re-run with `--out <snapshot>.json`, read the snapshot back, and confirm the run states its schema verdict honestly: `Migrated stack is schema-valid` when it is, and the `Migrated stack does not yet pass schema validation — resolve the manual changes above, then run \\`os validate\\`` warning when manual changes are still outstanding",
+        "re-run with `--out <snapshot>.json`, read the snapshot back, and confirm the run states its schema verdict honestly: `Migrated stack is schema-valid` when it is, and, when the migrated stack still fails the schema, the `Migrated stack does not yet pass schema validation — <n> refusal(s) left after the chain. Resolve them, then run \\`os validate\\`:` warning, followed by each refusal (packages/cli/src/commands/migrate/meta.ts#printSchemaVerdict)",
         "idempotence: replay a CANONICAL source — one carrying no shape the 17 → 18 chain converts; the tree the WRITE MODE leg wrote is one, while the stock showcase tree is NOT (three edge-branched decisions omit `mode`, so flow-decision-mode-inclusive-explicit lists three edits over it) — over a real range — `os migrate meta --from 17` (--to defaults to 18, CHAIN_TERMINUS_MAJOR: the higher of the runtime's PROTOCOL_MAJOR and the highest major the registries carry a step for, 18 on both counts since PROTOCOL_VERSION moved to 18 (#22215); the run's `Chain:` line prints both) — and confirm NO `Applied <N> mechanical change(s):` block and exit 0; the step-18 semantic advisories are still listed (every hop lists its semantic entries unconditionally), so `Nothing to migrate …` is NOT the expected line here. Then run the identical `--from <previous major>` command on the planted tree a second time and diff the two stdouts with the verdict line's elapsed-time stamp (`(<n>ms)`) normalized away — it is a timing, not report content. Separately record the EMPTY-RANGE answer: `--from 18` (range 18 → 18, no step) prints `⚠ No migration step exists for protocol 18 → 18, so this run replayed nothing — that is not a finding that the metadata is canonical.` — never the canonical success line",
         "run it with a --from BELOW the supported floor and capture the MigrationFloorError path (`Cannot migrate from protocol <N>: the chain's support floor is <F>`)",
         "run it with --json where supported and check the exit code in the same way #4873 required of every other migrate subcommand",
@@ -866,6 +887,12 @@
           "date": "2026-10-16",
           "change": "stale clause re-pointed (#23950, from QA run #23921): the item's own restart trigger fired. #9591 closed completed — `os migrate meta --write` landed by PR #22108 (a959493cd) and the house retirement sentence names it since PR #22142 — so `--help` now lists --write (and --all), and acceptance[7], which asserted the print-only flag surface, went red against a correct product. As revision 3 prescribed, the source-rewrite assertions are restored rather than the restart clause deleted: acceptance[7] is now the write contract — --write rewrites in place exactly the mechanical edits it can trace to one literal in one project file, lists every other with a closed-set refusal kind, writes no semantic advisory, leaves every byte outside a written site unchanged, and is held to a re-run of the chain (restored, exit 1, on disagreement), so the written tree re-runs clean and a second --write writes nothing. The last step becomes the WRITE MODE leg on its own fresh scratch copy. Following the same landing: the title and fixtures say the rewrite is opt-in and needs its own copy; the third knownGap now describes what --write refuses instead of saying it does not exist; step 2 quotes the current house sentence (with its --write clause); acceptance[1] is scoped to runs without --write and drops a quotation ('unsafe and lossy') meta.ts no longer carries; and the mutation negative splits into a no-write half and a write half. Source gains printWriteOutcome, CodemodRefusalKind and the migrate-meta-write.test.ts pin. Measured on the re-run and corrected here, same class (a step that reds a correct product): step 8 called the unmodified tree canonical for the `--from 17` replay, but the stock showcase carries three edge-branched decisions with no `mode`, which flow-decision-mode-inclusive-explicit converts, so that replay lists three edits; the canonical source is now the tree the WRITE MODE leg wrote, and the identical-run diff normalizes the verdict line's elapsed-time stamp. Same re-run, same class: step 8 still said the --to default ran ahead of the runtime's PROTOCOL_MAJOR 17, but PROTOCOL_VERSION is 18 since #22215, so the default (meta.ts CHAIN_TERMINUS_MAJOR, the higher of the two) is 18 on both counts; the parenthetical now says so, and the measured `--from 17` / `--from 18` expectations are unchanged",
           "ref": "#23950"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "steps[6] quotes the schema-verdict warning from its producer — checklist-accuracy finding C5 of QA run #24786 (wave anchor #24579 round 13): meta.ts printSchemaVerdict at base 7697ddcf94 prints 'Migrated stack does not yet pass schema validation — N refusal(s) left after the chain. Resolve them, then run `os validate`:' and then each refusal, where the step still quoted the older '… resolve the manual changes above …' wording. No clause changed",
+          "ref": "#24850"
         }
       ]
     },
@@ -961,7 +988,7 @@
       "title": "os doctor: every check emits an attributed row, an unparseable posture is an ERROR not a swallow, ledger rows print under every posture, the ✓ is withheld when the read was incomplete — and the two monorepo-anchored scans announce a named skip in a user app instead of blessing a tree they never walked",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -978,7 +1005,7 @@
         ]
       },
       "steps": [
-        "baseline: from the untouched scaffold run `os doctor; echo $?` and `os doctor -v; echo $?` — capture both full reports (the unconditional environment rows print first: Node.js, pnpm, TypeScript, Dependencies, Git, Environment files — then whichever finding-only rows are live, then the extended checks)",
+        "baseline: from the untouched scaffold run `os doctor; echo $?` and `os doctor -v; echo $?` — capture both full reports (the environment rows print first: the unconditional Node.js, pnpm, TypeScript, Dependencies, Git, Environment files and Package-authored scheduled work, with whichever finding-only rows are live in their places — then the extended checks, then, when a config loads, the config block, which opens with its Platform protocol row)",
         "stage the config findings in the scratch copy: a view whose object does not exist (orphan), two objects whose lookup fields point at each other (circular), and one object nothing references (unused); run `os doctor` and capture the three warning rows — then restore and capture the three ✓ rows (Dependencies / Object usage / View integrity). The untouched blank scaffold is NOT that clean baseline: its starter object — the template's blank_note, renamed to the project's namespace (qa_doctor_note for the qa-doctor scaffold) — is referenced by no view, app or flow (its src/views, src/apps and src/flows barrels are empty), so findUnusedObjects warns on it and the report never reaches its healthy line. Add one view over it to the scratch copy (e.g. views: [{ name: 'qa_doctor_note', object: 'qa_doctor_note', list: { columns: ['title'] } }]) before the clean run. Stage the orphan as a WELL-FORMED view container whose name equals its object key and whose object does not exist, e.g. views: [{ name: 'qa_missing', object: 'qa_missing', list: { columns: [...] } }]: the default defineStack load accepts it and all three checks run. A malformed view body (e.g. a single view's viewKind/config keys on a container) is refused by the default load, and doctor then prints '⚠ Config load  Could not load config for analysis (config checks skipped)' and runs none of the three — a staging fault, not a doctor finding; defineStack(…, { strict: false }) loads any shape, and is the route when the staging itself needs a shape the closed schema refuses",
         "unparseable posture: `OS_TENANCY_POSTURE=isolatd os doctor; echo $?` — the Tenancy posture ERROR row must print naming the variable and the allowed set, the REST of the report must still run, and the exit must be 1 (#5382: report-not-refuse, resolved OUTSIDE the config-analysis try at doctor.ts, row pushed)",
         "env provenance: put the same bad posture in a .env FILE (not the shell) and re-run — the finding must still fire (#5387 dotenv cascade) and the Environment files row must attribute the value to the file that supplied it",
@@ -988,9 +1015,9 @@
       ],
       "acceptance": [
         {
-          "clause": "every environment check emits its own row, and the finding-only rows appear exactly when their finding is live — Node.js, pnpm, TypeScript, Dependencies, Git and Environment files are unconditional; @objectstack/spec prints only where <cwd>/packages/spec/package.json exists (#10679), NODE_ENV only while NODE_ENV is unset (#5673), Tenancy posture only on an unrecognized value (#5382), and Installed packages only on a ledger failure or a skipped entry (#5429) — and -v adds the fix/detail lines without changing the verdicts",
+          "clause": "every environment check emits its own row, and the finding-only rows appear exactly when their finding is live — Node.js, pnpm, TypeScript, Dependencies, Git, Environment files and Package-authored scheduled work (ON or OFF, #17396) are unconditional; @objectstack/spec prints only where <cwd>/packages/spec/package.json exists (#10679), NODE_ENV only while NODE_ENV is unset (#5673), Tenancy posture only on an unrecognized value (#5382), and Installed packages only on a ledger failure or a skipped entry (#5429); once a config loads, the config block opens with its own Platform protocol row (✓ when the declared engines.protocol covers the installed platform, ⚠ when checkProtocolVersionGap reports a gap) — and -v adds the fix/detail lines without changing the verdicts",
           "oracle": "log",
-          "verify": "both transcripts carry one row per check through renderHealthCheckResult (doctor.ts); the six unconditional rows are pushed across doctor.ts and the four finding-only rows (spec workspace, gated on the package.json probe), (nodeEnvCheck), (postureReading) and (installedPackageLedgerChecks, which returns [] on a clean ledger); the -v run differs only by detail lines",
+          "verify": "both transcripts carry one row per check through renderHealthCheckResult (doctor.ts); the unconditional rows are the run body's results.push calls that no condition guards — Node.js, pnpm (pnpmCheck), TypeScript (typescriptCheck), Dependencies, Git (gitCheck), Environment files (environmentSourcesCheck) and Package-authored scheduled work (packages/cli/src/commands/doctor.ts#scheduledWorkCheck) — and the four finding-only rows are pushed under their guards: the spec workspace (gated on the package.json probe), nodeEnvCheck, postureReading and installedPackageLedgerChecks (which returns [] on a clean ledger); the Platform protocol row is printed by the config block from checkProtocolVersionGap, not pushed among them; the -v run differs only by detail lines",
           "evidence": "the paired scaffold transcripts, plus the same pair from a monorepo cwd — a conditional row that is absent and a row that was dropped read identically in one transcript alone"
         },
         {
@@ -1055,7 +1082,8 @@
         { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): `os doctor` as a whole had NO checklist item; it appeared only as a --help variant on cli.flag-command-error-ux while carrying seven unit-pinned seams (env provenance #5387, posture honesty #5382, ledger independence #5429, withheld ✓ #5412/#5413/#5644). Authored from the run body at doctor.ts with the withhold-the-✓ discipline the command itself established turned back on its own monorepo-anchored Test-coverage/Deprecations ✓s, which bless a tree they never examined in every user app — encoded as an expected-fail probe rather than silently accepted", "ref": "claude/new-session-0pv25p" },
         { "revision": 2, "date": "2026-08-23", "change": "text refresh only, no capability change: #10679 landed the fix this item's expected-fail predicted, so that clause inverts into an ordinary pass. findMissingTests/findDeprecatedUsages now return a MonorepoTreeScan and the ✓ is reachable only from the scanned arm; outside a monorepo each check prints 'ℹ <name> Skipped — no packages/spec/src in this directory (monorepo-only check)', with the resolved directory under -v. Rewritten against a REAL run of the shipped CLI in a `create-objectstack -t blank` scaffold and again from a monorepo checkout, not from source: (a) the expected-fail clause, step 7 and the item title inverted; (b) the row enumeration in acceptance[0] and step 1 corrected — measurement falsified the premise that only @objectstack/spec became conditional: `Installed packages` was ALREADY findings-only (installedPackageLedgerChecks returns [] on a clean ledger) and had never been an unconditional row, and NODE_ENV/Tenancy posture are finding-only too, so the enumeration now splits unconditional from finding-only rather than naming one exception; (c) the '@objectstack/spec Not built' negative flipped from an accepted note into a regression, its probe being gated; (d) two negatives added for the skip row's own wrong shapes (a ⚠ instead of a ℹ, and the row vanishing); (e) doctor-unexamined-spec-tree.test.ts added to the pins; (f) every line anchor in the item re-derived at this base — doctor.ts grew ~90 lines, so every number quoted at revision 1 had moved", "ref": "#10798" },
         { "revision": 3, "date": "2026-10-17", "change": "steps[1] said how to stage the three config findings but not that the staged config must load (checklist-accuracy finding, #23878 close-out: 'orphan-view staging needs defineStack strict:false, the default load refuses it, and doctor then skips config analysis'). Re-measured on main c91af8ed6, the finding holds for a malformed view body only: a well-formed container bound to a missing object loads under the default defineStack and doctor reports it, so strict:false is an option, not a requirement. The step names the well-formed shape, the skip row a refused load prints, and the strict:false route; knownGaps[0] says the staged config must load. Re-run on a scratch config (circular lookup pair qa_a/qa_b, unreferenced qa_unused): with the container { name: 'qa_missing', object: 'qa_missing', list } under the default load, os doctor exit 0 with '⚠ Circular dependency: qa_a → qa_b → qa_a', '⚠ Object \"qa_unused\" is defined but not referenced …' and '⚠ View \"qa_missing\" references non-existent object \"qa_missing\"'; the same three under strict:false with a mismatched-name container; a container carrying viewKind/config → '⚠ Config load  Could not load config for analysis (config checks skipped) — defineStack validation failed …' and none of the three rows; the restored config → '✓ Dependencies No circular references detected', '✓ Object usage All objects are referenced', '✓ View integrity All views reference valid objects', exit 0", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-19", "change": "steps[1] and acceptance[5] (clause, verify) name the clean baseline — checklist-accuracy finding of the 18.0 QA sweep (QA run #24551, cli.doctor-health-report fixtures; wave anchor #24579 §3): the stock blank scaffold always carries an Object usage ⚠, so the restored config never reached the three ✓ rows. Re-derived at base 9a7838edf5: the blank template ships src/objects/note.object.ts (blank_note, renamed to the project namespace at scaffold) and empty views/apps/flows barrels (packages/create-objectstack/src/templates/blank), and findUnusedObjects (doctor.ts) counts only view, flow and app references. The clean run now adds one view over that object", "ref": "#24649" }
+        { "revision": 4, "date": "2026-10-19", "change": "steps[1] and acceptance[5] (clause, verify) name the clean baseline — checklist-accuracy finding of the 18.0 QA sweep (QA run #24551, cli.doctor-health-report fixtures; wave anchor #24579 §3): the stock blank scaffold always carries an Object usage ⚠, so the restored config never reached the three ✓ rows. Re-derived at base 9a7838edf5: the blank template ships src/objects/note.object.ts (blank_note, renamed to the project namespace at scaffold) and empty views/apps/flows barrels (packages/create-objectstack/src/templates/blank), and findUnusedObjects (doctor.ts) counts only view, flow and app references. The clean run now adds one view over that object", "ref": "#24649" },
+        { "revision": 5, "date": "2026-10-20", "change": "steps[0] and acceptance[0] (clause, verify) name every unconditional row — checklist-accuracy finding C6 of QA run #24786 (wave anchor #24579 round 13). At base 7697ddcf94 doctor.ts's run body pushes seven rows under no condition: the six the item named and Package-authored scheduled work (scheduledWorkCheck, ON or OFF, #17396); and once a config loads, the config block prints its own Platform protocol row (checkProtocolVersionGap). The clause names that row beside the others, and the verify names the rows by their push sites and checks rather than by a count. The finding-only rows are unchanged", "ref": "#24850" }
       ]
     },
     {
@@ -1154,7 +1182,7 @@
       "title": "os migrate duplicates: a read-only JSON inventory of identifiers minted across partitions — within-partition repeats excluded, nothing written, the live two-counter condition reported, and runnable BEFORE the #8686 repair destroys the evidence",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell, pre-repair audit)"],
@@ -1162,7 +1190,7 @@
         "app": "showcase",
         "requires": [
           "a scratch app + persistent sqlite DB whose base schema was synced by ONE prior `os dev` boot (the same recipe cli.migrate-plan-apply-json uses), e.g. -d file:/tmp/<run>/dup.db — the app config must declare an org-scoped object with an autonumber (or unique) field",
-          "direct SQL seeding after that boot (sqlite3 CLI or a node better-sqlite3 one-liner): one identifier value held by a row with organization_id NULL AND a row with organization_id '<org>' (the cross-partition duplicate); the same value twice WITHIN '<org>' on a second identifier (the excluded repeat); and two _objectstack_sequences rows for the same object/field — one __global__ tenant, one org-scoped (the live condition)"
+          "direct SQL seeding after that boot (sqlite3 CLI or a node better-sqlite3 one-liner): one identifier value held by a row with organization_id NULL AND a row with organization_id '<org>' (the cross-partition duplicate); the same value twice WITHIN '<org>' on a second identifier (the excluded repeat); and two _objectstack_sequences rows for the same object/field — one __global__ tenant, one org-scoped (the live condition). The stock showcase declares ONE org-scoped identifier (showcase_field_zoo.f_autonumber), so the second identifier the within-partition repeat sits on must be declared in the scratch app (another autonumber, or a field carrying unique). Drop that field's partitioned unique index first — uniq_OBJ_organization_id_FIELD (an autonumber defaults to unique: 'organization'; the SQL driver names the index in packages/drivers/driver-sql/src/schema-drift.ts#buildIndexName) — or the repeat's second insert is refused. After the drop, `os migrate plan` over the same database reports that index as an index_mismatch drift (actual '(absent)'): the staging's own footprint, not a finding of this item"
         ],
         "knownGaps": [
           "ORDERING IS LOAD-BEARING: do NOT boot the dev server again between seeding and scanning — a #8686-repairing boot backfills organization_id = NULL, which is exactly the evidence this report inventories (the command's own header calls the evidence perishable). The duplicates command itself boots read-only (deferSchemaDdl + readOnlyProbe) and is safe to run any number of times",
@@ -1202,7 +1230,7 @@
         {
           "clause": "the kernel:ready pre-flight (#8725) reports the RUNTIME-migration class os migrate plan cannot see: one entry per index the two kernel:ready migrations tighten (three — the overlay migration owns two; the third migration, sys_view_definition's, retired with its table under ADR-0131 D13), each blocked|clear|table-absent|unreadable, a blocked one naming every colliding key group and its row count",
           "oracle": "log",
-          "verify": ".runtimeIndexPreflight names idx_sys_metadata_overlay_active as blocked with one key group carrying the seeded type and name, package_id_key '' and bundle_member_key '', and its row count — and the SAME database run through `os migrate plan` mentions neither the index nor the seeded name in its plan REPORT (the boot's own log lines are not the report: plan's stdout carries '[Registry] Registered view: NAME' for every row it hydrates, and stderr a [metadata_spec_invalid] line for a body the spec refuses) (the matched control: the declared-index duplicate above IS reported by plan, this one is not); no entry names sys_view_definition",
+          "verify": ".runtimeIndexPreflight names idx_sys_metadata_overlay_active as blocked with one key group carrying the seeded type and name, package_id_key '' and bundle_member_key '', and its row count — and the SAME database run through `os migrate plan` mentions neither the index nor the seeded name in its plan REPORT (the boot's own log lines are not the report. Under `--json`, plan's stdout is the plan document alone and every boot line goes to stderr: '[Registry] Registered view: NAME' for every row it hydrates, which the objectql registry prints through console.log and bootSchemaStack moves to stderr (packages/cli/src/utils/json-stdout.ts#reserveStdoutForJson), and a [metadata_spec_invalid] line for a body the spec refuses. Only on the human path, without `--json`, do the '[Registry]' lines print on stdout, above the report) (the matched control: the declared-index duplicate above IS reported by plan, this one is not); no entry names sys_view_definition",
           "evidence": "the pre-flight section beside the plan output for one database"
         },
         {
@@ -1271,6 +1299,12 @@
           "date": "2026-10-19",
           "change": "steps[4] and acceptance[3].verify narrowed to what can be read — checklist-accuracy findings of the 18.0 QA sweep (QA run #24551, cli.migrate-duplicates-inventory steps[4] and acceptance[3]; wave anchor #24579 §3). A minimal { name, label, object } view body is refused for carrying identity keys only (view.zod.ts assertViewIdentity at base 9a7838edf5), so the step names a container slot; and plan's stdout does name the seeded row in the registry's boot lines (objectql registry.ts logs '[Registry] Registered TYPE: NAME' through console.log), so the clause's control reads the plan report, not the boot log",
           "ref": "#24649"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-20",
+          "change": "fixtures.requires[1] and acceptance[3].verify corrected — checklist-accuracy findings C1 and C2 of QA run #24786 (wave anchor #24579 round 13), re-read at base 7697ddcf94. C1: under `--json`, plan's '[Registry] Registered view: NAME' lines go to stderr and stdout is the plan document alone (bootSchemaStack reserves stdout through json-stdout.ts reserveStdoutForJson); only the human path prints them on stdout. The control's conclusion holds. C2: the stock showcase declares one org-scoped identifier (showcase_field_zoo.f_autonumber), so requires[1] now asks for a second one, and says its partitioned unique index (uniq_OBJ_organization_id_FIELD) must be dropped before the repeat is seeded, after which os migrate plan reports the drop as index_mismatch (schema-drift.ts, the declared-index-missing arm). No clause changed",
+          "ref": "#24850"
         }
       ]
     },
@@ -1396,7 +1430,7 @@
       "title": "Hook/action body extraction: --strict-body refuses every forbidden pattern with its own worded reason, capability tokens are inferred (and crypto.hash is NOT, #4391), free identifiers fall back to bundling — and the DEFAULT build's warn-and-bundle fallback SURFACES every refusal (#10678)",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "cli",
       "personas": ["build-time author (no session)"],
@@ -1459,7 +1493,7 @@
         {
           "clause": "the DEFAULT `os build` warn-and-bundle path is NOT silent (#10678): a forbidden-pattern hook still ships through the .mjs bundle and the build exits 0 — lower-callables.ts catches the extraction failure, and making the default fatal would change what os build accepts — but compile.ts prints 'N handler(s) could not be lowered to a metadata body — bundled via the legacy runtime module instead (build still succeeds)' with one line per refused handler naming that handler's FORBIDDEN_PATTERNS reason, and the --json success payload carries the same records under bodyExtractionWarnings (a key of its own, apart from the rule-advisory warnings). The extractor's contract header now documents this default. A default run that is silent again, or a refused handler missing from either list, FAILS the clause",
           "oracle": "build",
-          "verify": "the default run over the forbidden seven exits 0 and prints the warning block naming each of the seven hooks with its own reason; the --json run exits 0 with success true and bodyExtractionWarnings holding one {origin, reason} record per refused hook; jq confirms all seven hooks are body-less and the runtime bundle was emitted (compile.ts, the #10678 surfacing; lower-callables.ts, the catch-and-bundle)",
+          "verify": "the default run over the steps[0] hooks — one per FORBIDDEN_PATTERNS entry (packages/cli/src/utils/extract-hook-body.ts#FORBIDDEN_PATTERNS; recount the array, never a remembered number) — exits 0 and prints the warning block naming each of those hooks with its own reason (the block lists at most 20, then '… and N more'); the --json run exits 0 with success true and bodyExtractionWarnings holding one {origin, reason} record per refused hook; jq confirms every one of those hooks is body-less and the runtime bundle was emitted (compile.ts, the #10678 surfacing; lower-callables.ts, the catch-and-bundle)",
           "evidence": "the warning block + the --json bodyExtractionWarnings + the jq body-absence sweep"
         }
       ],
@@ -1483,7 +1517,8 @@
         { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): a security grant derived from a regex had no checklist item — only the runtime side of one token (records-forms) and the build's generic exit contract were covered. RE-VERIFIED against source with one material correction to the hunter brief: a forbidden pattern does NOT fail a default `os build` — lower-callables.ts catches every extraction error and falls back to the bundle, the warnings print nowhere on that path, and only --strict-body (compile.ts) produces the worded refusals; hook-bodies.mdx documents exactly that, while the extractor's own header still promises fail-with-no-fallback. The worded-refusal clauses are therefore pinned to --strict-body, and the default path's silence is encoded as the expected-fail contradiction clause", "ref": "claude/new-session-0pv25p" },
         { "revision": 2, "date": "2026-08-22", "change": "the '// @capabilities' first-line override was RETIRED (#10917, maintainer ruling under ADR-0049 enforce-or-remove): measured on all four ordinary authoring shapes (.ts/.js/.mjs/an imported handler) it reached the extractor from NONE of them, so a documented directive silently taught a wrong convention and the mismatch surfaced far from its cause as a sandbox refusal. Its acceptance clause asserted behaviour that no longer exists — a runner would have filed a FAIL against the ruling — and is replaced by the covered route (body.capabilities as data) plus the inertness guarantee owed to configs that still carry the comment. Steps, fixtures and the extract-hook-body.ts line citations moved with it. No other clause changed; note the expected-fail clause still describes the pre-#10678 silent default and is stale on its own account, which is NOT this revision's subject", "ref": "claude/issue-10917-retire-capabilities-hook-directive" },
         { "revision": 3, "date": "2026-10-17", "change": "clause 6's EXPECTED-FAIL has flipped (checklist-accuracy finding, #23879 and the #23878 close-out; the r2 history already flagged it stale): since #10678 the default build prints the refused handlers and --json carries them as bodyExtractionWarnings. The title, clause 6 (now a positive assertion that fails if the default path goes silent again), its verify and evidence, steps[1], knownGaps[1] and two source parentheticals now describe the surfaced default. Re-run on main c91af8ed6 on a scratch stack with the forbidden seven, a module-scope helper and a clean find hook: default os build exit 0 with '⚠ 8 handlers could not be lowered to a metadata body — bundled via the legacy runtime module instead (build still succeeds)' and one bullet per hook carrying its own reason (import and fetch prescribe a Connector recipe, require, process, globalThis, eval and new Function name themselves, the helper hook names 'helper'); --json exit 0, success true, bodyExtractionWarnings 8 records; --strict-body exit 1 '--strict-body: 8 callable(s) lack a metadata body'; the artifact carries no body on the eight, body.capabilities ['api.read'] on the find hook, and one objectstack-runtime bundle in dist", "ref": "#24036" },
-        { "revision": 4, "date": "2026-10-19", "change": "steps[0] and acceptance[0] (clause, verify, evidence) cover every FORBIDDEN_PATTERNS entry — checklist-accuracy finding of the 18.0 QA sweep (QA run #24551, cli.hook-body-extraction-gates steps[0]; wave anchor #24579 §3): the array has grown past the original seven sandbox escapes. Re-derived at base 9a7838edf5 (extract-hook-body.ts): fourteen entries, the seven escapes plus .sudo( (#14010), .create( with Object.create exempt (#16249), ctx.dispatch.scope and ctx.submitted (#22810), and the hook-face-only ctx.provenance, ctx.ql and ctx.transaction (#22837). The clause already said EACH pattern; its count and its evidence now match the array", "ref": "#24649" }
+        { "revision": 4, "date": "2026-10-19", "change": "steps[0] and acceptance[0] (clause, verify, evidence) cover every FORBIDDEN_PATTERNS entry — checklist-accuracy finding of the 18.0 QA sweep (QA run #24551, cli.hook-body-extraction-gates steps[0]; wave anchor #24579 §3): the array has grown past the original seven sandbox escapes. Re-derived at base 9a7838edf5 (extract-hook-body.ts): fourteen entries, the seven escapes plus .sudo( (#14010), .create( with Object.create exempt (#16249), ctx.dispatch.scope and ctx.submitted (#22810), and the hook-face-only ctx.provenance, ctx.ql and ctx.transaction (#22837). The clause already said EACH pattern; its count and its evidence now match the array", "ref": "#24649" },
+        { "revision": 5, "date": "2026-10-20", "change": "acceptance[6].verify counts from the roster — checklist-accuracy finding C7 of QA run #24786 (wave anchor #24579 round 13): it still said 'the forbidden seven' while steps[0] and acceptance[0] say fourteen, and QA run #24786 measured 14. At base 7697ddcf94 FORBIDDEN_PATTERNS (extract-hook-body.ts) holds 14 entries; the verify now names one hook per entry of that array, with no number, and notes that compile.ts lists at most 20 in the warning block. No clause changed", "ref": "#24850" }
       ]
     },
     {
@@ -1691,7 +1726,7 @@
       "title": "autoMigrate off|safe: a dev boot self-heals ONLY the safe-categorized drift and reports each applied op, `off` (the driver default) and NODE_ENV=production never touch the schema, and a duplicates-blocked tighten is never auto-applied",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 5,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -1704,7 +1739,8 @@
         ],
         "knownGaps": [
           "the duplicates-BLOCKED leg (ADR-0120 D4 tightenNullSafeOnly recreate: duplicate rows found by the pre-flight probe → op blocked with a row report, old index left in place) needs planted duplicate rows under a legacy platform-wide unique index — stageable only by writing rows directly into the scratch sqlite file before boot. The leg is unit-pinned (sql-driver-unique-tenancy.test.ts 'auto-tightens at boot … when the probe is clean' + its duplicates sibling); a run may cite the pin per RUNNER rule 6 instead of hand-staging, and must record WHICH it did",
-          "`autoMigrate` is honoured by the native sqlite / postgres / mysql drivers only — the sqlite-wasm driver is constructed without it (the guidance entry on SqliteWasmConfigSchema says writing it there changes nothing), and turso's config declares no such key (standalone-stack.ts). Do not stage the wasm/turso arms expecting behavior"
+          "`autoMigrate` is honoured by the native sqlite / postgres / mysql drivers only — the sqlite-wasm driver is constructed without it (the guidance entry on SqliteWasmConfigSchema says writing it there changes nothing), and turso's config declares no such key (standalone-stack.ts). Do not stage the wasm/turso arms expecting behavior",
+          "DEFECTIVE PIN, scores no clause (QA run #24840; routed to the wave anchor #24579 as a test fix, not repaired by a ledger edit): sql-driver-schema-drift.test.ts 'is force-disabled under NODE_ENV=production (warns, does not alter)' stages relax_not_null, which ADR-0113 made needs_confirm. A safe reconcile never applies needs_confirm, so the column stays NOT NULL with or without the production guard: its sibling case 'does NOT auto-relax a stray NOT NULL — needs_confirm survives dev auto-reconcile' asserts that same outcome with no NODE_ENV set. The case also asserts no warning. Its green says nothing about the production arm of reconcileAndWarnDrift (packages/drivers/driver-sql/src/sql-driver.ts). Score acceptance[2] only from steps[3]'s live boot, which re-plants the legacy index: replace_unique_index is the safe-category drift that arm must hold back"
         ]
       },
       "variants": [
@@ -1770,19 +1806,21 @@
         "an authored `autoMigrate` on a sqlite-wasm datasource appearing to DO something is a FAIL of the declared boundary (the wasm driver is constructed without it — the guidance entry says writing it changes nothing); conversely, do not file the wasm no-op as a missing capability"
       ],
       "traps": ["stale-dist", "destructive-in-place"],
-      "automated": { "kind": "unit", "ref": "packages/drivers/driver-sql/src/sql-driver-schema-drift.test.ts" },
+      "automated": { "kind": "unit", "ref": "packages/drivers/driver-sql/src/sql-driver-unique-tenancy.test.ts — acceptance[4] and negative[2], at the driver: its 'bare-composite tightening + duplicate pre-flight (ADR-0120 D4)' describe, where 'auto-tightens at boot under autoMigrate: safe when the probe is clean' converges with zero drift, and 'BLOCKS the tightening on duplicate NULL-organization rows — old index kept, rows reported' keeps the old index through initObjects, reports the op BLOCKED naming the duplicate group, and refuses even an allowDestructive apply until the duplicate is gone; + packages/drivers/driver-sql/src/sql-driver-schema-drift.test.ts — negative[0] ONLY ('does NOT auto-apply destructive drift (orphan column kept; warned instead)'). Its 'is force-disabled under NODE_ENV=production (warns, does not alter)' case scores NOTHING (knownGaps[2]). acceptance[0]–[3] and [5], and negative[1] and [3], are boot-log and schema-dump clauses: they need the scratch boots" },
       "source": [
         "packages/spec/src/data/driver/common.zod.ts#SqlAutoMigrateSchema (SqlAutoMigrateSchema z.enum(['off','safe']) — 'Dev-only, loosen-only schema self-heal (#2186) … force-disabled under NODE_ENV=production') + sqlite.zod.ts (the authored key; the wasm not-honoured guidance)",
         "packages/drivers/driver-sql/src/sql-driver.ts#SqlDriverConfig (SqlDriverConfig.autoMigrate docblock: non-destructive alters only), (default 'off'), (reconcileAndWarnDrift — the managed+safe gate, the production ignore warning verbatim, safe-only applyMigrationEntries allowDestructive:false, per-op auto-reconciled info line, post-reconcile re-detect, warn-once loop)",
         "packages/drivers/driver-sql/src/schema-drift.ts#tightenNullSafeOnly (tightenNullSafeOnly: clean probe → safe, duplicates → blocked with a row report, old index left in place; ADR-0120 D4)",
         "packages/runtime/src/dev-auto-migrate.ts#devAutoMigrateConfig (the ONE dev self-heal decision since #21733: a dev boot and a driver whose contract declares autoMigrate) + packages/runtime/src/standalone-stack.ts#createStandaloneStack (its default datasource reads it) + packages/cli/src/utils/storage-driver.ts#resolveStorageDefinition (the config-load fallback spreads it per kind) + packages/cli/src/utils/telemetry-datasource.ts#provisionTelemetryDatasource (the telemetry sibling, never self-healed on a one-shot boot)",
-        "packages/drivers/driver-sql/src/sql-driver-schema-drift.test.ts#driver + sql-driver-unique-tenancy.test.ts + sql-driver-index-drift.test.ts,322-342 (the pins: off-warns / safe-applies / clean-probe tighten / duplicates block)",
+        "packages/drivers/driver-sql/src/sql-driver-schema-drift.test.ts#driver + sql-driver-unique-tenancy.test.ts + sql-driver-index-drift.test.ts, its describe block \"dev auto-reconcile (autoMigrate: 'safe')\" (the pins: off-warns / safe-applies / clean-probe tighten / duplicates block)",
         "sibling items: cli.dev-boot-contract (the boot this rides), cli.migrate-plan-apply-json (the deliberate apply path — the ONLY door for destructive diffs; cross-referenced, not re-proven)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "new item (sweep 2026-08-30, angle 2): the autoMigrate off|safe policy had no coverage although it is the one path that mutates a dev database at boot. Grounded verify-first, correcting the register's sketch on two points: (1) 'safe' is the LOOSEN-only subset (relax NOT NULL, widen varchar, index ops, clean-probe tighten) — not 'additive' diffs; (2) the register's sql-driver.ts/4652-4654 cites the config/field declarations, but the enforcement lives in reconcileAndWarnDrift with the managed-mode gate, the production force-off warning, and allowDestructive:false — all now pinned as clauses. The dev-injection arm (storage-driver.ts / serve.ts, 'safe' only when isDev) was found while grounding and added as its own clause so a keyless dev boot's self-heal is not misread as a driver default. enumSource pins SqlAutoMigrateSchema expect 2", "ref": "#sweep-2026-08-30" },
         { "revision": 2, "date": "2026-10-17", "change": "fixture and steps re-pointed (checklist-accuracy finding, #23878 close-out): a config-declared datasource named `default` is refused by defineStack, `required: true` no longer makes a NOT NULL column (storage.notNull, ADR-0113), and relax_not_null is needs_confirm, so the step-0 drift the safe leg relied on was never auto-appliable. The fixture now names a datasource routed by datasourceMapping default:true; step 0 stages one drift per category (storage.notNull relax = needs_confirm, a planted legacy platform-wide unique index = safe, a removed field = destructive); the steps read a schema dump instead of `os migrate plan`, which composes no driver for a config-declared primary and says its plan is PARTIAL; the safe variant lists the real safe ops; clauses 0, 1 and 3's verify follow. No clause's ruling changed. Re-run on main c91af8ed6 on a minimal scratch stack: datasource named default → build exit 2 with the reserved-name refusal; qa_main + mapping built. off and omitted boots each warned all three drifts and left the dump byte-identical; `os migrate plan` (also with --database-url) reported 'Examined 0 managed table(s)' and a PARTIAL plan. safe boot: '[schema-drift] auto-reconciled replace_unique_index on qa_thing.code', the legacy qa_thing_code_unique gone from the dump, the relax and orphan warnings still printed; the second safe boot printed no reconcile line. NODE_ENV=production with safe: the named ignore warning verbatim, all three warnings, dump unchanged. Keyless os dev over a planted legacy index: auto-reconciled replace_unique_index; non-dev os start over a re-planted one: the warning only, the index kept. Duplicates leg on the pin: driver-sql sql-driver-unique-tenancy.test.ts (incl. 'auto-tightens at boot under autoMigrate: safe when the probe is clean' and 'BLOCKS the tightening on duplicate NULL-organization rows') + sql-driver-schema-drift.test.ts, 38 passed", "ref": "#24036" },
-        { "revision": 3, "date": "2026-10-19", "change": "steps[4], acceptance[5] (clause, verify) and source[3] re-pointed to the injection site that exists — checklist-accuracy finding of the 18.0 QA sweep (QA run #24551, cli.dev-automigrate-policy acceptance[5] / steps[4]; wave anchor #24579 §3): the cited storage-driver.ts `isDev ? { autoMigrate: 'safe' } : {}` and serve.ts telemetry branch moved. Re-derived at base 9a7838edf5: since #21733 the decision lives in packages/runtime/src/dev-auto-migrate.ts (devAutoMigrateConfig), read by createStandaloneStack's default datasource, resolveStorageDefinition's fallback and the telemetry sibling. The run found the behaviour matching the clause; the clause now names the one decision and the three readers", "ref": "#24649" }
+        { "revision": 3, "date": "2026-10-19", "change": "steps[4], acceptance[5] (clause, verify) and source[3] re-pointed to the injection site that exists — checklist-accuracy finding of the 18.0 QA sweep (QA run #24551, cli.dev-automigrate-policy acceptance[5] / steps[4]; wave anchor #24579 §3): the cited storage-driver.ts `isDev ? { autoMigrate: 'safe' } : {}` and serve.ts telemetry branch moved. Re-derived at base 9a7838edf5: since #21733 the decision lives in packages/runtime/src/dev-auto-migrate.ts (devAutoMigrateConfig), read by createStandaloneStack's default datasource, resolveStorageDefinition's fallback and the telemetry sibling. The run found the behaviour matching the clause; the clause now names the one decision and the three readers", "ref": "#24649" },
+        { "revision": 4, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[4] cited lines 322-342 of sql-driver-index-drift.test.ts in the comma-range spelling (authored in 45397edf53 as the list 112-113 and 322-342). Those lines are unchanged at this base: the describe block \"dev auto-reconcile (autoMigrate: 'safe')\", which source[4] now names. A test file declares no symbol worth anchoring, so the block is named in prose. The count of passed tests that history[1] records after a file name is not a citation, and that row is a dated record, so it is left. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
+        { "revision": 5, "date": "2026-10-20", "change": "automated.ref narrowed per clause, fixtures.knownGaps[2] added — checklist-accuracy findings of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4), round 15 of wave anchor #24579. (1) The bare ref named sql-driver-schema-drift.test.ts alone. By RUNNER rule 6 (a pin scores only the layer it drives) that pin scores negative[0] only. (2) Its production force-off case stages relax_not_null, needs_confirm since ADR-0113, so it passes with or without the guard and asserts no warning. It scores no clause, and the knownGap records it for the anchor to route as a test fix. (3) sql-driver-unique-tenancy.test.ts, which acceptance[4].verify and knownGaps[0] already named, was missing from the ref. Its ADR-0120 D4 cases assert acceptance[4] and negative[2] at the driver, the layer that test-oracle clause names. Read at base b1676441ba. No clause changed", "ref": "#24891" }
       ]
     },
     {
@@ -1871,10 +1909,10 @@
     },
     {
       "id": "cli.organization-ownership-ceremony",
-      "title": "`os migrate organization-ownership` in 18.0, which supports fresh installs only: plan and apply alike refuse NOT_IMPLEMENTED before reading anything and leave the database unchanged, and `os migrate apply --allow-destructive` still withholds every organization_id drop on a v17-shaped database; the ceremony class the refusal keeps underneath (plan, refusals, checkpoints, drop gate) and `os migrate comment-reactions --apply` stay pinned — the v17 → v18 ceremony itself ships in an 18.x release",
+      "title": "`os migrate organization-ownership` upgrades a database 17.x or an 18.0 pre-release (18.0.0-next.*) created (18.x): a bare run writes the reviewed plan and changes nothing; `--apply --plan-file PLAN --backup-taken` runs every step — attribution through the moves, the declared webhook and sharing-rule settlements, the column drops and NOT NULL — and certifies the marker at this release's ownership shape generation; the served boot refuses an uncertified database, naming the command, and boots a certified one; `os migrate apply --allow-destructive` still withholds every organization_id drop the ceremony owns, and `os migrate comment-reactions --apply` stays pinned",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -1887,55 +1925,62 @@
           "a COPY of a v17-shaped SQLite DB (platform-core.v18-boot-refusals names how to get one) — never the original"
         ],
         "knownGaps": [
-          "WITHDRAWN IN 18.0 and deliberately not scored here: the ceremony's own arms — the plan file a bare run writes, its plan-file-required / plan-*-mismatch / database-busy refusals, the sys_migration adr-0131-organization-ownership checkpoint a reviewed apply writes, and a migrated copy booting under v18 — are not clauses of this revision. QA run #24551: \"ruling records 6259608309 (item 1) and 6259698357 then cut 18.0 to fresh installs on the single posture\" — carried, the record goes on, by the changeset 15212-180-guards-fresh-single-only (consumed into 18.0.0; source lists it with the others), the ADR-0131 release-scope note and organization-ownership.ts; the registered command (packages/cli/src/commands/migrate/organization-ownership.ts#MigrateOrganizationOwnership) refuses before the ceremony runs. A runner scores none of these arms — neither `fail` (QA run #24551's reading of revision 1) nor `skipped` (QA run #24556's, c1/c2/c4): they are not on the item. The 18.x release that ships the upgrade path restores them as clauses in the revision that re-registers the ceremony; their revision-1 wording is in this file's git history",
-          "acceptance[3] scores the drop gate's exit code, `message` and `tables`, not its prose: that prose still prescribes `os migrate organization-ownership --out PLAN` and `--apply --plan-file PLAN`, which 18.0 refuses — a product defect tracked on #24567, not a fail of this clause"
+          "a walled database (group or isolated posture) holding a CUSTOMIZED copy of a declared webhook or sharing rule blocks at its settlement step, by design: the declaration's switch is deployment-wide, so the ceremony does not switch it off for every organization on the operator's behalf — that arm is scored by the unit pins (organization-ownership-apply.generation-1.test.ts), not by a step here"
         ]
       },
       "steps": [
-        "`os migrate organization-ownership --database-url file:COPY` on the v17-shaped copy, plain and with `--json`; checksum the DB before and after, and list the working directory for organization-ownership-plan-*.json",
-        "`--apply` without --plan-file; `--apply --plan-file P --backup-taken` with P any path (18.0 writes no plan, and the refusal reads none); `--apply` with the DB held open by a second process; each with `--json` too",
-        "`os migrate apply --allow-destructive --yes --json` on the v17-shaped copy; checksum the DB before and after",
+        "`os migrate organization-ownership --database-url file:COPY --out /tmp/RUN/plan.json` on the v17-shaped copy, in the showcase's directory; checksum the DB before and after",
+        "`--apply` without --plan-file; then `--apply --plan-file /tmp/RUN/plan.json --backup-taken --out /tmp/RUN/apply.json --json`; then read `SELECT verified_at, blocking, details FROM sys_migration WHERE id = 'adr-0131-organization-ownership'`",
+        "boot the showcase (`os serve`) over the migrated copy, and over a second, unmigrated copy",
+        "`os migrate apply --allow-destructive --yes --json` on a fresh unmigrated v17-shaped copy; checksum the DB before and after",
         "`os migrate comment-reactions --apply` twice"
       ],
       "acceptance": [
         {
-          "clause": "the 18.0 release refusal of the registered command, and the ceremony class it keeps whole underneath (plan, refusals, checkpoints, drop gate, reactions conversion) — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "clause": "the ceremony and the guard — plan, refusals, checkpoints, the generation-1 steps, the drop gate, the birth marker and the reactions conversion — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
           "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "a bare run (plan mode, plain or `--json`) is refused before it reads anything: exit 1 with NOT_IMPLEMENTED — `--json` answers {error: plan_refused, reason: upgrade-unavailable, code: NOT_IMPLEMENTED, detail}, the plain form prints the refusal with `(NOT_IMPLEMENTED)` — no organization-ownership-plan-*.json is written, and the DB checksum is unchanged",
+          "clause": "a bare run writes the plan file and changes nothing: exit 0, the plan JSON names every table's fate, and the DB checksum is unchanged; `--apply` without --plan-file is refused before the boot (exit 1, plan-file-required)",
           "oracle": "build",
-          "verify": "exit code + the JSON object (or the printed refusal) per form + a directory listing + checksums before/after",
-          "evidence": "the refusal per form, the listing, the checksum pair"
+          "verify": "exit codes + the plan file's kind/ceremony/inventoryDigest + checksums before/after",
+          "evidence": "the plan excerpt, the refusal line, the checksum pair"
         },
         {
-          "clause": "every --apply arm — no --plan-file, a --plan-file with --backup-taken, the DB held open by a second process — is refused the same way before reading anything: exit 1, `--json` {error: apply_refused, reason: upgrade-unavailable, code: NOT_IMPLEMENTED}; none answers the ceremony's own plan-file-required, plan-*-mismatch or database-busy, which nothing reaches in 18.0, and nothing is applied",
+          "clause": "`--apply --plan-file PLAN --backup-taken` completes: exit 0, every step done (the report's steps), blocking 0, and the sys_migration marker is verified with details.checkpoint.shapeGeneration equal to this release's generation",
           "oracle": "build",
-          "verify": "exit code + error / reason / code per arm + checksums before/after",
-          "evidence": "per-arm lines"
+          "verify": "the apply report's steps/complete/blocking + the marker row",
+          "evidence": "the report excerpt and the marker row"
         },
         {
-          "clause": "the drop gate still holds on a v17-shaped DB: `os migrate apply --allow-destructive` refuses every organization_id drop the ceremony owns — exit 1, `--json` message refused_organization_ownership_unmigrated with `tables` naming them — and applies nothing",
+          "clause": "the served boot refuses the unmigrated copy with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED, naming `os migrate organization-ownership` and no 17.x release to stay on, and boots the migrated copy",
+          "oracle": "build",
+          "verify": "the refused boot's error line + the migrated boot's ready line",
+          "evidence": "both lines"
+        },
+        {
+          "clause": "the drop gate still holds on an unmigrated v17-shaped DB: `os migrate apply --allow-destructive` refuses every organization_id drop the ceremony owns — exit 1, `--json` message refused_organization_ownership_unmigrated with `tables` naming them — and applies nothing",
           "oracle": "build",
           "verify": "exit code + the JSON message and tables + checksums before/after",
           "evidence": "the excerpt and the checksum pair"
         }
       ],
       "negative": [
-        "any ceremony arm that alters the DB while refusing is a data-integrity FAIL"
+        "any ceremony arm that alters the DB while refusing, or a plan run that alters it at all, is a data-integrity FAIL"
       ],
       "traps": [
         "destructive-in-place"
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/cli/src/commands/migrate/organization-ownership.apply-flags.test.ts + packages/cli/src/utils/organization-ownership-apply.test.ts + packages/cli/src/commands/migrate/organization-ownership.occupancy.integration.test.ts + packages/cli/src/commands/migrate/organization-ownership.dialect.test.ts + packages/cli/src/commands/migrate/apply-organization-ownership-gate.integration.test.ts + packages/cli/src/commands/migrate/comment-reactions.integration.test.ts + packages/cli/src/utils/organization-ownership-host-supplement.integration.test.ts + packages/cli/src/commands/migrate/organization-ownership.release-refusal.test.ts"
+        "ref": "packages/cli/src/commands/migrate/organization-ownership.apply-flags.test.ts + packages/cli/src/utils/organization-ownership-apply.test.ts + packages/cli/src/commands/migrate/organization-ownership.occupancy.integration.test.ts + packages/cli/src/commands/migrate/organization-ownership.dialect.test.ts + packages/cli/src/commands/migrate/apply-organization-ownership-gate.integration.test.ts + packages/cli/src/commands/migrate/comment-reactions.integration.test.ts + packages/cli/src/utils/organization-ownership-host-supplement.integration.test.ts + packages/cli/src/utils/organization-ownership-apply.generation-1.test.ts + packages/runtime/src/organization-ownership-boot-guard.test.ts"
       },
       "source": [
         "packages/cli/src/commands/migrate/organization-ownership.ts",
-        "packages/cli/src/commands/migrate/organization-ownership.ts#ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE",
+        "packages/runtime/src/organization-ownership-boot-guard.ts",
+        "packages/spec/src/system/migration.zod.ts#ORGANIZATION_OWNERSHIP_SHAPE_GENERATION",
         "packages/spec/src/system/fate-supplement.zod.ts#OrganizationOwnershipSupplementSchema",
         "packages/cli/src/utils/organization-ownership-drop-gate.ts",
         "docs/adr/0131-total-organization-ownership-no-null-organization-id.md",
@@ -1953,6 +1998,12 @@
           "date": "2026-10-19",
           "change": "re-pointed to the 18.0 release refusal (QA run #24551 acceptance[1]–[4] fail, disposition stale-spec, RUNNER rule 7 agreeing; parked on #24579 §1). 18.0 was narrowed to fresh installs by ruling — #24551: \"ruling records 6259608309 (item 1) and 6259698357 then cut 18.0 to fresh installs on the single posture\" — and the registered `os migrate organization-ownership` refuses plan and apply alike with NOT_IMPLEMENTED before reading anything. acceptance[1] and [2] now score that refusal (no plan written, the DB unchanged, every apply arm refused the same way); acceptance[3] keeps the drop-gate half and drops the sys_migration checkpoint half; revision 1's acceptance[4] (the migrated copy boots) is removed. The ledger has no clause-level skip, so the ceremony's own arms are recorded in fixtures.knownGaps[0] as withdrawn and deliberately not scored, the shape knownGaps already carries for a half an item does not score. That is the one reading for both runs: a runner scores those arms neither `fail` (#24551, revision 1) nor `skipped` (QA run #24556, c1/c2/c4), and both runs captured the refusal each re-pointed clause now asserts. automated.ref gains organization-ownership.release-refusal.test.ts, the pin of the registered command (the other pins drive the ceremony class beneath it); acceptance[0], the title, the steps and source follow; re-derived from main 5a871e4e41, where every source cited here is byte-identical to the run subject 5b14b7f3",
           "ref": "#24622"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "re-pointed to the opened ceremony (18.x steps 5 and 6, one landing by ruling record 6270035914 on the v18 epic): the registered command runs the ceremony again, the 18.0 refusal and its pin (organization-ownership.release-refusal.test.ts) are deleted, and the boot guard recognises a database by its birth marker and its ownership shape generation (ruling record 6269955919, ① A). Revision 1's arms are restated against it: the plan written, the reviewed apply certifying at the current generation, the served boot refusing an unmigrated copy and booting the migrated one; the drop-gate clause is kept; fixtures.knownGaps now records the one deliberate block (a walled customized copy). automated.ref drops the deleted refusal pin and gains the generation-1 steps' pins and the guard's",
+          "ref": "#24681"
         }
       ]
     },
@@ -2037,7 +2088,7 @@
       "title": "`os validate` / `os build` verdicts new on v18: an unknown seed record key (with did-you-mean), a misspelt record[…] / previous[…] field, a duplicate stack entry name, a controlled_by_parent object without exactly one required master_detail (also through objectExtensions), a component-props finding (now an error), and a credential in stack email/sms config each fail the build",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -2076,7 +2127,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/spec/src/data/define-seed-record-keys.test.ts + packages/formula/src/validate-field-existence-spellings.test.ts + packages/spec/src/stack-duplicate-entry.test.ts + packages/lint/src/data-model-rules.master-detail-required.test.ts + packages/spec/src/stack-cbp-extension-master.test.ts + packages/lint/src/validate-component-props.test.ts + packages/spec/src/stack-email-sms.test.ts"
+        "ref": "packages/spec/src/data/define-seed-record-keys.test.ts + packages/formula/src/validate-field-existence-spellings.test.ts + packages/spec/src/stack-duplicate-entry.test.ts + packages/lint/src/data-model-rules.master-detail-required.test.ts + packages/spec/src/stack-cbp-extension-master.test.ts + packages/lint/src/validate-component-props.test.ts + packages/spec/src/stack-email-sms.test.ts — acceptance[0] ONLY, the clause that scores these seven spec, formula and lint unit files themselves. None of them runs `os validate` or `os build`, so no pin covers acceptance[1] (each arm's `os validate` exit and rule at its path, and the build refusing) or acceptance[2] (the controls pass): drive them by hand with the CLI"
       },
       "source": [
         "packages/spec/src/data/seed.zod.ts#defineSeed",
@@ -2091,6 +2142,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause — checklist-accuracy finding C8 of QA run #24786 (wave anchor #24579 round 13, round 6's theme-B rule): the ref listed seven spec, formula and lint unit pins with no clause qualifier, though acceptance[1] and acceptance[2] need os validate and os build. None of the seven runs the CLI (read at base 7697ddcf94). The pins are acceptance[0]'s own subject, so `automated` stays, narrowed to it. No clause changed",
+          "ref": "#24850"
         }
       ]
     },
@@ -2099,7 +2156,7 @@
       "title": "`os verify` gains five derived proof families on v18 — --reference-shapes, --delete-behaviors, --unique-scopes, --parent-write-reach, --dashboard-windows — each clean (exit 0) on the showcase with its report in --json, and non-zero on a planted defect",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "cli",
       "personas": [
@@ -2137,7 +2194,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/cli/test/verify-reference-shapes.test.ts + packages/cli/test/verify-delete-behaviors.test.ts + packages/cli/test/verify-unique-scopes.test.ts + packages/cli/test/verify-parent-write-reach.test.ts + packages/cli/test/verify-dashboard-windows.test.ts"
+        "ref": "packages/cli/test/verify-reference-shapes.test.ts + packages/cli/test/verify-delete-behaviors.test.ts + packages/cli/test/verify-unique-scopes.test.ts + packages/cli/test/verify-parent-write-reach.test.ts + packages/cli/test/verify-dashboard-windows.test.ts — acceptance[0] for all five (the clause that scores these files), and acceptance[2] through verify-delete-behaviors.test.ts's 'NEGATIVE CONTROL: reports a cascade a hook undid, counts it, and exits 1', which spawns the CLI over its own stack plus a beforeDelete hook that detaches a declared cascade's holders, and asserts exit 1, that field's status 'contradicted' and deleteBehaviors.summary contradicted 1, hardFailures 1. No pin covers acceptance[1]: each file runs its family over its own fixture stack, never the showcase, so each family's exit 0, hardFailures 0 and --json report on the showcase need the live run"
       },
       "source": [
         "packages/cli/src/commands/verify.ts",
@@ -2157,6 +2214,12 @@
           "date": "2026-10-19",
           "change": "steps[1] and acceptance[2] (clause, verify) name a plant the family can catch — checklist-accuracy finding of the 18.0 QA sweep (QA run #24558, cli.verify-derived-proof-families step 2; wave anchor #24579 §3): a wrong deleteBehavior alone is enforced as declared, so it verifies clean. Re-derived at base 9a7838edf5 from the pin's own negative control (packages/cli/test/verify-delete-behaviors.test.ts 'NEGATIVE CONTROL: reports a cascade a hook undid, counts it, and exits 1'): the defect is a beforeDelete hook detaching the children of a declared cascade",
           "ref": "#24649"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause — checklist-accuracy finding C8 of QA run #24786 (wave anchor #24579 round 13, round 6's theme-B rule): the five pins spawn the CLI over their own fixture stacks, never the showcase, so acceptance[1]'s 'on the showcase' needs the live run, which QA run #24786 drove. The ref now names acceptance[0] for all five and acceptance[2] for verify-delete-behaviors.test.ts's NEGATIVE CONTROL case (read at base 7697ddcf94). No clause changed",
+          "ref": "#24850"
         }
       ]
     }

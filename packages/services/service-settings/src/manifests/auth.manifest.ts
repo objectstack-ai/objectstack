@@ -30,12 +30,22 @@ const manifest = {
       required: false,
       default: true,
     },
+    // The email/password sign-up route's own switch (`emailAndPassword.
+    // disableSignUp`), a door of its own beside the audience posture below:
+    // the route admits a registrant only when BOTH say yes. So it is not
+    // hidden under `invite_only` — there it still decides whether an invited
+    // address may register through the form — and its default stays `true`,
+    // the runtime's own default (`disableSignUp` unset ⇒ open). The help text
+    // states the conjunction, so ON beside "Invitation only" reads as what it
+    // is rather than as a contradiction.
     {
       type: 'toggle',
       key: 'signup_enabled',
-      label: 'Allow self-service registration',
+      label: 'Allow email sign-up',
       required: false,
       default: true,
+      description:
+        'Opens the email-and-password sign-up form. Who it admits is decided by the Self-registration audience below: under invite_only, only an address holding a pending invitation; under email_domain, the allowlisted domains and invited addresses; under open, anyone. Off closes the form under every audience, invitations included.',
       visible: "${data.email_password_enabled !== false}",
     },
     {
@@ -359,7 +369,7 @@ const manifest = {
       label: 'Allowed IP ranges',
       required: false,
       description:
-        'CIDR ranges or exact IPs (one per line, or comma-separated), e.g. 203.0.113.0/24. When set, sign-in from outside these ranges is rejected. Empty = no restriction. Requires a trusted proxy to set X-Forwarded-For.',
+        'CIDR ranges or exact IPs (one per line, or comma-separated), e.g. 203.0.113.0/24. When set, sign-in from outside these ranges is rejected, and so is any request whose client address the server cannot establish. Empty = no restriction. The address judged is the connection\'s peer; behind a reverse proxy, declare server.trustProxy in the stack so the forwarded client address is judged instead.',
     },
     // [#23367, ruling A] The API-key lifecycle policy. Two readers, one
     // source: `bindAuthSettings` binds these into the auth service
@@ -426,6 +436,21 @@ const manifest = {
       description:
         'Configure the built-in Google sign-in provider. Deployment env vars still win.',
     },
+    // Google is offered only when this is on AND a client ID and secret both
+    // resolve (saved here, or GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET, which
+    // the settings service cannot see). The default stays `true` because that
+    // is the runtime's own default for an undeclared toggle, and a deployment
+    // signing in with env credentials relies on it; the help text carries the
+    // conjunction, so ON beside two empty fields reads as "not offered yet".
+    //
+    // The two credential keys below are therefore NOT `required`. `required`
+    // is judged by `setMany` against the stored value, and the runtime needs
+    // the pair to RESOLVE, not to be stored: on a deployment that sets
+    // GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET, a `required` here refused
+    // `google_enabled: true` (the save touches both through `visible`), so an
+    // admin who switched Google off could not switch it back on, although
+    // the server held valid credentials. Saving ON with nothing resolving is
+    // the same runtime state as the default: no Google button.
     {
       type: 'toggle',
       key: 'google_enabled',
@@ -433,13 +458,13 @@ const manifest = {
       required: false,
       default: true,
       description:
-        'Requires a Google OAuth client ID and secret from Google Cloud Console.',
+        'Offers Google sign-in once a client ID and a client secret both resolve: saved below, or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server, which win over saved values. Until both resolve, the login page shows no Google button, even while this is on. Off withdraws Google sign-in even when the server sets both. Create the OAuth client in Google Cloud Console.',
     },
     {
       type: 'text',
       key: 'google_client_id',
       label: 'Google client ID',
-      required: true,
+      required: false,
       description:
         'OAuth client ID from Google Cloud Console. GOOGLE_CLIENT_ID can also be set on the server.',
       visible: "${data.google_enabled !== false}",
@@ -448,7 +473,7 @@ const manifest = {
       type: 'password',
       key: 'google_client_secret',
       label: 'Google client secret',
-      required: true,
+      required: false,
       encrypted: true,
       description:
         'Stored encrypted at rest. GOOGLE_CLIENT_SECRET can also be set on the server.',

@@ -1078,9 +1078,11 @@ export const REMOTE_FACE_ANSWERS = {
   deferredSchemaObjectCount: 'inherited',
   previewDeferredSchemaWork: 'inherited',
   flushDeferredSchemaDdl: 'inherited',
-  // `{ created: 0, existing: 0 }`: the remote doors count nothing, and both
-  // counts at zero is the `IDataDriver` contract's "cannot say".
-  getSchemaSyncStats: 'inherited',
+  // The remote schema doors count what their `sqlite_master` probe answers —
+  // created vs found — so a fresh remote database is observed as one (the
+  // organization-ownership birth marker reads it). A remote boot that ran no
+  // schema door still answers `{0, 0}`, the contract's "cannot say".
+  getSchemaSyncStats: 'remote',
   // [#23816] Drift and migration: the shared differ over the remote catalog,
   // and the index / column-drop entries applied through the libSQL client (see
   // "Remote schema drift" above for which entries, and why only those).
@@ -2518,8 +2520,8 @@ export class TursoDriver extends SqlDriver {
    * {@link SqlDriver.applyTenantScope} a bare Knex query builder and compiles
    * what the chokepoint added. So the rule's decisions all stay in that one
    * method:
-   *  - the NULL-organization arm (a platform row with no organization is no
-   *    other tenant's);
+   *  - the organization equality (a row with no organization is no tenant's,
+   *    ADR-0131 D1, so no scope reaches it);
    *  - the `group` posture's membership set (`tenantIds`, the union Layer 0
    *    enforces);
    *  - the exits for a call with no tenant context and for an object with no
@@ -2773,9 +2775,11 @@ export class TursoDriver extends SqlDriver {
     scope: string,
     suffix: string,
   ): Promise<number> {
+    // The bucket first, as the local face resolves it: an organization-less
+    // row on a tenant table is refused (ADR-0131 D9) before any DDL or read.
+    const resolvedTenantId = this.resolveSequenceTenantId(tenantField, tenantId, tableName, field);
     await this.ensureRemoteSequencesTable();
     const table = this.sequencesTableName;
-    const resolvedTenantId = this.resolveSequenceTenantId(tenantField, tenantId);
     const keyHash = this.sequenceKeyHash(tableName, resolvedTenantId, field, scope);
 
     const bumped = await this.remoteSequenceRows(
@@ -2876,7 +2880,12 @@ export class TursoDriver extends SqlDriver {
   ): Promise<void> {
     if (!this.isRemote) return super.resyncSequenceToDataMax(reservation);
     await this.ensureRemoteSequencesTable();
-    const resolvedTenantId = this.resolveSequenceTenantId(reservation.tenantField, reservation.tenantId);
+    const resolvedTenantId = this.resolveSequenceTenantId(
+      reservation.tenantField,
+      reservation.tenantId,
+      reservation.tableName,
+      reservation.field,
+    );
     const keyHash = this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope);
     const observedMax = await this.scanRemoteMaxCounter(
       reservation.tableName,
@@ -4199,6 +4208,16 @@ export class TursoDriver extends SqlDriver {
    * statement and no round-trip. The parameter repeats the base's declared
    * shape key for key (`check:object-def-param-keys` arm C).
    */
+  /**
+   * `IDataDriver.getSchemaSyncStats` — on the REMOTE face, what the transport's
+   * schema doors counted (`RemoteTransport.schemaSyncStats`); the local and
+   * embedded-replica faces answer with the inherited Knex count.
+   */
+  override getSchemaSyncStats(): { created: number; existing: number } {
+    if (this.isRemote) return this.remoteTransport!.schemaSyncStats();
+    return super.getSchemaSyncStats();
+  }
+
   override registerObjectMetadata(
     objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] }>,
   ): void {

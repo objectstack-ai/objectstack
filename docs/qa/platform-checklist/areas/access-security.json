@@ -831,7 +831,7 @@
       "title": "Scope depth (readScope/writeScope): org-wide read with own-only write, per persona — depth widens along geometry, never bypasses",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -845,6 +845,9 @@
         "requires": [
           "showcase_inquiry is OWD private with create granted to the baseline — depth only matters where the baseline stops (permission-sets.ts docblock)",
           "personas staffed by granting the sets (sys_user_permission_set) or assigning the positions manager/exec/ops (each declares its set in permissionSets, examples/app-showcase/src/security/positions.ts)"
+        ],
+        "knownGaps": [
+          "No permanent pin scores a clause of this item, so it carries no `automated` field and every clause is driven by hand. The three dogfood suites nearest to it, packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts, packages/qa/dogfood/test/showcase-scope-depth-write.dogfood.test.ts and packages/qa/dogfood/test/showcase-scope-depth-fallback.dogfood.test.ts, assert the business-unit depth axis on showcase notes (readScope unit / unit_and_below / own_and_reports, writeScope unit, the absent-writeScope default, the fallback profile and the open edition's fail-closed degrade). None of them drives the manager / executive / ops personas or showcase_inquiry, so none asserts the org-read / own-write asymmetry acceptance[0]–[5] score. `automated` returns when a pin asserts one of those clauses in full"
         ]
       },
       "steps": [
@@ -902,10 +905,6 @@
         "executive: read org / write none",
         "ops: read org / write org"
       ],
-      "automated": {
-        "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/showcase-scope-depth.dogfood.test.ts + packages/qa/dogfood/test/showcase-scope-depth-write.dogfood.test.ts + packages/qa/dogfood/test/showcase-scope-depth-fallback.dogfood.test.ts — ⚠️ ADJACENT pins, not this item's: they drive the business-unit depth values (readScope unit / unit_and_below / own_and_reports, writeScope unit, the absent-writeScope default and the fallback profile), not the org-read / own-write asymmetry of the manager, executive and ops personas that acceptance[0]–[5] score, so no clause here is satisfied by running them — drive the clauses by hand"
-      },
       "traps": [
         "wrong-persona"
       ],
@@ -927,6 +926,12 @@
           "date": "2026-10-19",
           "change": "steps[0] and automated.ref corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24559, access-security.scope-depth-asymmetry; wave anchor #24579 §3; round 2's Tier 1 record #24598, which names this item among the refs that over-claim clause coverage). steps[0] POSTed a showcase_inquiry with `subject`; the object has no such field and requires name, email and message (examples/app-showcase/src/data/objects/inquiry.object.ts). The three dogfood pins exercise the business-unit depth axis (unit / unit_and_below / own_and_reports and the fallback profile), not the manager / executive / ops org-read and own-write asymmetry the clauses score, so automated.ref now says so and that no clause rests on them. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "automated dropped and fixtures.knownGaps[0] added, under round 6's theme-B rule (drop `automated` where no pin asserts a full clause, with a knownGaps line) — round 11 of wave anchor #24579, whose round-3 summary named this nominally Tier 1 item. Its revision-3 automated.ref already said the three dogfood pins cover no clause. Re-read at 46bb5e3e54: they drive business-unit depth on showcase notes and never the manager / executive / ops personas or showcase_inquiry. The item is now Tier 2, every clause driven by hand as revision 3 already prescribed. No clause changed",
+          "ref": "#24801"
         }
       ]
     },
@@ -1055,7 +1060,7 @@
       "title": "Criteria sharing rules widen the OWD baseline: matching rows become visible to the rule's audience, non-matching stay hidden",
       "since": "v15.1",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1080,7 +1085,7 @@
         "manual one-off share via the record-shares route"
       ],
       "steps": [
-        "boot showcase isolated; add the audience member to bu_west_coast through sys_business_unit_member (fixtures.requires); give a second member the manager position to record the position confound",
+        "boot the showcase on its own port and file DB (dogfood §0's isolation, RUNNER's canonical boot line) in the stock `single` tenancy posture: no clause needs OS_TENANCY_POSTURE=isolated or any walled boot; add the audience member to bu_west_coast through sys_business_unit_member (fixtures.requires); give a second member the manager position to record the position confound",
         "the probes are seeded: share_new_inquiries_with_field_ops matches status='new', and the seed ships one new, one contacted and one closed showcase_inquiry (OWD private). Use the new one as the MATCHING probe and a non-new one as the NON-MATCHING probe",
         "as the audience member: GET the object list and GET each probe by id",
         "as a member OUTSIDE the audience: same reads",
@@ -1151,6 +1156,12 @@
           "date": "2026-10-19",
           "change": "steps[6] and acceptance[4] (clause, verify, evidence) re-pointed — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.sharing-rules-widen acceptance[4]; wave anchor #24579 §3) with its oracle from round 2 (QA run #24601). §A13 asked that an admin edit to the SEEDED sys_sharing_rule row survive a restart; the seeder that copied declared rules into that table is retired (ADR-0131 D2, packages/plugins/plugin-sharing/src/declared-sharing-rules.ts) and GET /api/v1/data/sys_sharing_rule answers total 0, so there is no seeded row to edit. The administrator's durable act on a declared rule is now the activation switch (POST /api/v1/security/_activation/sharing_rule/NAME), and the clause asserts that switch across two restarts. QA run #24601 drove exactly this recipe at ba4afcc2 and passed. It measured that GET /api/v1/meta/sharing_rule/NAME keeps reading active: true while the ledger holds the rule off, so the oracle is the ledger row and the member's reads, never the metadata read. acceptance[0]–[3] are unchanged",
           "ref": "#24632"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] spells out its boot — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12): the runner read 'boot showcase isolated' as the isolated tenancy posture, which no clause needs (all six passed on stock single). The ledger's 'isolated' boot is dogfood §0's own port and DB; the step now says that, and names the stock single posture. No clause changed",
+          "ref": "#24824"
         }
       ]
     },
@@ -1395,7 +1406,7 @@
       "title": "OWD save gate: the retired external dial is refused on every object write, and a packaged object's OWD cannot be changed at runtime — the managed-content seal refuses the write before any OWD rule judges it — server-side",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1424,8 +1435,8 @@
         {
           "clause": "the server refuses the retired externalSharingModel on ANY object write, draft included: the writable-object PUT carrying it answers 422 INVALID_METADATA with one issue at externalSharingModel carrying the prescription (\"`object.externalSharingModel` was removed in @objectstack/spec 18 … Delete the key.\"), and nothing is stored",
           "oracle": "api",
-          "verify": "PUT /api/v1/meta/object/qa_owd_probe (active state, and again with ?mode=draft) answers 422 with code INVALID_METADATA, the issue path names externalSharingModel and its message carries the prescription; a follow-up GET finds no qa_owd_probe. ⛔ security-external-wider-than-internal and 403 owd_external_wider are both RETIRED spellings: the lint rule left with the key, and object-posture-gate.ts R2 was retired by the maintainer ruling on #8310",
-          "evidence": "the two PUT traces + the read"
+          "verify": "PUT /api/v1/meta/object/qa_owd_probe (active state, and again with ?mode=draft) answers 422 with code INVALID_METADATA, the issue path names externalSharingModel and its message carries the prescription; a follow-up GET /api/v1/meta/object/qa_owd_probe finds no qa_owd_probe, and for the ?mode=draft leg so does the draft read GET /api/v1/meta/object/qa_owd_probe?state=draft — a GET takes `state`, never the save door's `mode`, which it refuses with 400 (packages/rest/src/meta-item-read-gate.ts#META_ITEM_READ_PARAMS). ⛔ security-external-wider-than-internal and 403 owd_external_wider are both RETIRED spellings: the lint rule left with the key, and object-posture-gate.ts R2 was retired by the maintainer ruling on #8310",
+          "evidence": "the two PUT traces + the plain and the ?state=draft reads"
         },
         {
           "clause": "the server admits the same object without the key: the PUT with only sharingModel saves 2xx — the refusal keys on the retired key, not on the posture",
@@ -1482,7 +1493,8 @@
         { "revision": 2, "date": "2026-08-18", "change": "corrected clauses 1-2 and steps 2-3 for the #8310 retirement (maintainer ruling 2026-08-13). The item tested R2 owd_external_wider / 403 at the ?mode=draft door; R2 is RETIRED from object-posture-gate.ts as a duplicate of the runtime lint door, whose refusal is 422 INVALID_METADATA rule security-external-wider-than-internal raised at the ACTIVE-state door — and draft saves deliberately defer to the draft-to-active promotion gate (#4463 D1), so the clause was unobservable where it was pointed (#9453 CF-2). ⚠️ #9453 CF-3 (that the R1 knownGap mispredicts which layer answers) was NOT applied: object-posture-gate.ts states verbatim that R1 applies only to overlay writes over an artifact-backed object and that 'the default deploy already 403s these before this gate runs' (if (!ctx.isArtifactBacked) return), which is what the knownGap and clause 4 already say", "ref": "#9386" },
         { "revision": 3, "date": "2026-08-19", "change": "the R1 knownGap, step 5 and clause 4 named the WRONG answering layer, and #9453 CF-3 was RIGHT — re-measured on a genuinely stock showcase boot and OVERTURNING the revision-2 note above (#9477). Proven stock from the server process's own /proc/<pid>/environ: zero METADATA_WRITABLE occurrences among 147 vars. Target artifact-backed, proven by GET ?layers=true returning a populated `code` layer (_packageId com.example.showcase) with `overlay: null`. A widening PUT then answered 403 declaredCode owd_widening_forbidden — reproduced twice, object byte-identical after. The mechanism the old text missed: saveMetaItem runs runAuthoringGate BEFORE the overlay/package doors on the host-config kernel the showcase boots (environmentId undefined, so protocol.ts's env-partitioned NOT_OVERRIDABLE branch never arms — the #7674 note in that file says the showcase is exactly that shape). So the deploy posture does not select the layer; the body's DIRECTION does. Control leg (same boot, same object, tightened body) passed R1 and answered 403 NOT_OVERRIDABLE, i.e. the door the knownGap called 'earlier' is in fact LATER. Six legs measured (widen/tighten x stock/hatch x ?package= present/absent) and WRITABLE_PACKAGE_REQUIRED appeared on none. ⛔ Not a product defect: every widening leg refused and the object never changed — object-posture-gate.ts behaved exactly as its executable guard (if (!ctx.isArtifactBacked) return) specifies; only the prose parenthetical in that file's header, and this item, mispredicted the door order", "ref": "#9477" },
         { "revision": 4, "date": "2026-10-13", "change": "clause 4, acceptance[3], re-pointed to the managed-content seal, with step 5, the R1 knownGap, the first knownGap's packaged tighten-only parenthetical, the R1 variant, the title and two new source notes (stale spec, #23104 A3). Revision 3 measured, at #9477, that a widening PUT on showcase_announcement met R1 first and answered 403 PERMISSION_DENIED with declaredCode owd_widening_forbidden. Two later changes reorder that. #22338 made saveMetaItem ask the package door on every kernel topology, ahead of the checks that judge the body. ADR-0131 D6 (#22401, e02833c24) made the OS_METADATA_WRITABLE hatch stop opening an item a managed package ships. A packaged object, whose type opens no overlay channel, is now refused 403 NOT_OVERRIDABLE (ITEM_LOCKED with ?package=) whatever the body says, so R1 is unreachable on this door on stock. The protection holds: nothing widens. Per the #23121 triage, no fixture package is built to reach R1. Its oracle is its unit pins, named in the clause: plugin-security object-posture-gate.test.ts for the verdict, and rest meta-object-owd-gate.test.ts, whose R1 block now pins the package door answering first, hatch open", "ref": "#23121" },
-        { "revision": 5, "date": "2026-10-14", "change": "the external clauses retired with the key (#23268, ruling of record 6159300530, letter A): externalSharingModel was removed from the object schema (ADR-0049), so the Studio external-wider clause goes and the external-wider refusal, admit and shipped-declarations clauses and the D11 knownGap are rewritten: clause 1 now asserts the tombstone's 422 refusal on every object write, draft included, clause 2 the admit without the key, and the last clause that the showcase ships no retired key. The packaged-object seal clauses are unchanged (the seal is now clause 3, and step 4 names it so). surface mixed → api: no browser step remains", "ref": "#23268" }
+        { "revision": 5, "date": "2026-10-14", "change": "the external clauses retired with the key (#23268, ruling of record 6159300530, letter A): externalSharingModel was removed from the object schema (ADR-0049), so the Studio external-wider clause goes and the external-wider refusal, admit and shipped-declarations clauses and the D11 knownGap are rewritten: clause 1 now asserts the tombstone's 422 refusal on every object write, draft included, clause 2 the admit without the key, and the last clause that the showcase ships no retired key. The packaged-object seal clauses are unchanged (the seal is now clause 3, and step 4 names it so). surface mixed → api: no browser step remains", "ref": "#23268" },
+        { "revision": 6, "date": "2026-10-20", "change": "acceptance[0] (verify, evidence) adds the draft re-read — carried finding 3 of round 12's report on PR #24824 (wave anchor #24579 round 13), from QA run #24779: 'a follow-up GET finds no qa_owd_probe' named no read for the ?mode=draft PUT leg, and a GET with ?mode=draft answers 400. A GET takes state (META_ITEM_READ_PARAMS, meta-item-read-gate.ts at base 7697ddcf94), so the verify now re-reads the probe with ?state=draft beside the plain GET, and 'nothing is stored' holds for both legs. No clause changed", "ref": "#24850" }
       ]
     },
     {
@@ -2347,30 +2359,33 @@
       "title": "A session with no active organization is a LEGAL state with fail-closed semantics: tenant-scoped reads resolve to nothing, tenant-scoped writes are refused loudly naming the missing org, and nothing is ever NULL-stamped",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 8,
       "priority": "P0",
       "surface": "api",
       "personas": [
-        "a freshly signed-up user on their FIRST session (structurally predates their sys_member row)",
-        "a user removed from their organization",
+        "a user holding NO membership (producer (1) of fixtures.knownGaps[0]): on the walled invite-only boot, minted by the operator with POST /api/v1/auth/admin/create-user, which answers membershipCreated:false",
+        "an organization member whose session has cleared its active organization (producer (2) of fixtures.knownGaps[0]): POST /api/v1/auth/organization/set-active {\"organizationId\": null}",
         "seeded admin (control — has an active organization)"
       ],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "a tenancy-walled deployment (ADR-0095 Layer 0 active on at least one tenant-scoped object) — confirm the posture before scoring, since on an unwalled deployment every clause here is vacuous",
-          "the ability to complete a signup and use the resulting first session before the membership reconciler settles, OR to remove a member and reuse their live session"
+          "one of the two durable producers fixtures.knownGaps[0] names, on that walled boot: a user minted by POST /api/v1/auth/admin/create-user under OS_AUTH_MEMBERSHIP_POLICY=invite-only (membershipCreated:false, no sys_member row), or a member who sends POST /api/v1/auth/organization/set-active {\"organizationId\": null}"
         ],
         "knownGaps": [
-          "The state is timing-derived on the signup path (better-auth defers the membership write past the signup transaction, ADR-0093), so reproducing it by racing signup is flaky. The DURABLE reproduction is the removed-member path, or a multi-organization deployment whose reconciler binds nobody (ADR-0093 D1 `no-target-org`). Record WHICH producer the run used — a clause proven only on a racy producer is weaker evidence and must say so.",
-          "No stock showcase fixture is known to configure `invite-only` or SSO-JIT-pending; those two producers are blocked(fixture) unless the run configures them.",
-          "18.0 adds a reason no fixture can answer: every clause needs a tenancy-walled deployment (fixtures.requires[0]), and os serve — and os dev / os start, which boot through it — refuses OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true) before a config is read: FATAL: tenancy posture '…' is not supported in 18.0 (NOT_IMPLEMENTED), exit 1 (packages/cli/src/commands/serve.ts#walledPostureRefusal); see RUNNER.md's environment-facts entry '18.0 boots the single tenancy posture only'. So on 18.0 the item cannot run live on any CLI boot, whatever is provisioned — not even with the @objectstack/organizations runtime revision 2's history names, which is open code since ADR-0132 and would load only after that refusal. blocked (fixture, #9334) stays the marker; on 18.0 the item's only evidence is its pin (automated.ref, which boots the posture in-process). The walled postures return in a later 18.x release"
+          "The state needs a producer, and two are durable and non-racy on the walled boot (knownGaps[2]), both measured by QA run #24783 on `isolated` and `group`. (1) NO membership: under OS_AUTH_MEMBERSHIP_POLICY=invite-only a user minted by POST /api/v1/auth/admin/create-user answers membershipCreated:false and holds no sys_member row, because the reconciler answers `policy-skip` under invite-only (packages/plugins/plugin-auth/src/reconcile-membership.ts#reconcileMembership, packages/plugins/plugin-auth/src/admin-user-endpoints.ts#bindUserToSoleOrganization), so every session it mints reads activeOrganizationId null. (An explicitly declared `auto` binds nobody under a wall either, ADR-0093 D1 `no-target-org`; no run has measured that boot.) (2) A member who CLEARS its active organization: POST /api/v1/auth/organization/set-active {\"organizationId\": null}, after which GET /api/v1/auth/get-session reads null. The two differ under `group`, where the scope is the membership set (acceptance[0]), so record WHICH producer each clause was scored on. Two former producers no longer yield the state. The signup race is gone: the session seam settles a newly created user's membership before its first session resolves an organization (ADR-0123 D3; packages/plugins/plugin-auth/src/auth-manager.ts#composeDatabaseHooks, its defaultActiveOrg hook), so only a policy that binds nobody leaves that session without one. The removed-member path ends the session's claim instead: removing a user's last membership revokes each live session that named that organization, and a user still holding another membership has such a session re-pointed to it (packages/plugins/plugin-auth/src/membership-ended-session.ts#endSessionClaimsForEndedMembership); QA run #24783 measured the removed member's token answering 401 UNAUTHENTICATED",
+          "`invite-only` is no longer a fixture gap: the walled boot must declare a membership policy anyway (RUNNER.md 'A walled boot is a fixture of its own', prerequisite 3), and declaring `invite-only` gives knownGaps[0]'s producer (1). SSO-JIT-pending still has no stock fixture: that producer is blocked(fixture) unless the run configures SSO.",
+          "requires[0]'s tenancy-walled deployment is a walled boot. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). The item stays blocked (fixture, #9334) because every clause is a walled leg and the stock showcase provisions no walled boot, not for want of a producer (knownGaps[0]); its pin (automated.ref) boots the posture in-process.",
+          "acceptance[4] has an open question for a user who holds NO membership at all (producer (1) of knownGaps[0]): its login/logout rows in sys_audit_log carry tenant_id null, because no organization exists to stamp and ADR-0123 D3's ordering fix 'must not manufacture a membership that policy says must not exist'. QA run #24783 read those rows only as the platform operator (GET /api/v1/data/sys_audit_log filtered by user_id answered 200), while the user itself gets 403 on sys_audit_log, on both postures. ADR-0123 does not state whether that is the intended answer: D3 forbids a NULL-tenanted row under this state 'in any subsystem' and pays the audit ledger by ordering, which binds nobody under invite-only. ADR-0131 D7 moves the clause's premise without answering the question: sys_audit_log is a deployment-level ledger with no organization column, its tenant_id is an attribution field the tenant-field resolver does not claim, 'never the tenancy anchor', and such objects are 'governed by object permission, not by the wall'. So Layer 0 is inert on the ledger, and the clause's 'invisible to RLS readers' (written for #8245, when the ledger was walled) no longer names its read path; ADR-0131 D9 scopes the no-NULL rule to tenant-column objects ('column ⇒ in scope'). Neither ADR states whether a member-less actor's row may carry a NULL attribution, nor who must be able to read it. The operator's 200 and the user's 403 are the implementation: packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts, whose tenant_id docblock says NULL means a deployment-level action and whose defaultRowScope sys_audit_log_org reads tenant_id == current_user.organization_id, which a NULL row matches for no organization reader. The clause stands as written. Until the question is ruled (raised by QA run #24783's finding F3 for wave anchor #24579; no card carries it yet), score acceptance[4] on that user from what is measured (the raw rows, their tenant_id and the readers that see them) and name this question beside the verdict",
+          "On `group`, producer (2), a member with no active organization, gets 500 {\"code\": \"ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED\"} on a tenant-scoped create, where `isolated` and a member-less caller answer the acceptance[1] 403 naming the missing organization; nothing is written (QA run #24783: acceptance[1], acceptance[5], acceptance[6] and negative[3] FAIL on `group` only). That is the open product card #24784. The clauses stand as written: score them against it until it lands, and score the member-less caller's write separately",
+          "acceptance[7] (the walled `group` leg for a member with no active organization) stays red until #24784 lands: on a walled group boot at 580fd4ed (QA run #24783, re-derived under RUNNER rule 7) the create answers 500 ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED and writes no row. It is scored only on a live walled group boot; a run without one records it blocked(fixture) citing RUNNER.md's 'A walled boot is a fixture of its own' — ⛔ never from automated.ref, whose group CONTROL stops at the plugin-security layer (RUNNER rule 6, a pin scores only the layer it drives). When #24784's fix merges, re-run the clause and drop this line"
         ]
       },
       "blocked": { "by": "fixture", "ref": "#9334" },
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-security/src/no-active-organization-write-refusal.test.ts — pins every clause of this item at unit level, INCLUDING a control asserting that the `single` posture has no wall, i.e. the test itself agrees the stock showcase configuration makes the item vacuous"
+        "ref": "packages/plugins/plugin-security/src/no-active-organization-write-refusal.test.ts — pins every clause of this item at unit level, INCLUDING a control asserting that the `single` posture has no wall, i.e. the test itself agrees the stock showcase configuration makes the item vacuous. The layer it drives is a plugin unit: SecurityPlugin's middleware over a stub terminal that stands in for the engine, so a case that 'lands' there means the middleware called next(), and the engine's own insert path never runs. Its `group` describe's CONTROL 'a NON-EMPTY membership set lands, even with no active organization' therefore proves the plugin-security wall lets that write through and nothing past it: on a full walled group boot the engine refuses the same write with 500 ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED (#24784). Under RUNNER rule 6 the pin scores a clause whose oracle is the HTTP answer partial at most, naming the engine and HTTP layers as missing, and it cannot score acceptance[7] at all"
       },
       "steps": [
         "establish the state and PROVE it: obtain a session whose `activeOrganizationId` is null, and cite the evidence (session row / session endpoint payload) — do not infer the state from the symptom you are about to test",
@@ -2380,13 +2395,14 @@
         "query the underlying table as admin for rows whose tenant column is NULL, before and after the write attempt",
         "repeat the read and the write against a NON-tenant-scoped object to bound the blast radius",
         "sign in and out with the state in force, then inspect the audit ledger rows the session produced (plugin-audit auth-session-audit login/logout)",
-        "run the same read+write as the control admin persona to show the refusal is state-derived, not a blanket denial"
+        "run the same read+write as the control admin persona to show the refusal is state-derived, not a blanket denial",
+        "walled `group` leg (acceptance[7]), on a walled boot with OS_TENANCY_POSTURE=group provisioned per RUNNER.md's 'A walled boot is a fixture of its own': a member of organization A (non-empty membership set) sets A active with POST /api/v1/auth/organization/set-active, creates a showcase_account and a showcase_project in A, then clears it with POST /api/v1/auth/organization/set-active {organizationId: null} and proves the state (GET /api/v1/auth/get-session reads session.activeOrganizationId null). As that member, POST /api/v1/data/showcase_task {title, project: the project in A}; take the admin-side count of showcase_task rows whose organization_id is NULL or empty before and after, and read back any row the create produced"
       ],
       "acceptance": [
         {
-          "clause": "tenant-scoped READS resolve to nothing — an empty result set, NOT an error: Layer 0's deny sentinel (RLS_DENY_FILTER) yields zero rows and a 200",
+          "clause": "tenant-scoped READS resolve to nothing — an empty result set, NOT an error: Layer 0's deny sentinel (RLS_DENY_FILTER) yields zero rows and a 200 — for a caller with no organization scope, which under `isolated` is no active organization and under `group` is an EMPTY membership set (ADR-0123 D2). Under `group` membership, not the active organization, bounds read reach (ADR-0105 D2), so a member with no active organization reads the rows of its own memberships: that read is the posture's union wall, not a leak (packages/plugins/plugin-security/src/tenant-layer.ts#computeTenantLayer0Filter)",
           "oracle": "api",
-          "verify": "GET returns 200 with an empty collection; a 4xx/5xx here is a FAIL (the read side is deliberately not an error path)",
+          "verify": "GET returns 200 with an empty collection for the scope-less caller — under `isolated` either producer of fixtures.knownGaps[0], under `group` producer (1) only; a 4xx/5xx here is a FAIL (the read side is deliberately not an error path). Under `group`, producer (2) answers 200 with rows of its own memberships' organizations only: a row of an organization it does not belong to is a FAIL (acceptance[3]), and its own organizations' rows are not",
           "evidence": "status + body"
         },
         {
@@ -2424,6 +2440,12 @@
           "oracle": "api",
           "verify": "the run record states each subsystem's observed behavior side by side; any disagreement is the finding, whichever way it leans",
           "evidence": "the three-way comparison table"
+        },
+        {
+          "clause": "walled `group` leg: a member whose membership set is NON-EMPTY and whose session has no active organization never gets a 5xx on a tenant-scoped create, and nothing is stamped with a NULL organization_id. Which answer `group` gives — the write lands in a member organization, or a 4xx refusal — is #24784's to decide; this clause asserts only those two facts. Red until #24784 lands",
+          "oracle": "api",
+          "verify": "step-9 create on the live walled group boot: status is NOT 5xx (500 ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED, logged '[REST] Unhandled error: SystemWriteOrganizationRequiredError', is the #24784 shape); the admin-side NULL-or-empty organization_id count for showcase_task is identical before and after; and if the create answered 2xx, the row it produced carries a real organization_id the member belongs to. Score it only from that live boot: the automated.ref pin's group CONTROL stops above the engine (RUNNER rule 6), so it cannot score this clause",
+          "evidence": "the get-session payload + the create response, quoted + both NULL counts + the produced row's organization_id when the create landed"
         }
       ],
       "negative": [
@@ -2446,7 +2468,8 @@
         "PR #8471 (ADR-0123 + enforcement)",
         "@objectstack/plugin-security security-plugin.ts step 3.7 + tenant-layer.ts (computeTenantLayer0Filter, RLS_DENY_FILTER)",
         "@objectstack/plugin-auth auth-manager.ts composeDatabaseHooks + reconcile-membership.ts",
-        "@objectstack/plugin-audit auth-session-audit.ts (login/logout rows)"
+        "@objectstack/plugin-audit auth-session-audit.ts (login/logout rows)",
+        "QA-source: #24783 · access-security.no-active-org-session-semantics · acceptance[1] (the walled group leg; #24784)"
       ],
       "history": [
         {
@@ -2461,6 +2484,36 @@
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[2] added — the 18.0 sweep's wave-wide theme '18.0 refuses every walled posture' (wave anchor #24579 §2; the item stays blocked and hidden from the selector, #24579 §0). Re-derived at base bfc1539fe0: serve.ts walledPostureRefusal refuses group and isolated before a config is read, ahead of the multi-org runtime load revision 2 cites as the refusal. No clause or marker changed",
           "ref": "#24687"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[2] re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal, so a walled os serve boots once provisioned per RUNNER.md's 'A walled boot is a fixture of its own'. The blocked marker stays for its own producer reasons. No clause changed",
+          "ref": "#24580"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[2]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
+          "ref": "#24788"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "producers re-measured and acceptance[0] aligned with its governing text — QA run #24783 (finding F3), round 11 of wave anchor #24579. personas[0]–[1], fixtures.requires[1] and knownGaps[0]–[1] now name the two durable producers on a walled boot (a user the operator creates under invite-only, membershipCreated:false; a member that sets its active organization to null). The signup race is closed by ADR-0123 D3's session-seam settle, and the removed-member path revokes or re-points the session (QA run #24783 measured 401). acceptance[0]'s clause and verify scope 'resolve to nothing' to a caller with no organization scope, which ADR-0123 D2 defines under `group` as an empty membership set, ADR-0105 D2 letting a `group` member's reads span its memberships. acceptance[4] is unchanged: ADR-0123 states no answer for a member-less user's NULL-tenanted audit rows, so knownGaps[3] names the question. knownGaps[4] names #24784, the `group` write 500. knownGaps[2]: the prerequisite sentence holds through os dev only (a bare production os serve needs OS_AUTH_SECRET first, RUNNER.md), and the blocked marker's reason is restated (every clause is a walled leg) because a producer is no longer missing; the marker itself is unchanged",
+          "ref": "#24801"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "acceptance[7], steps[8] and knownGaps[5] added, and automated.ref now names the layer its pin drives — for #24784, which the walled pass of round 3 (QA run #24783, 580fd4ed) found. Rounds 1 and 2 scored the walled legs from the pin because a walled boot was refused then; the pin's group CONTROL 'lands' a write by a member with no active organization at the plugin-security layer, and on a full walled group boot the engine refuses that write with a 500. The new clause asserts only no 5xx and no NULL stamping (which answer group gives is #24784's to decide) and stays red until #24784's fix lands. Merged onto revision 6 (round 11 of wave anchor #24579, #24801), whose knownGaps[0] producer (2) is the one steps[8] drives and whose knownGaps[4] names the same card for acceptance[1], [5], [6] and negative[3]; knownGaps[5] adds only the new clause's red state and the rule that it is never scored from the pin",
+          "ref": "#24802"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[3] sharpened with ADR-0131 D7's reading — carried item of wave anchor #24579 round 13 (PR #24801 named it in knownGaps[3]; #24343 reads sys_audit_log.tenant_id as D7's attribution field, not the anchor). Decided by governing text, read at base 7697ddcf94: D7 makes sys_audit_log a deployment-level ledger with no organization column, whose tenant_id is an attribution field and never the tenancy anchor, governed by object permission and not by the wall, and D9 scopes the no-NULL rule to tenant-column objects. No ADR states that a member-less actor's audit row may read NULL, or that the platform operator reads such rows, so acceptance[4] stays as written and knownGaps[3] names the question with the D7 reading. No clause changed",
+          "ref": "#24850"
         }
       ]
     },
@@ -2469,7 +2522,7 @@
       "title": "Activation-ledger write authority (ADR-0126 §5): the manage_metadata tier refuses first on every posture, and the shared operator gate — INERT on stock `single` — demands the platform_admin POSITION in walled postures, at both the flow and action doors",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2484,10 +2537,10 @@
           "stock showcase boots the `single` tenancy posture (no tenancy service / ADR-0093 D4-D5 fallback) — CONFIRM the posture before scoring, because it decides which gate can answer at all. No API exposes the posture; the proof is the boot banner line `Tenancy: single` (printed at every log level), corroborated at OS_LOG_LEVEL=info by the log line \"[security] tenancy posture 'single' — Layer 0 is inert …\"",
           "a packaged flow: showcase_urgent_task_alert (com.example.showcase, examples/app-showcase/src/automation/flows/index.ts) for POST /api/v1/automation/showcase_urgent_task_alert/toggle",
           "a packaged action for POST /api/v1/actions/_activation/showcase_task/showcase_mark_done (examples/app-showcase/src/ui/actions/index.ts)",
-          "a runtime-authored scratch permission set with system_permissions ['manage_metadata'] granted to a fresh member via a sys_user_permission_set row (same runtime-authoring pattern access-security.fls-mask-and-strip's read half uses) — no stock showcase set grants manage_metadata"
+          "a runtime-authored scratch permission set with system_permissions ['manage_metadata'] granted to a fresh member via a sys_user_permission_set row (same runtime-authoring pattern access-security.fls-mask-and-strip's read half uses) — no stock showcase set grants manage_metadata. The walled legs (knownGaps[0]; steps[8], acceptance[4]) need that set held by an organization OWNER inside the owner's own organization, and no HTTP door places that row on a walled boot (QA run #24783): the operator's insert into an organization it is not a member of is refused by the Layer 0 tenant check, 403 '… organization_id is outside the caller's organization scope' (packages/plugins/plugin-security/src/security-plugin.ts#denyTenantPlacement), and the owner's own insert is refused by ADR-0090 D12 condition (c), because manage_metadata is declared scope 'platform' (packages/spec/src/security/capabilities.ts; packages/plugins/plugin-security/src/delegated-admin-gate.ts#organizationBoundaryFailure). Use the dogfood harness's recipe instead: the grant row {user_id, permission_set, organization_id} is a system-context engine insert stamped with that organization, as packages/qa/dogfood/test/wall-environment-metadata-refusal.dogfood.test.ts#boot places it, or a direct row on the run's own scratch DB, as QA run #24783 placed it. Record it in the run record as a fixture write made outside HTTP"
         ],
         "knownGaps": [
-          "The group/isolated legs (clause 5, acceptance[4]; steps[8]; variants[1]–[2]) have no live leg on 18.0: os serve — and os dev / os start, which boot through it — refuses OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true) before a config is read: FATAL: tenancy posture '…' is not supported in 18.0 (NOT_IMPLEMENTED), exit 1 (packages/cli/src/commands/serve.ts#walledPostureRefusal); see RUNNER.md's environment-facts entry '18.0 boots the single tenancy posture only'. That refusal runs ahead of the multi-org runtime load this gap used to name, and the runtime itself is open code since ADR-0132, so neither an 'enterprise runtime' fixture nor ADR-0093 D5's absent-runtime refusal is what a runner meets now, and no fixture unblocks the legs. Clause 5 is scored from the unit pins in automated.ref (oracle test), which drive the posture x identity matrix in-process; its live HTTP leg is not scored on a stock 18.0 boot. The walled postures return in a later 18.x release. Never fake a posture to tick them.",
+          "The group/isolated legs (clause 5, acceptance[4]; steps[8]; variants[1]–[2]) run live on a walled boot, which a stock showcase boot is not (fixtures.requires[0] confirms `single`). On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). A run that does not provision it records those legs blocked(fixture) naming that entry, never fail. Clause 5 is also scored from the unit pins in automated.ref (oracle test), which drive the posture x identity matrix in-process. Never fake a posture to tick them.",
           "⚠️ On the STOCK `single` posture the §5 operator gate is INERT by design (activation-gate.ts — postureEnforcesWall('single') is false, so the gate returns before the position is ever read). The refusal an unentitled caller gets on stock showcase is the manage_metadata AUTHORING TIER, not the operator gate — score clause 1/2 against the tier and never against §5, or the run records the wrong gate as proven."
         ]
       },
@@ -2500,7 +2553,7 @@
         "author the scratch manage_metadata permission set, grant it to a fresh member, and prove server-side that the member's positions do NOT include platform_admin (session row / GET /auth/get-session — never the grant gesture)",
         "as that member: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false} — expect 200; read the ledger row back (metadata_type 'flow', active false, and NO organization_id key on the row — the ledger carries no tenant column at all, #15024 / ADR-0131 D7); then re-enable ({\"enabled\": true}) to restore the fixture",
         "as the same member: POST /api/v1/actions/_activation/showcase_task/showcase_mark_done {\"enabled\": false} — expect 200 + the metadata_type 'action' row; re-enable to restore",
-        "walled-posture legs: not run live on 18.0, which refuses a walled boot (knownGaps[0]) — the group/isolated matrix (org admin with manage_metadata refused naming the posture and the per-artifact remedy; platform_admin POSITION admitted; no row on refusal) is pinned at unit level by automated.ref; run those pins for clause 5"
+        "walled-posture legs: on a walled boot provisioned per knownGaps[0] — the group/isolated matrix (org admin with manage_metadata refused naming the posture and the per-artifact remedy; platform_admin POSITION admitted; no row on refusal) — and run the unit pins in automated.ref for clause 5"
       ],
       "acceptance": [
         {
@@ -2528,9 +2581,9 @@
           "evidence": "the position proof + both 200 traces + the ledger rows"
         },
         {
-          "clause": "walled postures (`group`/`isolated`) — pin-scored, since 18.0 refuses the walled boot a live probe needs (knownGaps[0]): an org admin holding manage_metadata is refused 403 PERMISSION_DENIED with a message naming the POSTURE and the per-artifact remedy — both remedies name the platform operator and NEITHER recommends a clone (ADR-0131 D6 · D12 items 7–8: under a wall a clone is environment authoring, the operator's too; both pins assert the operator and no 'clone') — no row is written on refusal, and a caller at the ADR-0095 PLATFORM_ADMIN posture rung (not a position name, #15981; not a capability) is admitted",
+          "clause": "walled postures (`group`/`isolated`) — pin-scored, with its live leg on a walled boot (knownGaps[0]): an org admin holding manage_metadata is refused 403 PERMISSION_DENIED with a message naming the POSTURE and the per-artifact remedy — both remedies name the platform operator and NEITHER recommends a clone (ADR-0131 D6 · D12 items 7–8: under a wall a clone is environment authoring, the operator's too; both pins assert the operator and no 'clone') — no row is written on refusal, and a caller at the ADR-0095 PLATFORM_ADMIN posture rung (not a position name, #15981; not a capability) is admitted",
           "oracle": "test",
-          "verify": "stands on the unit pins, since 18.0 refuses the walled boot a live probe needs (knownGaps[0]): packages/runtime/src/domains/automation-activation-posture-gate.test.ts (#12157) and action-activation-posture-gate.test.ts (#12160) drive the posture x identity matrix against both doors and assert toggleFlow/the write was never entered on refusal; the refusal sentence is packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite's, and the remedies are the `remedy` of packages/runtime/src/domains/activation-gate.ts#FLOW_ACTIVATION_SUBJECT and packages/runtime/src/domains/activation-gate.ts#ACTION_ACTIVATION_SUBJECT. Do not tick this clause from an HTTP probe on a faked posture",
+          "verify": "stands on the unit pins, corroborated live on a walled boot (knownGaps[0]): packages/runtime/src/domains/automation-activation-posture-gate.test.ts (#12157) and action-activation-posture-gate.test.ts (#12160) drive the posture x identity matrix against both doors and assert toggleFlow/the write was never entered on refusal; the refusal sentence is packages/runtime/src/domains/activation-gate.ts#refuseUngrantedActivationWrite's, and the remedies are the `remedy` of packages/runtime/src/domains/activation-gate.ts#FLOW_ACTIVATION_SUBJECT and packages/runtime/src/domains/activation-gate.ts#ACTION_ACTIVATION_SUBJECT. Do not tick this clause from an HTTP probe on a faked posture",
           "evidence": "the two test runs' output, cited by test name"
         },
         {
@@ -2548,8 +2601,8 @@
       ],
       "variants": [
         "single (stock — gate inert, tier decides)",
-        "group (pin-only on 18.0: the walled boot is refused)",
-        "isolated (pin-only on 18.0: the walled boot is refused)"
+        "group (live on a walled boot, knownGaps[0]; the pins either way)",
+        "isolated (live on a walled boot, knownGaps[0]; the pins either way)"
       ],
       "enumSource": {
         "file": "packages/spec/src/security/tenancy-posture.ts",
@@ -2598,6 +2651,24 @@
           "date": "2026-10-20",
           "change": "line citations re-pointed — the carried note from round 5 of wave anchor #24579 (its report, comment 6279808387). acceptance[3].clause, acceptance[4].verify, acceptance[5].verify, negative[3] and source[0] cited activation-gate.ts by line number in a comma-range spelling (',141-147', ',155-163', ',190', and source[0]'s five ranges), the rot class the line-citation limb exists for and does not detect; at this base those lines hold other code. Each now anchors the declaring symbol (refuseUngrantedActivationWrite, refuseUngrantedActivationAuthoring, readEffectiveTenancyPosture, FLOW_ACTIVATION_SUBJECT, ACTION_ACTIVATION_SUBJECT) or names the header section in prose. Reading the gate for that, acceptance[4].clause was corrected beside its walled lead, which is unchanged: it said flows recommend the clone path and that the platform_admin POSITION admits; both remedies name the operator and neither a clone (ADR-0131 D6 · D12 items 7–8, as both pins assert), and the gate reads the PLATFORM_ADMIN posture rung, never a position name (#15981). Not loosened: the oracle and the pins are unchanged",
           "ref": "#24717"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0], steps[8], acceptance[4] (clause, verify) and variants[1]–[2] re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal, so the walled legs run live on a walled boot provisioned per RUNNER.md's 'A walled boot is a fixture of its own'; unprovisioned, they are blocked(fixture). Clause 5 keeps its unit pins as its oracle; no clause deleted",
+          "ref": "#24580"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
+          "ref": "#24788"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-20",
+          "change": "fixtures.requires[3] names the recipe for the walled legs' org-owner manage_metadata grant, and knownGaps[0]'s prerequisite sentence says os dev — QA run #24783 (findings F7 and F2), round 11 of wave anchor #24579. No HTTP door placed the grant on the walled boot: the operator's insert into an organization it is not a member of is refused by the Layer 0 tenant check, and the owner's own insert by ADR-0090 D12 condition (c), manage_metadata being scope 'platform'. The recipe is the dogfood harness's system-context engine insert (wall-environment-metadata-refusal.dogfood.test.ts, its boot helper). A bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md), so the refusal sentence now names os dev. No clause changed",
+          "ref": "#24801"
         }
       ]
     },
@@ -2798,7 +2869,7 @@
       "title": "OS_PLATFORM_OWNER_EMAIL platform-admin anchor: only a VERIFIED stored-email match confers PLATFORM_ADMIN — unset, unverified match, non-match and malformed lists each confer nothing, fail closed",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2816,7 +2887,7 @@
         ]
       },
       "steps": [
-        "boot showcase single (OS_TENANCY_POSTURE=single — also what a deployment with no tenancy configuration resolves to) with the variable UNSET — a walled posture (group / isolated) is out of scope here (see negative), and on 18.0 it does not boot at all: os serve refuses it before a config is read, whether the variable is set or unset (packages/cli/src/commands/serve.ts#walledPostureRefusal; RUNNER.md environment facts) — and keep that posture for every restart below; admin session; sign up fresh member M and record M's email; as M: GET /api/v1/datasources and GET /api/v1/auth/me/permissions (read systemPermissions) — the baseline refusals",
+        "boot showcase single (OS_TENANCY_POSTURE=single — also what a deployment with no tenancy configuration resolves to) with the variable UNSET — a walled posture (group / isolated) is out of scope here (see negative), and it boots only once provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own', where this very variable is a prerequisite: unset, the walled boot is refused at plugin-auth init — and keep that posture for every restart below; admin session; sign up fresh member M and record M's email; as M: GET /api/v1/datasources and GET /api/v1/auth/me/permissions (read systemPermissions) — the baseline refusals",
         "restart with OS_PLATFORM_OWNER_EMAIL=<M's email> (M's row is unverified); as M repeat both probes",
         "restart with OS_PLATFORM_OWNER_EMAIL=<an address matching no sys_user row>; repeat M's probes",
         "entitled side (see knownGaps for the verified-member fixture): with M's row verified and the variable naming M, as M repeat the probes and read /api/v1/auth/me/permissions — expect the declared admin envelope; where the fixture is unavailable, run the unit pin and cite its output instead. This step runs BEFORE the malformed variant on purpose: the malformed list's 'the well-formed sibling confers nothing' check only discriminates once M is verified",
@@ -2890,9 +2961,9 @@
         "packages/core/src/security/resolve-authz-context.ts#grantAnchorsPlatformStanding (#11663 L5 — the unscoped admin_full_access row derives PLATFORM_ADMIN only when the requested posture enforces no wall)",
         "packages/spec/src/security/tenancy-posture.ts#postureEnforcesWall (walled = every posture except single)",
         "packages/core/src/security/admin-standing-surface.ts (the env declared a non-table derivation input — no break-glass write can reach it)",
-        "packages/types/src/env.ts#PLATFORM_OWNER_EMAIL_ENV,200 (PLATFORM_OWNER_EMAIL_ENV / resolvePlatformOwnerEmail)",
+        "packages/types/src/env.ts#PLATFORM_OWNER_EMAIL_ENV + packages/types/src/env.ts#resolvePlatformOwnerEmail (the variable's name, and its live per-call read)",
         "packages/plugins/plugin-auth/src/auth-plugin.ts (#11343 — the dev seed stamps its admin's address verified)",
-        "packages/services/service-datasource/src/admin-routes.ts#manage_platform_settings,261 (the manage_platform_settings-floor probe)",
+        "packages/services/service-datasource/src/admin-routes.ts#DATASOURCE_ADMIN_CAPABILITY (the manage_platform_settings-floor probe)",
         "#11663 L2 (the design and ruled bundle), #13146 (landed 2026-08-29), ADR-0068 D2 (the stored-grant anchor beside it)"
       ],
       "history": [
@@ -2919,6 +2990,18 @@
           "date": "2026-10-20",
           "change": "steps[0]'s walled parenthetical corrected — the carried note from round 5 of wave anchor #24579 (its report, comment 6279808387). It said a walled posture refuses to boot with the variable unset (plugin-auth init); on 18.0 serve.ts#walledPostureRefusal refuses a walled posture earlier, before any config or plugin, whether the variable is set or unset. The item boots single throughout and no clause scores the walled case, so no clause changed",
           "ref": "#24717"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[0]'s walled parenthetical re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal, so a walled posture boots once provisioned per RUNNER.md's 'A walled boot is a fixture of its own', and with this item's variable unset it is refused at plugin-auth init again (revision 3's reading). The item still boots single throughout and no clause scores the walled case; no clause changed",
+          "ref": "#24580"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "source[5] and source[7] re-pointed — the two comma-range line citations round 9 of wave anchor #24579 left, because PR #24667 held the item then (round 9's report 6283532816, out_of_scope_findings[0]). At the authoring commit 45397edf53, line 200 of env.ts was the resolvePlatformOwnerEmail declaration and line 261 of admin-routes.ts was the DATASOURCE_ADMIN_CAPABILITY declaration. At base 795ff708d8 source[5] anchors both PLATFORM_OWNER_EMAIL_ENV and resolvePlatformOwnerEmail in env.ts, and source[7] anchors the DATASOURCE_ADMIN_CAPABILITY declaration in admin-routes.ts instead of the string literal manage_platform_settings. All three resolve as declarations in the shared resolver. The ',NNN' residue is what #13786's strip left of a two-range list. No clause, step or other field changed",
+          "ref": "#24788"
         }
       ]
     },
@@ -3052,7 +3135,7 @@
       "title": "Opt-in record-view auditing writes `read` rows for exactly the opted-in objects' detail reads, batched off the request path — stock boot audits nothing, excluded names refuse loudly, values never copied",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3091,7 +3174,7 @@
           "evidence": "log line + the ledger rows before/after each read"
         },
         {
-          "clause": "the row records WHO/WHICH/WHEN and nothing else: action 'read', user_id = M, object_name/record_id correct, old_value AND new_value both null (the afterFind hook sees PRE-MASK plaintext, so copying values would mint a plaintext copy of exactly what FLS withholds — read-audit.ts,516-521), and created_at is the VIEW instant, not the flush instant",
+          "clause": "the row records WHO/WHICH/WHEN and nothing else: action 'read', user_id = M, object_name/record_id correct, old_value AND new_value both null (the afterFind hook sees PRE-MASK plaintext, so copying values would mint a plaintext copy of exactly what FLS withholds — packages/plugins/plugin-audit/src/read-audit.ts#buildRow writes both as null, for the reason the file header's section 'The row records NO field values, and that is load-bearing' gives), and created_at is the VIEW instant, not the flush instant",
           "oracle": "api",
           "verify": "field-by-field read of the landed row; created_at within the read's wall-clock window, not the flush's",
           "evidence": "the row + the recorded clocks"
@@ -3155,6 +3238,12 @@
           "date": "2026-10-17",
           "change": "re-measured on main c91af8ed6 (checklist-accuracy finding from #23878): the stock leg's install-line grep was vacuous on a default boot, because the line logs at INFO and os dev defaults to warn, so steps[0], the fixture and clause 0's verify now boot at OS_LOG_LEVEL=info with an INFO-line positive control. The stock specimen GET /data/showcase_contact/ID is refused to a baseline member at the object gate (403), so the zero proved nothing either; the step now reads a showcase_account detail (200). knownGaps[0] gains the scripted scratch-copy recipe for the configured half, and steps 1 and 3 name X = showcase_account and the un-opted showcase_project. Re-run: stock boot at info (649 INFO lines), plain member detail reads of showcase_project, showcase_task and showcase_account all 200, action 'read' rows 0, no install line. Configured scratch copy: 'Plugin superseded: com.objectstack.audit' WARN, the sys_job exclusion WARN and 'AuditPlugin: record-view auditing installed on 1 object(s) — showcase_account'; member M's account detail read → 1 row (action read, user_id M, object_name showcase_account, record_id correct, old_value and new_value null, created_at 00:15:23.489Z inside the 23.385–23.497 read window, about 4 s before the flush read); the list read and the showcase_project detail read left the count at 1; the admin's detail read made it 2",
           "ref": "#24036"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[2].clause cited lines 516-521 of read-audit.ts in the comma-range spelling, the second range of the two-range list 45397edf53 authored (55-75 and 516-521). At that commit lines 516-521 were the audit row's old_value / new_value nulls; at this base they hold a docblock, and the nulls sit in the buildRow closure of installReadAuditWriter. The clause now anchors read-audit.ts#buildRow and names the header section that gives the reason in prose. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#24752"
         }
       ]
     },
@@ -3163,7 +3252,7 @@
       "title": "The /s/:token share-link landing page renders the resolved record minus redacted fields, gates on password, and refuses dead links with designed states — never a blank page or a raw error",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3179,7 +3268,7 @@
         ],
         "knownGaps": [
           "automated.ref lives ENTIRELY in the objectui repo — from this checkout it is neither runnable nor pin-evidenced (the RUNNER standing fact): drive the item by hand in the browser, or run the pin in an objectui checkout and name the revision",
-          "the ai_conversations transcript branch (SharedRecordPage.tsx,190-234 — messages fetch + ChatbotEnhanced readOnly) is ai_conversations-only (Cloud/EE service-ai) — the same knownGap split the API item records for /:token/messages; not runnable on open-framework showcase",
+          "the ai_conversations transcript branch (objectui SharedRecordPage.tsx: the SharedRecordPage component's ai_conversations branch, with its messages-fetch effect and the ChatbotEnhanced readOnly transcript) is ai_conversations-only (Cloud/EE service-ai) — the same knownGap split the API item records for /:token/messages; not runnable on open-framework showcase",
           "FIXED, regression row, expected PASS (objectui#11649): the page no longer folds every 401 into the password prompt. Measured at objectui 1fb1ced36243 (the pin this row was written at), again at daeb77fc84dd (#23878) and at f8267df93aba (this repo's .objectui-sha when revision 3 was written; re-read it at whatever pin the run boots): SharedRecordPage.tsx reads a 401 by the body's error.code through shared-record-shape.ts resolveGateOf — NEEDS_PASSWORD and WRONG_PASSWORD open the password prompt, SIGN_IN_REQUIRED opens the sign-in gate, and any other code shows the server's message, not a prompt — so a signed_in-audience link opened anonymously renders the dedicated 'Sign in required' state, never 'Password required'. acceptance[3] now asserts that state (QA run #23163 saw it live at objectstack 36b2889c). The objectui pins are apps/console/src/pages/SharedRecordPage-11649.test.tsx ('shows the sign-in path back to this link, and no password prompt') and shared-record-shape.test.ts ('reads each 401 code as its gate'), objectui-repo-only like knownGaps[0]"
         ]
       },
@@ -3201,13 +3290,13 @@
         {
           "clause": "the password gate renders as designed and never leaks early: 401 → the 'Password required' prompt; wrong password → re-prompt with 'Wrong password.'; correct password → the record renders — and NO 401 response body carries the record",
           "oracle": "network",
-          "verify": "the three round-trips (SharedRecordPage.tsx,143-176): two 401s with record-free bodies, then the 200 render; drive the input with native setter + events, not coordinate typing",
+          "verify": "the three round-trips (objectui SharedRecordPage.tsx: the component's password-gate branch, gate === 'password'): two 401s with record-free bodies, then the 200 render; drive the input with native setter + events, not coordinate typing",
           "evidence": "the three network traces + screenshots of prompt and render"
         },
         {
           "clause": "dead links refuse with designed, non-leaking states: revoked and expired render 'This link has expired or was revoked.' (410), a garbage token renders 'This link is invalid or no longer available.' (404) — never a blank page, a spinner that never settles, or a raw stack/JSON error, and no record data in any refusal body",
           "oracle": "screenshot",
-          "verify": "each terminal state's screenshot shows the designed message (SharedRecordPage.tsx,178-186); the paired network bodies are record-free",
+          "verify": "each terminal state's screenshot shows the designed message (objectui SharedRecordPage.tsx: the component's error branch, which renders the message fetchResolve sets for a 404 or a 410); the paired network bodies are record-free",
           "evidence": "screenshots + the 404/410 bodies"
         },
         {
@@ -3249,7 +3338,7 @@
       },
       "source": [
         "objectui apps/console/src/App.tsx (the /s/:token route, mounted outside the authenticated shell)",
-        "objectui apps/console/src/pages/SharedRecordPage.tsx (status folds, password form, error states, generic record render + hidden-fields notice, ai_conversations branch,190-234)",
+        "objectui apps/console/src/pages/SharedRecordPage.tsx (status folds, password form, error states, generic record render + hidden-fields notice, ai_conversations branch)",
         "objectui apps/console/src/pages/shared-record-shape.ts (normalizeResolvedShare — both envelopes, the #3983 rename)",
         "cross-ref access-security.share-link-capability-tokens — the API half: mint/resolve/redaction/password/audience/revoke semantics and the #9308 showcase_client_brief fixture are asserted THERE; this item asserts only what the console renders of them",
         "#9308 (the stock fixture), objectstack#3983 (the enveloped-branch rename regression the notice clause guards)"
@@ -3272,6 +3361,12 @@
           "date": "2026-10-16",
           "change": "knownGaps[2] stopped naming objectui 1fb1ced36243 as 'still this repo's .objectui-sha' (#23878 checklist-accuracy finding). The pin moved to daeb77fc84dd and then to f8267df93aba; at f8267df93aba SharedRecordPage.tsx still reads a 401 by its code through shared-record-shape.ts resolveGateOf, renders the 'Sign in required' state for SIGN_IN_REQUIRED, and both objectui pins (SharedRecordPage-11649.test.tsx, shared-record-shape.test.ts) are present. The revision 2 history row stays as written: it was true at its pin. Wording only, no re-run owed",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.knownGaps[1], acceptance[1].verify, acceptance[2].verify and source[1] cited objectui SharedRecordPage.tsx by the line ranges 190-234 (twice), 143-176 and 178-186 in the comma-range spelling (authored in 45397edf53). At the objectui pin that commit shipped, 9602dc820450, those lines were the ai_conversations branch, the password form and the error state; at the shipped pin 12dc7b47c340 all three have moved down, below a sign-in gate and a reworked fetchResolve, and the password branch now reads gate === 'password'. Each now names its branch of the SharedRecordPage component. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
+          "ref": "#24752"
         }
       ]
     },
@@ -3367,7 +3462,7 @@
       "title": "Under a walled posture (group / isolated) environment metadata and the security catalog belong to the platform operator: an org owner holding manage_metadata is refused 403 on every /meta write verb, every /packages write, install-local of a catalog-carrying package, _migrate-stored and POST /automation — and the single posture is unchanged",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 5,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -3380,10 +3475,10 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a second boot with OS_TENANCY_POSTURE=isolated (walled posture) on its own port and file DB — the stock single posture leaves every walled clause vacuous, so confirm the posture from the boot log before scoring",
-          "on the walled boot: a second organization whose owner is granted manage_metadata but not the platform_admin position"
+          "on the walled boot: a second organization whose owner is granted manage_metadata but not the platform_admin position. No HTTP door places that grant on a walled boot (QA run #24783): the operator's insert into an organization it is not a member of is refused by the Layer 0 tenant check, 403 '… organization_id is outside the caller's organization scope' (packages/plugins/plugin-security/src/security-plugin.ts#denyTenantPlacement), and the owner's own insert is refused by ADR-0090 D12 condition (c), because manage_metadata is declared scope 'platform' (packages/spec/src/security/capabilities.ts; packages/plugins/plugin-security/src/delegated-admin-gate.ts#organizationBoundaryFailure). The recipe is the dogfood harness's: the operator saves a permission set carrying systemPermissions ['manage_metadata'], and the grant row {user_id, permission_set, organization_id} is a system-context engine insert stamped with that organization, as packages/qa/dogfood/test/wall-environment-metadata-refusal.dogfood.test.ts#boot places it, or a direct row on the run's own scratch DB, as QA run #24783 placed it. Record it in the run record as a fixture write made outside HTTP"
         ],
         "knownGaps": [
-          "Every live leg here needs the walled boot fixtures.requires[1] names and the second organization fixtures.requires[2] names, and a stock 18.0 boot has neither: os serve — and os dev / os start, which boot through it — refuses OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true) before a config is read: FATAL: tenancy posture '…' is not supported in 18.0 (NOT_IMPLEMENTED), exit 1 (packages/cli/src/commands/serve.ts#walledPostureRefusal), and a stock boot holds one organization (see RUNNER.md's environment-facts entries '18.0 boots the single tenancy posture only' and 'A stock 18.0 boot holds exactly one organization'). So on a stock 18.0 boot acceptance[1], acceptance[2] and negative[0] are not scored: record them skipped with those entries cited, never blocked(fixture) and never fail. steps[3]'s single-posture admit is only the control for the walled refusal and proves nothing alone. The item's 18.0 evidence is acceptance[0]: its pins boot the walled posture at kernel level, where serve's refusal never runs. The clauses stay: the walled postures return in a later 18.x release"
+          "Every live leg here needs the walled boot fixtures.requires[1] names and the second organization fixtures.requires[2] names. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). On that boot the second organization is created through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records acceptance[1], acceptance[2] and negative[0] blocked(fixture) naming those entries, never fail. steps[3]'s single-posture admit is only the control for the walled refusal and proves nothing alone. acceptance[0]'s pins boot the walled posture at kernel level and stay the item's pinned evidence"
         ]
       },
       "steps": [
@@ -3440,6 +3535,24 @@
           "date": "2026-10-19",
           "change": "fixtures.knownGaps added and steps[0]'s object body made to declare sharingModel — the 18.0 sweep's wave-wide theme '18.0 refuses every walled posture' (wave anchor #24579 §2; QA runs #24556, #24558 and #24559 scored acceptance[1], acceptance[2] and negative[0] blocked on the boot's NOT_IMPLEMENTED FATAL), and round 2's report on the same wave anchor (a minimal object body is refused 422 security-owd-unset). Re-derived at base bfc1539fe0: serve.ts walledPostureRefusal refuses the walled boot before a config is read; meta-item-write-routes.ts asks the walled refusal ahead of saveMetaItem, so the org owner's refusal is unaffected, while the operator's and the single-posture admin's repeats reach the authoring rules, where validate-security-posture.ts refuses an object with no sharingModel at error tier. No clause deleted",
           "ref": "#24687"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0] re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal: the walled boot fixtures.requires[1] names now boots once provisioned per RUNNER.md's 'A walled boot is a fixture of its own', and the second organization is created on it through the auth API. Unprovisioned legs are blocked(fixture), no longer skipped. No clause changed",
+          "ref": "#24580"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
+          "ref": "#24788"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "fixtures.requires[2] names the recipe for its organization-scoped manage_metadata grant, and knownGaps[0]'s prerequisite sentence says os dev — QA run #24783 (findings F7 and F2), round 11 of wave anchor #24579. No HTTP door placed the grant on the walled boot: the operator's insert into an organization it is not a member of is refused by the Layer 0 tenant check, and the owner's own insert by ADR-0090 D12 condition (c), manage_metadata being scope 'platform'. The recipe is the dogfood harness's system-context engine insert (wall-environment-metadata-refusal.dogfood.test.ts, its boot helper). A bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md), so the refusal sentence now names os dev. No clause changed",
+          "ref": "#24801"
         }
       ]
     },
@@ -3684,7 +3797,7 @@
       "title": "Grant-table write contract (sys_user_permission_set / sys_user_position): the retired permission_set_id column is refused, a duplicate grant is 409, an inverted validity window is 400, granted_by is stamped with the caller, and (walled) a grant to a non-member is refused",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3698,7 +3811,7 @@
           "the member's user id and a showcase permission-set NAME"
         ],
         "knownGaps": [
-          "acceptance[4] and steps[4] are written for a walled boot holding a second organization A, and a stock 18.0 boot has neither: os serve — and os dev / os start, which boot through it — refuses OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true) before a config is read: FATAL: tenancy posture '…' is not supported in 18.0 (NOT_IMPLEMENTED), exit 1 (packages/cli/src/commands/serve.ts#walledPostureRefusal), and a stock boot holds one organization (see RUNNER.md's environment-facts entries '18.0 boots the single tenancy posture only' and 'A stock 18.0 boot holds exactly one organization'). As written, acceptance[4] is not scored on a stock 18.0 boot: record it skipped with those entries cited, never blocked(fixture) and never fail. Its refusal is pinned through acceptance[0] (grant-holder-membership-refusal.test.ts in automated.ref). ⚠️ The refusal itself does not read the posture — that pin's case 'the predicate is the same on every posture' refuses an organization-scoped row naming a non-member under single too (packages/plugins/plugin-security/src/grant-holder-membership-refusal.ts#registerGrantHolderMembershipRefusal) — so the leg is walled by its wording, not by its mechanism. A single-posture rig with a grantee who holds no membership in the writer's organization is not measured here"
+          "acceptance[4] and steps[4] are written for a walled boot holding a second organization A, which a stock showcase boot is not. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). The second organization is created on that boot through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records acceptance[4] blocked(fixture) naming those entries, never fail. Its refusal is pinned through acceptance[0] (grant-holder-membership-refusal.test.ts in automated.ref). ⚠️ The refusal itself does not read the posture — that pin's case 'the predicate is the same on every posture' refuses an organization-scoped row naming a non-member under single too (packages/plugins/plugin-security/src/grant-holder-membership-refusal.ts#registerGrantHolderMembershipRefusal) — so the leg is walled by its wording, not by its mechanism. A single-posture rig with a grantee who holds no membership in the writer's organization is not measured here"
         ]
       },
       "steps": [
@@ -3767,6 +3880,24 @@
           "date": "2026-10-19",
           "change": "fixtures.knownGaps added — the 18.0 sweep's wave-wide theme '18.0 refuses every walled posture' (wave anchor #24579 §2; QA run #24559 scored acceptance[4] pass on its pin with the live leg blocked(environment) on the boot's NOT_IMPLEMENTED FATAL; rounds 2 and 3 named the leg). Re-derived at base bfc1539fe0: serve.ts walledPostureRefusal refuses the walled boot; grant-holder-membership-refusal.ts's predicate is posture-independent, which the gap records without re-pointing the clause. No clause deleted",
           "ref": "#24687"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0] re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal, so acceptance[4]'s walled boot with a second organization is provisioned per RUNNER.md's 'A walled boot is a fixture of its own'; unprovisioned, it is blocked(fixture). The posture-independence note is kept. No clause changed",
+          "ref": "#24580"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
+          "ref": "#24788"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "knownGaps[0]'s prerequisite sentence says os dev — round 11's carried finding 3 (wave anchor #24579 round 12; report 6285435593 on PR #24801), from QA run #24783's F2: a bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md, the serve.ts AuthPlugin-skipped branch at base 307ce4c4b4). The same sentence PR #24801 wrote into four other walled items, byte for byte. No clause changed",
+          "ref": "#24824"
         }
       ]
     },
@@ -3775,7 +3906,7 @@
       "title": "Write guards tightened on v18: a walled update cannot null out organization_id, a detail write naming an unreadable header is reference_not_found, a validation rule reading an unreadable header answers like a missing one, and a controlled_by_parent child's attachments / comments / explain follow the master's edit grant",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3790,7 +3921,7 @@
           "for the organization leg: the walled boot"
         ],
         "knownGaps": [
-          "acceptance[1] and steps[0] (the organization leg, on fixtures.requires[2]'s walled boot) need a walled posture: the Layer 0 write wall refuses an update that empties organization_id only under one, and its pin's control says the single posture is unchanged (tenant-wall-organization-removal.test.ts in automated.ref). 18.0 refuses the walled boot: os serve — and os dev / os start, which boot through it — refuses OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true) before a config is read: FATAL: tenancy posture '…' is not supported in 18.0 (NOT_IMPLEMENTED), exit 1 (packages/cli/src/commands/serve.ts#walledPostureRefusal); see RUNNER.md's environment-facts entry '18.0 boots the single tenancy posture only'. On a stock 18.0 boot acceptance[1] is not scored: record it skipped with that entry cited, never blocked(fixture) and never fail; acceptance[0]'s pin carries the leg. acceptance[2] and acceptance[3] are not walled legs and run as written"
+          "acceptance[1] and steps[0] (the organization leg, on fixtures.requires[2]'s walled boot) need a walled posture: the Layer 0 write wall refuses an update that empties organization_id only under one, and its pin's control says the single posture is unchanged (tenant-wall-organization-removal.test.ts in automated.ref). On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). A run that does not provision it records acceptance[1] blocked(fixture) naming that entry, never fail; acceptance[0]'s pin carries the leg. acceptance[2] and acceptance[3] are not walled legs and run as written"
         ]
       },
       "steps": [
@@ -3853,6 +3984,24 @@
           "date": "2026-10-19",
           "change": "fixtures.knownGaps added — the 18.0 sweep's wave-wide theme '18.0 refuses every walled posture' (wave anchor #24579 §2; QA run #24559 scored acceptance[1] pass on its pin with the live leg blocked(environment) on the boot's NOT_IMPLEMENTED FATAL). Re-derived at base bfc1539fe0: serve.ts walledPostureRefusal refuses the walled boot, and tenant-wall-organization-removal.test.ts pins the emptied-organization refusal as a walled-posture rule with the single posture unchanged. No clause deleted",
           "ref": "#24687"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0] re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal, so the organization leg's walled boot is provisioned per RUNNER.md's 'A walled boot is a fixture of its own'; unprovisioned, it is blocked(fixture). No clause changed",
+          "ref": "#24580"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
+          "ref": "#24788"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "knownGaps[0]'s prerequisite sentence says os dev — round 11's carried finding 3 (wave anchor #24579 round 12; report 6285435593 on PR #24801), from QA run #24783's F2: a bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md, the serve.ts AuthPlugin-skipped branch at base 307ce4c4b4). The same sentence PR #24801 wrote into four other walled items, byte for byte. No clause changed",
+          "ref": "#24824"
         }
       ]
     },

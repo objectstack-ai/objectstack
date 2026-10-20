@@ -57,6 +57,7 @@ import { superuserBypassBitForOperation } from './permission-evaluator.js';
 import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import { ExplainObjectNotFoundError } from './errors.js';
 import { RLS_DENY_FILTER, compiledObjectDefaultRowScopeOf, compiledPolicyNameOf } from './rls-compiler.js';
+import { andComposeLayers } from './tenant-layer.js';
 import { declaredComparisonColumns } from './declared-comparison-columns.js';
 import {
   declaredJsonStoredColumns,
@@ -1404,6 +1405,49 @@ interface RecordAttributionContext {
    * object-level detail and its record block name one depth.
    */
   depthScope: string;
+  /**
+   * [#24646 / ADR-0090 D10] The delegator behind an on-behalf-of principal —
+   * its resolved sets and its context, as the object-level pass resolved them
+   * — or `undefined` on the ordinary path. A by-id write's pre-image re-read
+   * (step 2.7) ANDs the delegator's own write filter beside the principal's,
+   * so the record verdict of an `update` or a `delete` composes it too.
+   */
+  delegator?: { sets: PermissionSet[]; context: any };
+}
+
+/**
+ * [ADR-0090 D10] The delegator's write filter an on-behalf-of by-id write's
+ * pre-image re-read (step 2.7) ANDs beside the principal's, as the door
+ * composes it — two compositions of the delegator's own sets and context,
+ * ANDed:
+ *
+ *  - {@link ExplainEngineDeps.computeRlsFilter}: the delegator's filter as the
+ *    delegated path composes it (the floor standing);
+ *  - {@link ExplainEngineDeps.computeLayeredRlsFilter}: the delegator's OWN
+ *    record-grained write composition — the one the delegator's own
+ *    explanation of this record is judged on, carrying the floor decision the
+ *    delegator's own by-id write of the record gets.
+ *
+ * So an on-behalf-of record write verdict never admits a row the delegator's
+ * own record write verdict refuses. The AND only narrows. An engine that
+ * cannot split the layers composes the first alone, as its record story does
+ * for every principal.
+ */
+async function delegatorRecordWriteFilter(
+  deps: ExplainEngineDeps,
+  delegator: { sets: PermissionSet[]; context: any },
+  object: string,
+  rlsOp: string,
+): Promise<Record<string, unknown> | null> {
+  const parts: Record<string, unknown>[] = [];
+  const delegated = await deps.computeRlsFilter(delegator.sets, object, rlsOp, delegator.context);
+  if (delegated) parts.push(delegated);
+  const own = deps.computeLayeredRlsFilter
+    ? await deps.computeLayeredRlsFilter(delegator.sets, object, rlsOp, delegator.context)
+    : undefined;
+  const ownFilter = own ? andComposeLayers(own.layer0, own.layer1) : null;
+  if (ownFilter) parts.push(ownFilter);
+  return parts.length === 0 ? null : parts.length === 1 ? parts[0] : { $and: parts };
 }
 
 /**
@@ -1425,7 +1469,7 @@ async function applyRecordAttribution(
 ): Promise<{ record: NonNullable<ExplainDecision['record']>; posture: AuthzPosture }> {
   const {
     deps, object, recordId, engineOp, rlsOp, context, sets, layers, owd, capsDeny, crudAllowed, vamaEffective, vamaSets,
-    declaredColumns, depthScope,
+    declaredColumns, depthScope, delegator,
   } = ra;
   const isRead = engineOp === 'find';
   const posture = derivePosture(context);
@@ -1468,6 +1512,23 @@ async function applyRecordAttribution(
   const layered = layeredOrFault === DEPENDENCY_FAULT ? undefined : layeredOrFault;
   const layer0 = layered?.layer0;
   const layer1 = layered?.layer1;
+  // [#24646 / ADR-0090 D10] An on-behalf-of by-id write may only touch a row the
+  // delegator could touch: step 2.7 composes the DELEGATOR's write filter (its
+  // own sets, its own context) and ANDs it into the same pre-image re-read as
+  // the principal's — {@link delegatorRecordWriteFilter} is that composition,
+  // for the verbs step 2.7 judges, judged on the `rls` layer with the
+  // principal's Layer 1. A rejection fails the write, so it is reported fail
+  // closed, as a rejection of the principal's own composition is.
+  const delegatorWriteOrFault = delegator && recordExists && (rlsOp === 'update' || rlsOp === 'delete')
+    ? await settle(delegatorRecordWriteFilter(deps, delegator, object, rlsOp))
+    : undefined;
+  const delegatorWriteFault = delegatorWriteOrFault === DEPENDENCY_FAULT;
+  const delegatorWriteFilter = delegatorWriteOrFault === DEPENDENCY_FAULT ? undefined : (delegatorWriteOrFault ?? undefined);
+  /** The business row filter this record's verdict is judged on: the principal's Layer 1, and the delegator's write filter beside it. */
+  const recordLayer1 = delegatorWriteFilter
+    ? (layer1 != null ? { $and: [layer1, delegatorWriteFilter] } : delegatorWriteFilter)
+    : layer1;
+  const rlsFault = layeredFault || delegatorWriteFault;
   const layeredFaultDetail = (layerName: string): string =>
     `${layerName} could not be evaluated: the row-level security composition threw, and enforcement ` +
     'fails the request on the same call — so the record is reported NOT visible (fail closed), never admitted.';
@@ -1854,22 +1915,28 @@ async function applyRecordAttribution(
   if (rlsLayer) {
     if (!recordExists) {
       rlsLayer.record = { outcome: 'not_evaluated', rules: [], detail: 'Record not found; business RLS not evaluated.' };
-    } else if (layeredFault) {
-      rlsLayer.record = { outcome: 'not_evaluated', rules: [], detail: layeredFaultDetail('Business RLS') };
-    } else if (layered === undefined) {
+    } else if (rlsFault) {
+      rlsLayer.record = {
+        outcome: 'not_evaluated',
+        rules: [],
+        detail: layeredFault
+          ? layeredFaultDetail('Business RLS')
+          : layeredFaultDetail("The delegator's write filter (ADR-0090 D10)"),
+      };
+    } else if (layered === undefined && !delegatorWriteFilter) {
       rlsLayer.record = { outcome: 'not_evaluated', rules: [], detail: 'Business RLS split is unavailable on this engine build.' };
-    } else if (layer1 == null) {
+    } else if (recordLayer1 == null) {
       rlsLayer.record = { outcome: 'not_evaluated', rowFilter: null, rules: [], detail: 'No business RLS policy applies to this record.' };
     } else {
-      const deny = isDenyAll(layer1);
-      const m = matches(layer1);
+      const deny = isDenyAll(recordLayer1);
+      const m = matches(recordLayer1);
       const excluded = deny || m === false;
       // [#24164 ruling E′] An object's default row scope is named as itself,
       // reached through the object's declaration rather than a held set.
-      const [objectDefault] = objectDefaultRowScopesOf([layer1]);
+      const [objectDefault] = objectDefaultRowScopesOf([layer1, delegatorWriteFilter].filter(Boolean) as Record<string, unknown>[]);
       rlsLayer.record = {
         outcome: excluded ? 'excluded' : 'admitted',
-        rowFilter: layer1,
+        rowFilter: recordLayer1,
         matchesRecord: deny ? false : m,
         rules: [
           objectDefault
@@ -1877,16 +1944,20 @@ async function applyRecordAttribution(
                 kind: 'rls_policy',
                 name: objectDefault.name ?? '(unnamed)',
                 via: 'object_default',
-                predicate: layer1,
+                predicate: recordLayer1,
                 effect: excluded ? 'excludes' : 'admits',
               }
-            : { kind: 'rls_policy', name: 'business_rls', predicate: layer1, effect: excluded ? 'excludes' : 'admits' },
+            : { kind: 'rls_policy', name: 'business_rls', predicate: recordLayer1, effect: excluded ? 'excludes' : 'admits' },
         ],
         detail: (deny
           ? 'Business RLS composes to DENY ALL for this principal.'
           : excluded
             ? 'The record does not satisfy the business row-level predicate.'
             : 'The record satisfies the business row-level predicate.') +
+          (delegatorWriteFilter
+            ? ` On this on-behalf-of ${engineOp}, the predicate is the principal's business RLS AND the delegator's ` +
+              'own write filter, as the by-id write composes them (ADR-0090 D10).'
+            : '') +
           (objectDefault ? objectDefaultRowScopeSource(object, [objectDefault]) : ''),
       };
     }
@@ -1932,7 +2003,7 @@ async function applyRecordAttribution(
   else if (rlsExcluded) { visible = false; decidedBy = 'rls'; }
   // A dependency that threw decides by failing the request, in the order the
   // pipeline calls it: the RLS composition runs before the sharing middleware.
-  else if (layeredFault) { visible = false; decidedBy = 'rls'; }
+  else if (rlsFault) { visible = false; decidedBy = 'rls'; }
   else if (sharingFaultDetail) { visible = false; decidedBy = 'sharing'; }
   // [ADR-0055] The master check refuses after the record's own row-level
   // security (step 2.8 runs below the pre-image gate), and names its leg on
@@ -1955,7 +2026,7 @@ async function applyRecordAttribution(
         ? 'sharing'
         : depthAdmitsRow
           ? 'depth'
-          : layer1 != null
+          : recordLayer1 != null
             ? 'rls'
             : owd.effect === 'private' && ownerIsMe
               ? 'owd_baseline'
@@ -2652,6 +2723,7 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
       deps: askerCannotRead || principalCannotRead ? { ...deps, fetchRecord: async () => null } : deps,
       object, recordId, engineOp: dataOp, rlsOp, context, sets, layers, owd, capsDeny, crudAllowed,
       vamaEffective, vamaSets, declaredColumns, depthScope: scope,
+      ...(delegatorSets && delegatorContextForRls ? { delegator: { sets: delegatorSets, context: delegatorContextForRls } } : {}),
     });
     recordVerdict = out.record;
     posture = out.posture;

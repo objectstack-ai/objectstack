@@ -92,7 +92,15 @@ export const SysAuditLog = ObjectSchema.create({
       // `permission_change` removed (#8147): the value is retired from the enum,
       // so the filter would have matched nothing for the rest of time. Permission
       // object writes are already on the ledger as ordinary create/update rows.
-      filter: [{ field: 'action', operator: 'in', value: ['login', 'logout'] }],
+      //
+      // `login_failed` and `account_locked` joined WITH their writer (the
+      // auth-event sink's account events, called from plugin-auth's password
+      // sign-in outcome): a refused sign-in and an account entering the
+      // ADR-0069 D2 lockout are auth events, and this preset is where an
+      // administrator looks for them.
+      filter: [
+        { field: 'action', operator: 'in', value: ['login', 'logout', 'login_failed', 'account_locked'] },
+      ],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
@@ -243,6 +251,17 @@ export const SysAuditLog = ObjectSchema.create({
     // ⛔ Dotless `snake_case`, per Prime Directive #3 and every incumbent value
     // here; the ruling's illustrative `platform_admin_standing.changed` carried
     // a dot and was written 「e.g.」.
+    //
+    // `login_failed` and `account_locked` join the enum WRITER-FIRST. Their
+    // writer is `auth-event-audit.ts` (`createAuthEventAuditSink`, the account
+    // event class), called by plugin-auth from the password sign-in outcome
+    // (`auth-session-audit.ts`): one `login_failed` row per refused sign-in
+    // that names an existing account, and one `account_locked` row each time
+    // the ADR-0069 D2 lockout is stamped. Each row names the account
+    // (`user_id`, and `sys_user` + its id as the target), the outcome (the
+    // action, plus the refusal's machine code in `metadata`), the time and the
+    // client fingerprint; never the attempted credential. Their shipped
+    // surface is the `auth_events` list view above.
     action: Field.select(
       [
         'create',
@@ -251,6 +270,8 @@ export const SysAuditLog = ObjectSchema.create({
         'delete',
         'login',
         'logout',
+        'login_failed',
+        'account_locked',
         'config_change',
         'import',
         'platform_admin_standing_change',
@@ -326,7 +347,8 @@ export const SysAuditLog = ObjectSchema.create({
       // MACHINE NAME beside a real record id of that object —
       // `audit-writers.ts` (`object_name: ctx.object`, `record_id: recordId`),
       // `read-audit.ts` (`event.objectName` / `event.recordId`),
-      // `auth-event-audit.ts` (the session object + `event.sessionId`) and
+      // `auth-event-audit.ts` (the session object + `event.sessionId` for a
+      // session event, `sys_user` + the account's id for an account event) and
       // plugin-auth's admin user endpoints (`'sys_user'` + the affected user
       // id). The pair is also the object's own query key: the
       // `{object_name, record_id}` index and the `record_views` list view
