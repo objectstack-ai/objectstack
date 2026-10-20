@@ -315,7 +315,12 @@ describe('#8844 multi-organization — the write is REFUSED, never defaulted', (
       expect(refusal.status).toBe(500);
       // Loud: the condition, what would have been written, and the remedy.
       expect(refusal.message).toContain('dispatch_order');
-      expect(refusal.message).toContain('__global__');
+      // What would have been written: a row no organization owns (ADR-0131 D9)
+      // — and, since stage 8d, NOT the retired organization-less counter, which
+      // no write can reach any more.
+      expect(refusal.message).toContain('organization_id = NULL');
+      expect(refusal.message).toContain('ADR-0131 D9');
+      expect(refusal.message).not.toContain('__global__');
       expect(refusal.message).toContain('tenantId');
       expect(refusal.message).toContain('systemFields: { tenant: false }');
 

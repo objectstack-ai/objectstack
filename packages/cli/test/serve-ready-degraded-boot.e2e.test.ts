@@ -48,6 +48,12 @@ import {
  * incidents reached by other routes: a plugin that did not load, and a core
  * service that is not there.
  *
+ * [ADR-0131 D9] Both legs boot `--no-server`. A production SERVER boot with no
+ * secret is now refused before the kernel starts
+ * (`serve-no-auth-secret-refusal.integration.test.ts`), so it reaches no banner; the
+ * kernel-only boot still skips auth with the warning and still prints the
+ * ready banner, which is the property under test here.
+ *
  * ⛔ `runServe()` cannot reach it. That helper spawns `bin/run-dev.js`, which
  * sets `NODE_ENV = 'development'` before argv is parsed, so `isDev` is true,
  * the dev fallback secret applies, auth ALWAYS loads and the boot is never
@@ -92,7 +98,7 @@ async function boot(env: Record<string, string | undefined> = {}): Promise<Boot>
   // A kernel-assigned port (#24295): production posture refuses to auto-shift,
   // so a port drawn and released beforehand is a red whenever another process
   // takes it in the gap. Nothing here talks to the port.
-  const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '--port', KERNEL_ASSIGNED_PORT], {
+  const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '--no-server', '--port', KERNEL_ASSIGNED_PORT], {
     cwd: fixtureDir,
     stdio: ['ignore', 'pipe', 'pipe'],
     // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
