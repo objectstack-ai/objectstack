@@ -50,6 +50,7 @@ import { NotificationDelivery } from './notification-delivery.object.js';
 import { NotificationPreference } from './notification-preference.object.js';
 import { NotificationReceipt } from './notification-receipt.object.js';
 import { NotificationSubscription } from './notification-subscription.object.js';
+import { installDefaultOrganization } from '../default-organization.testkit.js';
 
 const SYS = { context: { isSystem: true } } as any;
 const NOW = new Date('2026-09-25T00:00:00Z');
@@ -164,6 +165,9 @@ describe('[#20044] notification objects resolve a real record title under ADR-00
       engine.registry.registerObject(schema, 'com.objectstack.test.20044');
     }
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
   });
 
   afterAll(async () => {
