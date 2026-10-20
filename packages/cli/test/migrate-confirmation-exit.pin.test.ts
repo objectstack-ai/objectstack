@@ -140,7 +140,7 @@ const COMMANDS = new Map<string, Runnable>();
 for (const name of readdirSync(MIGRATE_DIR).sort()) {
   if (!name.endsWith('.ts') || /\.(test|spec)\.ts$/.test(name) || name.endsWith('.d.ts')) continue;
   const mod = (await import(join(MIGRATE_DIR, name))) as { default?: unknown };
-  if (typeof mod.default === 'function') COMMANDS.set(basename(name, '.ts'), mod.default as Runnable);
+  if (typeof mod.default === 'function') COMMANDS.set(basename(name, '.ts'), mod.default as unknown as Runnable);
 }
 
 /** A mode that writes behind a confirmation: a `yes` flag, or an `apply` mode. */
