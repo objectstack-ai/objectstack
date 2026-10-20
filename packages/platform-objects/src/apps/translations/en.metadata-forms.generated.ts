@@ -226,7 +226,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.expression": {
         label: "Expression",
-        helpText: "CEL formula expression"
+        helpText: "CEL expression the field's value is computed from. On a formula field: computed on read, no stored column. On any other field: computed by the engine from the row each write stores, and stored, so a client-sent value never stands."
       },
       "fields.returnType": {
         label: "Return Type",
@@ -763,7 +763,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       expression: {
         label: "Expression",
-        helpText: "CEL expression to calculate this field (makes it read-only)"
+        helpText: "CEL expression the field's value is computed from. On a formula field: computed on read, no stored column. On any other field: computed by the engine from the row each write stores, and stored, so a client-sent value never stands."
       },
       returnType: {
         label: "Return Type",

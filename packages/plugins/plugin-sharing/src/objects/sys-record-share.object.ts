@@ -215,6 +215,23 @@ export const SysRecordShare = ObjectSchema.create({
       maxLength: 100,
       description: 'ID of the user/group/position that receives access',
       group: 'Recipient',
+      // [#24701] Drawn as the recipient it names, not as the stored id: the
+      // console's `recipient-picker` face (objectui#12613) reads the kind from
+      // the row's `recipient_type` and names the id by that kind's directory
+      // (a `user` id by an exact-id `sys_user` read). It is the declaration
+      // `sys_sharing_rule.recipient_id` carries, less `object_name`: the face
+      // reads that sibling only for the `field` recipient kind, which this
+      // object's `recipient_type` does not offer, and `grant()` writes `user`
+      // alone (ADR-0111 D7).
+      //
+      // A display hint only. The column stays this text column, and no form
+      // ever draws the picker as an editor: the object is engine-owned and its
+      // data API is read-only (`enable.apiMethods` below), so `grant()` stays
+      // the one writer of a recipient. A list that does not fetch
+      // `recipient_type` gives the face no kind, and the cell draws the stored
+      // id as before (`sys-record-share.recipient-face.test.ts`).
+      widget: 'recipient-picker',
+      dependsOn: ['recipient_type'],
     }),
 
     access_level: Field.select(
