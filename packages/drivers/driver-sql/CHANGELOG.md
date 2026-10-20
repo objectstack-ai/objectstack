@@ -1,5 +1,584 @@
 # @objectstack/driver-sql
 
+## 18.0.0
+
+### Minor Changes
+
+- 12d1476: feat(cli,runtime)!: `os migrate organization-ownership` upgrades a database 17.x or an 18.0 pre-release created; a server serves only a database it created or one the ceremony certified
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The data migration this change prescribes is the operator's ceremony, `os migrate organization-ownership`, stated below; the boot refusal names it. Two `@objectstack/objectql` exports are removed, `WALLED_ORGANIZATION_LESS_BRIDGE` and `isWalledOrganizationLessBridgeObject`: they named the two tables whose organization-less inserts were let through under a wall while those tables still carried an organization column, and both tables now declare none. Neither is a metadata key and no stored row or stack names them, so a caller has nothing to migrate: drop the import, since a deployment-level table is recognised by `systemFields: { tenant: false }`. -->
+  
+  **BREAKING** for a database with no birth marker — one 17.x or an 18.0 pre-release (`18.0.0-next.*`) created — shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D10).
+  
+  - **The ceremony is open.** `os migrate organization-ownership` runs again (the 18.0 pre-releases refused it with `NOT_IMPLEMENTED`): a bare run writes the plan, and `--apply --plan-file PLAN --backup-taken` applies that reviewed plan. Its new steps carry what an 18.0 pre-release database still owes, each selected by the rows' shape, never by a NULL organization:
+    - `sibling-moves`: the global settings-audit rows move to `sys_platform_setting_audit`, and identity mail (reset, verification, account invitation, change-email notice, magic link) to `sys_identity_email`, id for id. Their queued mail jobs and their activity rows follow them. The organization invitation stays in `sys_email`.
+    - `declared-webhooks`: each `sys_webhook` copy a package's seeder wrote under a name a package still declares is settled. A pristine copy is deleted once its deliveries name the declaration (`declared:NAME`), with the cipher it referenced. A copy customized only in its switch becomes the declaration's activation row. Any other edit becomes the administrator's own webhook under a new name (`NAME_custom`), and the declaration is switched off.
+    - `declared-rule-copies`: each stored sharing rule under a declared rule's name becomes a clone under a new name, its grants kept, and the declaration is switched off.
+    - `not-null`: after the column drops, every table the post-step plan clears takes `organization_id` NOT NULL. The ceremony owns that nullability, so the schema differ no longer reports it as `relax_not_null` drift.
+  - **The boot guard decides on a marker.** The first boot that creates a datastore from empty writes a birth marker (`sys_migration` row `adr-0131-organization-ownership`, `details.birth.shapeGeneration`). Every CLI data boot writes it too, so a fresh install whose first command is `os migrate apply` or `os seed` still boots. On the Turso remote face (`libsql://`), `getSchemaSyncStats` now answers what its schema doors created and found (it answered `{ created: 0, existing: 0 }` before), so a fresh remote database is observed as one and gets its marker. The ceremony's verified marker carries the same `shapeGeneration` (now `1`, `ORGANIZATION_OWNERSHIP_SHAPE_GENERATION` in `@objectstack/spec/system`). A server refuses a database with no marker (one 17.x or an 18.0 pre-release created), one certified at an older generation, or an uncertified one. The refusal names the command and no longer says to stay on 17.x. The v17-shape probe also reads `tenancy: { enabled: false }` and `systemFields: false`.
+  - **`sys_secret` and `sys_flow_credential` are deployment-level** (`systemFields: { tenant: false }`). Their `organization_id` is dropped by the ceremony's column-drops step. The settings service no longer writes one, and `SettingsSecretStore.insert` no longer takes it. With no organization column, their organization-less system inserts land under a walled posture on the engine's own rule, so `@objectstack/objectql` no longer exports `WALLED_ORGANIZATION_LESS_BRIDGE` or `isWalledOrganizationLessBridgeObject`, and the system-write refusal's remedy names `systemFields: { tenant: false }`.
+  
+  **What an operator does.** Fresh installs are supported under every tenancy posture and need nothing. Before serving a database 17.x or an 18.0 pre-release created with this release: start this release against it once (the boot is refused, and its schema sync has already created the tables this release adds, which the ceremony moves rows into), take a backup, run `os migrate organization-ownership --out plan.json`, review the plan, then run `os migrate organization-ownership --apply --plan-file plan.json --backup-taken`, and start the server. `os dev` does this for a local SQLite development database. On a walled database, a customized copy of a declared webhook or sharing rule blocks its step, naming the row: rename it to a name no package declares, or delete it, then re-run.
+- 7c2eab9: feat(driver-sql)!: a tenant-scoped read no longer answers a row with no organization; the driver's `OR organization_id IS NULL` arm is retired
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A read-scope narrowing in the SQL driver's tenant chokepoint and the lifecycle sweep's global pass: no key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. No export, type or error code is added, removed or renamed. The data it stops reaching is retired by the 18.x upgrade ceremony, which certifies zero organization-less rows before a database boots. -->
+  
+  **BREAKING** read-scope narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D1, D14). Step 7 of the 18.x organization-ownership line: it lands after the upgrade ceremony opens.
+  
+  - **Before.** `SqlDriver.applyTenantScope` compiled a tenant scope as `(organization_id = :tenant OR organization_id IS NULL)`, and the `group` posture's union as `(organization_id IN (…) OR organization_id IS NULL)`. That was the v17 reading, in which a row with no organization stood for platform state, and every tenant's scoped read, count, update and delete reached it. The Turso remote face compiles the same scope, so it answered the same rows.
+  - **Now.** The scope is `organization_id = :tenant`, or `organization_id IN (…)` under `group`. NULL is not an owner: a row with no organization is no tenant's, and only an unscoped read (no tenant on the call) reaches it. The lifecycle sweep's global retention and archive pass over an `organization_id` partition is a bare `$nin` of the overriding tenants: it no longer selects organization-less rows.
+  - **Unchanged.** A call with no tenant context and an object with no tenant column are unscoped, as before. The `single` posture's driver reads carry no tenant scope at all (ADR-0131 D8). The `sys_audit_log` attribution partition (`tenant_id`, ADR-0131 D7) keeps its NULL arm: a deployment-level ledger row is about no organization by design, and the global pass still reaps it. Insert stamping (`injectTenantOnInsert`) is unchanged.
+  
+  **Who is affected.** Only a database that still holds organization-less rows in a tenant-scoped table, and only under a walled posture (`group` / `isolated`) or a caller that passes `tenantId` to the driver itself. A certified 18.x database holds none: a v17 database is refused at boot until `os migrate organization-ownership` certifies it, and a fresh install never writes one.
+  
+  **The remedy.** If a scoped read misses a row you expect, the row has no organization: run the upgrade ceremony (`os migrate organization-ownership` to review its plan, then the same command with `--apply`), which stamps each such row with its owner, or stamp it yourself (`organization_id = <the owning organization>`).
+- dd29bbe: feat(metadata-core,metadata-protocol)!: the `sys_metadata` family declares no organization column — `sys_metadata`, `sys_metadata_audit`, `sys_metadata_commit` and `sys_metadata_history` (ADR-0131 D6/D7)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered sys-metadata-organization-column-retired, sys-metadata-audit-organization-column-retired, sys-metadata-commit-organization-column-retired, sys-metadata-history-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Metadata is the environment's (ADR-0131 D6). The four tables of the metadata family no longer declare `organization_id`, and each sets `systemFields.tenant: false`, so the engine injects none back. The engine refuses an undeclared field, so nothing reads or writes the column any more.
+  
+  FROM → TO:
+  
+  - An authored filter, list-view column, report grouping, formula or seed key naming `organization_id` on one of the four tables → delete it; no organization owns a row. The field resolver answers it as an unknown field.
+  - `new SysMetadataRepository({ engine, organizationId, orgLabel })` → `new SysMetadataRepository({ engine, orgLabel })`. The `organizationId` option is gone: every repository reads and writes the environment's rows.
+  - `DatabaseLoader`'s `organizationId` option (and so `MetadataManager.setDatabaseDriver` / `setDataEngine`'s `organizationId` argument) → accepted and ignored, like `environmentId`: no write stamps it and no read filters on it. Drop the argument.
+  - `@objectstack/spec`: the published `ApiError.code` / `ErrorCode` enum widens by `LEGACY_ORGANIZATION_ROWS_UNREADABLE`, registered under `@objectstack/metadata-core`.
+  - `isLegacyOrganizationRow(row)` (`@objectstack/metadata-core`) → `readLegacyOrganizationRows(driver, table?)`. The row-value test read a key the engine no longer returns, so it is removed. The new read answers from the physical column, through the table's driver (`engine.getDriverForObject`): id → organization, empty on a migrated or fresh database. A seam that cannot answer is refused (`LegacyOrganizationRowsUnreadable`), never read as "none".
+  - An existing database → run `os migrate organization-ownership` (review its plan), then `os migrate organization-ownership --apply --plan-file FILE` with that plan file. The ceremony promotes or reports the legacy organization rows, then drops the physical column. Until it has run, the v18 runtime refuses to start against the database.
+  
+  The indexes are re-keyed with the column:
+  
+  - The overlay unique key is (`type`, `name`, `package_id`, `bundle_member`): the declared `idx_sys_metadata_overlay_active` and the runtime partial indexes of the same names. Removing the organization TIGHTENS uniqueness. On a database the ceremony has not cleared, two legacy organizations' rows, or an organization's row and the environment's, can share a key. There the runtime index migration keeps the previous index and names the duplicates (ADR-0120 D4); it never drops a row. `os migrate duplicates` and the boot report group by the same key.
+  - `sys_metadata_history` is unique on (`event_seq`) and on (`type`, `name`, `version`). Its other indexes, and those of `sys_metadata_audit` and `sys_metadata_commit`, lose their organization prefix.
+  - `idx_sys_metadata_org_type` is gone.
+  
+  What else changes:
+  
+  - The boot line `[metadata_org_scoped_unserved]` is gone with the column it read. A database still holding legacy organization rows is refused at boot instead, until the ceremony has run.
+  - The package uninstall no longer removes a legacy organization's row of the package's name: no row carries an organization.
+  - Who reads the family through the generic data door (`/data/sys_metadata_*`), before → after:
+    - `sys_metadata_audit`, `sys_metadata_history`, `sys_metadata_commit`, **under a wall** (`isolated` / `group`): before, the tenant wall filtered each caller to its own organization's rows, and an `organization_admin` read its organization's. With the column gone the wall has nothing to filter on, so without a gate that admin would read every organization's trail, history bodies and commit ranges. After: each requires `studio.access` (`requiredPermissions`, the #22107 precedent). The capability is platform-scoped, so an `organization_admin` holding it by role does not exist, and that admin is refused.
+    - The same three, **under `single`**: before, any caller whose grant covered the table (a read wildcard) read it. After: `studio.access` is required there too. A Studio author (the platform admin among them) reads as before; a plain member is refused.
+    - Every `/meta` door serving these rows admits `studio.access`: `/meta/:type/:name/history`, `/audit` and `/diff` admit `studio.access` or `manage_metadata`, and `/packages/:id/commits` admits `studio.access` alone; `setup.access` alone is refused at all four. `requiredPermissions` is an AND-gate and cannot name an any-of set, and `setup.access` is held by organization admins, so it could not be the gate. A caller holding only `manage_metadata` therefore still reads the history and audit rows through `/meta`, but not the commit rows, and none of them through the data door.
+    - `sys_metadata` stays ungated, before and after: its rows are what `/meta` already serves to every organization.
+  - On a database the ceremony has not migrated (which `os serve` refuses, but every `os migrate` boot opens, the ceremony's own among them), the legacy organization rows are still told apart, off the physical column:
+    - every read the metadata protocol makes of the family goes through one seam that leaves them out. That covers boot hydration; the `/meta` list, by-name, layered and draft-preview reads; the item lock (`_lock`) the reads report and the save and delete gates enforce; the package-less write and read address; and the package, commit, audit, history and diff reads. Two reads keep them on purpose and read the column themselves: `os migrate meta --stored` reports such a row, and the commit revert refuses a legacy commit by name. The authored hook and action binders leave them out too;
+    - the metadata repository's write never resolves to one: before, a save of an address that only a legacy organization's row held rewrote that row in place (measured on the ceremony's template promotion). Now the write targets the environment's row, and with none it creates one, which the re-keyed unique index refuses beside the organization's row until the ceremony settles it;
+    - `os migrate meta --stored` reports such a row `skipped` and never re-saves it;
+    - `os migrate security-catalog-overlays` neither lists nor deletes it;
+    - a commit recorded in a legacy organization's layer is still refused by the revert;
+    - the runtime-datasource reads, the packaged permission-set overlay reading, the kernel:ready security-catalog echo, the stored flow-credential move and a `DatabaseLoader` (engine- or driver-backed) leave them out.
+  - `SqlDriver.listPhysicalColumns(object, options?)` (new, read-only): a table's physical column names, from the catalog, joining `options.transaction`. `TursoDriver`'s remote face answers it from the remote catalog. Every boot asks whether the family still carries the retired column, and it asks this way, not through `execute()`. So `os migrate plan` keeps its "a plan writes nothing" line on a migrated or fresh database. The legacy rows themselves are read with a raw statement only where the column exists.
+  - `GET /forms/:slug` and `POST /forms/:slug/submit` no longer read the Default Organization's legacy layer. Every metadata read is now environment → code. The doors judge each candidate against the environment's view list, which holds one item per package of a view name. So a withdrawal in one package still closes that name's form in every package. On a deployment with no organization this closes more than before, which is the fail-closed direction. A withdrawal saved only at the organization layer is carried onto the environment by the ceremony's `metadata-promotion` step, which the runtime requires before it starts.
+  - The protocol's `getMetaItems` drops its undocumented `legacyFormOrganizationId` request key. It was never in the spec's `GetMetaItemsRequest`, and only those doors passed it. A caller that still passes it now gets the environment's list.
+- 462dff3: feat(drivers): the five drivers compile the composed `ReadableIds` leaf or refuse it with one envelope, and the leaf's conformance case-set lands with the suites that run it (ADR-0139 D3)
+  
+  Clause-②: yes
+  
+  The engine already composes every `ReadableIds` leaf at its executor boundary (ADR-0139 D2). Until now no driver evaluated the composed leaf; each driver now either compiles it or refuses it.
+  
+  - **`@objectstack/driver-sql`** compiles `{ field: { $in: <composed leaf> } }` to `field IN (SELECT id FROM <parent table> WHERE <scope> AND <tenant wall>)`. The subquery's tenant wall is `applyTenantScope` on the parent table with the outer read's own options. `find`, `count`, `aggregate` and the other read doors issue one statement, so they agree. The statement binds only the scope's own values and the two walls, never one parameter per readable parent: a reader with more than 2,000 readable parents gets every row they may see. `applyFilters` and `applyFilterCondition` (both `protected`) take the read's `DriverOptions` as a new optional last parameter, which the subquery needs.
+  - **`@objectstack/driver-sqlite-wasm`** and the local face of **`@objectstack/driver-turso`** inherit that compile. **Turso's remote face** has a compiler of its own. `TursoDriver` resolves the leaf into the parent's remote table, its scope and its tenant wall, using the same chokepoint, and `RemoteTransport` compiles the same semi-join.
+  - **`@objectstack/driver-memory`** evaluates the leaf in process. It reads the parent under the composed scope, then tests membership. It owes no tenant wall, because it refuses every tenant-scoped call.
+  - **`@objectstack/driver-mongodb`** refuses the leaf, composed or not, until a pipeline form is measured (ADR-0139 open item O3).
+  - **The refusal is the same on every driver**: `INTERNAL_ERROR` / 500, never `INVALID_FILTER`. A driver gives it for an uncomposed leaf at any position (the direct driver call that bypassed the engine), a composed leaf outside a `$in` comparand, and every leaf on `driver-mongodb`. The message names the driver, the leaf and the remedy. It is logged at `error` once per driver. No `DriverCapabilities` bit is added.
+  - **`@objectstack/core`** exports the shared pieces: `findMisplacedReadableIds`, `replaceComposedReadableIds`, `readableIdsDriverRefusal`, `refuseReadableIdsOnce` and the `MisplacedReadableIds`, `ReadableIdsDriverRefusalError` and `ReadableIdsRefusalLog` types.
+  - **`@objectstack/spec`** exports the leaf's driver conformance case-set from `@objectstack/spec/data`: `READABLE_IDS_CASES`, the fixture (`READABLE_IDS_PARENT_OBJECT`, `READABLE_IDS_CHILD_OBJECT`, `READABLE_IDS_PARENT_ROWS`, `READABLE_IDS_CHILD_ROWS`), the refusal envelope `READABLE_IDS_REFUSAL`, and their types. Every driver package runs the case-set, and the driver conformance gate records that with no ledger rows.
+- c4111c6: fix(cli,driver-turso): `os migrate plan` and `os migrate apply` on a Turso REMOTE database no longer offer `--allow-destructive` for a change that database cannot apply
+  
+  Clause-②: yes (widening)
+  
+  On a primary reached over the Turso REMOTE transport (`libsql://…`), `os migrate plan` listed a NOT NULL tightening with the remedy `Run "os migrate apply --allow-destructive".` and closed with `(add --allow-destructive for drops / tightenings)`. That transport runs no SQLite table rebuild, so the apply then named the tightening as not applied and exited 1. The plan now says so before the apply: each change the database cannot apply (a tightened or relaxed NOT NULL, a dropped DEFAULT) is still listed, with its finding and `"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE transport does not run.` in place of the remedy. The footer offers `--allow-destructive` only for the destructive changes the database can apply (a column drop, an index change) and says how many listed changes remain drift after the apply. The listing `os migrate apply` prints before its prompt reads the same way. Its counts of held-back destructive changes, before the prompt and after the run, offer a re-run with `--allow-destructive` only for the ones that re-run could apply, and name the rest as drift it cannot apply either. On every other database both commands read exactly as before, and their `--json` documents are unchanged on every database.
+  
+  `@objectstack/driver-turso`: `TursoDriver.driftApplyLimit(opType)` is new. It returns why the driver's `applyMigrationEntries` cannot perform a drift op of that type on this face, or `null` when it can. It answers from the same per-op declaration the REMOTE apply door dispatches by, and returns `null` for every op on the local and embedded-replica faces. A driver that does not implement it is read as applying every op the differ means it to.
+  
+  `@objectstack/driver-sql`: `driftFindingWithoutRemedy(entry)` is a new export. It returns a drift entry's finding without the `os migrate apply --allow-destructive` sentence that a destructive column entry's message ends with, and returns every other message unchanged; the messages themselves keep their exact text.
+
+### Patch Changes
+
+- 9e9e6f9: feat(cli)!: `os meta resync` is deleted
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A CLI command is removed; it reconciled platform rows no reader uses for authorization, and no key of any spec schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The package publishes (not unpublished); no ADR-0087 id covers this rule and this diff adds none (not registered / already-registered). -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `os meta resync` reconciled the platform-default `sys_permission_set` rows (`admin_full_access`, `member_default`, …) to the shipped declaration. Since the authorization resolver reads permission sets from the security catalog (ADR-0131 D3), an edited default set is served from its declaration at the next boot, and the rows the command reconciled decide nothing. The command, its `--yes` / `--json` modes and its skip-count explanation are gone; a script that calls it gets oclif's unknown-command error.
+  
+  In `@objectstack/plugin-security`, `@objectstack/driver-sql` and `@objectstack/runtime`, shipped comments and one warning sentence (the permission-set backfill's re-provision list) no longer name the command. Their behaviour is unchanged.
+- 3d886ee: A field can declare cell formatting rules: `conditionalFormatting: [{ condition, style }]`, the rule a list view already declares for its rows
+  
+  Clause-②: yes (widening)
+  
+  - **`FieldSchema.conditionalFormatting`** (optional) is an ordered list of `{ condition, style }` rules. The first rule whose CEL `condition` holds applies its CSS `style` map to that field's cell, wherever the field renders. A list view's row rules still style the row, and both may apply to one record. Example: `amount: Field.currency({ conditionalFormatting: [{ condition: P\`value < 0\`, style: { color: '#b91c1c' } }] })`.
+  - **One rule element, no second style vocabulary.** The `{ condition, style }` element moved out of `ListViewSchema` into its own spec module, and both `ListViewSchema.conditionalFormatting` and `FieldSchema.conditionalFormatting` mount it. The list view accepts exactly what it accepted before. Its refusal of an unknown rule key now reads the same on both members: for a `color` written beside `style`, it says to put the colour in `style` first, then points a list view at `rowColor`.
+  - **The scope is `value` and `record`.** `value` is this field's value on the record and `record` is the row. `@objectstack/lint` judges each condition at `objectstack build`, `objectstack validate` and the object save: it must parse, read fields as `record.<field>`, name declared fields, and read no other root (`previous`, `parent` and the user roots are refused, naming the field and the rule).
+  - **For presentation only.** Use it for rules that carry no meaning of their own, such as an amount below zero in red or stock under its safety level in amber. A deadline's overdue state stays a declaration (`dueLike` with `settledWhen`).
+  - **Display only.** Nothing on the write path reads the key, and every metadata that parsed before parses unchanged. Field-level security drops a rule whose condition reads a field the caller cannot read, keeping the other rules in order (`@objectstack/metadata-core`). The SQL driver classifies the key as presentation, so it never reaches column DDL (`@objectstack/driver-sql`).
+  - **Who reads it.** objectui's cell renderers read the rules in a follow-up release, once this spec version is published. Until then a rule is validated when it is authored and styles no cell.
+- 86f53a4: fix(cli): `os migrate plan` / `apply` / `unmapped-columns` examine what `os serve` mounts around the stack, so the retired `sys_account.issuer` is finally a drop (#22506)
+  
+  `os migrate plan` and `os migrate apply` only examine the objects their own boot registers, and that boot stopped at the stack: its config, its metadata and the platform floor. Nothing `os serve` mounts around a stack was there. On an app declaring `requires: ['auth']`, the plan examined 9 of the 68 tables the serving boot had created. `sys_account` read as an undeclared platform table, so its retired `issuer` column (and that column's unique index) was never a destructive drop. `os migrate apply --allow-destructive` dropped nothing, while the boot's drift line and `os migrate account-issuer` kept prescribing exactly that command.
+  
+  The two commands now also compose, each through the rule `os serve` itself reads, and so does `os migrate unmapped-columns`, which reads the plan's own `unmapped_column` findings and therefore needs the plan's object set:
+  
+  - the auth family behind `serve`'s auth gate: plugin-auth's identity objects, the security plugin and the audit plugin, when the stack mounts no `AuthPlugin` of its own, the `auth` tier is on, and an auth secret resolves;
+  - the provider of every capability `serve` mounts: the stack's `requires` and the always-on slate, as `os serve` composes it with no `--preset`;
+  - the REST API plugin;
+  - every `plugins` entry by `serve`'s rule for one: a package name is loaded from the app, and a plain bundle is wrapped as an app;
+  - the pinyin-search decision from the config's locales, so the `__search` companion columns a boot provisions are no longer listed as destructive drops on a config-only project.
+  
+  `os migrate unmapped-columns --object sys_account` (or any platform object the plan now declares) resolves the object and reads its unmapped columns, where it used to answer `OBJECT_NOT_FOUND`.
+  
+  Each piece is composed for its declarations only. Its `init()` runs, and its `start()` and lifecycle hooks do not, so no dispatcher, scheduler or seed runs inside a dry run.
+  
+  **What an operator sees.** On the shape that looped, `os migrate plan` lists `sys_account.issuer` and `uniq_sys_account_issuer_account_id` as destructive drops. `os migrate apply --allow-destructive` drops both, `os migrate account-issuer` reads zero, and the next boot prints no drift line for them. When no auth secret is set and the boot is not a development one, the plan says it did not compose the auth family, and how to compose it: run with the deployment's `OS_AUTH_SECRET` exported. `os migrate` reads no `.env` file.
+  
+  **driver-sql.** The deferred-DDL preview answers a rotation-declared object (`lifecycle.storage.strategy: 'rotation'`, such as `sys_activity`) from the rotator's facts: when the current shard and the read view exist, nothing is pending. It used to list `create_table` for such an object on every plan, and `apply` then created nothing.
+  
+  **Known limit.** A development boot, or one with `OS_TELEMETRY_DB` set, keeps lifecycle-classed objects in a sibling `telemetry` database. The one-shot migration boot does not provision that database, so it examines those objects against the primary one.
+- e5687cb: An `email` field can declare that it identifies a correspondent for inbound mail: `mailAssociation`
+  
+  Clause-②: yes (widening)
+  
+  - **`mailAssociation: boolean`** (optional, no default) on a field definition. TRUE marks this email field as identifying a message correspondent: when a mailbox service ingests a message, it associates the message with every record of the object whose value in this field equals one of the message's participant addresses (From, Sender, Reply-To, To and Cc, plus those of a forwarded message it carries; ASCII case-insensitive; the receiving mailbox's own addresses excluded; only within the mailbox's organization). A message no record matches waits in the mailbox's unassociated pool. Absent or FALSE: the field takes no part in matching.
+  - **The platform learns which fields carry a correspondent's address, never what a contact is.** Every object that flags a field is treated alike; no app code and no resolver service is involved.
+  - **The door that judges it.** `FieldSchema` refuses the key on any type other than `email`, naming the field's type and the fix (change the type to `email`, or drop the key). Every metadata that parsed before parses unchanged.
+  - **Who reads it.** Nothing yet: the mailbox service's ingest is the reader, and it ships separately. Until then `objectstack validate` and `objectstack lint` warn an author who sets it (`liveness-planned-property`) that no mailbox service reads it yet.
+  - **Where to author it.** The field designer offers it on email fields as "Match Inbound Mail".
+  - **`@objectstack/driver-sql`.** `FIELD_KEY_STORAGE_CLASS` classifies `mailAssociation` as `presentation`: the mailbox service reads it, never `createColumn`, so a declaration on a builtin column name is not reported as discarded storage. No behaviour changes.
+  - **`@objectstack/metadata-core`.** `FIELD_REFERENCE_POSITIONS` classifies `mailAssociation` as `keep`: the FLS scrub of a served object definition passes the flag through unchanged, because it names no field.
+  - **`@objectstack/platform-objects`.** The field designer's new row carries its label and help text in the metadata-form translation bundles for en, zh-CN, ja-JP and es-ES.
+- 53646fc: fix(driver-sql): a SQLite database file the driver cannot create or open fails `connect()` at once, naming the file and the operating system's error (#23696)
+  
+  Clause-②: no
+  
+  A declared SQLite datasource whose `config.filename` lay under a directory the operating system will not make (for example `/proc/x/ds.db`) never finished connecting. The driver made the directory with Node's recursive `mkdir`, which loops without end on such a path: `mkdir` of the level answers `ENOENT`, its parent answers `EEXIST`, and it retries, about 1,600 failing calls a second, all system CPU. The boot was then refused only by a plugin start timeout (30 s, or 120 s when a `datasourceMapping` rule routes to the datasource), and that message named neither the datasource, the path nor the error. The same happened to the host's own database when `OS_DATABASE_URL=file:` named such a path.
+  
+  **What changes**
+  
+  - The directory is made by a walk bounded by the path's depth, one non-recursive `mkdir` per missing level. The first level the operating system refuses fails `connect()` with a `SqliteDatabaseFileError` that names the file, the directory and the cause (`ENOENT`, `EACCES`, `ENOTDIR`, …).
+  - A file SQLite itself cannot open (`SQLITE_CANTOPEN`, for example a filename that is a directory) now fails `connect()` the same way. Before, the error was logged as a warning and `connect()` resolved, so the datasource counted as connected while it could not answer one query. A native-addon load failure keeps its warning and the step-down to wasm SQLite.
+  
+  The boot's existing connect refusal (ADR-0062 D5) carries this message, so `objectstack serve` on such a config now prints, at once, `datasource 'primary': connect failed — SQLite database file '/proc/x/ds.db' cannot be created: its directory '/proc/x' could not be made: ENOENT: no such file or directory, mkdir '/proc/x'`. No configuration key or accepted value changes. A path the operating system can create still connects.
+- 8776119: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  feat(spec): `referenceDeletedWhen` beside `referenceVia` marks a polymorphic pointer's target as platform-deleted
+  
+  Clause-②: yes
+  
+  `FieldSchema` gains one optional key beside `referenceVia`: `referenceDeletedWhen: { field, value }`. On rows where the sibling `select` field `field` holds the option `value`, the record the pointer names was deleted by the platform's own assertion, and a renderer draws a tombstone from that option's own label instead of a link. Example: `record_id: Field.text({ referenceVia: 'object_name', referenceDeletedWhen: { field: 'cancel_reason', value: 'record_deleted' } })`.
+  
+  Any other shape is refused at parse, naming the field and the option:
+  
+  - the key on a field that declares no `referenceVia` (`FieldSchema`), or an unknown key inside it;
+  - a `field` that is the declaring field itself, is not declared on the object, is not a `select`, is a `multiple: true` select, or declares no inline `options` (a `picklist`-backed select); a `value` that is not one of the sibling's option values (`ObjectSchema`, at every door: `ObjectSchema.create()`, `defineStack`, raw `.parse()` and the metadata save door).
+  
+  Nothing that parsed before is refused: the key is new. Its liveness row is `planned` until the renderer that reads it ships.
+  
+  The other packages classify the new key where every field key is classified:
+  
+  - **`@objectstack/metadata-core`.** `FIELD_REFERENCE_POSITIONS` deletes a served field's `referenceDeletedWhen` when its `field` names a field the caller cannot read (field-level security); `value` is an option value and never a field name.
+  - **`@objectstack/driver-sql`.** `FIELD_KEY_STORAGE_CLASS` classifies it `presentation`: no DDL reads it.
+  - **`@objectstack/platform-objects`.** The field form's new `referenceDeletedWhen` row carries its labels and help text in zh-CN, ja-JP and es-ES.
+- Updated dependencies [5a871e4]
+- Updated dependencies [ffba02e]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [1b40780]
+- Updated dependencies [ca426cb]
+- Updated dependencies [4ad3ce5]
+- Updated dependencies [8016a9d]
+- Updated dependencies [df9d07e]
+- Updated dependencies [8eac321]
+- Updated dependencies [a5a781b]
+- Updated dependencies [9a7838e]
+- Updated dependencies [191e043]
+- Updated dependencies [b12e16a]
+- Updated dependencies [fbafb85]
+- Updated dependencies [35450f0]
+- Updated dependencies [1e8b628]
+- Updated dependencies [12d1476]
+- Updated dependencies [14ccb1d]
+- Updated dependencies [c0803b0]
+- Updated dependencies [4bc3bec]
+- Updated dependencies [1f949da]
+- Updated dependencies [ecb7b44]
+- Updated dependencies [41edf73]
+- Updated dependencies [1c1144f]
+- Updated dependencies [014863d]
+- Updated dependencies [3983965]
+- Updated dependencies [3230d66]
+- Updated dependencies [0c910d5]
+- Updated dependencies [317cddd]
+- Updated dependencies [b2e7870]
+- Updated dependencies [fec87e7]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [dac99c2]
+- Updated dependencies [0d3ea29]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [66949b7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7de0265]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [f9b4217]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [7958bdf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [04e776b]
+- Updated dependencies [a7df552]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [b15f8a1]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [440bed6]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [194a42d]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [87e902d]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [777eed2]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [ed03834]
+- Updated dependencies [e1deaef]
+- Updated dependencies [1badd31]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [4216796]
+- Updated dependencies [a22e67b]
+- Updated dependencies [5f37d36]
+- Updated dependencies [62ce45d]
+- Updated dependencies [39e93ef]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [8464380]
+- Updated dependencies [252a582]
+- Updated dependencies [f931e76]
+- Updated dependencies [1912af4]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [60f9baf]
+- Updated dependencies [f5ef054]
+- Updated dependencies [584e737]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [301eec6]
+- Updated dependencies [572ecfb]
+- Updated dependencies [5547ad4]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [0f05907]
+- Updated dependencies [5e725b8]
+- Updated dependencies [086fa46]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [daafae6]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [f606ba2]
+- Updated dependencies [d176b0a]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [ee0e115]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [0a052e6]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [c03077e]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [45e6001]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [9f024d8]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [fa26308]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [01fafde]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [26501ae]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [94e60c0]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [adb7910]
+- Updated dependencies [f573976]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [325a92e]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/core@18.0.0
+  - @objectstack/spec@18.0.0
+  - @objectstack/types@18.0.0
+  - @objectstack/observability@18.0.0
+
 ## 18.0.0-next.5
 
 ### Patch Changes

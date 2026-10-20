@@ -84,6 +84,34 @@ function nestVariables(variables: Map<string, unknown>): Record<string, unknown>
 }
 
 /**
+ * The user who TRIGGERED the run — every step's submitter, whoever resumed the
+ * run onto it (`ApprovalEscalationSchema.notifySubmitter`: "Notify the
+ * original submitter on escalation").
+ *
+ * After an approval decision the engine runs the next segment as the DECIDER
+ * (`ResumeSignal.resumedBy`, ruling A on `FlowSchema.runAs`), so
+ * `context.userId` on a later step is the previous step's decider, never the
+ * submitter. The engine keeps who started the run on the same context: at the
+ * first switch it records `triggerUserId` (`null` when the trigger resolved no
+ * user) and every later switch keeps it, persisted through each pause. Absent,
+ * no switch happened and `userId` is still the trigger user. This is the
+ * engine's own reading, `runTriggerUserId` in `@objectstack/service-automation`'s
+ * `runtime-identity.ts`, mirrored here because this plugin deliberately does not
+ * depend on service-automation (as {@link nestVariables} mirrors its condition
+ * scope). The two-step pins in `later-step-original-submitter.integration.test.ts`
+ * run it against the real engine.
+ *
+ * ⛔ Not `triggerUserId ?? userId`: a recorded `null` means nobody triggered
+ * the run, and falling through would name the decider as its submitter.
+ */
+function runTriggerUser(context: { userId?: string; triggerUserId?: unknown } | undefined): string | null {
+  if (context && Object.prototype.hasOwnProperty.call(context, 'triggerUserId')) {
+    return typeof context.triggerUserId === 'string' && context.triggerUserId !== '' ? context.triggerUserId : null;
+  }
+  return context?.userId ?? null;
+}
+
+/**
  * Register the `approval` node executor on the automation engine, plus the
  * `approval_revise` window the ADR-0044 send-back parks on. Idempotent at the
  * engine level (re-registering replaces). Safe to skip when no automation
@@ -162,7 +190,10 @@ export function registerApprovalNode(
           flowName,
           flowLabel,
           nodeLabel: typeof node.label === 'string' ? node.label : undefined,
-          submitterId: context?.userId ?? null,
+          // The run's trigger user, not `context.userId`: after a decision
+          // that is the decider, who acts in this segment (the envelope below)
+          // but did not submit the run.
+          submitterId: runTriggerUser(context),
           record,
           organizationId: context?.organizationId ?? context?.tenantId ?? null,
           // #3447 P2: flow variables (nested, as CEL conditions see them) — the

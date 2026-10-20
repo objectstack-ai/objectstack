@@ -593,6 +593,120 @@ describe('AutoEnqueuer', () => {
 });
 
 /**
+ * #24835 — a delivery the outbox could not record is a DURABILITY loss: the
+ * record write already answered 200 and the webhook still reads active, so it
+ * is reported at `error` (AGENTS.md "Degradation log levels"), said once per
+ * webhook, and re-armed by the next delivery recorded for that webhook. The
+ * measured cause was a payload `JSON.stringify` refused on PostgreSQL; any
+ * refused write takes the same path, so the fake throws that error.
+ */
+describe('AutoEnqueuer — a delivery that could not be recorded is reported at error (#24835)', () => {
+    type Line = { level: 'debug' | 'warn' | 'error'; msg: string; meta?: any };
+    function capturingLogger() {
+        const lines: Line[] = [];
+        const logger = {
+            info() {},
+            debug: (msg: string, meta?: unknown) => { lines.push({ level: 'debug', msg, meta }); },
+            warn: (msg: string, meta?: unknown) => { lines.push({ level: 'warn', msg, meta }); },
+            error: (msg: string, _err?: unknown, meta?: unknown) => { lines.push({ level: 'error', msg, meta }); },
+        };
+        // Only the lines about a lost event: they carry its `eventId`.
+        const about = (level: Line['level']) => lines.filter((l) => l.level === level && l.meta?.eventId);
+        return { logger, about };
+    }
+    const refused: HttpEnqueueFn = async () => {
+        throw new TypeError("Converting circular structure to JSON --> starting at object with constructor 'Timeout'");
+    };
+    const at = (s: number) => `2026-10-20T00:00:0${s}.000Z`;
+
+    it('reports the first lost delivery once at error, naming the webhook; later losses stay at debug', async () => {
+        const engine = new FakeEngine({ sys_webhook: [webhook({ name: 'contact_changed' })] });
+        const realtime = new FakeRealtime();
+        const { logger, about } = capturingLogger();
+        const ae = new AutoEnqueuer(engine, realtime, refused, { refreshIntervalMs: 0, logger });
+        await ae.start();
+
+        await realtime.publish(event('updated', 'contact', { id: 'c-1' }, at(1)));
+        await realtime.publish(event('updated', 'contact', { id: 'c-1' }, at(2)));
+        await flush();
+        await ae.stop();
+
+        const errors = about('error');
+        expect(errors).toHaveLength(1);
+        expect(errors[0].msg).toContain("'contact_changed'");
+        expect(errors[0].msg).toContain('sys_http_delivery');
+        expect(errors[0].meta).toMatchObject({ webhook: 'contact_changed', eventId: `contact:c-1:updated:${at(1)}` });
+        expect(String(errors[0].meta.err)).toContain('circular');
+        // The second loss is still on record, with its own event id — not a
+        // second error, and never the old bare warn.
+        expect(about('debug').map((l) => l.meta.eventId)).toEqual([`contact:c-1:updated:${at(2)}`]);
+        expect(about('warn')).toHaveLength(0);
+    });
+
+    it('says it once per webhook — one failing webhook does not silence another', async () => {
+        const engine = new FakeEngine({
+            sys_webhook: [webhook({ id: 'wh-a', name: 'hook_a' }), webhook({ id: 'wh-b', name: 'hook_b' })],
+        });
+        const realtime = new FakeRealtime();
+        const { logger, about } = capturingLogger();
+        const ae = new AutoEnqueuer(engine, realtime, refused, { refreshIntervalMs: 0, logger });
+        await ae.start();
+
+        await realtime.publish(event('created', 'contact', { id: 'c-1' }, at(1)));
+        await flush();
+        await ae.stop();
+
+        expect(about('error').map((l) => l.meta.webhook).sort()).toEqual(['hook_a', 'hook_b']);
+    });
+
+    it('is loud again once a delivery for the webhook was recorded in between', async () => {
+        const engine = new FakeEngine({ sys_webhook: [webhook({ name: 'contact_changed' })] });
+        const realtime = new FakeRealtime();
+        const { logger, about } = capturingLogger();
+        let broken = true;
+        const enqueue: HttpEnqueueFn = async (input) => {
+            if (broken) return refused(input);
+            return 'id';
+        };
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger });
+        await ae.start();
+
+        await realtime.publish(event('updated', 'contact', { id: 'c-1' }, at(1)));
+        await flush();
+        broken = false;
+        await realtime.publish(event('updated', 'contact', { id: 'c-1' }, at(2)));
+        await flush();
+        broken = true;
+        await realtime.publish(event('updated', 'contact', { id: 'c-1' }, at(3)));
+        await flush();
+        await ae.stop();
+
+        expect(about('error').map((l) => l.meta.eventId)).toEqual([
+            `contact:c-1:updated:${at(1)}`,
+            `contact:c-1:updated:${at(3)}`,
+        ]);
+        expect(about('debug')).toHaveLength(0);
+    });
+
+    it('reports a lost bulk delivery through the same register', async () => {
+        const engine = new FakeEngine({ sys_webhook: [webhook({ name: 'contact_bulk', triggers: 'bulk_update' })] });
+        const realtime = new FakeRealtime();
+        const { logger, about } = capturingLogger();
+        const ae = new AutoEnqueuer(engine, realtime, refused, { refreshIntervalMs: 0, logger });
+        await ae.start();
+
+        await realtime.publish(bulkEvent('updated', 'contact', 3, at(1)));
+        await flush();
+        await ae.stop();
+
+        const errors = about('error');
+        expect(errors).toHaveLength(1);
+        expect(errors[0].meta.webhook).toBe('contact_bulk');
+        expect(about('warn')).toHaveLength(0);
+    });
+});
+
+/**
  * #4639 — predicate writes dispatch under their OWN opt-in triggers.
  *
  * A `multi: true` update/delete publishes `data.records.*` carrying a count and
