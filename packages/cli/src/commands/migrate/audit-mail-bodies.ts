@@ -4,6 +4,7 @@ import { Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import { createInterface } from 'node:readline';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { MailLogBodyMigrationReport } from '@objectstack/plugin-audit';
 import {
   printHeader,
   printSuccess,
@@ -21,6 +22,80 @@ import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupa
 import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { absentTableReads } from '../../utils/absent-table-reads.js';
+import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
+
+/**
+ * [#24899] What the command did about one declared archive target:
+ *
+ *  - `examined`: its driver is registered on this boot, and `report` is the run;
+ *  - `not-connected`, NOT examined: either the stack config declares a
+ *    datasource of that name that this boot attempted and did not connect
+ *    (`connection` carries the connect service's retained verdict), or an
+ *    active runtime datasource row of that name exists, which `os serve`
+ *    connects and this boot does not;
+ *  - `unknown`, NOT examined: neither of the above, and the runtime rows could
+ *    not be read;
+ *  - `none`: no datasource of that name is declared and connected on this boot,
+ *    none was attempted, and no active runtime row names one. That is all it
+ *    checked: an archive a host registers in code outside the stack config is
+ *    not visible here.
+ *
+ * `not-connected` and `unknown` fail the run.
+ */
+interface ArchiveOutcome {
+  datasource: string;
+  objects: string[];
+  status: 'examined' | 'none' | 'not-connected' | 'unknown';
+  report?: MailLogBodyMigrationReport;
+  connection?: { status: string; reason?: string };
+}
+
+/**
+ * The connect service's retained verdict for a declared datasource named
+ * `datasource` that this boot attempted and did not connect, or `undefined`
+ * when it connected or was never attempted. Gate (c) `autoConnect` is not a
+ * fail-fast trigger, so a declared archive that fails to connect only degrades
+ * and leaves no driver behind. The verdicts are the ones
+ * `findDeclaredDatasourceDrivers` reads.
+ */
+function declaredConnectFailure(kernel: unknown, datasource: string): { status: string; reason?: string } | undefined {
+  let states: unknown;
+  try {
+    states = (kernel as { getService?: (n: string) => any })?.getService?.('datasource-connection')?.listConnectionStates?.();
+  } catch {
+    return undefined;
+  }
+  const state = (Array.isArray(states) ? states : []).find((s: { name?: unknown }) => s?.name === datasource) as
+    | { status?: unknown; reason?: unknown; availability?: unknown }
+    | undefined;
+  if (!state || state.availability === 'available') return undefined;
+  return {
+    status: String(state.status),
+    ...(typeof state.reason === 'string' && state.reason !== '' ? { reason: state.reason } : {}),
+  };
+}
+
+/**
+ * Does the database hold an active runtime datasource row named `datasource`?
+ * Runtime datasources are `sys_metadata` rows of type `datasource` — the
+ * store `os serve`'s datasource admin rehydrates its pools from at boot. Ids
+ * only are read; a refused read answers `unknown`, never `none`.
+ */
+async function runtimeDatasourceRowStatus(
+  engine: Pick<IObjectQLEngine, 'find'>,
+  datasource: string,
+): Promise<'none' | 'not-connected' | 'unknown'> {
+  try {
+    const rows = await engine.find(
+      'sys_metadata',
+      { where: { type: 'datasource', name: datasource, state: 'active' }, fields: ['id'], limit: 1 },
+      { context: { isSystem: true } },
+    );
+    return Array.isArray(rows) && rows.length > 0 ? 'not-connected' : 'none';
+  } catch {
+    return 'unknown';
+  }
+}
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -57,12 +132,34 @@ async function confirm(question: string): Promise<boolean> {
  * clean report is the verification. The report is counts only. No
  * `sys_migration` flag is recorded: nothing gates irreversible behaviour on it.
  * The flags are `os migrate audit-metadata-bodies`'s, one for one.
+ *
+ * ## The archive datasource too (#24899)
+ *
+ * `sys_audit_log` declares `lifecycle.archive` (`to: 'archive'`): the
+ * Archiver copies rows past the hot window to that datasource verbatim and
+ * deletes them hot, and the engine never routes the object there. So a copy
+ * archived before the writer masked still holds the body, out of the hot run's
+ * reach. After the hot run this command reads each copy table's declared
+ * archive target and, when this boot connected a datasource of that name,
+ * runs the same runner through its driver (`migrateArchivedMailLogBodyCopies`),
+ * in the same dry-run / `--apply` mode. A hot copy masked before the Archiver
+ * moves it is archived masked, so the two runs cover the copies already
+ * archived and the ones still to be.
+ *
+ * Absence is loud: when the target is not connected here but the stack config
+ * declares it and this boot's connect failed or was refused, or the database
+ * holds an active runtime datasource row of that name (one an admin created,
+ * which `os serve` connects and this boot does not), the archive was NOT
+ * examined — the report says so and the command exits non-zero. `none` says
+ * only what was checked: no such declaration attempted, no such row. An
+ * archive a host registers in code outside the stack config is not reached;
+ * declare it in the stack config's `datasources` with `autoConnect: true`.
  */
 export default class MigrateAuditMailBodies extends Command {
   static override description =
     'Mask the mail bodies (body_text, body_html) of sys_email / sys_identity_email rows that the audit writer ' +
-    'copied in clear into sys_audit_log / sys_activity before it masked them. Dry run by default; --apply writes. ' +
-    'Reports counts only.';
+    'copied in clear into sys_audit_log / sys_activity before it masked them, on this database and in the archive ' +
+    'datasource sys_audit_log archives to. Dry run by default; --apply writes. Reports counts only.';
 
   static override examples = [
     '$ os migrate audit-mail-bodies',
@@ -87,7 +184,19 @@ export default class MigrateAuditMailBodies extends Command {
     json: Flags.boolean({ description: 'Output as JSON (implies non-interactive; requires --yes to apply)' }),
   };
 
+  /**
+   * [#24899] The process must end when the run does — the reason `os migrate
+   * plan`'s does (#13027): the boot connects the declared datasources
+   * (`composeDeclaredDatasources`), and a pool it opened can leave the event
+   * loop alive after the kernel reports a clean shutdown. The failure paths
+   * exit through oclif's own signal and do not come back here.
+   */
   async run(): Promise<void> {
+    await this.mask();
+    await exitOneShotCommand(typeof process.exitCode === 'number' ? process.exitCode : 0);
+  }
+
+  private async mask(): Promise<void> {
     const { flags } = await this.parse(MigrateAuditMailBodies);
     const timer = createTimer();
     const apply = flags.apply;
@@ -125,12 +234,12 @@ export default class MigrateAuditMailBodies extends Command {
           this.exit(1);
           return;
         }
-        printWarning('Apply mode rewrites audit/activity rows. Re-run with --yes to confirm, or run without --apply to preview.');
+        printWarning('Apply mode rewrites audit/activity rows (and archived audit rows). Re-run with --yes to confirm, or run without --apply to preview.');
         this.exit(1);
         return;
       }
       const ok = await confirm(
-        chalk.bold('\nMask the mail body in every audit/activity copy of a mail-log row on this database? [y/N] '),
+        chalk.bold('\nMask the mail body in every audit/activity copy of a mail-log row on this database and its archive? [y/N] '),
       );
       if (!ok) {
         printInfo('Aborted — no changes made.');
@@ -153,6 +262,10 @@ export default class MigrateAuditMailBodies extends Command {
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         extraPlugins: await buildDataMigrationPlugins({ audit: true }),
+        // [#24899] Connect the declared datasources as `os serve` does, so a
+        // declared archive datasource is registered under its name and the
+        // archive run below reaches it.
+        composeDeclaredDatasources: true,
         ...(apply ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
     } catch (error: any) {
@@ -171,7 +284,8 @@ export default class MigrateAuditMailBodies extends Command {
         throw new Error('No ObjectQL engine on this stack — cannot rewrite audit rows.');
       }
 
-      const { migrateMailLogBodyCopies } = await import('@objectstack/plugin-audit');
+      const { migrateMailLogBodyCopies, migrateArchivedMailLogBodyCopies, MAIL_LOG_BODY_COPY_OBJECTS } =
+        await import('@objectstack/plugin-audit');
 
       const logger = flags.json
         ? { info: (m: string) => console.error(m), warn: (m: string) => console.error(m) }
@@ -192,10 +306,44 @@ export default class MigrateAuditMailBodies extends Command {
 
       const report = await migrateMailLogBodyCopies(readView, logger, { apply });
 
+      // [#24899] Each copy table's declared archive target, then the same
+      // runner through that datasource's driver — the registry the Archiver
+      // itself resolves `archive.to` against (`engine.datasource(name)`).
+      const targets = new Map<string, Array<(typeof MAIL_LOG_BODY_COPY_OBJECTS)[number]>>();
+      for (const object of MAIL_LOG_BODY_COPY_OBJECTS) {
+        const to = (engine.getObject(object) as { lifecycle?: { archive?: { to?: unknown } } } | undefined)
+          ?.lifecycle?.archive?.to;
+        if (typeof to !== 'string' || to === '') continue;
+        targets.set(to, [...(targets.get(to) ?? []), object]);
+      }
+      const archive: ArchiveOutcome[] = [];
+      for (const [datasource, objects] of targets) {
+        const driver = engine.getDriverByName?.(datasource);
+        if (driver) {
+          const archived = await migrateArchivedMailLogBodyCopies(driver, logger, { apply, objects });
+          archive.push({ datasource, objects, status: 'examined', report: archived });
+          continue;
+        }
+        // Not connected on this boot. A declaration this boot attempted and
+        // did not connect, or a runtime datasource row of that name (an
+        // archive `os serve` connects and this boot cannot): NOT examined.
+        const connection = declaredConnectFailure(stack.kernel, datasource);
+        if (connection) {
+          archive.push({ datasource, objects, status: 'not-connected', connection });
+          continue;
+        }
+        archive.push({ datasource, objects, status: await runtimeDatasourceRowStatus(readView, datasource) });
+      }
+      const archiveFailures = archive.reduce(
+        (n, a) => n + (a.report?.failures ?? 0) + (a.status === 'not-connected' || a.status === 'unknown' ? 1 : 0),
+        0,
+      );
+      const failures = report.failures + archiveFailures;
+
       if (flags.json) {
         reads.notice(true);
-        await emitJson({ database: stack.dbLabel, apply, report, duration: timer.elapsed() });
-        if (report.failures > 0) this.exit(1);
+        await emitJson({ database: stack.dbLabel, apply, report, archive, duration: timer.elapsed() });
+        if (failures > 0) this.exit(1);
         return;
       }
 
@@ -207,22 +355,61 @@ export default class MigrateAuditMailBodies extends Command {
           `  ${chalk.white(object)}: ${stats.scanned} mail-log cop(ies) scanned, ${stats.rewritten} ${apply ? 'masked' : 'to mask'}`,
         );
       }
+      for (const a of archive) {
+        if (a.report) {
+          for (const [object, stats] of Object.entries(a.report.byObject)) {
+            console.log(
+              `  ${chalk.white(object)} (archive datasource '${a.datasource}'): ${stats.scanned} mail-log cop(ies) scanned, ` +
+                `${stats.rewritten} ${apply ? 'masked' : 'to mask'}`,
+            );
+          }
+        } else if (a.status === 'none') {
+          console.log(chalk.dim(
+            `  archive datasource '${a.datasource}': none declared and connected on this boot, and no active runtime ` +
+              `datasource row names one — nothing examined. An archive a host registers in code outside the stack ` +
+              `config is not reached: declare it in the config's \`datasources\` with \`autoConnect: true\`.`,
+          ));
+        }
+      }
       console.log('');
+      for (const a of archive) {
+        if (a.status === 'not-connected' && a.connection) {
+          printError(
+            `Archive datasource '${a.datasource}' (${a.objects.join(', ')}) was NOT examined: the stack config declares ` +
+              `it, and this boot did not connect it (${a.connection.status}` +
+              `${a.connection.reason ? `: ${a.connection.reason}` : ''}), so its archived copies may still hold a mail ` +
+              `body in clear. Make it reachable from where this command runs, and re-run.`,
+          );
+        } else if (a.status === 'not-connected') {
+          printError(
+            `Archive datasource '${a.datasource}' (${a.objects.join(', ')}) was NOT examined: the database holds an active ` +
+              `runtime datasource of that name, which \`os serve\` connects and this command does not, so its archived ` +
+              `copies may still hold a mail body in clear. Declare it in the stack config's \`datasources\` ` +
+              `(with \`autoConnect: true\`) and re-run.`,
+          );
+        } else if (a.status === 'unknown') {
+          printError(
+            `Archive datasource '${a.datasource}' (${a.objects.join(', ')}) was NOT examined: it is not connected on this ` +
+              `boot, and whether the database holds a runtime datasource of that name could not be read.`,
+          );
+        }
+      }
 
-      if (report.failures > 0) {
-        printError(`${report.failures} read(s) or row(s) failed — re-run to finish them.`);
-      } else if (apply && report.rewritten > 0) {
+      const rewritten = report.rewritten + archive.reduce((n, a) => n + (a.report?.rewritten ?? 0), 0);
+      if (failures > 0) {
+        printError(`${failures} read(s), row(s) or archive datasource(s) failed — re-run to finish them.`);
+      } else if (apply && rewritten > 0) {
         printSuccess(
-          `Masked the mail body in ${report.rewritten} audit/activity row(s). Re-run any time — it only revisits copies still holding a body.`,
+          `Masked the mail body in ${rewritten} audit/activity row(s). Re-run any time — it only revisits copies still holding a body.`,
         );
-      } else if (!apply && report.rewritten > 0) {
-        printInfo(`Dry run only — ${report.rewritten} row(s) would be masked. Re-run with --apply.`);
+      } else if (!apply && rewritten > 0) {
+        printInfo(`Dry run only — ${rewritten} row(s) would be masked. Re-run with --apply.`);
       } else {
         printSuccess('Nothing to mask — no audit/activity copy of a mail-log row holds a mail body in clear.');
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
-      if (report.failures > 0) this.exit(1);
+      if (failures > 0) this.exit(1);
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }

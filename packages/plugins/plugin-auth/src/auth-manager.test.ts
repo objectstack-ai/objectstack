@@ -2688,11 +2688,16 @@ describe('AuthManager', () => {
     });
 
     it('a tenant sys_notification_template row overrides the built-in text', async () => {
+      // The row is read in the organization the send resolves to,
+      // `tenancy.defaultOrgId()` — the Default Organization under `single`
+      // (phone-sms-texts.ts, "Which organization's row").
       const { manager, opts } = await bootOtp({
+        getTenancy: () => ({ defaultOrgId: async () => 'org_default' }),
         dataEngine: {
           async find(object: string, q: any) {
             if (
               object === 'sys_notification_template' &&
+              q?.where?.organization_id === 'org_default' &&
               q?.where?.topic === 'auth.phone_otp' &&
               q?.where?.channel === 'sms' &&
               q?.where?.locale === 'zh-CN'

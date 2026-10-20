@@ -409,7 +409,9 @@ describe('[#21908] rows 24 onward — the remaining fan-out and outbox calls car
         const store = new NotificationTemplateStore({ getData: () => engine });
         const email = createEmailChannel({ getEmail: () => ({ async send() { return { id: 'e1' }; } }) as any, getData: () => engine, store });
         const sms = createSmsChannel({ getSms: () => ({ async send() { return { id: 's1' }; } }) as any, getData: () => engine, store });
-        const notification = { title: 't', body: 'b', recipients: ['u1'], topic: 'deal.won' };
+        // The delivery names its organization, so the template read happens
+        // (a call that names none reads no row — NotificationTemplateStore).
+        const notification = { title: 't', body: 'b', recipients: ['u1'], topic: 'deal.won', organizationId: 'org_1' };
 
         expect((await email.send({ logger: silentLogger() }, { notification, channel: 'email', recipient: 'u1' } as any)).ok).toBe(true);
         expect((await sms.send({ logger: silentLogger() }, { notification, channel: 'sms', recipient: 'u1' } as any)).ok).toBe(true);

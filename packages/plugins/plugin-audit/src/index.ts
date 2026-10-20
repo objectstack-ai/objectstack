@@ -75,12 +75,19 @@ export type {
 export { maskMailLogBodyCopy } from './mail-log-body-mask.js';
 export {
   migrateMailLogBodyCopies,
+  migrateArchivedMailLogBodyCopies,
   planMailLogBodyAuditRowPatch,
   planMailLogBodyActivityRowPatch,
   MAIL_LOG_BODY_COPY_OBJECTS,
   MAIL_LOG_BODY_MIGRATION_PAGE_SIZE,
 } from './mail-log-body-migration.js';
-export type { MailLogBodyMigrationEngine, MailLogBodyMigrationReport } from './mail-log-body-migration.js';
+export type {
+  MailLogBodyArchiveDriver,
+  MailLogBodyCopyObject,
+  MailLogBodyMigrationEngine,
+  MailLogBodyMigrationOptions,
+  MailLogBodyMigrationReport,
+} from './mail-log-body-migration.js';
 // [ADR-0139 E6] The stored-row backfill of `sys_activity`'s two writer-stamped
 // read-rule columns, and the one planner it, the CRUD mirror and the
 // before-insert hook stamp by. The CLI command
