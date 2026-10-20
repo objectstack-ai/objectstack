@@ -1093,7 +1093,8 @@ describe('security.explain answers what enforcement does — the enumeration', (
  * step admits (each gate's own parity table pins it: its `sharing deny` row
  * refuses with explain never called, though the double would admit). So on a
  * row the deferral admits, record sharing's own `deny` still decides both
- * gates: explain admitting it cannot widen either one.
+ * gates: explain admitting it cannot widen either one. That holds for today's
+ * gate composition only, and the case below says which card changes it.
  */
 describe('an app-authored row-level write policy the by-id write gate defers to (ADR-0105 D3)', () => {
   it('the update story names the deferral: record sharing excludes the row, row-level security admits it', async () => {
@@ -1115,6 +1116,12 @@ describe('an app-authored row-level write policy the by-id write gate defers to 
   it("the parent gates' first question, record sharing, still refuses the row explain now admits", async () => {
     const rig = await bootSharing({ authored: true });
     try {
+      // ⚠️ A sibling card flips this pin: #24646 (ruling B, comment 6279880675)
+      // drops both gates' own-depth record-sharing step and their master step,
+      // so they ask only explain's record-grained by-id `update` verdict. The
+      // gate then admits exactly what the parent's by-id update admits; for
+      // this scenario, with #24647's deferral, that is ADMITTED. Until then the
+      // gates' first question below is record sharing's, and it refuses.
       expect(await rig.checkEdit(AUTHORED_WRITER, 'l_theirs')).toBe('deny');
       const x = await rig.explain(AUTHORED_WRITER, 'update', 'l_theirs');
       expect(x.kind === 'decision' ? x.decision.record?.visible : x.kind, describeExplained(x)).toBe(true);
