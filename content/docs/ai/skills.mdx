@@ -29,9 +29,12 @@ See [Agents](/docs/ai/agents#you-extend-the-platform-with-skills-not-agents) for
 Skills ship as the npm package `@objectstack/skills`, released with the other `@objectstack/*` packages at one shared version. Install it at your installed `@objectstack/spec`'s version — the catalog's version is then your spec's — and copy it from `node_modules` into your agent's directory, the two steps `create-objectstack` runs when it scaffolds a project:
 
 ```bash
-npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+pnpm add -D "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+#   npm: npm install --save-dev "@objectstack/skills@…"   ·   yarn: yarn add -D "@objectstack/skills@…"
 npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
 ```
+
+Add the package with the manager that installed the project: in a pnpm project, `npm install --save-dev` exits `1` with `npm error Cannot read properties of null (reading 'edgesOut')`.
 
 The skills land as real files in `.claude/skills/`; commit them with the project, and keep `--copy` — without it they are links into `node_modules`, which a clone does not have. Name your own runtime after `--agent` (`codex`, `cursor`, …). The catalog is versioned and updated as **one unit**, with ObjectStack itself: bump `@objectstack/skills` with the other `@objectstack/*` packages, then re-run the sync. The package is published from `18.0.0-next.0` on (there is no 17.x release); for what the sync writes, the versions, the one scaffolder that is an exception and the `next` channel, see the [AI Skills Reference](/docs/ai/skills-reference#installing-skills).
 

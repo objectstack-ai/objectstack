@@ -91,9 +91,10 @@
  * Only the closed list in {@link OPTIONAL_DRIVER_CLIENT_PACKAGES} is re-routed:
  * it is exactly the clients the factory's knex arms load, so it names a fix
  * that is known to be right. Every other module-not-found — any path, any
- * `@objectstack/…` package, any other bare name (a hard dependency such as
- * `knex` missing is a broken install, for which `pnpm install` is the fix) —
- * keeps the unbuilt remedy unchanged.
+ * `@objectstack/…` package other than the optional driver packages below, any
+ * other bare name (a hard dependency such as `knex` missing is a broken
+ * install, for which `pnpm install` is the fix) — keeps the unbuilt remedy
+ * unchanged.
  *
  * The client remedy keeps this module's discipline: it names the install of
  * THAT module once and stops — no build, no environment variable, no
@@ -101,6 +102,41 @@
  * project uses, so it spells the one install the way the factory's
  * optional-driver messages already do: `npm install <client>`, with the pnpm
  * and yarn spellings of the same command beside it.
+ *
+ * ## A missing OPTIONAL driver package is an install too (#24937)
+ *
+ * Three of the shared factory's arms load their driver from a package this
+ * service declares only as an OPTIONAL peer — `@objectstack/driver-turso`,
+ * `@objectstack/driver-mongodb` and `@objectstack/driver-sqlite-wasm`
+ * ({@link OPTIONAL_DRIVER_PACKAGES}). A project installs those itself, and when
+ * one is absent the arm already says so and names the install
+ * (`missingTursoDriverMessage` and its two siblings in
+ * `default-datasource-driver-factory.ts`). The refusal used to append the
+ * unbuilt remedy after that text anyway, so it named two fixes that contradict
+ * each other: the install, then "a build precondition … Run `pnpm install &&
+ * pnpm build`". Measured on the published release, outside any workspace, with
+ * a declared `turso` datasource and no `@objectstack/driver-turso`:
+ *
+ * ```text
+ * ✗ datasource 'notes_store': connect failed — … the driver package
+ *   @objectstack/driver-turso is not installed. … npm install @objectstack/driver-turso
+ *   … Import error: Cannot find package '@objectstack/driver-turso' imported from …
+ *   … That is a build precondition … Run `pnpm install && pnpm build`, then start again.
+ * ```
+ *
+ * The split is the same specifier read as the client one, and it falls the same
+ * way for every arm: a BARE optional driver package name is a missing install,
+ * so the refusal ends on {@link missingOptionalDriverPackageRemedy}, ONE
+ * sentence that defers to the install the factory's text has already named —
+ * no second command, no build, no environment variable. A PATH into one of
+ * those packages (`…/@objectstack/driver-turso/dist/index.mjs`) is still an
+ * unbuilt workspace and keeps the unbuilt remedy, and so does a subpath of one
+ * (the package IS installed). Measured in this monorepo on a fresh worktree
+ * after `pnpm install` and before any build: all three packages are linked, so
+ * each arm's refusal names the PATH of the missing `dist/` entry, never the bare
+ * name — a contributor with an unbuilt checkout is still told to build. The
+ * accepted cost is a contributor whose install is stale enough to lack the link
+ * itself: they are pointed at the package's install, not at `pnpm install`.
  *
  * ## Scope: a message branch, nothing else
  *
@@ -111,6 +147,11 @@
  */
 
 import { isModuleNotFoundError } from '@objectstack/types';
+import {
+  MONGODB_DRIVER_PACKAGE,
+  SQLITE_WASM_DRIVER_PACKAGE,
+  TURSO_DRIVER_PACKAGE,
+} from './default-datasource-driver-factory.js';
 
 /**
  * The remedy for every cause except the unbuilt workspace — a database that is
@@ -168,6 +209,42 @@ export function missingDriverClientRemedy(client: string): string {
   );
 }
 
+/**
+ * The driver packages this service declares as OPTIONAL peers and the shared
+ * factory loads lazily — one per arm (`turso`, `mongodb`, `sqlite-wasm`), named
+ * through the factory's own constants so the two cannot drift. A
+ * module-not-found naming one of these, as a bare specifier, is a missing
+ * install and not an unbuilt workspace.
+ *
+ * Closed on purpose, like {@link OPTIONAL_DRIVER_CLIENT_PACKAGES}: a name on
+ * this list is promised a remedy that defers to the factory's install text, so
+ * it holds only the packages whose arm states that install. The pins hold it
+ * equal to the optional peers `package.json` declares.
+ */
+export const OPTIONAL_DRIVER_PACKAGES: readonly string[] = [
+  TURSO_DRIVER_PACKAGE,
+  MONGODB_DRIVER_PACKAGE,
+  SQLITE_WASM_DRIVER_PACKAGE,
+];
+
+/**
+ * The remedy when an optional driver package is not installed.
+ *
+ * ONE sentence, and it names no command: the factory's own text, which the
+ * refusal carries above this sentence, already names the install of that
+ * package (`npm install <package>`, with the pnpm and yarn spellings beside
+ * it), so a second spelling here would only be a second fix to choose between.
+ * No build, no environment variable, no configuration key — see the module
+ * note.
+ */
+export function missingOptionalDriverPackageRemedy(packageName: string): string {
+  return (
+    `The fix is the install of \`${packageName}\` named above, then start again: it is an ` +
+    `OPTIONAL driver package the project adds itself, so a build cannot produce it and no ` +
+    `boot-time override can stand in for it.`
+  );
+}
+
 /** `Cannot find module 'x'` (CJS `require`) and `Cannot find package 'x'` (ESM `import`). */
 const UNRESOLVED_SPECIFIER = /Cannot find (?:module|package) '([^']+)'/;
 
@@ -203,9 +280,25 @@ export function missingDriverClient(cause: unknown): string | undefined {
 }
 
 /**
+ * The optional driver package this connect failed to load, when that is the
+ * cause — one of {@link OPTIONAL_DRIVER_PACKAGES}, named exactly as a bare
+ * specifier. A path into the package (`…/driver-turso/dist/index.mjs`) is an
+ * unbuilt workspace and a subpath means the package IS installed; neither is
+ * this case.
+ */
+export function missingOptionalDriverPackage(cause: unknown): string | undefined {
+  const specifier = unresolvedSpecifier(cause);
+  return specifier !== undefined && OPTIONAL_DRIVER_PACKAGES.includes(specifier)
+    ? specifier
+    : undefined;
+}
+
+/**
  * Did this connect fail because the driver's module could not be RESOLVED, as
  * opposed to a connection that was attempted and refused — and was it not
- * merely a missing database client ({@link missingDriverClient})?
+ * merely a missing install the project makes itself: a database client
+ * ({@link missingDriverClient}) or an optional driver package
+ * ({@link missingOptionalDriverPackage})?
  *
  * Delegates to `@objectstack/types`' shared classifier — the single owner of
  * this judgement since framework#3265, already relied on by the CLI's
@@ -226,7 +319,11 @@ export function missingDriverClient(cause: unknown): string | undefined {
  */
 export function isUnbuiltWorkspaceFailure(cause: unknown): boolean {
   if (cause === undefined) return false;
-  return isModuleNotFoundError(cause) && missingDriverClient(cause) === undefined;
+  return (
+    isModuleNotFoundError(cause) &&
+    missingDriverClient(cause) === undefined &&
+    missingOptionalDriverPackage(cause) === undefined
+  );
 }
 
 /**
@@ -237,5 +334,7 @@ export function isUnbuiltWorkspaceFailure(cause: unknown): boolean {
 export function connectFailureRemedy(cause: unknown): string {
   const client = missingDriverClient(cause);
   if (client !== undefined) return missingDriverClientRemedy(client);
+  const driverPackage = missingOptionalDriverPackage(cause);
+  if (driverPackage !== undefined) return missingOptionalDriverPackageRemedy(driverPackage);
   return isUnbuiltWorkspaceFailure(cause) ? UNBUILT_WORKSPACE_REMEDY : GENERIC_CONNECT_FAILURE_REMEDY;
 }

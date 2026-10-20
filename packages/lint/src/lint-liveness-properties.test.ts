@@ -251,12 +251,13 @@ describe('lintLivenessProperties', () => {
   // #3494 PRUNED the aspirational dead props from the schema and the #3489
   // materializer bridge made every remaining prop live. ADR-0131 D2 then
   // retired that bridge: a declared webhook is read from the registry and has
-  // no Setup row, so the two display-only props, `label` and `description`,
-  // lost their only reader and the ledger marks them dead. Every delivery-
-  // bearing prop stays silent. Runs against the REAL webhook.json, so a ledger
-  // flip that is not carried to authors fails here.
+  // no Setup row. The two display-only props, `label` and `description`, stay
+  // live all the same: the Studio metadata list and quick-find draw them off
+  // `GET /api/v1/meta/webhook`, so the ledger grades them live and nothing
+  // warns. Runs against the REAL webhook.json, so a ledger flip that is not
+  // carried to authors fails here.
 
-  it('warns on a declared webhook\'s label and description only — every delivery-bearing prop is live', () => {
+  it('stays silent on a declared webhook that authors every prop, label and description included', () => {
     const findings = lintLivenessProperties({
       webhooks: [{
         name: 'showcase_task_changed',
@@ -272,14 +273,7 @@ describe('lintLivenessProperties', () => {
         description: 'Sends task lifecycle events to an external system.',
       }],
     });
-    expect(findings.map((f) => [f.rule, f.message.match(/`(\w+)`/)?.[1]])).toEqual([
-      ['liveness-dead-property', 'label'],
-      ['liveness-dead-property', 'description'],
-    ]);
-    for (const f of findings) {
-      expect(f.where).toBe("webhook 'showcase_task_changed'");
-      expect(f.hint).toContain('no Setup row');
-    }
+    expect(findings).toEqual([]);
   });
 
   it('stays silent on a declared webhook that authors only what is delivered on', () => {
