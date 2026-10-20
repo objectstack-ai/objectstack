@@ -231,7 +231,7 @@ describe('export → import: each language re-imports its boolean column', () =>
         body: { format: 'csv', csv, mapping: MAPPINGS[lang] },
       } as any, res);
       expect(res._json).toMatchObject({ total: 2, ok: 2, errors: 0, created: 2 });
-      const stored = await target.engine.find('lead', { orderBy: [{ field: 'id', order: 'asc' }] } as any);
+      const stored = await target.engine.find('lead', { orderBy: [{ field: 'id', order: 'asc' }] });
       expect(stored.map((r: any) => [r.id, r.is_converted, r.do_not_call]))
         .toEqual([['1', true, false], ['2', false, true]]);
     });
@@ -248,7 +248,7 @@ describe('export → import: each language re-imports its boolean column', () =>
         body: { format: 'xlsx', xlsxBase64, mapping: MAPPINGS[lang] },
       } as any, res);
       expect(res._json).toMatchObject({ total: 2, ok: 2, errors: 0, created: 2 });
-      const stored = await target.engine.find('lead', { orderBy: [{ field: 'id', order: 'asc' }] } as any);
+      const stored = await target.engine.find('lead', { orderBy: [{ field: 'id', order: 'asc' }] });
       expect(stored.map((r: any) => [r.id, r.is_converted, r.do_not_call]))
         .toEqual([['1', true, false], ['2', false, true]]);
     });
