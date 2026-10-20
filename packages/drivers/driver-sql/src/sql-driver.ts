@@ -4858,6 +4858,42 @@ function classifyFilterKey(
   return 'clause';
 }
 
+/**
+ * [#24707] PostgreSQL only: the session's `search_path` reaches one table name
+ * in more than one schema, and {@link SqlDriver.introspectSchema} keys its
+ * answer by bare name — one key cannot hold two tables.
+ *
+ * This used to be silent: the later table was overwritten by the earlier one
+ * (`sales.customers` vanished behind `public.customers`), and nothing in the
+ * answer said a table was missing. Keeping the first and logging the second
+ * is not loud either — the HTTP and AI callers of the listing never see a
+ * server log, so to them it is the same silent drop. The answer is a refusal
+ * naming every colliding name with its schemas in `search_path` order, and
+ * the remedy: one schema per connection (the datasource's `schema` setting is
+ * what sets its `search_path`), or a rename. A connection that reaches one
+ * schema — the default `public` deployment — can never collide, so no caller
+ * that sees one schema is refused.
+ *
+ * `collisions` is non-empty; each entry's `schemas` has two or more members.
+ */
+function postgresTableNameCollisionError(collisions: ReadonlyArray<{ table: string; schemas: string[] }>): Error {
+  const list = (names: string[]) => names.map((s) => `'${s}'`).join(', ');
+  const [first] = collisions;
+  const err = new Error(
+    `Cannot introspect this PostgreSQL connection: its search_path reaches ${collisions.length} table name(s) ` +
+      `in more than one schema, for example '${first.table}' in ${list(first.schemas)}. ` +
+      `Introspection keys each table by its bare name, so one key cannot hold both, and the bare name ` +
+      `resolves only to '${first.schemas[0]}.${first.table}'; listing it once would hide the other ` +
+      `table and its columns. Colliding: ` +
+      collisions.map((c) => `'${c.table}' (${list(c.schemas)})`).join('; ') +
+      `. Point the connection at one schema (the datasource's 'schema' setting sets its search_path), ` +
+      `or rename one of the tables.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.RESOURCE_CONFLICT;
+  err.status = 409;
+  return err;
+}
+
 // ── Introspection Types ──────────────────────────────────────────────────────
 
 /**
@@ -15454,19 +15490,50 @@ export class SqlDriver implements IDataDriver {
     // moment later than the first table it actually read.
     const introspectedAt = new Date().toISOString();
     let tableNames: string[] = [];
+    // PostgreSQL only (#24707): the schema each listed table lives in, so its
+    // columns are read THERE. Every other dialect leaves it empty.
+    const schemaByTable = new Map<string, string>();
 
     if (this.isPostgres) {
       // Every schema the session can actually reach unqualified, rather than
       // the literal `'public'` — same answer for a default deployment, where
       // `current_schemas(false)` is exactly `{public}`, and the right answer for
       // a session pointed at another schema, where the literal listed nothing.
+      //
+      // `table_schema` and its `search_path` position are selected too
+      // (#24707). The result is keyed by BARE name, so two schemas holding the
+      // same name used to collapse into one key with the later table silently
+      // dropped — refused below instead. And the schema is what the column read
+      // needs: knex `columnInfo()` on a bare name reads `current_schema()`, the
+      // FIRST schema on the path only, so a table in a later schema reported
+      // zero columns. No `ORDER BY` is added: the key order of a single-schema
+      // answer stays exactly what it was.
       const result = await this.knex.raw(`
-        SELECT table_name
+        SELECT table_schema, table_name,
+          array_position(current_schemas(false), table_schema::name) AS path_position
         FROM information_schema.tables
         WHERE table_schema = ANY (current_schemas(false))
         AND table_type = 'BASE TABLE'
       `);
-      tableNames = result.rows.map((row: any) => row.table_name);
+      const rows = result.rows as { table_schema: string; table_name: string; path_position: number }[];
+      const schemasByTable = new Map<string, { schema: string; position: number }[]>();
+      for (const row of rows) {
+        const seen = schemasByTable.get(row.table_name);
+        const entry = { schema: row.table_schema, position: Number(row.path_position) };
+        if (seen) seen.push(entry);
+        else schemasByTable.set(row.table_name, [entry]);
+      }
+      const collisions = [...schemasByTable]
+        .filter(([, schemas]) => schemas.length > 1)
+        .map(([table, schemas]) => ({
+          table,
+          schemas: schemas.sort((a, b) => a.position - b.position).map((s) => s.schema),
+        }))
+        .sort((a, b) => (a.table < b.table ? -1 : a.table > b.table ? 1 : 0));
+      if (collisions.length > 0) throw postgresTableNameCollisionError(collisions);
+
+      tableNames = rows.map((row) => row.table_name);
+      for (const row of rows) schemaByTable.set(row.table_name, row.table_schema);
     } else if (this.isMysql) {
       const result = await this.knex.raw(`
         SELECT table_name
@@ -15493,7 +15560,11 @@ export class SqlDriver implements IDataDriver {
       // read as absent (#11161). Every in-tree caller of `introspectSchema`
       // already handles a throw (the datasource health check reports
       // `{ ok: false }`, the REST/CLI seams surface the error).
-      const columns = await this.introspectColumns(tableName);
+      // On PostgreSQL the columns are read in the table's OWN schema (#24707);
+      // the three key reads below already scope to `current_schemas(false)`
+      // or resolve along `search_path`, which the refusal above makes
+      // unambiguous among base tables.
+      const columns = await this.introspectColumns(tableName, schemaByTable.get(tableName));
       const foreignKeys = await this.introspectForeignKeys(tableName);
       const primaryKeys = await this.introspectPrimaryKeys(tableName);
       const uniqueConstraints = await this.introspectUniqueConstraints(tableName);
@@ -20866,19 +20937,21 @@ export class SqlDriver implements IDataDriver {
    * catalog's ordinal rather than trusting a plan.
    *
    * Each arm reads the same catalog `columnInfo()` populates, with the same
-   * scoping knex itself applies there (PG: `current_schema()`; MySQL:
-   * `DATABASE()`; SQLite: `PRAGMA table_info`, whose `cid` is the ordinal).
+   * scoping knex itself applies there (PG: `current_schema()`, or the named
+   * `schema` exactly as knex's `withSchema()` scopes `columnInfo()` — #24707;
+   * MySQL: `DATABASE()`; SQLite: `PRAGMA table_info`, whose `cid` is the
+   * ordinal).
    */
-  protected async introspectColumnOrder(tableName: string): Promise<string[]> {
+  protected async introspectColumnOrder(tableName: string, schema?: string): Promise<string[]> {
     if (this.isPostgres) {
       const result = await this.knex.raw(
         `SELECT column_name
            FROM information_schema.columns
           WHERE table_name = ?
             AND table_catalog = current_database()
-            AND table_schema = current_schema()
+            AND table_schema = ${schema === undefined ? 'current_schema()' : '?'}
           ORDER BY ordinal_position`,
-        [tableName],
+        schema === undefined ? [tableName] : [tableName, schema],
       );
       return result.rows.map((row: any) => row.column_name);
     }
@@ -20904,8 +20977,17 @@ export class SqlDriver implements IDataDriver {
     return [];
   }
 
-  protected async introspectColumns(tableName: string): Promise<IntrospectedColumn[]> {
-    const columnInfo = (await this.knex(tableName).columnInfo()) as Record<string, any>;
+  /**
+   * `schema` (PostgreSQL, #24707) reads the table in that schema rather than
+   * in `current_schema()`. Omitted, the read is the bare-name one it always
+   * was — the first schema on `search_path` — which is right for every caller
+   * that names a table this driver manages. {@link introspectSchema} lists
+   * tables across every schema on the path, so it names each table's own.
+   */
+  protected async introspectColumns(tableName: string, schema?: string): Promise<IntrospectedColumn[]> {
+    let catalog = this.knex(tableName);
+    if (schema !== undefined) catalog = catalog.withSchema(schema);
+    const columnInfo = (await catalog.columnInfo()) as Record<string, any>;
     const columns: IntrospectedColumn[] = [];
 
     // #11163: emit in DECLARED order, not the `columnInfo()` object's
@@ -20918,7 +21000,7 @@ export class SqlDriver implements IDataDriver {
     // in `columnInfo()` order rather than dropped, so the merge can reorder
     // but never lose a column.
     const has = (name: string) => Object.prototype.hasOwnProperty.call(columnInfo, name);
-    const orderedNames = (await this.introspectColumnOrder(tableName)).filter(has);
+    const orderedNames = (await this.introspectColumnOrder(tableName, schema)).filter(has);
     const seen = new Set(orderedNames);
     for (const name of Object.keys(columnInfo)) {
       if (!seen.has(name)) orderedNames.push(name);
