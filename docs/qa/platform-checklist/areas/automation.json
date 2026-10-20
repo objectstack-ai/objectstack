@@ -557,7 +557,7 @@
           "revision": 8,
           "date": "2026-10-20",
           "change": "automated removed, fixtures.knownGaps[2] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: Tier 1 in name only), round 15 of wave anchor #24579. The ref already said its one dogfood pin covers ONE variant of acceptance[1]. A variant is not a clause, so no full clause is pinned: automated is dropped (theme-B rule), and the knownGap says what the pin asserts. Read at base b1676441ba. No clause changed",
-          "ref": "#PENDING-24579R15"
+          "ref": "#24891"
         }
       ],
       "enumSource": {
@@ -695,7 +695,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "negative[0]'s pin note narrowed, automated.ref unchanged — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: negative[0]'s pin is not in the ref), round 15 of wave anchor #24579. Read at base b1676441ba: the dogfood case asserts the anonymous trigger's 401 on the served showcase composition and never reads the runs after it. So it asserts half of negative[0] ('denied (401) with NO run row created'). A pin joins the ref only for a full clause at its layer, so it stays out, and negative[0] now says which half it pins. negative[0]'s FAIL condition is unchanged",
-          "ref": "#PENDING-24579R15"
+          "ref": "#24891"
         }
       ]
     },

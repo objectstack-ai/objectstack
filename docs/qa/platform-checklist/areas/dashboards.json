@@ -587,7 +587,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: a bare ref over-implies coverage), round 15 of wave anchor #24579. The dogfood pin drives the draft-save and publish doors (acceptance[0]), and reads the dashboard back for its widget count and missing layout only. Read at base b1676441ba. No clause changed",
-          "ref": "#PENDING-24579R15"
+          "ref": "#24891"
         }
       ]
     },
@@ -685,7 +685,7 @@
           "revision": 2,
           "date": "2026-10-20",
           "change": "automated.ref adds empty-group-bucket-parity.test.ts for acceptance[4] — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: a ref that misses its own pin), round 15 of wave anchor #24579. acceptance[4].verify names that suite and the ref did not. Read at base b1676441ba: it drives two real drivers and applyInMemoryAggregation over the same rows and asserts the same keys, key types and totals on both paths, which is acceptance[4]'s test oracle. No clause changed",
-          "ref": "#PENDING-24579R15"
+          "ref": "#24891"
         }
       ]
     },

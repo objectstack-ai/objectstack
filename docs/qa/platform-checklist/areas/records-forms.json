@@ -3973,7 +3973,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "automated.ref and acceptance[1].verify re-scored per RUNNER rule 6 — the sweep-wide rule-6 contradiction QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4) names at cascading-multilevel acceptance[1], round 15 of wave anchor #24579. acceptance[1] scores the direct POST's answer. Its verify and the ref (round 14 moved the objectql pin's scope into it) scored it, and acceptance[2], from rule-validator.option-visibility.test.ts, which calls evaluateValidationRules directly. By the rule (a pin scores only the layer it drives) that pin scores neither clause. Re-read at the console pin 616df6598b42 (blob 5f65228948b7 of cascading-options.spec.ts, unchanged since round 14), the ref's own objectui spec carries a second case, 'the server rejects an out-of-set option value, and accepts an in-set one', which POSTs to the live backend and asserts the out-of-set 400 VALIDATION_FAILED with invalid_option on province and the in-set 201. That is acceptance[1] at the HTTP door, so the ref and the verify cite it; no live run exists at that pin, so its verdict there is NOT MEASURED. acceptance[2] needs the run. No clause changed",
-          "ref": "#PENDING-24579R15"
+          "ref": "#24891"
         }
       ]
     },
@@ -4081,7 +4081,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause; acceptance[3].verify and fixtures.knownGaps[1] rewritten — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: the acceptance[2] and [4] guards are pinned at the engine only), round 15 of wave anchor #24579. secret-fields.test.ts drives a real ObjectQL engine over a stub driver, with no HTTP. By RUNNER rule 6 (a pin scores only the layer it drives) it scores none of this item's api clauses, so the ref names it engine-layer evidence for acceptance[2]–[4] and negative[1]–[3], and names the dogfood pin's own clauses (acceptance[0]'s API oracle, acceptance[1], negative[0]). The same rule makes acceptance[3]'s 'unit-pin verdict' (the #22017 row 22 disposition) a rule-6 contradiction, located here beyond #24840's list: no stock composition runs without a provider, so the clause is now recorded blocked(fixture) with the pin beside it. Read at base b1676441ba. No clause changed",
-          "ref": "#PENDING-24579R15"
+          "ref": "#24891"
         }
       ]
     },
@@ -4313,7 +4313,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause; acceptance[1].verify, acceptance[2].verify, acceptance[3].verify and steps[4] rewritten — checklist-accuracy findings of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4), round 15 of wave anchor #24579. (1) The ref said the two SQL pins assert '409 UNIQUE_VIOLATION over real REST'. They drive SqlDriver over better-sqlite3 and map its refusal to that envelope through a test-local createAsApi helper, so no REST door is driven. (2) The sweep-wide rule-6 contradiction #24840 names at acceptance[1]–[3]: those clauses score the REST answer, and their verifies and steps[4] told the runner to score them from the memory-driver pin ('score from the pin'). By RUNNER rule 6 (a pin scores only the layer it drives) the pins are now cited as driver-level evidence only, and an updateMany door the boot does not expose is recorded blocked(fixture). The ref names the clauses each pin scores: acceptance[4] (test oracle) and [5], and negative[2] and [3]. Read at base b1676441ba. No clause changed",
-          "ref": "#PENDING-24579R15"
+          "ref": "#24891"
         }
       ]
     },

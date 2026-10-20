@@ -299,7 +299,7 @@
           "revision": 3,
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: a bare ref over-implies coverage), round 15 of wave anchor #24579. The one pin drives createMcpProviderFactory over a fake client factory. By RUNNER rule 6 (a pin scores only the layer it drives) it scores negative[0] (on a deny, nothing reaches the spawner) and is provider-layer evidence for the boot-output clauses acceptance[0]–[2]. Read at base b1676441ba. No clause changed",
-          "ref": "#PENDING-24579R15"
+          "ref": "#24891"
         }
       ]
     },
@@ -709,7 +709,7 @@
           "revision": 10,
           "date": "2026-10-20",
           "change": "automated removed, fixtures.knownGaps[2] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: a bare ref over-implies coverage), round 15 of wave anchor #24579. The one dogfood pin asserts acceptance[0]'s no-sys_webhook-row half on its own fixture stack and drives no activation door. By RUNNER rule 6 (a pin scores only the layer it drives) no full clause is pinned, so automated is dropped (theme-B rule) and the knownGap says what the pin asserts. Read at base b1676441ba. No clause changed",
-          "ref": "#PENDING-24579R15"
+          "ref": "#24891"
         }
       ],
       "enumSource": {
@@ -1331,7 +1331,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "automated.ref respelled — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: a ref that misses its own pin), round 15 of wave anchor #24579. The second pin was spelled '(+ __tests__/envelope.conformance.test.ts)', a partial path in a parenthesis, so the run's ref parser missed it and ran it separately (24/24). It is now a full repo path after ' + ', as the other multi-pin refs spell it. The ref's scope is unchanged. Read at base b1676441ba. No clause changed",
-          "ref": "#PENDING-24579R15"
+          "ref": "#24891"
         }
       ]
     },
@@ -1573,7 +1573,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause; acceptance[0] (verify, evidence), acceptance[3] (verify, evidence) and fixtures.knownGaps[0] rewritten — the sweep-wide rule-6 contradiction QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4) names at drift-gate acceptance[0] and [3], round 15 of wave anchor #24579. acceptance[0]–[3] score the boot log, and the item told the runner to score them from the plugin pins when the live arm is blocked ('Unit fallback', 'the unit pins are the fallback evidence'). The three pins drive ExternalValidationPlugin over stubbed services. By RUNNER rule 6 (a pin scores only the layer it drives) they score the test-oracle clauses acceptance[4]–[6] and negative[2] and [4], and are cited as plugin-layer evidence beside a blocked(fixture) verdict for the rest. Read at base b1676441ba. No clause changed",
-          "ref": "#PENDING-24579R15"
+          "ref": "#24891"
         }
       ]
     },

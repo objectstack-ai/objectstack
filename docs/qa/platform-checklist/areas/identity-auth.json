@@ -534,7 +534,7 @@
           "revision": 9,
           "date": "2026-10-20",
           "change": "automated.ref adds security-plugin.test.ts's [#3023] case — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: acceptance[5] and negative[3] cite a pin not in the ref), round 15 of wave anchor #24579. Read at base b1676441ba: the case asserts at the plugin-security unit that an owner_id:null write carrying __referentialFieldClear passes the owner-anchor guard. That is negative[3]'s #3023 half (its #3031 half is already pinned), and acceptance[5]'s exemption half, which the clause scores from this pin because no public door is left. The ref also says that acceptance[5]'s refusal half is pinned without its owned-row read. No clause changed",
-          "ref": "#PENDING-24579R15"
+          "ref": "#24891"
         }
       ]
     },

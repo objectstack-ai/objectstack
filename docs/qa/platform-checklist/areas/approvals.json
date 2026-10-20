@@ -541,7 +541,7 @@
           "revision": 7,
           "date": "2026-10-20",
           "change": "automated removed; fixtures.knownGaps[0] rewritten and fixtures.knownGaps[1] added; acceptance[9].verify's envelope corrected — QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: the sweep-wide rule-6 contradiction at approvals acceptance[9], and 'the pin also asserts negative[1]'), round 15 of wave anchor #24579. (1) The ref claimed acceptance[9] from approval-service.test.ts's #12769 describe, and knownGaps[0] said that pin is how acceptance[9] is scored. The pin drives ApprovalService over a fake engine, and the clause scores the wire answer, so by RUNNER rule 6 (a pin scores only the layer it drives) it is evidence beside a blocked(fixture) verdict. (2) Its throttle cases assert negative[1] at the service, and rest-approvals-wire-codes.test.ts maps THROTTLED to 429 over a mocked service; neither drives the remind door, so negative[1] joins no ref. (3) No full clause is pinned, so automated is dropped (theme-B rule). (4) Located while rewriting knownGaps[0]: acceptance[9].verify said READ_BACK_FAILED rides the generic template-generated 500 and is deliberately absent from handleApprovalError's prefix map. It has been a named 500 row there since 5b3ff63cc (packages/rest/src/approvals-routes.ts), pinned by rest-approvals-wire-codes.test.ts. Read at base b1676441ba. No clause changed",
-          "ref": "#PENDING-24579R15"
+          "ref": "#24891"
         }
       ]
     },
