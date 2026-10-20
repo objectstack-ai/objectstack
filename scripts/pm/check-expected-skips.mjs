@@ -439,8 +439,8 @@ export function listWorkflowFiles(root = ROOT) {
  * The roster a live run judges with is a function of exactly these files, as
  * they sit in the checkout the command runs from: THIS file (the listed half,
  * and the derivation's code) and every workflow file (the derived half). A
- * head's check-runs come from the workflows of the merge its runs were built
- * on — the head over its base branch's tip at that moment. So a checkout behind
+ * head's `pull_request` check-runs come from the workflows of the merge they
+ * were built on — the head over its base branch's tip at that moment. So a checkout behind
  * the base reads a job rostered on the base since as an unexpected skip (exit
  * 4; measured on PR #24771's head `7a9bc58c6`, judged from `6b222464c`, one
  * merge before the `18.x upgrade harness (opt-in)` job and its row landed),
