@@ -30,7 +30,7 @@ type ObjectDef = { name?: string; fields?: Record<string, FieldDef>; actions?: A
 
 const CATALOGUE: ObjectDef[] = [
   ...new Set(
-    Object.values(PlatformObjects).filter(
+    (Object.values(PlatformObjects) as unknown[]).filter(
       (v): v is ObjectDef =>
         !!v && typeof v === 'object' && typeof (v as ObjectDef).name === 'string' && !!(v as ObjectDef).fields,
     ),
