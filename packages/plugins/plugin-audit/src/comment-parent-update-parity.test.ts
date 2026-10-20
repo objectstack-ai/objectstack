@@ -2,23 +2,26 @@
 
 /**
  * The `sys_comment` moderation gate gives the answer a by-id update of the
- * parent record gets.
+ * parent record gets — and, since #24646, asks nothing else.
  *
  * The limb that asks "may the caller edit the parent record?" — editing or
- * removing another person's comment — admits only where the security service's
- * judgement of that update admits: its record-grained `explain` verdict for
- * `update` on `(parent object, parent id)`, `allowed` and `record.visible`
- * both. That verdict is the write path's own composition (the object-level
- * grant, the parent's own row-level security, its record sharing and, for a
- * `controlled_by_parent` parent, its master), so the gate keeps no second copy
- * of it.
+ * removing another person's comment — admits exactly where the security
+ * service's judgement of that update admits: its record-grained `explain`
+ * verdict for `update` on `(parent object, parent id)`, `allowed` and
+ * `record.visible` both. That verdict is the write path's own composition (the
+ * object-level grant, the parent's own row-level security, its record sharing
+ * at the caller's real write depth and, for a `controlled_by_parent` parent,
+ * its master), so the gate keeps no second copy of it: record sharing and the
+ * master-detail check are not asked where the judgement is served. A caller
+ * record sharing refuses at owner-only depth — a `unit` / `org` write-depth
+ * holder — moderates when the update admits them, and a caller the update
+ * refuses is refused whatever record sharing or the master check would have
+ * said. A store fault keeps its own status. Posting a comment stays a READ rule
+ * on the parent (the module header says why), so the update judgement is not
+ * asked there.
  *
- * What the gate already composed keeps its answers: record sharing's `deny`
- * still refuses without asking anything further, and so do the master-detail
- * write check's refusals. A store fault keeps its own status. The update
- * judgement can only add refusals; it never admits what the gate refused.
- * Posting a comment stays a READ rule on the parent (the module header says
- * why), so the update judgement is not asked there.
+ * Where the security service serves no `explain`, the gate keeps the
+ * composition it had before it could ask one (the last suite below).
  *
  * Refusals are asserted on the ADR-0112 envelope (`code` and `status`).
  */
@@ -136,75 +139,71 @@ const hookCtx = (event: string, input: Record<string, unknown>, visible: string[
 
 const othersComment = { id: 'c1', thread_id: THREAD, author_id: AUTHOR, body: 'hello' };
 
+/** What record sharing and the master-detail check WOULD answer — neither is asked where the judgement is served. */
 interface Row {
   shape: string;
   sharing: SharingVerdict;
   master?: ControlledByParentWriteOutcome;
-  /** `null` = never asked. */
-  judgement: UpdateJudgement | null;
+  judgement: UpdateJudgement;
   admits: boolean;
 }
 
 const ROWS: Row[] = [
-  { shape: 'sharing allow, update judgement admits', sharing: 'allow', judgement: 'admits', admits: true },
-  { shape: 'sharing allow, update judgement: record verdict refuses', sharing: 'allow', judgement: 'record_refuses', admits: false },
-  { shape: 'sharing allow, update judgement: decision refuses', sharing: 'allow', judgement: 'decision_refuses', admits: false },
-  { shape: 'sharing allow, update judgement carries no record verdict', sharing: 'allow', judgement: 'no_record_verdict', admits: false },
-  { shape: 'sharing abstain, no master, update judgement admits', sharing: 'abstain', judgement: 'admits', admits: true },
-  { shape: 'sharing abstain, no master, update judgement: record verdict refuses', sharing: 'abstain', judgement: 'record_refuses', admits: false },
+  { shape: 'update judgement admits (record sharing allows)', sharing: 'allow', judgement: 'admits', admits: true },
+  { shape: 'update judgement: record verdict refuses (record sharing allows)', sharing: 'allow', judgement: 'record_refuses', admits: false },
+  { shape: 'update judgement: decision refuses (record sharing allows)', sharing: 'allow', judgement: 'decision_refuses', admits: false },
+  { shape: 'update judgement carries no record verdict (record sharing allows)', sharing: 'allow', judgement: 'no_record_verdict', admits: false },
+  // [#24646] The write-depth holder: record sharing at owner-only depth
+  // refuses, the parent's own update admits — and so does the gate.
+  { shape: 'update judgement admits, record sharing at own depth refuses (a unit / org write-depth holder)', sharing: 'deny', judgement: 'admits', admits: true },
+  { shape: 'update judgement: record verdict refuses, record sharing refuses', sharing: 'deny', judgement: 'record_refuses', admits: false },
+  { shape: 'update judgement admits (record sharing abstains)', sharing: 'abstain', judgement: 'admits', admits: true },
+  // A controlled_by_parent parent follows its master THROUGH the judgement.
   {
-    shape: 'sharing abstain, no master, update judgement: decision refuses',
+    shape: 'update judgement admits, the master check alone would refuse',
     sharing: 'abstain',
-    judgement: 'decision_refuses',
-    admits: false,
-  },
-  {
-    shape: 'sharing abstain, master admits, update judgement admits',
-    sharing: 'abstain',
-    master: { outcome: 'allow' },
+    master: { outcome: 'deny', leg: 'object_permission' },
     judgement: 'admits',
     admits: true,
   },
   {
-    shape: 'sharing abstain, master admits, update judgement: decision refuses',
+    shape: 'update judgement: record verdict refuses, the master check alone would admit',
     sharing: 'abstain',
     master: { outcome: 'allow' },
+    judgement: 'record_refuses',
+    admits: false,
+  },
+  {
+    shape: 'update judgement: decision refuses, the master check is unresolvable',
+    sharing: 'abstain',
+    master: { outcome: 'unresolvable', reason: 'master_reference_missing' },
     judgement: 'decision_refuses',
     admits: false,
   },
-  {
-    shape: 'sharing abstain, master refuses',
-    sharing: 'abstain',
-    master: { outcome: 'deny', leg: 'object_permission' },
-    judgement: null,
-    admits: false,
-  },
-  {
-    shape: 'sharing abstain, master unresolvable',
-    sharing: 'abstain',
-    master: { outcome: 'unresolvable', reason: 'master_reference_missing' },
-    judgement: null,
-    admits: false,
-  },
-  { shape: 'sharing deny', sharing: 'deny', judgement: null, admits: false },
 ];
 
-const judgementOf = (row: Row): UpdateJudgement => row.judgement ?? 'admits';
+const rowDoubles = (row: Row) => {
+  const { security, explain, checkControlledByParentWrite } = securityDouble(row.judgement, row.master);
+  const sharing = sharingDouble(row.sharing);
+  return { security, explain, checkControlledByParentWrite, sharing, checkEdit: sharing.checkEdit as ReturnType<typeof vi.fn> };
+};
 
-describe('the comment moderation gate agrees with the parent by-id update', () => {
+describe('the comment moderation gate asks the parent by-id update, and only it', () => {
   for (const row of ROWS) {
     it(`delete another person's comment — ${row.shape} → ${row.admits ? 'admitted' : 'refused 403 RECORD_NOT_ACCESSIBLE'}`, async () => {
-      const { security, explain } = securityDouble(judgementOf(row), row.master);
-      const { beforeDelete } = install({ sharing: sharingDouble(row.sharing), security, comments: [othersComment] });
+      const { security, explain, checkControlledByParentWrite, sharing, checkEdit } = rowDoubles(row);
+      const { beforeDelete } = install({ sharing, security, comments: [othersComment] });
       const run = beforeDelete(hookCtx('beforeDelete', { id: 'c1' }));
       if (row.admits) await expect(run).resolves.toBeUndefined();
       else await expect(run).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403, object: PARENT });
-      expect(explain).toHaveBeenCalledTimes(row.judgement === null ? 0 : 1);
+      expect(explain).toHaveBeenCalledTimes(1);
+      expect(checkEdit).not.toHaveBeenCalled();
+      expect(checkControlledByParentWrite).not.toHaveBeenCalled();
     });
 
     it(`edit another person's comment — ${row.shape} → ${row.admits ? 'admitted' : 'refused 403 RECORD_NOT_ACCESSIBLE'}`, async () => {
-      const { security } = securityDouble(judgementOf(row), row.master);
-      const { beforeUpdate } = install({ sharing: sharingDouble(row.sharing), security, comments: [othersComment] });
+      const { security, sharing } = rowDoubles(row);
+      const { beforeUpdate } = install({ sharing, security, comments: [othersComment] });
       const run = beforeUpdate(hookCtx('beforeUpdate', { id: 'c1', data: { body: 'edited' } }));
       if (row.admits) await expect(run).resolves.toBeUndefined();
       else await expect(run).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403, object: PARENT });
@@ -284,9 +283,50 @@ describe('the comment moderation gate asks the update judgement of the parent re
     await expect(beforeInsert(hookCtx('beforeInsert', { data: { thread_id: THREAD, body: 'hi' } }))).resolves.toBeUndefined();
     expect(explain).not.toHaveBeenCalled();
   });
+});
 
-  it('a kernel with no security service composes no update judgement, as the parent update meets none', async () => {
-    const { beforeDelete } = install({ sharing: sharingDouble('abstain'), security: null, comments: [othersComment] });
-    await expect(beforeDelete(hookCtx('beforeDelete', { id: 'c1' }))).resolves.toBeUndefined();
+/**
+ * [#24646] A kernel whose security service serves no `explain` — or no
+ * security service at all — judges no by-id update of the parent, and the gate
+ * keeps the composition it had before it could ask one: record sharing's
+ * tri-state `checkEdit` at owner-only depth, then, on an abstention, the
+ * master-detail check. Removing those steps there would admit every caller, so
+ * this suite holds them: each row is the answer the gate gave before #24646.
+ */
+describe('a kernel that judges no by-id update keeps the record-sharing and master-detail steps', () => {
+  const masterOnly = (outcome: ControlledByParentWriteOutcome): CommentSecurityLike => ({
+    checkControlledByParentWrite: vi.fn(async (): Promise<ControlledByParentWriteOutcome> => outcome),
+  });
+  const DEGRADED: Array<{ shape: string; sharing: SharingVerdict; master: ControlledByParentWriteOutcome; admits: boolean }> = [
+    { shape: 'record sharing allows', sharing: 'allow', master: { outcome: 'deny', leg: 'record_sharing' }, admits: true },
+    { shape: 'record sharing refuses at owner-only depth', sharing: 'deny', master: { outcome: 'allow' }, admits: false },
+    { shape: 'record sharing abstains, the master check admits', sharing: 'abstain', master: { outcome: 'allow' }, admits: true },
+    { shape: 'record sharing abstains, the master check refuses', sharing: 'abstain', master: { outcome: 'deny', leg: 'record_sharing' }, admits: false },
+  ];
+  for (const row of DEGRADED) {
+    it(`delete another person's comment on a security service serving no explain — ${row.shape} → ${row.admits ? 'admitted' : 'refused 403 RECORD_NOT_ACCESSIBLE'}`, async () => {
+      const { beforeDelete } = install({ sharing: sharingDouble(row.sharing), security: masterOnly(row.master), comments: [othersComment] });
+      const run = beforeDelete(hookCtx('beforeDelete', { id: 'c1' }));
+      if (row.admits) await expect(run).resolves.toBeUndefined();
+      else await expect(run).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403, object: PARENT });
+    });
+
+    it(`edit another person's comment with no security service — ${row.shape} → ${row.sharing === 'deny' ? 'refused 403 RECORD_NOT_ACCESSIBLE' : 'admitted'}`, async () => {
+      // No security service: an abstention admits, as the parent's own update meets no master check either.
+      const { beforeUpdate } = install({ sharing: sharingDouble(row.sharing), security: null, comments: [othersComment] });
+      const run = beforeUpdate(hookCtx('beforeUpdate', { id: 'c1', data: { body: 'edited' } }));
+      if (row.sharing !== 'deny') await expect(run).resolves.toBeUndefined();
+      else await expect(run).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403, object: PARENT });
+    });
+  }
+
+  it('with no sharing service either, the parent read alone decides — as before', async () => {
+    const shown = install({ sharing: null, security: null, comments: [othersComment] });
+    await expect(shown.beforeDelete(hookCtx('beforeDelete', { id: 'c1' }))).resolves.toBeUndefined();
+    const hidden = install({ sharing: null, security: null, comments: [othersComment] });
+    await expect(hidden.beforeDelete(hookCtx('beforeDelete', { id: 'c1' }, []))).rejects.toMatchObject({
+      code: 'RECORD_NOT_ACCESSIBLE',
+      status: 403,
+    });
   });
 });
