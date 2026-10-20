@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: the real `os` binary, three runs (dry run, apply, re-run) over one 18.0 fixture copy, each a full CLI boot; measured 12.84 s wall on a shared agent box, re-measure on CI
 //
 // [#24693] `os migrate audit-mail-bodies` over an 18.0 database: the mail-log
 // bodies the 18.0 audit writer copied in clear into `sys_audit_log` and
