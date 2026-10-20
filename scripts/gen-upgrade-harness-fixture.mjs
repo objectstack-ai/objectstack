@@ -44,7 +44,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -114,7 +114,10 @@ try {
   // The populator comes from HEAD; copy it in when the checkout's differs.
   const from = join(REPO_ROOT, HARNESS_DIR);
   const to = join(checkout, HARNESS_DIR);
-  if (resolve(from) !== resolve(to)) cpSync(from, to, { recursive: true, filter: (src) => !relative(from, src).startsWith('fixture-') });
+  // The fixture DIRECTORIES stay the checkout's own; `fixture-manifest.ts`
+  // is populator code and comes from HEAD like the rest.
+  const isFixtureDir = (src) => /^fixture-[^/]*$/.test(relative(from, src)) && statSync(src).isDirectory();
+  if (resolve(from) !== resolve(to)) cpSync(from, to, { recursive: true, filter: (src) => !isFixtureDir(src) });
 
   const work = mkdtempSync(join(tmpdir(), 'upgrade-harness-run-'));
   try {
