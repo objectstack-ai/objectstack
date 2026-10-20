@@ -32,10 +32,8 @@
  * membership table to watch.
  *
  * The position expansion also unions `sys_member.role`, the ADR-0057 D4
- * transition source. The holder check reads it — a user who still holds the
- * position there keeps the rule's grants when an assignment row goes — but its
- * writes are not watched here: its values are the closed set of membership
- * grades (ADR-0108), not business positions.
+ * transition source, and so does the holder check: a user who still holds the
+ * position there keeps the rule's grants when an assignment row goes.
  *
  * ## Cost: scoped to one user and to the rules that name the recipient
  *

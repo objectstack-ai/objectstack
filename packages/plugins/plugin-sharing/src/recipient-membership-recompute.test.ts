@@ -186,7 +186,7 @@ async function boot() {
   /** The account ids `userId`'s own read path admits. */
   const readable = async (userId: string): Promise<string[]> => {
     const filter = await sharing.buildReadFilter(OBJECT, member(userId));
-    expect(filter).not.toBeNull(); // a member context never bypasses — else this reads nothing
+    expect(filter).not.toBeNull(); // a member context is always filtered — else this measures nothing
     const rows = (await ql.find(OBJECT, { where: filter as any, context: SYSTEM } as never)) as any[];
     return rows.map((r) => String(r.id)).sort();
   };
