@@ -1735,9 +1735,12 @@ function singleMasterOf(obj: AnyRec): string | undefined {
  * serve a hop, so the lint refuses it where it is written.
  *
  * The literal `.reference` read stays in the argument for the #5017 receiver
- * scan, exactly as in {@link masterDetailCount}. A type whose target is implied
- * (`user`, `tree`) never names the family, so the authored carrier is the only
- * one read.
+ * scan, exactly as in {@link masterDetailCount}. Only the authored carrier is
+ * read: a type whose target is implied never implies the family. A `tree`
+ * field's authored `reference` cannot name it (the object schema refuses any
+ * target but the declaring object); a `user` field's authored `reference` is
+ * not refused at parse, so a `user` naming the family is collected too
+ * (#24677 measured it).
  */
 function storedMetadataBodyReferencesOf(obj: AnyRec): Map<string, string> {
   const out = new Map<string, string>();
@@ -1774,8 +1777,9 @@ function storedMetadataBodyHopMessage(
 
 /**
  * [#24677] The refusal of the declaration every hop above presupposes: a
- * `lookup` or `master_detail` field whose `reference` is a stored-metadata-body
- * table ({@link storedMetadataBodyReferencesOf}). The engine never hydrates
+ * `lookup` or `master_detail` field (or any other type the collector admits)
+ * whose `reference` is a stored-metadata-body table
+ * ({@link storedMetadataBodyReferencesOf}). The engine never hydrates
  * such a field — `expand` keeps its stored id, and a master-detail `parent`
  * root over a family header stays unbound — so the field saves and never
  * works. It names the field, its type, the target and the rule, and ends on
@@ -1792,7 +1796,7 @@ function storedMetadataBodyReferenceMessage(field: string, type: string, target:
       + 'unbound, so every write a `parent` rule judges is refused'
     : 'and a formula or a validation rule never reads through the field';
   return `\`${field}\` is a \`${type}\` whose \`reference\` names '${target}', a table of stored metadata. `
-    + 'A `lookup` or `master_detail` field may not target a stored-metadata-body table: the engine never '
+    + 'A relationship field may not target a stored-metadata-body table: the engine never '
     + `hydrates one, so \`$expand\` keeps the stored id and never nests the row, ${consequence}. `
     + 'Those rows carry stored metadata bodies, served only '
     + 'through the metadata API (`GET /api/v1/meta/:type/:name`), where the body is projected; to point a '

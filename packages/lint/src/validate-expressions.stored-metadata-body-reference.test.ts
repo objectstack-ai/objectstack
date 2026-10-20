@@ -89,6 +89,15 @@ describe('[#24677] a lookup or master_detail into a stored-metadata-body table i
     }
   }
 
+  it('a `user` field whose authored `reference` names the family is refused too — the collector\'s type set, not a second one', () => {
+    // `user`'s target is implied (`sys_user`), but an authored `reference` on it
+    // is not refused at parse and is the target every reader resolves, so the
+    // hop refusal's collector admits it, and this refusal judges the same set.
+    const [issue] = atReference(validateStackExpressions({ objects: [carrier('user', 'sys_metadata')] }));
+    expect(issue?.message).toContain('`meta` is a `user`');
+    expect(atReference(validateStackExpressions({ objects: [carrier('user', 'sys_user')] }))).toEqual([]);
+  });
+
   it('a master_detail refusal says its `parent` root stays unbound; a lookup refusal does not', () => {
     const [md] = atReference(validateStackExpressions({ objects: [carrier('master_detail', 'sys_metadata')] }));
     const [lk] = atReference(validateStackExpressions({ objects: [carrier('lookup', 'sys_metadata')] }));
