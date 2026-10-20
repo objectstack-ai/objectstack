@@ -15,6 +15,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SettingsService, mailSettingsManifest, registerSettingsRoutes } from '@objectstack/service-settings';
 import { EmailServicePlugin } from './email-plugin.js';
 
@@ -46,12 +47,17 @@ const FROM_EMAIL = 'no-reply@acme.test';
 
 type UserRow = { id: string; email?: string | null };
 
+/** The engine double: `update` and `findOne` held to ObjectQL's own dispatch contract. */
 function fakeEngine(users: UserRow[], opts: { userReadFails?: boolean } = {}) {
   return {
     insert: vi.fn(async (_object: string, row: any) => ({ id: row?.id })),
-    update: vi.fn(async () => undefined),
+    update: vi.fn(async (_object: string, data: any, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
+      return undefined;
+    }),
     find: vi.fn(async () => []),
     findOne: vi.fn(async (object: string, query: any) => {
+      assertEngineFindOnePredicate(object, query);
       if (object !== 'sys_user') return null;
       if (opts.userReadFails) throw new Error('sys_user is unavailable');
       return users.find((u) => u.id === query?.where?.id) ?? null;
