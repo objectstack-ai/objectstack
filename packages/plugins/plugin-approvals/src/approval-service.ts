@@ -93,6 +93,12 @@ import {
   type ActingCaller,
 } from './approver-address.js';
 import { labelOrMachineName, requestDisplayLabels, slateLabelOf } from './display-labels.js';
+import {
+  localizeRequestLabels,
+  readerLabelsFor,
+  type ReaderLabelI18n,
+  type ReaderLabels,
+} from './reader-locale-labels.js';
 import type { SlotLabelSource } from './display-label-backfill.js';
 import {
   redactSnapshot,
@@ -1429,6 +1435,17 @@ export interface ApprovalServiceOptions {
    * `translation` metadata wins over the built-in sentence.
    */
   messageTranslator?: () => ValidationMessageTranslator | undefined;
+  /**
+   * [#24863] The deployment's `i18n` service, through which the approvals door
+   * serves a request's flow, step and object labels in the READER's locale
+   * (`reader-locale-labels.ts`). Resolved LAZILY per read, for the reason
+   * {@link ApprovalServiceOptions.messageTranslator} is: the provider is
+   * another plugin's and may start after this one.
+   *
+   * Absent (or resolving to `undefined`) serves the labels as stored, the
+   * authored text the request snapshotted when it opened.
+   */
+  i18nServiceSource?: () => ReaderLabelI18n | undefined;
 }
 
 /**
@@ -1528,6 +1545,8 @@ export class ApprovalService implements IApprovalService {
   private objectReadAdmission?: ObjectReadAdmissionSource;
   /** [#11993] Lazily-resolved deployment i18n lookup for refusal copy. */
   private messageTranslator?: () => ValidationMessageTranslator | undefined;
+  /** [#24863] Lazily-resolved `i18n` service for the reader-locale display labels. */
+  private i18nServiceSource?: () => ReaderLabelI18n | undefined;
   /**
    * [#8652] The HOST-named object set for the record-reader visibility tier
    * (the constructor option). EMPTY is the default, and the tier is then off
@@ -1556,6 +1575,7 @@ export class ApprovalService implements IApprovalService {
     this.tenancyPosture = opts.tenancyPosture;
     this.fieldVisibility = opts.fieldVisibility;
     this.messageTranslator = opts.messageTranslator;
+    this.i18nServiceSource = opts.i18nServiceSource;
     this.recordReaderVisibleObjects = new Set(
       (Array.isArray(opts.recordReaderVisibleObjects) ? opts.recordReaderVisibleObjects : [])
         .map((n) => String(n ?? '').trim())
@@ -8164,8 +8184,36 @@ export class ApprovalService implements IApprovalService {
     const served = await this.servedSubjectFields(list, context);
     this.redactPayloads(list, served);
     await this.enrichRows(list, served, context);
+    const labels = this.readerLabels(context);
+    if (labels) for (const row of list) localizeRequestLabels(row, labels);
     this.attachViewers(list, context, caller);
     return list;
+  }
+
+  /**
+   * [#24863] The labels this read serves in the READER's locale
+   * (`ExecutionContext.locale`), picked through the deployment's `i18n`
+   * service from `flows.<flow>.label`, `flows.<flow>.approvals.<node_id>.label`
+   * and `objects.<object>.label`, or `undefined` when the read can pick none
+   * (no locale, no service). The one spelling of the pick, the fallback and
+   * the keys is `reader-locale-labels.ts`.
+   *
+   * A read, never a write: the stored `process_label` / `current_step_label`
+   * stay the authored snapshot, and a label nothing is picked for is served as
+   * the row already carries it. Asked on every door that serves a request to
+   * a reader: the list ({@link listRequests}: the inbox and the record's
+   * approval panel), and the get and a decision's echo ({@link loadRequest}),
+   * whose step progress ({@link attachFlowSteps}) names its steps the same way.
+   */
+  private readerLabels(context: ExecutionContext): ReaderLabels | undefined {
+    let service: ReaderLabelI18n | undefined;
+    try {
+      service = this.i18nServiceSource?.();
+    } catch {
+      // The i18n service is optional and late-bound: the stored labels stand.
+      return undefined;
+    }
+    return readerLabelsFor(service, context?.locale);
   }
 
   async countRequests(
@@ -8278,7 +8326,9 @@ export class ApprovalService implements IApprovalService {
     const served = await this.servedSubjectFields([row], context);
     this.redactPayloads([row], served);
     await this.enrichRows([row], served, context);
-    await this.attachFlowSteps(row);
+    const labels = this.readerLabels(context);
+    if (labels) localizeRequestLabels(row, labels);
+    await this.attachFlowSteps(row, labels);
     await this.attachDecisionProgress(row, raw);
     this.attachViewers([row], context, caller);
     return row;
@@ -8387,8 +8437,13 @@ export class ApprovalService implements IApprovalService {
    * preferring `approve`/`true` edges, so the result is the flow's main
    * approval trunk; conditional side-steps show as part of the potential
    * path. Display-only and best-effort.
+   *
+   * [#24863] A step is named the way the request's own step is: in the
+   * reader's locale when `labels` picks its `flows.<flow>.approvals.<node_id>.label`,
+   * else by the node's authored label. So the progress strip and the request's
+   * `current_step_label` name the current step alike.
    */
-  private async attachFlowSteps(row: ApprovalRequestRow): Promise<void> {
+  private async attachFlowSteps(row: ApprovalRequestRow, labels: ReaderLabels | undefined): Promise<void> {
     try {
       const flowName = row.process_name?.startsWith('flow:') ? row.process_name.slice(5) : undefined;
       if (!flowName || typeof this.automation?.getFlow !== 'function') return;
@@ -8400,7 +8455,9 @@ export class ApprovalService implements IApprovalService {
       let cur: any = flow.nodes.find((n: any) => n.type === 'start');
       while (cur && !seen.has(cur.id)) {
         seen.add(cur.id);
-        if (cur.type === 'approval') steps.push({ id: cur.id, label: cur.label || cur.id });
+        if (cur.type === 'approval') {
+          steps.push({ id: cur.id, label: labels?.stepLabel(flowName, cur.id) ?? (cur.label || cur.id) });
+        }
         const out = (flow.edges ?? []).filter((e: any) => e.source === cur.id);
         if (!out.length) break;
         const pick = out.find((e: any) => e.label === 'approve')

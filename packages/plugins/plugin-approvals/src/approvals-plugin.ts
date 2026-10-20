@@ -216,6 +216,20 @@ export class ApprovalsServicePlugin implements Plugin {
     }
     this.engine = engine;
 
+    // The deployment's `i18n` service, read LAZILY at question time: it is
+    // contributed by another plugin (ADR-0029 D8) and may start after this
+    // one, so a reading taken here would pin its absence for the life of the
+    // process. `getService` THROWS on an empty slot. The one read both i18n
+    // consumers below ask, so they cannot disagree about which service exists.
+    const i18nService = (): II18nService | undefined => {
+      try {
+        const i18n = ctx.getService<II18nService>('i18n');
+        return typeof i18n?.t === 'function' ? i18n : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
     this.service = new ApprovalService({
       engine: engine as ApprovalEngine,
       logger: ctx.logger,
@@ -248,16 +262,15 @@ export class ApprovalsServicePlugin implements Plugin {
       // `translation` for `errors.approval_recall_not_submitter` wins — the
       // override address the catalog documents, made real for this emitter.
       messageTranslator: () => {
-        try {
-          const i18n = ctx.getService<II18nService>('i18n');
-          const t = i18n?.t;
-          if (typeof t !== 'function') return undefined;
-          return (key: string, locale: string, params?: Record<string, unknown>) =>
-            t.call(i18n, key, locale, params);
-        } catch {
-          return undefined;
-        }
+        const i18n = i18nService();
+        if (!i18n) return undefined;
+        return (key: string, locale: string, params?: Record<string, unknown>) =>
+          i18n.t(key, locale, params);
       },
+      // [#24863] The same service, for the approvals door's flow, step and
+      // object labels in the reader's locale (`reader-locale-labels.ts`).
+      // Without one, the door serves the labels as stored.
+      i18nServiceSource: i18nService,
     });
 
     // [#10749] Field-visibility authority for payload-snapshot redaction.
