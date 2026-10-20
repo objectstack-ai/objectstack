@@ -9,7 +9,7 @@
       "title": "transactionalBatch capability bit matches the mounted /batch behavior — atomicity, rollback codes, size cap",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -20,6 +20,9 @@
         "requires": [
           "two batch-writable objects: showcase_private_note (title is enough) and showcase_task — a showcase_task create needs its required `project` lookup (a seeded showcase_project id), or it answers 400 VALIDATION_FAILED 'Project is required'",
           "default maxBatchSize (200 unless RestServerConfig.batch overrides)"
+        ],
+        "knownGaps": [
+          "acceptance[5] (an empty-string id on an update or delete op) stays red until #24781 lands: the door's up-front id check tests `op.id == null` only (packages/rest/src/batch-routes.ts), so `\"id\": \"\"` reaches the engine and answers 500 — DATABASE_ERROR for update, INTERNAL_ERROR for delete. Measured at 580fd4ed (QA run #24779) and again at MAIN_SHA. When #24781's fix merges, re-run the clause and drop this line"
         ]
       },
       "steps": [
@@ -28,7 +31,8 @@
         "POST /api/v1/batch with the same operations and a TOP-LEVEL atomic: false; capture status + error code. ⛔ Spelled as options {atomic: false} the key is stripped, atomic defaults to true, and the batch simply SUCCEEDS — the clause below then reads as a product failure when nothing failed",
         "POST /api/v1/batch where a MIDDLE operation must fail (e.g. create showcase_invoice missing its required name), sandwiched between two valid creates; capture the per-operation results and re-read all three would-be rows",
         "POST /api/v1/batch with operations.length > maxBatchSize (201 no-op creates on the default config); capture the rejection",
-        "POST /api/v1/data/showcase_private_note/batch (the PER-OBJECT batch door) with a mixed set [valid, invalid, valid], NO atomic flag and options {continueOnError: true}; capture the per-row outcomes. Then repeat the same set with NO options at all (continueOnError defaults false) and capture the stop: the row before the failure written, the failing row its own error, the tail NOT_ATTEMPTED"
+        "POST /api/v1/data/showcase_private_note/batch (the PER-OBJECT batch door) with a mixed set [valid, invalid, valid], NO atomic flag and options {continueOnError: true}; capture the per-row outcomes. Then repeat the same set with NO options at all (continueOnError defaults false) and capture the stop: the row before the failure written, the failing row its own error, the tail NOT_ATTEMPTED",
+        "empty-id probe: POST /api/v1/batch with ONE op {object: showcase_task, action: update, id: \"\" (the empty string), data: {done: false}} and a TOP-LEVEL atomic: true, then the same with action: delete and id: \"\". Control: each op again with the id key omitted. Capture status + body for all four, and the server log around the empty-id pair"
       ],
       "acceptance": [
         {
@@ -60,10 +64,17 @@
           "oracle": "api",
           "verify": "continueOnError:true response has per-row success and error entries and re-reads confirm BOTH valid rows persisted; the default-options response has row 0 success, row 1 its own validation error, row 2 errors[0].code NOT_ATTEMPTED, and re-reads find row 0 persisted and row 2 absent",
           "evidence": "both responses + re-reads"
+        },
+        {
+          "clause": "an update or delete op whose id is the EMPTY STRING is refused up front exactly as a missing id is — 400 VALIDATION_FAILED (\"Operation 'update' on 'showcase_task' requires an id\") — and never answers a 5xx; the per-object doors (POST /data/:object/batch, /updateMany) already treat a blank id as absent. Red until #24781 lands",
+          "oracle": "api",
+          "verify": "step-7 responses: both empty-id ops answer status 400 with error code VALIDATION_FAILED, the same status and code as their no-id controls, and the log carries no '[REST] Unhandled error' for them. Any 5xx is a FAIL (the #24781 shape: update 500 DATABASE_ERROR, delete 500 INTERNAL_ERROR, logged '[REST] Unhandled error: Error: Update requires an ID or options.multi=true'). Score status and code per verb, not the sentence",
+          "evidence": "the four responses (two empty-id, two no-id controls) + the log excerpt around the empty-id pair"
         }
       ],
       "negative": [
-        "the two batch doors must not be conflated: atomic:false must NOT be accepted-and-ignored on /api/v1/batch (silent non-atomic acceptance is the pre-ADR-0119 bug shape), and the per-object door must NOT silently roll back valid rows when a sibling row fails without atomic being requested"
+        "the two batch doors must not be conflated: atomic:false must NOT be accepted-and-ignored on /api/v1/batch (silent non-atomic acceptance is the pre-ADR-0119 bug shape), and the per-object door must NOT silently roll back valid rows when a sibling row fails without atomic being requested",
+        "a malformed op must never answer a 5xx: an empty-string id answered 500 tells the caller the server broke, a retry policy keyed on 5xx replays it, and the two verbs disagree on the code (#24781) — boundary values (\"\", a missing id, an unknown id) are the door's own validation, never the engine's"
       ],
       "traps": [
         "dispatcher-vs-hono-route"
@@ -73,7 +84,8 @@
         "packages/spec/src/api/batch.zod.ts (ADR-0119 D4)",
         "packages/spec/src/api/error-code-ledger.zod.ts#BATCH_NOT_ATOMIC (BATCH_NOT_ATOMIC, BATCH_TOO_LARGE, NOT_ATTEMPTED, ROLLED_BACK — #4793)",
         "packages/rest/src/rest-route-ledger.ts (batch family)",
-        "packages/spec/src/api/discovery.zod.ts#transactionalBatch (transactionalBatch)"
+        "packages/spec/src/api/discovery.zod.ts#transactionalBatch (transactionalBatch)",
+        "QA-source: #24779 · api-backend.batch-transactional-discovery · observed beside the clauses (#24781)"
       ],
       "history": [
         {
@@ -105,6 +117,12 @@
           "date": "2026-10-16",
           "change": "the fixture line said showcase_task accepts a baseline create with only a title (#23878 checklist-accuracy finding); its project lookup is required. Re-measured on main c91af8ed6: a task create without project answers 400 VALIDATION_FAILED fields[project] required, alone or inside an atomic /batch, where the whole batch is refused and the sibling note does not persist; with a project the atomic batch answers 200. The fixture line and step 2's operations now carry the project; the rollback clause is unchanged and its re-run passed",
           "ref": "#24036"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "acceptance[5], steps[6], negative[1] and knownGaps[0] added for #24781, which QA run #24779 found beside the clauses (round 3 of the 18.0 sweep, 580fd4ed): no clause asked what the cross-object door answers for an empty-string id, and it answers 500 where a missing id answers 400 VALIDATION_FAILED. The clause asserts the missing-id answer and stays red until #24781's fix lands. No existing clause changed",
+          "ref": "#24802"
         }
       ]
     },

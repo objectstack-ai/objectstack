@@ -110,10 +110,49 @@ selector handed you has a verdict; planned ids are listed, not chased.
    and cite its output as the evidence; drive the browser only for what the pin doesn't
    cover. The reverse also holds: when a sweep hand-proves something repeatedly,
    propose promoting it to a permanent test and set `automated` in a revision.
+
+   **A pin scores only the layer it drives.** Before a pin scores a clause whose oracle
+   is a public door's answer (an HTTP status, an error envelope, a row the door left
+   behind), name the layer the pin reaches — a **plugin unit** (one plugin's hooks or
+   middleware over a stub), the **engine** (a real ObjectQL engine and driver, no HTTP),
+   or **HTTP** (a booted server answering the door) — and write that layer in the
+   clause's evidence. Read it off the pin's own harness, never off its file name or its
+   `automated.ref` prose: a stub terminal standing in for the engine means "lands" is
+   "the middleware called `next()`", and nothing below it ran. A pin that stops above
+   the layer the clause's oracle sits at scores that clause **`partial`**, naming the
+   missing layer, and the live leg is driven, or recorded `blocked` with its fixture
+   cited. It never scores `pass`. The instance that made this a rule is
+   `access-security.no-active-org-session-semantics`: the `group` CONTROL of
+   `no-active-organization-write-refusal.test.ts` "lands" a write by a member with no
+   active organization at the plugin-security layer, two rounds scored the walled legs
+   from it while a walled boot was refused, and on a full walled `group` boot the engine
+   answers that same write with a 500 (#24784).
 7. **Verify pass for high-stakes claims.** For P0 `fail`s and any finding that would
    ship or block a release: a second, independent agent re-derives the verdict from the
    captured evidence alone (not from the first agent's narrative) before it is acted
    on. Disagreement → re-run the item.
+8. **Keep an off-clause probe budget.** Clauses only ask what someone already thought
+   to ask. Every run keeps time AFTER its clauses have verdicts for probing the doors its
+   selector covers past those clauses — on the same boot, as the same personas. Probe
+   where a clause stops:
+   - **boundary values** on the inputs the clauses drive: the empty string, a missing
+     id, an unknown id;
+   - **the opposite severity or posture** of a path a clause asserts: the `warning`
+     twin of an `error` rule, `group` beside `isolated`;
+   - **recipients or readers outside the asserted scope**: who else a notification,
+     share or read reaches.
+
+   A probe is not a clause, so it scores nothing and no item verdict moves on it. A
+   finding that passes the filing gate is extracted like any other product defect (see
+   "Extraction obligation" below), and its card carries
+   `QA-source: #<run record> · <area.item> · observed beside the clauses`, naming the
+   item whose doors were probed. A probe that finds a gap the ledger should have asked
+   about is also a checklist-accuracy finding for the wave's anchor card: the clause it
+   was missing. The run record states how long the probes took and what they covered
+   (doors, personas, the boundary classes tried), and says so when the budget was
+   spent on nothing. A record that omits the probe line reads as a run that skipped it.
+   Round 3 of the 18.0 sweep (QA run #24779) found #24781 and #24782 this way, beside
+   items whose clauses all passed.
 
 ### Environment facts the runner should not re-derive
 
@@ -648,7 +687,8 @@ The in-environment JSON scratch (RUNNER shape, never committed):
 
 The issue body is: env fingerprint · scope (selector + per-item `revision`) · the
 per-clause verdict table (text oracle evidence) · a reproduction rule per `fail` (rule 2's
-carve-out excepted) · derived item verdicts + fixture gaps. The durable,
+carve-out excepted) · derived item verdicts + fixture gaps · the off-clause probe line
+(rule 8: how long, which doors and boundary classes, what it found). The durable,
 version-controlled truth is still the checklist under `areas/`; a run is a dated assertion
 about one build, and it lives in its issue, not the tree.
 

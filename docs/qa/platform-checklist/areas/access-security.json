@@ -2347,7 +2347,7 @@
       "title": "A session with no active organization is a LEGAL state with fail-closed semantics: tenant-scoped reads resolve to nothing, tenant-scoped writes are refused loudly naming the missing org, and nothing is ever NULL-stamped",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -2364,13 +2364,14 @@
         "knownGaps": [
           "The state is timing-derived on the signup path (better-auth defers the membership write past the signup transaction, ADR-0093), so reproducing it by racing signup is flaky. The DURABLE reproduction is the removed-member path, or a multi-organization deployment whose reconciler binds nobody (ADR-0093 D1 `no-target-org`). Record WHICH producer the run used — a clause proven only on a racy producer is weaker evidence and must say so.",
           "No stock showcase fixture is known to configure `invite-only` or SSO-JIT-pending; those two producers are blocked(fixture) unless the run configures them.",
-          "requires[0]'s tenancy-walled deployment is a walled boot. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. The item stays blocked (fixture, #9334) for the producer reasons above, not for the posture; its pin (automated.ref) boots the posture in-process."
+          "requires[0]'s tenancy-walled deployment is a walled boot. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. The item stays blocked (fixture, #9334) for the producer reasons above, not for the posture; its pin (automated.ref) boots the posture in-process.",
+          "acceptance[7] (the walled `group` leg for a member with no active organization) stays red until #24784 lands: on a walled group boot at 580fd4ed (QA run #24783, re-derived under RUNNER rule 7) the create answers 500 ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED and writes no row. It is scored only on a live walled group boot; a run without one records it blocked(fixture) citing RUNNER.md's 'A walled boot is a fixture of its own' — ⛔ never from automated.ref, whose group CONTROL stops at the plugin-security layer (RUNNER rule 6, a pin scores only the layer it drives). When #24784's fix merges, re-run the clause and drop this line"
         ]
       },
       "blocked": { "by": "fixture", "ref": "#9334" },
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-security/src/no-active-organization-write-refusal.test.ts — pins every clause of this item at unit level, INCLUDING a control asserting that the `single` posture has no wall, i.e. the test itself agrees the stock showcase configuration makes the item vacuous"
+        "ref": "packages/plugins/plugin-security/src/no-active-organization-write-refusal.test.ts — pins every clause of this item at unit level, INCLUDING a control asserting that the `single` posture has no wall, i.e. the test itself agrees the stock showcase configuration makes the item vacuous. The layer it drives is a plugin unit: SecurityPlugin's middleware over a stub terminal that stands in for the engine, so a case that 'lands' there means the middleware called next(), and the engine's own insert path never runs. Its `group` describe's CONTROL 'a NON-EMPTY membership set lands, even with no active organization' therefore proves the plugin-security wall lets that write through and nothing past it: on a full walled group boot the engine refuses the same write with 500 ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED (#24784). Under RUNNER rule 6 the pin scores a clause whose oracle is the HTTP answer partial at most, naming the engine and HTTP layers as missing, and it cannot score acceptance[7] at all"
       },
       "steps": [
         "establish the state and PROVE it: obtain a session whose `activeOrganizationId` is null, and cite the evidence (session row / session endpoint payload) — do not infer the state from the symptom you are about to test",
@@ -2380,7 +2381,8 @@
         "query the underlying table as admin for rows whose tenant column is NULL, before and after the write attempt",
         "repeat the read and the write against a NON-tenant-scoped object to bound the blast radius",
         "sign in and out with the state in force, then inspect the audit ledger rows the session produced (plugin-audit auth-session-audit login/logout)",
-        "run the same read+write as the control admin persona to show the refusal is state-derived, not a blanket denial"
+        "run the same read+write as the control admin persona to show the refusal is state-derived, not a blanket denial",
+        "walled `group` leg (acceptance[7]), on a walled boot with OS_TENANCY_POSTURE=group provisioned per RUNNER.md's 'A walled boot is a fixture of its own': a member of organization A (non-empty membership set) sets A active with POST /api/v1/auth/organization/set-active, creates a showcase_account and a showcase_project in A, then clears it with POST /api/v1/auth/organization/set-active {organizationId: null} and proves the state (GET /api/v1/auth/get-session reads session.activeOrganizationId null). As that member, POST /api/v1/data/showcase_task {title, project: the project in A}; take the admin-side count of showcase_task rows whose organization_id is NULL or empty before and after, and read back any row the create produced"
       ],
       "acceptance": [
         {
@@ -2424,6 +2426,12 @@
           "oracle": "api",
           "verify": "the run record states each subsystem's observed behavior side by side; any disagreement is the finding, whichever way it leans",
           "evidence": "the three-way comparison table"
+        },
+        {
+          "clause": "walled `group` leg: a member whose membership set is NON-EMPTY and whose session has no active organization never gets a 5xx on a tenant-scoped create, and nothing is stamped with a NULL organization_id. Which answer `group` gives — the write lands in a member organization, or a 4xx refusal — is #24784's to decide; this clause asserts only those two facts. Red until #24784 lands",
+          "oracle": "api",
+          "verify": "step-9 create on the live walled group boot: status is NOT 5xx (500 ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED, logged '[REST] Unhandled error: SystemWriteOrganizationRequiredError', is the #24784 shape); the admin-side NULL-or-empty organization_id count for showcase_task is identical before and after; and if the create answered 2xx, the row it produced carries a real organization_id the member belongs to. Score it only from that live boot: the automated.ref pin's group CONTROL stops above the engine (RUNNER rule 6), so it cannot score this clause",
+          "evidence": "the get-session payload + the create response, quoted + both NULL counts + the produced row's organization_id when the create landed"
         }
       ],
       "negative": [
@@ -2446,7 +2454,8 @@
         "PR #8471 (ADR-0123 + enforcement)",
         "@objectstack/plugin-security security-plugin.ts step 3.7 + tenant-layer.ts (computeTenantLayer0Filter, RLS_DENY_FILTER)",
         "@objectstack/plugin-auth auth-manager.ts composeDatabaseHooks + reconcile-membership.ts",
-        "@objectstack/plugin-audit auth-session-audit.ts (login/logout rows)"
+        "@objectstack/plugin-audit auth-session-audit.ts (login/logout rows)",
+        "QA-source: #24783 · access-security.no-active-org-session-semantics · acceptance[1] (the walled group leg; #24784)"
       ],
       "history": [
         {
@@ -2473,6 +2482,12 @@
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[2]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
           "ref": "#24788"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "acceptance[7], steps[8] and knownGaps[3] added, and automated.ref now names the layer its pin drives — for #24784, which the walled pass of round 3 (QA run #24783, 580fd4ed) found. Rounds 1 and 2 scored the walled legs from the pin because a walled boot was refused then; the pin's group CONTROL 'lands' a write by a member with no active organization at the plugin-security layer, and on a full walled group boot the engine refuses that write with a 500. The new clause asserts only no 5xx and no NULL stamping (which answer group gives is #24784's to decide) and stays red until #24784's fix lands. acceptance[0]'s and [1]'s group wording and knownGaps[0]-[1]'s producers (round 3 accuracy finding F3) belong to wave anchor #24579 and are not touched here",
+          "ref": "#24802"
         }
       ]
     },
