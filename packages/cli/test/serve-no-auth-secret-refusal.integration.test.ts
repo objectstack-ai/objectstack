@@ -65,7 +65,11 @@ async function boot(databaseFile: string, env: Record<string, string | undefined
       OS_DISABLE_CONSOLE: '1',
       OS_SECRET_KEY: E2E_SECRET_KEY,
       // Truly unset in both legs unless a leg sets it: the refusal's subject.
+      // The two legacy spellings `resolveAuthSecret` still reads are unset too,
+      // so an ambient one cannot compose auth behind the leg's back.
       OS_AUTH_SECRET: undefined,
+      AUTH_SECRET: undefined,
+      BETTER_AUTH_SECRET: undefined,
       // Production posture — see the header.
       NODE_ENV: undefined,
       ...env,
