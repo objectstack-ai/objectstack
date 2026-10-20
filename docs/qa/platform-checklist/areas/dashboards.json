@@ -1154,7 +1154,7 @@
       "title": "Scheduled report dispatch: the dispatcher ticks on a stock boot, a due schedule runs under the OWNER's authority or FAILS CLOSED with the refusal recorded on the row — never an RLS-bypassed run — and the delivery/bookkeeping contract (format fork, subject template, next-run advance) holds",
       "since": "v15.1",
       "status": "retired",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1175,7 +1175,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); read the boot log for the dispatcher registration line — 'dispatcher registered with job service' or 'dispatcher registered (setInterval fallback)', with its intervalMs — and for the email arm (LogTransport line, or the 'no email service — schedules will fire without delivery' warn)",
+        "boot the showcase on its own port and DB (dogfood §0); read the boot log for the dispatcher registration line — 'dispatcher registered with job service' or 'dispatcher registered (setInterval fallback)', with its intervalMs — and for the email arm (LogTransport line, or the 'no email service — schedules will fire without delivery' warn)",
         "as a fresh member: POST /api/v1/reports (a report over an object the member can read, e.g. showcase_task) then POST /api/v1/reports/:id/schedule with { recipients: ['<member email>'], intervalMinutes: 1, format: 'csv', subjectTemplate: '{{name}}: {{rows}} on {{date}}' } — record the receipt's next_run_at (first fire = create time + interval; an invalid cronExpression is refused eagerly at create, not left to fall back silently at 3am)",
         "wait past next_run_at + one dispatcher tick, then as the member GET /api/v1/reports/:id/schedules and read the row's last_status / last_error / last_sent_at / next_run_at",
         "capture the server log lines for the tick (ReportService.dispatchDue warn/error lines)",
@@ -1252,6 +1252,12 @@
           "date": "2026-09-25",
           "change": "retired — the saved-report stack it exercised was removed (#20102); see retiredReason",
           "ref": "#20102"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ],
       "retiredReason": "Capability removed (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-25, #20102): the saved-report schedule dispatcher this item drove left with the rest of the saved-report stack (sys_report_schedule, the /api/v1/reports schedule routes, @objectstack/plugin-reports), which had zero consumers. The platform has no scheduled delivery of a report today; scheduled delivery for `report` metadata is explicitly NOT built by that ruling — a real need is a new card on the metadata kind, and a new item with it."
