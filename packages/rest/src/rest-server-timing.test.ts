@@ -24,7 +24,8 @@ const makeServer = () => ({
 
 /**
  * A fake data engine that returns just enough rows for `resolveAuthzContext` to
- * derive a posture: an UNSCOPED `admin_full_access` grant for `admin1` (→
+ * derive a posture: an `admin_full_access` grant for `admin1` owned by the
+ * Default Organization (the only grant that anchors platform standing →
  * PLATFORM_ADMIN) and a plain `member_default` grant for `member1` (→ MEMBER).
  * Every other object read resolves empty.
  */
@@ -32,9 +33,11 @@ const makeQl = () => bindTestSecurityCatalog({
     find: async (object: string, opts: any) => {
         const where = opts?.where ?? {};
         if (object === 'sys_user') return [{ id: where.id, email: `${where.id}@example.com` }];
+        // The Default Organization, by its slug.
+        if (object === 'sys_organization') return [{ id: 'org_default', slug: 'default' }];
         if (object === 'sys_user_permission_set') {
-            if (where.user_id === 'admin1') return [{ permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null }];
-            if (where.user_id === 'member1') return [{ permission_set_id: 'ps_member', permission_set: 'member_default', organization_id: null }];
+            if (where.user_id === 'admin1') return [{ permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: 'org_default' }];
+            if (where.user_id === 'member1') return [{ permission_set_id: 'ps_member', permission_set: 'member_default', organization_id: 'org_default' }];
             return [];
         }
         if (object === 'sys_permission_set') {

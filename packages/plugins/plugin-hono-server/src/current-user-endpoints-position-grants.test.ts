@@ -19,7 +19,8 @@
 // halves: the issue's own repro (a position-bound set surfaces), and the
 // semantics that come free with the delegation and would have to be re-written
 // by hand otherwise — the implicit `everyone` anchor (ADR-0090 D5), null-org =
-// global, active-org matching, and the ADR-0091 validity window.
+// nowhere (a grant applies only in its own organization), active-org matching,
+// and the ADR-0091 validity window.
 //
 // Every negative case here carries a co-present VALID grant and asserts it
 // surfaced. A negative asserted on its own would pass in the pre-fix world for
@@ -259,17 +260,24 @@ describe('position-bound permission sets reach /auth/me/permissions (#6334)', ()
         expect(body.positions).toContain('org_member');
     });
 
-    it('treats a null-org position row as global (resolves under any active org)', async () => {
+    it('drops a null-org position row (an organization-less grant applies nowhere), keeping the active-org one', async () => {
         const app = mount({
             tables: baseTables({
-                sys_user_position: [{ id: 'up1', user_id: USER, position: 'ops', organization_id: null }],
+                sys_user_position: [
+                    { id: 'up1', user_id: USER, position: 'ops', organization_id: null },
+                    { id: 'up2', user_id: USER, position: 'auditor', organization_id: ACTIVE_ORG },
+                ],
             }),
         });
 
         const body = await permissionsOf(app);
 
-        expect(body.positions).toContain('ops');
-        expect(body.systemPermissions).toContain('showcase.export_data');
+        // The co-present valid grant is asserted so the negative below cannot
+        // pass merely because nothing resolved.
+        expect(body.positions).toContain('auditor');
+        expect(body.systemPermissions).toContain('showcase.audit_read');
+        expect(body.positions).not.toContain('ops');
+        expect(body.systemPermissions).not.toContain('showcase.export_data');
     });
 
     it('drops a position row scoped to another organization, keeping the active-org one', async () => {

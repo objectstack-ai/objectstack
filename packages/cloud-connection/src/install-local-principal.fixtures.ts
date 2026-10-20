@@ -48,10 +48,25 @@ export const INSTALLER_USER_ID = 'admin';
 export const INSTALLER_SET = { name: 'admin_full_access', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] };
 
 /**
+ * [ADR-0131 D5] The Default Organization the installer's grant is owned by —
+ * the organization `resolveAuthzContext` names by `slug = 'default'`. Only the
+ * `admin_full_access` grant that organization owns anchors platform standing,
+ * and an anchoring grant applies whatever organization the request acts in
+ * (none included), so these fixtures stay independent of the active tenant.
+ */
+export const INSTALLER_ORGANIZATION = { id: 'org_default', slug: 'default' };
+
+/**
  * The `sys_*` rows that make `userId` a holder of `manage_metadata`, shaped the
- * way `resolveAuthzContext` reads them (an UNSCOPED `sys_user_permission_set`
- * grant pointing at a `sys_permission_set` whose `system_permissions` carry the
- * capability — the shipped `admin_full_access` shape).
+ * way `resolveAuthzContext` reads them (a `sys_user_permission_set` grant owned
+ * by {@link INSTALLER_ORGANIZATION}, pointing at a `sys_permission_set` whose
+ * `system_permissions` carry the capability — the shipped `admin_full_access`
+ * shape the first-user promotion writes). An organization-less grant would
+ * apply nowhere and anchor nothing.
+ *
+ * `sys_organization` is deliberately NOT among them: suites wire their own
+ * organizations. {@link answerDefaultOrganizationRead} supplies the Default
+ * Organization only where the suite's engine names none.
  */
 export function installerGrantRows(userId: string = INSTALLER_USER_ID): Record<string, unknown[]> {
     return {
@@ -62,7 +77,7 @@ export function installerGrantRows(userId: string = INSTALLER_USER_ID): Record<s
         sys_metadata_activation: [],
         sys_position_permission_set: [],
         sys_user_permission_set: [
-            { id: 'ups_installer', user_id: userId, permission_set_id: 'ps_installer', permission_set: 'admin_full_access', organization_id: null },
+            { id: 'ups_installer', user_id: userId, permission_set_id: 'ps_installer', permission_set: 'admin_full_access', organization_id: INSTALLER_ORGANIZATION.id },
         ],
         sys_permission_set: [
             {
@@ -74,6 +89,22 @@ export function installerGrantRows(userId: string = INSTALLER_USER_ID): Record<s
     };
 }
 
+/**
+ * The resolver's Default Organization read — `sys_organization` where
+ * `{ slug: 'default' }` — answered with {@link INSTALLER_ORGANIZATION} when the
+ * suite's own engine answered it with nothing. `undefined` for every other read
+ * (and for a suite that does hold a `default` organization), so a suite's own
+ * `sys_organization` rows and probes are never overridden.
+ */
+export function answerDefaultOrganizationRead(object: string, options: unknown, innerRows: unknown): unknown[] | undefined {
+    if (object !== 'sys_organization') return undefined;
+    const where = (options as { where?: Record<string, unknown> } | undefined)?.where;
+    if (!where || Object.keys(where).length !== 1 || where.slug !== 'default') return undefined;
+    const rows = innerRows && (innerRows as { value?: unknown }).value !== undefined ? (innerRows as { value: unknown }).value : innerRows;
+    if (Array.isArray(rows) && rows.length > 0) return undefined;
+    return [{ ...INSTALLER_ORGANIZATION }];
+}
+
 /** The `auth` service shape the plugin resolves a session through. */
 export function installerAuthService(userId: string = INSTALLER_USER_ID) {
     return { api: { getSession: async () => ({ user: { id: userId }, session: {} }) } };
@@ -81,8 +112,10 @@ export function installerAuthService(userId: string = INSTALLER_USER_ID) {
 
 /**
  * Wrap an existing `objectql` fake so the authorization tables answer from
- * {@link installerGrantRows} and EVERY other object falls through to whatever
- * the suite already wired.
+ * {@link installerGrantRows}, the resolver's Default Organization read answers
+ * {@link INSTALLER_ORGANIZATION} when the suite names none
+ * ({@link answerDefaultOrganizationRead}), and EVERY other object falls through
+ * to whatever the suite already wired.
  *
  * Wrapping rather than replacing is the point: these suites' engines carry
  * behaviour their own assertions depend on (seed lookups, ledger probes,
@@ -100,7 +133,8 @@ export function withInstallerGrants<T extends Record<string, any>>(
         ...engine,
         find: async (object: string, options?: unknown) => {
             if (Object.prototype.hasOwnProperty.call(rows, object)) return rows[object];
-            return inner ? inner(object, options) : [];
+            const answered = inner ? await inner(object, options) : [];
+            return answerDefaultOrganizationRead(object, options, answered) ?? answered;
         },
     } as T;
     // What the security plugin binds to a real engine: the catalog the

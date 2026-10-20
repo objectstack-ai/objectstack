@@ -18,8 +18,8 @@
  * values are unconstrained, so a tenant can mint an ADR-0057 D4 row spelling
  * that built-in name, `resolveUserAuthzGrants` §4 pushes it into
  * `grants.positions`, and the third arm answered `true` while `grants.posture`
- * — derived from the unscoped `admin_full_access` grant and nothing else —
- * stayed `MEMBER`.
+ * — derived from the anchoring `admin_full_access` grant (the Default
+ * Organization's) and nothing else — stayed `MEMBER`.
  *
  * ⭐ WHAT THE ESCALATION BUYS, driven rather than argued: the platform arm of
  * `isOverrideActor` deliberately CROSSES THE TENANT WALL (the tenant-admin arm
@@ -33,8 +33,10 @@
  * (the console's participant-visibility read, `visibleRequestIds`), for a
  * NON-slate-holding actor in a DIFFERENT organization from the request, in
  * three shapes — a D4 row spelling the built-in name with no capability grant
- * (`name-only`), a genuine unscoped `admin_full_access` grant (`genuine`), and
- * a plain member (`plain`, the floor that proves the arms are not all passing
+ * (`name-only`), a genuine Default Organization `admin_full_access` grant
+ * (`genuine`), the same grant carrying NO organization (`orgless`, which
+ * anchors nothing — a grant applies only in its own organization), and a
+ * plain member (`plain`, the floor that proves the arms are not all passing
  * for some unrelated reason). The `name-only` and `genuine` contexts are built
  * by inserting rows and resolving them through the REAL
  * `resolveUserAuthzGrants`.
@@ -150,10 +152,22 @@ function makeAuthzQl(tables: Record<string, Array<Record<string, unknown>>>) {
   }, tables);
 }
 
-type Shape = 'name-only' | 'genuine' | 'plain';
+type Shape = 'name-only' | 'genuine' | 'orgless' | 'plain';
 
+/**
+ * Every grant row is owned by `ATTACKER_ORG`, which is also the Default
+ * Organization: a grant applies only in its own organization (an
+ * organization-less row confers nothing), and platform standing is anchored
+ * only by the Default Organization's `admin_full_access` grant. The principal
+ * is resolved in `ATTACKER_ORG`, so the name-only position row applies — and
+ * the request under test still belongs to the OTHER organization.
+ */
 function authzTables(shape: Shape) {
   return {
+    sys_organization: [
+      { id: ATTACKER_ORG, slug: 'default' },
+      { id: VICTIM_ORG, slug: 'victim' },
+    ],
     sys_user: [{ id: ATTACKER, email: 'attacker@example.com', email_verified: true }],
     sys_member: [{ organization_id: ATTACKER_ORG, user_id: ATTACKER, role: 'member' }],
     sys_user_position:
@@ -161,7 +175,7 @@ function authzTables(shape: Shape) {
         ? [
             // Exactly what a tenant admin can write through the `apiEnabled`
             // `sys_user_position` surface: a row whose NAME is the built-in.
-            { user_id: ATTACKER, position: BUILTIN_IDENTITY_PLATFORM_ADMIN, organization_id: null },
+            { user_id: ATTACKER, position: BUILTIN_IDENTITY_PLATFORM_ADMIN, organization_id: ATTACKER_ORG },
           ]
         : [],
     // An ACTIVE catalogue row, so ADR-0049's deactivated-position filter is not
@@ -172,8 +186,11 @@ function authzTables(shape: Shape) {
         : [],
     sys_position_permission_set: [],
     sys_user_permission_set:
-      shape === 'genuine'
-        ? [{ user_id: ATTACKER, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS, organization_id: null }]
+      shape === 'genuine' || shape === 'orgless'
+        ? [{
+            user_id: ATTACKER, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS,
+            organization_id: shape === 'genuine' ? ATTACKER_ORG : null,
+          }]
         : [],
     sys_permission_set: [{ id: PS_ADMIN, name: ADMIN_FULL_ACCESS, active: true }],
   };
@@ -335,7 +352,7 @@ describe('[#15981] a D4 `sys_user_position` row spelling `platform_admin` confer
   });
 });
 
-describe('[#15981] CONTROL — a genuine unscoped admin_full_access grant still overrides', () => {
+describe('[#15981] CONTROL — a genuine Default Organization admin_full_access grant still overrides', () => {
   let engine: ReturnType<typeof makeFakeEngine>;
   let svc: ApprovalService;
   let n = 0;
@@ -403,5 +420,22 @@ describe('[#15981] CONTROL — a genuine unscoped admin_full_access grant still 
     expect(genuine.context.positions).toContain(BUILTIN_IDENTITY_PLATFORM_ADMIN);
     expect(escalation.rung).toBe(false);
     expect(genuine.rung).toBe(true);
+  });
+
+  it('the same admin_full_access grant with NO organization anchors nothing, and decides nothing', async () => {
+    const orgless = await resolve('orgless');
+    const req = await openVictimRequest();
+
+    expect(orgless.context.positions).not.toContain(BUILTIN_IDENTITY_PLATFORM_ADMIN);
+    expect(orgless.context.permissions).not.toContain(ADMIN_FULL_ACCESS);
+    expect(orgless.grants.posture).not.toBe('PLATFORM_ADMIN');
+    expect(orgless.rung).toBe(false);
+
+    await expect(
+      svc.decideNode(req.id, { decision: 'approve', actorId: ATTACKER }, orgless.context),
+    ).rejects.toThrow(/^FORBIDDEN/);
+    const [row] = await engine.find('sys_approval_request', { where: { id: req.id } });
+    const actions = (await svc.listActions(req.id, SYS)).filter((a: any) => a.actor_id === ATTACKER);
+    expect({ status: row?.status, decided: actions.length > 0 }).toEqual({ status: 'pending', decided: false });
   });
 });

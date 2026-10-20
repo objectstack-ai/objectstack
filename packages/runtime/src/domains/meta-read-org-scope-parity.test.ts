@@ -137,8 +137,8 @@ function protocolDouble() {
  * `u_exmember`'s session is stamped `org_alpha` while its only current
  * `sys_member` row is `org_beta` — the session outlived the membership that
  * backed it. `u_member` is a current `org_alpha` member. Both hold ONE shared
- * permission set, so RBAC cannot separate any two arms: only the organization
- * claim can.
+ * permission set (bound to the built-in `everyone` position), so RBAC cannot
+ * separate any two arms: only the organization claim can.
  */
 function makeQl() {
     const tables: Record<string, any[]> = {
@@ -153,13 +153,21 @@ function makeQl() {
             { id: 'u_exmember', email: 'u_exmember@example.com' },
             { id: 'u_admin', email: 'u_admin@example.com' },
         ],
+        // The Default Organization: it owns the operator's `admin_full_access`
+        // grant, the one grant that anchors platform standing.
+        sys_organization: [{ id: 'org_default', slug: 'default' }],
         sys_user_permission_set: [
-            { user_id: 'u_member', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
-            { user_id: 'u_exmember', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
             // [ADR-0131 D12 items 7–8] The platform operator: under the wall
             // the one caller the `/meta` write doors admit.
-            { user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
+            { user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: 'org_default' },
         ],
+        // The ONE shared set reaches every caller through the built-in
+        // `everyone` position, so it holds in whichever organization a caller
+        // acts in and with none — the ex-member's dropped claim included. A
+        // user grant applies only in its own organization, so it could not be
+        // shared across the arms.
+        sys_position: [{ id: 'pos_everyone', name: 'everyone' }],
+        sys_position_permission_set: [{ id: 'pps_everyone_shared', position_id: 'pos_everyone', permission_set_id: 'ps_shared' }],
         sys_permission_set: [
             { id: 'ps_shared', name: 'shared_access', system_permissions: ['manage_metadata', 'studio.access'] },
             { id: 'ps_admin', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access'] },

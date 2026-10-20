@@ -41,9 +41,9 @@
  * Three populations below the operator rung: a current member, a member
  * removed from the organization whose session still names it (the resolver
  * drops the claim), and a caller who never selected an organization. All three
- * are refused the same way. The platform operator (an unscoped
- * `admin_full_access` grant) uninstalls, with or without an active
- * organization, naming none.
+ * are refused the same way. The platform operator (an `admin_full_access`
+ * grant owned by the Default Organization) uninstalls, with or without an
+ * active organization, naming none.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -57,6 +57,8 @@ import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 const PKG = 'com.acme.crm';
 const ALPHA = 'org_alpha';
 const BETA = 'org_beta';
+/** The Default Organization, which owns the operator's grant. */
+const DEFAULT_ORG = 'org_default';
 const SESSION_HEADER = 'x-test-session';
 
 // ── Identity: sessions and the permission store, in the shipped shapes ────────
@@ -96,12 +98,18 @@ const TABLES: Record<string, any[]> = {
         { id: 'u_orgless', email: 'u_orgless@example.com' },
         { id: 'u_admin', email: 'u_admin@example.com' },
     ],
+    // The Default Organization: it owns the operator's `admin_full_access`
+    // grant, the one grant that anchors platform standing.
+    sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }],
     sys_user_permission_set: [
-        { user_id: 'u_member', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
-        { user_id: 'u_exmember', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
-        { user_id: 'u_orgless', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
-        { user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
+        { user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: DEFAULT_ORG },
     ],
+    // The ONE shared set reaches every caller through the built-in `everyone`
+    // position, so it holds in whichever organization a caller acts in and with
+    // none. A user grant applies only in its own organization, so it could not
+    // be shared by a caller whose claim is dropped or who never selected one.
+    sys_position: [{ id: 'pos_everyone', name: 'everyone' }],
+    sys_position_permission_set: [{ id: 'pps_everyone_shared', position_id: 'pos_everyone', permission_set_id: 'ps_shared' }],
     sys_permission_set: [
         { id: 'ps_shared', name: 'shared_access', system_permissions: ['manage_metadata', 'studio.access'] },
         { id: 'ps_admin', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access'] },

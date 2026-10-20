@@ -16,16 +16,17 @@
  * built-in name. `resolveUserAuthzGrants` §4 pushes the row's `position`
  * straight into `grants.positions`, and `resolveAuthzContext` copies that array
  * onto `ExecutionContext.positions` verbatim. The capability rung
- * (`grants.posture`, §6d) is derived from the unscoped `admin_full_access`
- * grant and nothing else, so it stays `MEMBER` — the two answers genuinely
+ * (`grants.posture`, §6d) is derived from the anchoring `admin_full_access`
+ * grant (the Default Organization's) and nothing else, so it stays `MEMBER` — the two answers genuinely
  * disagree, and the name-read took the wrong one.
  *
  * ⭐ WHAT THE ESCALATION BUYS, driven rather than argued (see the arms below):
  * `manage_sharing` is an ORG-scoped capability (ADR-0111 D6) that an ordinary
- * tenant admin may grant. (Since #20515 a grant scoped to an organization no
- * longer applies to a resolution with no organization at all, so the arms below
- * hold it through a GLOBAL grant — the one way an org-less caller still holds
- * it.) Holding it with no organization resolved is refused
+ * tenant admin may grant. (A grant applies only in its own organization, and
+ * an organization-less grant row confers nothing, so the arms below resolve
+ * the caller's grants IN `HOME_ORG` and then present them on a context that
+ * carries no organization — the org-less shape the gate under test exists to
+ * refuse.) Holding it with no organization on the context is refused
  * by `assertResolvableAdminScope` precisely because an unscoped answer "would
  * expose every tenant's rules". The D4 name-read was the bypass: it satisfied
  * that gate, `adminOrgScope` then returned the UNFILTERED `where`, and
@@ -34,10 +35,12 @@
  *
  * ## POPULATION OF THIS PIN — stated because a pin proves only what it covers
  *
- * Covers: an ORG-LESS caller holding `manage_sharing`, in two shapes — a D4
+ * Covers: an ORG-LESS caller holding `manage_sharing`, in three shapes — a D4
  * row spelling the built-in name with no capability grant behind it
- * (`name-only`), and a genuine unscoped `admin_full_access` grant
- * (`genuine`, the control that proves the fix did not simply deny everyone).
+ * (`name-only`), a genuine Default Organization `admin_full_access` grant
+ * (`genuine`, the control that proves the fix did not simply deny everyone),
+ * and that same grant carrying NO organization (`orgless`, which anchors
+ * nothing).
  * Both shapes are built by inserting rows and resolving them through the REAL
  * `resolveUserAuthzGrants`, so the `positions` / `posture` disagreement under
  * test is produced by the shipping resolver rather than hand-asserted.
@@ -96,29 +99,43 @@ const sharingAdminSet = {
   active: true,
 };
 
-function authzTables(shape: 'name-only' | 'genuine') {
+type Shape = 'name-only' | 'genuine' | 'orgless';
+
+/**
+ * Every grant row is owned by `HOME_ORG`, which is also the Default
+ * Organization: a grant applies only in its own organization, and platform
+ * standing is anchored only by the Default Organization's `admin_full_access`
+ * grant.
+ */
+function authzTables(shape: Shape) {
   const userPositions =
     shape === 'name-only'
       ? [
           // Exactly what a tenant admin can write through the `apiEnabled`
           // `sys_user_position` surface: a row whose NAME is the built-in.
-          { user_id: USER, position: BUILTIN_IDENTITY_PLATFORM_ADMIN, organization_id: null },
+          { user_id: USER, position: BUILTIN_IDENTITY_PLATFORM_ADMIN, organization_id: HOME_ORG },
         ]
       : [];
   const userSets: Array<Record<string, unknown>> = [
-    // The `manage_sharing` capability both shapes hold — the precondition, not
-    // the axis under test. GLOBAL (no organization): this caller resolves with
-    // NO organization, and an organization-less resolution applies only global
-    // grants (#20515), so an org-scoped grant here would simply not be held and
-    // every arm below would be vacuous. It is still `sharing_admin`, never
-    // `admin_full_access`, so it cannot be mistaken for the grant that confers
-    // standing.
-    { user_id: USER, permission_set_id: PS_SHARING, permission_set: 'sharing_admin', organization_id: null },
+    // The `manage_sharing` capability every shape holds — the precondition, not
+    // the axis under test. Owned by `HOME_ORG`, the organization the grants
+    // are resolved in ({@link resolve}): an organization-less row would confer
+    // nothing, and every arm below would be vacuous. It is still
+    // `sharing_admin`, never `admin_full_access`, so it cannot be mistaken for
+    // the grant that confers standing.
+    { user_id: USER, permission_set_id: PS_SHARING, permission_set: 'sharing_admin', organization_id: HOME_ORG },
   ];
-  if (shape === 'genuine') {
-    userSets.push({ user_id: USER, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS, organization_id: null });
+  if (shape === 'genuine' || shape === 'orgless') {
+    userSets.push({
+      user_id: USER, permission_set_id: PS_ADMIN, permission_set: ADMIN_FULL_ACCESS,
+      organization_id: shape === 'genuine' ? HOME_ORG : null,
+    });
   }
   return {
+    sys_organization: [
+      { id: HOME_ORG, slug: 'default' },
+      { id: OTHER_ORG, slug: 'victim' },
+    ],
     sys_user: [{ id: USER, email: 'subject@example.com', email_verified: true }],
     sys_member: [{ organization_id: HOME_ORG, user_id: USER, role: 'member' }],
     sys_user_position: userPositions,
@@ -142,12 +159,14 @@ function authzTables(shape: 'name-only' | 'genuine') {
  * context the transports would build and the rung, so every assertion below is
  * about resolver output rather than a hand-written array.
  *
- * The caller is deliberately ORG-LESS (`tenantId` omitted): that is the shape
- * `assertResolvableAdminScope` exists to refuse.
+ * The grants are resolved IN `HOME_ORG` (the only organization a grant row
+ * applies in), and the context handed to the service is deliberately ORG-LESS
+ * (`tenantId` omitted): that is the shape `assertResolvableAdminScope` exists
+ * to refuse.
  */
-async function resolve(shape: 'name-only' | 'genuine') {
+async function resolve(shape: Shape) {
   const ql = makeAuthzQl(authzTables(shape));
-  const grants = await resolveUserAuthzGrants(ql as any, USER);
+  const grants = await resolveUserAuthzGrants(ql as any, USER, { tenantId: HOME_ORG });
   const context = {
     userId: USER,
     positions: grants.positions,
@@ -254,7 +273,7 @@ describe('[#15981] a D4 `sys_user_position` row spelling `platform_admin` confer
   });
 });
 
-describe('[#15981] CONTROL — a genuine unscoped admin_full_access grant still admits', () => {
+describe('[#15981] CONTROL — a genuine Default Organization admin_full_access grant still admits', () => {
   it('all three answers are TRUE and agree, and the cross-tenant read is served', async () => {
     const { context, rung } = await resolve('genuine');
     const engine = makeSharingEngine();
@@ -278,6 +297,20 @@ describe('[#15981] CONTROL — a genuine unscoped admin_full_access grant still 
     // … and opposite on the axis that actually decides.
     expect(escalation.rung).toBe(false);
     expect(genuine.rung).toBe(true);
+  });
+
+  it('the same admin_full_access grant with NO organization anchors nothing, and is refused', async () => {
+    const { context, grants, rung } = await resolve('orgless');
+    const engine = makeSharingEngine();
+    const service = makeService(engine);
+
+    expect(context.positions).not.toContain(BUILTIN_IDENTITY_PLATFORM_ADMIN);
+    expect(grants.posture).not.toBe('PLATFORM_ADMIN');
+    expect(rung).toBe(false);
+    // The capability is still held, so the refusal is about platform authority.
+    expect(context.systemPermissions).toContain('manage_sharing');
+    await expect(service.listRules({}, context)).rejects.toThrow(/PERMISSION_DENIED/);
+    expect(engine.finds).toEqual([]);
   });
 });
 
