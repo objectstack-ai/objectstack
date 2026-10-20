@@ -2116,29 +2116,34 @@ export class AppPlugin implements Plugin {
      * [#8686] Adopt untenanted seed rows into the install's organization the
      * moment that organization first exists.
      *
-     * ## Why this cannot be done at seed time, and why boot is too late
+     * ## What 17.x left behind, and why this still runs
      *
-     * The seed loader already stamps `organization_id` on business seeds — but
-     * only when it can resolve an organization to stamp WITH
-     * (`resolveSoleOrganizationId`). On a first boot there is none: seeds land
-     * during `start()`, and the admin (and their organization) are created later,
-     * by a sign-up POST against the running server. So the loader correctly
-     * declines, the rows land `organization_id = NULL`, and the SQL driver files
-     * their numbers under the `__global__` counter.
+     * Under 17.x the seed loader stamped `organization_id` on business seeds only
+     * when it could resolve an organization to stamp WITH
+     * (`resolveSoleOrganizationId`), and on a first boot there was none: the
+     * admin and their organization arrived later, by a sign-up POST. So the rows
+     * landed `organization_id = NULL`, and the SQL driver filed their numbers
+     * under the `__global__` counter. The first API create then drew from a
+     * DIFFERENT counter that was correctly empty and minted `CASE-00001` — a
+     * value the seed already used — and the partitioned unique index
+     * (`COALESCE(organization_id, '__global__'), <field>`) could not see the
+     * collision. Measured on 17.0.0 GA: four duplicate identifiers, four 201s,
+     * no warning.
      *
-     * Then the first API create arrives carrying a real organization, draws from a
-     * DIFFERENT counter that is correctly empty, and mints `CASE-00001` — a value
-     * the seed already used. The partitioned unique index
-     * (`COALESCE(organization_id, '__global__'), <field>`) cannot see the
-     * collision because the two rows sit in different partitions. Measured on
-     * 17.0.0 GA: four duplicate identifiers, four 201s, no warning.
+     * [ADR-0131 D3/D9] A fresh install no longer produces that state: the
+     * Default Organization exists before the seeds load, the loader stamps it,
+     * and the driver's counter refuses an organization-less row on a tenant
+     * table (`OrganizationlessCounterRefusal`) instead of filing it under
+     * `__global__`. What remains is the residue an install seeded under 17.x
+     * carries — `__global__` counter rows the ownership ceremony leaves in
+     * `_objectstack_sequences` — and this handoff is one of its two repairs.
      *
      * `metadata-protocol`'s `kernel:ready` migration repairs an install that is
-     * ALREADY in that state, which covers every existing deployment. It cannot
-     * cover a fresh one: at `kernel:ready` the organization still does not exist,
-     * so the earliest that migration can act is the NEXT restart — by which time
-     * the duplicates of this session have already been minted and, per the ruling,
-     * are not the platform's to renumber.
+     * ALREADY in that state. It could not cover a 17.x first boot: at
+     * `kernel:ready` the organization did not exist yet, so the earliest that
+     * migration could act was the NEXT restart — by which time the duplicates of
+     * that session had been minted and, per the ruling, are not the platform's to
+     * renumber.
      *
      * Hence this seam. `sys_organization` gaining its first row is exactly the
      * event that makes the answer derivable, and it is the ownership handoff's

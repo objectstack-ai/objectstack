@@ -550,7 +550,6 @@ export {
   SystemWriteOrganizationRequiredError,
   SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE,
   ORGANIZATION_OBJECT,
-  GLOBAL_TENANT,
   DEFAULT_TENANT_FIELD,
 } from './tenancy/system-write-organization.js';
 

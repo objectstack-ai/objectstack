@@ -74,7 +74,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { E2E_SECRET_KEY, RUN_JS_RESOLVES_FROM_DIST, requireBuiltCli } from './helpers/serve-process.js';
+import { E2E_AUTH_SECRET, E2E_SECRET_KEY, RUN_JS_RESOLVES_FROM_DIST, requireBuiltCli } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const RUN_JS = resolve(HERE, '../bin/run.js');
@@ -171,7 +171,15 @@ function runCli(args: string[], env: Record<string, string>, opts: { cwd?: strin
 function runServe(home: string): Promise<Run> {
   return runCli(
     ['serve', '--port', '0'],
-    { OS_HOME: home, OS_DATABASE_URL: ':memory:', OS_SECRET_KEY: E2E_SECRET_KEY, OS_DISABLE_CONSOLE: '1' },
+    {
+      OS_HOME: home,
+      OS_DATABASE_URL: ':memory:',
+      OS_SECRET_KEY: E2E_SECRET_KEY,
+      // A production server boot with no auth secret is refused (ADR-0131 D9);
+      // this file's property is about OS_HOME, not auth.
+      OS_AUTH_SECRET: E2E_AUTH_SECRET,
+      OS_DISABLE_CONSOLE: '1',
+    },
     { cwd: serveDir, until: BANNER_TAIL },
   );
 }
