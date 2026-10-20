@@ -931,7 +931,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "automated dropped and fixtures.knownGaps[0] added, under round 6's theme-B rule (drop `automated` where no pin asserts a full clause, with a knownGaps line) — round 11 of wave anchor #24579, whose round-3 summary named this nominally Tier 1 item. Its revision-3 automated.ref already said the three dogfood pins cover no clause. Re-read at 46bb5e3e54: they drive business-unit depth on showcase notes and never the manager / executive / ops personas or showcase_inquiry. The item is now Tier 2, every clause driven by hand as revision 3 already prescribed. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round11"
+          "ref": "#24801"
         }
       ]
     },
@@ -2485,7 +2485,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "producers re-measured and acceptance[0] aligned with its governing text — QA run #24783 (finding F3), round 11 of wave anchor #24579. personas[0]–[1], fixtures.requires[1] and knownGaps[0]–[1] now name the two durable producers on a walled boot (a user the operator creates under invite-only, membershipCreated:false; a member that sets its active organization to null). The signup race is closed by ADR-0123 D3's session-seam settle, and the removed-member path revokes or re-points the session (QA run #24783 measured 401). acceptance[0]'s clause and verify scope 'resolve to nothing' to a caller with no organization scope, which ADR-0123 D2 defines under `group` as an empty membership set, ADR-0105 D2 letting a `group` member's reads span its memberships. acceptance[4] is unchanged: ADR-0123 states no answer for a member-less user's NULL-tenanted audit rows, so knownGaps[3] names the question. knownGaps[4] names #24784, the `group` write 500. knownGaps[2]: the prerequisite sentence holds through os dev only (a bare production os serve needs OS_AUTH_SECRET first, RUNNER.md), and the blocked marker's reason is restated (every clause is a walled leg) because a producer is no longer missing; the marker itself is unchanged",
-          "ref": "claude/issue-24579-v18-sweep-round11"
+          "ref": "#24801"
         }
       ]
     },
@@ -2640,7 +2640,7 @@
           "revision": 8,
           "date": "2026-10-20",
           "change": "fixtures.requires[3] names the recipe for the walled legs' org-owner manage_metadata grant, and knownGaps[0]'s prerequisite sentence says os dev — QA run #24783 (findings F7 and F2), round 11 of wave anchor #24579. No HTTP door placed the grant on the walled boot: the operator's insert into an organization it is not a member of is refused by the Layer 0 tenant check, and the owner's own insert by ADR-0090 D12 condition (c), manage_metadata being scope 'platform'. The recipe is the dogfood harness's system-context engine insert (wall-environment-metadata-refusal.dogfood.test.ts, its boot helper). A bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md), so the refusal sentence now names os dev. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round11"
+          "ref": "#24801"
         }
       ]
     },
@@ -3524,7 +3524,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "fixtures.requires[2] names the recipe for its organization-scoped manage_metadata grant, and knownGaps[0]'s prerequisite sentence says os dev — QA run #24783 (findings F7 and F2), round 11 of wave anchor #24579. No HTTP door placed the grant on the walled boot: the operator's insert into an organization it is not a member of is refused by the Layer 0 tenant check, and the owner's own insert by ADR-0090 D12 condition (c), manage_metadata being scope 'platform'. The recipe is the dogfood harness's system-context engine insert (wall-environment-metadata-refusal.dogfood.test.ts, its boot helper). A bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md), so the refusal sentence now names os dev. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round11"
+          "ref": "#24801"
         }
       ]
     },

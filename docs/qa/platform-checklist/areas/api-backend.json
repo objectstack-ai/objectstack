@@ -1795,7 +1795,7 @@
           "revision": 4,
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[2] re-pointed — QA run #24783 (finding F5), round 11 of wave anchor #24579. 'Needs an enterprise tenancy runtime no example app composes' is stale since 18.x step 4 (#24580): a scratch app declaring the open @objectstack/organizations composes the walled posture (RUNNER.md 'A walled boot is a fixture of its own'), and QA run #24783 measured the authority-first order on both walled postures. The line now points at that entry and names the handler whose order it asserts. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round11"
+          "ref": "#24801"
         }
       ]
     },

@@ -3311,7 +3311,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "steps[2]'s tenant lock made a named fixture prerequisite (fixtures.requires[2], new knownGaps[1]), and knownGaps[0]'s prerequisite sentence says os dev — QA run #24783 (findings F6 and F2), round 11 of wave anchor #24579. No HTTP door sets a tenant-row lock: sys_setting answers update 405 (apiMethods get/list) and the settings PUT writes values only, so the run stamped the lock with a system write on its scratch DB. A bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md), so the refusal sentence now names os dev. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round11"
+          "ref": "#24801"
         }
       ]
     },

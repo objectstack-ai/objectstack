@@ -2093,7 +2093,7 @@
           "revision": 5,
           "date": "2026-10-20",
           "change": "fixtures.requires[0]–[1] and personas[2] re-pointed — QA run #24783 (finding F8), round 11 of wave anchor #24579. requires[0]'s 'REFUSES TO BOOT … measured by QA run #23166' predates 18.x step 4 (#24580); the provisioning now points at RUNNER.md's walled-boot entry, keeping only the seeded-admin owner-email hint. requires[1] and personas[2]: the user gets its second membership by creating a second organization itself (QA run #24783, both postures), so the platform-admin add-member is not needed and the admin only mints the member. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round11"
+          "ref": "#24801"
         }
       ]
     },

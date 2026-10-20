@@ -688,7 +688,7 @@
           "revision": 9,
           "date": "2026-10-20",
           "change": "fixtures.requires[0]'s walled sentence and scratch-webhook recipe corrected — QA run #24783 (finding F4), round 11 of wave anchor #24579. 'Under a walled posture it would be refused as belonging to no organization' predates ADR-0131 ruling A: a declared webhook is deployment-wide under every posture (auto-enqueuer.ts admitsOrganization answers true for CachedSubscription.deploymentWide), delivers one row per event stamped with that event's organization, and is switched on by the operator under a wall, as wall-declared-webhook-deployment-wide.dogfood.test.ts pins and QA run #24783 measured on both postures. The scratch sys_webhook recipe now names its required definition_json and the lower-case method values sys-webhook.object.ts declares. No clause changed",
-          "ref": "claude/issue-24579-v18-sweep-round11"
+          "ref": "#24801"
         }
       ],
       "enumSource": {
