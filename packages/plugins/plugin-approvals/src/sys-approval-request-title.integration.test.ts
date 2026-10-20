@@ -81,7 +81,7 @@ async function packageObjects(): Promise<any[]> {
 
 /** The title the declaration names on a served row: the value under `nameField`. */
 const NAME_FIELD = SysApprovalRequest.nameField as string;
-const titleOf = (row: Record<string, unknown> | null | undefined): unknown => row?.[NAME_FIELD];
+const titleOf = (row: object | null | undefined): unknown => (row as Record<string, unknown> | null | undefined)?.[NAME_FIELD];
 
 describe('#24665 — the approval request title is the flow label the approvals get serves', () => {
   let engine: ObjectQL;
