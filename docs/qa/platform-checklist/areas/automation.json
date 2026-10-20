@@ -78,7 +78,7 @@
       "title": "Flow Runs render loop/region iterations as a nested execution tree",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -92,7 +92,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "POST /api/v1/automation/showcase_batch_reminders/trigger with body {\"params\": {\"tasks\": [t1, t2, t3]}} — three task-shaped objects each carrying id/title/owner so the loop body's notify node can interpolate {task.title}/{task.owner}",
         "GET /api/v1/automation/showcase_batch_reminders/runs, take the newest run id, then GET /api/v1/automation/showcase_batch_reminders/runs/:runId for the full step log",
         "record every step's nodeId, nodeType, status, parentNodeId, iteration, regionKind (ExecutionStepLogSchema #1505 region tags)",
@@ -189,6 +189,12 @@
           "date": "2026-10-19",
           "change": "acceptance[1] (clause, verify) stops asking a tag of a step that is never logged — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.flow-run-step-nesting acceptance[1]; wave anchor #24579 §3): both showcase_batch_reminders and showcase_resilient_sync runs end at the last real node, so the clause held vacuously for end. Re-derived at base 9a7838edf5 (packages/services/service-automation/src/engine.ts: a taken end pushes no step; recordSkipped logs an untaken edge's target as skipped)",
           "ref": "#24649"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -197,7 +203,7 @@
       "title": "Time-relative flow triggers author first-class and fire per matching record",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -214,7 +220,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0) with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 exported (fixtures.requires); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0) with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 exported (fixtures.requires); sign in as the dev admin",
         "open showcase_task_due_reminder in the Studio flow-designer; open the start node's panel",
         "screenshot the first-class timeRelative editor (sweep object / date field / offset days as a numberList editor — not raw JSON)",
         "read the server boot log: the Flows banner must count showcase_task_due_reminder bound as a time_relative trigger (requires: ['triggers'] — engine warns 'no time_relative trigger is registered' otherwise)",
@@ -288,6 +294,12 @@
           "date": "2026-10-16",
           "change": "the item assumed the time_relative trigger binds on a stock boot (#23878 automation slice finding 1; #23879 out_of_scope_findings). Re-measured on main c91af8ed6: unset OS_AUTOMATION_SCHEDULED_WORK_ENABLED leaves showcase_task_due_reminder unbound by deployment policy (banner: '1 flow declares a 'time_relative' trigger but is NOT bound — disabled by deployment policy'; _status bound:false), and with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 _status reports it bound, triggerType time_relative. The fixture line and step 1 now name the switch; the sweep itself was not re-run",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -296,7 +308,7 @@
       "title": "Filtered roll-up summaries recompute only through their own filter",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -310,7 +322,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "GET /api/v1/data/showcase_expense_report for EXP-2001 and record all six roll-ups: total_amount (unfiltered SUM), approved_amount (SUM where status=approved), reimbursable_amount (SUM where billable=true), line_count (unfiltered COUNT), rejected_count (COUNT where status=rejected), over_limit_count (COUNT where amount >= 500)",
         "GET the child showcase_expense_line rows for that report and independently recompute each roll-up from them",
         "PATCH one line's status approved→rejected over /api/v1/data/showcase_expense_line/:id; re-read the parent and recompute again",
@@ -392,6 +404,12 @@
           "date": "2026-10-19",
           "change": "steps[6] and acceptance[4].verify name the namespace prefix the scratch base requires — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.rollup-summary-filter step 7 / acceptance[4]; wave anchor #24579 §3): without it publish-drafts refuses the objects NAMESPACE_PREFIX and the persisted-metadata half is unreachable. Re-derived at base 9a7838edf5 (packages/spec/src/kernel/namespace-prefix.ts deriveNamespaceFromPackageId / validateObjectNamespacePrefix; metadata-protocol publish preflight NAMESPACE_PREFIX). The active-save asymmetry the run met is the product defect #24547 (open), not edited here. No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -400,7 +418,7 @@
       "title": "Every demonstrable flow node type authors in the designer, executes in a run, and surfaces its step in run logs",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -441,7 +459,7 @@
         "approval_revise"
       ],
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "GET /api/v1/automation/actions (the designer palette feed) and record the descriptor list; open the Studio flow-designer palette on a WRITABLE scope and screenshot it — the stock showcase package is read-only, so its canvas offers no Add node: clone a flow first (POST /api/v1/automation/NAME/clone, or Setup › Packaged Automation, as QA run #24545 did) and open the clone under Studio's ~org scope",
         "record_change chain: POST a showcase_task WITH `assignee` set to a real user's email, under a project that has an `owner` (the project lookup is required), with status 'in_review' — task_status_flow allows done only from in_review and does not check a create — then PATCH status→done — fires showcase_task_completed (script+notify), showcase_fan_out_notify (parallel+http), showcase_resilient_sync (try_catch), showcase_task_done_notify_owner (subflow); the create also fires showcase_task_follow_up (wait) and showcase_declarative_connector_ping / showcase_mcp_connector_echo (connector_action). ⚠ The notify steps address the task's assignee and its project's owner: a task created without an assignee, or under a project without an owner, makes them fail LOUDLY for want of a recipient — a correct refusal, not a notify FAIL (QA run #23166)",
         "on-demand chain: POST /api/v1/automation/<name>/trigger for showcase_batch_reminders {params:{tasks:[…]}} (loop), showcase_inquiry_purge (get_record+decision+delete_record — seed at least one closed showcase_inquiry first), showcase_release_signoff {params:{items:[…]}} (map)",
@@ -558,6 +576,12 @@
           "date": "2026-10-20",
           "change": "automated removed, fixtures.knownGaps[2] added — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: Tier 1 in name only), round 15 of wave anchor #24579. The ref already said its one dogfood pin covers ONE variant of acceptance[1]. A variant is not a clause, so no full clause is pinned: automated is dropped (theme-B rule), and the knownGap says what the pin asserts. Read at base b1676441ba. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ],
       "enumSource": {
@@ -571,7 +595,7 @@
       "title": "Every flow trigger type fires and produces a run of its bound flow; the run's trigger block records the launch event",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -593,7 +617,7 @@
         "time_relative"
       ],
       "steps": [
-        "boot showcase isolated (dogfood §0) with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 and OS_PORT exported (fixtures.requires — without the first, the schedule and time_relative variants can never fire); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0) with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 and OS_PORT exported (fixtures.requires — without the first, the schedule and time_relative variants can never fire); sign in as the dev admin",
         "record_change (create leg): POST /api/v1/data/showcase_task with priority='urgent' — showcase_urgent_task_alert fires via record-after-write with previous == null (#3427)",
         "record_change (update leg): POST a normal-priority task, then PATCH priority→'urgent'; also move a task to done — create it with status 'in_review' and its required project (task_status_flow allows done only from in_review, and a create is not transition-checked), then PATCH status→'done' — and confirm a further save WITHOUT a transition fires nothing",
         "api: POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake with JSON {title, assignee, project} and header x-objectstack-signature: t=<unix seconds>,v1=<HMAC-SHA256 of '<t>.<raw body>', key 'showcase-webhook-secret'> — signHttpBodyAt(rawBody, 'showcase-webhook-secret', Math.floor(Date.now() / 1000)) from @objectstack/core writes it, and the door refuses a t more than 300 s from the server clock — expect a 202 ACK; then find the created showcase_task",
@@ -696,6 +720,12 @@
           "date": "2026-10-20",
           "change": "negative[0]'s pin note narrowed, automated.ref unchanged — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: negative[0]'s pin is not in the ref), round 15 of wave anchor #24579. Read at base b1676441ba: the dogfood case asserts the anonymous trigger's 401 on the served showcase composition and never reads the runs after it. So it asserts half of negative[0] ('denied (401) with NO run row created'). A pin joins the ref only for a full clause at its layer, so it stays out, and negative[0] now says which half it pins. negative[0]'s FAIL condition is unchanged",
           "ref": "#24891"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -704,7 +734,7 @@
       "title": "A failing node inside try_catch is handled (catch region, $error binding) and the failed attempt is still recorded; outside it fails the run loudly",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -718,7 +748,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "handled case: POST a showcase_task carrying its required `project` (a seeded showcase_project id; without it the create answers 400 VALIDATION_FAILED 'Project is required'), status 'in_review' and an assignee, then PATCH status→'done' (allowed from in_review only) — showcase_resilient_sync runs, its try-region http node fails against the unroutable host, retries, then the catch region runs",
         "GET /api/v1/automation/showcase_resilient_sync/runs/:runId — record the overall status, the try_catch container step's own status, EVERY step carrying regionKind='try' (nodeId, status, error, retryAttempt) in log order, the catch step's status/regionKind, and the run duration",
         "re-read the task over /api/v1/data/showcase_task/:id — sync_status and sync_error",
@@ -807,7 +837,8 @@
         },
         { "revision": 3, "date": "2026-08-18", "change": "re-pointed step 5 and clause 7 at a trigger-fired specimen. The step prescribed an api-triggered probe, whose failure clause 7 structurally cannot observe: service-automation/src/engine.ts emits the ERROR line only inside trigger.start's callback, and its own text and #4632 verdict give the reason — 'no caller holds this result'. For a manual or api trigger the caller DOES hold it, so no line is written and a clean log reads as a missing diagnostic (#9467 CF-5)", "ref": "#9386" },
         { "revision": 4, "date": "2026-10-16", "change": "the handled case's 'POST a showcase_task and PATCH status→done' failed as written (#23878 automation slice finding 2, re-measured on main c91af8ed6): showcase_task requires `project` (a create without it answers 400 VALIDATION_FAILED 'Project is required'), and task_status_flow allows status→done only from in_review (a PATCH from the default backlog answers 400 invalid_transition). A create with project and status 'in_review' answers 201 (create is not transition-checked) and the PATCH to done answers 200, firing the record-change flows. Step 2 now creates the task with project and status 'in_review'; on that path showcase_resilient_sync ran and completed (the catch region handled the failure)", "ref": "#24036" },
-        { "revision": 5, "date": "2026-10-19", "change": "fixtures.requires[1] and steps[4] say where the probe flow lands — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.flow-error-handling step 5 / fixtures.requires; wave anchor #24579 §3): POST /api/v1/automation reads no package selector, so \"in the scratch package\" could not be honoured. Re-derived at base 9a7838edf5 (packages/runtime/src/domains/automation-flow-door-package-address.test.ts 'POST / of a flow no package holds saves the package-unbound row'). No clause changed", "ref": "#24649" }
+        { "revision": 5, "date": "2026-10-19", "change": "fixtures.requires[1] and steps[4] say where the probe flow lands — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.flow-error-handling step 5 / fixtures.requires; wave anchor #24579 §3): POST /api/v1/automation reads no package selector, so \"in the scratch package\" could not be honoured. Re-derived at base 9a7838edf5 (packages/runtime/src/domains/automation-flow-door-package-address.test.ts 'POST / of a flow no package holds saves the package-unbound row'). No clause changed", "ref": "#24649" },
+        { "revision": 6, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#PENDING-24579R17" }
       ]
     },
     {
@@ -815,7 +846,7 @@
       "title": "Screen flow round-trip: action trigger → paused run → rendered dialog → resume with inputs → persisted write",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -831,7 +862,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin; open /apps/showcase_app/showcase_task",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin; open /apps/showcase_app/showcase_task",
         "start capturing POSTs to /api/v1/automation/**",
         "open the first row's action menu ([data-testid=row-action-trigger]) and click row-action-showcase_bulk_reassign",
         "record the launch POST — POST /api/v1/actions/showcase_task/showcase_bulk_reassign (the action door; see clause 1) — and GET /api/v1/automation/showcase_reassign_wizard/runs to find the new run — status must be paused",
@@ -930,6 +961,12 @@
           "date": "2026-10-13",
           "change": "acceptance[0].verify and steps[3] re-pointed from the trigger route to the action door (stale spec, #23163 A0; parked on #23121, carried by #23169). Since objectui#12037 a click on a declared type:'flow' action — showcase_bulk_reassign is one — launches through POST /api/v1/actions/:object/:action, which runs the flow and answers the pause; the trigger route is left to undeclared flow starts. QA run #23163 saw POST /actions, the run paused at 'collect', and every other clause pass. Re-read from objectui source at 1fb1ced36243 (useConsoleActionRuntime.tsx), still this repo's .objectui-sha; the framework door is runtime route-ledger.ts /api/v1/actions/:object/:action",
           "ref": "#23169"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -938,7 +975,7 @@
       "title": "Suspended runs persist to sys_automation_run, survive a cold restart, and resume — including nested (linked-run) pauses",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -952,7 +989,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated against a file DB (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port against its own file DB (dogfood §0); sign in as the dev admin",
         "POST a showcase_task — showcase_task_follow_up suspends at its wait node (timer PT1M)",
         "PATCH a showcase_project status→'completed' — showcase_project_closure parks at its subflow node and showcase_closure_signoff parks at its approval node (linked runs)",
         "read the paused rows from sys_automation_run over the data API by run id: status, flow name, suspended node, and the rehydration payload",
@@ -1015,6 +1052,12 @@
           "date": "2026-08-07",
           "change": "initial — promotes the #4470 durable-suspend proof to a ledger item and adds the nested linked-run pair",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated against a file DB' → 'boot the showcase on its own port against its own file DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1023,7 +1066,7 @@
       "title": "A paused record-change run's stored state serves its trigger record masked — credential-class fields as the mask, internal fields absent — to a run-state reader, hot and after a cold boot",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1043,7 +1086,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated against a file DB (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port against its own file DB (dogfood §0); sign in as the dev admin",
         "create a row of the fixture object with all three non-ordinary fields set (a password, a secret, an internal value), then PATCH its ordinary field and its password so the record-change flow fires and pauses",
         "as the member persona, read the paused sys_automation_run row by id over GET /data/sys_automation_run/:id and parse variables_json and context_json",
         "as the member persona, read GET /automation/:name/runs/:runId",
@@ -1119,6 +1162,12 @@
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[0] corrected — a carried note of the 18.0 sweep (round 3's report on wave anchor #24579): it called showcase_approver_bindings 'draft on purpose'. Re-derived at base bfc1539fe0: approver-bindings.flow.ts authors it status: 'obsolete', and its docblock says why not draft — a draft flow binds and fires exactly like an active one, while obsolete is loaded and never armed. It is still the only flow on showcase_field_zoo, so the gap's conclusion holds. No clause changed",
           "ref": "#24687"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated against a file DB' → 'boot the showcase on its own port against its own file DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1127,7 +1176,7 @@
       "title": "connector_action dispatches through every registered connector kind, and the registry feeds the designer pickers",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1152,7 +1201,7 @@
         "showcase_mcp_tools (declarative MCP)"
       ],
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "GET /api/v1/automation/connectors — record the descriptor list and each connector's action list (the MCP instance's actions must come from its tools/list handshake)",
         "premise guard, before scoring any dispatch clause: confirm the boot EXPORTED OS_PORT=<port> (or SHOWCASE_SELF_URL) — read it back from the server process's environment — and that one declarative dispatch succeeds (after step 4's create, the newest showcase_declarative_connector_ping run is completed, not 'fetch failed'). ⛔ Neither surface you might reach for carries the dial address: GET /api/v1/automation/connectors exposes no baseUrl at all (its rows carry name, label, type, description, icon, origin, state, actions), and GET /api/v1/meta/connector/showcase_status_api serves the BUILD-time providerConfig.baseUrl — http://127.0.0.1:3000 on an artifact compiled without OS_PORT, even while the running instance dials the exported port",
         "POST a showcase_task carrying its required `project` (a seeded showcase_project id; without it the create answers 400 VALIDATION_FAILED 'Project is required') and status 'in_review' — fires showcase_declarative_connector_ping and showcase_mcp_connector_echo on create",
@@ -1218,6 +1267,12 @@
           "date": "2026-10-16",
           "change": "the premise-guard step and knownGaps[1] read the declarative instances' baseUrl out of GET /api/v1/automation/connectors, a key that response does not carry (#23878 automation slice finding 4). Re-measured on main c91af8ed6: the connector rows carry no baseUrl, and /meta/connector/showcase_status_api serves providerConfig.baseUrl http://127.0.0.1:3000 (the build-time artifact) while the boot exported OS_PORT=48731, nothing listened on 3000 and both declarative pings completed. The guard now checks the exported variable and a completed dispatch. Steps 4-5 also create the task with its required project and status 'in_review' before patching it to done (#23878 automation slice finding 2, re-measured on main c91af8ed6): showcase_task requires `project` (a create without it answers 400 VALIDATION_FAILED 'Project is required'), and task_status_flow allows status→done only from in_review (a PATCH from the default backlog answers 400 invalid_transition). A create with project and status 'in_review' answers 201 (create is not transition-checked) and the PATCH to done answers 200, firing the record-change flows",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1226,7 +1281,7 @@
       "title": "The developer Flow Runs page triggers a run with typed inputs and drives a screen flow's pause to completion (no orphaned paused rows)",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1240,7 +1295,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "open the developer Flow Runs PAGE (apps/console FlowRunsPage) at /apps/showcase_app/component/developer/flow-runs (console route developer/flow-runs) — NOT the Studio flow-designer Runs preview",
         "typed-input run: select 'Batch Task Reminders (Loop)' (showcase_batch_reminders); the Test Run panel shows the `tasks` input as a JSON `list` textarea; paste three task-shaped objects [{id,title,owner}×3] and click 'Run Flow'",
         "record the trigger POST (client.automation.execute → POST /api/v1/automation/showcase_batch_reminders/trigger) and screenshot the Result envelope; confirm a fresh row appeared in the Recent Runs panel (client.automation.listRuns → GET /automation/showcase_batch_reminders/runs)",
@@ -1311,6 +1366,12 @@
           "date": "2026-10-13",
           "change": "steps[5] leaves new_assignee empty (assertion defect, minor, #23166 A2; parked on #23121, carried by #23169). Filling it at Run supplies the screen's one required field, so the run completes without pausing and the hand-off is never exercised (service-automation screen-input-contract: caller-supplied declared fields satisfy the screen). QA run #23166 left it empty, met the pause, the FlowRunner dialog and the resume, and passed every clause",
           "ref": "#23169"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1319,7 +1380,7 @@
       "title": "Toggling a record-change flow OFF is a runtime kill switch — the mutation that fired it produces no new run; ON restores firing",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1332,7 +1393,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "baseline: POST /api/v1/data/showcase_task with priority='urgent' and its required project (a seeded showcase_project id); GET /api/v1/automation/showcase_urgent_task_alert/runs and record the run count (one new run for this create)",
         "read the pre-toggle runtime state: GET /api/v1/automation/_status (getFlowRuntimeStates) — showcase_urgent_task_alert enabled=true, bound=true",
         "toggle OFF: POST /api/v1/automation/showcase_urgent_task_alert/toggle with {enabled:false} (client.automation.toggle → engine.toggleFlow → deactivateFlowTrigger)",
@@ -1402,6 +1463,12 @@
           "date": "2026-10-16",
           "change": "the urgent-task creates carried no project, so each answered 400 VALIDATION_FAILED 'Project is required' and no run could be counted (#23878 automation slice finding 2, re-measured on main c91af8ed6). Steps 2, 6 and 8 now send the project; with it the urgent create answered 201 and showcase_urgent_task_alert gained one run",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1410,7 +1477,7 @@
       "title": "The flow-dispatch HTTP status contract: every never-dispatched, ran-and-failed and non-terminal outcome answers its own status + ADR-0112 code, at every door that dispatches a flow",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)", "org member for the resume 403 arm — created by the admin with POST /api/v1/auth/admin/create-user and past its password change (POST /api/v1/auth/change-password): a held session answers 403 PASSWORD_RESET_REQUIRED, the right status for the wrong reason"],
@@ -1430,7 +1497,7 @@
       },
       "steps": [
         "read the table first, from its single definition: packages/runtime/src/flow-dispatch-status.ts (FLOW_NOT_FOUND_STATUS, classifyFlowRefusal, isPausedRun) — it is a module rather than a route mapper precisely because three doors must agree on it, and a second copy of it is a defect by construction. The resume arms are a separate list, read them from packages/runtime/src/domains/automation.ts (the `POST /:name/runs/:runId/resume` branch and its code→status arms)",
-        "boot showcase isolated (dogfood §0) with OS_PORT exported as well as -p (RUNNER.md's connector self-URL fact), sign in as the dev admin, and run the qa-flow-status-doors recipe",
+        "boot the showcase on its own port and DB (dogfood §0) with OS_PORT exported as well as -p (RUNNER.md's connector self-URL fact), sign in as the dev admin, and run the qa-flow-status-doors recipe",
         "TRIGGER, per row, against BOTH doors — POST /api/v1/automation/:name/trigger and the legacy POST /api/v1/automation/trigger/:name (the shape client.automation.trigger() calls): a name the deployment does not hold (404 RESOURCE_NOT_FOUND: the status table's 404 row names no code of its own, so the envelope carries the spec's status default, HttpStatusErrorCodeMap in packages/spec/src/api/errors.zod.ts); qa_always_fails; the disabled showcase_urgent_task_alert; qa_no_start_node; a flow that succeeds — showcase_notify_owner with {\"params\": {\"ownerId\": <a user id>, \"message\": \"…\"}} answers 200 (not showcase_resilient_sync, whose CEL condition reads the record's status and answers a bare trigger 400 FLOW_FAILED); showcase_reassign_wizard (pauses)",
         "record for every response the HTTP status AND error.code together — neither alone is the contract, and a run that captured only the status cannot tell 409 FLOW_DISABLED from any other 409",
         "on the 400 FLOW_FAILED responses, additionally record error.details.errorMessage and error.details.summary (the flow author's own text and the per-node accounting) — they are the documented payload of that row and the console reads them from exactly there",
@@ -1542,6 +1609,12 @@
           "date": "2026-10-20",
           "change": "steps[5]'s INVALID_SIGNAL body and the 404 row's code — checklist-accuracy findings of QA run #24779 (wave anchor #24579 round 12). {\"output\":{\"$x\":1}} alone answers 400 INVALID_SCREEN_INPUT on the wizard, whose screen requires new_assignee, because refuseInvalidScreenInput runs before applyResumeSignal (engine.ts at base 307ce4c4b4); the body now satisfies the input too. The 404 row answers RESOURCE_NOT_FOUND: flow-dispatch-status.ts names no code for it, and the envelope takes the spec's HttpStatusErrorCodeMap default. steps[2] and acceptance[0] (clause, verify) state it. No other clause changed",
           "ref": "#24824"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[1] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1550,7 +1623,7 @@
       "title": "Disabling a packaged flow writes a durable sys_metadata_activation row that survives a cold restart with the trigger left unbound; re-enable UPDATES the row and restores firing",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1565,7 +1638,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated against a file DB (dogfood §0); sign in as the dev admin",
+        "boot the showcase on its own port against its own file DB (dogfood §0); sign in as the dev admin",
         "baseline: POST /api/v1/data/showcase_task with priority='urgent' — one new run for showcase_urgent_task_alert (the single-boot toggle semantics are automation.flow-toggle-kill-switch's; this item takes only enough baseline to anchor the restart contrast)",
         "toggle OFF: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false}",
         "read the ledger row over the data API: GET /api/v1/data/sys_metadata_activation (reads are open — apiMethods ['get','list'], sys-metadata-activation.object.ts) and locate the row where metadata_type='flow' AND name='showcase_urgent_task_alert' — record active, package_id and the row id, plus the row's whole KEY SET: organization_id is ABSENT from it, because the table carries no tenant column (#15024 / ADR-0131 D7). ⛔ Do not record the tenant half as a value — `row.organization_id ?? null` answers `null` for a column that does not exist, so a value read passes while measuring nothing",
@@ -1655,6 +1728,12 @@
           "date": "2026-10-20",
           "change": "negative[3] rewritten as the product outcome it guarded. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4): it stated a recording rule (a run scoring the ledger clause from the code alone verified nothing) with no product expectation, so it could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). The outcome it guards is the refusal naming the ledger, so the FAIL is now a ledger-disabled flow answered with the status dimension's bare 'Flow NAME is disabled'. Read at base feb09db14a in engine.ts describeDisabledFlow: the ledger arm adds the 'packaged-metadata activation ledger (sys_metadata_activation' sentence, and the status arm returns the bare one. acceptance[1].verify keeps its ⛔ on the code alone. No acceptance clause changed",
           "ref": "#24963"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "steps[0] respelled: 'boot showcase isolated against a file DB' → 'boot the showcase on its own port against its own file DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
@@ -1663,7 +1742,7 @@
       "title": "Disabling a packaged flow that packaged callers invoke as a subflow is refused 409 DELETE_RESTRICTED naming every caller; the refused attempt writes no ledger row; enabling the subflow itself is never guarded",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1680,7 +1759,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0, OS_PORT exported); sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0, OS_PORT exported); sign in as the dev admin",
         "subflow pair: POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": false} — record the full HTTP answer (status, code, message)",
         "map pair: POST /api/v1/automation/showcase_one_task_signoff/toggle {\"enabled\": false} — record the answer",
         "after each refusal: GET /api/v1/data/sys_metadata_activation and assert NO row exists for the refused flow; then prove it is still ARMED — trigger a run through its caller (for the notify pair: create a showcase_task with its required project and status 'in_review', then PATCH it to status='done' — task_status_flow allows done only from in_review) and confirm the child's subflow step executed",
@@ -1749,7 +1828,8 @@
         { "revision": 3, "date": "2026-10-16", "change": "the 'still armed' probe patched a showcase_task to done without saying how to get there (#23878 automation slice finding 2, re-measured on main c91af8ed6): showcase_task requires `project` (a create without it answers 400 VALIDATION_FAILED 'Project is required'), and task_status_flow allows status→done only from in_review (a PATCH from the default backlog answers 400 invalid_transition). A create with project and status 'in_review' answers 201 (create is not transition-checked) and the PATCH to done answers 200, firing the record-change flows. Step 4 now creates the task with project and status 'in_review' first; on that path showcase_task_done_notify_owner ran and completed", "ref": "#24036" },
         { "revision": 4, "date": "2026-10-19", "change": "acceptance[0].clause quotes the remedy the engine writes — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.packaged-flow-subflow-disable-refusal acceptance[0]; wave anchor #24579 §3): the remedy names the calling flow, so a substring match on the generic quote fails although the meaning is identical. Re-derived at base 9a7838edf5 (packages/services/service-automation/src/engine.ts, the subflow-caller refusal: 'disable the calling flow 'NAME' first' … ' — or leave this one armed.')", "ref": "#24649" },
         { "revision": 5, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[4] cited lines 707, 795, 816, 1322 and 1339 of the showcase flows index.ts in the comma-range spelling (authored in e0abc386a4 as the list 678 to 1339). At that commit those lines were the names and child flowName values of the three stock caller flows; at this base all of them have moved. source[4] now anchors the three callers, index.ts#TaskDoneNotifyOwnerFlow, #ProjectClosureFlow and #ReleaseSignoffFlow, and names each child in prose. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
-        { "revision": 6, "date": "2026-10-20", "change": "fixtures.knownGaps[0] and negative[1] no longer score door arms from the engine pin, and negative[2] moved to steps[7]. PR #24891's carried finding (round 15's acceptance notes: the 'score from the pin' spelling, engine-pinned arms of api clauses) and QA run #24841's procedural-negative finding (18.0 sweep round 4 at 307ce4c4). Under RUNNER rule 6 the engine pin flow-activation-ledger.test.ts (over a fake store, read at base feb09db14a) is evidence of its own layer only: the non-packaged-caller and self-call arms, and negative[1]'s several-callers arm, are door answers, recorded blocked(fixture) without a scratch caller, with the pin beside them. negative[2] (the UI half belongs to another item) stated a scope rule with no product expectation, so it could only score not-run; its text moved, unchanged in substance, to steps[7]. No acceptance clause changed", "ref": "#24963" }
+        { "revision": 6, "date": "2026-10-20", "change": "fixtures.knownGaps[0] and negative[1] no longer score door arms from the engine pin, and negative[2] moved to steps[7]. PR #24891's carried finding (round 15's acceptance notes: the 'score from the pin' spelling, engine-pinned arms of api clauses) and QA run #24841's procedural-negative finding (18.0 sweep round 4 at 307ce4c4). Under RUNNER rule 6 the engine pin flow-activation-ledger.test.ts (over a fake store, read at base feb09db14a) is evidence of its own layer only: the non-packaged-caller and self-call arms, and negative[1]'s several-callers arm, are door answers, recorded blocked(fixture) without a scratch caller, with the pin beside them. negative[2] (the UI half belongs to another item) stated a scope rule with no product expectation, so it could only score not-run; its text moved, unchanged in substance, to steps[7]. No acceptance clause changed", "ref": "#24963" },
+        { "revision": 7, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#PENDING-24579R17" }
       ]
     },
     {
@@ -1757,7 +1837,7 @@
       "title": "POST /automation/:name/clone: whole-definition copy mutating exactly name/label/status, protection envelope dropped, no ancestry, draft-but-armed (double-fire notice verbatim), 409/404/400 refusal arms — and the honest clause: the clone must survive a restart and reach Studio",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1771,7 +1851,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated against a file DB (dogfood §0, OS_PORT exported); sign in as the dev admin",
+        "boot the showcase on its own port against its own file DB (dogfood §0, OS_PORT exported); sign in as the dev admin",
         "refusal arms first (no state left behind): POST /api/v1/automation/showcase_urgent_task_alert/clone with {} · with {\"name\":\"x\"} (label missing) · with {\"label\":\"x\"} (name missing) · with {\"name\":\"showcase_urgent_task_alert\",\"label\":\"Same\"} (same-name) · with {\"name\":\"Bad-Name!\",\"label\":\"Illegal\"} (violates ^[a-z_][a-z0-9_]*$) · and POST /api/v1/automation/does_not_exist/clone {\"name\":\"qa_x\",\"label\":\"X\"} (unknown source) — record every status + code + message",
         "the copy: POST /api/v1/automation/showcase_urgent_task_alert/clone {\"name\":\"qa_urgent_alert_clone\",\"label\":\"QA urgent alert clone\"} — record the FULL response body (flow + notice)",
         "read both definitions back (GET /api/v1/automation/qa_urgent_alert_clone and …/showcase_urgent_task_alert) and diff them key by key",
@@ -1856,7 +1936,8 @@
         { "revision": 2, "date": "2026-10-02", "change": "clause 7's expected-fail note now names only the reachability half. The durability half was fixed by cb4c31d (#20907, with #20761): on 17.6.0 the clone survives a cold restart, reads back with its edited label and still fires (release-verification run). The reachability half still fails — no Studio surface lists a package-less flow — and is now filed as #21332 instead of resting on the #12438 sweep", "ref": "#21330" },
         { "revision": 3, "date": "2026-10-17", "change": "clause 6's reachability EXPECTED FAIL is stale (checklist-accuracy finding, automation slice report on #23878): objectui#11553 gave Studio an org scope whose Automations rail lists package-less flows, and #21332 closed as a duplicate. The verify now asserts the clone is listed and opens at /_console/studio/~org/automations, steps[7] drives it after the restart, and the objectui source line names the org scope and its pin. Re-run on main c91af8ed6 with the console at objectui f8267df93aba, file DB: POST …/showcase_urgent_task_alert/clone {name qa_urgent_alert_clone, label} → 200 status draft; the Organization flows rail listed 'QA urgent alert clone' and opened it (Trigger: Record created or updated · showcase_task, Enabled, no lock banner); after a cold restart over the same DB the GET answered 200, the rail listed and opened it again, and one urgent task create added one run to the clone (0 → 1) and one to the base (1 → 2); teardown DELETE → deleted true", "ref": "#24036" },
         { "revision": 4, "date": "2026-10-19", "change": "acceptance[1] (clause, verify) counts the dropped keys the clone really drops — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.packaged-flow-clone-contract acceptance[1]; wave anchor #24579 §3): FLOW_CLONE_DROPPED_KEYS is 10, not 9, since packages/runtime/src/flow-clone.ts appends 'protection' (#23120, ADR-0010 §3.5) to the 2 read decorations and 7 protection fields. Re-derived at base 9a7838edf5", "ref": "#24649" },
-        { "revision": 5, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[3].verify cited line 439 of automation-flow-clone.test.ts in the comma-range spelling (authored in e0abc386a4 as the list 368-401 and 439). Those lines are unchanged at this base: the same-name 409 cases and the unknown-source 404 assertion. The verify now anchors the two codes those cases assert, automation-flow-clone.test.ts#RESOURCE_CONFLICT and #RESOURCE_NOT_FOUND. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" }
+        { "revision": 5, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[3].verify cited line 439 of automation-flow-clone.test.ts in the comma-range spelling (authored in e0abc386a4 as the list 368-401 and 439). Those lines are unchanged at this base: the same-name 409 cases and the unknown-source 404 assertion. The verify now anchors the two codes those cases assert, automation-flow-clone.test.ts#RESOURCE_CONFLICT and #RESOURCE_NOT_FOUND. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
+        { "revision": 6, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated against a file DB' → 'boot the showcase on its own port against its own file DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#PENDING-24579R17" }
       ]
     },
     {
@@ -1864,7 +1945,7 @@
       "title": "The Setup packaged-automation page: reachable from Setup nav, lists packaged flows + packaged actions, toggle persists, clone on flow rows only, no lineage surface, server refusals verbatim in role=alert",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1885,7 +1966,7 @@
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0, OS_PORT exported); build/serve the pinned console; sign in as the dev admin",
+        "boot the showcase on its own port and DB (dogfood §0, OS_PORT exported); build/serve the pinned console; sign in as the dev admin",
         "nav probe: GET /api/v1/meta/app?id=setup and search the served navigation for a type:'component' item with componentRef 'automation:packaged'; then look for the entry in the rendered Setup sidebar and click it",
         "regardless of the nav verdict, reach the page and screenshot it settled (only if the sidebar entry is MISSING — a regression of #12457 — fall back to the typed URL /_console/apps/com.objectstack.setup/component/automation/packaged — where the sidebar entry lands, the app segment being the package id (QA run #24545) — recording that the typed URL was needed, so the rest of the item is still scored)",
         "inventory: compare the flows table rows against GET /api/v1/meta/flow (which items carry a real _packageId and _provenance != 'org') and the actions section against its own packaged-actions read; confirm every switch reads On except a flow authored status: 'obsolete' (showcase_approver_bindings, examples/app-showcase/src/automation/flows/approver-bindings.flow.ts), whose switch correctly reads Off — 31 On / 1 Off at QA run #24545's subject",
@@ -2002,6 +2083,12 @@
           "date": "2026-10-20",
           "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[6].verify and source[1] cited objectui PackagedAutomationPage.tsx by the lines 529 and 516 in the comma-range spelling (authored in e0abc386a4; source[1]'s list also left a bare 529). At objectui 9602dc820450, the file's latest commit when the item was authored, 529 was the clone dialog's submit button disabled by cloneNameValid and 516 its role=alert rendering of clone.refusal; at the shipped pin 12dc7b47c340 both have moved. Each now names that code of the PackagedAutomationPage component. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed",
           "ref": "#24752"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "automated.ref confirmed, unchanged. PR #24982's pin finding: objectui packages/app-shell/src/views/setup/PackagedAutomationPage.test.tsx changed blob between the console pins (b321640a6100 at 616df6598b42, aeb3e5f94e38 at cf153eb2e535; objectui#13185 and objectui#13279). Re-read at cf153eb2e535 it still stubs fetch. Its new cases (the Activation cell reading 'Not running here' for a flow the engine left unarmed, and the clone result's next steps) widen the mocked component half only, and PackagedActionsSection.test.tsx is unchanged, so the ref's scope holds and no clause moves. steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
+          "ref": "#PENDING-24579R17"
         }
       ]
     },
