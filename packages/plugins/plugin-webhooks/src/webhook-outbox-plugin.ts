@@ -149,8 +149,8 @@ type AutoEnqueueWiring =
 
 /**
  * [#24910] Why the auto-enqueuer is not running, and the composition change
- * that starts it, as one sentence. The boot report and the activation door's
- * refusal both say exactly this, so the two can never name different fixes.
+ * that starts it, as one sentence: the reason and the fix the boot report owes
+ * (AGENTS.md "Degradation log levels").
  */
 function autoEnqueueGapReason(gap: AutoEnqueueGap): string {
     const missing: string[] = [];
@@ -286,23 +286,18 @@ export class WebhookOutboxPlugin implements Plugin {
 
         if (typeof (ctx as any).hook === 'function') {
             (ctx as any).hook('kernel:ready', async () => {
-                // [#24910] Whether the auto-enqueuer can run is decided FIRST,
-                // before the declared-webhook reader is bound below, so the
-                // activation door reads the verdict from the reader's birth and
-                // never a "dispatching" the boot has not established.
-                const wiring = this.resolveAutoEnqueueWiring(ctx, autoEnqueueOpt);
                 // The table's write doors, the legacy-secret sweep and the
-                // declared-webhook reader — this only needs the data
+                // declared-webhook reader FIRST — this only needs the data
                 // engine, so it must not be gated behind the auto-enqueue
                 // dispatch prerequisites (realtime + messaging).
-                await this.bootWebhookTable(ctx, wiring);
+                await this.bootWebhookTable(ctx);
                 // [#22756] The redelivery veto, and beside it the `webhooks`
                 // service — gated on the engine and messaging alone, like the
                 // step above, and never on the auto-enqueue prerequisites. It
                 // runs before the enqueuer writes its first row (#8069), and
                 // before the mount below is mounted.
                 this.bootRedeliverDoor(ctx, autoEnqueueOpt);
-                await this.bootAutoEnqueue(ctx, autoEnqueueOpt, wiring);
+                await this.bootAutoEnqueue(ctx, autoEnqueueOpt);
                 this.registerAdminRoutes(ctx);
             });
         }
@@ -372,7 +367,7 @@ export class WebhookOutboxPlugin implements Plugin {
      * dispatches nothing. Runs before {@link bootAutoEnqueue}, which reads the
      * reader bound here.
      */
-    private async bootWebhookTable(ctx: PluginContext, wiring: AutoEnqueueWiring): Promise<void> {
+    private async bootWebhookTable(ctx: PluginContext): Promise<void> {
         const engine = this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']);
         if (!engine) {
             ctx.logger.warn?.('[webhook] sys_webhook write doors and the declared-webhook reader not bound — no data engine available');
@@ -397,13 +392,7 @@ export class WebhookOutboxPlugin implements Plugin {
         bindWebhookLegacyCleartextGate(engine as any, ctx.logger as any);
         let metadataService: IMetadataService | undefined;
         try { metadataService = ctx.getService<IMetadataService>('metadata'); } catch { /* optional */ }
-        // [#24910] Born knowing whether this kernel dispatches what it reads.
-        this.declaredSource = new DeclaredWebhookSource(
-            engine,
-            metadataService,
-            ctx.logger as any,
-            wiring.kind === 'gap' ? autoEnqueueGapReason(wiring.gap) : null,
-        );
+        this.declaredSource = new DeclaredWebhookSource(engine, metadataService, ctx.logger as any);
         ctx.registerService(DECLARED_WEBHOOKS_SLOT, this.declaredSource);
         // And the declared-name guard: a row that took a declared name would
         // withhold the declaration for the whole deployment, so no non-system
@@ -462,8 +451,7 @@ export class WebhookOutboxPlugin implements Plugin {
             ctx.logger.error?.(
                 `[webhook-auto-enqueuer] the ${declared.length} webhook${declared.length === 1 ? '' : 's'} this stack `
                     + `declares (${declared.join(', ')}) will NEVER be delivered: record writes still succeed and nothing `
-                    + `else reports the loss, but no delivery is ever enqueued — ${autoEnqueueGapReason(gap)} Until then the `
-                    + 'activation door refuses to switch a declared webhook on.',
+                    + `else reports the loss, but no delivery is ever enqueued — ${autoEnqueueGapReason(gap)}`,
                 undefined,
                 { ...gap, declared },
             );
@@ -478,8 +466,8 @@ export class WebhookOutboxPlugin implements Plugin {
     private async bootAutoEnqueue(
         ctx: PluginContext,
         opt: boolean | AutoEnqueuerOptions,
-        wiring: AutoEnqueueWiring,
     ): Promise<void> {
+        const wiring = this.resolveAutoEnqueueWiring(ctx, opt);
         if (wiring.kind === 'off') return;
         if (wiring.kind === 'gap') {
             this.reportAutoEnqueueGap(ctx, wiring.gap);

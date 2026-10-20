@@ -138,26 +138,6 @@ function declaredWebhookReaderOf(service: unknown): DeclaredWebhookReader | unde
 }
 
 /**
- * [#24910] Whether this deployment DELIVERS a declared webhook switched on, as
- * the same reader answers it: the reason the dispatcher is not running, or
- * `null` when it is. plugin-webhooks decides it once its kernel is ready (the
- * auto-enqueuer reads record events only from the realtime service), and binds
- * the reader already knowing it.
- *
- * Declared REQUIRED for switching ON: a reader that cannot say leaves the door
- * unable to confirm that `enabled: true` is true, and the door refuses rather
- * than reporting a switch that may switch nothing. Switching OFF never asks.
- */
-interface DeclaredWebhookDispatch {
-    dispatchUnavailable(): string | null;
-}
-
-function declaredWebhookDispatchOf(service: unknown): DeclaredWebhookDispatch | undefined {
-    const candidate = service as Partial<DeclaredWebhookDispatch> | null | undefined;
-    return typeof candidate?.dispatchUnavailable === 'function' ? (candidate as DeclaredWebhookDispatch) : undefined;
-}
-
-/**
  * The service-backed types — declarations a plugin owns, not catalog entries —
  * each with how its declaration is looked up and how it is named in a refusal.
  */
@@ -167,12 +147,6 @@ const DECLARATION_LOOKUPS: Readonly<Record<'sharing_rule' | 'webhook', {
     serviceNoun: string;
     authoredRemedy: string;
     lookup(service: unknown, name: string): Promise<{ name: string; packageId?: string } | null> | undefined;
-    /**
-     * [#24910] Why switching `name` ON would switch nothing on this deployment,
-     * or `undefined` when it takes effect. Asked only for `enabled: true`, after
-     * the declaration is confirmed.
-     */
-    switchOnRefusal?(service: unknown, name: string): string | undefined;
 }>> = {
     sharing_rule: {
         service: 'sharingRules',
@@ -193,26 +167,6 @@ const DECLARATION_LOOKUPS: Readonly<Record<'sharing_rule' | 'webhook', {
                     ? { name: d.webhook.name, ...(d.packageId !== undefined ? { packageId: d.packageId } : {}) }
                     : null))
                 : undefined;
-        },
-        switchOnRefusal: (service, name) => {
-            const cannotConfirm = (why: string) =>
-                `Cannot confirm that declared webhook '${name}' would be delivered — ${why}. ` +
-                'Refusing rather than answering enabled: true for a webhook that may never be sent.';
-            const dispatch = declaredWebhookDispatchOf(service);
-            if (!dispatch) {
-                return cannotConfirm('the declared-webhook reader bound to this deployment does not say whether its dispatcher runs');
-            }
-            let reason: string | null;
-            try {
-                reason = dispatch.dispatchUnavailable();
-            } catch (err: any) {
-                return cannotConfirm(`the declared-webhook reader could not say whether its dispatcher runs (${err?.message ?? String(err)})`);
-            }
-            return reason === null
-                ? undefined
-                : `Declared webhook '${name}' cannot be switched on — this deployment delivers no declared webhook: ` +
-                    `${reason} Refusing rather than answering enabled: true for a webhook that would never be sent; ` +
-                    'switching it off is unaffected.';
         },
     },
 };
@@ -260,9 +214,7 @@ function ledgerUnregistered(ql: any): boolean {
  *     the engine — the one `resolveUserAuthzGrants` reads, so this door and
  *     the resolver cannot disagree about which names exist. No reader bound,
  *     or a reader that cannot answer ⇒ 503 (an outage is not a verdict);
- *     unknown ⇒ 404. A declared webhook switched ON is also refused 503 where
- *     the deployment delivers no declared webhook at all — the reader says why
- *     — since that 200 would report a switch that switches nothing.
+ *     unknown ⇒ 404.
  *  5. **The durable write**, through the engine. A packaged item's row names
  *     its package; an environment-authored item's row names none.
  */
@@ -377,19 +329,6 @@ export async function handleCatalogActivationWrite(
                     `${enabled ? 'on' : 'off'}. ${declaration.authoredRemedy}`,
                     404,
                 ),
-            };
-        }
-        // [#24910] A switch ON is a claim that the declaration now takes
-        // effect. Where this deployment delivers no declared webhook at all (the
-        // dispatcher is not running), a 200 `enabled: true` would be the claim
-        // with nothing behind it, so the door refuses in the same 503 shape as
-        // a reader it cannot consult. Switching OFF is always true and is
-        // written as before.
-        const switchOnRefusal = enabled ? declaration.switchOnRefusal?.(service, entry.name) : undefined;
-        if (switchOnRefusal !== undefined) {
-            return {
-                handled: true,
-                response: deps.error(switchOnRefusal, 503, { code: 'SERVICE_UNAVAILABLE' }),
             };
         }
     }

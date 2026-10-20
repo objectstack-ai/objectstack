@@ -109,15 +109,14 @@ requires: ['automation', 'triggers', 'webhooks', 'realtime'],
 
 - `'webhooks'` mounts `plugin-webhooks`: the declared-webhook reader, the
   auto-enqueuer and the redeliver door. Without it nothing reads the
-  declaration, and the activation door answers `503 SERVICE_UNAVAILABLE`
-  because no declared-webhook reader is bound.
+  declaration at all.
 - `'realtime'` mounts the realtime service, which is the auto-enqueuer's only
   source of record events: the engine publishes `data.record.*` through it, and
   nothing else feeds the enqueuer (§4.1). With `'webhooks'` and without
-  `'realtime'` the declaration is read but never dispatched. The boot logs one
-  `error` that names each declared webhook and the missing token. The
-  activation door then refuses to switch a declared webhook on, answering
-  `503 SERVICE_UNAVAILABLE` with the same reason. Switching one off still works.
+  `'realtime'` the declaration is read but never dispatched. Record writes still
+  succeed and no delivery is ever enqueued. The boot logs one `error` that names
+  each declared webhook and the missing token. Switching a declared webhook on
+  through the activation door delivers nothing on such a deployment either.
 
 The outbox itself comes from `messaging`, which every boot mounts unless it runs
 with `--preset minimal`. A scaffolded app's `requires` is

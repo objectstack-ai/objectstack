@@ -2,8 +2,7 @@
 
 /**
  * [#24910] A kernel with `webhooks` and without `realtime` delivers no declared
- * webhook — and says so ONCE, at `error`, and its declared-webhook reader tells
- * the activation door so.
+ * webhook — and now says so ONCE, at `error`, with the consequence and the fix.
  *
  * ## The defect
  *
@@ -25,14 +24,13 @@
  * the realtime service is a stand-in, and only on the legs that mount one.
  *
  *  1. Declared webhook, no realtime: one `error` naming the webhook, `realtime`
- *     and the fix; no `disabled` warn; the reader's `dispatchUnavailable()`
- *     names `realtime`; and a record write enqueues nothing (the loss itself).
- *  2. CONTROL, the same stack with realtime: no error, the reader answers
- *     `null`, and the same write enqueues one delivery — so leg 1's zero is the
- *     missing service and not a fixture that cannot deliver.
+ *     and the fix; no `disabled` warn; and a record write enqueues nothing (the
+ *     loss itself).
+ *  2. CONTROL, the same stack with realtime: no error, and the same write
+ *     enqueues its deliveries — so leg 1's zero is the missing service and not a
+ *     fixture that cannot deliver.
  *  3. No declared webhook, no realtime: the `warn` it always was, no `error`.
- *  4. `autoEnqueue: false`: the host's own choice — nothing reported, and the
- *     reader answers `null` (its redelivery reads the switch).
+ *  4. `autoEnqueue: false`: the host's own choice — nothing reported.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -205,7 +203,6 @@ describe('[#24910] the auto-enqueuer disabled on a stack that declares webhooks'
 
         expect(enqueuerStarted).toBe(false);
         expect(reader).toBeInstanceOf(DeclaredWebhookSource);
-        expect(reader.dispatchUnavailable()).toContain("add 'realtime' to `requires`");
         // The reader still answers the declaration — it is only dispatch that is missing.
         expect((await reader.declaredWebhookNamed(HOOK))?.active).toBe(true);
 
@@ -213,12 +210,11 @@ describe('[#24910] the auto-enqueuer disabled on a stack that declares webhooks'
         expect(outbox.enqueued).toEqual([]);
     });
 
-    it('CONTROL — the same stack with realtime: no error, the reader answers null, and the same write is delivered', async () => {
-        const { plugin, reader, enqueuerStarted, writeRecord, outbox } = await boot({ realtime: true });
+    it('CONTROL — the same stack with realtime: no error, and the same write is delivered', async () => {
+        const { plugin, enqueuerStarted, writeRecord, outbox } = await boot({ realtime: true });
 
         expect(plugin.lines('error', '[webhook-auto-enqueuer]')).toEqual([]);
         expect(enqueuerStarted).toBe(true);
-        expect(reader.dispatchUnavailable()).toBeNull();
 
         await writeRecord();
         expect(outbox.enqueued.map((d) => [d.refId, d.label])).toEqual([
@@ -228,22 +224,19 @@ describe('[#24910] the auto-enqueuer disabled on a stack that declares webhooks'
     });
 
     it('no declared webhook, no realtime: the warn it always was, never the error', async () => {
-        const { plugin, reader } = await boot({ declare: false });
+        const { plugin } = await boot({ declare: false });
 
         expect(plugin.lines('error', '[webhook-auto-enqueuer]')).toEqual([]);
         const warns = plugin.lines('warn', 'auto-enqueuer] disabled');
         expect(warns).toHaveLength(1);
         expect(warns[0].meta).toMatchObject({ hasEngine: true, hasRealtime: false, hasMessaging: true });
-        // Deployment-wide: a webhook declared later still could not be switched on here.
-        expect(reader.dispatchUnavailable()).toContain("'realtime'");
     });
 
-    it('`autoEnqueue: false` is the host\'s own composition: nothing reported, and the reader answers null', async () => {
-        const { plugin, reader, enqueuerStarted } = await boot({ plugin: { autoEnqueue: false } });
+    it('`autoEnqueue: false` is the host\'s own composition: nothing reported', async () => {
+        const { plugin, enqueuerStarted } = await boot({ plugin: { autoEnqueue: false } });
 
         expect(plugin.lines('error', '[webhook-auto-enqueuer]')).toEqual([]);
         expect(plugin.lines('warn', '[webhook-auto-enqueuer]')).toEqual([]);
         expect(enqueuerStarted).toBe(false);
-        expect(reader.dispatchUnavailable()).toBeNull();
     });
 });
