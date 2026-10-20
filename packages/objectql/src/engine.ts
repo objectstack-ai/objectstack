@@ -12209,8 +12209,10 @@ export class ObjectQL implements IObjectQLEngine {
     try {
       sink.setTenantKeyCertifiedResolver(() => this.isOrganizationOwnershipCertified());
     } catch (e: any) {
-      // A driver that did not take the resolver answers "not certified", the
-      // reading that never proposes a rebuild on a guess.
+      // A driver that did not take the resolver answers "not certified": it
+      // keeps the two forms distinct and REPORTS a destructive recreate_index,
+      // which is never applied unattended (safe-only boot reconcile, the
+      // artifact gate, `os migrate apply --allow-destructive`).
       this.logger.debug('Driver declined the ADR-0131 certification resolver', {
         driverName: driver.name,
         error: e?.message ?? String(e),

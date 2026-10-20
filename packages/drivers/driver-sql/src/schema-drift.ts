@@ -2557,6 +2557,22 @@ export function diffManagedIndexes(args: {
     // own (`nullSafeColumns` is only ever recorded alongside an expression key
     // part); a resolved shadow key can carry NULL-safe parts with no
     // expressions at all, so the implication no longer holds.
+    // [ADR-0131 D1] An earlier release's COALESCE tenant key part against the
+    // plain one new DDL declares — the divergence is ONLY that form, on a
+    // table where the two are still different constraints (not
+    // certified, nullable tenant column). The remedy is the ownership ceremony,
+    // which certifies the database and so retires this entry — never a rebuild:
+    // `--allow-destructive` would drop and re-key the index over rows that may
+    // still lack an organization. The op is unchanged (destructive, reported,
+    // never applied unattended); only what it tells the operator differs.
+    const uncertifiedTenantKeyOnly =
+      tenantKeyCertified !== true &&
+      !!tenantField &&
+      p.unique === e.unique &&
+      (pk.nullSafeColumns ?? []).includes(tenantField) &&
+      !(e.nullSafeColumns ?? []).includes(tenantField) &&
+      canonicalIndexKey(pk.columns, (pk.nullSafeColumns ?? []).filter((c) => c !== tenantField)) ===
+        canonicalIndexKey(e.columns, (e.nullSafeColumns ?? []).filter((c) => c !== tenantField));
     const tightenNullSafeOnly =
       e.unique &&
       p.unique &&
@@ -2584,7 +2600,15 @@ export function diffManagedIndexes(args: {
         ...(e.nullSafeColumns ? { nullSafeColumns: e.nullSafeColumns } : {}),
         ...(tightenNullSafeOnly ? { tightenNullSafeOnly: true } : {}),
       },
-      message: tightenNullSafeOnly
+      message: uncertifiedTenantKeyOnly
+        ? `${table}: index '${e.name}' is ${indexSignature(pk.columns, p.unique, pk.nullSafeColumns)} and metadata declares ` +
+          `${indexSignature(e.columns, e.unique, e.nullSafeColumns)}: the same columns, differing only in how the ` +
+          `'${tenantField}' key part treats a row with no organization. This database is not certified for the ` +
+          `organization-ownership shape and '${tenantField}' is nullable, so the two are still different constraints. ` +
+          `Run "os migrate organization-ownership": once it certifies the database the two read as one index and this ` +
+          `entry is gone. Do not rebuild it with "os migrate apply --allow-destructive", which would drop and re-key ` +
+          `the index over rows that may still have no organization.`
+        : tightenNullSafeOnly
         ? `${table}: index '${e.name}' is ${indexSignature(pk.columns, p.unique, pk.nullSafeColumns)} but metadata declares ` +
           `${indexSignature(e.columns, e.unique, e.nullSafeColumns)} (ADR-0120 D3: the organization key part is NULL-safe, ` +
           `so rows without an organization are constrained too). Pure tightening — eligibility is decided by the ` +

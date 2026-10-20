@@ -15,7 +15,8 @@
  * (`sql-driver-tenant-key-equivalence.test.ts`).
  *
  * Every way of not knowing answers `false`, the reading under which the differ
- * keeps the two forms distinct and never proposes a rebuild on a guess.
+ * keeps the two forms distinct: the differ reports a destructive
+ * `recreate_index`, which is never applied unattended.
  */
 
 import { describe, it, expect } from 'vitest';

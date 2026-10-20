@@ -73,6 +73,20 @@ describe('7b-1 — the differ: COALESCE(tenant) ≡ tenant where the tenant colu
     expect(entry).toMatchObject({ category: 'destructive', op: { type: 'recreate_index', indexName: NAME } });
   });
 
+  it('the uncertified entry names the ownership ceremony as its remedy, never --allow-destructive', () => {
+    const [entry] = diff(expectedPlain, coalesced, false);
+    expect(entry!.message).toContain('"os migrate organization-ownership"');
+    expect(entry!.message).toContain('not certified');
+    // The rebuild is named only to be ruled out, never prescribed as the fix.
+    expect(entry!.message).toContain('Do not rebuild it with "os migrate apply --allow-destructive"');
+    expect(entry!.message).not.toMatch(/existing duplicates: "os migrate apply --allow-destructive"/);
+    // Control — a real redefinition keeps the rebuild remedy it always had.
+    const other: ExpectedIndex = { name: NAME, columns: [ORG, 'code', 'region'], unique: true };
+    const [rebuild] = diff(other, coalesced, false);
+    expect(rebuild!.message).not.toContain('os migrate organization-ownership');
+    expect(rebuild!.message).toContain('"os migrate apply --allow-destructive"');
+  });
+
   it('the other direction: a plain physical index against a NULL-safe expectation, no drift when certified', () => {
     expect(diff(expectedNullSafe, plain, true)).toEqual([]);
     expect(diff(expectedNullSafe, plain, false).map((d) => d.op.type)).toEqual(['recreate_index']);

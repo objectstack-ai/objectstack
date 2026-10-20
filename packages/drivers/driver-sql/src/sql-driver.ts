@@ -20413,9 +20413,12 @@ export class SqlDriver implements IDataDriver {
    * The answer decides one thing only: whether the differ reads an earlier
    * release's `COALESCE(<tenant>, …)` key part as the plain tenant column new
    * DDL keys ({@link detectTableIndexDrift}). Without a resolver, or when it
-   * throws, the answer is "not certified" — the two forms then stay distinct
-   * constraints, which is the reading that never proposes a rebuild on a
-   * guess.
+   * throws, the answer is "not certified": the two forms then stay distinct
+   * constraints, and the differ REPORTS the 18.0 index as a destructive
+   * `recreate_index`. That report is never applied unattended — the boot
+   * reconcile applies `safe` entries only, the artifact gate refuses it, and
+   * `os migrate apply` needs `--allow-destructive` — and its message names the
+   * ownership ceremony as the remedy.
    */
   setTenantKeyCertifiedResolver(resolve: () => boolean | Promise<boolean>): void {
     this.tenantKeyCertifiedResolver = resolve;
@@ -20443,9 +20446,11 @@ export class SqlDriver implements IDataDriver {
       // {@link PRE_DDL_QUESTION_SCOPE}).
       if ((await PRE_DDL_QUESTION_SCOPE.run(true, resolver)) !== true) return false;
     } catch (e: any) {
-      // Not knowing reads as "not certified" — the reading that never proposes
-      // a rebuild on a guess — and is said once, so a drift report that then
-      // names an 18.0 index is not taken for a verdict on a certified store.
+      // Not knowing reads as "not certified": the forms stay distinct and an
+      // 18.0 index is reported as a destructive recreate_index, which nothing
+      // applies unattended (safe-only boot reconcile, the artifact gate,
+      // `--allow-destructive`). Said once, so that report is not taken for a
+      // verdict on a certified store.
       if (!this.tenantKeyCertifiedReadFailureReported) {
         this.tenantKeyCertifiedReadFailureReported = true;
         this.logger.warn(
