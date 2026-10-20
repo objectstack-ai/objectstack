@@ -51,10 +51,15 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 // The release gate's run listing reads GitHub through the ONE retry policy the
-// citation gate already measured (see `readRuns` below). Imported, never
-// copied; the module imports nothing, which release.yml's install-free
-// `full-battery` job depends on.
-import { BOARD_READ_RETRY, boardReadBudget, readBoard, readFailure } from '../github-read-retry.mjs';
+// citation gate measured and pins (#23361; see `readRuns` below). Imported,
+// never copied.
+// ⛔ This import puts `check-issue-citations.mjs` and its own imports in THIS
+// file's load closure, and release.yml's `full-battery` job runs this file off
+// a bare checkout with no install step (so does scheduled-full-run-card.yml's
+// `import()`). Measured when it was added: every module in that closure
+// imports only `node:*` builtins and runs nothing at load. A dependency
+// added anywhere in it breaks the publish lane at load time.
+import { BOARD_READ_RETRY, boardReadBudget, readBoard, readFailure } from '../check-issue-citations.mjs';
 import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 // The `Blocked-by:` reader the half-state patrol's H19 discovers targets with.
@@ -902,7 +907,8 @@ export function readFirstParentHistory(releaseCommit, window = RELEASE_GATE_WIND
 // NOT MEASURED with no second attempt: release run 39230668843, whose every
 // full-battery verdict was green, shipped only after a manual re-run and a
 // second `release` approval. Each page is now read through the citation gate's
-// policy (`../github-read-retry.mjs`, whose docblock is the measurement):
+// policy (`BOARD_READ_RETRY` in `../check-issue-citations.mjs`, whose docblock
+// is the measurement):
 //
 //   retried      an HTTP 5xx, or a named connection failure (ECONNRESET,
 //                UND_ERR_SOCKET) -- 3 attempts per read, 500 / 1000 ms apart;
