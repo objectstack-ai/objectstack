@@ -1401,7 +1401,7 @@
       "title": "The flow-dispatch HTTP status contract: every never-dispatched, ran-and-failed and non-terminal outcome answers its own status + ADR-0112 code, at every door that dispatches a flow",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)", "org member for the resume 403 arm — created by the admin with POST /api/v1/auth/admin/create-user and past its password change (POST /api/v1/auth/change-password): a held session answers 403 PASSWORD_RESET_REQUIRED, the right status for the wrong reason"],
@@ -1422,19 +1422,19 @@
       "steps": [
         "read the table first, from its single definition: packages/runtime/src/flow-dispatch-status.ts (FLOW_NOT_FOUND_STATUS, classifyFlowRefusal, isPausedRun) — it is a module rather than a route mapper precisely because three doors must agree on it, and a second copy of it is a defect by construction. The resume arms are a separate list, read them from packages/runtime/src/domains/automation.ts (the `POST /:name/runs/:runId/resume` branch and its code→status arms)",
         "boot showcase isolated (dogfood §0) with OS_PORT exported as well as -p (RUNNER.md's connector self-URL fact), sign in as the dev admin, and run the qa-flow-status-doors recipe",
-        "TRIGGER, per row, against BOTH doors — POST /api/v1/automation/:name/trigger and the legacy POST /api/v1/automation/trigger/:name (the shape client.automation.trigger() calls): a name the deployment does not hold; qa_always_fails; the disabled showcase_urgent_task_alert; qa_no_start_node; a flow that succeeds — showcase_notify_owner with {\"params\": {\"ownerId\": <a user id>, \"message\": \"…\"}} answers 200 (not showcase_resilient_sync, whose CEL condition reads the record's status and answers a bare trigger 400 FLOW_FAILED); showcase_reassign_wizard (pauses)",
+        "TRIGGER, per row, against BOTH doors — POST /api/v1/automation/:name/trigger and the legacy POST /api/v1/automation/trigger/:name (the shape client.automation.trigger() calls): a name the deployment does not hold (404 RESOURCE_NOT_FOUND: the status table's 404 row names no code of its own, so the envelope carries the spec's status default, HttpStatusErrorCodeMap in packages/spec/src/api/errors.zod.ts); qa_always_fails; the disabled showcase_urgent_task_alert; qa_no_start_node; a flow that succeeds — showcase_notify_owner with {\"params\": {\"ownerId\": <a user id>, \"message\": \"…\"}} answers 200 (not showcase_resilient_sync, whose CEL condition reads the record's status and answers a bare trigger 400 FLOW_FAILED); showcase_reassign_wizard (pauses)",
         "record for every response the HTTP status AND error.code together — neither alone is the contract, and a run that captured only the status cannot tell 409 FLOW_DISABLED from any other 409",
         "on the 400 FLOW_FAILED responses, additionally record error.details.errorMessage and error.details.summary (the flow author's own text and the per-node accounting) — they are the documented payload of that row and the console reads them from exactly there",
-        "RESUME: trigger showcase_reassign_wizard with {\"params\": {\"recordId\": <a task id>, \"objectName\": \"showcase_task\"}} to obtain a live paused runId (without recordId the valid resume fails 400 FLOW_FAILED: its update_record filters on recordId), then drive each refusal arm against POST /api/v1/automation/:name/runs/:runId/resume — a bodyless/valid resume (200, next screen or completion); a resume missing a required screen input (400 INVALID_SCREEN_INPUT); a resume whose signal writes the engine's `$` namespace (400 INVALID_SIGNAL) — spelled {\"output\": {\"$x\": 1}}, which lands as collect.$x: a `$` key inside `inputs` meets the screen check first and answers INVALID_SCREEN_INPUT, and a body carrying both `inputs` and `variables` is refused 400 VALIDATION_FAILED since #24594; a resume of an unknown runId (404 RUN_NOT_FOUND); a resume as the member persona, neither the trigger identity nor a resumeAuthority holder (403 PERMISSION_DENIED); and 409 RESUME_IN_PROGRESS, reproducible with a scratch screen flow start → screen(collect, required x) → http GET a local delay server (e.g. http://127.0.0.1:FREE-PORT/slow?s=6) → screen(collect2, required y) → end: send a second resume while the first is inside the http node (the engine's `resuming` guard holds for the whole continuation), and the second screen makes the intact suspension and a later resume observable (QA run #24596)",
+        "RESUME: trigger showcase_reassign_wizard with {\"params\": {\"recordId\": <a task id>, \"objectName\": \"showcase_task\"}} to obtain a live paused runId (without recordId the valid resume fails 400 FLOW_FAILED: its update_record filters on recordId), then drive each refusal arm against POST /api/v1/automation/:name/runs/:runId/resume — a bodyless/valid resume (200, next screen or completion); a resume missing a required screen input (400 INVALID_SCREEN_INPUT); a resume whose signal writes the engine's `$` namespace (400 INVALID_SIGNAL) — spelled {\"inputs\": {\"new_assignee\": \"…\"}, \"output\": {\"$x\": 1}}, which lands as collect.$x. The screen check runs first (refuseInvalidScreenInput before applyResumeSignal, engine.ts), so the body must also satisfy the screen's required new_assignee: {\"output\": {\"$x\": 1}} alone answers 400 INVALID_SCREEN_INPUT (QA run #24779), as does a `$` key inside `inputs`; and a body carrying both `inputs` and `variables` is refused 400 VALIDATION_FAILED since #24594; a resume of an unknown runId (404 RUN_NOT_FOUND); a resume as the member persona, neither the trigger identity nor a resumeAuthority holder (403 PERMISSION_DENIED); and 409 RESUME_IN_PROGRESS, reproducible with a scratch screen flow start → screen(collect, required x) → http GET a local delay server (e.g. http://127.0.0.1:FREE-PORT/slow?s=6) → screen(collect2, required y) → end: send a second resume while the first is inside the http node (the engine's `resuming` guard holds for the whole continuation), and the second screen makes the intact suspension and a later resume observable (QA run #24596)",
         "after each RETRYABLE refusal, re-read the run and confirm the suspension is STILL PAUSED and a later valid resume still works — 'the refusal left the suspension intact' is half of what those arms mean, and a status alone does not show it",
         "cross-door: dispatch the SAME disabled flow through POST /api/v1/actions/... with a type:'flow' action and through a declared type:'flow' endpoint, and record what each answers",
         "capture the per-row × per-door verdict table"
       ],
       "acceptance": [
         {
-          "clause": "every TRIGGER row answers its own status and code, on BOTH trigger routes: 404 (no such flow), 409 FLOW_DISABLED, 422 FLOW_NO_START_NODE, 400 FLOW_FAILED — and a successful run answers 200",
+          "clause": "every TRIGGER row answers its own status and code, on BOTH trigger routes: 404 RESOURCE_NOT_FOUND (no such flow), 409 FLOW_DISABLED, 422 FLOW_NO_START_NODE, 400 FLOW_FAILED — and a successful run answers 200",
           "oracle": "api",
-          "verify": "one request per row per route; the observed (status, error.code) pair equals the row in flow-dispatch-status.ts. ⚠️ The dangerous direction is a 200 whose body carries an inner {success:false}: that is the pre-17.1.0 double envelope these rows replaced, and a caller branching on HTTP status alone reads a failed or refused run as a successful one — so a 200 on any of the four refusal rows is a FAIL, not a formatting difference",
+          "verify": "one request per row per route; the observed (status, error.code) pair equals the row in flow-dispatch-status.ts, whose 404 row names no code of its own: that row's code is the spec's status default RESOURCE_NOT_FOUND (HttpStatusErrorCodeMap, packages/spec/src/api/errors.zod.ts). ⚠️ The dangerous direction is a 200 whose body carries an inner {success:false}: that is the pre-17.1.0 double envelope these rows replaced, and a caller branching on HTTP status alone reads a failed or refused run as a successful one — so a 200 on any of the four refusal rows is a FAIL, not a formatting difference",
           "evidence": "the per-row per-route status + code table, with one full response body per row"
         },
         {
@@ -1527,6 +1527,12 @@
           "date": "2026-10-19",
           "change": "personas, steps[2] and steps[5] name the specimens and spellings each arm needs — checklist-accuracy findings of the 18.0 QA sweep (QA run #24545 steps[2] and steps[5], QA run #24596 acceptance[4]'s 409 arm; wave anchor #24579 §3, comment 6272314386). The success row now names showcase_notify_owner; the wizard is triggered with recordId + objectName; INVALID_SIGNAL is spelled through `output`, since a `$` key in `inputs` meets the screen check first (refuseInvalidScreenInput runs before applyResumeSignal, engine.ts) and the `inputs` + `variables` body #24545 measured as silently dropped is refused since PR #24594 (c3954057fe, the fix of #24546); the 403 member must be past its password change; and 409 RESUME_IN_PROGRESS reproduces with a slow http node before a second screen. Re-derived at base 9a7838edf5. The 503 STORE_UNAVAILABLE arm stays blocked(fixture) (§4)",
           "ref": "#24649"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "steps[5]'s INVALID_SIGNAL body and the 404 row's code — checklist-accuracy findings of QA run #24779 (wave anchor #24579 round 12). {\"output\":{\"$x\":1}} alone answers 400 INVALID_SCREEN_INPUT on the wizard, whose screen requires new_assignee, because refuseInvalidScreenInput runs before applyResumeSignal (engine.ts at base 307ce4c4b4); the body now satisfies the input too. The 404 row answers RESOURCE_NOT_FOUND: flow-dispatch-status.ts names no code for it, and the envelope takes the spec's HttpStatusErrorCodeMap default. steps[2] and acceptance[0] (clause, verify) state it. No other clause changed",
+          "ref": "#24824"
         }
       ]
     },
@@ -2055,7 +2061,7 @@
       "title": "Flow authoring contract on v18, refused at `os validate` — and at PUT /meta/flow for every flow-body arm but the CEL root scope, which only `os validate` judges: single-brace {…} value tokens (CEL only; text slots use {{ }}), $-prefixed bound variable names, builtin node config keys/values the executor does not declare, dangling or repeated edges, `record`/`user.id` roots a flow cannot bind, retryPolicy.maxRetry, and an anonymous endpoint targeting a runAs:\"system\" flow",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -2105,7 +2111,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/spec/src/automation/flow-value-slot-template.test.ts + packages/spec/src/automation/flow-text-slot-template.test.ts + packages/spec/src/automation/flow-builtin-node-config-keys.test.ts + packages/spec/src/automation/flow-builtin-node-config-values.test.ts + packages/spec/src/automation/flow-bound-variable-name.test.ts + packages/spec/src/automation/flow.test.ts + packages/lint/src/validate-expressions.flow-cel-root.test.ts + packages/spec/src/shared/retry-policy.test.ts + packages/spec/src/api/anonymous-elevated-flow-gate.test.ts"
+        "ref": "packages/spec/src/automation/flow-value-slot-template.test.ts + packages/spec/src/automation/flow-text-slot-template.test.ts + packages/spec/src/automation/flow-builtin-node-config-keys.test.ts + packages/spec/src/automation/flow-builtin-node-config-values.test.ts + packages/spec/src/automation/flow-bound-variable-name.test.ts + packages/spec/src/automation/flow.test.ts + packages/lint/src/validate-expressions.flow-cel-root.test.ts + packages/spec/src/shared/retry-policy.test.ts + packages/spec/src/api/anonymous-elevated-flow-gate.test.ts — acceptance[0] ONLY, the clause that scores these nine spec and lint unit files themselves. None of them runs `os validate` or the PUT /api/v1/meta/flow door, so no pin covers acceptance[1] (each arm's `os validate` exit and located refusal), acceptance[2] (the door's 422s with nothing stored, and the two root-scope arms' 200) or acceptance[3] (the three controls validate and save): drive them by hand with the CLI and a boot"
       },
       "source": [
         "packages/spec/src/automation/flow-value-slot-template.ts#flowNodeValueTemplateRefusals",
@@ -2132,6 +2138,12 @@
           "date": "2026-10-19",
           "change": "steps[0] and acceptance[1] (clause, verify) name arms and verdict shapes os validate really has — checklist-accuracy findings of the 18.0 QA sweep (QA run #24545 acceptance[1], QA run #24558 steps; wave anchor #24579 §3). \"A REST-triggered flow reading record.x\" was ambiguous: an api-type flow binds record (packages/lint/src/flow-cel-root-scope.ts hands record to the api kind); the refused shape is an autolaunched flow. The anonymous-endpoint arm needs an armed rateLimit or ADR-0121 D6 fires beside it (packages/spec/src/api/endpoint-publish-gate.ts). Schema-layer arms surface as STACK_SCHEMA_INVALID with the contract sentence, not a rule id. Re-derived at base 9a7838edf5; round 1's acceptance[2] re-point is unchanged",
           "ref": "#24649"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause — checklist-accuracy finding C8 of QA run #24786 (wave anchor #24579 round 12, round 6's theme-B rule): the ref listed nine spec and lint unit pins with no clause qualifier, though acceptance[1]–[3] need the CLI or the PUT door. The pins are acceptance[0]'s own subject, so `automated` stays, narrowed to it. No clause changed",
+          "ref": "#24824"
         }
       ]
     },

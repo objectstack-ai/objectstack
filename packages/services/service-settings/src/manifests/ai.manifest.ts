@@ -427,12 +427,18 @@ export const aiTestActionHandler: SettingsActionHandler = async ({ values, paylo
 };
 
 /**
- * Built-in fallback handler for `ai/test_embedder`. Real implementation
- * with a live `embed()` round-trip lives in `@objectstack/service-ai` or
- * `@objectstack/service-knowledge` and overrides this stub at runtime.
+ * Handler for `ai/test_embedder` ("Test embedder"), registered by
+ * `SettingsServicePlugin`'s default `actionHandlers` map (#24769).
  *
- * This fallback validates form completeness only — no network call —
- * so the button is useful even when no embedder plugin is mounted.
+ * It checks form completeness only — a provider is chosen, an API key is
+ * present (Ollama excepted), a Base URL is present for `custom` / `azure` —
+ * and sends NO embedding request. Nothing in this repository replaces it with
+ * a live probe: neither `@objectstack/embedder-openai` nor
+ * `@objectstack/service-knowledge` registers `ai/test_embedder` (a plugin that
+ * did would call `SettingsService.registerAction`, which replaces this
+ * handler). So its success message says what was checked and that no request
+ * was sent, and names no package whose mounting would make this check live —
+ * none does.
  */
 export const aiTestEmbedderActionHandler: SettingsActionHandler = async ({ values, payload }) => {
   const overrides = extractOverrides(payload);
@@ -469,8 +475,8 @@ export const aiTestEmbedderActionHandler: SettingsActionHandler = async ({ value
     ok: true,
     severity: 'info',
     message:
-      `${provider} embedder configured (model=${model}). ` +
-      'Mount @objectstack/embedder-openai + a knowledge adapter to exercise live calls.',
+      `${provider} embedder settings are complete (model=${model}). ` +
+      'This checks the form only — no embedding request was sent.',
   };
 };
 

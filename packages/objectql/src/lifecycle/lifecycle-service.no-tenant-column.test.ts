@@ -175,7 +175,7 @@ describe('LifecycleService.sweep — an object with no tenant column has no tena
       { created_at: { $lt: isoCutoff('90d') }, organization_id: 'org_reg' },
       {
         created_at: { $lt: isoCutoff('30d') },
-        $or: [{ organization_id: { $nin: ['org_reg'] } }, { organization_id: null }],
+        organization_id: { $nin: ['org_reg'] },
       },
     ]);
   });

@@ -354,18 +354,35 @@ describe('aiTestActionHandler — live-call hint carries the cloud boundary (#11
     });
   }
 
-  // Contrast control, so the assertions above cannot be satisfied by blanket-
-  // rewording every hint in this file: the embedder hint names
-  // `@objectstack/embedder-openai`, which IS built in this repo (8 path hits
-  // under `git ls-tree -r --name-only HEAD | grep -cF /embedder-openai/`, against
-  // 0 for `/service-ai/`), so that instruction is followable as written and stays
-  // a plain mount line. Asserted here, deliberately not edited — commit 99ccbb9c8 fences
-  // this site out by name.
-  it('leaves the embedder hint a plain mount line — its package IS built here', async () => {
-    const r = await runTestEmbedder({ embedder_provider: 'openai', embedder_api_key: 'sk-test' });
+  // The embedder hint used to stand here as this block's contrast control — a
+  // plain "Mount @objectstack/embedder-openai + a knowledge adapter to exercise
+  // live calls", kept because that package IS built in this repo. Followable,
+  // but measured false for the button it answered (#24769): no package in this
+  // repo registers `ai/test_embedder`, so mounting it never made "Test
+  // embedder" live. Its replacement is pinned with the embedder handler below;
+  // the three branches above are still exercised one by one, so a blanket
+  // rewording cannot stand in for them.
+});
+
+/**
+ * #24769 — "Test embedder" is now answered (the handler is in the plugin's
+ * default map), and what it answers is a form check: no embedding request is
+ * sent and no package in this repo replaces it with a live probe. A green
+ * answer must say so, and must not name a package whose mounting would make the
+ * check live.
+ */
+describe('aiTestEmbedderActionHandler — a form check says it is one (#24769)', () => {
+  it('states that no embedding request was sent, and promises no live call', async () => {
+    const r = await runTestEmbedder({
+      embedder_provider: 'openai',
+      embedder_api_key: 'sk-test',
+      embedder_model: 'text-embedding-3-small',
+    });
     expect(r.ok).toBe(true);
-    expect(String(r.message)).toContain(
-      'Mount @objectstack/embedder-openai + a knowledge adapter to exercise live calls',
-    );
+    expect(r.severity).toBe('info');
+    const message = String(r.message);
+    expect(message).toContain('text-embedding-3-small');
+    expect(message).toMatch(/no embedding request was sent/);
+    expect(message).not.toMatch(/to exercise live calls/);
   });
 });

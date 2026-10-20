@@ -343,7 +343,7 @@
       "title": "sys_attachment reads inherit parent visibility: a restricted member sees neither rows nor counts for invisible parents",
       "since": "v15.1",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": ["member who can read the parent record", "member who cannot read the parent record"],
@@ -391,10 +391,10 @@
           "evidence": "the by-id response"
         },
         {
-          "clause": "the filter fails CLOSED: a filter-compute failure or a pre-scan past the 2000-candidate cap excludes rows rather than leaking them, and the cap logs a warning naming the fail-closed truncation",
+          "clause": "the filter fails CLOSED and never truncates an ordinary parent: since ADR-0139 D4 (step E7) the gate writes one ReadableIds leaf per parent object and pre-scans nothing, so a broad read past 2000 candidate rows serves every visible row with a true `total` and logs no cap warning. The bounded 2000-row probe remains only for ADR-0139 D5's three classes (a delegated caller, a parent an object-scoped read middleware narrows, a federated parent) and the two whole-read states knownGaps[3] names; there a pre-scan past the cap or a probe failure excludes rows rather than leaking them, and logs the '[storage] attachment read visibility' warning naming the fail-closed truncation or the denial",
           "oracle": "log",
-          "verify": "on a very broad unscoped list, either all rows resolve visibly or the '[storage] attachment read visibility' warning appears — silence plus leaked rows is the failure",
-          "evidence": "log excerpt for the broad-read case"
+          "verify": "on a very broad unscoped list over the recipe's ordinary parents, every visible row is served, `total` (the read passes $top) equals the rows served, the invisible-parent row stays excluded, and no '-row cap' warning is logged. Leaked rows are the failure; a cap warning on an ordinary parent contradicts ADR-0139 D4 and is recorded as a finding. The probe half is not reachable from a run here (knownGaps[2]): cite attachment-read-leaf.integration.test.ts and attachment-read-leaf.test.ts",
+          "evidence": "the broad read's row count, its total and the log around it"
         }
       ],
       "negative": [
@@ -428,6 +428,12 @@
           "date": "2026-10-16",
           "change": "knownGaps names the gate's two whole-read probe states (no canReadObject or no security service; an engine that cannot classify) and says that the driver-mongodb 500 names its driver in the server log, not in the response body — the two precision notes carried from the attachment landing's contract review. No clause, step or pin changes.",
           "ref": "#23857"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "acceptance[3] (clause, verify, evidence) says what the gate does now — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12): the clause still named a 2000-row cap warning that the scan-cap pin says an ordinary parent no longer emits. Governing text ADR-0139 D4 and D5 (step E7, the attachment gate): one ReadableIds leaf per parent object and no pre-scan, the bounded fail-closed probe kept for D5's three classes (attachment-access-hooks.ts, READ_SCAN_LIMIT), as knownGaps[2]–[3] already record. Read at base 307ce4c4b4",
+          "ref": "#24824"
         }
       ]
     },
@@ -892,7 +898,7 @@
       "title": "A field's declared accept/maxSize is re-enforced SERVER-SIDE on record write — the control the client widget check explicitly is not — with the declared missing-metadata and dotless-extension holes scored as documented boundaries",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai) — the check is a declaration constraint, not an authz gate: it binds every caller identically, so no restricted persona is needed"],
@@ -976,7 +982,7 @@
         "⛔ NOT a violation probe: a random/unknown id token in the field passes untouched BY DESIGN — an id matching no sys_file row is treated as an external/legacy value and skipped before any constraint is read (file-reference-lifecycle.ts); probe with a REAL committed sys_file or the run measures nothing"
       ],
       "traps": ["absence-inference", "wrong-panel"],
-      "automated": { "kind": "unit", "ref": "packages/services/service-storage/src/file-reference-lifecycle.test.ts ('accept / maxSize enforcement' describe) — HANDLER-DIRECT: drives the hook through a fake engine, covering the semantics of clauses 0/1/4/5/6 (rejection, per-entry vocabulary, missing-metadata pass, no-constraints pass) at the unit level. It is NOT evidence about the wired REST lane or the wire envelope (clause 2), and per the attach-requires-parent-edit clause-3 lesson a handler-direct green can coexist with different wired behaviour — the dogfood lane has NO pin for this seam, which is precisely why this item exists." },
+      "automated": { "kind": "unit", "ref": "packages/services/service-storage/src/file-reference-lifecycle.test.ts ('accept / maxSize enforcement' describe) — HANDLER-DIRECT: drives the hook through a fake engine, covering the semantics of clauses 0/1/3/4/5/6 at the unit level: rejection; the UPDATE refusal (clause 3: its case 'refuses an UPDATE onto an oversize file with the same envelope, leaving the record and both files as they were' asserts the refused swap and the unchanged stored value); per-entry vocabulary; missing-metadata pass; no-constraints pass. It is NOT evidence about the wired REST lane or the wire envelope (clause 2), and per the attach-requires-parent-edit clause-3 lesson a handler-direct green can coexist with different wired behaviour — the dogfood lane has NO pin for this seam, which is precisely why this item exists." },
       "source": [
         "packages/services/service-storage/src/file-reference-lifecycle.ts#assertFileConstraints (the rationale: the widget check is a convenience, the server re-check is the control; missing metadata is not evidence of a violation), (assertFileConstraints — maxSize guard, testable filter + early return, accept mismatch throw), (matchesAcceptEntry — exact MIME / type\\/* wildcard /.ext-against-NAME vocabulary), (the check rides copy-on-claim in the before hooks — beforeInsert, beforeUpdate — and unknown ids are skipped)",
         "packages/spec/src/data/field.zod.ts#maxSize (accept/maxSize declared on FieldSchema, 'Offered to the file picker AND enforced on write') + packages/spec/liveness/field.json#live (both keys `live` with this enforcement as evidence)",
@@ -988,7 +994,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-20", "change": "new item from the scoped scan-functionality sweep (扫描功能): the server-side re-enforcement of field accept/maxSize had NO coverage on either lane — the only pinned guard is the client dialog's (records-forms.upload-guard-blocks-confirm), which the enforcement source itself calls 'a convenience rather than a control'. Authored with the qa-media-constraints recipe (no stock showcase field declares either key), the two source-documented holes (missing metadata, dotless-name vs extension-only accept) as documented-boundary passes, the declaration-based content boundary recorded so runs do not score sniffing absence as a leak, and the per-source wire-envelope analysis (ERR_FILE_CONSTRAINT ledgered but status-less → sanitized 500 expected) carried as a knownGap for the run to measure rather than rediscover", "ref": "claude/new-session-0pv25p" },
         { "revision": 2, "date": "2026-10-16", "change": "clause 3 and knownGaps WIRE-ENVELOPE expected, per an unmeasured source reading, the sanitized 500 INTERNAL_ERROR with the prose only in the server log, and told the next run to revise the clause if a 4xx appeared (#23878 checklist-accuracy finding). It did: re-measured on main c91af8ed6 with the qa-media-constraints recipe, the accept probe and the size probe both answer 400 ERR_FILE_CONSTRAINT with the field-naming message in the body (FileConstraintError now declares status 400), the compliant control answers 201, and the info-level log carries no line for the refusal (#23932 closed). The clause's oracle moves from log to api and scores status, code and the named field; the knownGap records the measured envelope", "ref": "#24036" },
-        { "revision": 3, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.requires[1] cited line 255 of storage-routes.ts, and fixtures.knownGaps[0] and source[5] line 337 of the showcase actions index.ts, in the comma-range spelling (authored in 8d74a57487 as the lists 241-243 and 255, and 334 and 337). At that commit line 255 was the mime_type of the pending sys_file row the presigned-upload route writes, and line 337 the accept/maxSize of the action gallery's p_attachments param; at this base both have moved. requires[1] now anchors storage-routes.ts#registerStorageFamily, whose POST /storage/upload/presigned handler writes that row, and knownGaps[0] and source[5] anchor index.ts#ActionParamGalleryAction. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" }
+        { "revision": 3, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). fixtures.requires[1] cited line 255 of storage-routes.ts, and fixtures.knownGaps[0] and source[5] line 337 of the showcase actions index.ts, in the comma-range spelling (authored in 8d74a57487 as the lists 241-243 and 255, and 334 and 337). At that commit line 255 was the mime_type of the pending sys_file row the presigned-upload route writes, and line 337 the accept/maxSize of the action gallery's p_attachments param; at this base both have moved. requires[1] now anchors storage-routes.ts#registerStorageFamily, whose POST /storage/upload/presigned handler writes that row, and knownGaps[0] and source[5] anchor index.ts#ActionParamGalleryAction. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
+        { "revision": 4, "date": "2026-10-20", "change": "automated.ref adds clause 3, the update path — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12). Read at base 307ce4c4b4: file-reference-lifecycle.test.ts's 'accept / maxSize enforcement' case 'refuses an UPDATE onto an oversize file with the same envelope, leaving the record and both files as they were' asserts the refused swap and the unchanged stored value at the same handler-direct level as the clauses the ref already names. No clause changed", "ref": "#24824" }
       ]
     },
     {

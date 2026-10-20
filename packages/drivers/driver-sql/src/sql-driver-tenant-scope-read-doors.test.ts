@@ -58,12 +58,14 @@
  * answering `[]` to an unscoped admin read is a different defect, not a fix. So
  * each exposure case is stated beside the read it must not become.
  *
- * The NULL-org row is here for the same reason. `applyTenantScope` emits
- * `(field = ? OR field IS NULL)` on purpose (#2734: strict equality hid every
- * platform-seeded RBAC row from every tenant admin). A door "fixed" with a bare
- * equality would pass a naive cross-tenant assertion and silently lose p1, so
- * p1 is what distinguishes routing through the chokepoint from reimplementing
- * a worse copy of it.
+ * The NULL-org row is here for the same reason. The measurement above is the
+ * v17 chokepoint, `(field = ? OR field IS NULL)` (#2734). [ADR-0131 D1, D14]
+ * 18.x retired that arm after the upgrade ceremony: NULL is not an owner, so
+ * `applyTenantScope` emits `field = ?` alone and no scoped read reaches p1. p1
+ * now holds every door to the SAME rule from both sides: absent under a
+ * tenant, present with none. A door that kept its own copy of the old arm, or
+ * that dropped the no-tenant early-out, answers p1 where the chokepoint does
+ * not.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -136,8 +138,8 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
     await driver.create(TABLE, { id: 'a2', organization_id: 'org_a', name: 'A2', balance: 20 } as any);
     await driver.create(TABLE, { id: 'b1', organization_id: 'org_b', name: 'B1', balance: 30 } as any);
     await driver.create(TABLE, { id: 'b2', organization_id: 'org_b', name: 'B2', balance: 40 } as any);
-    // Platform row: belongs to no tenant, so it belongs to no OTHER tenant
-    // either and must stay visible (#2734).
+    // An organization-less row: no tenant's, so no scoped read reaches it
+    // (ADR-0131 D1); only an unscoped one does.
     await driver.create(TABLE, { id: 'p1', name: 'P1', balance: 50 } as any);
 
     await driver.create(UNSCOPED_TABLE, { id: 'l1', name: 'L1', balance: 1 } as any);
@@ -155,7 +157,7 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
       const rows = await driver.findWithWindowFunctions(TABLE, { ...WINDOW } as any, {
         tenantId: 'org_a',
       } as any);
-      expect(ids(rows)).toEqual(['a1', 'a2', 'p1']);
+      expect(ids(rows)).toEqual(['a1', 'a2']);
       expect(ids(rows)).not.toContain('b1');
       expect(ids(rows)).not.toContain('b2');
     });
@@ -163,8 +165,8 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
     it('gives each tenant its own rows, and only its own', async () => {
       const a = await driver.findWithWindowFunctions(TABLE, { ...WINDOW } as any, { tenantId: 'org_a' } as any);
       const b = await driver.findWithWindowFunctions(TABLE, { ...WINDOW } as any, { tenantId: 'org_b' } as any);
-      expect(ids(a)).toEqual(['a1', 'a2', 'p1']);
-      expect(ids(b)).toEqual(['b1', 'b2', 'p1']);
+      expect(ids(a)).toEqual(['a1', 'a2']);
+      expect(ids(b)).toEqual(['b1', 'b2']);
     });
 
     it('agrees with `find()` on the same read — one driver, one answer', async () => {
@@ -173,9 +175,9 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
       expect(ids(viaWindow)).toEqual(ids(viaFind));
     });
 
-    it('keeps the NULL-org platform row visible — the chokepoint, not a bare equality (#2734)', async () => {
+    it('does not reach the organization-less row under a tenant — NULL is not an owner (ADR-0131 D1)', async () => {
       const rows = await driver.findWithWindowFunctions(TABLE, { ...WINDOW } as any, { tenantId: 'org_a' } as any);
-      expect(ids(rows)).toContain('p1');
+      expect(ids(rows)).not.toContain('p1');
     });
 
     it('honours the ADR-0105 D2 union posture the same way the chokepoint does (#3623)', async () => {
@@ -183,13 +185,13 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
         tenantId: 'org_a',
         tenantIds: ['org_a', 'org_b'],
       } as any);
-      expect(ids(rows)).toEqual(['a1', 'a2', 'b1', 'b2', 'p1']);
+      expect(ids(rows)).toEqual(['a1', 'a2', 'b1', 'b2']);
 
       const narrow = await driver.findWithWindowFunctions(TABLE, { ...WINDOW } as any, {
         tenantId: 'org_a',
         tenantIds: ['org_a'],
       } as any);
-      expect(ids(narrow)).toEqual(['a1', 'a2', 'p1']);
+      expect(ids(narrow)).toEqual(['a1', 'a2']);
     });
 
     it('still applies the caller\'s own `where` beside the tenant predicate', async () => {
@@ -198,10 +200,9 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
         { ...WINDOW, where: { balance: { $gte: 20 } } } as any,
         { tenantId: 'org_a' } as any,
       );
-      // `p1` (balance 50) is the NULL-org platform row and is legitimately
-      // visible to org_a — it passes the filter AND the chokepoint. b1/b2
-      // (30/40) pass the filter and must not survive the tenant predicate.
-      expect(ids(rows)).toEqual(['a2', 'p1']);
+      // `p1` (balance 50) and b1/b2 (30/40) pass the filter, and none of them
+      // survives the tenant predicate: p1 is no tenant's (ADR-0131 D1).
+      expect(ids(rows)).toEqual(['a2']);
     });
 
     it('still computes the window function itself', async () => {
@@ -245,7 +246,7 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
   describe('distinct — the third read door, found by the gate rather than by the card', () => {
     it('does not return another tenant\'s values', async () => {
       const values = await driver.distinct(TABLE, 'name', undefined, { tenantId: 'org_a' } as any);
-      expect(values.sort()).toEqual(['A1', 'A2', 'P1']);
+      expect(values.sort()).toEqual(['A1', 'A2']);
       expect(values).not.toContain('B1');
       expect(values).not.toContain('B2');
     });
@@ -260,9 +261,9 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
       const values = await driver.distinct(TABLE, 'name', { balance: { $gte: 20 } } as any, {
         tenantId: 'org_a',
       } as any);
-      // `P1` is the NULL-org platform row (balance 50) — see the window-door
-      // case above. `B1`/`B2` also pass the filter and must not survive.
-      expect(values.sort()).toEqual(['A2', 'P1']);
+      // `P1` is the organization-less row (balance 50) — see the window-door
+      // case above. It and `B1`/`B2` pass the filter and must not survive.
+      expect(values.sort()).toEqual(['A2']);
     });
 
     it('is UNSCOPED with no tenantId — the admin / seed path stays open', async () => {

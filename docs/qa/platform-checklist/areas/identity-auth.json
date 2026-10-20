@@ -982,23 +982,23 @@
       "title": "Forgot-password: request → token captured at the dev mail transport → reset; old password refused, expired/reused token refused loudly",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["anonymous visitor (holds no session)", "the account owner (before and after reset)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "email+password sign-in enabled and an email transport configured — a stock boot sends through the dev `log` transport, so nothing leaves the box; the mail is read from its sys_email row (admin GET /api/v1/data/sys_email — body_text / body_html hold the rendered body and its link): the dev `log` transport is not an env switch (EMAIL_TRANSPORT_PROVIDERS is a const list of what the package can build, packages/plugins/plugin-email/src/transports/index.ts) and LogTransport logs only to, subject and hasText/hasHtml — never the body or the link (packages/plugins/plugin-email/src/email-service.ts)",
+          "email+password sign-in enabled and an email transport configured — a stock boot sends through the dev `log` transport, so nothing leaves the box; the mail is read from its sys_identity_email row (admin GET /api/v1/data/sys_identity_email — body_text / body_html hold the rendered body and its link). The reset mail is identity mail: plugin-auth's auth.password_reset send passes identityMail: true, and the mail service records identity mail in the deployment-level sys_identity_email, never in the tenant log sys_email (ADR-0131 D7, packages/plugins/plugin-email/src/email-log-objects.ts), so GET /api/v1/data/sys_email holds no reset row: the dev `log` transport is not an env switch (EMAIL_TRANSPORT_PROVIDERS is a const list of what the package can build, packages/plugins/plugin-email/src/transports/index.ts) and LogTransport logs only to, subject and hasText/hasHtml — never the body or the link (packages/plugins/plugin-email/src/email-service.ts)",
           "a target user with a known current password"
         ],
         "knownGaps": [
-          "capturing the reset TOKEN means reading the reset mail's sys_email row (admin GET /api/v1/data/sys_email, newest row to the requester) — the LogTransport output carries no link. A deployment whose provider persists no sys_email row leaves the token-capture step blocked(fixture); the request/refusal clauses that don't need the token still run"
+          "capturing the reset TOKEN means reading the reset mail's sys_identity_email row (admin GET /api/v1/data/sys_identity_email, newest row to the requester) — the LogTransport output carries no link, and sys_email holds no identity mail. The object is readable by the platform administrator only (its rows carry reset and sign-in links, sys-identity-email.object.ts), which the --seed-admin admin is. A deployment whose provider persists no sys_identity_email row leaves the token-capture step blocked(fixture); the request/refusal clauses that don't need the token still run"
         ]
       },
       "steps": [
         "as anonymous, request a reset: POST /api/v1/auth/request-password-reset with the target email (NOTE the live route is request-password-reset / reset-password — the spec's AuthEndpointPaths says /forget-password, a divergence; trust the live server per RUNNER, and file the doc divergence)",
-        "capture the reset email: as admin, read the newest sys_email row addressed to the requester (GET /api/v1/data/sys_email; to_addresses reads 'NAME <EMAIL>', so match on the address it contains, not on equality) and extract the token from body_text / body_html (the link is GET /api/v1/auth/reset-password/:token). The LogTransport line in the server log shows only to and subject — it never carries the link",
+        "capture the reset email: as admin, read the newest sys_identity_email row addressed to the requester (GET /api/v1/data/sys_identity_email — identity mail, never sys_email; to_addresses reads 'NAME <EMAIL>', so match on the address it contains, not on equality) and extract the token from body_text / body_html (the link is GET /api/v1/auth/reset-password/:token). The LogTransport line in the server log shows only to and subject — it never carries the link",
         "complete the reset: POST /api/v1/auth/reset-password with the token + a new password; capture the response",
         "sign in with the NEW password (2xx) and confirm the OLD password is now refused",
         "reuse the SAME token a second time (POST /api/v1/auth/reset-password again) and capture the loud refusal — a consumed token must not reset again",
@@ -1010,8 +1010,8 @@
         {
           "clause": "the request issues a real reset artifact: POST /api/v1/auth/request-password-reset produces an email at the dev transport carrying a reset token/link (GET /api/v1/auth/reset-password/:token)",
           "oracle": "api",
-          "verify": "the sys_email row the request wrote (to = the requester) carries the reset link with a token in its body; the request response is a non-leaking 2xx/accepted",
-          "evidence": "the captured sys_email row (to, subject, the link with the token redacted after use)"
+          "verify": "the sys_identity_email row the request wrote (to = the requester) carries the reset link with a token in its body; the request response is a non-leaking 2xx/accepted",
+          "evidence": "the captured sys_identity_email row (to, subject, the link with the token redacted after use)"
         },
         {
           "clause": "the token completes the reset and rotates the credential: POST /api/v1/auth/reset-password with the token + new password succeeds, the new password signs in and the old one is refused",
@@ -1058,6 +1058,12 @@
           "date": "2026-10-19",
           "change": "acceptance[0].oracle 'log' → 'api' — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.self-service-password-reset acceptance[0]; wave anchor #24579 §3): the clause's verify and evidence already read the sys_email row the request wrote, an API read, not a log line; the oracle label now names what the run consults. Clause text, verify and evidence unchanged",
           "ref": "#24632"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "fixtures.requires[0], knownGaps[0], steps[1] and acceptance[0] (verify, evidence) read the reset mail from sys_identity_email — checklist-accuracy finding of QA run #24779 (wave anchor #24579 round 12): sys_email held 0 rows and the mail was in sys_identity_email. Governing text ADR-0131 D7 (identity mail is deployment-level); read at base 307ce4c4b4 in auth-manager.ts (the auth.password_reset send passes identityMail: true) and email-service.ts (emailLogObjectOf). Not loosened: the clause still requires a real mail carrying a working tokened link",
+          "ref": "#24824"
         }
       ]
     },
