@@ -1,6 +1,6 @@
 # ADR-0050: Form layout vs presentation — split the overloaded `FormView.type`
 
-**Status**: Proposed (2026-06-15)
+**Status**: Proposed (2026-06-15) · **Amended** (2026-10-20, letter B′ on [#24692](https://github.com/objectstack-ai/objectstack/issues/24692), ruling record [`6281834942`](https://github.com/objectstack-ai/objectstack/issues/24692#issuecomment-6281834942), maintainer 「同意」) — the list add-record open mode is no longer declared on `addRecord`; see the note under Decision 2.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0014](./0014-record-form-field-type.md) (record form field type), [ADR-0017](./0017-object-has-many-view.md) (object-bound views), [ADR-0049](./0049-no-unenforced-security-properties.md) (declared ≠ enforced discipline)
 **Consumers**: `@objectstack/spec` (`ui/view.zod.ts` `FormViewSchema`), `@object-ui/plugin-form` (`ObjectForm` + `TabbedForm`/`WizardForm`/`SplitForm`/`DrawerForm`/`ModalForm`), `@object-ui/app-shell` (`RecordFormPage`, `AppContent`, `useActionModal`), examples + templates form views.
@@ -40,6 +40,8 @@ So `drawer`/`modal`/`split` *as `FormView.type` values* are **redundant with —
 
 1. **`FormView.type` = layout only**: `z.enum(['simple','tabbed','wizard'])` (default `simple`).
 2. **Remove `drawer` / `modal` from `FormView.type`.** A form is *placed in* a drawer/modal by the **caller** (list `addRecord.mode`, `NavigationMode`, action `type:'modal'`), and the container renders an `ObjectForm` whose `type` is a *layout*. This makes "modal + tabbed" expressible — the whole point.
+
+   > **Note (2026-10-20, ruling record [`6281834942`](https://github.com/objectstack-ai/objectstack/issues/24692#issuecomment-6281834942)):** the list add-record open mode is no longer declared on `addRecord` — `addRecord.mode` and `addRecord.formView` were retired (ADR-0049 enforce-or-remove); the create form is chosen by convention (`formViews.create` when declared, else `form` / `formViews.default`), how it opens stays the renderer's, and a per-list open mode, if ever wanted, is the list's existing `navigation.mode`, never a second enum.
 3. **Remove `split` from `FormView.type`.** Master-detail is already `subforms` (single-record parent/child) + the list's `NavigationMode:'split'` (list+detail). A form-level `split` is a third, redundant spelling.
 4. **`ObjectForm` drops its `drawer`/`modal`/`split` branches** (`DrawerForm`/`ModalForm` become caller-supplied containers; `SplitForm` retires in favour of `subforms`). It keeps `simple`/`tabbed`/`wizard`.
 
