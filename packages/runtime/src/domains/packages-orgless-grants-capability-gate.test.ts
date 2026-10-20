@@ -154,6 +154,10 @@ function rig() {
     (registry as any).logLevel = 'silent';
     registry.installPackage({ id: PKG, namespace: 'crm', name: 'CRM', version: '1.0.0', type: 'app', scope: 'project' } as any, 'code');
     registry.registerObject({ name: 'crm_lead', fields: { title: { type: 'text' } } } as any, PKG, 'crm', 'own');
+    // The organization object the platform registers: the resolver reads the
+    // Default Organization (the owner of the anchoring admin grant) only from a
+    // registry that holds it.
+    registry.registerObject({ name: 'sys_organization', fields: { slug: { type: 'text' } } } as any, 'com.objectstack.platform', 'sys', 'own');
 
     const deleteRequests: any[] = [];
     const protocol = {

@@ -739,7 +739,7 @@ function runLifecycleStandingSentence(): string {
             + `that standing comes only from ${RUN_LIFECYCLE_DECLARED_ADMINISTRATORS}.`;
     }
     return `It requires platform-operator standing, which under this deployment's '${posture}' tenancy posture `
-        + `comes from an unscoped \`${ADMIN_FULL_ACCESS}\` grant (ADR-0068 D2) or from `
+        + `comes from the Default Organization's \`${ADMIN_FULL_ACCESS}\` grant (ADR-0068 D2, ADR-0131 D5) or from `
         + `${RUN_LIFECYCLE_DECLARED_ADMINISTRATORS}.`;
 }
 
