@@ -162,6 +162,16 @@ describe("runAs:'system' create_record stamps organization_id / owner_id / creat
 
   it('a USER-LESS system run (schedule shape) stamps nothing — and that is the contract, not a gap', async () => {
     await boot();
+    // The row this run writes names no organization, which only a store built
+    // before 18.x can hold: a fresh tenant column is NOT NULL (ADR-0131 D1), and
+    // this composition registers no organization object to derive one from.
+    const relaxed = await (ql.getDriverForObject('crm_task') as any).applyMigrationEntries([
+      {
+        kind: 'nullability_mismatch', remoteName: 'crm_task', table: 'crm_task', column: 'organization_id', category: 'needs_confirm',
+        op: { type: 'relax_not_null', table: 'crm_task', column: 'organization_id' },
+      },
+    ]);
+    expect(relaxed.applied).toHaveLength(1);
     automation.registerFlow('night_sweep', sweepFlow('night_sweep', { title: 'renew C' }) as any);
 
     // What ScheduleTrigger actually supplies: an event and params, NO user, NO

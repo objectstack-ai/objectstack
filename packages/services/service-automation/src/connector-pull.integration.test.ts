@@ -34,6 +34,7 @@ import { AutomationServicePlugin } from './plugin.js';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 import type { IAutomationService } from '@objectstack/spec/contracts';
 import type { ConnectorPullProtocol } from './connector-pull.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const CONTACT = {
     name: 'contact',
@@ -147,6 +148,9 @@ describe('[#20919] connector pull, end to end through a real rest connector', ()
         await ql.init();
         ql.registry.registerObject(CONTACT as any);
         await ql.syncSchemas();
+        // A real `single` install's Default Organization: the system writes below
+        // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+        await installDefaultOrganization(ql);
 
         const automation = new AutomationServicePlugin({ suspendedRunStore: 'memory' });
         kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
