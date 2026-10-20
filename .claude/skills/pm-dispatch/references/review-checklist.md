@@ -9,7 +9,6 @@
 - 切 `Part of` 的正文最易再武装自动关闭:否定句、记账句、引号包裹,解析器一律照关。
 - 安全拼法 = 卡号旁零动词,关闭安排写进评论。
 - 闭合关键词两读:翻 ready 前亲核首行、亲扫全正文,⛔ 关键词永不挨另一张 open 卡编号。
-- 这是合并前唯一的人工关口,⛔ 不只信报告;合并后那一读见 `landing-operations.md`。
 - `Part of` 收口的卡不会自动关,`pm:dispatched` 必须手工摘,动作要件见落地细则 B。
 - ACCEPT 那一刻记进落地待办,⛔ 不留给下次巡检。
 
@@ -48,6 +47,7 @@
 - ⛔ 非当前 head 上的 `cancelled` 零动作、永不重跑:新推送自带全套 run。
 - 席位核对门禁证据 = 钉 head 的 check-runs(名+结论);本地并集只证本地子集,⛔ 不替缺席者。
 - dev 本地并集钉 head:所抄 `git rev-parse --short HEAD` 不符 PR `head.sha` 或没抄 ⇒ 双向都不入账。
+- `!` 或 `(narrowing)`:入队前核 `dogfood_battery` 钉 head、全量、红已修/已报;缺或收窄 ⇒ REWORK。
 
 ## 断言与收益
 
