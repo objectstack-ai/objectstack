@@ -115,9 +115,20 @@ const userIdFor = (engine: any, email: string): string => {
   return String(row.id);
 };
 
+/** The Default Organization's id — the row slugged `default`, staged if absent. */
+const defaultOrganizationIdOf = async (engine: any): Promise<string> => {
+  const existing = (engine.tables.get('sys_organization') ?? []).find((r: any) => r.slug === 'default');
+  if (existing) return String(existing.id);
+  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' });
+  return 'org_default';
+};
+
 /**
  * Grant platform admin the ADR-0068 D2 way — a `sys_user_permission_set` row
- * pointing at `admin_full_access` with `organization_id = null`.
+ * pointing at `admin_full_access`, owned by the Default Organization (the
+ * `sys_organization` row slugged `default`, staged here when the engine holds
+ * none). Only that organization's grant anchors platform standing; an
+ * organization-less one anchors nothing.
  *
  * ⛔ Deliberately NOT `row.role = 'admin'`. Writing that scalar is what the
  * 2026-08-18 ruling permanently vetoed, and a fixture that used it would be
@@ -132,7 +143,7 @@ const grantPlatformAdmin = async (engine: any, userId: string) => {
     user_id: userId,
     permission_set_id: PS_ADMIN,
     permission_set: 'admin_full_access',
-    organization_id: null,
+    organization_id: await defaultOrganizationIdOf(engine),
   });
 };
 

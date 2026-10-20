@@ -66,7 +66,7 @@ vi.mock('@objectstack/spec/data', async (importOriginal) => ({
 }));
 
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
-import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
+import { declareInstallerPlatformOwner, installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 
 type Handler = (c: any) => Promise<any>;
@@ -145,14 +145,19 @@ const OLD_POSTURE = process.env.OS_TENANCY_POSTURE;
 const OLD_LEGACY = process.env.OS_MULTI_ORG_ENABLED;
 
 let dir: string;
+let restoreOwner: () => void;
 beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'mil-posture-'));
     seedResult = { summary: { totalInserted: 2, totalUpdated: 0, totalSkipped: 0 }, errors: [] };
     loadCalls = [];
     delete process.env.OS_TENANCY_POSTURE;
     delete process.env.OS_MULTI_ORG_ENABLED;
+    // No organization on the request: under the walled postures below the
+    // installer is the deployment's declared platform owner.
+    restoreOwner = declareInstallerPlatformOwner();
 });
 afterEach(() => {
+    restoreOwner();
     rmSync(dir, { recursive: true, force: true });
     if (OLD_POSTURE === undefined) delete process.env.OS_TENANCY_POSTURE;
     else process.env.OS_TENANCY_POSTURE = OLD_POSTURE;

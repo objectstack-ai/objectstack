@@ -442,7 +442,9 @@ async function bootBaseline(declared: boolean) {
   for (const schema of declarers) await knex(schema.name).insert(fixtureRowsFor(schema));
   // What an agent's delegator resolves from (ADR-0090 D10: the delegator leg is
   // rebuilt from the store): the memberships, and the grants the viewer and the
-  // two administrators hold.
+  // two administrators hold — each owned by `org_x`, the organization every
+  // agent's request runs in and so the one its delegator's grants are resolved
+  // in (an organization-less grant applies nowhere, ADR-0131 D10).
   const member = objects.get('sys_member')!;
   await knex('sys_member').insert([
     ['u_x', 'org_x', 'member'], ['u_x2', 'org_x', 'member'], ['a_x', 'org_x', 'admin'], ['u_y', 'org_y', 'member'],
@@ -450,7 +452,7 @@ async function bootBaseline(declared: boolean) {
   await knex('sys_user_permission_set').insert([
     { id: 'ups:u_x2', user_id: 'u_x2', permission_set: 'viewer_readonly', organization_id: 'org_x' },
     { id: 'ups:a_x', user_id: 'a_x', permission_set: 'organization_admin', organization_id: 'org_x' },
-    { id: 'ups:p_admin', user_id: 'p_admin', permission_set: 'admin_full_access', organization_id: null },
+    { id: 'ups:p_admin', user_id: 'p_admin', permission_set: 'admin_full_access', organization_id: 'org_x' },
   ]);
 
   const served = async (object: string, persona: Persona): Promise<string[] | string> => {

@@ -304,7 +304,9 @@ const PROSE_KEYS: ReadonlySet<string> = new Set([
 /** Inside a display root (and everywhere else), these path segments make a site behavioural. */
 const BEHAVIOUR_SEGMENTS: ReadonlySet<string> = new Set([
   'filter', 'filters', 'runtimeFilter', 'relatedListFilter', 'where', 'criteria', 'conditions',
-  'condition', 'defaultFilter', 'userFilters', 'quickFilters', 'filterableFields',
+  // `filterableFields` is not here: @objectstack/spec 18 retired the key and no
+  // list view reads it, so a field it names is not read by it either.
+  'condition', 'defaultFilter', 'userFilters', 'quickFilters',
   'sort', 'sortBy', 'defaultSort', 'grouping', 'groupBy', 'groupByField', 'groupField',
   'startField', 'endField', 'dateField', 'startDateField', 'endDateField', 'coverField',
   'titleField', 'colorField', 'latitudeField', 'longitudeField', 'locationField',

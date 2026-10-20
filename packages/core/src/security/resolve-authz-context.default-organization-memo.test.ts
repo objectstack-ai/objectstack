@@ -152,10 +152,14 @@ describe('[#24523] the Default Organization answer is read once per engine', () 
     expect(await e.resolve()).toEqual({ reads: [BY_SLUG], standing: true });
   });
 
-  it('CONTROL — an organization-less grant never reads it, memo or not', async () => {
+  it('CONTROL — an organization-less grant never reads it, memo or not, and anchors nothing', async () => {
     const e = makeEngineQl(tablesOf('', [{ id: 'org_a', slug: 'default' }]));
-    // The grant's organization is blank: the legacy organization-less spelling.
-    expect(await e.resolve()).toEqual({ reads: [], standing: true });
+    // The grant's organization is blank: the legacy organization-less spelling,
+    // which applies nowhere and anchors nothing — the D10 ownership ceremony
+    // attributes such a row to the Default Organization, so one still carrying
+    // none is invalid state. The arms above, on the same organization, are the
+    // positive half: the grant owned by `org_a` anchors.
+    expect(await e.resolve()).toEqual({ reads: [], standing: false });
     expect(e.middlewares).toHaveLength(0);
   });
 });

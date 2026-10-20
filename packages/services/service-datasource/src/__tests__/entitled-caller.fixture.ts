@@ -47,6 +47,24 @@ export const UNENTITLED_CREDENTIAL = 'Bearer unentitled-session';
 export const ENTITLED_USER = 'u_entitled';
 export const UNENTITLED_USER = 'u_plain';
 
+/**
+ * The organization the grant belongs to, and the one both sessions are active
+ * in. A stored grant applies only in its own organization — a row with no
+ * organization applies nowhere — so the grant names one and the resolution runs
+ * in it. Under the default `single` posture the session's claim is kept
+ * without a membership row, so no `sys_member` row is needed for it.
+ */
+export const ENTITLED_ORGANIZATION = 'o1';
+
+/**
+ * The session a credential resolves to: the user, active in
+ * {@link ENTITLED_ORGANIZATION}. Exported so a suite that adds sessions of its
+ * own (a held one, say) builds them in the same organization.
+ */
+export function sessionFor<U extends { id: string }>(user: U) {
+  return { user, session: { userId: user.id, activeOrganizationId: ENTITLED_ORGANIZATION } };
+}
+
 /** The permission set that carries the grant. */
 const GRANT_SET_ID = 'ps_datasource_operator';
 
@@ -64,7 +82,8 @@ const GRANT_SET_NAME = 'datasource_operator';
 
 /**
  * The `auth` service double: a `getSession` over the two credentials above,
- * spelled on the legacy `api` member the contract still declares.
+ * spelled on the legacy `api` member the contract still declares. Each session
+ * is active in {@link ENTITLED_ORGANIZATION}.
  */
 export function createSessionAuthService() {
   const sessions: Record<string, string> = {
@@ -75,7 +94,7 @@ export function createSessionAuthService() {
     api: {
       getSession: async ({ headers }: { headers: Headers }) => {
         const id = sessions[headers?.get?.('authorization') ?? ''];
-        return id ? { user: { id } } : null;
+        return id ? sessionFor({ id }) : null;
       },
     },
   };
@@ -86,8 +105,8 @@ export function createSessionAuthService() {
  *
  * Only the two objects carrying the grant answer rows; every other read — the
  * memberships, positions and identity tables the resolver also consults —
- * returns empty, which is what a deployment with no orgs and no custom roles
- * really looks like. The rows carry no `active` flag and no validity window on
+ * returns empty, which is what a `single`-posture deployment with one
+ * organization and no custom roles really looks like. The rows carry no `active` flag and no validity window on
  * purpose: absent means active/unbounded by the resolver's own predicates
  * (`isRowActive` / `isGrantActive`), so these fixtures pin the CAPABILITY path
  * rather than a validity edge case that belongs to `@objectstack/core`'s suite.
@@ -101,9 +120,10 @@ export function createGrantsEngine() {
               id: 'ups_datasource_operator',
               user_id: ENTITLED_USER,
               permission_set_id: GRANT_SET_ID, permission_set: GRANT_SET_NAME,
-              // Unscoped (null org) — the grant is platform-scoped, matching
-              // `manage_platform_settings`'s own `scope: 'platform'`.
-              organization_id: null,
+              // Owned by the sessions' organization: an organization-less
+              // grant row applies in no organization, so it would confer
+              // nothing (`grantAppliesInTenant`).
+              organization_id: ENTITLED_ORGANIZATION,
             }]
           : [];
       }

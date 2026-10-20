@@ -51,6 +51,8 @@ const DATA_READ = '/data/pin_note?$top=1';
 /**
  * The organization-less administrator's warm counts on this composition,
  * measured on `origin/main` 5a871e4e41: `get-session` 8, the data read 10.
+ * An organization-less grant no longer anchors standing, so that administrator
+ * is gone; the counts are the bar the organization-owned one is held to.
  * The organization-owned administrator paid 9 / 11 there (slug `default`) and
  * 10 / 12 (the sole organization slugged otherwise).
  */
@@ -145,7 +147,7 @@ afterAll(async () => {
   else process.env.NODE_ENV = prevNodeEnv;
 }, 60_000);
 
-describe('[#24523] statements per warm request: an organization-owned admin grant costs what an organization-less one does', () => {
+describe('[#24523] statements per warm request: an organization-owned admin grant costs what an organization-less one did', () => {
   it('the fixture: the promoted administrator\'s grant is owned by the Default Organization, slugged `default`', async () => {
     const [organization] = await find('sys_organization');
     expect(organization.slug).toBe('default');
@@ -170,7 +172,7 @@ describe('[#24523] statements per warm request: an organization-owned admin gran
     expect((await standing()).standing).toBe(true);
   });
 
-  it('CONTROL — the organization-less grant: the same counts, on either slug', async () => {
+  it('CONTROL — the organization-less grant anchors nothing: on either slug, no standing, and no sys_organization statement is issued for it', async () => {
     // An organization-less grant exists only on a store built before 18.x
     // (ADR-0131 D1 makes a fresh tenant column NOT NULL): this table is that
     // store's, relaxed through its driver's own drift apply door.
@@ -178,16 +180,17 @@ describe('[#24523] statements per warm request: an organization-owned admin gran
     const grant = await adminGrant();
     const [organization] = await find('sys_organization');
     await engine.update('sys_user_permission_set', { id: grant.id, organization_id: null }, { context: SYS });
-    const sole = await warm();
+    const sole = { reads: await warm(), standing: await standing() };
     await engine.update('sys_organization', { id: organization.id, slug: 'default' }, { context: SYS });
-    const slugged = await warm();
+    const slugged = { reads: await warm(), standing: await standing() };
     await engine.update('sys_user_permission_set', { id: grant.id, organization_id: organization.id }, { context: SYS });
-    for (const counts of [sole, slugged]) {
-      expect(counts).toEqual({
-        [GET_SESSION]: { count: WARM[GET_SESSION], organization: 0 },
-        [DATA_READ]: { count: WARM[DATA_READ], organization: 0 },
-      });
+    for (const { reads, standing: s } of [sole, slugged]) {
+      expect(s).toEqual({ standing: false, organizationReads: 0 });
+      expect(reads[GET_SESSION].organization).toBe(0);
+      expect(reads[DATA_READ].organization).toBe(0);
     }
+    // The positive leg: the same row, owned by the Default Organization again, anchors.
+    expect((await standing()).standing).toBe(true);
   });
 });
 

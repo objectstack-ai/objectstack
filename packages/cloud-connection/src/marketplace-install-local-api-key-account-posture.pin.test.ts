@@ -94,9 +94,14 @@ function matchesWhere(row: Record<string, unknown>, where: unknown): boolean {
     return true;
 }
 
-/** The key's owner holds the authoring capability, so a refusal below is the gate's alone. */
+/**
+ * The key's owner holds the authoring capability, so a refusal below is the gate's alone:
+ * the `admin_full_access` grant owned by the Default Organization, which applies with no
+ * active organization (a key carries none here).
+ */
 function grantRows(): Record<string, Array<Record<string, unknown>>> {
     return {
+        sys_organization: [{ id: 'org_default', slug: 'default' }],
         sys_api_key: [{ id: 'key_1', key: hashApiKey(KEY), user_id: OWNER, revoked: false, scopes: '[]' }],
         sys_user: [{ id: OWNER, email: 'owner@acme.test' }],
         sys_member: [],
@@ -105,7 +110,7 @@ function grantRows(): Record<string, Array<Record<string, unknown>>> {
         sys_metadata_activation: [],
         sys_position_permission_set: [],
         sys_user_permission_set: [
-            { id: 'ups1', user_id: OWNER, permission_set_id: 'ps1', permission_set: 'admin_full_access', organization_id: null },
+            { id: 'ups1', user_id: OWNER, permission_set_id: 'ps1', permission_set: 'admin_full_access', organization_id: 'org_default' },
         ],
         sys_permission_set: [{ id: 'ps1', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access'] }],
     };

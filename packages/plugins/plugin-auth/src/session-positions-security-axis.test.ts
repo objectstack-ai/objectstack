@@ -155,14 +155,15 @@ const arrange = async (opts: { assignPosition?: boolean } = {}) => {
   await engine.insert('sys_member', { organization_id: ORG, user_id: bystanderId, role: 'member' });
 
   // The security-layer position, and the ADR-0057 D4 assignment row that is its
-  // source of truth. `organization_id: null` = a global assignment, so the
-  // fixture does not also depend on the session carrying an active org.
+  // source of truth. The assignment is owned by `ORG` — a grant applies only in
+  // its own organization — and the holder's session acts in `ORG` (stamped
+  // from the membership above at sign-in).
   await engine.insert('sys_position', { id: 'pos_reviewer', name: POSITION, label: 'Demo Reviewer' });
   if (opts.assignPosition !== false) {
     await engine.insert('sys_user_position', {
       user_id: holderId,
       position: POSITION,
-      organization_id: null,
+      organization_id: ORG,
     });
   }
 

@@ -38,7 +38,7 @@
  *
  * The platform admin is made one the way a real deployment does it — a
  * `sys_user_permission_set` row pointing at the `admin_full_access`
- * `sys_permission_set`, with `organization_id = null` — and the case ASSERTS
+ * `sys_permission_set`, owned by the Default Organization — and the case ASSERTS
  * that the legacy `sys_user.role` scalar is NOT `'admin'`. Without that second
  * assertion the suite could pass while riding the retired D2 channel, which is
  * precisely the channel this family is closing; the pin would then survive the
@@ -192,8 +192,8 @@ async function bootEngine(): Promise<ObjectQL> {
   // only on a store built before 18.x (ADR-0131 D1 makes a fresh tenant column
   // NOT NULL): this is that store.
   await relaxEveryRegisteredTenantColumn(engine);
-  // [ADR-0131 D3/D4] The platform's `admin_full_access` definition, which an
-  // org-less grant of it resolves through (no security plugin binds one here).
+  // [ADR-0131 D3/D4] The platform's `admin_full_access` definition, which a
+  // grant of it resolves through (no security plugin binds one here).
   return bindTestSecurityCatalog(engine, { permissions: [{ name: ADMIN_FULL_ACCESS, ...ADMIN_FULL_ACCESS_CAPABILITIES }] });
 }
 
@@ -254,11 +254,22 @@ async function createOrg(
   return id;
 }
 
-/** Grant platform admin the ADR-0068 D2 way: an ORG-LESS `admin_full_access` link. */
+/**
+ * Grant platform admin the ADR-0068 D2 way: an `admin_full_access` link owned by
+ * the Default Organization — the only grant that anchors platform standing (an
+ * organization-less one anchors nothing). The Default Organization is written
+ * through the engine, so the resolver's Default Organization answer sees it.
+ */
 async function grantPlatformAdmin(engine: ObjectQL, userId: string): Promise<void> {
-  // [C8 stage 8b] The legacy organization-less catalogue row and grant, landed
-  // beneath the engine: under `single` the engine refuses an organization-less
-  // platform insert while the install holds no organization (ADR-0131 D9).
+  await engine.insert(
+    'sys_organization',
+    { id: 'org_default', name: 'Default Organization', slug: 'default' },
+    SYSTEM as never,
+  );
+  // [C8 stage 8b] The legacy organization-less catalogue row, and the grant,
+  // landed beneath the engine as before: under `single` the engine refuses an
+  // organization-less platform insert while the install holds no organization
+  // (ADR-0131 D9).
   const residue = (object: string, row: Record<string, unknown>) =>
     (engine as any).getDriver(object).create(object, row);
   await residue('sys_permission_set', { id: 'ps_admin_full_access', name: ADMIN_FULL_ACCESS });
@@ -267,7 +278,7 @@ async function grantPlatformAdmin(engine: ObjectQL, userId: string): Promise<voi
     user_id: userId,
     permission_set_id: 'ps_admin_full_access',
     permission_set: 'admin_full_access',
-    organization_id: null,
+    organization_id: 'org_default',
   });
 }
 

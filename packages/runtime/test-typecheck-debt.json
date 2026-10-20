@@ -116,7 +116,7 @@
       "TS7006: Parameter 'opts' implicitly has an 'any' type.": 1,
       "TS7006: Parameter 'ql' implicitly has an 'any' type.": 1,
       "TS7006: Parameter 'row' implicitly has an 'any' type.": 1,
-      "TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{ sys_api_key: { id: string; key: string; revoked: boolean; user_id: string; active_organization_id: string; expires_at: string; }[]; sys_member: { user_id: string; organization_id: string; role: string; }[]; ... 4 more ...; sys_user_position: never[]; }'.": 1
+      "TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{ sys_api_key: { id: string; key: string; revoked: boolean; user_id: string; active_organization_id: string; expires_at: string; }[]; sys_member: { user_id: string; organization_id: string; role: string; }[]; ... 5 more ...; sys_user_position: never[]; }'.": 1
     },
     "src/seed-loader.test.ts": {
       "TS2322: Type '…' is not assignable to type '…'.": 4,

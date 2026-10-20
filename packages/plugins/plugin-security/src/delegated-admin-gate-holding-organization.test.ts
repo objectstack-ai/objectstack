@@ -20,12 +20,13 @@
  *
  * ## The rule the read now follows — the runtime's own
  *
- * `resolveAuthzContext` (step 4, `@objectstack/core`) keeps a holding when its
- * `organization_id` is empty OR equals the active organization, and drops it
- * when it names a DIFFERENT one. The gate agrees: a holding stamped for another
- * organization never counts; an organization-less holding counts in every
- * organization, exactly as it grants in every organization. An
- * organization-less caller (`single` posture) drops nothing, as before.
+ * `resolveAuthzContext` (step 4, `@objectstack/core`) keeps a holding only
+ * when its `organization_id` equals the active organization. The gate agrees: a
+ * holding stamped for another organization never counts; an organization-less
+ * holding counts nowhere, exactly as it grants nowhere (the 18.0 ownership
+ * ceremony, ADR-0131 D10, attributes every such row before an upgraded database
+ * boots, so one is invalid state); and a caller whose context carries no
+ * organization holds nothing to delegate.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -213,12 +214,16 @@ describe('DelegatedAdminGate — rule 4 counts only holdings the caller\'s organ
     await expect(selfDelegate(gateOn(engine), ORG_A)).resolves.toBeUndefined();
   });
 
-  it('an organization-less holding counts in org A — the runtime grants it in every organization', async () => {
+  it('an organization-less holding counts nowhere — not in org A, where the runtime grants it nothing', async () => {
     const engine = await bootEngine();
     await seedOrganization(engine, ORG_B, '0');
     await seedOrganization(engine, ORG_A, 'a');
     await hold(engine, undefined, [{ id: 'up_none', user_id: USER }]);
 
+    await expectRefused(selfDelegate(gateOn(engine), ORG_A), /you do not currently hold 'field_lead'/);
+    await expectRefused(selfDelegate(gateOn(engine), ORG_B), /you do not currently hold 'field_lead'/);
+    // Control: the same user's holding OWNED by org A makes the same request stand.
+    await hold(engine, ORG_A, [{ id: 'up_a', user_id: USER }]);
     await expect(selfDelegate(gateOn(engine), ORG_A)).resolves.toBeUndefined();
   });
 
@@ -249,11 +254,14 @@ describe('DelegatedAdminGate — rule 4 counts only holdings the caller\'s organ
     await expect(selfDelegate(gateOn(engine), ORG_A, a.salesEast)).resolves.toBeUndefined();
   });
 
-  it('a `single`-posture caller (no organization in context) keeps counting every holding', async () => {
+  it('a caller whose context carries no organization counts no holding — owned or organization-less', async () => {
     const engine = await bootEngine();
     await seedOrganization(engine, ORG_B, '0');
     await hold(engine, ORG_B, [{ id: 'up_b', user_id: USER }]);
+    await hold(engine, undefined, [{ id: 'up_none', user_id: USER }]);
 
-    await expect(selfDelegate(gateOn(engine), undefined)).resolves.toBeUndefined();
+    await expectRefused(selfDelegate(gateOn(engine), undefined), /you do not currently hold 'field_lead'/);
+    // Control: the same holding counts once the request runs in the organization that owns it.
+    await expect(selfDelegate(gateOn(engine), ORG_B)).resolves.toBeUndefined();
   });
 });
