@@ -1,7 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { SqlDriver } from '@objectstack/driver-sql';
-
 /**
  * Return a SQLite file this release built to the shape an EARLIER release's
  * database has: every tenant column (`organization_id`) nullable.
@@ -15,6 +13,9 @@ import { SqlDriver } from '@objectstack/driver-sql';
  * (`relax_not_null`, the SQLite table rebuild), never a hand `ALTER`.
  */
 export async function relaxTenantColumnsOnFile(file: string, column = 'organization_id'): Promise<string[]> {
+  // A dynamic import: this file lives under `src/`, where a static driver import
+  // is refused (`schema-migrate.lazy-driver-import.test.ts`).
+  const { SqlDriver } = await import('@objectstack/driver-sql');
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true });
   const relaxed: string[] = [];
   try {
