@@ -104,7 +104,7 @@ const batch = async (operations: unknown[]) => {
 };
 
 const stored = async (id: string) =>
-  (await engine.findOne(OBJECT, { where: { id }, context: { isSystem: true } } as any)) as Record<string, unknown>;
+  (await engine.findOne(OBJECT, { where: { id }, context: { isSystem: true } })) as Record<string, unknown>;
 
 describe('[#24690] PATCH /data/:object/:id reports a replaced stored-expression value', () => {
   it('a PATCH of amount alone: 200, the computed amount is stored, and the replacement is on the body and the header', async () => {
