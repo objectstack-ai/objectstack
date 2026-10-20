@@ -56,6 +56,9 @@ const sysUser = {
 
 type LookupFilter = { field: string; operator: string; value: unknown };
 
+/** The one candidate the guard admits: the acting user, by id. */
+const ACTING_USER_ONLY: LookupFilter[] = [{ field: 'id', operator: 'eq', value: '{current_user_id}' }];
+
 const delegatorField = (): Record<string, any> =>
   (SysApprovalDelegation.fields as Record<string, any>).delegator_id;
 
@@ -100,12 +103,12 @@ describe('sys_approval_delegation — the Delegator picker offers only what the 
     expect(field.type).toBe('lookup');
     expect(field.reference).toBe('sys_user');
     expect(field.required).toBe(true);
-    expect(field.lookupFilters).toEqual([{ field: 'id', operator: 'eq', value: '{current_user_id}' }]);
+    expect(field.lookupFilters).toEqual(ACTING_USER_ONLY);
   });
 
   it('the registered body keeps the declaration', () => {
     const registered = (engine.registry.getObject(OBJECT) as any).fields.delegator_id;
-    expect(registered.lookupFilters).toEqual(delegatorField().lookupFilters);
+    expect(registered.lookupFilters).toEqual(ACTING_USER_ONLY);
   });
 
   it.each(USERS.map((u) => [u.id]))('the picker offers %s themselves and nobody else', async (caller) => {
