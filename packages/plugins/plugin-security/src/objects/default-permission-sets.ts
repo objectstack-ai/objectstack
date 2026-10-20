@@ -34,10 +34,12 @@ import { SysUser } from '@objectstack/platform-objects/identity';
  *
  * ⚠️ "Subject to the rest of the RLS chain" is the load-bearing half, and it is
  * a BLANKET grant — read this list as objects whose object-level read bit is
- * open, each narrowed (or not) by whatever `rowLevelSecurity` its holder set
- * declares for it. An object named here with NO `_self` / `_org` policy in
- * `member_default` is org-wide readable by every authenticated member. That is
- * intended for the staff-directory shapes (`sys_member`, `sys_user` via
+ * open, each narrowed (or not) by whatever `rowLevelSecurity` its holder's sets
+ * declare for it or, where they declare none, by the object's own declared
+ * default row scope (`defaultRowScope`; see "Identity tables scoped by their
+ * own declaration" below). An object named here with NEITHER is org-wide
+ * readable by every authenticated member. That is intended for the
+ * staff-directory shapes (`sys_member`, `sys_user` via
  * `sys_user_org_members`) and was NOT intended for `sys_invitation`
  * (maintainer ruling 2026-08-12) — see `sys_invitation_self` below. Do not
  * "fix" a future instance of this class by editing the blanket: dropping
@@ -103,147 +105,60 @@ const denyWritesOnManagedObjects = (): Record<string, {
   ]),
 );
 
-/**
- * [#20001] The row scope of the seven `@better-auth/scim` projection tables —
- * one more instance of the blanket class the header above describes, closed
- * with the instrument the header names (the per-object row scope, never an edit
- * of the blanket).
+/*
+ * ── IDENTITY TABLES SCOPED BY THEIR OWN DECLARATION ─────────────────────────
  *
- * Why the blanket was wider here than anywhere else on the list: NONE of these
- * tables carries a tenant column (`scripts/platform-object-tenancy-census.json`
- * records all seven `reach: out`, `tenantField: null`), so the organization wall
- * (Layer 0) is inert on them and the engine scopes nothing by organization. The
- * header's "org-wide readable" therefore meant EVERY organization's rows: an
- * ordinary member of one organization read the users, groups and memberships
- * another organization's identity provider had provisioned.
+ * [#24164 ruling E′ item 3; #20001, #20027] The identity tables whose row scope
+ * is the OBJECT'S OWN declaration (`defaultRowScope`) and no policy in any set
+ * below. The security plugin's collection applies an object's default wherever
+ * the caller's held sets carry no row policy for that object and operation
+ * (`object-default-row-scope.ts`), so every holder of these sets — in every
+ * composition, a deployment that composes no platform baseline
+ * (`fallbackPermissionSet: null`) included — reads these tables under their
+ * default, and explain names it as the object's (`via: 'object_default'`). The
+ * sets used to repeat each literal for the no-baseline deployment; the
+ * declarations made the repetition redundant and it was removed, rows unmoved
+ * (`shipped-sets-identity-default-row-scope.test.ts` pins both).
  *
- * The scope, per table:
- *   - `_self` (`user_id == current_user.id`) on the four tables that name the
- *     platform user a row is about — `sys_scim_user`, `sys_scim_subject`,
- *     `sys_scim_projection_grant`, `sys_scim_identity_tombstone`. A principal
- *     reads what the provisioning says about THEM, the same shape as every other
- *     `_self` carve-out in this file;
- *   - `_none` (`id == null`) on the three that name no user —
- *     `sys_scim_group`, `sys_scim_group_member`, `sys_scim_connection_binding`.
- *     `id` is required on every row, so this admits no row: said plainly, it is
- *     the mirror of the `id != null` spelling `sys_invitation_org_admin` uses for
- *     "every row". A policy rather than dropping `allowRead`, because the header
- *     rules out editing the blanket and a per-object `allowRead: false` would
- *     be undone by any other set that names the object.
- * The platform admin (`admin_full_access`) keeps every row: its wildcard carries
- * the superuser read bypass, which skips Layer 1 on a better-auth-managed object.
- * That is the audience SCIM is administered by — the connection store
- * (`sys_scim_connection_credential`) is gated on `manage_platform_settings`.
+ * The tables, and the declared scope each one reads under:
+ *   - the seven `@better-auth/scim` projection tables: `_self`
+ *     (`user_id == current_user.id`) on the four that name the user a row is
+ *     about (`sys_scim_user`, `sys_scim_subject`, `sys_scim_projection_grant`,
+ *     `sys_scim_identity_tombstone`), `_none` (`id == null`, no row) on the
+ *     three that name none (`sys_scim_group`, `sys_scim_group_member`,
+ *     `sys_scim_connection_binding`). None carries a tenant column, so Layer 0
+ *     is inert on them and an unscoped read is every organization's rows;
+ *   - the two credential tables, `sys_verification` and `sys_jwks`: `_none`.
+ *     Both are `private`, but the blanket above gives them an EXPLICIT read
+ *     entry, which `private` does not keep off; their declared scope is what
+ *     holds "DENY for non-admins by design";
+ *   - `sys_account`, `sys_team_member`, `sys_oauth_access_token`,
+ *     `sys_oauth_refresh_token`: `_self`, `select`.
+ * Every declared scope here is `select`: each table's writes are denied at the
+ * object layer by `denyWritesOnManagedObjects()`. The platform admin keeps
+ * every row through its superuser read bypass, which skips Layer 1, and
+ * better-auth reads through its adapter's system context, which no row policy
+ * reaches. A delegated principal's own ceiling leg collects no default (ruling
+ * of record 6278784335 on #24341, letter B): its row bound is the delegator's
+ * leg, which collects the default as any principal's does.
  *
- * ⚠️ There is deliberately NO organization-scoped read here, for members or for
- * org admins, because none is expressible without a schema change:
- *   - an `_org` predicate needs a column to compare, and the only table that
- *     knows a connection's organization is `sys_scim_connection_credential` — a
- *     predicate cannot traverse `connection_id` to it (ADR-0055);
- *   - an admin admission spelled like `sys_invitation_org_admin` (`id != null`,
- *     bounded by Layer 0) is bounded by NOTHING here — Layer 0 is inert — so it
- *     would hand an org admin every organization's rows again;
- *   - `user_id in current_user.org_user_ids` is not an organization scope for
- *     this data: a projection belongs to the CONNECTION that wrote it, so a
- *     user who belongs to two organizations would expose one organization's
- *     identity-provider record of them to the other.
- * An organization-scoped SCIM directory is therefore a capability to decide and
- * build (a tenant column on the projection, or a resolved connection set), not a
- * predicate to add here.
- *
- * `select` (not `all`): every write on these tables is denied at the object
- * layer by `denyWritesOnManagedObjects()` and answered 405 by
- * `apiMethods: ['get', 'list']`; the writer is the SCIM protocol endpoint,
- * through better-auth's adapter under system context, which no row policy
- * reaches.
- *
- * Spread into EVERY shipped set that spreads the blanket and carries row-level
- * security — `organization_admin` (and so its derived no-bypass variant),
- * `member_default` and `viewer_readonly` — rather than into the baseline alone:
- * a deployment that composes no platform baseline (`fallbackPermissionSet: null`)
- * resolves an org admin's sets without `member_default`, and a set with no
- * policy for an object leaves that object unfiltered. The MCP write ceiling
- * holds the blanket too and carries no row-level security by design (ADR-0090
- * D10): its bound is the delegating user's own sets, which carry this scope.
- * A fresh array per set, like `denyWritesOnManagedObjects()`, so no two sets
- * share one policy object.
+ * ⚠️ A policy for one of these tables in a set REPLACES the default for that
+ * set's holders on that operation — the default is never added beside a held
+ * policy. Two that must never be written here:
+ *   - an organization-admin admission on the SCIM tables. Shaped like
+ *     `sys_invitation_org_admin` (`id != null`, bounded by Layer 0) it is
+ *     bounded by NOTHING here and hands an org admin every organization's
+ *     rows; an `_org` predicate has no column to compare (the connection's
+ *     organization lives on `sys_scim_connection_credential`, which a predicate
+ *     cannot traverse to, ADR-0055); and `user_id in current_user.org_user_ids`
+ *     is not an organization scope for data that belongs to the CONNECTION that
+ *     wrote it. An organization-scoped SCIM directory is a capability to decide
+ *     and build (a tenant column on the projection, or a resolved connection
+ *     set), not a predicate to add;
+ *   - any read of the credential tables below platform admin.
+ * A policy byte-identical to a table's default changes no row and moves
+ * explain back to the set.
  */
-const scimProjectionRowScope = () => [
-  { name: 'sys_scim_user_self', object: 'sys_scim_user', operation: 'select', using: 'user_id == current_user.id' },
-  { name: 'sys_scim_subject_self', object: 'sys_scim_subject', operation: 'select', using: 'user_id == current_user.id' },
-  {
-    name: 'sys_scim_projection_grant_self',
-    object: 'sys_scim_projection_grant',
-    operation: 'select',
-    using: 'user_id == current_user.id',
-  },
-  {
-    name: 'sys_scim_identity_tombstone_self',
-    object: 'sys_scim_identity_tombstone',
-    operation: 'select',
-    using: 'user_id == current_user.id',
-  },
-  { name: 'sys_scim_group_none', object: 'sys_scim_group', operation: 'select', using: 'id == null' },
-  { name: 'sys_scim_group_member_none', object: 'sys_scim_group_member', operation: 'select', using: 'id == null' },
-  {
-    name: 'sys_scim_connection_binding_none',
-    object: 'sys_scim_connection_binding',
-    operation: 'select',
-    using: 'id == null',
-  },
-];
-
-/**
- * [#20027] The row scope of the two better-auth tables whose rows ARE
- * credentials: `sys_verification` (one-time verification and password-reset
- * tokens) and `sys_jwks` (the environment's JWT signing keys). Both declare
- * `access: { default: 'private' }`, and the contract this file has always
- * stated for them is "DENY for non-admins by design" — see the note above the
- * `_self` carve-outs in `member_default`.
- *
- * Why the declaration alone did not hold: `private` keeps a plain `'*'`
- * wildcard off an object (`resolveObjectPermission`), but the blanket above
- * gives these objects an EXPLICIT per-object read entry, and an explicit entry
- * is not the wildcard. The object-level read therefore resolved `true` for
- * every set holding the blanket, and neither object had a row policy. The
- * retired wildcard `tenant_isolation` policy was what used to deny their rows;
- * ADR-0095 D1 moved the tenant wall to Layer 0, which is inert on an object
- * with no tenant column. One more instance of the class this file's header
- * describes, closed with the instrument the header names: the per-object row
- * scope, ⛔ never an edit of the blanket.
- *
- * `_none` (`id == null`, i.e. no row), the shape `scimProjectionRowScope`
- * uses. There is no `_self` form: neither table names a user
- * (`sys_verification` keys on an address, `sys_jwks` on nothing), and no
- * principal needs to read even their OWN live token — better-auth reads it.
- *
- * Who keeps every row, and why this does not reach them:
- *   - the platform admin (`admin_full_access`): its wildcard carries the
- *     superuser read bypass, which skips Layer 1, and it names neither object
- *     explicitly;
- *   - better-auth itself: it reads through its adapter under system context
- *     (`withSystemContext`, plugin-auth), which no row policy reaches.
- *
- * Why a policy, and not `private` taking precedence over explicit entries in
- * the evaluator: three OTHER `private` objects on the blanket —
- * `sys_device_code`, `sys_oauth_access_token`, `sys_oauth_refresh_token` — are
- * deliberately readable by their owner through that same explicit entry plus
- * a `_self` policy. An evaluator rule would retire those reads too; this scope
- * touches only the two objects the contract names.
- *
- * `select` (not `all`): every write on these tables is already denied at the
- * object layer by the blanket. Spread into EVERY shipped set that spreads the
- * blanket and carries row-level security (`organization_admin`, and so its
- * derived no-bypass variant, `member_default`, `viewer_readonly`), for the
- * reason `scimProjectionRowScope` gives: where no platform baseline is
- * composed, a set with no policy for an object leaves it unfiltered. The MCP
- * write ceiling holds the blanket too; its bound is the delegating user's own
- * sets (ADR-0090 D10), which carry this scope. A fresh array per set.
- */
-const privateCredentialRowScope = () => [
-  { name: 'sys_verification_none', object: 'sys_verification', operation: 'select', using: 'id == null' },
-  { name: 'sys_jwks_none', object: 'sys_jwks', operation: 'select', using: 'id == null' },
-];
 
 /**
  * [ADR-0131 D7] The organization read scope of the compliance ledger,
@@ -272,10 +187,17 @@ const privateCredentialRowScope = () => [
  * - **Where it is spread**: every shipped set that carries row-level security —
  *   `organization_admin` (and so its derived no-bypass variant),
  *   `viewer_readonly`, whose wildcard reads the ledger, and `member_default`,
- *   the baseline every authenticated human resolves, so a ledger read an
- *   application set grants is scoped as well. A set with no policy for an
- *   object leaves it unfiltered, and `member_default` is absent where no
- *   platform baseline is composed (the reason `scimProjectionRowScope` gives).
+ *   the baseline every authenticated human resolves.
+ * - **Why the sets keep it although `sys_audit_log` declares this same literal
+ *   as its default row scope** (measured by #24164 ruling E′ item 3's
+ *   follow-up, which removed the identity tables' copies): the strip above
+ *   recognises a platform tenant policy by PROVENANCE, and the provenance keys
+ *   are read off THESE sets' policies (`platform-tenant-policies.ts`). Dropped
+ *   from every set, the object's identical default would no longer be the
+ *   platform's: it would survive the wall-less strip as an authored tenant
+ *   policy and narrow the ledger read `single` serves unscoped. Keep at least
+ *   this spelling here until provenance is read off the declaration
+ *   (`shipped-sets-identity-default-row-scope.test.ts` pins the `single` read).
  *   ⚠️ Out of reach: an application set that grants the superuser read bypass
  *   on the ledger (`viewAllRecords` on it or on a wildcard) skips Layer 1, as
  *   every such grant does on an object Layer 0 does not wall.
@@ -334,9 +256,10 @@ function identityAdminGroupFields(): string[] {
  *   - `withhold` → `member_default`, `viewer_readonly`: the shipped non-admin
  *     sets that open identity-object read to an org peer
  *     (`sys_user_org_members`). Repeated on `viewer_readonly` rather than
- *     inherited, for the reason `scimProjectionRowScope` gives: where no
- *     platform baseline is composed, a set naming nothing leaves the field
- *     served.
+ *     inherited: where no platform baseline is composed
+ *     (`fallbackPermissionSet: null`) `member_default` is not resolved, and
+ *     field security has no object-declared default to fall back to, so a set
+ *     naming nothing leaves the field served.
  *   - `keep` → `admin_full_access`, `organization_admin` (and so its derived
  *     no-bypass variant).
  *
@@ -533,18 +456,6 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         using: 'user_id == current_user.id',
       },
       {
-        name: 'sys_account_self',
-        object: 'sys_account',
-        operation: 'select',
-        using: 'user_id == current_user.id',
-      },
-      {
-        name: 'sys_team_member_self',
-        object: 'sys_team_member',
-        operation: 'select',
-        using: 'user_id == current_user.id',
-      },
-      {
         name: 'sys_two_factor_self',
         object: 'sys_two_factor',
         operation: 'all',
@@ -566,18 +477,6 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         name: 'sys_device_code_self',
         object: 'sys_device_code',
         operation: 'all',
-        using: 'user_id == current_user.id',
-      },
-      {
-        name: 'sys_oauth_access_token_self',
-        object: 'sys_oauth_access_token',
-        operation: 'select',
-        using: 'user_id == current_user.id',
-      },
-      {
-        name: 'sys_oauth_refresh_token_self',
-        object: 'sys_oauth_refresh_token',
-        operation: 'select',
         using: 'user_id == current_user.id',
       },
       {
@@ -666,15 +565,14 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         operation: 'select',
         using: 'organization_id == current_user.organization_id',
       },
-      // [#20001] The SCIM projection tables: self-only / no row, and deliberately
-      // no org-admin admission — Layer 0 is inert on them, so an `id != null`
-      // admission shaped like `sys_invitation_org_admin` would read every
-      // organization's rows. See `scimProjectionRowScope` above.
-      ...scimProjectionRowScope(),
-      // [#20027] The credential tables: no row. The org admin's `viewAllRecords`
-      // does not reach them — the blanket's explicit entry, not the wildcard,
-      // is what resolves for them. See `privateCredentialRowScope` above.
-      ...privateCredentialRowScope(),
+      // [#24164 E′ item 3] The SCIM projection tables, the credential tables,
+      // `sys_account`, `sys_team_member` and the two OAuth token tables read
+      // under their objects' own declared scope: see "Identity tables scoped by
+      // their own declaration" above. ⛔ No org-admin admission for any of
+      // them here: a policy in this set REPLACES the declared scope for its
+      // holders, the org admin's `viewAllRecords` does not reach them (the
+      // blanket's explicit entry, not the wildcard, resolves for them), and
+      // Layer 0 is inert on them.
       // [ADR-0131 D7] The compliance ledger: the rows about the active
       // organization. See `auditLedgerRowScope` above.
       ...auditLedgerRowScope(),
@@ -909,8 +807,15 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // `admin_full_access`, which has no RLS) should inspect them.
       // [#20027] ⚠️ Since the wildcard policy retired, nothing above denies
       // them: the blanket's explicit read entry opens the object, so the
-      // deny is held by `privateCredentialRowScope` (spread at the end of this
-      // list and of the two sibling sets). Keep the two together.
+      // deny is held by each table's own declared default row scope (`_none`;
+      // see "Identity tables scoped by their own declaration" above), which no
+      // policy here may replace. `sys_account`, `sys_team_member` and the two
+      // OAuth token tables read under their declared `_self` scope the same
+      // way. Of the tables that declare one, the carve-outs that stay below
+      // are `sys_user`'s (spelled apart from its merged declaration) and the
+      // `all` scopes, whose write arm the `'*'` ownership floor above would
+      // otherwise pre-empt: with the floor in the collection, the declared
+      // default is never collected on `update` / `delete` for an `org_member`.
       {
         name: 'sys_organization_self',
         object: 'sys_organization',
@@ -947,7 +852,8 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // pre-resolved by runtime/resolve-execution-context from
       // `sys_member` for the active organization. Sensitive credential
       // tables (`sys_account`, `sys_session`, `sys_api_key`, …) keep
-      // their stricter self-only carve-outs above.
+      // their stricter self-only scopes (the carve-outs here, or the
+      // table's own declared default).
       {
         name: 'sys_user_org_members',
         object: 'sys_user',
@@ -958,18 +864,6 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         name: 'sys_session_self',
         object: 'sys_session',
         operation: 'all',
-        using: 'user_id == current_user.id',
-      },
-      {
-        name: 'sys_account_self',
-        object: 'sys_account',
-        operation: 'select',
-        using: 'user_id == current_user.id',
-      },
-      {
-        name: 'sys_team_member_self',
-        object: 'sys_team_member',
-        operation: 'select',
         using: 'user_id == current_user.id',
       },
       {
@@ -994,18 +888,6 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         name: 'sys_device_code_self',
         object: 'sys_device_code',
         operation: 'all',
-        using: 'user_id == current_user.id',
-      },
-      {
-        name: 'sys_oauth_access_token_self',
-        object: 'sys_oauth_access_token',
-        operation: 'select',
-        using: 'user_id == current_user.id',
-      },
-      {
-        name: 'sys_oauth_refresh_token_self',
-        object: 'sys_oauth_refresh_token',
-        operation: 'select',
         using: 'user_id == current_user.id',
       },
       {
@@ -1228,11 +1110,9 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         using: 'id != null',
         positions: ['org_member'],
       },
-      // [#20001] The SCIM projection tables: a member reads the rows about
-      // themselves and no other — see `scimProjectionRowScope` above.
-      ...scimProjectionRowScope(),
-      // [#20027] The credential tables: no row — see `privateCredentialRowScope`.
-      ...privateCredentialRowScope(),
+      // [#20001, #20027] The SCIM projection and credential tables read under
+      // their objects' own declared scope — see "Identity tables scoped by
+      // their own declaration" above.
       // [ADR-0131 D7] The compliance ledger: the rows about the active
       // organization, for a ledger read any set grants — see `auditLedgerRowScope`.
       ...auditLedgerRowScope(),
@@ -1288,18 +1168,6 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         using: 'user_id == current_user.id',
       },
       {
-        name: 'sys_account_self',
-        object: 'sys_account',
-        operation: 'select',
-        using: 'user_id == current_user.id',
-      },
-      {
-        name: 'sys_team_member_self',
-        object: 'sys_team_member',
-        operation: 'select',
-        using: 'user_id == current_user.id',
-      },
-      {
         name: 'sys_two_factor_self',
         object: 'sys_two_factor',
         operation: 'select',
@@ -1320,18 +1188,6 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       {
         name: 'sys_device_code_self',
         object: 'sys_device_code',
-        operation: 'select',
-        using: 'user_id == current_user.id',
-      },
-      {
-        name: 'sys_oauth_access_token_self',
-        object: 'sys_oauth_access_token',
-        operation: 'select',
-        using: 'user_id == current_user.id',
-      },
-      {
-        name: 'sys_oauth_refresh_token_self',
-        object: 'sys_oauth_refresh_token',
         operation: 'select',
         using: 'user_id == current_user.id',
       },
@@ -1359,15 +1215,13 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         operation: 'select',
         using: 'email == current_user.email',
       },
-      // [#20001] Repeated here rather than inherited from `member_default`: this
-      // set names the SCIM projection tables through the blanket, and wherever
-      // the platform baseline is not composed a set with no policy for them
-      // leaves them unfiltered. See `scimProjectionRowScope` above.
-      ...scimProjectionRowScope(),
-      // [#20027] Repeated here for the same reason: the credential tables, no row.
-      ...privateCredentialRowScope(),
-      // [ADR-0131 D7] Repeated here for the same reason: the compliance ledger's
-      // organization scope, which this set's wildcard read reaches.
+      // [#20001, #20027] The SCIM projection and credential tables, which this
+      // set names through the blanket, read under their objects' own declared
+      // scope — see "Identity tables scoped by their own declaration" above.
+      // [ADR-0131 D7] Repeated here rather than inherited from `member_default`,
+      // which is not resolved where no platform baseline is composed: the
+      // compliance ledger's organization scope, which this set's wildcard read
+      // reaches. See `auditLedgerRowScope` above for why the copy stays.
       ...auditLedgerRowScope(),
     ],
   }),
@@ -1376,8 +1230,11 @@ const baseDefaultPermissionSets: PermissionSet[] = [
   // The capability ceiling an OAuth-authenticated MCP agent runs under,
   // derived from the token's consented scopes (see
   // `scopesToAgentPermissionSets`). These are ONE SIDE of the D10 intersection:
-  // the delegating user's own sets provide all row/owner/tenant narrowing, so
-  // these carry pure CRUD bits and NO row-level security. They are never bound
+  // the delegating user's own leg provides all row/owner/tenant narrowing (its
+  // sets' policies, and each object's declared default row scope where those
+  // carry none — the ceiling's own leg collects no default, ruling of record
+  // 6278784335 on #24341, letter B), so these carry pure CRUD bits and NO
+  // row-level security. They are never bound
   // to a position or an audience anchor — the producer
   // (`resolve-execution-context`) injects them onto the agent principal's
   // context directly — so the anchor high-privilege gate does not apply.
