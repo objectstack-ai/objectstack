@@ -604,7 +604,10 @@ describe('#9650 §4 — the transport seam that was ruled, and its edges', () =>
         kernel.use(
             new HonoServerPlugin({
                 port: 0,
-                cors: { enabled: true, origins: '*' },
+                // The origin the preflight below carries, named: the CORS
+                // built-in refuses `'*'` while credentials are on, and an
+                // admitted preflight is the one it answers on the way in.
+                cors: { enabled: true, origins: ['https://app.test'] },
                 observability: { metrics },
             }),
         );
