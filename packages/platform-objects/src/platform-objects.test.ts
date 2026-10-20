@@ -139,7 +139,8 @@ describe('@objectstack/platform-objects', () => {
         if (typeof objectName !== 'string') continue;
         for (const action of actionsOf(object)) {
           for (const param of action.params ?? []) {
-            if (!param.name || !credential.test(param.name)) continue;
+            // A boolean toggle about a password (`mustChangePassword`) is no credential.
+            if (!param.name || !credential.test(param.name) || param.type === 'boolean') continue;
             const key = `${objectName}.${action.name}#${param.name}`;
             seen.push(key);
             if (param.type !== 'password') offenders.push(`${key}: '${String(param.type)}'`);
