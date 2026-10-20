@@ -27,8 +27,8 @@ irreversibly on migrated data gate on the flag instead of the version.
 ## TypeScript Usage
 
 ```typescript
-import { AddFieldOperation, ChangeSetSchema, CreateObjectOperation, DataMigrationFlagSchema, DeleteObjectOperation, ExecuteSqlOperation, MigrationDependencySchema, MigrationJournalEventSchema, MigrationOperationSchema, ModifyFieldOperation, RemoveFieldOperation, RenameObjectOperation } from '@objectstack/spec/system';
-import type { ChangeSet, DataMigrationFlag, DeleteObjectOperation, ExecuteSqlOperation, MigrationDependency, MigrationJournalEvent, MigrationOperation, ModifyFieldOperation, RemoveFieldOperation, RenameObjectOperation } from '@objectstack/spec/system';
+import { AddFieldOperation, ChangeSetSchema, CreateObjectOperation, DataMigrationFlagSchema, DeleteObjectOperation, ExecuteSqlOperation, MigrationDependencySchema, MigrationJournalEventSchema, MigrationOperationSchema, ModifyFieldOperation, OrganizationOwnershipBirthMarkerSchema, RemoveFieldOperation, RenameObjectOperation } from '@objectstack/spec/system';
+import type { ChangeSet, DataMigrationFlag, DeleteObjectOperation, ExecuteSqlOperation, MigrationDependency, MigrationJournalEvent, MigrationOperation, ModifyFieldOperation, OrganizationOwnershipBirthMarker, RemoveFieldOperation, RenameObjectOperation } from '@objectstack/spec/system';
 
 // Validate data
 const result = AddFieldOperation.parse(data);
@@ -726,6 +726,22 @@ Modify properties of an existing field
 | **objectName** | `string` | ✅ | Target object name |
 | **fieldName** | `string` | ✅ | Name of the field to modify |
 | **changes** | `Record<string, any>` | ✅ | Partial field definition updates |
+
+
+---
+
+## OrganizationOwnershipBirthMarker
+
+Birth marker of a datastore created from empty: the ownership shape generation it was born in
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **shapeGeneration** | `integer` | ✅ | The organization-ownership shape generation the store was created in; the only field the boot guard decides on |
+| **platformVersion** | `string` | ✅ | The exact platform version that created the store (provenance only, never compared) |
+| **commit** | `string` | optional | The source commit of that build, when known (provenance only) |
+| **createdAt** | `string` | ✅ | When the guard observed the store created from empty |
 
 
 ---

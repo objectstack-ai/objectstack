@@ -1848,10 +1848,10 @@ export class SeedLoaderService implements ISeedLoaderService {
               `which has no organization (organization_id is NULL), and this seed load writes for organization ` +
               `${config.organizationId}. Inserting the record would put a twin beside that row, and updating the ` +
               `row would hand it to this organization: which organization an unowned row belongs to is decided by ` +
-              `the organization-ownership ceremony, not by a seed load. A row with no organization predates ` +
-              `organization stamping, so it is a v17 database's. 18.0 supports fresh installs only and does not ` +
-              `upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x release that carries ` +
-              `the upgrade path.`,
+              `the organization-ownership ceremony, not by a seed load. Attribute the unowned rows first ` +
+              `(\`os migrate organization-ownership --out PLAN\`, then the same command with ` +
+              `--apply --plan-file PLAN --backup-taken), then re-run this seed: the row is this organization's own ` +
+              `by then, and the upsert matches it.`,
           };
           errors.push(error);
           allErrors.push(error);

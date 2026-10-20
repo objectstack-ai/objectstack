@@ -21,8 +21,7 @@ export const entry: SemanticMigration = {
   replacement:
     '`permission_set`, the machine name of the permission set the grant holds (ADR-0131 D4). Delete '
     + 'the key from any authored `sys_user_permission_set` seed row or data-door write that still '
-    + 'carries it, and name the set instead. Existing databases: 18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path. '
-    + 'In that 18.x release, run its ceremony. Plan it first, '
+    + 'carries it, and name the set instead. Existing databases: run the v18 ceremony. Plan it first, '
     + '`os migrate organization-ownership --out plan.json`, and review the file it writes; then '
     + '`os migrate organization-ownership --apply --backup-taken --plan-file plan.json` executes that plan: its verified '
     + 'rewrite names every grant from the column and its column-drops step then drops the two retired '
@@ -31,7 +30,7 @@ export const entry: SemanticMigration = {
     'ADR-0131 D4 makes every reference to a catalog item a name, and D3 retired the permission-set '
     + 'catalog rows the id pointed at. Since then no writer fills the column and no reader confers '
     + 'anything through it: a grant holds its set by permission_set. D10 orders the column\'s removal '
-    + 'after every grant names its set, which is the 18.x ceremony\'s verified id-to-name rewrite: it '
+    + 'after every grant names its set, which is the v18 ceremony\'s verified id-to-name rewrite: it '
     + 'reads the physical column by raw SQL, names each grant, verifies every name against the '
     + 'security catalog, and only then drops the column through the schema-drift machinery (schema '
     + 'sync is additive, so an undeclared column stays until it is dropped). The boot-time name '
@@ -47,7 +46,6 @@ export const entry: SemanticMigration = {
     'No authored stack seed or client write names `permission_set_id` on `sys_user_permission_set`: '
     + 'the engine refuses the undeclared field with 400 INVALID_FIELD. A second grant of one set to '
     + 'one user in one organization is refused by the unique index with 409 UNIQUE_VIOLATION, '
-    + 'platform-wide grants (organization NULL) included, on every write path. 18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path. '
-    + 'In that 18.x release, after `os migrate organization-ownership --apply --backup-taken --plan-file plan.json` on a legacy database the column '
+    + 'platform-wide grants (organization NULL) included, on every write path. On a legacy database, after `os migrate organization-ownership --apply --backup-taken --plan-file plan.json` the column '
     + 'is gone and the boot no longer reports it orphaned.',
 };

@@ -67,7 +67,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ORGANIZATION_OWNERSHIP_MIGRATION_ID } from '@objectstack/spec/system';
 import { isExitSignal } from './format.js';
 import MigrateApply from '../commands/migrate/apply.js';
-import { OrganizationOwnershipCeremony as MigrateOrganizationOwnership } from '../commands/migrate/organization-ownership.js';
+import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
 
 // Paid at module load, not inside a clocked case (`check:test-source-alias`).
 import '@objectstack/runtime';
@@ -193,6 +193,15 @@ async function bootV17(dbFile: string): Promise<void> {
   await kernel.use(osgcObjectsPlugin() as any);
   await runtime.start();
   await kernel.shutdown();
+  // This boot of THIS tree created the store from empty, so it wrote this
+  // release's birth marker; the v17 database it stands in for carries none,
+  // and the drop gate below reads that absence.
+  const db = new Database(dbFile);
+  try {
+    db.prepare(`DELETE FROM sys_migration WHERE id = 'adr-0131-organization-ownership'`).run();
+  } finally {
+    db.close();
+  }
 }
 
 /** A supplement row: `column-drop` for `drop`, `report` for every other host object. */
@@ -437,8 +446,6 @@ describe('os migrate apply --allow-destructive: the organization_id drop on a ho
       marker: null,
     });
     expect(payload.detail).toMatch(/organization-ownership ceremony/);
-    // 18.0 refuses `os migrate organization-ownership` on every database: the refusal names no step of it.
-    expect(payload.detail).not.toMatch(/os migrate organization-ownership|--plan-file|organization-ownership --out/);
     // The drops the refusal held back are the ones the drift offered.
     expect(organizationDropsIn(payload.skipped)).toEqual([...DECLARED].sort());
     for (const table of HOST_OBJECTS) expect(hasOrganizationColumn(dbFile, table), table).toBe(true);
