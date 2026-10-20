@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveLocalizationContext } from '@objectstack/core';
+import { effectiveTenancyPosture, resolveLocalizationContext, type TenancyPostureSource } from '@objectstack/core';
 import type { IDataEngine, II18nService, ISecurityService, ISharingService } from '@objectstack/spec/contracts';
 import { SysAuditLog, SysActivity, SysComment, SysCommentReaction } from './objects/index.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
@@ -17,6 +17,7 @@ import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface }
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
+import { admitMentionRecipients } from './mention-recipient-gate.js';
 import { installActivityReadVisibility } from './activity-read-visibility.js';
 import { installActivityFieldRedaction } from './activity-field-redaction.js';
 import { installAuditLogFieldRedaction } from './audit-log-field-redaction.js';
@@ -399,7 +400,25 @@ export class AuditPlugin implements Plugin {
         }
         return typeof tenancy?.defaultOrgId === 'function' ? tenancy.defaultOrgId() : undefined;
       };
-      installAuditWriters(engine as any, this.name, { getMessaging, getI18n, getLocale, getDefaultOrganizationId });
+      // A mention notification previews its comment and links its record, so
+      // it reaches only a mentioned user who can READ that record — judged in
+      // that user's own envelope, their organization claim vetted under the
+      // posture the request path reads (`mention-recipient-gate.ts`).
+      const getTenancyPosture = () => {
+        try {
+          return effectiveTenancyPosture(ctx.getService<TenancyPostureSource>('tenancy'));
+        } catch {
+          return undefined;
+        }
+      };
+      installAuditWriters(engine as any, this.name, {
+        getMessaging,
+        getI18n,
+        getLocale,
+        getDefaultOrganizationId,
+        admitMentionRecipients: (input) =>
+          admitMentionRecipients({ engine: engine as any, getTenancyPosture, logger: ctx.logger as any }, input),
+      });
       ctx.logger.info('AuditPlugin: audit + activity writers installed');
 
       // [#8992] Record-view auditing — the `read` half of the ledger. Installed
