@@ -1975,3 +1975,31 @@ describe('retired translation.validationMessages', () => {
     })).not.toThrow();
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// `_views.<view>.title` — a form view's heading (`FormViewSchema.title`)
+// ──────────────────────────────────────────────────────────────────────────
+describe('`objects.<object>._views.<view>.title`, the key a form view\'s title is translated through', () => {
+  const parse = (view: unknown) =>
+    ObjectTranslationDataSchema.safeParse({ label: 'Lead', _views: { web_to_lead: view } });
+
+  it('accepts `title` as its own key, beside the view\'s `label`', () => {
+    const result = parse({ label: '网页线索', title: '联系我们' });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    expect(result.success && result.data._views?.web_to_lead).toEqual({ label: '网页线索', title: '联系我们' });
+  });
+
+  it('a heading-shaped neighbour is named as a rename onto `title`, not onto `label`', () => {
+    const result = parse({ heading: '联系我们' });
+    expect(result.success).toBe(false);
+    const issue = result.error?.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(issue?.message).toContain('this view translation');
+    expect(issue?.message).toContain('`heading` → `title`');
+  });
+
+  it('CONTROL: the entry stays closed — a key it does not declare is still refused', () => {
+    const result = parse({ subtitle: 'x' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+  });
+});
