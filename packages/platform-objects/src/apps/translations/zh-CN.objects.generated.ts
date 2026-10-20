@@ -1557,7 +1557,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         description: "确定要轮换此 OAuth 客户端的密钥吗？旧密钥将立即失效，任何使用它的集成都将中断，直到更新为新密钥为止。新密钥仅显示一次。",
         resultDialog: {
           title: "Client Secret 已轮换",
-          description: "请立即保存新密钥——它只显示一次。请在旧密钥宽限期结束前更新所有集成。",
+          description: "请立即保存新密钥——它只显示一次。旧密钥已经失效：请用新密钥更新所有集成。",
           acknowledge: "我已更新所有集成",
           fields: {
             client_secret: "新的 Client Secret"

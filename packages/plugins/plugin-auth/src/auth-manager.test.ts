@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthManager, ipMatchesRange } from './auth-manager';
+import { vendorClientAddressOptions } from './client-address-vendor';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/objectql';
 
 // Mock better-auth so we can control the handler behaviour
@@ -2116,6 +2117,7 @@ describe('AuthManager', () => {
           domain: '.objectos.app',
         },
         useSecureCookies: true,
+        ipAddress: vendorClientAddressOptions(),
       });
     });
 
@@ -2142,7 +2144,7 @@ describe('AuthManager', () => {
       expect(capturedConfig.advanced.cookiePrefix).toBe('objectos');
     });
 
-    it('should NOT include advanced when not provided', async () => {
+    it('carries only the library client-address source when no advanced option is provided', async () => {
       let capturedConfig: any;
       (betterAuth as any).mockImplementation((config: any) => {
         capturedConfig = config;
@@ -2157,7 +2159,7 @@ describe('AuthManager', () => {
       await manager.getAuthInstance();
       warnSpy.mockRestore();
 
-      expect(capturedConfig).not.toHaveProperty('advanced');
+      expect(capturedConfig.advanced).toEqual({ ipAddress: vendorClientAddressOptions() });
     });
   });
 
