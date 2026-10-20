@@ -1533,29 +1533,32 @@ describe('[ADR-0055] parent EDIT on a controlled_by_parent parent — checkEdit,
   });
 });
 
-// ── The parent gate agrees with the parent by-id update (#24549) ──────────
+// ── The parent gate asks the parent by-id update, and only it (#24549, #24646) ──
 
 /**
  * The `sys_attachment` parent gate gives the answer a by-id update of the
- * parent record gets.
+ * parent record gets — and, since #24646, asks nothing else.
  *
  * Every limb that asks "may the caller edit the parent record?" — the attach
  * rule, the row rule's parent-editor limb on update and delete, the attach rule
  * on a re-point, and the caller-scoped `mayEditAttachmentParent` the
- * file-attachments service asks before it spends work on a file — admits only
- * where the security service's judgement of that update admits: its
+ * file-attachments service asks before it spends work on a file — admits
+ * exactly where the security service's judgement of that update admits: its
  * record-grained `explain` verdict for `update` on `(parent object, parent id)`,
  * `allowed` and `record.visible` both. That verdict is the write path's own
  * composition (the object-level grant, the parent's own row-level security, its
- * record sharing and, for a `controlled_by_parent` parent, its master), so the
- * gate keeps no second copy of it.
+ * record sharing at the caller's real write depth and, for a
+ * `controlled_by_parent` parent, its master), so the gate keeps no second copy
+ * of it: record sharing and the master-detail check are not asked where the
+ * judgement is served. A caller record sharing refuses at owner-only depth —
+ * a `unit` / `org` write-depth holder — is admitted when the update admits
+ * them, and a caller the update refuses is refused whatever record sharing or
+ * the master check would have said. A store fault keeps its own status.
  *
- * What the gate already composed keeps its answers: record sharing's `deny`
- * still refuses without asking anything further, and so do the master-detail
- * write check's refusals. A store fault keeps its own status. The update
- * judgement can only add refusals; it never admits what the gate refused.
+ * Where the security service serves no `explain`, the gate keeps the
+ * composition it had before it could ask one (the last suite below).
  *
- * Each row below names the shape of the answers the gate is handed and the
+ * Each row below names the shape of the answers the gate's doubles hold and the
  * answer it gives. Refusals are asserted on the ADR-0112 envelope (`code` and
  * `status`).
  */
@@ -1640,105 +1643,102 @@ const attachCtx = () =>
 const othersRow = { id: 'a1', file_id: 'f1', parent_object: PARENT, parent_id: PARENT_ID, uploaded_by: UPLOADER };
 
 /**
- * One row per shape: what record sharing answers, what the master-detail check
- * answers (only asked on an abstention), what the parent's update judgement
- * answers (`null` = never asked), and the gate's answer.
+ * One row per shape: what record sharing and the master-detail check WOULD
+ * answer — neither is asked where the judgement is served — what the parent's
+ * update judgement answers, and the gate's answer.
  */
 interface Row {
   shape: string;
   sharing: SharingVerdict;
   master?: ControlledByParentWriteOutcome;
-  judgement: UpdateJudgement | null;
+  judgement: UpdateJudgement;
   admits: boolean;
 }
 
 const ROWS: Row[] = [
-  { shape: 'sharing allow, update judgement admits', sharing: 'allow', judgement: 'admits', admits: true },
-  { shape: 'sharing allow, update judgement: record verdict refuses', sharing: 'allow', judgement: 'record_refuses', admits: false },
-  { shape: 'sharing allow, update judgement: decision refuses', sharing: 'allow', judgement: 'decision_refuses', admits: false },
-  { shape: 'sharing allow, update judgement carries no record verdict', sharing: 'allow', judgement: 'no_record_verdict', admits: false },
-  { shape: 'sharing abstain, no master, update judgement admits', sharing: 'abstain', judgement: 'admits', admits: true },
-  { shape: 'sharing abstain, no master, update judgement: record verdict refuses', sharing: 'abstain', judgement: 'record_refuses', admits: false },
+  { shape: 'update judgement admits (record sharing allows)', sharing: 'allow', judgement: 'admits', admits: true },
+  { shape: 'update judgement: record verdict refuses (record sharing allows)', sharing: 'allow', judgement: 'record_refuses', admits: false },
+  { shape: 'update judgement: decision refuses (record sharing allows)', sharing: 'allow', judgement: 'decision_refuses', admits: false },
+  { shape: 'update judgement carries no record verdict (record sharing allows)', sharing: 'allow', judgement: 'no_record_verdict', admits: false },
+  // [#24646] The write-depth holder: record sharing at owner-only depth
+  // refuses, the parent's own update admits — and so does the gate.
+  { shape: 'update judgement admits, record sharing at own depth refuses (a unit / org write-depth holder)', sharing: 'deny', judgement: 'admits', admits: true },
+  { shape: 'update judgement: record verdict refuses, record sharing refuses', sharing: 'deny', judgement: 'record_refuses', admits: false },
+  { shape: 'update judgement admits (record sharing abstains)', sharing: 'abstain', judgement: 'admits', admits: true },
+  // A controlled_by_parent parent follows its master THROUGH the judgement:
+  // the gate's own master step is gone in both directions.
   {
-    shape: 'sharing abstain, no master, update judgement: decision refuses',
+    shape: 'update judgement admits, the master check alone would refuse',
     sharing: 'abstain',
-    judgement: 'decision_refuses',
-    admits: false,
-  },
-  {
-    shape: 'sharing abstain, master admits, update judgement admits',
-    sharing: 'abstain',
-    master: { outcome: 'allow' },
+    master: { outcome: 'deny', leg: 'record_sharing' },
     judgement: 'admits',
     admits: true,
   },
   {
-    shape: 'sharing abstain, master admits, update judgement: decision refuses',
+    shape: 'update judgement: record verdict refuses, the master check alone would admit',
     sharing: 'abstain',
     master: { outcome: 'allow' },
+    judgement: 'record_refuses',
+    admits: false,
+  },
+  {
+    shape: 'update judgement: decision refuses, the master check is unresolvable',
+    sharing: 'abstain',
+    master: { outcome: 'unresolvable', reason: 'record_not_found' },
     judgement: 'decision_refuses',
     admits: false,
   },
-  {
-    shape: 'sharing abstain, master refuses',
-    sharing: 'abstain',
-    master: { outcome: 'deny', leg: 'record_sharing' },
-    judgement: null,
-    admits: false,
-  },
-  {
-    shape: 'sharing abstain, master unresolvable',
-    sharing: 'abstain',
-    master: { outcome: 'unresolvable', reason: 'record_not_found' },
-    judgement: null,
-    admits: false,
-  },
-  { shape: 'sharing deny', sharing: 'deny', judgement: null, admits: false },
 ];
 
-/** The judgement a row hands the double; a row whose judgement is never asked still gets one that admits. */
-const judgementOf = (row: Row): UpdateJudgement => row.judgement ?? 'admits';
+/** Doubles for one row: the judgement, and the two services the gate no longer asks beside it. */
+const rowDoubles = (row: Row) => {
+  const { security, explain, checkControlledByParentWrite } = securityDouble(row.judgement, row.master);
+  const sharing = sharingDouble(row.sharing);
+  return { security, explain, checkControlledByParentWrite, sharing, checkEdit: sharing.checkEdit as ReturnType<typeof vi.fn> };
+};
 
-describe('the attachment parent gate agrees with the parent by-id update', () => {
+describe('the attachment parent gate asks the parent by-id update, and only it', () => {
   for (const row of ROWS) {
     it(`attach — ${row.shape} → ${row.admits ? 'admitted' : 'refused 403 ATTACHMENT_PARENT_ACCESS'}`, async () => {
-      const { security, explain } = securityDouble(judgementOf(row), row.master);
-      const { beforeInsert } = installForParity({ sharing: sharingDouble(row.sharing), security });
+      const { security, explain, checkControlledByParentWrite, sharing, checkEdit } = rowDoubles(row);
+      const { beforeInsert } = installForParity({ sharing, security });
       const run = beforeInsert(attachCtx());
       if (row.admits) await expect(run).resolves.toBeUndefined();
       else await expect(run).rejects.toMatchObject({ code: 'ATTACHMENT_PARENT_ACCESS', status: 403, object: PARENT });
-      expect(explain).toHaveBeenCalledTimes(row.judgement === null ? 0 : 1);
+      expect(explain).toHaveBeenCalledTimes(1);
+      expect(checkEdit).not.toHaveBeenCalled();
+      expect(checkControlledByParentWrite).not.toHaveBeenCalled();
     });
 
     it(`delete another user's file — ${row.shape} → ${row.admits ? 'admitted' : 'refused 403 ATTACHMENT_DELETE_DENIED'}`, async () => {
-      const { security } = securityDouble(judgementOf(row), row.master);
-      const { beforeDelete } = installForParity({ sharing: sharingDouble(row.sharing), security, attachments: [othersRow] });
+      const { security, sharing } = rowDoubles(row);
+      const { beforeDelete } = installForParity({ sharing, security, attachments: [othersRow] });
       const run = beforeDelete(hookCtx('beforeDelete', { id: 'a1' }));
       if (row.admits) await expect(run).resolves.toBeUndefined();
       else await expect(run).rejects.toMatchObject({ code: 'ATTACHMENT_DELETE_DENIED', status: 403, object: PARENT });
     });
 
     it(`update another user's file — ${row.shape} → ${row.admits ? 'admitted' : 'refused 403 RECORD_NOT_ACCESSIBLE'}`, async () => {
-      const { security } = securityDouble(judgementOf(row), row.master);
-      const { beforeUpdate } = installForParity({ sharing: sharingDouble(row.sharing), security, attachments: [othersRow] });
+      const { security, sharing } = rowDoubles(row);
+      const { beforeUpdate } = installForParity({ sharing, security, attachments: [othersRow] });
       const run = beforeUpdate(hookCtx('beforeUpdate', { id: 'a1', data: { file_name: 'renamed.pdf' } }));
       if (row.admits) await expect(run).resolves.toBeUndefined();
       else await expect(run).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403, object: PARENT });
     });
 
     it(`re-point the caller's own file — ${row.shape} → ${row.admits ? 'admitted' : 'refused 403 ATTACHMENT_PARENT_ACCESS'}`, async () => {
-      const { security } = securityDouble(judgementOf(row), row.master);
+      const { security, sharing } = rowDoubles(row);
       const own = { ...othersRow, uploaded_by: CALLER };
-      const { beforeUpdate } = installForParity({ sharing: sharingDouble(row.sharing), security, attachments: [own] });
+      const { beforeUpdate } = installForParity({ sharing, security, attachments: [own] });
       const run = beforeUpdate(hookCtx('beforeUpdate', { id: 'a1', data: { parent_id: NEXT_ID } }));
       if (row.admits) await expect(run).resolves.toBeUndefined();
       else await expect(run).rejects.toMatchObject({ code: 'ATTACHMENT_PARENT_ACCESS', status: 403, object: PARENT });
     });
 
     it(`mayEditAttachmentParent — ${row.shape} → ${row.admits}`, async () => {
-      const { security } = securityDouble(judgementOf(row), row.master);
+      const { security, sharing } = rowDoubles(row);
       const verdict = await mayEditAttachmentParent(
-        { getSharing: () => sharingDouble(row.sharing), getSecurity: () => security, logger: { debug: vi.fn() } },
+        { getSharing: () => sharing, getSecurity: () => security, logger: { debug: vi.fn() } },
         PARENT,
         PARENT_ID,
         callerEnvelope,
@@ -1816,9 +1816,64 @@ describe('the attachment parent gate asks the update judgement of the parent rec
     });
     expect(unread.explain).not.toHaveBeenCalled();
   });
+});
 
-  it('a kernel with no security service composes no update judgement, as the parent update meets none', async () => {
-    const { beforeInsert } = installForParity({ sharing: sharingDouble('abstain'), security: null });
-    await expect(beforeInsert(attachCtx())).resolves.toBeUndefined();
+/**
+ * [#24646] A kernel whose security service serves no `explain` — or no
+ * security service at all — judges no by-id update of the parent, and the gate
+ * keeps the composition it had before it could ask one: record sharing's
+ * tri-state `checkEdit` at owner-only depth, then, on an abstention, the
+ * master-detail check. Removing those steps there would admit every caller, so
+ * this suite holds them: each row is the answer the gate gave before #24646.
+ */
+describe('a kernel that judges no by-id update keeps the record-sharing and master-detail steps', () => {
+  const masterOnly = (outcome: ControlledByParentWriteOutcome) => {
+    const checkControlledByParentWrite = vi.fn(async (): Promise<ControlledByParentWriteOutcome> => outcome);
+    return { security: { checkControlledByParentWrite } satisfies AttachmentSecurityLike, checkControlledByParentWrite };
+  };
+  const DEGRADED: Array<{ shape: string; sharing: SharingVerdict; master: ControlledByParentWriteOutcome; admits: boolean }> = [
+    { shape: 'record sharing allows', sharing: 'allow', master: { outcome: 'deny', leg: 'record_sharing' }, admits: true },
+    { shape: 'record sharing refuses at owner-only depth', sharing: 'deny', master: { outcome: 'allow' }, admits: false },
+    { shape: 'record sharing abstains, the master check admits', sharing: 'abstain', master: { outcome: 'allow' }, admits: true },
+    { shape: 'record sharing abstains, the master check refuses', sharing: 'abstain', master: { outcome: 'deny', leg: 'record_sharing' }, admits: false },
+  ];
+  for (const row of DEGRADED) {
+    it(`attach on a security service serving no explain — ${row.shape} → ${row.admits ? 'admitted' : 'refused 403 ATTACHMENT_PARENT_ACCESS'}`, async () => {
+      const { security } = masterOnly(row.master);
+      const { beforeInsert } = installForParity({ sharing: sharingDouble(row.sharing), security });
+      const run = beforeInsert(attachCtx());
+      if (row.admits) await expect(run).resolves.toBeUndefined();
+      else await expect(run).rejects.toMatchObject({ code: 'ATTACHMENT_PARENT_ACCESS', status: 403, object: PARENT });
+    });
+
+    it(`delete another user's file with no security service — ${row.shape} → ${row.sharing === 'deny' ? 'refused 403 ATTACHMENT_DELETE_DENIED' : 'admitted'}`, async () => {
+      // No security service: an abstention admits, as the parent's own update meets no master check either.
+      const { beforeDelete } = installForParity({ sharing: sharingDouble(row.sharing), security: null, attachments: [othersRow] });
+      const run = beforeDelete(hookCtx('beforeDelete', { id: 'a1' }));
+      if (row.sharing !== 'deny') await expect(run).resolves.toBeUndefined();
+      else await expect(run).rejects.toMatchObject({ code: 'ATTACHMENT_DELETE_DENIED', status: 403, object: PARENT });
+    });
+  }
+
+  it('mayEditAttachmentParent on a security service serving no explain refuses what record sharing refuses', async () => {
+    const { security } = masterOnly({ outcome: 'allow' });
+    const verdict = await mayEditAttachmentParent(
+      { getSharing: () => sharingDouble('deny'), getSecurity: () => security, logger: { debug: vi.fn() } },
+      PARENT,
+      PARENT_ID,
+      callerEnvelope,
+      'attach',
+      async () => ({ id: PARENT_ID }),
+    );
+    expect(verdict).toBe(false);
+  });
+
+  it('with no sharing service either, the parent read alone decides — as before', async () => {
+    await expect(installForParity({ sharing: null, security: null }).beforeInsert(attachCtx())).resolves.toBeUndefined();
+    const ctx = { ...attachCtx(), api: apiReading([]) };
+    await expect(installForParity({ sharing: null, security: null }).beforeInsert(ctx)).rejects.toMatchObject({
+      code: 'ATTACHMENT_PARENT_ACCESS',
+      status: 403,
+    });
   });
 });
