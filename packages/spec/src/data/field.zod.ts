@@ -693,14 +693,17 @@ const uniqueScopeError: z.core.$ZodErrorMap = (issue) => {
  * (`stripe_customer_id`), a DNS hostname, a globally reserved slug, a device
  * identity. Global uniqueness is the special case and has to say so.
  *
- * NULL-safety of the per-organization scope (ADR-0120 D3, #5030): the kernel
- * injects `organization_id` unconditionally, so on single-organization stacks
- * the column exists and is NULL on every row — and SQL UNIQUE is
- * NULL-distinct, so a raw-column composite `(organization_id, field)` enforces
- * NOTHING there. The organization key part therefore materializes NULL-safe as
+ * NULL-safety of the per-organization scope (ADR-0120 D3, #5030): SQL UNIQUE
+ * is NULL-distinct, so a raw-column composite `(organization_id, field)`
+ * enforces nothing between rows whose `organization_id` is NULL — and under
+ * 17.x a single-organization stack wrote every row that way. The organization
+ * key part therefore materializes NULL-safe as
  * `COALESCE(organization_id, '__global__')` (driver-side, #5030): NULL-org
- * rows collapse into one platform bucket, unique among themselves; non-NULL
- * rows are untouched. On an object with no tenant column at all
+ * rows collapse into one bucket, unique among themselves; non-NULL rows are
+ * untouched. Since ADR-0131 D9 every write on a tenant-column object carries
+ * its organization or is refused wherever the organization object is
+ * registered, so there a NULL-org row is residue an earlier release wrote,
+ * never a new one. On an object with no tenant column at all
  * (`tenancy.enabled: false`) both per-organization spellings degrade to the
  * listed column alone.
  *

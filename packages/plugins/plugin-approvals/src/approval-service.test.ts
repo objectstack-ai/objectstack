@@ -953,11 +953,10 @@ describe('ApprovalService (node era)', () => {
     expect(req.pending_approvers.sort()).toEqual(['u5', 'u6']);
   });
 
-  // #3807 — an app's org tree is normally SEEDED, and a seed cannot know the
-  // organization id the runtime mints at boot, so those rows carry
-  // `organization_id = null` while every approval request carries an org. The
-  // old strict equality made each of them invisible and every `department`
-  // approver resolved to the dead `department:<id>` literal.
+  // [ADR-0131 D1/D8] The unit screen is a strict equality. It admitted a NULL
+  // organization for seeded units until certification made every unit an
+  // organization's (#3807's reason is gone: the ceremony attributes
+  // `sys_business_unit`, and a new unit is stamped or refused, D9).
   const departmentInput = (value: string) => positionInput({
     config: {
       approvers: [{ type: 'department' as const, value }],
@@ -966,22 +965,19 @@ describe('ApprovalService (node era)', () => {
     },
   });
 
-  it('department approver: an env-wide (null-org) business unit still resolves (#3807)', async () => {
+  it('department approver: an organization-less unit is no organization’s — it does not resolve (ADR-0131 D8)', async () => {
     engine._tables['sys_business_unit'] = [
       { id: 'bu_seeded', organization_id: null, active: true },
       { id: 'bu_seeded_child', parent_business_unit_id: 'bu_seeded', organization_id: null, active: true },
     ];
-    // #14946: the SEEDED rows are the units; the membership rows are stamped,
-    // as the session write path leaves them. An org-less membership row on a
-    // seeded unit is pinned on its own in
-    // `business-unit-member-org-screen.test.ts` (B3) — it does NOT route.
+    // The membership rows are the request organization's, so a slate could only
+    // come from the unit screen admitting the org-less unit — the arm retired.
     engine._tables['sys_business_unit_member'] = [
       { id: 'bm1', business_unit_id: 'bu_seeded', user_id: 'u5', organization_id: 't1' },
       { id: 'bm2', business_unit_id: 'bu_seeded_child', user_id: 'u6', organization_id: 't1' },
     ];
     const req = await svc.openNodeRequest(departmentInput('bu_seeded'), CTX);
-    // Both the seed check AND the subtree descent must see the null-org rows.
-    expect(req.pending_approvers.sort()).toEqual(['u5', 'u6']);
+    expect(req.pending_approvers).toEqual(['department:bu_seeded']);
   });
 
   it('department approver: another organization’s unit stays invisible (#3807 keeps the wall)', async () => {
@@ -997,9 +993,9 @@ describe('ApprovalService (node era)', () => {
     expect(req.pending_approvers).toEqual(['department:bu_other']);
   });
 
-  it('department approver: a null-org subtree does not drag in another org’s child unit (#3807)', async () => {
+  it('department approver: the subtree descent does not drag in another org’s child unit', async () => {
     engine._tables['sys_business_unit'] = [
-      { id: 'bu_seeded', organization_id: null, active: true },
+      { id: 'bu_seeded', organization_id: 't1', active: true },
       { id: 'bu_mine', parent_business_unit_id: 'bu_seeded', organization_id: 't1', active: true },
       { id: 'bu_theirs', parent_business_unit_id: 'bu_seeded', organization_id: 't2', active: true },
     ];

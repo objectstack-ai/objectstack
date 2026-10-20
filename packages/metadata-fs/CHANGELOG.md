@@ -1,5 +1,47 @@
 # @objectstack/metadata-fs
 
+## 18.0.0
+
+### Patch Changes
+
+- a3d47c2: fix(metadata-fs, runtime): metadata writes record the acting user's id or nobody, never the label `'fs'`, and a signed-in save through the runtime dispatcher records the user
+  
+  Clause-②: no
+  
+  - **What was wrong (filesystem repository).** `FileSystemRepository` named the label `'fs'` as the writer whenever no user was given. That covered every edit it saw on disk, every file it found that no recorded write produced, and an actor-less `put()`, which read back as `'fs'`. `MetadataPlugin` attaches the repository without naming a user, so this happened on every host that boots it. The contract for these fields (`PutOptions.actor`, `MetadataItem.authoredBy`, `MetadataEvent.actor`) is the acting user's id, or `null` for "nobody".
+  - **What it does now.** With no user named, the repository records `null`. A write that names a user records that user, and a write that records `null` reads back as `null`. The `fsActor` option keeps its type. When it is set, it is the user id reported for changes the repository did not write itself, and it no longer replaces a writer that a write recorded. Every event still names its origin on `source: 'fs'`, as before.
+  - **What was wrong (runtime dispatcher).** `PUT /api/v1/meta/:type/:name` served by the runtime dispatcher (the `@objectstack/hono` catch-all) saved without the caller's identity, so a signed-in author's save recorded `null` in `sys_metadata.updated_by` / `created_by` and `sys_metadata_history.recorded_by`. `RestServer`'s route recorded the user.
+  - **What an operator sees.** Filesystem-backed metadata history and events from this release on no longer name `'fs'` as the writer. A save through the runtime dispatcher records the signed-in user's id, as the REST route does, and a system caller with no user records `null`. Entries written before this release keep what they recorded.
+- Updated dependencies [78b1a63]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7895671]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [56c8844]
+- Updated dependencies [3d886ee]
+- Updated dependencies [f4069c5]
+- Updated dependencies [9af0005]
+- Updated dependencies [8532783]
+- Updated dependencies [e5687cb]
+- Updated dependencies [5677add]
+- Updated dependencies [58f5c90]
+- Updated dependencies [c5b43b6]
+- Updated dependencies [8c10776]
+- Updated dependencies [430e5f5]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [105902f]
+- Updated dependencies [c2bb302]
+- Updated dependencies [8776119]
+- Updated dependencies [30ce56e]
+- Updated dependencies [df2c551]
+- Updated dependencies [adad73f]
+- Updated dependencies [d050a8f]
+- Updated dependencies [077b75f]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [ef1fcb2]
+  - @objectstack/metadata-core@18.0.0
+
 ## 18.0.0-next.5
 
 ### Patch Changes

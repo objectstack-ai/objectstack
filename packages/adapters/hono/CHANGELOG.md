@@ -1,5 +1,351 @@
 # @objectstack/hono
 
+## 18.0.0
+
+### Minor Changes
+
+- 5cfd866: feat(sharing): a share-link password can be sent in the `X-Share-Password` header whatever its characters, under a declared encoding (`X-Share-Password-Encoding: utf-8`)
+  
+  Clause-②: yes (widening)
+  
+  - **What was missing.** A browser cannot put a character above U+00FF in a request header (`Headers` throws a `TypeError` before the request leaves), and it strips leading and trailing spaces. `createLink` accepts any password, so a link whose password has a CJK character or an emoji could not be opened through the header.
+  - **What is now accepted.** A new companion request header, `X-Share-Password-Encoding`, declares how `X-Share-Password` is encoded. Its one value is `utf-8`, compared case-insensitively. Under it, `X-Share-Password` carries the password's UTF-8 bytes percent-encoded, as `encodeURIComponent(password)` produces them, and both public routes (`GET /api/v1/share-links/:token/resolve` and `/:token/messages`) decode it on both mounts: the sharing plugin's routes and the runtime dispatcher's `/share-links` domain. Both read the pair through one helper, `readSharePasswordHeader`, exported from `@objectstack/types` with the header-name constants.
+  - **Unchanged.** Without `X-Share-Password-Encoding`, `X-Share-Password` is read raw, exactly as before, so every value a client sends today resolves as it did. That includes a Latin-1 password and a raw password containing `%`; the server never percent-decodes a value nobody declared encoded. The `?password=` query parameter is still read first, and when it is present the header pair is not read.
+  - **What is refused.** `X-Share-Password-Encoding` naming any other value, or a password header that is not percent-encoded UTF-8 under `utf-8` (a `%` without two hex digits, octets that are not well-formed UTF-8, a character outside visible ASCII), answers `400 VALIDATION_FAILED` before the token is looked up. It is never compared raw instead. The message names the headers and the rule, never the presented value.
+  - **Response headers.** Both public routes now answer `Vary: X-Share-Password, X-Share-Password-Encoding`, still beside `Cache-Control: no-store`.
+  - **Cross-origin clients.** `X-Share-Password-Encoding` is in the default CORS preflight allow-list (`DEFAULT_CORS_ALLOW_HEADERS` in `@objectstack/plugin-hono-server`, which the `@objectstack/hono` adapter also applies). A deployment that passes its own `allowHeaders` must add `X-Share-Password-Encoding` beside `X-Share-Password` to let a cross-origin client send an encoded password.
+- cb9841a: fix(hono,runtime)!: `createHonoApp` hands the dispatcher a repeated query name as an array, so the dispatcher's arity rules refuse it instead of answering its last value; `/packages` refuses a repeated `keepData` or `overwrite`
+  
+  `@objectstack/hono`'s `createHonoApp` catch-all built the dispatcher's query by copying `URLSearchParams` into an object, so a name sent twice reached `HttpDispatcher.dispatch()` as its LAST value and the first was dropped without a word. Every arity rule the dispatcher declares was therefore unreachable on a `createHonoApp` host: `GET /meta/app/crm?package=a&package=b` was answered `200` for package `b`, where the same request through `@objectstack/plugin-hono-server` is refused. The catch-all now reads the query the way `@objectstack/plugin-hono-server` does: a name sent once is the string it always was, a repeated name is the array of its values, and the object is built without dynamic property writes, so a `__proto__` name is an ordinary own key.
+  
+  Two `/packages` write flags read a repeat as absent, and are now refused before the registry or the protocol is touched, as `enabled` and `version` already are. `DELETE /packages/:id?keepData=true&keepData=true` dropped the package's object tables, because the protocol keeps storage only for `keepData === true`, and was answered `200`. `POST /packages?overwrite=true&overwrite=true` answered `409` "already exists" for a package one `overwrite=true` replaces. Both doors were reached that way through `@objectstack/plugin-hono-server`, whose adapter already keeps repeats, and would have been through `createHonoApp` from this change.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is added, removed, renamed or re-shaped, and no exported declaration is added, removed or narrowed (the adapter's query reader and the domain's flag guard are both module-private). No stored row or package source changes, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a query accept set: on a `createHonoApp` host every dispatcher read point that refuses a repeated single-valued name now sees the repeat and refuses it, and on every host `DELETE /packages/:id` and `POST /packages` refuse a repeated `keepData` and `overwrite`. One malformed input widens: on a `createHonoApp` host, a query pair with an empty name is no longer refused, matching `@objectstack/plugin-hono-server`. The remedy is in the request a caller sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What changes for you: send each single-valued query name once. On a `createHonoApp` host, a request that repeats one is now refused `400` in the dispatcher's envelope, `{ success: false, error: { code, message } }`, with the code and sentence the same request gets through `@objectstack/plugin-hono-server` (`VALIDATION_ERROR`, "The "NAME" query parameter was supplied N times…"; `INVALID_FILTER` on the `/data` filter slot), where it used to be answered with the last value. On every host, `DELETE /packages/:id` refuses a repeated `keepData` and `POST /packages` a repeated `overwrite`, with that same `VALIDATION_ERROR` and sentence. A name sent once is answered as before; genuinely multi-valued names such as `select` and `expand` now reach the dispatcher as the array they are. One malformed input moves the other way, to match `@objectstack/plugin-hono-server`: a query pair with an EMPTY name (`?=x`) is no longer handed to the dispatcher, so a door with a closed parameter set reads it as absent where it used to refuse it as an unknown parameter `""`. The `@objectstack/client` SDK sends each single-valued name once, and the Console's package delete sends `keepData` once.
+- e1cefa5: fix(hono): `createHonoApp` answers an escaped throw that declares an ADR-0112 envelope as that envelope, not as `500 INTERNAL_ERROR` (#23365)
+  
+  `@objectstack/hono`'s `createHonoApp` has two catch arms: the auth mount's, and
+  the `${prefix}/*` catch-all's around `HttpDispatcher.dispatch()`. Both answered
+  an escaped throw from its `statusCode` alone, so a producer that declared
+  `status` and a registered `code` lost both on this host. A `GET`, `PATCH` or
+  `DELETE` of `/data/:object/:id` for an id that names no row answered
+  `500 INTERNAL_ERROR` where the standalone REST server answers
+  `404 RECORD_NOT_FOUND`. The `/data` version refusals answered `500` too (a stale
+  `If-Match`'s `409 CONCURRENT_UPDATE`, and `If-Match: ""`'s
+  `400 VALIDATION_FAILED`), and so did an authorization-store outage
+  (`AuthzStoreUnavailableError`, `503 SERVICE_UNAVAILABLE`).
+  
+  **What changed.** Both arms now answer a throw that carries **both** a declared
+  ADR-0112 status (a key of `HttpStatusErrorCodeMap`) **and** a code registered in
+  `ErrorCode` as that envelope. The recognition is `declaredEnvelopeForThrow`, the
+  rule `@objectstack/plugin-hono-server`'s direct-mount routes have used since
+  #16545, so the two Hono doors answer one throw alike by construction: the same
+  two conditions, the same 5xx disclosure filter (`looksLikeInternalErrorLeak`),
+  and `details` and `userMessage` forwarded only when the producer declared them.
+  
+  The rule's other limbs come with it, as they did on the direct-mount door. A
+  validation-shaped throw answers `400 VALIDATION_FAILED` with its `fields[]`. A
+  driver fault the engine has already classified keeps its `500` and now carries
+  the code it declared instead of `INTERNAL_ERROR`. Measured: `GET /data/:object`
+  over an object whose table is missing answers `500 DATABASE_ERROR`, with the
+  same message as before.
+  
+  **What did NOT change**, pinned in the same PR through a real `createHonoApp`
+  over the real dispatcher and protocol (`packages/qa/http-conformance`):
+  
+  - a throw that is **not** such an envelope answers what it answered before. A
+    bare `Error` is still `500 INTERNAL_ERROR` carrying `code` and `message`, with
+    no `cause` in the body, and a throw that declares `statusCode` with no
+    registered code keeps that status;
+  - ⛔ no error code is minted and no ledger row is added.
+  
+  `@objectstack/plugin-hono-server` gains one export, `declaredEnvelopeForThrow`,
+  which was module-private. `createHonoApp` imports it rather than restating the
+  rule. Its behaviour is unchanged.
+  
+  Earlier entries say a `createHonoApp` host still renders the `/data` version
+  refusals as `500`. This change ends that: they are answered `409` and `400` as
+  declared.
+  
+  The `409 CONCURRENT_UPDATE` this host now answers carries `currentVersion` and
+  `currentRecord` in `error.details`, the two fields the standalone REST server's
+  `409` carries; `currentRecord` is the row as the caller reads it.
+  
+  Clause-②: yes (widening)
+- 75ced06: fix(hono)!: `createHonoApp` refuses a declared JSON body that does not parse with `400 INVALID_REQUEST` when the dispatched domain reads it, instead of dispatching it as `{}`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, no stored row is rewritten or deleted, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of the `createHonoApp` catch-all and its `/auth/*` fallback for one input: a body declared as JSON that does not parse, which used to be dispatched as `{}` and is now refused when a domain reads it. The remedy is in the requests a client sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The `${prefix}/*` catch-all handed `dispatch()` `{}` for a body that did not parse, and the data domain read that as an empty query or an empty update: a truncated `POST /data/OBJECT/query` answered every row the caller could read, and a truncated `PATCH` answered `200` for an update that changed nothing.
+  
+  What changes for an integrator, on a host that serves `createHonoApp`:
+  
+  - A `POST`, `PUT` or `PATCH` body sent as `application/json` (matched case-insensitively) that is not blank and does not parse, to a domain that reads the parsed body (the data, metadata and every other domain that takes `body`): FROM that domain's answer for `{}`, TO `400` with `{ "success": false, "error": { "code": "INVALID_REQUEST", "message": "The request body could not be parsed as JSON (it was sent as application/json). It was refused rather than read as an empty body: send a well-formed JSON document, or no body at all." } }`. The domain acts on nothing past its read of the body, and the dispatcher's own gates still answer first. This is the same status and body `@objectstack/plugin-hono-server` answers for the same request.
+  - The same applies to the `/auth/*` legacy fallback that runs when no auth service is registered, for every method it hands a body (all but `GET` and `HEAD`).
+  
+  **Remedy, in one line.** Send a JSON body as well-formed JSON with `Content-Type: application/json`, or send no body.
+  
+  **Unchanged.**
+  
+  - An empty or whitespace-only JSON body is dispatched as `{}` (an empty query), as before.
+  - A body that does not declare JSON is read as before: parsed when it is JSON, `{}` when it is not.
+  - The request handed on beside the body still arrives unread, in every case. A domain that forwards it and reads its own bytes answers exactly as before, a malformed JSON body included: `/webhooks/redeliver` and the inbound automation hooks give their own refusal after their own sign-in or signature check, and the `/approvals/act` form `POST` reads its form.
+  - The catch-all dispatches `GET`, `HEAD` and `DELETE` with no body, and the `/auth/*` fallback hands `GET` and `HEAD` `{}`, as before.
+- 76d9dca: fix(hono)!: `createHonoApp` reads a dispatched body by `@objectstack/plugin-hono-server`'s rule, so a JSON body sent as `text/plain`, or any other body that declares neither JSON nor a form, is refused `400 INVALID_REQUEST` when the dispatched domain reads it, instead of being parsed or dispatched as `{}`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, no stored row is rewritten or deleted, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of the `createHonoApp` catch-all and its `/auth/*` fallback for bodies that declare neither JSON nor a form, which used to be parsed as JSON whatever they declared or dispatched as `{}`, and are now refused when a domain reads them. The remedy is in the requests a client sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The `${prefix}/*` catch-all and the `/auth/*` legacy fallback parsed every body as JSON whatever its `Content-Type`, and handed `dispatch()` `{}` for any body that did not parse. So the two Hono doors answered one request two ways: `@objectstack/plugin-hono-server` (`objectstack dev`, `os serve`) refused a valid query body sent as `text/plain`, and this door honoured it; a garbled body that did not declare JSON reached the data domain here as `{}`, the empty query, and read every row the caller could read.
+  
+  What changes for an integrator, on a host that serves `createHonoApp`, for a `POST`, `PUT` or `PATCH` body read by a domain that reads the parsed body (the data, metadata and every other domain that takes `body`), and on the `/auth/*` legacy fallback for every method it hands a body (all but `GET` and `HEAD`):
+  
+  - A JSON body sent as `text/plain`, or as any media type other than JSON or a form: FROM parsed and honoured, TO `400` with `{ "success": false, "error": { "code": "INVALID_REQUEST", "message": "The request body was sent as text/plain, which this server does not read into a request body. It was refused rather than read as an empty body: send it as application/json." } }`, the message naming the media type that was sent.
+  - Any other body that declares neither JSON nor a form (`text/plain`, `application/octet-stream`, a `+json` suffix type such as `application/merge-patch+json`, or no `Content-Type` at all), when the request declares a body (`Content-Length` other than `0`, or `Transfer-Encoding`): FROM `{}`, TO the same refusal ("sent with no Content-Type" when there is none).
+  - A `multipart/form-data` or `application/x-www-form-urlencoded` body: FROM `{}`, TO its parsed fields, as `plugin-hono-server` hands them (Hono's `parseBody`: the last value of a repeated name). A form that does not parse: TO the refusal "The request body could not be parsed as form data (it was sent as multipart/form-data). It was refused rather than read as an empty body."
+  
+  The domain acts on nothing past its read of the body, and the dispatcher's own gates still answer first. Each answer is the status and body `@objectstack/plugin-hono-server` gives the same request. This replaces the earlier `createHonoApp` entry's statement that a body that does not declare JSON is read as before.
+  
+  **Remedy, in one line.** Send a JSON body with `Content-Type: application/json`, or send no body.
+  
+  **Unchanged.**
+  
+  - A body sent as `application/json` (matched case-insensitively) is parsed when well-formed, `{}` when blank or whitespace-only, and refused when it does not parse, as before.
+  - A request that declares no body is dispatched as `{}`, whatever its media type.
+  - The request handed on beside the body still arrives unread, in every case. A domain that forwards it and reads its own bytes answers exactly as before, whatever the body declares: `/webhooks/redeliver` and the inbound automation hooks give their own refusal after their own sign-in or signature check, and the `/approvals/act` form `POST` reads its form.
+  - The catch-all dispatches `GET`, `HEAD` and `DELETE` with no body, and the `/auth/*` fallback hands `GET` and `HEAD` `{}`, as before.
+
+### Patch Changes
+
+- 26aa999: fix(runtime,hono): approval e-mail links work on a kernel with no raw HTTP app — the dispatcher serves `/approvals/act`, and the Hono catch-all no longer consumes request bodies
+  
+  Clause-②: no
+  
+  On a self-hosted server, `@objectstack/plugin-approvals` serves the ADR-0043 action page (the approve / reject link in an approval e-mail or IM message) by mounting `GET` and `POST /api/v1/approvals/act` on the raw Hono app. A hosted tenant kernel has no raw app, so on that shape the path answered `404 ROUTE_NOT_FOUND` and every action link was dead.
+  
+  **`@objectstack/runtime`.** `HttpDispatcher` now serves exactly `/approvals/act` (no sub-paths) for `GET`, `HEAD` and `POST`. It forwards the request, unread, to the request kernel's `approvals` service (`IApprovalService.handleActionPage`) and returns that `Response` as it is.
+  
+  - `HEAD` answers as the self-hosted mount does: the `GET` page's status and headers, with no body. It renders and never decides.
+  - No `approvals` service registered, or one without `handleActionPage`: `501 NOT_IMPLEMENTED`, naming which. Never `ROUTE_NOT_FOUND`.
+  - A member that throws: a sanitised `500 INTERNAL_ERROR`, with the original error in the server log. The same answer, logged, when a transport hands over a `POST` whose body was already read, instead of an "invalid link" page for a live link.
+  - The token is the only credential, as on the self-hosted mount. The project-membership gate now skips the exact act path (unscoped or `/environments/:id`-scoped), so a signed-in caller who is not a member of the environment reaches the page like an anonymous one instead of getting `403 PROJECT_MEMBERSHIP_REQUIRED`. Every other path, `/approvals/act/...` and `/approvals/requests/...` included, is checked as before.
+  
+  **`@objectstack/hono`.** The `createHonoApp` catch-all (and the `/auth/*` fallback) read the JSON body with `c.req.json()`, which consumed the raw request for every `Content-Type`. A domain that forwarded the request got it empty. The body is now parsed from a clone, so `context.request` reaches the dispatcher unread, byte for byte. The parsed `body` the domains receive is unchanged for every input: JSON values as parsed, and `{}` for an empty, form, text or invalid body. The cost is that a request body is buffered twice for the life of the request.
+  
+  Nothing changes on a self-hosted server: the plugin's raw-app mount still serves the path there and never reaches the dispatcher.
+- 19c554d: fix(plugin-hono-server): a `409 CONCURRENT_UPDATE` answered by either Hono door carries `currentVersion`, as the standalone REST server's does (#23531)
+  
+  A stale `If-Match` (or `expectedVersion`) on `PATCH` or `DELETE /data/:object/:id` is refused by the protocol with `409 CONCURRENT_UPDATE`. The standalone REST server's answer carries the server's `currentVersion`, which `wire-format.mdx` documents and a conflict dialog needs: it is the token "Overwrite anyway" sends back as the next `If-Match`. The two Hono doors answered the same refusal without it. They are `@objectstack/hono`'s `createHonoApp`, which answered it `500 INTERNAL_ERROR` (the `@objectstack/hono` entry for #23365 makes it a `409`), and a route mounted on `@objectstack/plugin-hono-server`'s `HonoHttpServer`, which answered it with `code` and `message` only.
+  
+  - FROM `{"success":false,"error":{"code":"CONCURRENT_UPDATE","message":"…"}}` on a `HonoHttpServer` route, and `500` `{"success":false,"error":{"code":"INTERNAL_ERROR","message":"…"}}` on `createHonoApp`
+  - TO `{"success":false,"error":{"code":"CONCURRENT_UPDATE","message":"…","details":{"currentVersion":"…","currentRecord":{…}}}}`
+  
+  The field rides `error.details`, the wrapped envelope's declared context slot. `@objectstack/client` reads a wrapped body's context from there, so `err.details.currentVersion` now carries it on these hosts too. It is read from the classification the REST server applies (`structuredCodeAnswer` in `@objectstack/types`), so it appears only when the conflict stated it. On a `HonoHttpServer` route, status, `code` and `message` are unchanged; on `createHonoApp` they are the `409` the `@objectstack/hono` entry for #23365 states. No other answer changes.
+  
+  `currentRecord` rides beside it, as on the REST server: the row as the caller reads it, which the protocol re-reads under the caller's own context on a version mismatch (#23586).
+  
+  Nothing changes in `@objectstack/hono`'s own code: `createHonoApp` renders through `declaredEnvelopeForThrow` from `@objectstack/plugin-hono-server`.
+  
+  Clause-②: no
+- 5bb9a83: fix(plugin-hono-server): a `409 CONCURRENT_UPDATE` answered by either Hono door carries `currentRecord` as well, the caller's own read of the row, as the standalone REST server's does (#23531)
+  
+  The two Hono doors are `@objectstack/hono`'s `createHonoApp` and a route mounted on `@objectstack/plugin-hono-server`'s `HonoHttpServer`. Their answer to a stale `If-Match` (or `expectedVersion`) on `PATCH` or `DELETE /data/:object/:id` carried neither field: the route answered it with `code` and `message` only, and `createHonoApp` answered it `500 INTERNAL_ERROR`, which the `@objectstack/hono` entry for #23365 makes a `409`. On a version mismatch the protocol now re-reads the row under the caller's own context (#23586), so the record holds only what the caller may read, and these doors forward it beside the server's `currentVersion`.
+  
+  - FROM `{"success":false,"error":{"code":"CONCURRENT_UPDATE","message":"…"}}` on a `HonoHttpServer` route, and `500` `{"success":false,"error":{"code":"INTERNAL_ERROR","message":"…"}}` on `createHonoApp`
+  - TO `{"success":false,"error":{"code":"CONCURRENT_UPDATE","message":"…","details":{"currentVersion":"…","currentRecord":{…}}}}`
+  
+  `currentRecord` is the row as the caller reads it. A field the caller's field-level rules hide is absent from it, and a row the caller's row-level rules hide answers `404 RECORD_NOT_FOUND` with neither field, as the REST server answers. It is read from the classification the REST server applies (`structuredCodeAnswer` in `@objectstack/types`), so it appears only when the conflict stated it, and `@objectstack/client` reads it as `err.details.currentRecord` on these hosts. On a `HonoHttpServer` route, status, `code` and `message` are unchanged; on `createHonoApp` they are the `409` the `@objectstack/hono` entry for #23365 states. No other answer changes.
+  
+  Nothing changes in `@objectstack/hono`'s own code: `createHonoApp` renders through `declaredEnvelopeForThrow` from `@objectstack/plugin-hono-server`.
+  
+  Clause-②: no
+- fa6a608: fix(hono): `createHonoApp`'s catch arms withhold a driver diagnostic from an undeclared `500` instead of shipping it to the client (#23532)
+  
+  Clause-②: no
+  
+  `@objectstack/hono`'s `createHonoApp` has two catch arms: the auth mount's, and the `${prefix}/*` catch-all's around `HttpDispatcher.dispatch()`. A throw that does not declare an ADR-0112 envelope is answered from its own `message`, and that message was shipped unread. A driver diagnostic therefore reached the client verbatim: on a host whose object `ghost` was registered but whose table was never synced, `POST /api/v1/data/ghost` answered `500 INTERNAL_ERROR` with the message `insert into [statement and bound values redacted] - no such table: ghost`, naming the SQLite error and the physical table.
+  
+  **What changed.** Before it ships that message, the arm now asks `looksLikeInternalErrorLeak` (`@objectstack/types`), as every other door that emits a thrown message already does: `HttpDispatcher.error`, the REST registrars, `@objectstack/plugin-hono-server`'s direct-mount routes and this adapter's own `/auth/config` arm. When the answer is a `5xx` and the message looks like a driver or SQL dump, the message is replaced by the same text those doors use, `Internal server error`. The status and the `code` are unchanged.
+  
+  **What did NOT change:**
+  
+  - a `5xx` whose message does not look like a dump keeps it: a bare `new Error('boom')` is still `500 INTERNAL_ERROR` with the message `boom`;
+  - a `4xx` keeps its message, as on the other doors, because a `4xx` message is an answer meant for the caller;
+  - a throw that declares an ADR-0112 envelope is answered as declared, as before.
+- 9822b05: fix(hono): on a `createHonoApp` host a `HEAD` is answered as its `GET` (no body), as the standalone server answers it; `HEAD /api/v1/mcp/skill` no longer answers `405` with `Allow: GET`
+  
+  Clause-②: no
+  
+  `createHonoApp`'s `${prefix}/*` catch-all handed the dispatcher the request's raw verb. Hono answers a `HEAD` from the `GET` route, but the verb still read `HEAD`, and the dispatcher's domains decide by comparing it with `GET`, so a `HEAD` was not answered as its `GET` on this host. Measured: `HEAD /api/v1/mcp/skill` answered `405 METHOD_NOT_ALLOWED` with `Allow: GET`; `/health`, `/ready` and the scoped root `/environments/:id` answered `404 ROUTE_NOT_FOUND`; signed in, `/analytics/meta` answered `404` and `/ai/agents` `501`; anonymous, the public `/share-links/:token/resolve` answered `401` where `GET` answers `501`. With an auth service, `HEAD /auth/config` answered `404` (it was forwarded to better-auth instead of answered as the `GET`).
+  
+  - **`@objectstack/hono`.** The catch-all now dispatches a `HEAD` as `GET`, and the `/auth/config` branch answers a `HEAD` as its `GET`. Every dispatcher route answers `HEAD` with its `GET` answer's status and headers, and Hono drops the body. A path that serves no `GET` keeps its `GET` answer for `HEAD` (its `405` and `Allow`, or `401` to an anonymous caller). The standalone server (`HonoServerPlugin` with the dispatcher plugin) already answered `HEAD` this way. Only the verb changes: a domain that forwards the request (the `/mcp` transport, the `/approvals/act` page) is still handed the client's `HEAD` request.
+  - **`@objectstack/runtime`.** The `/approvals/act` domain decides whether a request is a `HEAD` from the forwarded request's own method, not from the dispatcher's verb. So a `HEAD` still reaches the approvals member as a `GET` and is answered with no body.
+- 1ef0ee8: fix(hono): on a `createHonoApp` host, `GET /api/v1/mcp/skill` answers the raw markdown with one `Content-Type: text/markdown; charset=utf-8` and `Cache-Control: no-store`, as the standalone server does
+  
+  Clause-②: no
+  
+  - **What a caller got.** The skill is served as a single string event on the dispatcher's `result` stream channel. The adapter's stream writer framed every event outside a Vercel data stream as `data: <JSON>`, so the body was an SSE frame of a JSON-encoded string (`data: "---\nname: …"`), not markdown. It also set its own `Content-Type` and `Cache-Control` beside the domain's, so the answer carried `text/markdown; charset=utf-8, text/markdown; charset=utf-8` and `no-cache, no-store` (on a socket: two `Content-Type` lines and two `Cache-Control` lines).
+  - **What it answers now.** A string event is written as given, in every stream mode, and a header the producer sets replaces the adapter's default of the same name, whatever its case. Object events are still one `data:` frame each (one JSON line in a Vercel data stream), and a stream that sets no headers still gets `text/event-stream`, `no-cache` and `keep-alive`.
+  - **Unchanged:** the AI chat streams, which reach the same writer as pre-encoded Vercel data stream frames or as object parts, and every other route.
+- Updated dependencies [191e043]
+- Updated dependencies [c395405]
+- Updated dependencies [12d1476]
+- Updated dependencies [3b8e2b1]
+- Updated dependencies [41edf73]
+- Updated dependencies [014863d]
+- Updated dependencies [f7005cb]
+- Updated dependencies [9b2953d]
+- Updated dependencies [3230d66]
+- Updated dependencies [f7546a4]
+- Updated dependencies [25e16ab]
+- Updated dependencies [fec87e7]
+- Updated dependencies [34dba5a]
+- Updated dependencies [67b669e]
+- Updated dependencies [45e206e]
+- Updated dependencies [cd3d391]
+- Updated dependencies [95a8435]
+- Updated dependencies [9e9e6f9]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [240890c]
+- Updated dependencies [1fb274e]
+- Updated dependencies [5cfd866]
+- Updated dependencies [a543e24]
+- Updated dependencies [d0bb78e]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3aa0c7b]
+- Updated dependencies [fbcbcf1]
+- Updated dependencies [f4069c5]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [ca135dc]
+- Updated dependencies [746637e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [c572fe2]
+- Updated dependencies [b53b949]
+- Updated dependencies [faf6348]
+- Updated dependencies [0fea05f]
+- Updated dependencies [26aa999]
+- Updated dependencies [cb3bb93]
+- Updated dependencies [5081090]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [6d5191e]
+- Updated dependencies [8558668]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [51f36e7]
+- Updated dependencies [20028df]
+- Updated dependencies [8bc7836]
+- Updated dependencies [117817e]
+- Updated dependencies [0cbfb7c]
+- Updated dependencies [7f2f081]
+- Updated dependencies [4267484]
+- Updated dependencies [c5b43b6]
+- Updated dependencies [6662e3f]
+- Updated dependencies [0aef788]
+- Updated dependencies [8c10776]
+- Updated dependencies [8024e12]
+- Updated dependencies [a3d47c2]
+- Updated dependencies [21c8644]
+- Updated dependencies [d4aaeaf]
+- Updated dependencies [3c1a046]
+- Updated dependencies [917b1a0]
+- Updated dependencies [d9d7edd]
+- Updated dependencies [d45d0e9]
+- Updated dependencies [cb9841a]
+- Updated dependencies [8ed3786]
+- Updated dependencies [584e737]
+- Updated dependencies [37510aa]
+- Updated dependencies [01d5034]
+- Updated dependencies [f24574a]
+- Updated dependencies [430e5f5]
+- Updated dependencies [5d3018d]
+- Updated dependencies [3d231ba]
+- Updated dependencies [0f05907]
+- Updated dependencies [28e294f]
+- Updated dependencies [b1e9280]
+- Updated dependencies [e1cefa5]
+- Updated dependencies [1d79556]
+- Updated dependencies [c980d11]
+- Updated dependencies [0ecac96]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [daafae6]
+- Updated dependencies [650933e]
+- Updated dependencies [cac0be8]
+- Updated dependencies [1f3ac4f]
+- Updated dependencies [70d4c06]
+- Updated dependencies [9fcea20]
+- Updated dependencies [19c554d]
+- Updated dependencies [5bb9a83]
+- Updated dependencies [c263588]
+- Updated dependencies [ee0e115]
+- Updated dependencies [7c6b7f4]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [f7cd580]
+- Updated dependencies [c9810dd]
+- Updated dependencies [cd86e41]
+- Updated dependencies [395ca21]
+- Updated dependencies [9e0945c]
+- Updated dependencies [7428da0]
+- Updated dependencies [6ee483c]
+- Updated dependencies [b55be42]
+- Updated dependencies [f7a5ebe]
+- Updated dependencies [9d4fb3c]
+- Updated dependencies [c5cf546]
+- Updated dependencies [34b740f]
+- Updated dependencies [ae4dfaf]
+- Updated dependencies [2e15620]
+- Updated dependencies [0cb45e9]
+- Updated dependencies [605aa01]
+- Updated dependencies [9e797a8]
+- Updated dependencies [75ced06]
+- Updated dependencies [66d2757]
+- Updated dependencies [6e43b7b]
+- Updated dependencies [6dede7a]
+- Updated dependencies [727091c]
+- Updated dependencies [62f959d]
+- Updated dependencies [f792290]
+- Updated dependencies [eda6f14]
+- Updated dependencies [d702b18]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [5a9a80b]
+- Updated dependencies [8eccf51]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [58a2faa]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [cbfa5e4]
+- Updated dependencies [9822b05]
+- Updated dependencies [889bf12]
+- Updated dependencies [7a8733f]
+- Updated dependencies [1e001c7]
+- Updated dependencies [d79dc48]
+- Updated dependencies [51ad8e4]
+- Updated dependencies [c4526a7]
+- Updated dependencies [fa26308]
+- Updated dependencies [6868514]
+- Updated dependencies [2a1e48a]
+- Updated dependencies [2ec6827]
+- Updated dependencies [964a237]
+- Updated dependencies [cdf3777]
+  - @objectstack/runtime@18.0.0
+  - @objectstack/types@18.0.0
+  - @objectstack/plugin-hono-server@18.0.0
+
 ## 18.0.0-next.5
 
 ### Patch Changes

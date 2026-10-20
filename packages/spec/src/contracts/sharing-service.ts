@@ -481,6 +481,15 @@ export type SharingRuleRecipientType = 'user' | 'team' | 'business_unit' | 'posi
 export interface SharingRuleRow {
   id: string;
   organization_id?: string | null;
+  /**
+   * [ADR-0131 D2/D8] `true` on a DECLARED rule's projection that sweeps the
+   * whole deployment — the one projection a declared rule is served as under
+   * the `single` posture. Such a projection carries no `organization_id`:
+   * deployment-wide is this typed marker, never a NULL organization. Absent on
+   * every stored `sys_sharing_rule` row, and on a declared rule's
+   * per-organization projections under a walled posture.
+   */
+  deploymentWide?: true;
   name: string;
   label: string;
   description?: string | null;
