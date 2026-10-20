@@ -60,11 +60,14 @@ export interface ApprovalNotificationText {
   readonly keyedText: ApprovalKeyedText;
 }
 
-/** The record an approval notification names: `{{object}} {{record}}`. */
-export interface ApprovalSubjectParams {
+/**
+ * The record an approval notification names: `{{object}} {{record}}`. A type,
+ * not an interface, so it spreads into a sentence's params as it stands.
+ */
+export type ApprovalSubjectParams = {
   readonly object: { readonly key: string; readonly fallback: string };
   readonly record: string;
-}
+};
 
 /** The `II18nService` key of an approval sentence, `messages.<id>`. */
 export function approvalMessageKey(id: ApprovalMessageId): string {
