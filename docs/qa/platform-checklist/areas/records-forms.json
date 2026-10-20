@@ -66,7 +66,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -125,7 +125,7 @@
         {
           "clause": "record History reflects the create and the update with display values (option labels, localized dates, real actor), not raw audit payloads or phantom value→null rows",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the History tab rendered, read its entries — same contract objectui e2e/live/record-history-display.spec.ts pins on showcase Project",
+          "verify": "after a screenshot confirms the History tab rendered, read its entries — same contract objectui e2e/live/record-history-display.spec.ts pins on showcase_account, the showcase's enable.trackHistory object (its option labels, the localized Customer Since date and the resolved owner; objectui blob 7ebc45106cff at the console pin 616df6598b42)",
           "evidence": "screenshot + entries"
         },
         {
@@ -231,6 +231,12 @@
           "date": "2026-10-19",
           "change": "steps[2], acceptance[0].verify, acceptance[6].verify, negative[2] and fixtures.provisioning.why corrected from QA run #24572 (18.0 sweep, 5b14b7f3) and the P0 run #24556, re-read at objectstack f89d29e382. (1) The New form submits select defaults the step never touches (sales_region:'amer', default:true in account.object.ts), so the payload diff expects that key. (2) acceptance[6]'s ownership half is unobservable when the admin clones its own row; the provisioned contributor member cloning a seeded showcase_field_zoo row (allowCreate there, permission-sets.ts) is a non-owner cloner, and the same clone shows the autonumber and formula re-derived. (3) negative[2] named `status`, which defaults on showcase_account; the required field with no default there is `name`. The round-2 Tier 1 note that this item's automated.ref over-claims does not hold and is not taken: the ref already scopes itself to 'acceptance[6]'s READONLY half ONLY … Every other clause still needs the run'. Wave anchor #24579 (round 3 named this item)",
           "ref": "#24671"
+        },
+        {
+          "revision": 12,
+          "date": "2026-10-20",
+          "change": "acceptance[4].verify names the object the objectui spec drives. Round 14's out-of-scope finding (report 6289612504 on PR #24857, wave anchor #24579): it said the spec pins the History contract 'on showcase Project'. Read at objectstack's .objectui-sha pin 616df6598b42 (objectui blob 7ebc45106cff): e2e/live/record-history-display.spec.ts creates and patches a showcase_account, the showcase's enable.trackHistory object, and asserts its option labels, the localized signed_on date and the resolved owner. The live verdict at the pin is not measured here. No clause changed",
+          "ref": "#PENDING-24579R16"
         }
       ]
     },
@@ -4198,7 +4204,7 @@
       "title": "Field-level `unique` on the write path: colliding writes refused 409 UNIQUE_VIOLATION on both driver families, NULL-distinct, organization-scoped by default, whole-batch refusal, autonumber resync converges",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4251,7 +4257,7 @@
           "evidence": "the refusal + full before/after row reads"
         },
         {
-          "clause": "the scope matrix matches ADR-0120 D1/D3 on BOTH families: bare `unique: true` ≡ 'organization' (per-tenant where a tenant column exists; NULL-organization rows fold to ONE bucket), 'global' is platform-wide even with a tenant column — and the SQL family materializes the same rule via uniqueIndexesFromFields (driver-sql/src/schema-drift.ts), answering the same 409 UNIQUE_VIOLATION over REST",
+          "clause": "the scope matrix matches ADR-0120 D1/D3 on BOTH families: bare `unique: true` ≡ 'organization' (per-tenant where a tenant column exists; NULL-organization rows fold to ONE bucket), 'global' is platform-wide even with a tenant column — and the SQL family materializes the same rule via uniqueIndexesFromFields (driver-sql/src/schema-drift.ts), its refusal satisfying isUniqueViolationError (packages/types/src/unique-violation.ts#isUniqueViolationError), the predicate the platform's 409 UNIQUE_VIOLATION envelope is built on (packages/objectql/src/duplicate-record-error.ts#envelopeUniqueViolation): measured at SqlDriver through the pins' createAsApi mapping, never over a REST door (the REST answers are acceptance[0]–[3]'s, on the stock SQLite boot)",
           "oracle": "test",
           "verify": "memory-unique-constraint.test.ts (scope legs) + sql-driver-8577-tenant-scoped-declared-unique.test.ts green; live two-org probe only if two organizations are provisioned (knownGaps)",
           "evidence": "test output (+ live scope probe where run)"
@@ -4274,7 +4280,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/drivers/driver-memory/src/memory-unique-constraint.test.ts — acceptance[4]'s memory-family legs (the \"[#13197] scoping matches driver-sql's ADR-0120 D1/D3 rule\" describe), acceptance[5] ('the refusal is recognisable to the ENGINE, so the autonumber resync converges'), negative[2] ('updateMany refuses BEFORE mutating anything — no half-applied batch') and negative[3]'s memory-family half, at the memory driver; + packages/drivers/driver-sql/src/sql-driver-8577-tenant-scoped-declared-unique.test.ts + packages/drivers/driver-sql/src/sql-driver-declared-index-organization-respelling.test.ts — acceptance[4]'s SQL-family legs and negative[3]'s SQL-family half, at SqlDriver over better-sqlite3. NO pin drives a REST door: the SQL pins map each driver refusal through a test-local createAsApi helper to the { status: 409, code: 'UNIQUE_VIOLATION' } envelope rest-server.ts derives, so acceptance[4]'s 'same 409 UNIQUE_VIOLATION over REST' wording rests on that mapping, and every pin is driver-level evidence for acceptance[0]–[3], never their pass: those clauses score the REST answer on the stock SQLite boot"
+        "ref": "packages/drivers/driver-memory/src/memory-unique-constraint.test.ts — acceptance[4]'s memory-family legs (the \"[#13197] scoping matches driver-sql's ADR-0120 D1/D3 rule\" describe), acceptance[5] ('the refusal is recognisable to the ENGINE, so the autonumber resync converges'), negative[2] ('updateMany refuses BEFORE mutating anything — no half-applied batch') and negative[3]'s memory-family half, at the memory driver; + packages/drivers/driver-sql/src/sql-driver-8577-tenant-scoped-declared-unique.test.ts + packages/drivers/driver-sql/src/sql-driver-declared-index-organization-respelling.test.ts — acceptance[4]'s SQL-family legs and negative[3]'s SQL-family half, at SqlDriver over better-sqlite3. NO pin drives a REST door: the SQL pins map each driver refusal through a test-local createAsApi helper to the { status: 409, code: 'UNIQUE_VIOLATION' } envelope rest-server.ts derives, so acceptance[4]'s SQL-family leg is that mapping, as its clause says, and every pin is driver-level evidence for acceptance[0]–[3], never their pass: those clauses score the REST answer on the stock SQLite boot"
       },
       "source": [
         "packages/drivers/driver-memory/src/memory-unique-constraint.ts#scope (#13197/#13249, commit 56c093c — single judgment point; scope table read off driver-sql, arm for arm)",
@@ -4314,6 +4320,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause; acceptance[1].verify, acceptance[2].verify, acceptance[3].verify and steps[4] rewritten — checklist-accuracy findings of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4), round 15 of wave anchor #24579. (1) The ref said the two SQL pins assert '409 UNIQUE_VIOLATION over real REST'. They drive SqlDriver over better-sqlite3 and map its refusal to that envelope through a test-local createAsApi helper, so no REST door is driven. (2) The sweep-wide rule-6 contradiction #24840 names at acceptance[1]–[3]: those clauses score the REST answer, and their verifies and steps[4] told the runner to score them from the memory-driver pin ('score from the pin'). By RUNNER rule 6 (a pin scores only the layer it drives) the pins are now cited as driver-level evidence only, and an updateMany door the boot does not expose is recorded blocked(fixture). The ref names the clauses each pin scores: acceptance[4] (test oracle) and [5], and negative[2] and [3]. Read at base b1676441ba. No clause changed",
           "ref": "#24891"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "acceptance[4].clause states what its oracle measures, and automated.ref's sentence quoting the old wording follows it. PR #24891's carried finding (round 15 left the clause text, 'the same 409 UNIQUE_VIOLATION over REST', under a test oracle). Read at base feb09db14a: the SQL pins drive SqlDriver over better-sqlite3 and map each refusal through a test-local createAsApi helper with isUniqueViolationError (@objectstack/types), the predicate envelopeUniqueViolation (objectql duplicate-record-error.ts) builds the 409 on; no pin drives a REST door. acceptance[0]–[3] drive the REST door live, so no knownGaps line is owed. The scope matrix the clause asserts is unchanged",
+          "ref": "#PENDING-24579R16"
         }
       ]
     },
