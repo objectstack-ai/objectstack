@@ -99,9 +99,11 @@
  *   0  every skipped check-run on the head is in the roster
  *   4  at least one skipped check-run is outside it — each named and classified
  *   3  NOT MEASURED: the head could not be read (a sha the API cannot resolve,
- *      404, network, refused credential), carries no check-runs at all, or has
- *      a check-run that has not completed (the skip set is not final). ⛔ Never
- *      0 — "could not read" must never be legible as "every skip is expected".
+ *      404, network, refused credential), carries no check-runs at all, has a
+ *      check-run that has not completed (the skip set is not final), or the
+ *      roster in hand is not the base branch's (`rosterGap` below). ⛔ Never
+ *      0 — "could not read" must never be legible as "every skip is expected",
+ *      nor a roster older than the head's workflows as a confident ⛔ or OK.
  *   1  --self-test failed              2  usage error / an unclassified failure
  *
  * Report-only: this file never writes to GitHub (pinned structurally in the
@@ -113,15 +115,13 @@
  *
  * The board is `PM_SWEEP_REPO`, else `GITHUB_REPOSITORY`, else the default,
  * resolved by the resolver imported from `check-half-states.mjs` (never
- * restated). The roster, however, is THIS repository's workflows — a sibling
- * repo needs its own roster, and pointing this file at another board judges
- * that board's skips against objectstack's roster; the provenance line says
- * which board was read so the mismatch is visible. Reads go down a two-rung
- * ladder: the exported token first, and the header-less public read when the
- * token is refused. In a proxied agent
- * container node's `fetch` bypasses `HTTPS_PROXY`, so a live run re-execs
- * itself once with `--use-env-proxy` (the plan is imported, the guard variable
- * is this file's own).
+ * restated). The roster is THIS repository's, and a live run judges only with
+ * the base branch's own roster in hand (exit 3 otherwise), so another board —
+ * whose base carries neither this file nor these workflows — is refused, never
+ * judged against objectstack's roster. Reads go down a two-rung ladder: the
+ * exported token first, then the header-less public read when it is refused.
+ * In a proxied container node's `fetch` bypasses `HTTPS_PROXY`, so a live run
+ * re-execs once with `--use-env-proxy` (imported plan, this file's own guard).
  */
 
 // The structural self-test case below reads the enqueue bar and asserts it still
@@ -134,6 +134,7 @@
 
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -418,13 +419,124 @@ export function workflowReader(root = ROOT) {
   };
 }
 
+/** A workflow file, by name — one spelling for the local scan and the base's listing. */
+const WORKFLOW_FILE = /\.ya?ml$/;
+
 /** Every workflow file under a root, sorted; empty when the directory is absent. */
 export function listWorkflowFiles(root = ROOT) {
   const dir = join(root, WORKFLOW_DIR);
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
-    .filter((f) => /\.ya?ml$/.test(f))
+    .filter((f) => WORKFLOW_FILE.test(f))
     .sort();
+}
+
+// ---------------------------------------------------------------------------
+// The roster's own freshness — is the roster in hand the base branch's?
+// ---------------------------------------------------------------------------
+
+/**
+ * The roster a live run judges with is a function of exactly these files, as
+ * they sit in the checkout the command runs from: THIS file (the listed half,
+ * and the derivation's code) and every workflow file (the derived half). A
+ * head's `pull_request` check-runs come from the workflows of the merge they
+ * were built on — the head over its base branch's tip at that moment. So a checkout behind
+ * the base reads a job rostered on the base since as an unexpected skip (exit
+ * 4; measured on PR #24771's head `7a9bc58c6`, judged from `6b222464c`, one
+ * merge before the `18.x upgrade harness (opt-in)` job and its row landed),
+ * and a row the base has since retired as expected. Neither is a reading, so a
+ * live run compares the roster in hand with the base's BEFORE it judges, and
+ * answers exit 3 — naming the gap and the re-pin — when they differ.
+ *
+ * What is compared, and why not something cheaper (each measured 2026-10-20):
+ *
+ *   - BLOB IDENTITY of the roster's sources, not ancestry. A behind-count fires
+ *     on every merge — 792 first-parent commits on main in the 7 days to
+ *     `b1676441b`, of which 14 touched `.github/workflows` and 1 this file — so
+ *     it would refuse on ~98% of merges, none of which can move the roster; and
+ *     `merge-base` / `rev-list` answer green from a shallow clone's truncated
+ *     history. Equal sources make an equal roster by construction, and blob ids
+ *     need no history at all.
+ *   - the base branch's LIVE TIP, read through the contents API — not the local
+ *     `origin/<base>`, which is only as fresh as the last fetch (a checkout
+ *     behind is exactly one whose fetch may be), and not the PR's `base.sha`,
+ *     which does not follow the base: PR #24771 read `580fd4ed3` (04:15Z) after
+ *     its head was re-pushed at 08:06Z onto a main already carrying the new
+ *     job, so the stale `6b222464c` would have compared as ahead of its base.
+ *   - the WORKING TREE's bytes, not HEAD's: the judge evaluates the files on
+ *     disk, so a local edit to either half is a roster that is not the base's.
+ *
+ * Boundary: a head whose last run predates a roster change on its base is
+ * judged by the newer roster. An added row costs nothing (that head's runs
+ * never carried the new job); a retired row's skip reads exit 4, which is also
+ * the news that the head's runs are older than its base. `--head` with no PR
+ * compares with the board's default branch. The offline paths
+ * (`--check-runs-json`, `--roster`) are unchanged: no network, no comparison —
+ * they judge with the roster in hand, exactly as before.
+ */
+
+/** This file, repo-relative: the listed half of the roster and the derivation's code. */
+export const ROSTER_SELF = 'scripts/pm/check-expected-skips.mjs';
+
+/** At most this many gap paths are printed; the rest are counted. */
+const GAP_LINES = 12;
+
+/** git's blob id for a file's bytes — sha1 over `blob <size>`, one zero byte, then the bytes: the `sha` the contents API reports. */
+export function gitBlobSha(bytes) {
+  const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes), 'utf8');
+  return createHash('sha1').update(`blob ${buf.length}`).update(Buffer.from([0])).update(buf).digest('hex');
+}
+
+/**
+ * The roster's sources in a checkout's WORKING TREE, as path → blob id: this
+ * file and every workflow file the derivation scans. A source that cannot be
+ * read is left out, so the gap names it rather than the comparison passing.
+ */
+export function localRosterSources(root = ROOT) {
+  const sources = new Map();
+  for (const path of [ROSTER_SELF, ...listWorkflowFiles(root).map((f) => `${WORKFLOW_DIR}/${f}`)]) {
+    try {
+      sources.set(path, gitBlobSha(readFileSync(join(root, path))));
+    } catch {
+      // left out on purpose: rosterGap reports it as absent here
+    }
+  }
+  return sources;
+}
+
+/**
+ * The roster sources that differ between the checkout and the base — pure, so
+ * the behind and at-tip cases are fixtures. Empty means the two rosters are the
+ * same bytes. Each entry is `differs`, `absent-here` (the base has it, this
+ * checkout does not) or `here-only` (the base does not), sorted by path.
+ *
+ * @param {Map<string, string>} here  path → blob id, this checkout
+ * @param {Map<string, string>} base  path → blob id, the base's tip
+ */
+export function rosterGap(here, base) {
+  const gap = [];
+  for (const path of [...new Set([...here.keys(), ...base.keys()])].sort()) {
+    const mine = here.get(path) ?? null;
+    const theirs = base.get(path) ?? null;
+    if (mine === theirs) continue;
+    gap.push({ path, here: mine, base: theirs, kind: mine === null ? 'absent-here' : theirs === null ? 'here-only' : 'differs' });
+  }
+  return gap;
+}
+
+/** The refusal's detail for a non-empty gap: each path (capped), then the re-pin. */
+export function renderRosterGap(gap, { ref, root = ROOT }) {
+  const short = (sha) => String(sha).slice(0, 9);
+  const L = gap.slice(0, GAP_LINES).map((g) =>
+    g.kind === 'absent-here'
+      ? `${g.path} — on ${ref} (${short(g.base)}), absent here`
+      : g.kind === 'here-only'
+        ? `${g.path} — here (${short(g.here)}), absent on ${ref}`
+        : `${g.path} — here ${short(g.here)}, on ${ref} ${short(g.base)}`,
+  );
+  if (gap.length > GAP_LINES) L.push(`…and ${gap.length - GAP_LINES} more`);
+  L.push(`re-pin to ${ref}'s tip, then re-run: git -C ${root} fetch origin ${ref} && git -C ${root} checkout --detach origin/${ref}`);
+  return L;
 }
 
 // ---------------------------------------------------------------------------
@@ -790,7 +902,38 @@ async function resolvePrHead(number, repo) {
   if (read.verdict.kind !== 'ok') return read;
   const pr = read.value;
   if (typeof pr?.head?.sha !== 'string') return { verdict: { kind: 'not-a-pull', headline: `/pulls/${number} answered without a head sha` } };
-  return { verdict: read.verdict, value: { sha: pr.head.sha, state: pr.state, draft: pr.draft === true, merged: pr.merged_at ?? null } };
+  return {
+    verdict: read.verdict,
+    value: { sha: pr.head.sha, base: typeof pr.base?.ref === 'string' ? pr.base.ref : null, state: pr.state, draft: pr.draft === true, merged: pr.merged_at ?? null },
+  };
+}
+
+/** The board's default branch — the base a bare `--head` is compared with. */
+async function resolveDefaultBranch(repo) {
+  const read = await guarded(() => rest(`/repos/${repo}`));
+  if (read.verdict.kind !== 'ok') return read;
+  const ref = read.value?.default_branch;
+  if (typeof ref !== 'string' || !ref) return { verdict: { kind: 'not-a-repo', headline: `/repos/${repo} answered without a default branch` } };
+  return { verdict: read.verdict, value: ref };
+}
+
+/**
+ * The base's roster sources at its LIVE tip, as path → blob id — two directory
+ * listings through the contents API: no checkout, no history, no fetch.
+ */
+export async function readBaseRosterSources(repo, ref) {
+  const sources = new Map();
+  for (const dir of [ROSTER_SELF.slice(0, ROSTER_SELF.lastIndexOf('/')), WORKFLOW_DIR]) {
+    const read = await guarded(() => rest(`/repos/${repo}/contents/${dir}?ref=${encodeURIComponent(ref)}`));
+    if (read.verdict.kind === 'not-found') return { verdict: { kind: 'not-found', headline: `HTTP 404 on ${dir} at ${ref} — the base carries no such directory, or there is no such ref` } };
+    if (read.verdict.kind !== 'ok') return { verdict: { kind: read.verdict.kind, headline: `${dir} at ${ref}: ${read.verdict.headline}` } };
+    if (!Array.isArray(read.value)) return { verdict: { kind: 'not-a-listing', headline: `${dir} at ${ref} answered without a directory listing` } };
+    for (const entry of read.value) {
+      if (entry?.type !== 'file' || typeof entry.path !== 'string' || typeof entry.sha !== 'string') continue;
+      if (dir === WORKFLOW_DIR ? WORKFLOW_FILE.test(entry.path) : entry.path === ROSTER_SELF) sources.set(entry.path, entry.sha);
+    }
+  }
+  return { verdict: classifyRead(), value: sources };
 }
 
 /** The full check-runs listing for one sha, paginated until `total_count` is met. */
@@ -899,10 +1042,12 @@ export function renderReport(judgement, meta = {}) {
     for (const o of judgement.other) L.push(`    ${o.name} = ${o.conclusion}${o.suite !== null ? `  (check suite ${o.suite})` : ''}`);
   }
   const exit = verdictExit(judgement);
+  // A live verdict names whose roster judged it; the offline line is unchanged.
+  const roster = meta.rosterRef ? `${meta.rosterRef}'s roster` : 'the roster';
   L.push(
     exit === EXIT_OK
-      ? `VERDICT check-expected-skips: OK — ${skipped} skipped check-run(s), every one in the roster (exit ${EXIT_OK})`
-      : `VERDICT check-expected-skips: ⛔ ${judgement.unexpected.length} skipped check-run(s) outside the roster (exit ${EXIT_UNEXPECTED_SKIP})`,
+      ? `VERDICT check-expected-skips: OK — ${skipped} skipped check-run(s), every one in ${roster} (exit ${EXIT_OK})`
+      : `VERDICT check-expected-skips: ⛔ ${judgement.unexpected.length} skipped check-run(s) outside ${roster} (exit ${EXIT_UNEXPECTED_SKIP})`,
   );
   return L;
 }
@@ -935,7 +1080,7 @@ export const USAGE = [
   '',
   '  exit 0  every skipped check-run on the head is in the roster',
   '  exit 4  a skipped check-run is outside it (named and classified)',
-  '  exit 3  NOT MEASURED — unreadable head, no check-runs, or a check-run still running',
+  "  exit 3  NOT MEASURED — unreadable head, no check-runs, a check-run still running, or a roster that is not the base branch's",
 ];
 
 export function parseArgs(argv) {
@@ -1005,14 +1150,37 @@ async function run(argv) {
     // answers about the wrong route. Re-exec first, then ask.
     const rearmed = rearmThroughProxy(argv);
     if (rearmed !== null) return rearmed;
-    console.error(`board: ${sweep.repo} (${sweep.source}${sweep.source === 'default' ? `, ${DEFAULT_SWEEP_REPO}` : ''}); roster: this checkout's workflows.`);
+    console.error(`board: ${sweep.repo} (${sweep.source}${sweep.source === 'default' ? `, ${DEFAULT_SWEEP_REPO}` : ''}); roster: this checkout's, compared with the base branch's tip before judging.`);
     let sha = opts.head;
+    let base = null;
     if (opts.pr !== null) {
       const resolved = await resolvePrHead(opts.pr, sweep.repo);
       if (resolved.verdict.kind !== 'ok') return reportNotMeasured(`PR #${opts.pr}: ${resolved.verdict.headline}`, [readPathLine()]);
       sha = resolved.value.sha;
+      base = resolved.value.base;
       meta.pr = { number: Number(opts.pr), state: resolved.value.state, draft: resolved.value.draft, merged: resolved.value.merged };
+      if (!base) return reportNotMeasured(`PR #${opts.pr} answered without a base branch — the roster in hand cannot be compared with one`, [readPathLine()]);
+    } else {
+      const branch = await resolveDefaultBranch(sweep.repo);
+      if (branch.verdict.kind !== 'ok') return reportNotMeasured(`the default branch of ${sweep.repo}: ${branch.verdict.headline}`, [readPathLine()]);
+      base = branch.value;
     }
+    // The roster in hand must BE the base's before it judges anything (see rosterGap).
+    const baseSources = await readBaseRosterSources(sweep.repo, base);
+    if (baseSources.verdict.kind !== 'ok') {
+      return reportNotMeasured(`the roster in hand cannot be shown to be ${base}'s — ${baseSources.verdict.headline}`, [readPathLine()]);
+    }
+    const here = localRosterSources(ROOT);
+    const gap = rosterGap(here, baseSources.value);
+    if (gap.length > 0) {
+      return reportNotMeasured(
+        `the roster in hand is not ${sweep.repo}@${base}'s: ${gap.length} of its source file(s) differ from that branch's tip. ` +
+          "A stale roster turns a newly rostered skip into a false ⛔ and a retired row's skip into a false OK, so it judges this head neither way",
+        [...renderRosterGap(gap, { ref: base }), readPathLine()],
+      );
+    }
+    meta.rosterRef = base;
+    console.error(`roster: identical to ${sweep.repo}@${base}'s tip — this file and ${here.size - 1} workflow file(s), by blob id (no history read).`);
     const listing = await readCheckRuns(sha, sweep.repo);
     if (listing.verdict.kind !== 'ok') return reportNotMeasured(`check-runs of ${sha}: ${listing.verdict.headline}`, [readPathLine()]);
     payload = listing.value;
@@ -1340,6 +1508,57 @@ export function selfTest() {
   t('live derive: the listed and derived halves share no name', live.derivation.rows.some((r) => EXPECTED_SKIPS.some((l) => l.name === r.name)), false);
   t('live derive: the joined roster is frozen and duplicate-free', Object.isFrozen(live.roster) && new Set(live.roster.map((r) => r.name)).size === live.roster.length, true);
 
+  // ---- the roster's freshness: the roster in hand against the base's ----------
+  t("freshness: an empty file's blob id is git's", gitBlobSha(''), 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391');
+  t("freshness: …and so is a one-line file's (the id the contents API reports)", gitBlobSha('hello\n'), 'ce013625030ba8dba906f756967f9e9ca394464a');
+  t('freshness: the repo-relative self path resolves to the file running', join(ROOT, ROSTER_SELF), SELF_PATH);
+  const hereLive = localRosterSources(ROOT);
+  t(
+    "freshness: this checkout's sources are this file plus every workflow the derivation scans",
+    hereLive.size === liveFiles.length + 1 && hereLive.has(ROSTER_SELF) && liveFiles.every((f) => hereLive.has(`${WORKFLOW_DIR}/${f}`)),
+    true,
+  );
+  t('freshness: AT TIP — a base whose sources equal the checkout leaves no gap', rosterGap(hereLive, new Map(hereLive)).length, 0);
+  // The measured shape: a checkout one merge behind a base that added an opt-in
+  // job's workflow and its row. Blob ids are fixtures; only equality matters.
+  const NEW_JOB = '18.x upgrade harness (opt-in)';
+  const NEW_WORKFLOW = `${WORKFLOW_DIR}/upgrade-harness-optin.yml`;
+  const staleHere = new Map([[ROSTER_SELF, 'a'.repeat(40)], [`${WORKFLOW_DIR}/ci.yml`, 'c'.repeat(40)]]);
+  const tipBase = new Map([[ROSTER_SELF, 'b'.repeat(40)], [`${WORKFLOW_DIR}/ci.yml`, 'c'.repeat(40)], [NEW_WORKFLOW, 'd'.repeat(40)]]);
+  const behind = rosterGap(staleHere, tipBase);
+  t(
+    "freshness: BEHIND — the gap names the base's new workflow and this file's changed roster, and nothing unchanged",
+    JSON.stringify(behind.map((g) => `${g.kind} ${g.path}`)),
+    JSON.stringify([`absent-here ${NEW_WORKFLOW}`, `differs ${ROSTER_SELF}`]),
+  );
+  t('freshness: …a workflow the base no longer carries reads here-only', rosterGap(tipBase, staleHere).find((g) => g.path === NEW_WORKFLOW)?.kind, 'here-only');
+  const gapLines = renderRosterGap(behind, { ref: 'main', root: '/repo' });
+  t(
+    'freshness: …the refusal names each path and ends on the re-pin recipe',
+    gapLines.length === 3 && gapLines[0].startsWith(`${NEW_WORKFLOW} — on main`) &&
+      gapLines.at(-1) === "re-pin to main's tip, then re-run: git -C /repo fetch origin main && git -C /repo checkout --detach origin/main",
+    true,
+  );
+  const wideGap = rosterGap(new Map(), new Map(Array.from({ length: 15 }, (_, i) => [`${WORKFLOW_DIR}/w${String(i).padStart(2, '0')}.yml`, 'e'.repeat(40)])));
+  t('freshness: …a wide gap is capped and counted, never silently cut', renderRosterGap(wideGap, { ref: 'main' }).some((l) => l === '…and 3 more'), true);
+  const newJobHead = { total_count: 2, check_runs: [fixtureRun(NEW_JOB, 'skipped', 1), fixtureRun('Build Core', 'skipped', 2)] };
+  t(
+    "freshness: WHY — the behind checkout's roster (no row for the new job) reads its skip as ⛔",
+    verdictExit(judgeCheckRuns(newJobHead, live.roster.filter((r) => r.name !== NEW_JOB))),
+    EXIT_UNEXPECTED_SKIP,
+  );
+  t("freshness: …where the base's roster reads it expected", verdictExit(judgeCheckRuns(newJobHead, live.roster)), EXIT_OK);
+  t(
+    'freshness: a live verdict names whose roster judged it',
+    renderReport(judgeCheckRuns(newJobHead, live.roster), { rosterRef: 'main' }).at(-1),
+    "VERDICT check-expected-skips: OK — 2 skipped check-run(s), every one in main's roster (exit 0)",
+  );
+  t(
+    'freshness: …and the offline verdict line is byte-for-byte the old one',
+    renderReport(judgeCheckRuns(newJobHead, live.roster)).at(-1),
+    'VERDICT check-expected-skips: OK — 2 skipped check-run(s), every one in the roster (exit 0)',
+  );
+
   // ---- the measured #20748 head: the card's pins -------------------------------
   const m20748 = judgeCheckRuns(measured20748Payload(), live.roster);
   t('measured #20748: the raw-named skipped canary judges exit 0 against the joined roster', verdictExit(m20748), 0);
@@ -1389,6 +1608,7 @@ export function selfTest() {
     t('cli: the measured head on disk → exit 0', ok.status, 0);
     t('cli: …with the OK verdict line on stdout', ok.stdout.includes('VERDICT check-expected-skips: OK'), true);
     t('cli: …naming the head it read from the payload', ok.stdout.includes('head b671f83b'), true);
+    t('cli: …and the offline path compares no roster (no roster line on stderr)', ok.stderr.includes('roster:'), false);
 
     const badFile = join(dir, 'bad.json');
     writeFileSync(badFile, JSON.stringify({ total_count: 2, check_runs: [fixtureRun('Build Core', 'skipped'), fixtureRun('TypeScript Type Check', 'skipped')] }));
@@ -1457,6 +1677,12 @@ export function selfTest() {
   t('structural: …and having re-armed once, does not loop', proxyRearmPlan({ env: { HTTPS_PROXY: 'http://127.0.0.1:1', [PROXY_REARM_GUARD]: '1' }, flagSupported: true }).rearm, false);
   t('structural: the board resolver is the shared one (default board pinned)', resolveSweepRepo({}).repo, DEFAULT_SWEEP_REPO);
   t('structural: the SKILL.md enqueue bar names this file', readFileSync(join(ROOT, '.claude/skills/pm-dispatch/SKILL.md'), 'utf8').includes('check-expected-skips.mjs'), true);
+  const liveRun = positions.slice(positions.indexOf('async function run('));
+  t(
+    'structural: the live path compares the roster with the base before it reads a check-run',
+    liveRun.indexOf('rosterGap(') > 0 && liveRun.indexOf('rosterGap(') < liveRun.indexOf('readCheckRuns('),
+    true,
+  );
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name} (got ${JSON.stringify(c.actual)}, want ${JSON.stringify(c.expected)})`);
@@ -1471,7 +1697,9 @@ export function selfTest() {
       'expected skip, an unexpected skip named as a filter miss, a same-suite failure read as a dependency skip, a raw matrix template, ' +
       'other conclusions, a pending run and an empty head; the derived half — the non-PR-event recogniser admitting only its one shape and ' +
       'refusing a pull_request / push / merge_group term, a negation and every live mixed if:, the raw-name rule, and the derivation ' +
-      'refusing a shared, a listed and an untellable name — on a synthetic tree and on this checkout\'s workflows; the measured #20748 ' +
+      'refusing a shared, a listed and an untellable name — on a synthetic tree and on this checkout\'s workflows; the roster\'s ' +
+      'freshness — git blob ids, this checkout\'s sources, the at-tip case leaving no gap and the behind case naming the base\'s new ' +
+      'workflow and the changed roster with the re-pin, and the false ⛔ a behind roster gives that gap exists to refuse; the measured #20748 ' +
       'head judged 0 with its raw-named canary and 4 with a genuinely unexpected skip beside it; read classification for 422 / 404 / 401 / ' +
       '403 / 5xx / network; argv; the real CLI on payload files for 0 / 4 / 3 and --json; and the structural no-write-path, ' +
       'single-sourced transport and SKILL.md pointer pins).',

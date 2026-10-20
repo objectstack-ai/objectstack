@@ -416,7 +416,7 @@
       "title": "Metadata authoring round-trip: draft → publish on a WRITABLE package; read-only packages and locked types are server-side refused",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -458,7 +458,7 @@
         {
           "clause": "DENY side of the package gate: a runtime-only create targeting a read-only code/installed package is REJECTED with writable_package_required — not silently coerced to a package-less orphan (the pre-ADR-0070 #2252 bug)",
           "oracle": "api",
-          "verify": "the refusal names writable_package_required (pinned by packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts)",
+          "verify": "the refusal names writable_package_required at the PUT door steps[5] drives; packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts is protocol-layer evidence beside that answer, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives): it calls protocol.saveMetaItem in-process on a booted CRM stack",
           "evidence": "the refusal response"
         },
         {
@@ -482,7 +482,7 @@
       "traps": ["dispatcher-vs-hono-route", "stale-console-bundle"],
       "automated": {
         "kind": "api",
-        "ref": "packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts; objectui: e2e/live/studio-record-page.spec.ts (acceptance[2] ONLY: it creates a record page bound to showcase_invoice and asserts the captured PUT /meta/page body's type 'record', its object, and regions seeded with a record:highlights block), e2e/live/studio-object-designer.spec.ts (scores NO clause of this item: its cases drive the object designer and the Studio package switcher, and no clause here scores either)"
+        "ref": "packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts (scores NO clause of this item: it calls protocol.saveMetaItem in-process on a booted CRM stack — the WRITABLE_PACKAGE_REQUIRED refusal with its writable-base control, then the package lifecycle — and drives no /api/v1/meta door, so it is protocol-layer evidence for acceptance[3] only); objectui: e2e/live/studio-record-page.spec.ts (acceptance[2] ONLY: it creates a record page bound to showcase_invoice and asserts the captured PUT /meta/page body's type 'record', its object, and regions seeded with a record:highlights block), e2e/live/studio-object-designer.spec.ts (scores NO clause of this item: its cases drive the object designer and the Studio package switcher, and no clause here scores either)"
       },
       "source": [
         "packages/runtime/src/route-ledger.ts (PUT /meta/:type/:name, GET /meta/_drafts, GET /meta/:type/:name/published, POST /packages/:id/publish-drafts)",
@@ -495,7 +495,8 @@
         { "revision": 2, "date": "2026-08-11", "change": "annotated the objectui e2e/live/studio-record-page.spec.ts half of this item's automated.ref as STALE (run #7695): it fills the Object control as an input when it is now a role=combobox button, so it fails against the current surface, not against a defect. The Studio-designer clause now says drive it by hand until the spec is re-pointed; the dogfood pin and studio-object-designer.spec.ts are unaffected. Re-pointing lives in objectui (cross-repo half of #7753 item 6)", "ref": "#7753" },
         { "revision": 3, "date": "2026-10-16", "change": "steps[1], [3] and [7] and acceptance[0].verify and [5].verify re-pointed (checklist-accuracy findings of QA run #23939, wave #23878). A plain PUT /meta/view/NAME saves state=active, so the draft never appeared in /meta/_drafts — ?mode=draft is required — and a view's name must be qualified OBJECT.view (#23939 used showcase_task.os_qa_view_RUNID). The Studio half now names the create form (/_console/apps/showcase_app/metadata/page/new) and its 'list' default, which has to be set to 'record' for a record page. Not loosened: every clause still scores the same server reads", "ref": "#24036" },
         { "revision": 4, "date": "2026-10-20", "change": "automated.stale.observedIn, partial, why and ownedBy refreshed — the carried note from round 6 of wave anchor #24579 (its report, comment 6280484387), the refresh round 6 made on studio-authoring.record-page-roundtrip in PR #24697. Tier 1 run #24598 re-measured studio-record-page.spec.ts red at the sweep's console pin 4016370af3c9 (0 passed / 1 failed), and the spec is byte-identical at the shipped pin 12dc7b47c340, so the marker first written from #7695 still holds; ownedBy names the family card objectstack-ai/objectui#13104. The why also said studio-object-designer.spec.ts was unaffected; #24598 ran its F1 and F4 red (F2 and F3 passed), and partial now says so. No clause changed", "ref": "#24717" },
-        { "revision": 5, "date": "2026-10-20", "change": "automated.stale removed, automated.ref scoped per objectui spec, and acceptance[2].verify's stale note rewritten — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired both specs the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. studio-record-page.spec.ts: blob 181b2562c18d at the old pin 12dc7b47c340, 3844a60ccd79 at both 0b36ffa and 616df6598b42; it now sets Page type to record and picks the object from the Object combobox. studio-object-designer.spec.ts: blob 5967807df335, then 58a7f1cbf024 at both; F1 and F4 repaired. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the ref keeps only what this record claimed: studio-record-page.spec.ts asserts acceptance[2], the clause the stale record sent to hand-driving, and studio-object-designer.spec.ts, on which no clause here rests, now says so. The dogfood pin is unchanged. No clause changed", "ref": "#24857" }
+        { "revision": 5, "date": "2026-10-20", "change": "automated.stale removed, automated.ref scoped per objectui spec, and acceptance[2].verify's stale note rewritten — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired both specs the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. studio-record-page.spec.ts: blob 181b2562c18d at the old pin 12dc7b47c340, 3844a60ccd79 at both 0b36ffa and 616df6598b42; it now sets Page type to record and picks the object from the Object combobox. studio-object-designer.spec.ts: blob 5967807df335, then 58a7f1cbf024 at both; F1 and F4 repaired. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the ref keeps only what this record claimed: studio-record-page.spec.ts asserts acceptance[2], the clause the stale record sent to hand-driving, and studio-object-designer.spec.ts, on which no clause here rests, now says so. The dogfood pin is unchanged. No clause changed", "ref": "#24857" },
+        { "revision": 6, "date": "2026-10-20", "change": "automated.ref and acceptance[3].verify narrowed — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: acceptance[3]'s verify names the dogfood pin as covering the PUT door), round 15 of wave anchor #24579. Re-read at base b1676441ba, after round 14's ref edit: package-first-authoring.dogfood.test.ts calls protocol.saveMetaItem in-process on a booted CRM stack and never PUT /api/v1/meta. By RUNNER rule 6 (a pin scores only the layer it drives) it scores no clause of this item, and the ref and acceptance[3].verify now say so. The objectui studio-record-page.spec.ts keeps acceptance[2]. No clause changed", "ref": "#24891" }
       ]
     },
     {
@@ -2567,7 +2568,7 @@
       "title": "ADR-0057 lifecycle sweep: backdated telemetry rows past retention are reaped BOUNDED under a system context on the hourly sweep, onlyWhen scoping spares live rows, an archive-declaring object is NEVER hot-deleted unarchived (retained + reported archive-pending when no archive datasource exists), the transient class stays on the primary, and OS_LIFECYCLE_DISABLED=1 disarms the sweep",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["operator (local shell + direct sqlite access)", "seeded admin (API reads)"],
@@ -2628,7 +2629,7 @@
         {
           "clause": "the class vocabulary this item's variants ride is the spec's own: LifecycleClassSchema = record|audit|telemetry|transient|event (5), with audit/telemetry/event forming the system-ledger carve-out set in the engine (SYSTEM_LEDGER_LIFECYCLE_CLASSES — transient deliberately absent because transient objects stay on the primary and never reach the gate)",
           "oracle": "build",
-          "verify": "read the enum at packages/spec/src/data/object.zod.ts and the engine set at packages/objectql/src/engine.ts; the enumSource pin below fails this item loudly when the spec grows a sixth class",
+          "verify": "read the enum at packages/spec/src/data/object.zod.ts and the engine set at packages/objectql/src/engine.ts; the item's enumSource ratchet below (check:platform-checklist's variants-freshness check, not a test pin) fails this item loudly when the spec grows a sixth class. It counts LifecycleClassSchema's members only, so the engine set is read by hand",
           "evidence": "both source excerpts"
         }
       ],
@@ -2654,7 +2655,7 @@
       "traps": ["eventual-consistency", "clock-skew", "destructive-in-place", "absence-inference"],
       "automated": {
         "kind": "unit",
-        "ref": "packages/objectql/src/lifecycle/lifecycle-service.test.ts (archive-pending skip, bounded reap, rotation fallback, governance)"
+        "ref": "packages/objectql/src/lifecycle/lifecycle-service.test.ts (archive-pending skip, bounded reap, rotation fallback, governance) — acceptance[2]'s pinned half ('retains everything and reports archive-pending when the archive datasource is missing') and acceptance[3] (the 'LifecycleService.sweep — unguarded reap batching (#5194)' describe), plus negative[0]–[1], over a fake engine that records the reads and deletes the sweep issues. acceptance[0], [1] and [4] need the live boot. acceptance[5] is no pin's: its oracle is the build read of the two sources. The item's enumSource (check:platform-checklist's variants-freshness ratchet on LifecycleClassSchema, expect 5) holds only its class count, not the engine's SYSTEM_LEDGER_LIFECYCLE_CLASSES membership"
       },
       "source": [
         "packages/objectql/src/lifecycle/lifecycle-service.ts#SYSTEM_CTX (the ADR-0057 enforcer: header contract — reaper/rotator/archiver, the never-hot-delete-unarchived safety rule, #5194 bounds; SYSTEM_CTX; DEFAULT_LIFECYCLE_SWEEP_MS 3_600_000; DEFAULT_LIFECYCLE_INITIAL_DELAY_MS 60_000; REAP_BATCH_SIZE 500 / REAP_MAX_BATCHES_PER_SWEEP 20; enabled getter incl. OS_LIFECYCLE_DISABLED; start()/timer; archive safety; the aggregate sweep line)",
@@ -2688,6 +2689,12 @@
           "date": "2026-10-16",
           "change": "fixtures.requires[0], knownGaps[1] and steps[1] re-pointed (checklist-accuracy finding of QA run #23939, wave #23878). The knownGap said no telemetry datasource exists on stock, but `os dev` on a file DB now provisions data.telemetry.db beside the primary and routes telemetry/audit/event-classed objects to it — sys_automation_run and sys_audit_log live there, which is where #23939 seeded them. The seeding step now names the file per object; a row seeded into the primary would sit outside the sweep and read as a survivor. Not loosened: the clauses score the same reap, survivors and archive-pending report",
           "ref": "#24036"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "automated.ref says which clause each part scores, and acceptance[5].verify names its check — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: 'acceptance[5] is checked by the item's enumSource gate, not a pin'), round 15 of wave anchor #24579. The pin drives LifecycleService.sweep over a fake engine: acceptance[2]'s pinned half, [3], and negative[0]–[1]. acceptance[5]'s count is held by the enumSource variants-freshness ratchet of check:platform-checklist (LifecycleClassSchema, expect 5), and its engine-set half by reading packages/objectql/src/engine.ts. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ]
     },
@@ -2950,7 +2957,7 @@
       "title": "The settings audit trail keeps no fingerprint of a secret-valued setting that a reader can match offline: both ledgers record the platform's keyed digest or none, never the value or an unkeyed hash, so a caller who can only read the audit rows learns that the secret changed and nothing about its value",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3028,7 +3035,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/services/service-settings/src/settings-audit-secret-digest.test.ts (7 cases: 'records the provider keyed digest on both ledgers, not the unkeyed hash of the value' · 'is stable for equal values and distinct for different ones' · 'records no fingerprint on a reset' · the two legacy inline-adapter cases · the refusing-provider case · 'keep the unkeyed adapter digest of the canonical JSON, unchanged' for non-secret settings)"
+        "ref": "packages/services/service-settings/src/settings-audit-secret-digest.test.ts — acceptance[5] and negative[2]–[3] ONLY: the no-keyed-digest arm a stock boot cannot reach (knownGaps[0]), through 'legacy inline-adapter path with no provider records no fingerprint and reports it once' and 'a provider that refuses a keyed digest leaves the write intact and records no fingerprint'. The pin drives SettingsService over stub audit sinks. So its other cases — 'records the provider keyed digest on both ledgers, not the unkeyed hash of the value', 'is stable for equal values and distinct for different ones', 'records no fingerprint on a reset', the provider-wired inline-adapter case, and the non-secret 'keep the unkeyed adapter digest of the canonical JSON, unchanged' — are service-layer evidence for acceptance[0]–[4] and negative[0]–[1], never their pass: those score the ledger rows read back over the API (steps[0]–[6])"
       },
       "source": [
         "packages/services/service-settings/src/settings-service.ts#secretAuditDigest (one helper supplies a secret write's fingerprint on both write branches, the sys_secret path and the legacy inline-adapter path: the provider's keyedDigest, or null with a once-per-key warn; never the adapter's unkeyed digest)",
@@ -3056,6 +3063,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[2], steps[1] and acceptance[0].clause, [3] (clause, verify) re-pointed: mail is a global-scope namespace, and the settings audit trail's global rung moved to the deployment-level sys_platform_setting_audit (ADR-0131 D7, ruling record 6257510973 Q4 A). Global-rung rows an 18.0 install wrote stay in sys_setting_audit until the upgrade ceremony moves them. Not loosened: the same keyed-digest, no-value and reset rules are scored on the same rows",
           "ref": "#24530"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause — the sweep-wide rule-6 contradiction QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4) names at settings-audit acceptance[0]–[4], round 15 of wave anchor #24579. The ref listed seven cases whose names read as acceptance[0], [2], [3] and [4]. The pin drives SettingsService over stub audit sinks and never reads sys_platform_setting_audit or sys_audit_log over the API, which is what those clauses score. By RUNNER rule 6 (a pin scores only the layer it drives) it scores acceptance[5] and its negatives [2] and [3] only (QA run #24838 scored acceptance[0]–[4] live). Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ]
     },
@@ -3162,7 +3175,7 @@
       "title": "Protocol 18 upgrade surfaces: a package declaring engines.protocol \"^17\" is refused 422 OS_PROTOCOL_INCOMPATIBLE naming `os migrate meta --from 17` (\"^18\" is admitted), a stored v17-shaped row is served canonical while a PUT of the same old shape is refused at parse, and a \"^18\" artifact built before a retirement boots with one warn per replayed conversion",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3211,7 +3224,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/runtime/src/domains/packages-install-protocol-incompatible.test.ts + packages/cli/test/migrate-meta-protocol-range.test.ts + packages/spec/src/conversions/stored.test.ts + packages/metadata-protocol/src/protocol.stored-migration.test.ts + packages/metadata/src/plugin-artifact-forward-conversion-major-step.test.ts"
+        "ref": "packages/runtime/src/domains/packages-install-protocol-incompatible.test.ts + packages/cli/test/migrate-meta-protocol-range.test.ts + packages/spec/src/conversions/stored.test.ts + packages/metadata-protocol/src/protocol.stored-migration.test.ts + packages/metadata/src/plugin-artifact-forward-conversion-major-step.test.ts — acceptance[0] ONLY (the test-oracle clause: every named file reports at least one test and 0 failed). None drives a public door or a boot: packages-install-protocol-incompatible.test.ts calls HttpDispatcher.handlePackages over a fake kernel (the 422 OS_PROTOCOL_INCOMPATIBLE body with its migrateCommand, for acceptance[1]); stored.test.ts unit-tests applyConversionsToStoredItem, the replay a served row rides (acceptance[2]'s serving half); plugin-artifact-forward-conversion-major-step.test.ts reads the conversion warn off a mocked logger (acceptance[3]); migrate-meta-protocol-range.test.ts and protocol.stored-migration.test.ts drive the migrate passes in-process. Each is lower-layer evidence, never the pass of acceptance[1]–[3], which need the run"
       },
       "source": [
         "packages/spec/src/kernel/protocol-version.ts#PROTOCOL_VERSION",
@@ -3227,6 +3240,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-20",
+          "change": "automated.ref narrowed per clause — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: a bare ref over-implies coverage), round 15 of wave anchor #24579. The five pins pass as acceptance[0] asks, but none drives the install door, the GET/PUT door or an os start boot. By RUNNER rule 6 (a pin scores only the layer it drives) they score acceptance[0] only, and the ref says which lower layer each reaches for acceptance[1]–[3]. Read at base b1676441ba. No clause changed",
+          "ref": "#24891"
         }
       ]
     },

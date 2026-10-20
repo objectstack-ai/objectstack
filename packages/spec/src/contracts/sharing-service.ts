@@ -475,8 +475,12 @@ export interface ISharingService {
 export type SharingRuleRecipientType = 'user' | 'team' | 'business_unit' | 'position' | 'unit_and_subordinates' | 'queue' | 'field';
 
 /**
- * Stored shape of a sharing rule. Maps 1-to-1 to `sys_sharing_rule`
- * with `criteria` lifted out of the JSON column.
+ * A sharing rule as the service serves it: a stored `sys_sharing_rule` row
+ * (`criteria` lifted out of the JSON column), or a DECLARED rule's
+ * projection. Every member but one maps to a `sys_sharing_rule` column;
+ * {@link SharingRuleRow.deploymentWide} has no column there — it marks a
+ * declared rule's deployment-wide projection and is absent on every stored
+ * row.
  */
 export interface SharingRuleRow {
   id: string;
