@@ -192,9 +192,31 @@ curl -H "Authorization: Bearer $TOK" $API/data/account
 
 ## CORS
 
-CORS is intentionally **not** opinionated by the runtime — it's an
-app-level policy that depends on which origins host your front-end.
-Configure it on the Hono adapter:
+Which cross-origin callers are admitted is an app-level decision — it
+depends on which origins host your front-end — so the server that
+`os serve` / `os start` mount (`HonoServerPlugin`) admits only the
+origins you name:
+
+| Configuration | What is admitted |
+| --- | --- |
+| No origin list (neither `OS_CORS_ORIGIN` nor the plugin's `cors.origins`) | **No cross-origin caller.** On a development boot (`NODE_ENV=development`, which `os dev` and `os serve --dev` set), loopback origins (`localhost`, `127.0.0.1`, `[::1]`, any port) are admitted too. |
+| A list (`OS_CORS_ORIGIN=https://app.example.com`, comma-separated; exact origins or patterns such as `https://*.example.com`) | Those origins, with credentials unless `OS_CORS_CREDENTIALS=false`. Loopback origins are admitted alongside any list. |
+| `*` while credentials are on | **Refused at boot** — the process exits naming the two remedies. |
+
+Same-origin requests need no CORS answer, so the Console under
+`/_console` and any page the server itself serves work with no list at
+all. A front-end served from **another origin** needs exactly one
+variable:
+
+```bash
+OS_CORS_ORIGIN=https://app.example.com
+```
+
+`OS_TRUSTED_ORIGINS` is a different list — the origins auth accepts for
+its callbacks and CSRF checks — and admits nothing to CORS. A
+cross-origin front-end that signs in belongs in both.
+
+Composing the Hono adapter yourself, name the origins there as well:
 
 ```ts
 import { createHonoApp } from '@objectstack/hono';
@@ -209,9 +231,10 @@ const app = createHonoApp({
 });
 ```
 
-Do **not** use `origin: '*'` with `credentials: true` — the
-combination is rejected by every modern browser anyway, but the
-misconfiguration is a common red flag in audits.
+Do **not** use `origin: '*'` with `credentials: true`: together they
+admit every origin for credentialed requests. `HonoServerPlugin`
+refuses the combination at boot; `*` is accepted only with credentials
+off (`OS_CORS_CREDENTIALS=false`), for an API that takes no cookies.
 
 ## Auditing
 
