@@ -1092,6 +1092,11 @@ export const REMOTE_FACE_ANSWERS = {
   // `false`, the method's own "not taken" answer: only the Knex `initObjects`
   // asks the resolver, so on this face it would never be asked.
   setFileColumnsMovedResolver: 'remote',
+  // [ADR-0131 D1] In-memory bookkeeping with no Knex: the resolver is asked by
+  // the shared index differ, which the remote drift detector runs, so the
+  // remote face reads an earlier release's COALESCE tenant key part as the
+  // plain one on a certified database exactly as the local face does.
+  setTenantKeyCertifiedResolver: 'inherited',
   // `false`: remote mode opens no in-memory database.
   sqliteOpenedEmptyInMemory: 'inherited',
   // `'sqlite'`: libSQL speaks SQLite, and `execute()` sends what a caller
