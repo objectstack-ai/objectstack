@@ -92,10 +92,15 @@ export const SysSession = ObjectSchema.create({
       mode: 'delete',
       locations: ['list_item'],
       type: 'api',
-      target: '/api/v1/auth/revoke-session',
-      // better-auth `revoke-session` keys off the session token, not the id.
-      recordIdParam: 'token',
-      recordIdField: 'token',
+      // Keyed on the row's `id` — every list row carries it — and resolved to
+      // the session SERVER-side by plugin-auth's `sys-session/revoke` door, so
+      // the `internal` token below is never sent to or from the console. That
+      // door admits the session's owner (better-auth's own `/revoke-session`)
+      // and, for another user's session, a platform administrator (ADR-0068
+      // D2). ⛔ Never key this action on `token`: no read path serves it, so a
+      // row can never supply it.
+      target: '/api/v1/auth/sys-session/revoke',
+      recordIdParam: 'sessionId',
       confirmText: 'Revoke this session? The user will be signed out from that device.',
       successMessage: 'Session revoked',
       refreshAfter: true,

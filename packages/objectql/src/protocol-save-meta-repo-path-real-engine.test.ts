@@ -138,7 +138,8 @@ function makeStubDriver() {
 }
 
 function viewBody(label: string) {
-    return { name: 'cases', type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list' }; // [#7741] the inline arm requires the object binding pair
+    // [#24668] Bound to `sys_metadata`, an object this harness registers: the overlay save door refuses a list view bound to an object that exists nowhere (it read `case`).
+    return { name: 'cases', type: 'grid', label, columns: ['id'], object: 'sys_metadata', viewKind: 'list' }; // [#7741] the inline arm requires the object binding pair
 }
 
 describe('saveMetaItem — repository write path against real ObjectQL (PR-10d.4)', () => {

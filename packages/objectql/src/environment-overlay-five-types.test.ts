@@ -135,6 +135,18 @@ function overlayCatalogManifest(): Record<string, unknown> {
     return {
         id: PKG,
         name: 'overlay_catalog',
+        // [#24668] The object the view and the dataset bind to, shipped by the
+        // package: the overlay save door refuses a list view bound to an object
+        // that exists nowhere, and `probe_obj` was declared by nothing.
+        objects: [{
+            name: 'probe_obj',
+            label: 'Probe Object',
+            sharingModel: 'private',
+            fields: {
+                name: { name: 'name', label: 'Name', type: 'text' },
+                amount: { name: 'amount', label: 'Amount', type: 'number' },
+            },
+        }],
         views: [{
             object: 'probe_obj',
             listViews: {

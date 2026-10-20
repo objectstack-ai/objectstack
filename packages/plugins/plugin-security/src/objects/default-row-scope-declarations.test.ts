@@ -15,7 +15,11 @@
  *   2. Each declaration is the shipped literal with `object` dropped: same
  *      name, operation and predicate as the baseline set's policy for the
  *      object, and every shipped set that carries a policy for it carries the
- *      same predicate.
+ *      same predicate. The thirteen whose copies the shipped sets no longer
+ *      carry (ruling E′ item 3's follow-up: the SCIM projection and credential
+ *      tables, and the `select` self scope of `sys_account`, `sys_team_member`
+ *      and the two OAuth token tables) declare the literal written out here,
+ *      and no shipped set carries a policy for them.
  *   3. `sys_user` is the one merge: the key holds one policy, so its two
  *      shipped literals (`sys_user_self`, `sys_user_org_members`) are joined
  *      with `||`, and the merged predicate admits exactly the union of the two
@@ -24,10 +28,15 @@
  *      `service-automation/src/sys-user-default-row-scope.integration.test.ts`.
  *   4. The security plugin's collection applies a declared default where the
  *      caller's held sets carry no row policy for the object and operation —
- *      never on a delegated principal's own leg — and the shipped sets keep
- *      their spreads: a deployment with the shipped baseline serves every
- *      persona, delegated agents included, the rows and the explain it served
- *      before the declarations.
+ *      never on a delegated principal's own leg. On the ten declarers whose
+ *      literal the shipped sets still carry, a deployment with the shipped
+ *      baseline serves every persona, delegated agents included, the rows and
+ *      the explain it served before the declarations; on the thirteen whose
+ *      copies they dropped, the declaration is the scope every persona below
+ *      platform admin reads under (the undeclared tree reads wider), which is
+ *      exactly where the census finds a default collected. That the shipped
+ *      tree serves those thirteen what it served with the copies is pinned in
+ *      `shipped-sets-identity-default-row-scope.test.ts`.
  */
 
 import { describe, it, expect, vi, afterAll } from 'vitest';
@@ -86,6 +95,21 @@ const DECLARERS = [
   'sys_audit_log',
 ] as const;
 
+/**
+ * The declarers whose copies the shipped sets no longer carry (ruling E′ item
+ * 3's follow-up), with the literal each declares: `_self` on the tables that
+ * name the user a row is about, `_none` (`id == null`, no row) on the rest.
+ */
+const DROPPED_COPIES: Record<string, { name: string; operation: string; using: string }> = Object.fromEntries([
+  ...['sys_scim_user', 'sys_scim_subject', 'sys_scim_projection_grant', 'sys_scim_identity_tombstone',
+    'sys_account', 'sys_team_member', 'sys_oauth_access_token', 'sys_oauth_refresh_token']
+    .map((o) => [o, { name: `${o}_self`, operation: 'select', using: 'user_id == current_user.id' }]),
+  ...['sys_scim_group', 'sys_scim_group_member', 'sys_scim_connection_binding', 'sys_verification', 'sys_jwks']
+    .map((o) => [o, { name: `${o}_none`, operation: 'select', using: 'id == null' }]),
+]);
+/** The declarers whose literal the shipped sets still carry. */
+const KEPT_IN_SETS = DECLARERS.filter((n) => !(n in DROPPED_COPIES));
+
 /** Ruling E′ item 5: the platform-global objects declare no default. */
 const PLATFORM_GLOBAL = /^(sys_metadata|sys_job|sys_migration)|^(sys_platform_setting|sys_presence|sys_flow_dispatch)$/;
 
@@ -142,7 +166,7 @@ describe('the platform identity objects declare their default row scope (ruling 
     for (const name of platformGlobal) expect(objects.get(name)!.defaultRowScope, name).toBeUndefined();
   });
 
-  it.each(DECLARERS.filter((n) => n !== 'sys_user'))(
+  it.each(KEPT_IN_SETS.filter((n) => n !== 'sys_user'))(
     '%s declares the baseline set\'s literal for it, with `object` dropped',
     async (object) => {
       const declared = (await registeredObjects()).get(object)!.defaultRowScope!;
@@ -163,6 +187,16 @@ describe('the platform identity objects declare their default row scope (ruling 
           });
         }
       }
+    },
+  );
+
+  it.each(Object.keys(DROPPED_COPIES))(
+    '%s declares its scope, and no shipped set carries a copy of it (ruling E′ item 3\'s follow-up)',
+    async (object) => {
+      const declared = (await registeredObjects()).get(object)!.defaultRowScope!;
+      expect(asLiteral(object, declared)).toEqual({ ...DROPPED_COPIES[object], object, enabled: true });
+      expect('object' in declared).toBe(false);
+      for (const set of defaultPermissionSets) expect(policiesFor(set.name, object), set.name).toEqual([]);
     },
   );
 
@@ -426,19 +460,19 @@ async function bootBaseline(declared: boolean) {
   return { engine, plugin: plugin as any, security, served };
 }
 
-describe('a deployment with the shipped baseline is byte-for-byte unchanged on the real declarations (ruling E′ item 6, ③.11)', () => {
+describe('a deployment with the shipped baseline is byte-for-byte unchanged on the real declarations where the sets carry the literal (ruling E′ item 6, ③.11)', () => {
   // Explain is read for `read`; the census below reads the collection itself,
   // the one source every door and every explain composes from, for all four.
   const EXPLAINED = ['read'] as const;
   const COLLECTED = ['select', 'insert', 'update', 'delete'] as const;
 
-  it('every persona reads every declarer exactly as without the declarations, and is explained the same', { timeout: 30_000 }, async () => {
+  it('every persona reads every declarer the sets still carry exactly as without the declarations, and is explained the same', { timeout: 30_000 }, async () => {
     const after = await bootBaseline(true);
     const before = await bootBaseline(false);
     const rowsMoved: string[] = [];
     const explainMoved: string[] = [];
     for (const [persona, context] of Object.entries(BASELINE_PERSONAS)) {
-      for (const object of DECLARERS) {
+      for (const object of KEPT_IN_SETS) {
         const label = `${persona} on ${object}`;
         const was = await before.served(object, context);
         const now = await after.served(object, context);
@@ -460,7 +494,17 @@ describe('a deployment with the shipped baseline is byte-for-byte unchanged on t
     expect(await after.served('sys_session', BASELINE_PERSONAS.platform_admin)).toHaveLength(BASELINE_USERS.length);
   });
 
-  it('each delegated agent reads its delegator\'s rows on both trees: the platform administrator\'s agent reads every row', { timeout: 30_000 }, async () => {
+  it('on the declarers whose copies the sets dropped, the declaration is the scope: without it the baseline member reads every row', { timeout: 30_000 }, async () => {
+    const after = await bootBaseline(true);
+    const before = await bootBaseline(false);
+    for (const object of Object.keys(DROPPED_COPIES)) {
+      const now = await after.served(object, BASELINE_PERSONAS.member);
+      expect(now, object).toEqual(DROPPED_COPIES[object].name.endsWith('_self') ? [`${object}:u_x`] : []);
+      expect(await before.served(object, BASELINE_PERSONAS.member), object).toHaveLength(BASELINE_USERS.length);
+    }
+  });
+
+  it('each delegated agent reads its delegator\'s rows on both trees where the sets carry the literal, and under the declaration where they do not: the platform administrator\'s agent reads every row', { timeout: 30_000 }, async () => {
     const after = await bootBaseline(true);
     const before = await bootBaseline(false);
     const everyUser = [...BASELINE_USERS].sort();
@@ -481,13 +525,17 @@ describe('a deployment with the shipped baseline is byte-for-byte unchanged on t
     };
     for (const [persona, objects] of Object.entries(expected)) {
       for (const [object, ids] of Object.entries(objects)) {
-        expect(await before.served(object, BASELINE_PERSONAS[persona]), `${persona} on ${object}, before`).toEqual(ids);
+        // `sys_scim_user`'s copy the shipped sets dropped: its declaration is the
+        // delegator leg's scope, so the undeclared tree is no "before" for it.
+        if (!(object in DROPPED_COPIES)) {
+          expect(await before.served(object, BASELINE_PERSONAS[persona]), `${persona} on ${object}, before`).toEqual(ids);
+        }
         expect(await after.served(object, BASELINE_PERSONAS[persona]), `${persona} on ${object}, after`).toEqual(ids);
       }
     }
   });
 
-  it('census: no persona collects a declared default — the baseline carries a policy for each, and a delegated leg collects none', async () => {
+  it('census: a persona collects a declared default exactly on the dropped copies\' `select` — the baseline carries a policy for every other declarer — and a delegated leg collects none', async () => {
     const { plugin } = await bootBaseline(true);
     const objects = await registeredObjects();
     const census = async (context: Persona): Promise<string[]> => {
@@ -501,10 +549,12 @@ describe('a deployment with the shipped baseline is byte-for-byte unchanged on t
       }
       return applied;
     };
+    const dropped = Object.keys(DROPPED_COPIES).map((object) => `${object} select`).sort();
     for (const [persona, context] of Object.entries(BASELINE_PERSONAS)) {
       // The platform administrator's superuser bypass is decided before the collection.
       if (persona === 'platform_admin') continue;
-      expect(await census(context), persona).toEqual([]);
+      // [letter B] A delegated agent's own leg — the ceiling — collects none.
+      expect((await census(context)).sort(), persona).toEqual(context.onBehalfOf ? [] : dropped);
     }
     // CONTROL: the carve-out is the delegation, not the agent kind. The same
     // ceiling with no delegator (a hand-built shape no producer emits) has a

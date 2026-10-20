@@ -73,6 +73,17 @@ async function boot() {
         scope: 'system',
         objects: [SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject],
     });
+    // [#24668] The object the fixture view binds to: the overlay save door
+    // refuses a list view bound to an object that exists nowhere, and nothing
+    // here declared `crm_lead`.
+    engine.registry.registerObject({
+        name: 'crm_lead',
+        label: 'Lead',
+        fields: {
+            stage: { name: 'stage', label: 'Stage', type: 'text' },
+            amount: { name: 'amount', label: 'Amount', type: 'number' },
+        },
+    } as any, 'objectstack-test');
     await engine.syncSchemas();
 
     const protocol = new ObjectStackProtocolImplementation(engine as any);
