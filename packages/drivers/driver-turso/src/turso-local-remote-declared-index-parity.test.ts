@@ -23,8 +23,9 @@
  * per-face suite cannot fail on the DIFFERENCE between faces, and the
  * difference is the defect. So each pin here drives one object set through
  * BOTH faces and compares what physically landed — index names, uniqueness,
- * origin and key parts (NULL-safe organization expressions included) — rather
- * than asserting either face against a literal. Each parity pin is ANCHORED
+ * origin and key parts (the organization key part included — PLAIN since
+ * ADR-0131 D1, so a face that still emitted a COALESCE expression would show
+ * here) — rather than asserting either face against a literal. Each parity pin is ANCHORED
  * by names computed through the shared `buildIndexName`, because two faces
  * that both lost every index would agree perfectly.
  *
@@ -39,7 +40,8 @@
  * `indexes` verbatim — because this package does not (and should not) depend
  * on `service-messaging` or `platform-objects`. `os17609_scoped` covers what
  * those two do not: a tenant column, a field-level `unique` scoped by it, a
- * declared `unique: 'organization'` (NULL-safe key part), an explicit
+ * declared `unique: 'organization'` (plain organization key part, ADR-0131
+ * D1), an explicit
  * `unique: 'global'`, two author-named indexes — one of them no SQL
  * identifier at all (a space and a double quote), which both faces must
  * accept — and an index over a virtual `formula` field that neither face may
@@ -374,10 +376,15 @@ describe('[#17609] declared object-level indexes land identically on both TursoD
       expect(localShapes.map((i) => i.name), name).toEqual(EXPECTED_NAMES[name]);
     }
 
-    // The tenant key part is the NULL-safe expression on both faces, not the bare column.
+    // ADR-0131 D1: the tenant key part is the PLAIN column on both faces — no
+    // COALESCE expression — for the declared `unique: 'organization'` and the
+    // field-level `unique` alike (the remote face's agreement is pinned above).
     const scoped = await indexShapes(remote.query, SCOPED.name);
     expect(scoped.find((i) => i.name === buildIndexName(SCOPED.name, ['organization_id', 'slug'], true))).toEqual(
-      expect.objectContaining({ unique: true, keys: ["COALESCE(organization_id, '__global__')", 'slug'] }),
+      expect.objectContaining({ unique: true, keys: ['organization_id', 'slug'] }),
+    );
+    expect(scoped.find((i) => i.name === buildIndexName(SCOPED.name, ['organization_id', 'code'], true))).toEqual(
+      expect.objectContaining({ unique: true, keys: ['organization_id', 'code'] }),
     );
   });
 

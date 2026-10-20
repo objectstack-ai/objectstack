@@ -388,9 +388,15 @@ function duplicateProbeSqlIn(quote: IdentifierQuote): string {
         const keyPart = keyParts[i]!;
         return keyPart === quote(column) ? keyPart : `${keyPart} AS ${quote(`${column}_key`)}`;
     });
+    // [ADR-0131 D1] A row with a NULL in a plain key part conflicts with nothing
+    // under the NULL-distinct UNIQUE, so it is no duplicate to list: the query
+    // groups only the rows the index constrains (the driver's own pre-flight
+    // leaves them out the same way).
+    const plain = SYS_SETTING_IDENTITY_INDEX_COLUMNS.filter((column) => SYS_SETTING_NULL_SENTINELS[column] === undefined);
     return (
         `SELECT ${projected.join(', ')}, COUNT(*) AS ${quote('duplicate_rows')} ` +
         `FROM ${quote(SYS_SETTING_TABLE)} ` +
+        `WHERE ${plain.map((column) => `${quote(column)} IS NOT NULL`).join(' AND ')} ` +
         `GROUP BY ${keyParts.join(', ')} HAVING COUNT(*) > 1`
     );
 }
@@ -590,7 +596,7 @@ function reportDegradation(
             `'${SYS_SETTING_IDENTITY_INDEX_NAME}' on "${SYS_SETTING_TABLE}" stays NULL-distinct on user_id ` +
             `over (${columns}). The system keeps looking healthy while the declared row identity is void on ` +
             `every row that is not scope='user' — user_id is NULL there — so two tenant-scope rows for one ` +
-            `(namespace, key) in ONE organization, or two platform defaults on the global layer, can coexist ` +
+            `(namespace, key, scope) in ONE organization can coexist ` +
             `and SettingsService has no defined answer for which one wins. MySQL/MariaDB before ` +
             `8.0.13 has no functional key parts, so there is no in-dialect fix: run this platform on ` +
             `SQLite/PostgreSQL for the guarantee, and meanwhile watch for duplicates with this MySQL ` +
