@@ -165,7 +165,8 @@ describe('a reminder counts the reminders it hands over, one per distinct approv
     const reminders = audiencesOf('approval.reminder', req.id);
     const opened = audiencesOf('approval.requested', req.id);
     expect(opened.length, `${flow}: the opening told someone`).toBeGreaterThan(0);
-    expect(reminders, `${flow}: the reminder reached whom the opening reached`).toEqual(opened);
+    // Soft, so a broken fan-out still reaches the case's own `notified` assertion.
+    expect.soft(reminders, `${flow}: the reminder reached whom the opening reached`).toEqual(opened);
     return { req, stored, notified: out.notified, reminders };
   };
 
