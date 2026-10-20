@@ -103,6 +103,7 @@
  *   pages.<page>.label / .description
  *   pages.<page>.title / .subtitle   (from the page's `page:header` component)
  *   pages.<page>.components.<id>.<key>  (per-component copy, #6080)
+ *   pages.<page>.components.<tabsId>.items.<value>.label  (a `page:tabs` item label)
  *   flows.<flow>.label
  *   flows.<flow>.screens.<node_id>.title                       (#7646 / #11287)
  *   flows.<flow>.screens.<node_id>.description                 (#22507)
@@ -137,7 +138,9 @@ import {
   FLOW_SCREEN_COPY_KEYS,
   FLOW_SCREEN_FIELD_COPY_KEYS,
   FLOW_TERMINAL_MESSAGE_KEYS,
+  PAGE_TABS_COMPONENT_TYPE,
   globalFilterKey,
+  pageTabItemKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
 import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
@@ -1168,6 +1171,22 @@ function emitPageComponentCopy(out: ExpectedEntry[], page: any, name: string): v
         // locale map is recorded as authored-with-no-seed, anything else
         // records nothing (#14749).
         pushEntry(out, ['pages', name, 'components', id as string, key], value, 'page');
+      }
+      // A `page:tabs` component's tab labels, keyed by each item's `value`
+      // under the tabs component's id — the key `translatePage` reads. An
+      // item without a `value` gets no slot: its renderer token is
+      // index-derived, and an array index is never a bundle key (#14749).
+      if (component.type === PAGE_TABS_COMPONENT_TYPE && Array.isArray(props.items)) {
+        for (const item of props.items as unknown[]) {
+          const value = pageTabItemKey(item);
+          if (value === undefined) continue;
+          pushEntry(
+            out,
+            ['pages', name, 'components', id as string, 'items', value, 'label'],
+            (item as Record<string, unknown>).label,
+            'page',
+          );
+        }
       }
     }
     return component;

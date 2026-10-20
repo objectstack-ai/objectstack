@@ -1064,6 +1064,9 @@ const appTranslationDataShape = () => ({
    *
    *   pages.<name>.components.<componentId>.<key>
    *                             → that component's `properties.<key>` (#6080)
+   *   pages.<name>.components.<tabsId>.items.<value>.label
+   *                             → that `page:tabs` item's `label`, keyed by the
+   *                               item's `value` (see `items` below)
    *
    * When `title` is omitted, the header keeps the title its author wrote.
    * `label` stands in for it only where the header authors no title, or where
@@ -1185,7 +1188,7 @@ const appTranslationDataShape = () => ({
       // A page component's headline is `title`; the PAGE's is `label`. Same
       // document one level apart with opposite spellings — the same trap
       // `dashboards.widgets` names, so it gets the same alias table.
-      aliases: { name: 'title', heading: 'title', text: 'label', caption: 'description', help: 'description', helpText: 'description', empty: 'emptyText', emptyState: 'emptyText' },
+      aliases: { name: 'title', heading: 'title', text: 'label', caption: 'description', help: 'description', helpText: 'description', empty: 'emptyText', emptyState: 'emptyText', tabs: 'items' },
       guidance: {
         submitLabel:
           '`submitLabel` was removed in @objectstack/spec 17 (ADR-0049) — its only '
@@ -1206,6 +1209,40 @@ const appTranslationDataShape = () => ({
       label: z.string().optional().describe("Translated component label — overlays the component's own `label` when it declares one, else `properties.label`"),
       placeholder: z.string().optional().describe('Translated input placeholder (`element:record_picker`, `element:text_input`)'),
       emptyText: z.string().optional().describe('Translated empty-state text (`element:record_picker`)'),
+      /**
+       * A `page:tabs` component's tab labels, keyed by each item's `value`
+       * (`PageTabsProps.items[].value`) — read by `translatePage`, offered by
+       * `os i18n extract`, judged by `objectstack validate`.
+       *
+       * **Why under the tabs component, keyed by `value`.** A tab item is not
+       * a component: it carries no `id`, so the `components.<id>` route could
+       * never reach it, and a HotCRM home page rendered its three tabs in
+       * English under a translated header. Two addresses were open — give
+       * items an `id`, or key them under the tabs component they belong to.
+       * The item already declares the identifier this needs: `value` is the
+       * stable `?tab=` token the renderer reads and restores, so it is unique
+       * within the strip by construction, and the ruling that settled the
+       * inline-map question (#14749) recorded `tabs item.value` as the
+       * identity a page key builds on. A second identifier would give one tab
+       * two names. The component half stays the tabs component's own `id`,
+       * so `pages.<page>.components.<tabsId>` keeps meaning one component.
+       *
+       * **An item without a `value` has no key.** Its renderer token is
+       * `tab-<index>`, and an array index is never a bundle key: reordering
+       * two tabs would silently swap their translations. Author a `value`,
+       * or localize that label in place with an inline locale map.
+       *
+       * Only `page:tabs` items are addressed. A `page:accordion` panel has
+       * no author-settable identity (its renderer derives `panel-<index>`),
+       * so its label stays an inline-locale-map surface.
+       */
+      items: z.record(z.string(), strictObject({
+        surface: 'this page tab item translation',
+        history: TRANSLATION_HISTORY,
+        aliases: { name: 'label', title: 'label', text: 'label' },
+      }, {
+        label: z.string().optional().describe("Translated tab label — overlays the item's own `label` (`PageTabsProps.items[].label`)"),
+      })).optional().describe('`page:tabs` item labels keyed by the item `value` (`PageTabsProps.items[].value`); an item without a `value` has no key'),
     })).optional().describe('Per-component copy keyed by component id (`PageComponentSchema.id`)'),
   })).optional().describe('Page translations keyed by page name'),
 
