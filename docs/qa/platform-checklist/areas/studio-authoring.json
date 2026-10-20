@@ -194,7 +194,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "automated.stale added — §2 theme \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 ran studio-object-designer.spec.ts at the sweep's console pin 4016370af3c9: F2 and F3 passed, F1 and F4 failed as stale cases (causes from QA run #24571; #24604 drove acceptance[0], acceptance[3] and negative[0] by hand). Re-read at the shipped pin 12dc7b47c340: the spec is byte-identical and both causes hold. The ref keeps the spec, F2 and F3 still citable. No clause changed",
-          "ref": "#PENDING-24579R6"
+          "ref": "#24697"
         }
       ]
     },
@@ -368,7 +368,7 @@
           "revision": 6,
           "date": "2026-10-20",
           "change": "automated.stale.observedIn and automated.stale.why refreshed — §2 theme \"objectui live e2e is not green at its own pin\" of wave anchor #24579 (18.0 sweep). Tier 1 run #24598 re-measured studio-record-page.spec.ts red at the sweep's console pin 4016370af3c9 (0 passed / 1 failed; QA runs #24571 / #24604 drove the clauses by hand), and a re-read at the shipped pin 12dc7b47c340 finds the spec byte-identical and its create path unchanged, so the marker first written from #7695 still holds. No clause changed",
-          "ref": "#PENDING-24579R6"
+          "ref": "#24697"
         }
       ]
     },
