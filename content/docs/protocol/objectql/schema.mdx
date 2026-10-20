@@ -606,9 +606,13 @@ stays valid indefinitely; `'organization'` is simply the preferred spelling in
 new code.
 
 **The organization key part is NULL-safe.** It materializes as
-`COALESCE(organization_id, '__global__')`, so rows carrying no organization —
-platform rows, and *every* row on a single-organization deployment — form one
-platform bucket that is unique among itself. A plain `(organization_id, field)`
+`COALESCE(organization_id, '__global__')`, so rows carrying no organization
+form one bucket that is unique among itself. Wherever the organization object
+is registered, a tenant table holds no such row (ADR-0131: every write is
+stamped with its organization — on a single-organization deployment, the
+Default Organization); the bucket is for a composition that registers no
+organization object, and for residue an uncertified pre-18.x database still
+holds. A plain `(organization_id, field)`
 composite would enforce nothing on those rows, because SQL `UNIQUE` treats every
 `NULL` as distinct. The value stored in the column is still `NULL`; the sentinel
 exists only inside the index key, so `WHERE organization_id = '__global__'`
