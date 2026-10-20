@@ -319,7 +319,7 @@ describe('a controlled_by_parent detail is not read without object-level read on
     });
   }
 
-  it('at every hop: a line under a derived master is not read without object-level read on that master', async () => {
+  it('a detail whose master is itself controlled_by_parent is not read without object-level read on that master', async () => {
     // Read on the line and on the root master, nothing on the detail between them.
     const context = member(ME, SET.noMiddleGrant);
     expect(await rig.read(MASTER, context)).toEqual(['m_mine', 'm_other']);
@@ -402,6 +402,9 @@ describe('the write doors (§4): no detail is written without object-level read 
     });
 
     it(`${label}: an insert of a detail under the master is refused`, async () => {
+      // §4's third write. Refused by gates ahead of the read scope (the master
+      // gate, the reference check), so it stands with or without it; pinned so
+      // the suite covers every by-id write §4 names.
       const got = await outcomeOf(rig.engine.insert(DETAIL, { id: `d_insert_${i}`, note: '', master: 'm_mine' }, { context: { ...context } } as never));
       expect(got.kind).toBe('refused');
       expect(await rig.stored(DETAIL, `d_insert_${i}`)).toBeNull();
