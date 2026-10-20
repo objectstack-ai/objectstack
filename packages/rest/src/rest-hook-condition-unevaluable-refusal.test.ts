@@ -54,6 +54,17 @@ const UNEVALUABLE = {
     name: 'qa_failclosed', object: 'inquiry', events: ['beforeInsert'],
     condition: CARD_CONDITION, handler: async () => {},
 };
+/**
+ * The `after*` path: a condition reading `previous` on an insert (unbound
+ * there), on an `onError: 'log'` hook — the shape
+ * `hook-after-condition-rollback.dogfood.test.ts` pins through a booted stack.
+ * The throw reaches the door from inside the write door's unit (#22782 /
+ * #22856) rather than ahead of the insert, and must answer the same refusal.
+ */
+const AFTER_UNEVALUABLE = {
+    name: 'qa_after_watch', object: 'inquiry', events: ['afterInsert'], onError: 'log',
+    condition: 'previous.name != record.name', handler: async () => {},
+};
 /** CONTROL: a hook that refuses on purpose, declaring its ADR-0112 envelope. */
 const REFUSING = {
     name: 'qa_refuse', object: 'inquiry', events: ['beforeInsert'],
@@ -159,6 +170,19 @@ describe('[#24662] an unevaluable hook condition is a coded refusal on the REST 
 
         expect(res.status).toBe(400);
         expect(res.body).toEqual({ error: UNEVALUABLE_MESSAGE, code: 'VALIDATION_ERROR', object: 'inquiry' });
+        expect(await stack.rows()).toBe(0);
+        expect(stack.unhandledLines()).toEqual([]);
+    });
+
+    it('an afterInsert condition that reads previous on an insert: the same coded refusal, the row rolled back', async () => {
+        const stack = await boot([AFTER_UNEVALUABLE]);
+
+        const res = await stack.create({ id: 'r1', name: 'x' });
+
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe('VALIDATION_ERROR');
+        expect(String(res.body.error)).toContain("Hook 'qa_after_watch' could not evaluate its condition");
+        expect(String(res.body.error)).not.toContain('previous.name != record.name');
         expect(await stack.rows()).toBe(0);
         expect(stack.unhandledLines()).toEqual([]);
     });
