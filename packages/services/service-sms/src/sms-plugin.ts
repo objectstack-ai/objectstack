@@ -370,10 +370,14 @@ export class SmsServicePlugin implements Plugin {
               if (result.status === 'failed') {
                 return { ok: false, severity: 'error', message: result.error ?? 'Send failed.' };
               }
+              // Name the transport that actually carried it. When the form
+              // names no delivering provider, the live service did — the one
+              // the deployment configured at boot, never `log` (refused above).
+              const via = target === svc ? 'the deployment\'s configured transport' : resolved.provider;
               return {
                 ok: true,
                 severity: 'info',
-                message: `Sent test SMS to ${maskPhoneNumber(to)} via ${resolved.provider} (id=${result.messageId ?? result.id}).`,
+                message: `Sent test SMS to ${maskPhoneNumber(to)} via ${via} (id=${result.messageId ?? result.id}).`,
               };
             } catch (err: any) {
               return { ok: false, severity: 'error', message: err?.message ?? String(err) };

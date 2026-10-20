@@ -11,7 +11,7 @@ The Mail and SMS settings pages offer a Send test button and no recipient input,
 
 With no `to` in the request, the test now goes to the person who pressed the button: `mail/test` sends to the caller's own account email and `sms/test` to the caller's own phone number, each read from the caller's own `sys_user` row. A `to` in the request body still wins, as before. When the caller's account has no address or number, or the account cannot be read, the action refuses and says that nothing was sent. A phone number is on an account only where phone sign-in is enabled, so on other deployments "Send test SMS" still needs a `to` in the request body.
 
-`sms/test` no longer reports a send through the log-only transport (the namespace's default `None (log only)` provider) as a success. It answers `ok: false` with severity `warning`, as `mail/test` already does for its log transport.
+`sms/test` no longer reports a send through the log-only transport (the namespace's default `None (log only)` provider) as a success. It answers `ok: false` with severity `warning`, as `mail/test` already does for its log transport. When the form names no delivering provider and the transport the deployment configured at boot carries the test, the success message names that transport instead of saying the message went "via log".
 
 **Unchanged.**
 

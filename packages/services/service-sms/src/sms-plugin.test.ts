@@ -186,6 +186,34 @@ describe('SmsServicePlugin', () => {
     expect(send).not.toHaveBeenCalled();
     expect(result.message).not.toContain('5550006');
   });
+
+  it('names the deployment\'s transport, not `log`, when the boot-configured one carried the test', async () => {
+    // A deployment that configured Twilio at boot, with the namespace's
+    // `provider` still at its `log` default: the live service delivers, so the
+    // answer must not say the message went "via log".
+    const fetchImpl = vi.fn(async () => new Response(
+      JSON.stringify({ sid: 'SM1', status: 'queued' }),
+      { status: 201, headers: { 'Content-Type': 'application/json' } },
+    ));
+    const harness = fakeCtx({
+      settingsValues: { provider: 'log' },
+      settingsSources: { provider: 'default' },
+    });
+    const plugin = new SmsServicePlugin({
+      provider: 'twilio',
+      providerOptions: { accountSid: 'AC1', authToken: 't', from: '+15005550006', fetchImpl },
+    });
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    const result = await harness.actions.get('sms/test')!({
+      values: { provider: 'log' }, payload: { to: '+15005550009' }, ctx: {},
+    });
+    expect(result).toMatchObject({ ok: true, severity: 'info' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.message).not.toMatch(/via log\b/);
+  });
 });
 
 describe('SmsServicePlugin — authored-value criterion (#5536)', () => {
