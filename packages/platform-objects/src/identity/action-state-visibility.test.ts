@@ -20,8 +20,10 @@ import { celEngine } from '@objectstack/formula';
 import { SysUser } from './sys-user.object.js';
 import { SysApiKey } from './sys-api-key.object.js';
 
-const ADMIN = { id: 'u_admin', email: 'admin@example.com', positions: [], isPlatformAdmin: true };
-const MEMBER = { id: 'u_member', email: 'member@example.com', positions: ['org_owner'], isPlatformAdmin: false };
+type Principal = { id: string; email: string; positions: string[]; isPlatformAdmin: boolean };
+
+const ADMIN: Principal = { id: 'u_admin', email: 'admin@example.com', positions: [], isPlatformAdmin: true };
+const MEMBER: Principal = { id: 'u_member', email: 'member@example.com', positions: ['org_owner'], isPlatformAdmin: false };
 const FEATURES = { admin: true, apiKey: true };
 
 function visibleOf(def: { actions?: unknown }, name: string): string {
@@ -34,7 +36,7 @@ function visibleOf(def: { actions?: unknown }, name: string): string {
 }
 
 /** The verdict, or the fault spelled out so a faulting predicate fails loudly. */
-function offered(source: string, record: Record<string, unknown>, user = ADMIN): boolean | string {
+function offered(source: string, record: Record<string, unknown>, user: Principal = ADMIN): boolean | string {
   const r = celEngine.evaluate(
     { dialect: 'cel', source },
     { record, extra: { current_user: user, user, ctx: { user }, features: FEATURES } },
