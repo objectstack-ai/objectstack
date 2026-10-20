@@ -42,6 +42,7 @@
     "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/driver-sql": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.6.3",
