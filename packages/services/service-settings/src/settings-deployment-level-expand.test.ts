@@ -16,12 +16,12 @@
  *  - **The new write shape.** A global-rung audit row goes to
  *    `sys_platform_setting_audit`, with no organization; a tenant-rung row
  *    stays in `sys_setting_audit`, stamped.
- *  - **The dual read, on 18.0-shaped rows.** An 18.0 install wrote its
- *    global-rung audit rows into `sys_setting_audit`, stamped with the Default
- *    Organization. The global rung's history is selected by SCOPE in that
- *    table (never by a NULL organization, which those rows do not have) beside
- *    the sibling; nothing re-stamps or moves them — that is the upgrade
- *    ceremony's.
+ *  - **No second home (18.x step 7).** An 18.0 install wrote its global-rung
+ *    audit rows into `sys_setting_audit`, stamped with the Default
+ *    Organization; the upgrade ceremony moves them to the sibling before the
+ *    database is certified. So `sys_setting_audit` declares no `global` scope,
+ *    and the engine refuses a row that claims it: the global rung's history is
+ *    the sibling alone.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -202,24 +202,29 @@ describe('[18.x expand · Q4 A] the settings audit trail\'s new write shape, und
   });
 });
 
-describe('[18.x expand · Q4 A] the dual read, on 18.0-shaped rows', () => {
-  it('the global rung\'s history reads both tables: the 18.0 row in sys_setting_audit and the new one in the sibling', async () => {
-    const { engine, svc, seed } = await boot();
-    // The 18.0 shape: a global-rung audit row in sys_setting_audit, stamped
-    // with the Default Organization by the 18.0 engine.
-    seed('sys_setting_audit', {
-      id: 'aud_18', organization_id: DEFAULT_ORG, namespace: 'relay_probe', key: 'api_key', scope: 'global',
-      action: 'set', source: 'api', actor_id: null, encrypted: true, new_hash: 'hmac-sha256:18',
-      created_at: '2026-10-19T00:00:00.000Z',
-    });
-    await svc.setMany('relay_probe', { api_key: 're_456' }, { tenantId: DEFAULT_ORG, userId: undefined });
+describe('[18.x step 7] the global rung\'s history has one home: sys_setting_audit refuses a global-scope row', () => {
+  const auditRow = (scope: string) => ({
+    namespace: 'relay_probe', key: 'api_key', scope, action: 'set', source: 'api', encrypted: true,
+    new_hash: 'hmac-sha256:18', created_at: '2026-10-19T00:00:00.000Z',
+  });
 
-    const where = { namespace: 'relay_probe', key: 'api_key', scope: 'global' };
-    const legacy = (await engine.find('sys_setting_audit', { where }, SYS)) as any[];
-    const current = (await engine.find('sys_platform_setting_audit', { where }, SYS)) as any[];
-    expect(legacy).toEqual([expect.objectContaining({ id: 'aud_18', organization_id: DEFAULT_ORG, new_hash: 'hmac-sha256:18' })]);
-    expect(current).toHaveLength(1);
-    expect(current[0]!.organization_id ?? null).toBeNull();
-    expect(current[0]!.new_hash).not.toBe('hmac-sha256:18');
+  it('control: the same row at the tenant rung lands', async () => {
+    const { engine, rows } = await boot();
+    await engine.insert('sys_setting_audit', auditRow('tenant'), SYS);
+    expect(rows('sys_setting_audit')).toEqual([expect.objectContaining({ scope: 'tenant' })]);
+  });
+
+  it('a global-scope row is refused before the driver sees it, and the writer\'s global row lands in the sibling', async () => {
+    const { engine, svc, rows, writesTo } = await boot();
+    await expect(engine.insert('sys_setting_audit', auditRow('global'), SYS)).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+    expect(writesTo('sys_setting_audit')).toEqual([]);
+
+    await svc.setMany('relay_probe', { api_key: 're_456' }, { tenantId: DEFAULT_ORG, userId: undefined });
+    expect(rows('sys_setting_audit')).toEqual([]);
+    expect(rows('sys_platform_setting_audit')).toEqual([
+      expect.objectContaining({ namespace: 'relay_probe', key: 'api_key', scope: 'global' }),
+    ]);
   });
 });
