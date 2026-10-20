@@ -366,9 +366,12 @@ type MarkerReading =
  * first `os serve` of an install whose store a CLI boot created would find no
  * marker on a store it did not create, and refuse a fresh install.
  *
- * The ceremony's own boots never trip it: they hold their DDL back
- * (`deferSchemaDdl`) or skip schema sync, so their store reports nothing
- * created.
+ * A boot that holds its DDL back (`deferSchemaDdl`) or skips schema sync
+ * reports nothing created, so the plugin writes nothing there: the ceremony's
+ * own boots never trip it. The one deferred boot that then creates the tables
+ * — `os migrate apply`, at its confirmed flush — calls
+ * {@link recordOrganizationOwnershipBirth} itself once they exist (the CLI's
+ * `flushSchemaDdl`), judged on the same counts.
  */
 export class OrganizationOwnershipBirthMarkerPlugin implements Plugin {
   readonly name = ORGANIZATION_OWNERSHIP_BIRTH_MARKER_PLUGIN_NAME;

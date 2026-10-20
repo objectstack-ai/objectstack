@@ -304,15 +304,19 @@ describe('resolveExecutionContext — localization (timezone + locale)', () => {
 
 
 // ---------------------------------------------------------------------------
-// ADR-0066 — platform-scoped (null-org) permission-set grants are GLOBAL and
-// must resolve even when the caller has an active org. Regression for the gap
-// where `organization_id = tenantId` dropped a platform admin's null-org
-// admin_full_access grant (and its systemPermissions) the moment they owned an
-// org — which then locked them out of a requiredPermissions-gated object.
+// ADR-0066 — the platform-scoped permission-set grant must resolve even when the
+// caller has an active org. Regression for the gap where `organization_id =
+// tenantId` dropped a platform admin's admin_full_access grant (and its
+// systemPermissions) the moment they owned an org — which then locked them out
+// of a requiredPermissions-gated object. The platform-scoped grant is the one
+// the Default Organization owns: it anchors platform standing whatever the
+// active org. An organization-less grant is not platform-scoped — it applies
+// nowhere and anchors nothing.
 // ---------------------------------------------------------------------------
-describe('resolveExecutionContext — platform-scoped (null-org) grants (ADR-0066)', () => {
+describe('resolveExecutionContext — the platform-scoped (Default Organization) grant (ADR-0066)', () => {
   const RAW = 'osk_admin';
-  function makeAuthQl(extraGrants = []) {
+  /** @param adminGrantOrg the organization that owns u1's admin_full_access grant. */
+  function makeAuthQl(extraGrants = [], adminGrantOrg: string | null = 'org_default') {
     const tables = {
       // [#8287] Re-spelled from `organization_id`: these fixtures use the key as a
       // VEHICLE to authenticate u1 into orgA, and `active_organization_id` is the
@@ -321,8 +325,9 @@ describe('resolveExecutionContext — platform-scoped (null-org) grants (ADR-006
       // out), so this keeps them meaningful rather than merely green.
       sys_api_key: [{ id: 'k1', key: hashApiKey(RAW), revoked: false, user_id: 'u1', active_organization_id: 'orgA', expires_at: FUTURE }],
       sys_member: [{ user_id: 'u1', organization_id: 'orgA', role: 'owner' }],
+      sys_organization: [{ id: 'org_default', slug: 'default' }, { id: 'orgA', slug: 'org-a' }],
       sys_user_permission_set: [
-        { id: 'ups_global', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
+        { id: 'ups_global', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: adminGrantOrg },
         ...extraGrants,
       ],
       sys_permission_set: [
@@ -352,20 +357,32 @@ describe('resolveExecutionContext — platform-scoped (null-org) grants (ADR-006
   }
   const opts = (ql) => ({ getService: async () => undefined, getQl: async () => ql, request: { headers: { 'x-api-key': RAW } } });
 
-  it('resolves a null-org admin grant + its systemPermissions even with an active org', async () => {
+  it('resolves the Default Organization\'s admin grant + its systemPermissions even with another org active', async () => {
     const ctx = await resolveExecutionContext(opts(makeAuthQl()));
     expect(ctx.tenantId).toBe('orgA');
     expect(ctx.permissions).toContain('admin_full_access');
     expect(ctx.systemPermissions).toContain('manage_platform_settings');
     // [#2947] the derived posture rung is now CARRIED on the ctx (previously
-    // dropped at this entry). An unscoped admin_full_access grant → PLATFORM_ADMIN.
+    // dropped at this entry). The Default Organization's admin_full_access
+    // grant → PLATFORM_ADMIN.
     expect(ctx.posture).toBe('PLATFORM_ADMIN');
+  });
+
+  // The test above is the CONTROL: the same grant, owned by the Default
+  // Organization, resolves in full with orgA active.
+  it('an ORGANIZATION-LESS admin grant resolves nothing: no set, no capability, no platform standing', async () => {
+    const ctx = await resolveExecutionContext(opts(makeAuthQl([], null)));
+    expect(ctx.tenantId).toBe('orgA');
+    expect(ctx.permissions).not.toContain('admin_full_access');
+    expect(ctx.systemPermissions).not.toContain('manage_platform_settings');
+    expect(ctx.systemPermissions).not.toContain('manage_users');
+    expect(ctx.posture).not.toBe('PLATFORM_ADMIN');
   });
 
   it('still drops a grant scoped to a DIFFERENT org', async () => {
     const ql = makeAuthQl([{ id: 'ups_otherorg', user_id: 'u1', permission_set_id: 'ps_other', permission_set: 'other_org_set', organization_id: 'orgB' }]);
     const ctx = await resolveExecutionContext(opts(ql));
-    expect(ctx.permissions).toContain('admin_full_access'); // global grant kept
+    expect(ctx.permissions).toContain('admin_full_access'); // the Default Organization's grant kept
     expect(ctx.permissions).not.toContain('other_org_set'); // foreign-org grant dropped
     expect(ctx.systemPermissions).not.toContain('should_not_appear');
   });
@@ -501,11 +518,14 @@ describe('resolveExecutionContext — ADR-0090 D10 agent principal (OAuth on /mc
 
   // ── [ADR-0090 D10 #2] action-capability delegation ───────────────────────
   // A ql that resolves user `u1` to a set carrying system capabilities, so we
-  // can see whether the agent inherits the user's ACTION authority.
+  // can see whether the agent inherits the user's ACTION authority. The grant is
+  // the Default Organization's, so it applies whatever organization (or none)
+  // the agent resolves into.
   const capQl = () => {
     const tables: Record<string, any[]> = {
       sys_member: [{ user_id: 'u1', organization_id: 'orgA', role: 'owner' }],
-      sys_user_permission_set: [{ id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null }],
+      sys_organization: [{ id: 'org_default', slug: 'default' }],
+      sys_user_permission_set: [{ id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: 'org_default' }],
       sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access', system_permissions: '["manage_users","manage_platform_settings"]', object_permissions: '{}' }],
       sys_position: [], sys_position_permission_set: [], sys_user_position: [],
     };

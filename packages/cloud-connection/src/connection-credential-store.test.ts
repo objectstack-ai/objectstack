@@ -55,15 +55,18 @@ function makeRawApp() {
         post: (p: string, h: Handler) => routes.set(`POST ${p}`, h),
     };
 }
-const sessionAuth = (userId?: string) => ({ api: { getSession: async () => (userId ? { user: { id: userId } } : null) } });
+/** The organization the sessions act in, and the one {@link ADMIN_GRANTS}' grant is owned by. */
+const ORG = 'o1';
+const sessionAuth = (userId?: string) => ({ api: { getSession: async () => (userId ? { user: { id: userId }, session: { activeOrganizationId: ORG } } : null) } });
 /**
  * [#24148] The suites below sign in as `admin`, who must hold `setup.access` to
  * reach the connection-changing doors (their subject is the credential, not the
  * permission — that is `cloud-connection-setup-access.pin.test.ts`). Real
- * permission-set rows, read by the shared resolver through `find`.
+ * permission-set rows, read by the shared resolver through `find`; the grant is
+ * owned by {@link ORG}, the organization the session acts in.
  */
 const ADMIN_GRANTS: Record<string, any[]> = {
-    sys_user_permission_set: [{ id: 'ups_1', user_id: 'admin', permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: null }],
+    sys_user_permission_set: [{ id: 'ups_1', user_id: 'admin', permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: ORG }],
     sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
 };
 /**

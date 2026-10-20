@@ -189,12 +189,13 @@ async function mountCloudConnection(opts: {
     const hooks = new Map<string, any>();
     const auth = {
         api: {
-            getSession: async () => (opts.userId ? { user: { id: opts.userId }, session: {} } : null),
+            // The session acts in `o1`, the organization the grant below is owned by.
+            getSession: async () => (opts.userId ? { user: { id: opts.userId }, session: { activeOrganizationId: 'o1' } } : null),
         },
     };
     const grantRows: Record<string, any[]> = opts.userId && opts.setupAccess !== false
         ? {
-            sys_user_permission_set: [{ id: 'ups_1', user_id: opts.userId, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: null }],
+            sys_user_permission_set: [{ id: 'ups_1', user_id: opts.userId, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: 'o1' }],
             sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
         }
         : {};

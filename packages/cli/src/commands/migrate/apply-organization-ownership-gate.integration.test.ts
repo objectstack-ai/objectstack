@@ -125,6 +125,10 @@ beforeAll(async () => {
   } finally {
     process.chdir(savedCwd);
   }
+  // This apply of THIS tree created the store from empty, so it wrote this
+  // release's birth marker; the v17 database each case stands in for carries
+  // none, and the drop gate below reads that absence.
+  withDb(v18Db, (db) => db.prepare('DELETE FROM sys_migration WHERE id = ?').run(ORGANIZATION_OWNERSHIP_MIGRATION_ID));
   expect(columnsOf(v18Db, 'sys_platform_setting'), 'fixture: v18 declares no organization column here').not.toContain('organization_id');
 }, CASE_TIMEOUT_MS);
 

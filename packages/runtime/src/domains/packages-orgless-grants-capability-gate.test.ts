@@ -22,9 +22,11 @@
  * organization's copy of `org_member` fed its bindings to anyone still an
  * `org_member` somewhere.
  *
- * The rule now: with no active organization only the global grants apply, and
- * a grant scoped to an organization applies only while that organization is the
- * active tenant (`resolveUserAuthzGrants`, `@objectstack/core`).
+ * The rule now: a grant applies only while its organization is the active
+ * tenant, so with no active organization no stored grant applies, and a grant
+ * that names no organization applies nowhere (`resolveUserAuthzGrants`,
+ * `@objectstack/core`). Platform standing is anchored only by the
+ * `admin_full_access` grant the Default Organization owns.
  *
  * ## The rig
  *
@@ -50,6 +52,8 @@ import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 const PKG = 'com.acme.crm';
 const ALPHA = 'org_alpha';
 const BETA = 'org_beta';
+/** The Default Organization: its `admin_full_access` grant anchors platform standing. */
+const DEFAULT_ORG = 'org_default';
 const SESSION_HEADER = 'x-test-session';
 
 /** Equality plus `$in`, and a loud refusal of every other shape. */
@@ -74,9 +78,12 @@ function matchesWhere(row: any, where: any): boolean {
  * `org_beta`; `u_gone` has no membership left anywhere. Both still hold the
  * `org_alpha`-scoped `manage_metadata` set. `u_member` is the control: a
  * current `org_alpha` member holding the same grant. `u_global` was removed the
- * same way but holds the set GLOBALLY. `u_admin` holds `admin_full_access`
- * unscoped — the row the platform-admin bootstrap mints. `u_orgless` signed in,
- * never selected an organization and holds no grant at all.
+ * same way but holds the set with NO organization — a row the ownership
+ * ceremony never leaves behind, so it confers nothing. `u_admin` holds
+ * `admin_full_access` owned by the Default Organization — the row the
+ * platform-admin bootstrap mints. `u_oldadmin` holds `admin_full_access` with no
+ * organization, the row an earlier release's bootstrap wrote. `u_orgless`
+ * signed in, never selected an organization and holds no grant at all.
  */
 const TABLES: Record<string, any[]> = {
     sys_api_key: [],
@@ -87,16 +94,20 @@ const TABLES: Record<string, any[]> = {
         { user_id: 'u_admin', organization_id: ALPHA, role: 'owner' },
         { user_id: 'u_posex', organization_id: BETA, role: 'member' },
         { user_id: 'u_posmember', organization_id: ALPHA, role: 'member' },
+        { user_id: 'u_oldadmin', organization_id: ALPHA, role: 'member' },
     ],
-    sys_user: ['u_member', 'u_exmember', 'u_gone', 'u_global', 'u_admin', 'u_posex', 'u_posmember', 'u_orgless']
+    sys_user: ['u_member', 'u_exmember', 'u_gone', 'u_global', 'u_admin', 'u_posex', 'u_posmember', 'u_orgless', 'u_oldadmin']
         .map((id) => ({ id, email: `${id}@example.com` })),
     sys_user_permission_set: [
         { user_id: 'u_member', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
         { user_id: 'u_exmember', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
         { user_id: 'u_gone', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: ALPHA },
         { user_id: 'u_global', permission_set_id: 'ps_meta', permission_set: 'alpha_metadata_editors', organization_id: null },
-        { user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
+        { user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: DEFAULT_ORG },
+        { user_id: 'u_oldadmin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
     ],
+    // The Default Organization, which owns the platform-admin bootstrap's grant.
+    sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }],
     sys_permission_set: [
         { id: 'ps_meta', name: 'alpha_metadata_editors', system_permissions: ['manage_metadata', 'studio.access'] },
         { id: 'ps_admin', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access'] },
@@ -115,16 +126,24 @@ const TABLES: Record<string, any[]> = {
     ],
 };
 
-type Who = 'member' | 'exmember' | 'gone' | 'global' | 'admin' | 'admin_orgless' | 'posex' | 'posmember' | 'orgless';
+type Who = 'member' | 'exmember' | 'gone' | 'global' | 'global_beta' | 'admin' | 'admin_orgless'
+    | 'oldadmin' | 'oldadmin_orgless' | 'posex' | 'posmember' | 'orgless';
 
-/** Every session names `org_alpha` except `admin_orgless` and `orgless`, which name no organization. */
+/**
+ * Every session names `org_alpha` except `global_beta` (`org_beta`, where its
+ * holder IS a member), and `admin_orgless`, `oldadmin_orgless` and `orgless`,
+ * which name no organization.
+ */
 const SESSIONS: Record<Who, { id: string; token: string; userId: string; activeOrganizationId?: string }> = {
     member: { id: 'ses_member', token: 'tok_member', userId: 'u_member', activeOrganizationId: ALPHA },
     exmember: { id: 'ses_exmember', token: 'tok_exmember', userId: 'u_exmember', activeOrganizationId: ALPHA },
     gone: { id: 'ses_gone', token: 'tok_gone', userId: 'u_gone', activeOrganizationId: ALPHA },
     global: { id: 'ses_global', token: 'tok_global', userId: 'u_global', activeOrganizationId: ALPHA },
+    global_beta: { id: 'ses_global_beta', token: 'tok_global_beta', userId: 'u_global', activeOrganizationId: BETA },
     admin: { id: 'ses_admin', token: 'tok_admin', userId: 'u_admin', activeOrganizationId: ALPHA },
     admin_orgless: { id: 'ses_admin2', token: 'tok_admin2', userId: 'u_admin' },
+    oldadmin: { id: 'ses_oldadmin', token: 'tok_oldadmin', userId: 'u_oldadmin', activeOrganizationId: ALPHA },
+    oldadmin_orgless: { id: 'ses_oldadmin2', token: 'tok_oldadmin2', userId: 'u_oldadmin' },
     posex: { id: 'ses_posex', token: 'tok_posex', userId: 'u_posex', activeOrganizationId: ALPHA },
     posmember: { id: 'ses_posmember', token: 'tok_posmember', userId: 'u_posmember', activeOrganizationId: ALPHA },
     orgless: { id: 'ses_orgless', token: 'tok_orgless', userId: 'u_orgless' },
@@ -135,6 +154,10 @@ function rig() {
     (registry as any).logLevel = 'silent';
     registry.installPackage({ id: PKG, namespace: 'crm', name: 'CRM', version: '1.0.0', type: 'app', scope: 'project' } as any, 'code');
     registry.registerObject({ name: 'crm_lead', fields: { title: { type: 'text' } } } as any, PKG, 'crm', 'own');
+    // The organization object the platform registers: the resolver reads the
+    // Default Organization (the owner of the anchoring admin grant) only from a
+    // registry that holds it.
+    registry.registerObject({ name: 'sys_organization', fields: { slug: { type: 'text' } } } as any, 'com.objectstack.platform', 'sys', 'own');
 
     const deleteRequests: any[] = [];
     const protocol = {
@@ -261,6 +284,15 @@ async function refusedByTheWallNotTheCapabilityGate(answer: { status: number; co
     expect(message).not.toContain('requires the `manage_metadata` capability');
 }
 
+/** The capability gate's own refusal: it names the capability, and the walled refusal is never reached. */
+function refusedByTheCapabilityGate(answer: { status: number; code: unknown; httpStatus?: unknown; body: any }): void {
+    expect({ status: answer.status, code: answer.code, httpStatus: answer.httpStatus })
+        .toEqual({ status: 403, code: 'PERMISSION_DENIED', httpStatus: 403 });
+    const message = String(answer.body?.error?.message ?? '');
+    expect(message).toContain('requires the `manage_metadata` capability');
+    expect(message).not.toContain("'isolated' tenancy posture");
+}
+
 describe('[#20515] what the rule leaves unchanged', () => {
     it('CONTROL · a current member with the same grant and org_alpha active passes the capability gate: DELETE /packages/:id reaches the walled refusal, and nothing is deleted', async () => {
         const r = rig();
@@ -286,11 +318,21 @@ describe('[#20515] what the rule leaves unchanged', () => {
         expect(r.deleteRequests).toEqual([]);
     });
 
-    it('a GLOBAL grant still passes the capability gate for the removed member — the walled refusal answers next, below the operator rung', async () => {
+    // The CONTROL above holds the same set scoped to org_alpha and passes the
+    // capability gate, so this refusal is the organization-less row's, not the set's.
+    it('an ORGANIZATION-LESS grant confers nothing: the removed member holding it is refused by the capability gate on both doors', async () => {
         const r = rig();
-        await refusedByTheWallNotTheCapabilityGate(await r.call('DELETE', 'global', `/packages/${PKG}`));
+        refusedByTheCapabilityGate(await r.call('DELETE', 'global', `/packages/${PKG}`));
         expect(r.deleteRequests).toEqual([]);
-        await refusedByTheWallNotTheCapabilityGate(await r.call('PATCH', 'global', `/packages/${PKG}/disable`));
+        refusedByTheCapabilityGate(await r.call('PATCH', 'global', `/packages/${PKG}/disable`));
+        expect(switchedOff(r)).toBe(false);
+    });
+
+    it('an organization-less grant confers nothing in an organization its holder IS a member of, either: org_beta active, both doors refused by the capability gate', async () => {
+        const r = rig();
+        refusedByTheCapabilityGate(await r.call('DELETE', 'global_beta', `/packages/${PKG}`));
+        expect(r.deleteRequests).toEqual([]);
+        refusedByTheCapabilityGate(await r.call('PATCH', 'global_beta', `/packages/${PKG}/disable`));
         expect(switchedOff(r)).toBe(false);
     });
 
@@ -303,11 +345,23 @@ describe('[#20515] what the rule leaves unchanged', () => {
         expect(switchedOff(d)).toBe(true);
     });
 
-    it('platform-admin standing (unscoped admin_full_access) passes with org_alpha active, and with no organization at all', async () => {
+    it('platform-admin standing (the Default Organization\'s admin_full_access) passes with org_alpha active, and with no organization at all', async () => {
         expect((await rig().call('DELETE', 'admin', `/packages/${PKG}`)).status).toBe(200);
         expect((await rig().call('PATCH', 'admin', `/packages/${PKG}/disable`)).status).toBe(200);
         expect((await rig().call('DELETE', 'admin_orgless', `/packages/${PKG}`)).status).toBe(200);
         expect((await rig().call('PATCH', 'admin_orgless', `/packages/${PKG}/disable`)).status).toBe(200);
+    });
+
+    // The operator test above is the positive control: the same set, owned by the
+    // Default Organization, passes both doors with and without an organization.
+    it('an ORGANIZATION-LESS admin_full_access grant anchors nothing: its holder is refused by the capability gate with org_alpha active, and with no organization at all', async () => {
+        for (const who of ['oldadmin', 'oldadmin_orgless'] as const) {
+            const r = rig();
+            refusedByTheCapabilityGate(await r.call('DELETE', who, `/packages/${PKG}`));
+            refusedByTheCapabilityGate(await r.call('PATCH', who, `/packages/${PKG}/disable`));
+            expect(r.deleteRequests).toEqual([]);
+            expect(switchedOff(r)).toBe(false);
+        }
     });
 
     it('a caller who never selected an organization and holds no grant is refused 403 on both doors, as before', async () => {

@@ -23,8 +23,8 @@
  * session's `activeOrganizationId`, so the session arm of
  * `resolveAuthzContext` vets it on EVERY request with the rule it applies to a
  * browser session (`vetOrganizationClaim`): kept while a current membership
- * backs it under a walled posture, dropped (no organization, global grants
- * only) once none does. ⛔ No union of the user's organizations, no widened
+ * backs it under a walled posture, dropped (no organization, so no stored
+ * grant applies) once none does. ⛔ No union of the user's organizations, no widened
  * global grant, no third branch in core.
  *
  * ## The rig
@@ -51,6 +51,8 @@ const ALPHA = 'org_alpha';
 const BETA = 'org_beta';
 /** An organization no fixture user belongs to. */
 const GAMMA = 'org_gamma';
+/** The Default Organization, which owns the platform-admin row. */
+const DEFAULT_ORG = 'org_default';
 const CLIENT = 'agent-client-1';
 const LEAD = 'crm_lead';
 const CONTACT = 'crm_contact';
@@ -68,11 +70,14 @@ const SETS: PermissionSet[] = [
  *   `crm_contact_reader` in org_beta; a member of both — the "another
  *   organization" control.
  * - `u_pat` is an org_alpha member holding no grant.
- * - `u_admin` holds `admin_full_access` GLOBALLY (the platform-admin row).
+ * - `u_admin` holds `admin_full_access` owned by the Default Organization (the
+ *   platform-admin row), which applies whatever organization is active.
  * - `u_ex` held `sales_rep` in org_alpha and was removed from it (no
  *   org_alpha `sys_member` row; still a member of org_beta). They also hold
- *   `crm_lead_global` globally, so what is left after the claim is dropped is
- *   visible: a read the wall empties and a write it refuses.
+ *   `crm_lead_global` in org_beta, so what is left after the claim is dropped
+ *   is visible: nothing, since no organization is active. And they hold
+ *   `crm_contact_reader` with NO organization — a row that applies nowhere,
+ *   not even in org_beta.
  */
 function tables(): Record<string, any[]> {
   return {
@@ -91,9 +96,12 @@ function tables(): Record<string, any[]> {
     ],
     sys_user_permission_set: [
       { user_id: 'u_mia', permission_set: 'crm_contact_reader', organization_id: BETA },
-      { user_id: 'u_admin', permission_set: 'admin_full_access', organization_id: null },
-      { user_id: 'u_ex', permission_set: 'crm_lead_global', organization_id: null },
+      { user_id: 'u_admin', permission_set: 'admin_full_access', organization_id: DEFAULT_ORG },
+      { user_id: 'u_ex', permission_set: 'crm_lead_global', organization_id: BETA },
+      { user_id: 'u_ex', permission_set: 'crm_contact_reader', organization_id: null },
     ],
+    // The Default Organization: its `admin_full_access` grant anchors platform standing.
+    sys_organization: [{ id: DEFAULT_ORG, slug: 'default' }],
     sys_permission_set: SETS.map((s) => ({ id: `ps_${s.name}`, name: s.name, object_permissions: JSON.stringify(s.objects ?? {}) })),
     sys_position: [{ id: 'pos_sales_rep', name: 'sales_rep', organization_id: null }],
     sys_position_permission_set: [{ position_id: 'pos_sales_rep', permission_set_id: 'ps_crm_sales_user' }],
@@ -273,26 +281,35 @@ describe('an OAuth token acts in the organization its consent bound — isolated
     await expect(r.run(ctx, 'find', LEAD)).rejects.toThrow(D10_DENIAL);
   });
 
-  it('CONTROL — a revoked membership: the claim is dropped, so only global grants apply — the read comes back empty and the tenant write is refused loudly', async () => {
+  it('CONTROL — a revoked membership: the claim is dropped, so no stored grant applies — the read and the write are both refused', async () => {
     const ctx = await r.resolve(READ_TOKEN('u_ex', ALPHA));
     expect(ctx.tenantId).toBeUndefined();
     expect(droppedClaimLines()).toHaveLength(1);
     expect(droppedClaimLines()[0]).toContain(`principal=u_ex organization=${ALPHA}`);
 
-    // The global grant admits the read; the wall has no organization to read in.
-    const read = await r.run(ctx, 'find', LEAD);
-    expect(conjuncts(read.ast.where)).toEqual([RLS_DENY_FILTER, RLS_DENY_FILTER]);
-    await expect(r.run(ctx, 'insert', LEAD)).rejects.toThrow(/has no active organization/);
+    // The org_beta grant counts only with org_beta active, and none is.
+    await expect(r.run(ctx, 'find', LEAD)).rejects.toThrow(D10_DENIAL);
+    await expect(r.run(ctx, 'insert', LEAD)).rejects.toThrow(D10_DENIAL);
   });
 
-  it('CONTROL — a platform admin\'s global grant is unchanged: it admits the delegated read bound or unbound; only the organization the wall reads in moves', async () => {
+  it('CONTROL — the same former member bound to org_beta: the org_beta grant admits the read; the ORGANIZATION-LESS grant admits nothing', async () => {
+    const ctx = await r.resolve(READ_TOKEN('u_ex', BETA));
+    expect(ctx.tenantId).toBe(BETA);
+    expect(droppedClaimLines()).toEqual([]);
+    // The positive leg: the organization-scoped grant counts in its organization.
+    expect(conjuncts((await r.run(ctx, 'find', LEAD)).ast.where)).toEqual([{ organization_id: BETA }, { organization_id: BETA }]);
+    // An organization-less row applies nowhere, even where its holder is a member.
+    await expect(r.run(ctx, 'find', CONTACT)).rejects.toThrow(D10_DENIAL);
+  });
+
+  it('CONTROL — a platform admin\'s Default Organization grant is unchanged: it admits the delegated read bound or unbound; only the organization the wall reads in moves', async () => {
     const bound = await r.resolve(READ_TOKEN('u_admin', ALPHA));
     expect(bound.tenantId).toBe(ALPHA);
     expect(bound.posture).toBe('PLATFORM_ADMIN');
     expect(conjuncts((await r.run(bound, 'find', LEAD)).ast.where)).toEqual([{ organization_id: ALPHA }, { organization_id: ALPHA }]);
 
     // Unbound is what every token resolved before this change: still admitted
-    // by the global grant, and — a business object under `isolated` — walled
+    // by the anchoring grant, and — a business object under `isolated` — walled
     // to nothing with no organization to read in (ADR-0095 W2), as before.
     const unbound = await r.resolve(READ_TOKEN('u_admin'));
     expect(unbound.tenantId).toBeUndefined();
@@ -300,7 +317,7 @@ describe('an OAuth token acts in the organization its consent bound — isolated
     expect(conjuncts((await r.run(unbound, 'find', LEAD)).ast.where)).toEqual([RLS_DENY_FILTER, RLS_DENY_FILTER]);
   });
 
-  it('CONTROL — a token minted before consents bound an organization (no claim) keeps today\'s behaviour: global grants only', async () => {
+  it('CONTROL — a token minted before consents bound an organization (no claim) acts in no organization: no stored grant applies', async () => {
     const ctx = await r.resolve(READ_TOKEN('u_mia'));
     expect(ctx.tenantId).toBeUndefined();
     await expect(r.run(ctx, 'find', LEAD)).rejects.toThrow(D10_DENIAL);

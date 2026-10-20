@@ -731,9 +731,11 @@ describe('feature-gate lowering matrix (#2874)', () => {
     // #2874 P2b — audit gates: capability-dependent actions that previously
     // shipped UNGATED (rendered even with the backing plugin off, then 404'd).
     // Their doors are platform-admin gated, so the standing leads.
-    ['SysUser', SysUser, 'ban_user', `(${STANDING}) && features.admin == true`],
-    ['SysUser', SysUser, 'unban_user', `(${STANDING}) && features.admin == true`],
-    ['SysUser', SysUser, 'unlock_user', `(${STANDING}) && features.admin == true`],
+    // The three also read the row's state after the standing (the
+    // evaluated truth tables are `identity/action-state-visibility.test.ts`).
+    ['SysUser', SysUser, 'ban_user', `(${STANDING} && has(record.banned) && record.banned != true) && features.admin == true`],
+    ['SysUser', SysUser, 'unban_user', `(${STANDING} && has(record.banned) && record.banned == true) && features.admin == true`],
+    ['SysUser', SysUser, 'unlock_user', `(${STANDING} && ((has(record.locked_until) && record.locked_until != null) || (has(record.two_factor_enabled) && record.two_factor_enabled == true))) && features.admin == true`],
     ['SysUser', SysUser, 'set_user_password', `(${STANDING}) && features.admin == true`],
     ['SysUser', SysUser, 'impersonate_user', `(${STANDING}) && features.admin == true`],
     ['SysUser', SysUser, 'enable_two_factor', '(has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled != true) && features.twoFactor == true'],

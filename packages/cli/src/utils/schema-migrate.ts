@@ -56,7 +56,7 @@ import type {
   PendingSchemaWork,
 } from '@objectstack/driver-sql';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
-import { StorageNameMapping } from '@objectstack/spec/system';
+import { ORGANIZATION_OWNERSHIP_MIGRATION_ID, StorageNameMapping } from '@objectstack/spec/system';
 import { isDevelopmentBoot } from '@objectstack/core';
 import {
   doctorNodeEnv,
@@ -236,6 +236,11 @@ export interface SchemaStack {
   /**
    * Perform the deferred sync — call only once the operator has confirmed the
    * plan. Returns the work it actually ran (`[]` when nothing was deferred).
+   *
+   * Then the organization-ownership BIRTH half the deferred boot could not
+   * run ({@link recordBirthOfFlushedStore}): when this flush created the
+   * ledger's store from empty, it writes the birth marker, so the first `os
+   * serve` admits the database this run created. Throws when that write fails.
    */
   flushSchemaDdl: () => Promise<PendingSchemaWork[]>;
   /**
@@ -468,6 +473,9 @@ export class DeferSchemaDdlPlugin {
   /** Every driver this boot deferred, in the order it was armed. */
   readonly drivers: SqlDriverLike[] = [];
 
+  /** The kernel's logger, as `init()` was handed it: what the flush's birth half reports through. */
+  logger: BirthLogger | undefined;
+
   /**
    * [#23816] `exemptPrimary`: leave the engine's DEFAULT driver un-armed. Set
    * only by a `skipSchemaSync` boot (`deferredDdlUnsupported:
@@ -487,6 +495,7 @@ export class DeferSchemaDdlPlugin {
   }> = [];
 
   init = async (ctx: any) => {
+    this.logger = ctx.logger;
     if (this.options.exemptPrimary) this.exempt = defaultDriverOf(ctx);
     for (const name of SQL_DRIVER_SERVICES) {
       try { this.arm(ctx.getService(name)); } catch { /* not registered */ }
@@ -576,6 +585,75 @@ export class DeferSchemaDdlPlugin {
       if (original) Object.defineProperty(engine, 'registerDriver', original);
       else delete engine.registerDriver;
     }
+  }
+}
+
+/** `@objectstack/runtime`'s birth half, loaded lazily as the rest of the runtime is here. */
+type RecordOrganizationOwnershipBirth = typeof import('@objectstack/runtime').recordOrganizationOwnershipBirth;
+
+/**
+ * What the birth half reports through: the runtime's own parameter, which reads
+ * `info` alone. A failure is never logged on this path — it is thrown to the
+ * caller ({@link recordBirthOfFlushedStore}) — so the sink has no error channel.
+ */
+type BirthLogger = Parameters<RecordOrganizationOwnershipBirth>[1];
+
+/**
+ * [ADR-0131 D10; ruling record 6269955919, ① A] The organization-ownership
+ * BIRTH half of a deferred boot, run once {@link SchemaStack.flushSchemaDdl}
+ * has performed the DDL the boot held back.
+ *
+ * Every boot through here composes `OrganizationOwnershipBirthMarkerPlugin`
+ * (`createStandaloneStack`), which writes the birth marker when its `start()`
+ * sees the ledger's store created from empty. A deferred boot creates nothing
+ * by then: each driver stores its objects and skips them before counting, so
+ * the store reports nothing created and the plugin writes nothing. The tables
+ * are created HERE, at the flush. Without this step a fresh install whose
+ * first command is `os migrate apply` carries no marker, and its first `os
+ * serve` refuses it as a database an earlier release created.
+ *
+ * The decision is the runtime's own (`recordOrganizationOwnershipBirth`), read
+ * now: the ledger store's driver counts, from its `hasTable` probe, every
+ * table the flush created and every one it found, so `existing === 0 &&
+ * created > 0` holds only when no declared table was there before this run.
+ * ⛔ Never judged from the work the flush returns: a table already in sync
+ * produces no entry there, so "every entry is a create_table" also describes
+ * a populated database that merely gained a table — exactly the database
+ * that must never receive a birth marker. A store the flush did not touch
+ * (the Turso remote primary, whose schema sync this boot skipped) counts
+ * nothing created and is left to its first serving boot.
+ *
+ * A failed write throws: the tables are there and the marker is not, so the
+ * first `os serve` would refuse this database, and the command must not end
+ * reporting success. The ceremony certifies such a database.
+ *
+ * Exported for its unit pin (`schema-migrate.birth-after-flush.test.ts`), which
+ * holds the failed-write refusal without booting a kernel.
+ */
+export async function recordBirthOfFlushedStore(
+  kernel: { getService?: (name: string) => unknown },
+  recordBirth: RecordOrganizationOwnershipBirth,
+  logger: BirthLogger | undefined,
+): Promise<void> {
+  let engine: unknown;
+  try {
+    engine = kernel.getService?.('objectql');
+  } catch {
+    return; // no engine — no ledger to write
+  }
+  if (!engine || typeof (engine as { getDriverForObject?: unknown }).getDriverForObject !== 'function') return;
+  try {
+    await recordBirth(engine as Parameters<RecordOrganizationOwnershipBirth>[0], logger);
+  } catch (error) {
+    throw new Error(
+      `This run created the database from empty, and its organization-ownership birth marker (sys_migration ` +
+        `'${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') could not be written ` +
+        `(${error instanceof Error ? error.message : String(error)}). Without it the first 'os serve' takes this ` +
+        `database for one an earlier release created and refuses it. Fix the write, then run 'os migrate ` +
+        `organization-ownership --out PLAN' and 'os migrate organization-ownership --apply --plan-file PLAN ` +
+        `--backup-taken', which certifies it.`,
+      { cause: error },
+    );
   }
 }
 
@@ -1196,7 +1274,8 @@ export async function bootSchemaStack(
   const projectRoot = opts.projectRoot ?? process.cwd();
   const envLoad = loadProjectEnvFiles(projectRoot, { dev: opts.serveFlags?.dev === true });
 
-  const { createStandaloneStack, Runtime, resolveStandaloneDatabase } = await import('@objectstack/runtime');
+  const { createStandaloneStack, Runtime, resolveStandaloneDatabase, recordOrganizationOwnershipBirth } =
+    await import('@objectstack/runtime');
 
   // The inputs the database is resolved from — by `createStandaloneStack`
   // below, the occupancy probe before it, and the telemetry sibling's key.
@@ -1533,6 +1612,9 @@ export async function bootSchemaStack(
       // [#21529] The tables exist now; nothing is measured absent any more.
       absentTables.clear();
       deferral?.release();
+      // [ADR-0131 D10] The birth half the deferred boot could not run: only a
+      // deferred boot holds DDL back, so only it can have created the store here.
+      if (deferral) await recordBirthOfFlushedStore(kernel, recordOrganizationOwnershipBirth, deferral.logger);
       return sortPendingSchemaWork(performed);
     },
     composition,

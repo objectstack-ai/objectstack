@@ -62,12 +62,19 @@ function updateFlow(name: string, runAs: 'system' | 'user') {
   };
 }
 
-/** Authz tables granting user 'u1' the unscoped `ehr_all` set + the `approver` position. */
+/**
+ * The organization the run acts in, and the one u1's grants are owned by: a
+ * grant row applies only in its own organization (an organization-less row
+ * confers nothing), so the run names it.
+ */
+const ORG = 'org_1';
+
+/** Authz tables granting user 'u1' the `ehr_all` set + the `approver` position, both in {@link ORG}. */
 const AUTHZ_TABLES: Record<string, any[]> = {
   sys_user: [{ id: 'u1', email: 'u1@x.com' }],
-  sys_member: [],
-  sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: null }],
-  sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psE', permission_set: 'ehr_all', organization_id: null }],
+  sys_member: [{ user_id: 'u1', organization_id: ORG, role: 'member' }],
+  sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: ORG }],
+  sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psE', permission_set: 'ehr_all', organization_id: ORG }],
   sys_permission_set: [{ id: 'psE', name: 'ehr_all', system_permissions: ['cap_ehr'] }],
   sys_position: [],
   sys_position_permission_set: [],
@@ -96,8 +103,9 @@ describe("AutomationServicePlugin bridges the runAs:'user' grant resolver (#3356
     const automation = kernel.getService<AutomationEngine>('automation');
     automation.registerFlow('usr', updateFlow('usr', 'user') as never);
 
-    // The record-change hook shape: ONLY a userId — no positions/permissions.
-    const res = await automation.execute('usr', { userId: 'u1', params: { noteId: 'n1' } });
+    // The record-change hook shape: ONLY a userId (and the organization the
+    // write ran in) — no positions/permissions.
+    const res = await automation.execute('usr', { userId: 'u1', tenantId: ORG, params: { noteId: 'n1' } } as never);
     expect(res.success, `run failed: ${JSON.stringify(res)}`).toBe(true);
 
     const update = crud.find((c) => c.op === 'update' && c.obj === 'runas_thing');
@@ -111,8 +119,8 @@ describe("AutomationServicePlugin bridges the runAs:'user' grant resolver (#3356
       update!.ctx.permissions,
       "the triggering user's permission set was not propagated — runAs:'user' ran with the bare member fallback (#3356)",
     ).toContain('ehr_all');
-    // The peer list rides the same bridge. No organization here, so it is the
-    // user alone — what an organization-less request resolves to as well.
+    // The peer list rides the same bridge: the members of the organization the
+    // run acts in, u1 alone here.
     expect(update!.ctx.org_user_ids, 'the bridge dropped the resolver\'s peer list').toEqual(['u1']);
 
     await kernel.shutdown();

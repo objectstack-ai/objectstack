@@ -29,7 +29,8 @@
 //   capability grant.
 //
 // ⚠️ POPULATION OF THIS PIN, stated because a pin proves only what it covers:
-// it covers the D4-spelled-built-in-name shape and a genuine-grant control. It
+// it covers the D4-spelled-built-in-name shape, a genuine-grant control and the
+// retired organization-less grant (which anchors nothing). It
 // does NOT cover the ADR-0091 validity window, the ADR-0049 catalogue flag, or
 // the catalogue-page shapes — those are `platform-admin-standing.consolidation.
 // test.ts`'s population, and that suite passing is NOT evidence about this one.
@@ -100,17 +101,23 @@ const sessionFor = async (manager: AuthManager, bearer: string) => {
 
 /**
  * `shape: 'name-only'` — the escalation: a plain org member plus a D4 row
- * SPELLING the built-in name, and no capability grant behind it.
- * `shape: 'genuine'`   — the control: a real unscoped `admin_full_access` grant.
+ * SPELLING the built-in name (in the member's own organization, where it
+ * applies), and no capability grant behind it.
+ * `shape: 'genuine'`   — the control: a real `admin_full_access` grant owned by
+ * the Default Organization (`ORG`, slugged `default`) — the only grant that
+ * anchors platform standing.
+ * `shape: 'org-less'`  — the retired reading: the same grant with NO
+ * organization, which anchors nothing.
  */
-const arrange = async (shape: 'name-only' | 'genuine') => {
+type Shape = 'name-only' | 'genuine' | 'org-less';
+const arrange = async (shape: Shape) => {
   const engine = createMemoryEngine();
   const manager = makeManager(engine);
 
   await signUp(manager, 'subject@example.com', 'Subject');
   const userId = userIdFor(engine, 'subject@example.com');
 
-  await engine.insert('sys_organization', { id: ORG, name: 'Rung Org', slug: 'rung-org' });
+  await engine.insert('sys_organization', { id: ORG, name: 'Rung Org', slug: 'default' });
   await engine.insert('sys_member', { organization_id: ORG, user_id: userId, role: 'member' });
 
   if (shape === 'name-only') {
@@ -120,7 +127,7 @@ const arrange = async (shape: 'name-only' | 'genuine') => {
     await engine.insert('sys_user_position', {
       user_id: userId,
       position: 'platform_admin',
-      organization_id: null,
+      organization_id: ORG,
     });
   } else {
     await engine.insert('sys_permission_set', { id: PS_ADMIN, name: ADMIN_FULL_ACCESS });
@@ -128,7 +135,7 @@ const arrange = async (shape: 'name-only' | 'genuine') => {
       user_id: userId,
       permission_set_id: PS_ADMIN,
       permission_set: 'admin_full_access',
-      organization_id: null,
+      organization_id: shape === 'genuine' ? ORG : null,
     });
   }
 
@@ -137,7 +144,7 @@ const arrange = async (shape: 'name-only' | 'genuine') => {
 };
 
 /** All three answers, read off one arranged principal. */
-const verdicts = async (shape: 'name-only' | 'genuine') => {
+const verdicts = async (shape: Shape) => {
   const { engine, manager, userId, bearer } = await arrange(shape);
   const session = await sessionFor(manager, bearer);
   return {
@@ -183,7 +190,7 @@ describe('a `sys_user_position` row spelling `platform_admin` confers NO platfor
   });
 });
 
-describe('CONTROL — a genuine unscoped admin_full_access grant still admits', () => {
+describe('CONTROL — a genuine Default Organization admin_full_access grant still admits', () => {
   it('all three answers are TRUE, and they agree with each other', async () => {
     const v = await verdicts('genuine');
     expect(
@@ -195,6 +202,24 @@ describe('CONTROL — a genuine unscoped admin_full_access grant still admits', 
   it('the derived built-in is projected into positions[] as before', async () => {
     const v = await verdicts('genuine');
     expect(v.positions).toContain('platform_admin');
+  });
+});
+
+describe('an ORGANIZATION-LESS admin_full_access grant confers NO platform standing', () => {
+  it('all three answers are FALSE — and the Default Organization grant on the same rig is TRUE', async () => {
+    const v = await verdicts('org-less');
+    expect(
+      { alias: v.alias, gate: v.gate, rung: v.rung },
+      `positions=${JSON.stringify(v.positions)}`,
+    ).toEqual({ alias: false, gate: false, rung: false });
+    expect(v.positions).not.toContain('platform_admin');
+
+    const control = await verdicts('genuine');
+    expect({ alias: control.alias, gate: control.gate, rung: control.rung }).toEqual({
+      alias: true,
+      gate: true,
+      rung: true,
+    });
   });
 });
 

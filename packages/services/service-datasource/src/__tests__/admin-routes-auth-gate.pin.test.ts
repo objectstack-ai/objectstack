@@ -46,6 +46,7 @@ import {
   UNENTITLED_USER,
   createSessionAuthService,
   createGrantsEngine,
+  sessionFor,
 } from './entitled-caller.fixture.js';
 
 /** The gate postures plugin-auth's enrichment writes, one per policy. */
@@ -74,7 +75,7 @@ function createAuthService() {
     api: {
       getSession: async (input: { headers: Headers }) => {
         const user = held[input.headers?.get?.('authorization') ?? ''];
-        return user ? { user } : base.api.getSession(input);
+        return user ? sessionFor(user) : base.api.getSession(input);
       },
     },
   };
