@@ -24,7 +24,12 @@
  *     another operation or outside the caller's positions does not.
  *  3. The platform administrator is unchanged.
  *  4. Explain names the object default.
- *  5. A deployment with the baseline is byte-for-byte unchanged.
+ *  5. A deployment with the baseline is byte-for-byte unchanged on the objects
+ *     whose shipped sets still carry their literal (`sys_user`, `sys_session`);
+ *     on `sys_scim_user`, whose copy the shipped sets no longer carry (ruling
+ *     E′ item 3's follow-up), the declaration is the scope the baseline reads
+ *     under (`objects/shipped-sets-identity-default-row-scope.test.ts` pins the
+ *     shipped tree's rows on every such object).
  *  6. A default whose `using` does not lower is refused the way an authored
  *     policy's is: dropped with the compiler's WARN, failing closed to zero
  *     rows, on the same object with the same predicate.
@@ -399,11 +404,11 @@ describe('[#24164 E′] a deployment with the baseline is byte-for-byte unchange
     platform_admin: PLATFORM_ADMIN,
   };
 
-  it('every shipped persona reads and is explained exactly as without the declarations', async () => {
+  it('every shipped persona reads and is explained exactly as without the declarations, where the sets carry the literal', async () => {
     const now = await boot({ baseline: true, declared: true });
     const before = await boot({ baseline: true, declared: false });
     for (const [persona, context] of Object.entries(PERSONAS)) {
-      for (const object of ['sys_user', 'sys_session', 'sys_scim_user']) {
+      for (const object of ['sys_user', 'sys_session']) {
         const label = `${persona} on ${object}`;
         const served = await before.ids(object, context);
         expect(await now.ids(object, context), label).toEqual(served);
@@ -416,6 +421,21 @@ describe('[#24164 E′] a deployment with the baseline is byte-for-byte unchange
     // CONTROL: the comparison has teeth — the baseline really narrows these reads.
     expect(await now.ids('sys_user', PERSONAS.member_default)).toEqual(['u_x', 'u_x2']);
     expect(await now.ids('sys_session', PERSONAS.member_default)).toEqual(['sess:u_x']);
+  });
+
+  it('on sys_scim_user, whose copy the shipped sets no longer carry, the declaration is the scope every shipped persona below platform admin reads under', async () => {
+    const now = await boot({ baseline: true, declared: true });
+    const before = await boot({ baseline: true, declared: false });
+    for (const persona of ['member_default', 'viewer_readonly', 'organization_admin'] as const) {
+      const context = PERSONAS[persona];
+      expect(await now.ids('sys_scim_user', context), persona).toEqual([`scim:${String(context.userId)}`]);
+      const layer = (await now.security.explain({ object: 'sys_scim_user', operation: 'read' }, { ...context })).layers
+        .find((l: { layer: string }) => l.layer === 'rls');
+      expect(layer?.detail, persona).toContain(`object default row scope '${String(IDENTITY_DEFAULTS.sys_scim_user.name)}'`);
+      // CONTROL: without the declaration nothing in the baseline scopes it.
+      expect(await before.ids('sys_scim_user', context), persona).toEqual(USERS.map((u) => `scim:${u}`).sort());
+    }
+    expect(await now.ids('sys_scim_user', PERSONAS.platform_admin)).toEqual(USERS.map((u) => `scim:${u}`).sort());
   });
 });
 

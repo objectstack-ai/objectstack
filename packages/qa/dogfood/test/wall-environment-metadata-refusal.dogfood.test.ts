@@ -319,10 +319,18 @@ for (const posture of ['isolated', 'group'] as const) {
       await ok(await h.stack.apiAs(h.operator, 'DELETE', `/meta/view/${name}`));
 
       const pkg = `com.em.${p}.opctl`;
-      await ok(await h.stack.apiAs(h.operator, 'POST', '/packages', { id: pkg, name: 'opctl', version: '1.0.0', type: 'app' }), 201);
+      // As in the /packages case: the package declares the CRM package, whose
+      // object the view binds, and the publish line reads the receipt, because
+      // a refused publish also answers 200.
+      await ok(await h.stack.apiAs(h.operator, 'POST', '/packages',
+        { id: pkg, name: 'opctl', version: '1.0.0', type: 'app', dependencies: { [CRM_PKG]: '*' } }), 201);
       await ok(await h.stack.apiAs(h.operator, 'PATCH', `/packages/${pkg}`, { description: 'by the operator' }));
       await ok(await h.stack.apiAs(h.operator, 'PUT', `/meta/view/crm_lead.em_${p}_pkgv?package=${pkg}&mode=draft`, view(`crm_lead.em_${p}_pkgv`, 'v1')));
-      await ok(await h.stack.apiAs(h.operator, 'POST', `/packages/${pkg}/publish-drafts`, {}));
+      const published = await h.stack.apiAs(h.operator, 'POST', `/packages/${pkg}/publish-drafts`, {});
+      await ok(published);
+      const receipt = ((await published.json()) as { data?: Record<string, unknown> }).data;
+      expect({ success: receipt?.success, outcome: receipt?.outcome, publishedCount: receipt?.publishedCount }, JSON.stringify(receipt?.failed))
+        .toEqual({ success: true, outcome: 'published', publishedCount: 1 });
       await ok(await h.stack.apiAs(h.operator, 'POST', `/packages/${pkg}/duplicate`, { targetPackageId: `com.em.${p}.opctl.copy` }));
       await ok(await h.stack.apiAs(h.operator, 'DELETE', `/packages/${pkg}`));
 
@@ -358,9 +366,16 @@ describe('[ADR-0131 D12 items 7–8 · D11] single (CONTROL): the refusal is ine
     await ok(await h.stack.apiAs(h.tokA, 'PUT', '/meta/view/crm_lead.em_sin_view', view('crm_lead.em_sin_view', 'View by A')));
     await ok(await h.stack.apiAs(h.tokA, 'PUT', '/meta/flow/em_sin_flow', flow('em_sin_flow', 'Flow by A')));
     expect(await readAsB(h, 'view', 'crm_lead.em_sin_view')).toEqual({ status: 200, label: 'View by A' });
-    await ok(await h.stack.apiAs(h.tokA, 'POST', '/packages', { id: 'com.em.sin.a', name: 'a', version: '1.0.0', type: 'app' }), 201);
+    // As in the walled /packages case: the package declares the CRM package, and
+    // the publish line reads the receipt.
+    await ok(await h.stack.apiAs(h.tokA, 'POST', '/packages',
+      { id: 'com.em.sin.a', name: 'a', version: '1.0.0', type: 'app', dependencies: { [CRM_PKG]: '*' } }), 201);
     await ok(await h.stack.apiAs(h.tokA, 'PUT', '/meta/view/crm_lead.em_sin_pv?package=com.em.sin.a&mode=draft', view('crm_lead.em_sin_pv', 'v1')));
-    await ok(await h.stack.apiAs(h.tokA, 'POST', '/packages/com.em.sin.a/publish-drafts', {}));
+    const published = await h.stack.apiAs(h.tokA, 'POST', '/packages/com.em.sin.a/publish-drafts', {});
+    await ok(published);
+    const receipt = ((await published.json()) as { data?: Record<string, unknown> }).data;
+    expect({ success: receipt?.success, outcome: receipt?.outcome, publishedCount: receipt?.publishedCount }, JSON.stringify(receipt?.failed))
+      .toEqual({ success: true, outcome: 'published', publishedCount: 1 });
     await ok(await h.stack.apiAs(h.tokA, 'DELETE', '/packages/com.em.sin.a'));
     await ok(await h.stack.apiAs(h.tokA, 'POST', INSTALL_LOCAL, packageBody('com.em.sin.il', '1.0.0', [object('em_sin_ilobj', 'v1')])));
     await ok(await h.stack.apiAs(h.tokA, 'DELETE', `${INSTALL_LOCAL}/com.em.sin.il`));

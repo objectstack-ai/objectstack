@@ -16,9 +16,12 @@
  * policy the holder's set declares, and neither object had one.
  *
  * The fix is the header's own instrument, the per-object row scope: a `_none`
- * policy (`id == null`, no row) on each object, in every shipped set that holds
- * the blanket and carries row-level security. The two readers that must keep
- * every row are controls here:
+ * scope (`id == null`, no row) on each object. It was first a policy in every
+ * shipped set that holds the blanket; it is now each object's own declared
+ * `defaultRowScope`, which the security plugin's collection applies wherever a
+ * holder's sets carry no row policy for the object (#24164 ruling E′ item 3's
+ * follow-up removed the sets' copies). The two readers that must keep every
+ * row are controls here:
  *   - the platform admin (`admin_full_access`), through its superuser bypass;
  *   - better-auth itself, which reads these tables through its adapter under
  *     system context (`withSystemContext` in plugin-auth injects exactly the
@@ -30,8 +33,7 @@
  * `scim-projection-row-scope.test.ts`:
  *   - `isolated` with the platform baseline composed (the stock walled shape);
  *   - `isolated` with NO baseline, where each persona resolves only the set it
- *     names, so a set that carried no scope of its own reads every row even
- *     while the stock shape stays green through `member_default`;
+ *     names, so the object's declared scope is the only one in force;
  *   - `single`, where the policies carry no tenant token and so must survive
  *     the posture's strip of the platform's tenant policies (ADR-0105 D3).
  */
@@ -183,11 +185,14 @@ const PERSONAS = {
     posture: 'TENANT_ADMIN', org_user_ids: ORG_X_USERS, email: emailOf(PEOPLE.admin),
   },
   // The MCP write ceiling holds the grant too; it carries no row policy of its
-  // own by design (ADR-0090 D10), so its bound is the delegating member's sets.
-  // Those resolve from the baseline, so this persona runs where one is composed.
+  // own by design (ADR-0090 D10), and its own leg collects no object default
+  // (ruling of record 6278784335 on #24341, letter B), so its bound is the
+  // delegating member's leg. That resolves from the baseline, so this persona
+  // runs where one is composed. Shaped as its one producer shapes it (core's
+  // `assembleExecutionContext`): `userId` stays the delegating human.
   mcp_agent_data_write: {
-    userId: 'agent_x', tenantId: 'org_x', positions: [], permissions: ['mcp_agent_data_write'],
-    principalKind: 'agent', onBehalfOf: { userId: PEOPLE.member }, org_user_ids: ORG_X_USERS,
+    userId: PEOPLE.member, tenantId: 'org_x', positions: [], permissions: ['mcp_agent_data_write'],
+    principalKind: 'agent', onBehalfOf: { userId: PEOPLE.member, principalKind: 'human' }, org_user_ids: ORG_X_USERS,
   },
 } as const;
 type Persona = keyof typeof PERSONAS;
