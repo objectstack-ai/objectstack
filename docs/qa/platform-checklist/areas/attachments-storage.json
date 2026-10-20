@@ -1086,7 +1086,7 @@
       "title": "Chunked upload integrity on v18: complete with a missing chunk is 409 with details.missingChunks and the session stays in_progress, a re-sent chunk counts once, parallel chunks all record, and an org switch mid-upload answers 409 on chunk and complete, and on progress only once the session's expiry stamp is due",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1098,7 +1098,7 @@
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)"
         ],
         "knownGaps": [
-          "acceptance[0] names the org-switch guard among what the pins prove, but none of the three automated.ref files drives a CHUNKED door after an organization switch, so the door-level 409 of acceptance[3] (chunk PUT, chunked complete, a progress read whose expiry stamp is due) is unpinned. The guard is the doors' shared requireStartingOrganization (packages/services/service-storage/src/storage-routes.ts, asking packages/services/service-storage/src/metadata-store.ts#organizationOutOfWriteReach); the one door-level pin of it is the presigned COMMIT door's 409 RESOURCE_CONFLICT in packages/services/service-storage/src/error-envelope.conformance.test.ts, a sibling door, and chunk-part-record-concurrency.test.ts pins only the store-level miss. Score acceptance[0] on chunk accounting and the missing-chunk refusal alone, and do not cite the pins for the org-switch guard. acceptance[3]'s live leg also needs a second organization, which a stock 18.0 boot refuses (403 ORGANIZATION_CREATION_DISABLED, QA runs #24560 / #24558) — the wave's no-second-organization theme, parked on #24579 §2"
+          "acceptance[0] names the org-switch guard among what the pins prove, but none of the three automated.ref files drives a CHUNKED door after an organization switch, so the door-level 409 of acceptance[3] (chunk PUT, chunked complete, a progress read whose expiry stamp is due) is unpinned. The guard is the doors' shared requireStartingOrganization (packages/services/service-storage/src/storage-routes.ts, asking packages/services/service-storage/src/metadata-store.ts#organizationOutOfWriteReach); the one door-level pin of it is the presigned COMMIT door's 409 RESOURCE_CONFLICT in packages/services/service-storage/src/error-envelope.conformance.test.ts, a sibling door, and chunk-part-record-concurrency.test.ts pins only the store-level miss. Score acceptance[0] on chunk accounting and the missing-chunk refusal alone, and do not cite the pins for the org-switch guard. acceptance[3]'s live leg, steps[3], needs a second organization the admin can make active, and a stock 18.0 boot holds one: POST /api/v1/auth/organization/create answers 403 ORGANIZATION_CREATION_DISABLED on every 18.0 boot, since 18.0 boots no walled posture (packages/plugins/plugin-auth/src/auth-manager.ts#ORGANIZATION_CREATION_DISABLED_CODE; QA runs #24560 / #24558; see RUNNER.md's environment-facts entry 'A stock 18.0 boot holds exactly one organization'). On a stock 18.0 boot acceptance[3] is not scored: record it skipped with that entry cited, never blocked(fixture) and never fail. With no chunked-door pin of the guard either, a stock 18.0 run carries no verdict on it; a run that stages the second organization itself, as QA run #24560 did with a system write, scores a fixture of its own making and records that its verdict rests on it"
         ]
       },
       "steps": [
@@ -1159,6 +1159,12 @@
           "date": "2026-10-19",
           "change": "acceptance[0].clause narrowed to what its pins prove and fixtures.knownGaps added — the out-of-scope §3 note of #24622's round (wave anchor #24579 §3; QA run #24560): none of the three automated.ref pins drives a chunked door after an organization switch, so the door-level 409 acceptance[3] asserts is unpinned. The only door-level pin of the shared guard (storage-routes.ts requireStartingOrganization) is the presigned commit door's, in error-envelope.conformance.test.ts, and chunk-part-record-concurrency.test.ts pins the store-level miss only. acceptance[0] no longer claims the org-switch guard. The knownGap records the unpinned leg, and points at §2 for its live half, which needs a second organization stock 18.0 refuses. acceptance[1]–[3] (#24622) are unchanged",
           "ref": "#24632"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-19",
+          "change": "fixtures.knownGaps[0]'s pointer to the wave's second-organization theme replaced by the theme's own statement — the 18.0 sweep's wave-wide theme '18.0 permits no second organization' (wave anchor #24579 §2; QA runs #24560 and #24558). Re-derived at base bfc1539fe0: auth-manager.ts beforeCreateOrganization answers 403 ORGANIZATION_CREATION_DISABLED wherever the effective posture enforces no wall, which on 18.0 is every boot (serve.ts walledPostureRefusal), and sys_organization declares no create method. The clause and its pins are unchanged; the gap now says how a stock run scores it",
+          "ref": "#24687"
         }
       ]
     }
