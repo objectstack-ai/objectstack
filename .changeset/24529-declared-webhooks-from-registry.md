@@ -27,4 +27,4 @@ On a database an 18.0 install created (expand first — nothing is moved or dele
 - A seeded row whose declaration was removed keeps delivering, as it did on 18.0.
 - Redelivering an old delivery of a pristine seeded row is judged by the declaration that now answers for it, so a webhook switched off through the ledger is not re-sent.
 
-Deleting the seeded rows, and re-pointing their `sys_http_delivery` history at the declaration, is a step of the ownership migration in a later 18.x release.
+Deleting the seeded rows, and re-pointing their `sys_http_delivery` history at the declaration, is the ownership ceremony's `declared-webhooks` step (`os migrate organization-ownership`).

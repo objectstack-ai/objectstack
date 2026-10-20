@@ -614,13 +614,15 @@
  *   DID EVERY BYTE THIS ACT SENT REACH THE PLATFORM?
  *
  * ⛔ Not "did the bytes come back identical" — they never do, which is the
- * whole point of the declared set above. All FIVE benign classes keep the sent
+ * whole point of the declared set above. All SIX benign classes keep the sent
  * body's CONTENT whole: `identical` by definition, `trailing-newline-stripped`
  * gives up only newlines the platform does not keep, `footer-appended` adds
  * without removing, `footer-re-anchored` moves a newline the act itself sent,
- * and `footer-blank-collapsed` gives up one newline of the platform's OWN
- * footer separator, over any trailing newline it does not keep. Every one of
- * them exits 0.
+ * `footer-blank-collapsed` gives up one newline of the platform's OWN footer
+ * separator, over any trailing newline it does not keep, and
+ * `reference-expanded-on-read` IS one of those five once the read path's own
+ * spelling of a bare reference is collapsed back — the stored bytes were never
+ * different (the reference-expansion section below). Every one of them exits 0.
  *
  * `mutated` is the only class that answers no, and since #18693 it is also the
  * only class that CAN: the two shapes the platform's own footer takes are
@@ -640,6 +642,12 @@
  *                newline(s) of its own, and the stored body is it — those
  *                newlines stripped — with the block's blank line collapsed.
  *                Class `footer-blank-collapsed`, exit 0 (#19048, #19312).
+ *   EXPANDED     the stored body READS as `identical`, a stripped trailing
+ *                newline or one of the three shapes above only once every
+ *                `owner/repo#N` standing exactly where this act sent a bare
+ *                `#N` is collapsed back to it — the proxy-side REST read's
+ *                spelling, not a byte the platform changed. Class
+ *                `reference-expanded-on-read`, exit 0 (#24747).
  *   NOT STORED   `mutated`, and nothing else is: a byte this act sent is not
  *                the byte the platform holds at that offset, or the stored
  *                body stops before the sent one does. `EXIT_NOT_STORED`.
@@ -705,6 +713,66 @@
  * what that cell means — the same reason a newline that came from NOWHERE is
  * not forgiven: the platform inserting a byte the act never sent is a cell
  * nobody has measured, whatever it looks like.
+ *
+ * ## A reference the READ path expanded is not a byte the platform changed (#24747)
+ *
+ * The proxy in front of a cloud seat container rewrites what a REST read
+ * returns: a body read there intermittently comes back with a bare `#N`
+ * spelled `owner/repo#N` (`platform-readings.md`, 配额段, recorded by PR
+ * #24744). The card records the director post on objectstack#12708 stored at
+ * 14,657 bytes and read back with 117 expansions at 17,699 — 17,699 − 117 × 26
+ * = 14,657, the 26 being `objectstack-ai/objectstack`. The stored bytes never
+ * changed; the READ did. And the seat-side read-back — this classifier, which
+ * `fleet-write/dispatch.mjs` imports for every relayed write and its comment
+ * lookup — runs on exactly that read path, so a body stored whole read back
+ * `mutated`: exit 4 here, `not-stored` on the relay row, and a remedy that
+ * sends the seat to read the expanded body and send it back, which stores the
+ * expansion for real.
+ *
+ * So, before a read-back is called `mutated`, the judge asks one more
+ * question: does the stored body become one of the declared classes once the
+ * read path's spelling is collapsed back? Yes ⇒ `reference-expanded-on-read`,
+ * which lands; the class the collapsed body reads as is kept beside it
+ * (`afterCollapse`), with the count and the prefix.
+ *
+ * ⛔ The collapse is BUILT FROM THE SENT BYTES, ⛔ never a replace over the
+ * stored ones (`referenceExpansion`). A body may carry an author's own full
+ * `objectstack-ai/objectstack#N`, and a global replace would collapse that
+ * too and then compare it against a sent body that still spells it in full —
+ * a false `mutated` on exactly the body most careful about its references.
+ * So the walk reads both bodies in step and allows ONE thing: where the sent
+ * body has a bare reference — a `#` then a digit, at the start of the body or
+ * after a character that is neither an ASCII letter or digit nor `/` — the
+ * stored body may carry `owner/repo` immediately before that `#`. Every other
+ * byte is compared literally, and the walk stops at the first one that
+ * differs; what follows is handed to the same declared arms unchanged. The
+ * measured expansion is partial (bare references right after `(` were left
+ * alone on the read PR #24744 records), so either spelling is accepted at
+ * every bare position, and at no other position.
+ *
+ * ⛔ The prefix is the fleet's OWN repository, and ONE per body. The judge is
+ * not told which repository it read from — `classifyReadBack` takes
+ * `{ sent, stored }` and nothing else, and its relay caller passes exactly
+ * that — so the prefix is read off the stored body and must be a slug on the
+ * fleet's roster (`GOVERNED_REPOS`), the same one at every expanded position.
+ * `someone-else/objectstack#N`, two different roster slugs in one body, or a
+ * prefix in front of a `#` the act did not send bare are all bytes this act
+ * did not send, and stay `mutated`. What this does NOT prove is that the slug
+ * is the repository the body lives on: a body whose every bare reference came
+ * back naming a SIBLING repository of the roster would pass. Nothing has been
+ * measured producing that — the proxy spells the repository it read from —
+ * and the cure belongs to the caller, not to a guess here: a caller that
+ * handed over the repository it read would let the judge require it exactly.
+ *
+ * ⛔ Not widened in any other direction. No footer arm changed; there is no
+ * tolerance band and no length test — the length identity (bytes read −
+ * prefix bytes × count = bytes collapsed) holds by construction, so it is
+ * printed as a reading and never asked as a question. A body that still
+ * differs once collapsed is `mutated`, and its offset is taken AFTER the
+ * collapse, in SENT bytes, so the reader is sent to the real difference and
+ * not to the first expanded reference — the one place on that body a seat
+ * must not go and "repair". The count is said on stderr on both output
+ * shapes, so the reading stays visible at exit 0.
  *
  * ## A size refusal is a REFUSAL, not a missing route (#18843)
  *
@@ -886,6 +954,9 @@ import { CONTRACT_REVIEW_TIER, CONTRACT_REVIEW_TIER_NAME, TIER_DEFAULT, TIER_FLO
 // The record's `Local-runs:` line is read by the file that owns the record's
 // every other line — judged when present, an absent line not re-judged.
 import { localRunsStand, readLocalRuns } from './record-recognisers.mjs';
+// The fleet's repository roster — the one place a repository joins the fleet —
+// is what a read-back may collapse a reference expansion against (header).
+import { GOVERNED_REPOS } from './check-governed-merges.mjs';
 import { EXIT_UNCONFIRMED, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { MAX_BODY_BYTES, TRANSPORT_ENV } from './fleet-write/ops.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
@@ -2420,6 +2491,8 @@ export const READ_BACK_CLASSES = Object.freeze({
     "the stored body is that body with the trailing newline(s) it sent moved to before the footer block's rule — nothing added, nothing lost",
   'footer-blank-collapsed':
     "the stored body is that body with the blank line immediately before the footer block's rule collapsed, over any trailing newline(s) the platform does not keep — one newline of the block's own separator gone, and no content byte touched",
+  'reference-expanded-on-read':
+    "the stored body is one of the classes above once every `owner/repo#N` the READ path put where this act sent a bare `#N` is collapsed back — the read's spelling of a reference, not a byte the platform changed",
   mutated: 'something nobody measured — the bytes disagree, and the offset says where',
 });
 
@@ -2427,6 +2500,15 @@ export const READ_BACK_CLASSES = Object.freeze({
 // shape never reaches a reader under a word untrue of its bytes:
 // `footer-re-anchored` says "nothing lost" and the collapse loses one.
 const FOOTER_SHAPE_CLASSES = Object.freeze({ appended: 'footer-appended', 're-anchored': 'footer-re-anchored', collapsed: 'footer-blank-collapsed' });
+
+/**
+ * The `owner/repo` a read-back may collapse in front of a bare reference: the
+ * fleet's own repositories, read from its one roster, ⛔ never a pattern — a
+ * prefix outside it is a byte this act did not send. One per body, chosen by
+ * the stored body itself (`referenceExpansion`; header, reference-expansion
+ * section, for why the judge is not told which one).
+ */
+export const OWN_REFERENCE_PREFIXES = Object.freeze(GOVERNED_REPOS.map((r) => r.slug));
 
 /**
  * The first byte at which two bodies disagree, or `-1` when they do not.
@@ -2564,6 +2646,56 @@ export function footerReAnchoring(sent, stored) {
   return null;
 }
 
+/** Whether the `#` at index `i` of `text` opens a BARE reference: a digit after it, and before it the start of the body or a character that is neither an ASCII letter or digit nor `/`. Pure. */
+function opensBareReference(text, i) {
+  if (text[i] !== '#' || !/[0-9]/u.test(text[i + 1] ?? '')) return false;
+  return i === 0 || !/[A-Za-z0-9/]/u.test(text[i - 1]);
+}
+
+/**
+ * The stored body with the READ path's expansion of bare references collapsed
+ * back — `{ collapsed, count, prefix }` — or `null` when there is none to
+ * collapse. Pure.
+ *
+ * ⛔ BUILT FROM THE SENT BYTES, ⛔ never a replace over the stored ones (the
+ * header's reference-expansion section is the authority): the two bodies are
+ * walked in step, and only where `sent` opens a bare reference may the stored
+ * body carry one of `OWN_REFERENCE_PREFIXES` in front of that same `#` — the
+ * first one met fixes the prefix for the whole body. Every other character
+ * must be the same character; the walk stops at the first that is not, and
+ * the stored remainder is kept verbatim behind the collapsed part, so the
+ * declared arms judge the tail exactly as they would have. ⛔ It answers no
+ * class: `classifyReadBack` asks the same declared arms of what it returns.
+ */
+export function referenceExpansion(sent, stored) {
+  if (typeof stored !== 'string') return null;
+  const sentText = String(sent ?? '');
+  const pieces = [];
+  let prefix = null;
+  let count = 0;
+  let from = 0;
+  let i = 0;
+  let j = 0;
+  while (i < sentText.length && j < stored.length) {
+    if (sentText[i] === '#' && stored[j] !== '#' && opensBareReference(sentText, i)) {
+      const candidate = prefix ?? OWN_REFERENCE_PREFIXES.find((slug) => stored.startsWith(`${slug}#`, j));
+      if (candidate !== undefined && stored.startsWith(`${candidate}#`, j)) {
+        pieces.push(stored.slice(from, j));
+        j += candidate.length;
+        from = j;
+        prefix = candidate;
+        count += 1;
+      }
+    }
+    if (sentText[i] !== stored[j]) break;
+    i += 1;
+    j += 1;
+  }
+  if (count === 0) return null;
+  pieces.push(stored.slice(from));
+  return { collapsed: pieces.join(''), count, prefix };
+}
+
 /**
  * Whether every byte this act sent is on the platform — the question `$?`
  * answers — read off the verdict's own CLASS and nothing else.
@@ -2575,7 +2707,8 @@ export function footerReAnchoring(sent, stored) {
  * `footer-blank-collapsed` drops one newline of the platform's own footer
  * separator, over any trailing newline the platform does not keep — the only
  * bytes the footer path has been measured taking, and never a byte of the
- * body. So `mutated` — "something nobody
+ * body — and `reference-expanded-on-read` is one of those five once the read
+ * path's spelling of a bare reference is collapsed back. So `mutated` — "something nobody
  * measured" — is the one class that can answer no, and since #18693 ONE
  * measurement decides both what the status line says and what `$?` says.
  * ⛔ `unreadable` answers YES on purpose: nothing was measured there, which is
@@ -2613,10 +2746,39 @@ export function sentBodyLanded(readBack) {
  * chewed, a link rewritten inside the block, a newline that came from nowhere,
  * a byte lost before the rule, a truncation that happens to end in the block.
  * The one predicate is asked once, and it is asked about bytes.
+ *
+ * ONE question more before that word (#24747): does the stored body become a
+ * declared class once the read path's expansion of bare references is
+ * collapsed back (`referenceExpansion`)? Then it is
+ * `reference-expanded-on-read`, carrying the class the collapsed body reads as
+ * (`afterCollapse`), the count (`referenceExpanded`) and the prefix
+ * (`referencePrefix`). ⛔ The same declared arms answer, ⛔ never a wider one,
+ * and ⛔ the collapse is never applied twice: a body that still differs once
+ * collapsed is `mutated`, its offset taken on the collapsed pair — in SENT
+ * bytes, at the real difference rather than the first expanded reference —
+ * with the count beside it.
  */
 export function classifyReadBack({ sent, stored } = {}) {
   if (typeof stored !== 'string') return { class: 'unreadable', offset: null, strippedNewlines: 0 };
   const sentText = String(sent ?? '');
+  const declared = declaredNormalisation(sentText, stored);
+  if (declared !== null) return declared;
+
+  const expansion = referenceExpansion(sentText, stored);
+  if (expansion === null) return mutatedVerdict(sentText, stored);
+  const expanded = { referenceExpanded: expansion.count, referencePrefix: expansion.prefix };
+  const after = declaredNormalisation(sentText, expansion.collapsed);
+  if (after === null) return { ...mutatedVerdict(sentText, expansion.collapsed), ...expanded };
+  return { ...after, class: 'reference-expanded-on-read', afterCollapse: after.class, ...expanded };
+}
+
+/**
+ * The declared classes `classifyReadBack` answers before `mutated` — the
+ * identical bytes, the stripped trailing newline(s) and the three footer
+ * shapes — or `null` for none of them. Pure; asked once of the stored body,
+ * and once more of it collapsed.
+ */
+function declaredNormalisation(sentText, stored) {
   if (stored === sentText) return { class: 'identical', offset: null, strippedNewlines: 0 };
 
   const trimmed = sentText.replace(/\n+$/u, '');
@@ -2640,7 +2802,11 @@ export function classifyReadBack({ sent, stored } = {}) {
       footerShape: footer.shape,
     };
   }
+  return null;
+}
 
+/** The `mutated` verdict over one pair of bodies — the offset, both sides at it. Pure. */
+function mutatedVerdict(sentText, stored) {
   // Nothing anybody measured explains this difference, so the whole warning is
   // kept and the offset is what a reader goes and looks at. `footerReAnchored`
   // is false here by construction — the one predicate that could have answered
@@ -2738,6 +2904,16 @@ export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 
         ` short are that separator newline${readBack.strippedNewlines > 0 ? ' and the newline(s) the platform does not keep' : ''}, and` +
         ` every CONTENT byte sent IS stored (sent ${sentBytes}, stored ${storedBytes})`,
     );
+  } else if (readBack.class === 'reference-expanded-on-read') {
+    // The length identity is printed as a READING, ⛔ never asked: the collapse
+    // is exact by construction, and the class says what the collapsed body is.
+    const prefixBytes = Buffer.byteLength(readBack.referencePrefix, 'utf8');
+    lines.push(
+      `  read-back: clean — the READ path spelled ${readBack.referenceExpanded} bare reference(s) as \`${readBack.referencePrefix}#N\`;` +
+        ` collapsed at exactly the positions this act sent them bare, the stored body is \`${readBack.afterCollapse}\`, and every` +
+        ` CONTENT byte sent IS stored (sent ${sentBytes}, read ${storedBytes} − ${readBack.referenceExpanded} × ${prefixBytes} =` +
+        ` ${storedBytes - readBack.referenceExpanded * prefixBytes})`,
+    );
   } else {
     // `mutated` means one thing now, so it says one thing: nobody measured this
     // difference, here is where it starts, and the write did not land. The
@@ -2751,6 +2927,12 @@ export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 
     );
     lines.push(`     first difference at byte ${readBack.offset}: sent ${readBack.sentContext} | stored ${readBack.storedContext}`);
     lines.push(`     ⛔ a byte this act sent is NOT the byte stored at that offset — the write did NOT land. Exit ${EXIT_NOT_STORED}.`);
+    if (readBack.referenceExpanded > 0) {
+      lines.push(
+        `     (${readBack.referenceExpanded} bare reference(s) the READ path spelled \`${readBack.referencePrefix}#N\` were collapsed first and` +
+          ' are NOT the difference — the offset counts SENT bytes, taken after the collapse)',
+      );
+    }
   }
   // The exit code lives ON the verdict so exactly one place decides it: a
   // caller that reads the lines and a caller that reads `$?` cannot come to
@@ -2766,6 +2948,15 @@ export function readBackVerdict({ stamp, writtenAt, sent, stored, substituted = 
  */
 export function notStoredText(verdict, repo, target, mode = 'body') {
   const offset = verdict?.readBack?.offset;
+  const expanded = verdict?.readBack?.referenceExpanded ?? 0;
+  // A read the proxy expanded is the one a seat must not send back as it reads
+  // (header, reference-expansion section) — said here, where the remedy is.
+  const expandedText =
+    expanded > 0
+      ? `  This read also spelled ${expanded} bare reference(s) as \`${verdict.readBack.referencePrefix}#N\` — the read path's spelling,\n` +
+        '  collapsed before that offset was taken and NOT the difference. ⛔ Never send a body read on this\n' +
+        '  path back as it reads: collapse that prefix first, or the expansion is stored for real.\n'
+      : '';
   return (
     `\npost-stamped: NOT STORED — the platform kept something other than the bytes this act sent.\n\n` +
     `  The ${mode === 'comment' ? 'comment' : 'body'} was written to ${repo}#${target} and read back, and the stored bytes differ from the\n` +
@@ -2775,7 +2966,8 @@ export function notStoredText(verdict, repo, target, mode = 'body') {
     '  front of that rule. All three touch only the block\'s own separator — the collapse really does\n' +
     '  take one newline away, and a content byte has never been measured going with it. Here one is:\n' +
     '  something this act sent is not there.\n' +
-    '  The verdict lines above carry both sides at that offset.\n\n' +
+    '  The verdict lines above carry both sides at that offset.\n' +
+    `${expandedText}\n` +
     '  Fix:  READ THE ARTEFACT before writing anything that depends on it having landed.\n' +
     '        ⛔ Do not retry blindly: the one measured hit of this shape was a size refusal the\n' +
     '        platform never reported, so an identical second write reproduces it exactly. Work out\n' +
@@ -2784,6 +2976,21 @@ export function notStoredText(verdict, repo, target, mode = 'body') {
     `  ${EXIT_PREREQUISITE_NOT_MET}'s "no act at all" and ${EXIT_TOO_LARGE}'s "the platform answered and refused it on size" —\n` +
     '  this write HAPPENED. Capture it BEFORE any pipe:\n' +
     '  `node scripts/pm/post-stamped.mjs … > /tmp/p.log 2>&1; echo "EXIT=$?"`.)'
+  );
+}
+
+/**
+ * The ONE stderr line a read-back the read path expanded owes, printed on both
+ * output shapes so the reading stays visible at exit 0 (header,
+ * reference-expansion section) — or `null` when the read carried none. Pure.
+ */
+export function referenceExpansionNote(readBack) {
+  const count = readBack?.referenceExpanded ?? 0;
+  if (!(count > 0)) return null;
+  return (
+    `post-stamped: read-back — ${count} bare reference(s) came back spelled \`${readBack.referencePrefix}#N\` on this READ: ` +
+    "the proxy-side REST read's spelling, not a byte the platform changed, collapsed before the verdict. " +
+    '⛔ Never write a body read on this path back as it reads: collapse the prefix first, or the expansion is stored for real.'
   );
 }
 
@@ -3757,6 +3964,9 @@ async function main(argv) {
             class: verdict.readBack.class,
             first_difference_byte: verdict.readBack.offset,
             footer_re_anchored: verdict.readBack.footerReAnchored ?? null,
+            after_collapse: verdict.readBack.afterCollapse ?? null,
+            reference_expanded: verdict.readBack.referenceExpanded ?? 0,
+            reference_prefix: verdict.readBack.referencePrefix ?? null,
           },
           ...(unread
             ? {
@@ -3785,6 +3995,11 @@ async function main(argv) {
       ].join('\n'),
     );
   }
+
+  // The read path's expansion of bare references is said on BOTH output
+  // shapes, one line, whatever the verdict (header, reference-expansion section).
+  const expansionNote = referenceExpansionNote(verdict.readBack);
+  if (expansionNote !== null) console.error(expansionNote);
 
   // ⛔ The one thing a caller cannot be left to read out of prose: the write
   // happened and the platform did not keep it. Reported after the lines above
@@ -3818,6 +4033,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the exit code: the read-back reaches `$?`, or it reaches nobody': 24,
   'the re-anchored footer: a newline the platform MOVED is not a byte lost': 41,
   "the collapsed blank: the footer block's own separator is not a content byte": 33,
+  'the reference expansion: a bare `#N` the READ path spelled `owner/repo#N` is not a byte the platform changed': 45,
   'the CLI: the one decision a typo must never make': 16,
   'the unread-knock check: a refresh cannot void what nobody read': 49,
   'the size refusal: a 422 the platform answered is not a route that never existed': 53,
@@ -4603,6 +4819,127 @@ export function selfTest() {
       && Buffer.byteLength(C_SENT, 'utf8') === Buffer.byteLength(`${PLATFORM_COMMENT_FOOTER}${C_HEAD}`, 'utf8'));
   t('⛔ …so a MULTISET compare is still refused: equal bytes in a different order is not a normalisation',
     firstDifferingByte(C_SENT, `${PLATFORM_COMMENT_FOOTER}${C_HEAD}`) === 0);
+
+  // The READ path's expansion (#24747): a cloud seat container's proxied REST
+  // read intermittently spells a bare `#N` as `owner/repo#N` — recorded by PR
+  // #24744 in the platform-readings fact table, partial on the read it records
+  // (bare references right after `(` were left alone). The stored bytes are
+  // the sent ones; only the read differs. The fixtures carry that shape, and
+  // the controls pin that nothing else was forgiven on the way.
+  battery('the reference expansion: a bare `#N` the READ path spelled `owner/repo#N` is not a byte the platform changed');
+  {
+    const OWN = 'objectstack-ai/objectstack';
+    const OWN_BYTES = Buffer.byteLength(OWN, 'utf8');
+    const bytes = (s) => Buffer.byteLength(s, 'utf8');
+    // Three bare references: one opening the body, one after a space, one right after `(` the read path leaves bare.
+    const X_SENT = '#24747 is the card. It extends the footer arms of #18693 (#19048 was the third).\n';
+    const X_STORED = X_SENT.replace('#24747 is', `${OWN}#24747 is`).replace('of #18693', `of ${OWN}#18693`);
+    const X = rb({ sent: X_SENT, stored: X_STORED });
+    t('the fixture is the measured shape: 2 of the 3 bare references read back expanded, the one after `(` left bare',
+      (X_STORED.match(new RegExp(`${OWN}#`, 'gu')) ?? []).length === 2 && X_STORED.includes('(#19048'), X_STORED);
+    t('⛔ …and no declared arm alone matches it: the raw bytes differ at byte 0, the first expanded reference',
+      firstDifferingByte(X_SENT, X_STORED) === 0 && footerReAnchoring(X_SENT, X_STORED) === null);
+    t('⭐ THE FILED SHAPE: a body stored whole and read back expanded LANDS — exit 0, ⛔ not the 4 that sent a seat to re-send the expansion',
+      X.landed === true && X.exit === EXIT_OK && X.mutated === false);
+    t('⭐ …under its OWN declared word, `reference-expanded-on-read`', X.readBack.class === 'reference-expanded-on-read' && 'reference-expanded-on-read' in READ_BACK_CLASSES);
+    t('…carrying the class the collapsed body reads as, the count and the prefix',
+      X.readBack.afterCollapse === 'identical' && X.readBack.referenceExpanded === 2 && X.readBack.referencePrefix === OWN, JSON.stringify(X.readBack));
+    t('⭐ the length identity holds: bytes read − 26 × count = bytes sent', OWN_BYTES === 26 && bytes(X_STORED) - OWN_BYTES * 2 === bytes(X_SENT));
+    t('…and the line SAYS it, as a reading: the count, the prefix, the collapsed class and the arithmetic',
+      X.lines[1].includes('spelled 2 bare reference(s)') && X.lines[1].includes(`\`${OWN}#N\``) && X.lines[1].includes('`identical`') &&
+        X.lines[1].includes(`read ${bytes(X_STORED)} − 2 × 26 = ${bytes(X_SENT)}`), X.lines[1]);
+    t('…as ONE clean line — ⛔ no warning glyph, ⛔ no offset to chase', X.lines.length === 2 && X.lines[1].includes('⚠️') === false && X.readBack.offset === null);
+    t('⭐ the rule reads the CLASS: the new word lands by construction', sentBodyLanded({ class: 'reference-expanded-on-read' }) === true);
+
+    // The director post on objectstack#12708, as the card records it: raw 14,657 bytes, read back with 117 expansions,
+    // and PR #24744's arithmetic 17,699 − 117 × 26 = 14,657. The filler is filler: every byte of it is equal on both sides.
+    const REFS = 117;
+    const D_SENT = `${'x'.repeat(14_657 - REFS * 7)}${' #12708'.repeat(REFS)}`;
+    const D_STORED = D_SENT.replaceAll(' #12708', ` ${OWN}#12708`);
+    const D = rb({ sent: D_SENT, stored: D_STORED });
+    t('⭐ THE FILED READING — the director post: the fixture reproduces 14,657 bytes sent and 17,699 read',
+      bytes(D_SENT) === 14_657 && bytes(D_STORED) === 17_699, `sent=${bytes(D_SENT)} read=${bytes(D_STORED)}`);
+    t('…and it LANDS with all 117 counted', D.landed === true && D.exit === EXIT_OK && D.readBack.referenceExpanded === REFS);
+
+    // ⛔ THE CONTROL the card names: one byte different BESIDES the expansion is still `mutated`.
+    const X_CHEWED = X_STORED.replace('card', 'cart');
+    const C = rb({ sent: X_SENT, stored: X_CHEWED });
+    t('⛔ THE CONTROL — ONE byte different besides the expansion is still MUTATED, exit 4', C.mutated === true && C.landed === false && C.exit === EXIT_NOT_STORED);
+    t('⭐ …its offset is the REAL difference, in SENT bytes — ⛔ not byte 0, where the first expanded reference stands',
+      C.readBack.offset === X_SENT.indexOf('card') + 3, `offset=${C.readBack.offset}`);
+    t('…with the collapsed count kept beside it, and a line saying those references are NOT the difference',
+      C.readBack.referenceExpanded === 1 && C.lines.some((l) => l.includes('were collapsed first and are NOT the difference')), C.lines.join(' / '));
+    t('⭐ …and the NOT STORED text says never to send that read back as it reads', notStoredText(C, 'o/n', 24747).includes('Never send a body read on this') && notStoredText(C, 'o/n', 24747).includes('READ THE ARTEFACT'));
+    t('⛔ …while a NOT STORED with no expansion is the text it always was', notStoredText(rb({ sent: 'a [b] c', stored: 'a b c' }), 'o/n', 1).includes('This read also spelled') === false);
+    t('⛔ a byte LOST after the last expanded reference is still exit 4', rb({ sent: X_SENT, stored: X_STORED.replace('third', 'thrd') }).exit === EXIT_NOT_STORED);
+    t('⛔ …and so is a TRUNCATION of an expanded body', rb({ sent: X_SENT, stored: X_STORED.slice(0, X_STORED.indexOf('(#19048')) }).exit === EXIT_NOT_STORED);
+
+    // ⛔ BUILT FROM THE SENT BYTES: a body may spell its own references in full, and a replace over the stored
+    // bytes would collapse those too and then disagree with a sent body that still spells them in full.
+    const H_SENT = 'Fixes #24747; the fact is objectstack-ai/objectstack#24729, written in full.\n';
+    const H_STORED = H_SENT.replace('Fixes #24747', `Fixes ${OWN}#24747`);
+    const H = rb({ sent: H_SENT, stored: H_STORED });
+    t('⭐ an author\'s own full reference stands beside an expanded bare one: LANDS, ONE counted', H.landed === true && H.readBack.class === 'reference-expanded-on-read' && H.readBack.referenceExpanded === 1);
+    t('⛔ …which a global replace over the stored bytes would have called MUTATED — why the walk starts from what was sent',
+      H_STORED.replaceAll(`${OWN}#`, '#') !== H_SENT && classifyReadBack({ sent: H_SENT, stored: H_STORED.replaceAll(`${OWN}#`, '#') }).class === 'mutated');
+    t('⭐ a full reference sent and stored as sent is plain IDENTICAL — nothing collapsed, nothing counted',
+      classifyReadBack({ sent: H_SENT, stored: H_SENT }).class === 'identical' && classifyReadBack({ sent: H_SENT, stored: H_SENT }).referenceExpanded === undefined);
+    t('⛔ a full reference the stored body spells BARE is a byte this act sent and the platform does not hold — MUTATED',
+      rb({ sent: H_SENT, stored: H_SENT.replace(`${OWN}#24729`, '#24729') }).exit === EXIT_NOT_STORED);
+
+    // The combinations: the collapse runs, then the SAME declared arms answer — ⛔ never a wider one.
+    const F_HEAD = 'the seat wrote #24747 and #24755';
+    const F_HEAD_X = F_HEAD.replaceAll(' #', ` ${OWN}#`);
+    const combo = (sent, stored) => rb({ sent, stored }).readBack;
+    const APP = combo(`${F_HEAD}\n`, `${F_HEAD_X}${PLATFORM_COMMENT_FOOTER}`);
+    t('⭐ expansion + the footer APPENDED over a stripped newline: lands, `afterCollapse` names the footer shape',
+      APP.class === 'reference-expanded-on-read' && APP.afterCollapse === 'footer-appended' && APP.footerShape === 'appended' && APP.strippedNewlines === 1);
+    const RE = combo(`${F_HEAD}${PLATFORM_COMMENT_FOOTER}\n`, `${F_HEAD_X}\n${PLATFORM_COMMENT_FOOTER}`);
+    t('⭐ expansion + the footer RE-ANCHORED: lands as the re-anchor underneath', RE.class === 'reference-expanded-on-read' && RE.afterCollapse === 'footer-re-anchored');
+    const COL = combo(`${F_HEAD}\n${PLATFORM_COMMENT_FOOTER}\n`, `${F_HEAD_X}${PLATFORM_COMMENT_FOOTER}`);
+    t('⭐ expansion + the blank COLLAPSED over a stripped newline: lands, the strip recorded', COL.class === 'reference-expanded-on-read' && COL.afterCollapse === 'footer-blank-collapsed' && COL.strippedNewlines === 1);
+    const STR = combo(`${F_HEAD}\n\n`, F_HEAD_X);
+    t('⭐ expansion + the trailing newlines STRIPPED: lands as the strip underneath', STR.class === 'reference-expanded-on-read' && STR.afterCollapse === 'trailing-newline-stripped' && STR.strippedNewlines === 2);
+    t('⛔ THE COMBINED CONTROL — expansion + an appended footer + ONE content byte different is still exit 4',
+      rb({ sent: `${F_HEAD}\n`, stored: `${F_HEAD_X.replace('wrote', 'wrot')}${PLATFORM_COMMENT_FOOTER}` }).exit === EXIT_NOT_STORED);
+    t('⛔ …and a footer CHEWED under an expanded body is still exit 4', rb({ sent: F_HEAD, stored: `${F_HEAD_X}${PLATFORM_COMMENT_FOOTER.replace('---', '--')}` }).exit === EXIT_NOT_STORED);
+
+    // ⛔ The prefix: the fleet's own repository, ONE per body, and only where the act sent a bare reference.
+    t('the prefixes are the fleet roster\'s slugs, read from it — ⛔ never a pattern',
+      JSON.stringify(OWN_REFERENCE_PREFIXES) === JSON.stringify(GOVERNED_REPOS.map((r) => r.slug)) && OWN_REFERENCE_PREFIXES.includes(OWN));
+    const UI = 'objectstack-ai/objectui';
+    t('⭐ a body on a sibling repository of the roster collapses its own slug the same way', rb({ sent: 'see #1 and #2', stored: `see ${UI}#1 and ${UI}#2` }).readBack.referencePrefix === UI);
+    t('⛔ a prefix OUTSIDE the roster is a byte this act did not send — MUTATED, nothing counted',
+      rb({ sent: 'see #24747', stored: 'see someone-else/objectstack#24747' }).exit === EXIT_NOT_STORED && rb({ sent: 'see #24747', stored: 'see someone-else/objectstack#24747' }).readBack.referenceExpanded === undefined);
+    t('⛔ TWO roster slugs in one body is not one read\'s spelling — MUTATED', rb({ sent: 'see #1 and #2', stored: `see ${OWN}#1 and ${UI}#2` }).exit === EXIT_NOT_STORED);
+    t('⛔ a prefix before a `#` the act did NOT send bare — after a letter — is MUTATED', rb({ sent: 'PR#5 stands', stored: `PR${OWN}#5 stands` }).exit === EXIT_NOT_STORED);
+    t('⛔ …after a `/` too', rb({ sent: 'pull/#5', stored: `pull/${OWN}#5` }).exit === EXIT_NOT_STORED);
+    t('⛔ …and before a `#` that opens no number, a heading or an anchor', rb({ sent: 'x #intro', stored: `x ${OWN}#intro` }).exit === EXIT_NOT_STORED);
+    t('⛔ a DIFFERENT number behind the prefix is MUTATED, its offset at the digit', rb({ sent: 'see #24747', stored: `see ${OWN}#24748` }).readBack.offset === 'see #2474'.length);
+    t('the predicate answers null when there is nothing to collapse, and for an unreadable body',
+      referenceExpansion(X_SENT, X_SENT) === null && referenceExpansion(X_SENT, undefined) === null && referenceExpansion('#1', 'someone-else/x#1') === null);
+    t('…and the exact collapsed bytes when there is', referenceExpansion(X_SENT, X_STORED)?.collapsed === X_SENT && referenceExpansion(X_SENT, X_STORED)?.count === 2);
+
+    // The stderr line: ONE, naming the count, on BOTH output shapes, whatever the verdict.
+    const NOTE = referenceExpansionNote(X.readBack);
+    t('⭐ the stderr line names the count and the prefix', typeof NOTE === 'string' && NOTE.includes('2 bare reference(s)') && NOTE.includes(`\`${OWN}#N\``) && NOTE.includes('\n') === false, NOTE);
+    t('…and carries the one prescription that matters: ⛔ never write that read back as it reads', typeof NOTE === 'string' && NOTE.includes('⛔ Never write a body read on this path back as it reads'));
+    t('…said for a MUTATED read that carried an expansion too, and for no read that carried none',
+      referenceExpansionNote(C.readBack) !== null && referenceExpansionNote(rb({ sent: SENT, stored: SENT }).readBack) === null && referenceExpansionNote(rb({ sent: SENT, stored: undefined }).readBack) === null);
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    const mainSource = ownSource.slice(ownSource.indexOf('async function main(argv)'), ownSource.indexOf('// --self-test — offline'));
+    const noteAt = mainSource.indexOf('referenceExpansionNote(verdict.readBack)');
+    t('structural: main prints that line to stderr AFTER both output shapes and before the NOT STORED text — so `--json` carries it too',
+      noteAt > mainSource.indexOf('...(relayed ? [') && noteAt < mainSource.indexOf('if (!verdict.landed) console.error(notStoredText(') && mainSource.includes('if (expansionNote !== null) console.error(expansionNote);'));
+    t('structural: `--json` reports the count, the prefix and the collapsed class',
+      ['reference_expanded: verdict.readBack.referenceExpanded ?? 0', 'reference_prefix: verdict.readBack.referencePrefix ?? null', 'after_collapse: verdict.readBack.afterCollapse ?? null'].every((s) => mainSource.includes(s)));
+
+    // The relay's own comment lookup asks the same judge, so an expanded listing still finds the comment.
+    const R_AT = Date.parse('2026-10-20T06:40:00Z');
+    const listed = [{ id: 31, created_at: '2026-10-20T06:40:02Z', body: `${X_STORED.replace(/\n+$/u, '')}${PLATFORM_COMMENT_FOOTER}` }];
+    t('⭐ the relay comment lookup FINDS a comment whose listing the read path expanded', pickRelayComment(listed, X_SENT, R_AT)?.id === 31);
+    t('⛔ …and still finds nothing for the one-byte control', pickRelayComment([{ ...listed[0], body: X_CHEWED }], X_SENT, R_AT) === null);
+  }
 
   battery('the CLI: the one decision a typo must never make');
   t('a comment target parses', parseOptions(['--comment=17314']).options.mode === 'comment');

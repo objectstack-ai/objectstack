@@ -341,6 +341,25 @@ contradicts it, and correct it here when it does.
   the real port). This is "zero hits needs a positive control" applied to one tool: a
   negative from a command that never ran is not evidence.
 
+- **A SIGTERM to the `pnpm` wrapper does not stop the server under it — start a
+  backgrounded boot with `setsid` and stop its process group.** The canonical boot (in the
+  `--no-ui` entry below) is `pnpm -C … exec objectstack dev …`: pnpm spawns `os dev`, which
+  spawns `serve --dev` (`packages/cli/src/commands/dev.ts`). `os dev` forwards a SIGINT or
+  SIGTERM sent to its own pid to that child (its `process.on('SIGTERM', …)` handler calls
+  `beginShutdown()` of `ServeRestartCoordinator`, `packages/cli/src/utils/dev-restart.ts`),
+  but nothing forwards one sent to pnpm, so `kill` on the pnpm pid leaves the `serve`
+  grandchild listening. Both runners of the 18.0 sweep's round 3 met it (wave anchor
+  #24579 §6). Measured at
+  `46bb5e3e54` with a stand-in tree, `pnpm -C examples/app-showcase exec node parent.js`
+  where `parent.js` forwards SIGTERM to an HTTP child as `os dev` does: two seconds after a
+  SIGTERM to the pnpm pid the child still answered 200, and a SIGTERM to the process group
+  stopped all four processes. ⚠️ `$!` is not the group id: a backgrounded `setsid` forks
+  when the shell made it a group leader, so `$!` names a process that has already exited.
+  **So:** `setsid pnpm -C … exec objectstack dev … > LOG 2>&1 &`; once the port answers,
+  read the group from the listener, `PGID=$(ps -o pgid= -p "$(lsof -ti tcp:PORT)" | tr -d ' ')`;
+  stop it with `kill -TERM -- -$PGID`, and confirm `lsof -ti tcp:PORT` then prints nothing.
+  ⛔ Never stop a server by name (`pkill`), and never a group you did not start.
+
 - **Console session auth is a bearer token in `localStorage`, and a form sign-in ALSO
   sets a cookie — you need both halves.** The console's auth client stores the session
   under `auth-session-token` (objectui `packages/auth/src/createAuthClient.ts`:
@@ -505,16 +524,66 @@ contradicts it, and correct it here when it does.
   So on 18.0.0
   `OS_TENANCY_POSTURE=group` or `isolated` (or the legacy `OS_MULTI_ORG_ENABLED=true`, which
   `resolveTenancyPosture()` in `packages/types/src/env.ts` reads as `isolated`) boots through
-  `os serve`, and so `os dev` and `os start`. Each prerequisite below refuses the boot with a
-  FATAL naming itself when absent, so a refusal tells the runner what is missing, never that
-  the posture is unsupported:
+  `os serve`, and so `os dev` and `os start`. Through `os dev`, each prerequisite below
+  refuses the boot with a FATAL naming itself when absent (QA run #24783 measured all three),
+  so a refusal tells the runner what is missing, never that the posture is unsupported:
   1. the multi-org runtime **declared by the app**: `@objectstack/organizations` in the app's
      own `package.json` and installed there. Reachable only through `NODE_PATH` or a hoisted
      store is refused on purpose (ADR-0093 D5). No example app declares it, so a walled run
-     uses a scratch app that does;
+     uses a scratch app that does: a **full copy** of `examples/app-showcase`, `src/`
+     included (without `node_modules`, `.objectstack` or `dist`), whose own `package.json`
+     carries every showcase dependency as a `link:` to its workspace package plus
+     `"@objectstack/organizations": "link:<abs>/packages/plugins/organizations"`, installed
+     from the copy with `pnpm install --ignore-workspace` (QA run #24783). A scratch config
+     that only re-exports the showcase's `objectstack.config.ts` does not boot: a package-file
+     reference resolves against the root being served, and the showcase's OpenAPI connector
+     names its document that way (`spec: './src/system/connectors/status-openapi.json'` in
+     `examples/app-showcase/src/system/connectors/index.ts`, read relative to the package
+     root at materialization, where a missing document fails the boot);
   2. `OS_PLATFORM_OWNER_EMAIL`, the deployment's platform administrators: first-registrant
      promotion is off under a wall;
   3. a declared membership policy, `OS_AUTH_MEMBERSHIP_POLICY` (for example `invite-only`).
+
+  ⚠️ **A bare `os serve` in production mode judges none of the three until it has an auth
+  secret.** Without `--dev`, and with `NODE_ENV` anything but `development`, `serve` composes
+  the auth family only when `OS_AUTH_SECRET` (or a legacy spelling) resolves —
+  `resolvePlatformAuthComposition()` in `packages/core/src/stack-auth.ts`, reason
+  `no-secret` — and all three checks sit behind it: the multi-org runtime is loaded inside
+  `serve.ts`'s auth-composition branch, the owner-email check runs in `AuthPlugin`'s `init()`
+  (`packages/plugins/plugin-auth/src/auth-plugin.ts`), and the membership-policy gate skips a
+  kernel with no `auth` service (`assertWalledMembershipPolicyDeclared()` in
+  `packages/plugins/organizations/src/membership-policy-gate.ts`). With the secret unset the
+  boot prints `⚠ AuthPlugin skipped — set OS_AUTH_SECRET …` and comes up
+  `⚠ Server is ready — DEGRADED: missing core services: auth` (`printServerReady()` in
+  `packages/cli/src/utils/format.ts`), not a FATAL: QA run #24783 measured it with
+  `os serve --no-ui` from the scratch app, once with prerequisite 2 absent and once with
+  prerequisite 3 absent. A production `serve` also needs a stable encryption key,
+  `OS_SECRET_KEY` or a key file an earlier boot persisted; without one `LocalCryptoProvider`
+  refuses the boot naming `OS_SECRET_KEY`
+  (`packages/services/service-settings/src/local-crypto-provider.ts`). `os dev` needs
+  neither: it spawns `serve --dev`, whose development boot falls back to
+  `DEV_AUTH_SECRET_FALLBACK` (`resolveAuthSecret()`, same `stack-auth.ts`) and persists a key.
+  `os start` hands its `serve` child an auth secret (its `--auth-secret` flag, the
+  environment, or the `auth-secret` file it persists in its home directory) and opts the
+  provider into a persisted key (`OS_CRYPTO_AUTOKEY`), in `packages/cli/src/commands/start.ts`
+  — read from the code, not booted. **So:** boot a walled run through `os dev`, or give a bare
+  `serve` `OS_AUTH_SECRET` and a stable key first. ⛔ Never read a DEGRADED walled boot as
+  "the prerequisites are met", and never score a walled clause on it.
+
+  **Walled personas come from the admin door.** The walled boot keeps self-registration
+  closed: the showcase declares no `auth.audience`, so `POST /api/v1/auth/sign-up/email`
+  answers **`403 SELF_REGISTRATION_CLOSED`** exactly as on a stock boot
+  (`decideAudienceAdmission()` in `packages/plugins/plugin-auth/src/audience-posture.ts`; the
+  entry "A stock showcase boot refuses self-registration" above). QA run #24783 minted every
+  walled persona as the operator (the seeded admin, the address `OS_PLATFORM_OWNER_EMAIL`
+  names) with `POST /api/v1/auth/admin/create-user` (`runAdminCreateUser()` in
+  `packages/plugins/plugin-auth/src/admin-user-endpoints.ts`), then had each persona
+  `POST /api/v1/auth/change-password`. Under `invite-only` each lands with
+  `membershipCreated: false` and in no organization (the reconciler's `policy-skip`,
+  `reconcileMembership()` in `packages/plugins/plugin-auth/src/reconcile-membership.ts`); a
+  persona that needs an organization creates its own with
+  `POST /api/v1/auth/organization/create` and switches to it with `set-active` (the next
+  entry).
 
   Measured at `45898dbf6`: a scratch app declaring the real runtime, booted by the built CLI
   under `isolated` with the other two set, mounted `Organizations`, answered

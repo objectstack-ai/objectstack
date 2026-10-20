@@ -214,7 +214,6 @@ import {
   resolveSystemWriteOrganization,
   resolveTenantFieldName,
   carriesOrganization,
-  isWalledOrganizationLessBridgeObject,
   SystemWriteOrganizationRequiredError,
   ORGANIZATION_OBJECT,
 } from './tenancy/system-write-organization.js';
@@ -7396,16 +7395,10 @@ export class ObjectQL implements IObjectQLEngine {
     // organization or refused below — never left NULL. The walled half landed
     // in 18.x, after the stages that gave the walled writers (identity mail,
     // global audit, declared webhooks) an organization or a sibling of their
-    // own. ⛔ Never re-introduce a per-table or per-posture cut here — with
-    // ONE cited, temporary exception:
-    //
-    // [BRIDGE, epic ruling record 6270035914 on #15194 item 2, #24582] Under a
-    // wall, `sys_secret` and `sys_flow_credential` keep their organization-less
-    // system inserts until the steps 5+6 landing flips them column-less. See
-    // `WALLED_ORGANIZATION_LESS_BRIDGE`; delete this with the flips.
-    if (isWalledOrganizationLessBridgeObject(object) && this.resolveEnginePosture() !== 'single') {
-      return undefined;
-    }
+    // own. ⛔ Never re-introduce a per-table or per-posture cut here: a table
+    // whose rows are deployment-level declares no organization column
+    // (`sys_secret` and `sys_flow_credential` since the steps 5+6 landing,
+    // #24582) and exits below, on the missing tenant field.
     const objectSchema = this._registry.getObject(object) as any;
     // A federated object's schema is the REMOTE's (ADR-0015); the platform's
     // injected column says nothing about it, which is the same reason

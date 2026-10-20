@@ -79,6 +79,7 @@ import { loadArtifactBundle, isHttpUrl } from './load-artifact-bundle.js';
 import { makeDirectorySync } from './make-directory.js';
 import { loadTursoDriverFactory } from './turso-driver-factory.js';
 import { devAutoMigrateConfig } from './dev-auto-migrate.js';
+import { OrganizationOwnershipBirthMarkerPlugin } from './organization-ownership-boot-guard.js';
 import {
     namesRetiredMemoryEngine,
     resolveProjectDatabaseUrl,
@@ -1143,6 +1144,13 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
             // hands the plugin exactly the options it always did.
             ...(cfg.armLifecycleSweep === false ? { lifecycle: { enabled: false } } : {}),
         }),
+        // [ADR-0131 D10; ruling record 6269955919, ① A] A store this boot
+        // creates from empty is born in the current ownership shape: its
+        // birth marker is written here too, so a fresh install whose first
+        // boot is a CLI one (`os migrate apply`, `os seed`) is not refused
+        // by its first `os serve`. It never refuses — the served boot's guard
+        // judges (⛔ the guard itself stays out of this list).
+        new OrganizationOwnershipBirthMarkerPlugin(),
     ];
     if (artifactBundle) {
         plugins.push(new AppPlugin(artifactBundle, undefined, {

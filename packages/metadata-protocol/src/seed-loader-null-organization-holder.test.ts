@@ -135,15 +135,15 @@ describe('[#24301] a scoped load over a NULL-organization holder of a natural ke
     const [refusal] = refusalsOf(result);
     expect(refusal).toMatchObject({ sourceObject: 'tw_widget', targetField: 'sku', attemptedValue: 'W-HELD', recordIndex: 0 });
     expect(refusal.message).toContain("'w_unowned'");
-    // What 18.0 supports, never the ceremony it refuses; the first sentences
+    // The ceremony is the remedy, with its reviewed plan; the first sentences
     // (what was refused, and why) stay.
     expect(refusal.message).toContain('which has no organization (organization_id is NULL)');
     expect(refusal.message).toContain('decided by the organization-ownership ceremony, not by a seed load.');
-    expect(refusal.message).toMatch(
-      /A row with no organization predates organization stamping, so it is a v17 database's\. 18\.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17\.x release until the 18\.x release that carries the upgrade path\.$/,
+    expect(refusal.message).toContain(
+      'Attribute the unowned rows first (`os migrate organization-ownership --out PLAN`, then the same command with '
+        + '--apply --plan-file PLAN --backup-taken), then re-run this seed',
     );
-    expect(refusal.message).not.toContain('os migrate organization-ownership');
-    expect(refusal.message).not.toContain('--apply');
+    expect(refusal.message).not.toMatch(/fresh installs only|on a 17\.x release|carries the upgrade path/);
   });
 
   it("the organization's own row wins: a key held both by it and by an unowned row is matched, not refused", async () => {

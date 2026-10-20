@@ -57,6 +57,7 @@ import { superuserBypassBitForOperation } from './permission-evaluator.js';
 import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import { ExplainObjectNotFoundError } from './errors.js';
 import { RLS_DENY_FILTER, compiledObjectDefaultRowScopeOf, compiledPolicyNameOf } from './rls-compiler.js';
+import { andComposeLayers } from './tenant-layer.js';
 import { declaredComparisonColumns } from './declared-comparison-columns.js';
 import {
   declaredJsonStoredColumns,
@@ -1415,6 +1416,41 @@ interface RecordAttributionContext {
 }
 
 /**
+ * [ADR-0090 D10] The delegator's write filter an on-behalf-of by-id write's
+ * pre-image re-read (step 2.7) ANDs beside the principal's, as the door
+ * composes it — two compositions of the delegator's own sets and context,
+ * ANDed:
+ *
+ *  - {@link ExplainEngineDeps.computeRlsFilter}: the delegator's filter as the
+ *    delegated path composes it (the floor standing);
+ *  - {@link ExplainEngineDeps.computeLayeredRlsFilter}: the delegator's OWN
+ *    record-grained write composition — the one the delegator's own
+ *    explanation of this record is judged on, carrying the floor decision the
+ *    delegator's own by-id write of the record gets.
+ *
+ * So an on-behalf-of record write verdict never admits a row the delegator's
+ * own record write verdict refuses. The AND only narrows. An engine that
+ * cannot split the layers composes the first alone, as its record story does
+ * for every principal.
+ */
+async function delegatorRecordWriteFilter(
+  deps: ExplainEngineDeps,
+  delegator: { sets: PermissionSet[]; context: any },
+  object: string,
+  rlsOp: string,
+): Promise<Record<string, unknown> | null> {
+  const parts: Record<string, unknown>[] = [];
+  const delegated = await deps.computeRlsFilter(delegator.sets, object, rlsOp, delegator.context);
+  if (delegated) parts.push(delegated);
+  const own = deps.computeLayeredRlsFilter
+    ? await deps.computeLayeredRlsFilter(delegator.sets, object, rlsOp, delegator.context)
+    : undefined;
+  const ownFilter = own ? andComposeLayers(own.layer0, own.layer1) : null;
+  if (ownFilter) parts.push(ownFilter);
+  return parts.length === 0 ? null : parts.length === 1 ? parts[0] : { $and: parts };
+}
+
+/**
  * [C2 / ADR-0095] Fill the per-record row story onto the pipeline. Prepends the
  * `tenant_isolation` Layer 0, tags every layer with its `kernelTier`, attaches a
  * `record` attribution to the row-scoped layers (tenant / owd / depth / sharing /
@@ -1478,13 +1514,13 @@ async function applyRecordAttribution(
   const layer1 = layered?.layer1;
   // [#24646 / ADR-0090 D10] An on-behalf-of by-id write may only touch a row the
   // delegator could touch: step 2.7 composes the DELEGATOR's write filter (its
-  // own sets, its own context, no floor option) and ANDs it into the same
-  // pre-image re-read as the principal's. Composed here by that same call, for
-  // the verbs step 2.7 judges, and judged on the `rls` layer with the
+  // own sets, its own context) and ANDs it into the same pre-image re-read as
+  // the principal's — {@link delegatorRecordWriteFilter} is that composition,
+  // for the verbs step 2.7 judges, judged on the `rls` layer with the
   // principal's Layer 1. A rejection fails the write, so it is reported fail
   // closed, as a rejection of the principal's own composition is.
   const delegatorWriteOrFault = delegator && recordExists && (rlsOp === 'update' || rlsOp === 'delete')
-    ? await settle(deps.computeRlsFilter(delegator.sets, object, rlsOp, delegator.context))
+    ? await settle(delegatorRecordWriteFilter(deps, delegator, object, rlsOp))
     : undefined;
   const delegatorWriteFault = delegatorWriteOrFault === DEPENDENCY_FAULT;
   const delegatorWriteFilter = delegatorWriteOrFault === DEPENDENCY_FAULT ? undefined : (delegatorWriteOrFault ?? undefined);

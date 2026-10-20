@@ -4255,6 +4255,12 @@ export default class Serve extends Command {
               appName: resolveDeploymentAppName((config as any).email ?? {}, process.env, (config as any).appName),
               socialProviders: Object.keys(socialProviders).length > 0 ? socialProviders : undefined,
               trustedOrigins: trustedOrigins.length ? trustedOrigins : undefined,
+              // The stack's `server.trustProxy`, the same authored value the
+              // dispatcher's inbound rate limiter receives below: whether the
+              // ADR-0069 D5 IP allow-list and the D7 login audit may believe
+              // X-Forwarded-For / X-Real-IP when establishing a client address.
+              // Undeclared, both judge the transport's peer address.
+              trustProxy: (config as any).server?.trustProxy === true,
               // Enable the admin plugin by default so the Setup app's
               // ban/unban/set-password/impersonate/set-role row actions
               // resolve to real endpoints. The plugin self-gates by role
