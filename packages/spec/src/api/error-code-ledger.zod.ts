@@ -604,6 +604,7 @@ export const ERROR_CODE_LEDGER = {
     'PASSWORD_REUSE',
     'OAUTH_REGISTER_FAILED',       // better-auth rejected the client registration
     'PHONE_NOT_ENABLED',
+    'ROLE_NOT_FOUND',             // [#24750] 400 on /organization/invite-member and /organization/update-member-role: the requested membership role is outside the closed vocabulary, refused before any invitation or membership row is written; better-auth's code, stamped by plugin-auth on the invite door (`invite-role-not-found-code.ts`), pass-through from better-auth on update-member-role
     'SAML_REGISTER_FAILED',
     'SELF_REGISTRATION_CLOSED',   // [#11739] audience posture invite_only: self-registration is closed (no pending invitation for this address)
     'SSO_REGISTER_FAILED',
