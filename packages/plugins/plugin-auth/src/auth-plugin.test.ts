@@ -467,7 +467,7 @@ describe('AuthPlugin', () => {
       resolved: { value: unknown; source: string } | Error,
       opts: { brandingListed?: boolean } = {},
     ) => ({
-      get: vi.fn(async () => {
+      get: vi.fn(async (_namespace?: string, _key?: string, _ctx?: unknown) => {
         if (resolved instanceof Error) throw resolved;
         return resolved;
       }),
@@ -536,7 +536,7 @@ describe('AuthPlugin', () => {
     // check would log the warn this pins away.
     it('a walled boot (branding not listed) neither reads it nor warns about it', async () => {
       const settings = makeSettings({ value: undefined, source: 'default' }, { brandingListed: false });
-      settings.get.mockImplementation(async (namespace: string) => {
+      settings.get.mockImplementation(async (namespace?: string) => {
         if (namespace === 'branding') throw new Error("Unknown settings namespace: 'branding'");
         return { value: undefined, source: 'default' };
       });
