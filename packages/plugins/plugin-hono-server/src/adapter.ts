@@ -125,6 +125,20 @@ export interface HttpsListenerMaterial {
 
 export interface HonoCorsOptions {
     enabled?: boolean;
+    /**
+     * The origins admitted to cross-origin requests: exact origins and
+     * wildcard patterns (`https://*.example.com`, `http://localhost:*`), as an
+     * array or one comma-separated string. Wins over `OS_CORS_ORIGIN`.
+     *
+     * No default list. With neither this nor `OS_CORS_ORIGIN` set, no
+     * cross-origin caller is admitted — a loopback origin excepted, on a
+     * development boot only (`NODE_ENV=development`). Same-origin requests
+     * need no CORS answer and are unaffected either way.
+     *
+     * `'*'` (alone or in a list) is refused at init while
+     * {@link HonoCorsOptions.credentials} is on; it is accepted with
+     * credentials off.
+     */
     origins?: string | string[];
     methods?: string[];
     /**
@@ -144,6 +158,10 @@ export interface HonoCorsOptions {
      * exposed unless CORS is disabled entirely.
      */
     exposeHeaders?: string[];
+    /**
+     * Send `Access-Control-Allow-Credentials: true` to admitted origins.
+     * Defaults to `OS_CORS_CREDENTIALS !== 'false'`, i.e. on.
+     */
     credentials?: boolean;
     maxAge?: number;
 }
