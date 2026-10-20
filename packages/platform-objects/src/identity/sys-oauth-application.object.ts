@@ -157,8 +157,8 @@ export const SysOauthApplication = ObjectSchema.create({
       // (refusing them narrows the door, which waits for a major version), and
       // nothing on the server reads these options: the generic action door
       // refuses a `type: 'api'` action before its param contract runs, so the
-      // route is the only judge. The stored `type` column below keeps all four
-      // values, because rows written under earlier provider lines may hold them.
+      // route is the only judge. The stored `type` column below is a separate
+      // surface and is not narrowed here: that waits for the same major version.
       params: [
         { name: 'name', label: 'Application Name', type: 'text', required: true },
         {
