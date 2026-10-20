@@ -140,9 +140,8 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
     await driver.create(TABLE, { id: 'b1', organization_id: 'org_b', name: 'B1', balance: 30 } as any);
     await driver.create(TABLE, { id: 'b2', organization_id: 'org_b', name: 'B2', balance: 40 } as any);
     // An organization-less row: no tenant's, so no scoped read reaches it
-    // (ADR-0131 D1); only an unscoped one does.
-    // It exists only on a database built before 18.x (ADR-0131 D1 makes a
-    // fresh tenant column NOT NULL).
+    // (ADR-0131 D1); only an unscoped one does. Such a row exists only on a
+    // database built before 18.x, whose tenant column is nullable.
     await asPre18TenantColumn(driver, TABLE);
     await driver.create(TABLE, { id: 'p1', name: 'P1', balance: 50 } as any);
 

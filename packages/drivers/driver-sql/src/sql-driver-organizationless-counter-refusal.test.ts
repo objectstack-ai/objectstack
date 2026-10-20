@@ -18,6 +18,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { SqlDriver } from './index.js';
+import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
 import {
   ORGANIZATIONLESS_COUNTER_REFUSAL_CODE,
   ORGANIZATIONLESS_COUNTER_REFUSAL_STATUS,
@@ -121,6 +122,11 @@ describe('[ADR-0131 D9, 8d] the counter refuses an organization-less row on a te
 
   it('a composition with no organization object (a lean embedding) keeps `__global__` on a tenant table', async () => {
     const driver = await bootDriver([CASE_OBJECT]);
+    // The organization-less row itself lands only where the tenant column is
+    // nullable — a table built before 18.x (ADR-0131 D1 makes a fresh one NOT
+    // NULL, so a lean embedding's fresh table refuses it at the database). The
+    // counter's bucket is this case's subject, so the table is that store's.
+    await asPre18TenantColumn(driver, 'crm_case');
 
     const first = await driver.create('crm_case', { subject: 'lean embedding' });
     expect(first.case_number).toBe('CASE-0001');

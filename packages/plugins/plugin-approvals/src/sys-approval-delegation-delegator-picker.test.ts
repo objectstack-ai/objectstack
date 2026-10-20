@@ -33,6 +33,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import type { EngineCountOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { bindDelegationWriteGuard } from './lifecycle-hooks.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'sys_approval_delegation';
 const SYSTEM = { context: { isSystem: true } } as any;
@@ -96,6 +97,9 @@ describe('sys_approval_delegation — the Delegator picker offers only what the 
     engine.registry.registerObject(sysUser as any, 'com.objectstack.test.delegator-picker');
     engine.registry.registerObject(SysApprovalDelegation as any, 'com.objectstack.test.delegator-picker');
     await engine.syncSchemas();
+    // A real `single` install's Default Organization: the system writes below
+    // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+    await installDefaultOrganization(engine);
     bindDelegationWriteGuard(engine as any);
     for (const u of USERS) await engine.insert('sys_user', u, SYSTEM);
   });

@@ -274,7 +274,7 @@ describe("a record-change flow's start condition is evaluated on its own write-b
     await objectql.syncSchemas();
     // A real `single` install's Default Organization: the system writes below
     // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
-    await installDefaultOrganization(objectql);
+    await installDefaultOrganization(objectql as never);
     automation.registerFlow('esc_escalation', escalationFlow('esc_escalation', 'esc_case') as never);
 
     // Created OUTSIDE the condition (`priority` is not critical). The flow is

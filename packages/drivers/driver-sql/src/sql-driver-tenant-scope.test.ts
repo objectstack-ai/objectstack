@@ -482,7 +482,7 @@ describe('SqlDriver tenant scope (organization_id)', () => {
     });
 
     it('the union path does not reach an organization-less row either (ADR-0131 D1)', async () => {
-      // A pre-18 database's row with no organization (ADR-0131 D1).
+      // A pre-18 database's row with no organization.
       await asPre18TenantColumn(driver, 'account');
       await driver.create('account', { id: 'g1', name: 'ORPHAN' });
       const rows = await driver.find(
