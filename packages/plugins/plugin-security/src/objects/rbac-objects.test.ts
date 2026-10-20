@@ -173,7 +173,6 @@ describe('default permission sets', () => {
     expect(policyNames).toEqual([
       'owner_only_deletes',
       'owner_only_writes',
-      'sys_account_self',
       'sys_api_key_self',
       // [ADR-0131 D7] The compliance ledger's organization scope on its
       // attribution field `tenant_id`: the ledger has no tenant column, so
@@ -209,39 +208,25 @@ describe('default permission sets', () => {
       // deliberate, not a duplicate to be collapsed.
       'sys_invitation_issuer',
       'sys_invitation_self',
-      // [#20027] The credential tables' row scope (`id == null`, no row) —
-      // re-judged here, not a drift. `sys_jwks` and `sys_verification` declare
-      // `access: private` and "DENY for non-admins", but the managed-object
-      // blanket's EXPLICIT read entry opened them to every set holding it.
-      // Behaviour is pinned end to end in `private-credential-row-scope.test.ts`;
-      // this list only records presence (its twin is last in the list).
-      'sys_jwks_none',
+      // [#24164 E′ item 3] Absent by design: the row scope of the two
+      // credential tables (`_none`), the seven SCIM projection tables and the
+      // `select` self scope of `sys_account`, `sys_team_member` and the two
+      // OAuth token tables. Each is now its object's own declared
+      // `defaultRowScope`, which the collection applies where no held set
+      // carries a policy — so a copy here would change no row and only move
+      // explain back to this set. Behaviour is pinned end to end in
+      // `shipped-sets-identity-default-row-scope.test.ts`,
+      // `private-credential-row-scope.test.ts` and
+      // `scim-projection-row-scope.test.ts`; this list only records presence.
       'sys_notification_receipt_self',
-      'sys_oauth_access_token_self',
       'sys_oauth_application_self',
       'sys_oauth_consent_self',
-      'sys_oauth_refresh_token_self',
       'sys_organization_self',
-      // [#20001] The SCIM projection tables' row scope — re-judged here, not a
-      // drift: none of the seven carries a tenant column, so Layer 0 is inert
-      // on them and the managed-object blanket read every organization's rows.
-      // `_self` on the four that name a user; `_none` (`id == null`, no row) on
-      // the three that name none. Their behaviour is pinned end to end in
-      // `scim-projection-row-scope.test.ts`; this list only records presence.
-      'sys_scim_connection_binding_none',
-      'sys_scim_group_member_none',
-      'sys_scim_group_none',
-      'sys_scim_identity_tombstone_self',
-      'sys_scim_projection_grant_self',
-      'sys_scim_subject_self',
-      'sys_scim_user_self',
       'sys_session_self',
-      'sys_team_member_self',
       'sys_two_factor_self',
       'sys_user_org_members',
       'sys_user_preference_self',
       'sys_user_self',
-      'sys_verification_none',
     ]);
     expect(policyNames).not.toContain('tenant_isolation');
     const orgSelf = (member.rowLevelSecurity ?? []).find((p) => p.name === 'sys_organization_self')!;

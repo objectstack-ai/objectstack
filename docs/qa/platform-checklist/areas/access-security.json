@@ -2347,7 +2347,7 @@
       "title": "A session with no active organization is a LEGAL state with fail-closed semantics: tenant-scoped reads resolve to nothing, tenant-scoped writes are refused loudly naming the missing org, and nothing is ever NULL-stamped",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -2364,7 +2364,7 @@
         "knownGaps": [
           "The state is timing-derived on the signup path (better-auth defers the membership write past the signup transaction, ADR-0093), so reproducing it by racing signup is flaky. The DURABLE reproduction is the removed-member path, or a multi-organization deployment whose reconciler binds nobody (ADR-0093 D1 `no-target-org`). Record WHICH producer the run used — a clause proven only on a racy producer is weaker evidence and must say so.",
           "No stock showcase fixture is known to configure `invite-only` or SSO-JIT-pending; those two producers are blocked(fixture) unless the run configures them.",
-          "requires[0]'s tenancy-walled deployment is a walled boot. Since 18.x step 4 (#24580) os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): the 18.0 refusal (serve.ts walledPostureRefusal) is deleted. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. The item stays blocked (fixture, #9334) for the producer reasons above, not for the posture; its pin (automated.ref) boots the posture in-process."
+          "requires[0]'s tenancy-walled deployment is a walled boot. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. The item stays blocked (fixture, #9334) for the producer reasons above, not for the posture; its pin (automated.ref) boots the posture in-process."
         ]
       },
       "blocked": { "by": "fixture", "ref": "#9334" },
@@ -2467,6 +2467,12 @@
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[2] re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal, so a walled os serve boots once provisioned per RUNNER.md's 'A walled boot is a fixture of its own'. The blocked marker stays for its own producer reasons. No clause changed",
           "ref": "#24580"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[2]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
+          "ref": "#24788"
         }
       ]
     },
@@ -2475,7 +2481,7 @@
       "title": "Activation-ledger write authority (ADR-0126 §5): the manage_metadata tier refuses first on every posture, and the shared operator gate — INERT on stock `single` — demands the platform_admin POSITION in walled postures, at both the flow and action doors",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2493,7 +2499,7 @@
           "a runtime-authored scratch permission set with system_permissions ['manage_metadata'] granted to a fresh member via a sys_user_permission_set row (same runtime-authoring pattern access-security.fls-mask-and-strip's read half uses) — no stock showcase set grants manage_metadata"
         ],
         "knownGaps": [
-          "The group/isolated legs (clause 5, acceptance[4]; steps[8]; variants[1]–[2]) run live on a walled boot, which a stock showcase boot is not (fixtures.requires[0] confirms `single`). Since 18.x step 4 (#24580) os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): the 18.0 refusal (serve.ts walledPostureRefusal) is deleted. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. A run that does not provision it records those legs blocked(fixture) naming that entry, never fail. Clause 5 is also scored from the unit pins in automated.ref (oracle test), which drive the posture x identity matrix in-process. Never fake a posture to tick them.",
+          "The group/isolated legs (clause 5, acceptance[4]; steps[8]; variants[1]–[2]) run live on a walled boot, which a stock showcase boot is not (fixtures.requires[0] confirms `single`). On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. A run that does not provision it records those legs blocked(fixture) naming that entry, never fail. Clause 5 is also scored from the unit pins in automated.ref (oracle test), which drive the posture x identity matrix in-process. Never fake a posture to tick them.",
           "⚠️ On the STOCK `single` posture the §5 operator gate is INERT by design (activation-gate.ts — postureEnforcesWall('single') is false, so the gate returns before the position is ever read). The refusal an unentitled caller gets on stock showcase is the manage_metadata AUTHORING TIER, not the operator gate — score clause 1/2 against the tier and never against §5, or the run records the wrong gate as proven."
         ]
       },
@@ -2610,6 +2616,12 @@
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0], steps[8], acceptance[4] (clause, verify) and variants[1]–[2] re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal, so the walled legs run live on a walled boot provisioned per RUNNER.md's 'A walled boot is a fixture of its own'; unprovisioned, they are blocked(fixture). Clause 5 keeps its unit pins as its oracle; no clause deleted",
           "ref": "#24580"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
+          "ref": "#24788"
         }
       ]
     },
@@ -2810,7 +2822,7 @@
       "title": "OS_PLATFORM_OWNER_EMAIL platform-admin anchor: only a VERIFIED stored-email match confers PLATFORM_ADMIN — unset, unverified match, non-match and malformed lists each confer nothing, fail closed",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2902,9 +2914,9 @@
         "packages/core/src/security/resolve-authz-context.ts#grantAnchorsPlatformStanding (#11663 L5 — the unscoped admin_full_access row derives PLATFORM_ADMIN only when the requested posture enforces no wall)",
         "packages/spec/src/security/tenancy-posture.ts#postureEnforcesWall (walled = every posture except single)",
         "packages/core/src/security/admin-standing-surface.ts (the env declared a non-table derivation input — no break-glass write can reach it)",
-        "packages/types/src/env.ts#PLATFORM_OWNER_EMAIL_ENV,200 (PLATFORM_OWNER_EMAIL_ENV / resolvePlatformOwnerEmail)",
+        "packages/types/src/env.ts#PLATFORM_OWNER_EMAIL_ENV + packages/types/src/env.ts#resolvePlatformOwnerEmail (the variable's name, and its live per-call read)",
         "packages/plugins/plugin-auth/src/auth-plugin.ts (#11343 — the dev seed stamps its admin's address verified)",
-        "packages/services/service-datasource/src/admin-routes.ts#manage_platform_settings,261 (the manage_platform_settings-floor probe)",
+        "packages/services/service-datasource/src/admin-routes.ts#DATASOURCE_ADMIN_CAPABILITY (the manage_platform_settings-floor probe)",
         "#11663 L2 (the design and ruled bundle), #13146 (landed 2026-08-29), ADR-0068 D2 (the stored-grant anchor beside it)"
       ],
       "history": [
@@ -2937,6 +2949,12 @@
           "date": "2026-10-20",
           "change": "steps[0]'s walled parenthetical re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal, so a walled posture boots once provisioned per RUNNER.md's 'A walled boot is a fixture of its own', and with this item's variable unset it is refused at plugin-auth init again (revision 3's reading). The item still boots single throughout and no clause scores the walled case; no clause changed",
           "ref": "#24580"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-20",
+          "change": "source[5] and source[7] re-pointed — the two comma-range line citations round 9 of wave anchor #24579 left, because PR #24667 held the item then (round 9's report 6283532816, out_of_scope_findings[0]). At the authoring commit 45397edf53, line 200 of env.ts was the resolvePlatformOwnerEmail declaration and line 261 of admin-routes.ts was the DATASOURCE_ADMIN_CAPABILITY declaration. At base 795ff708d8 source[5] anchors both PLATFORM_OWNER_EMAIL_ENV and resolvePlatformOwnerEmail in env.ts, and source[7] anchors the DATASOURCE_ADMIN_CAPABILITY declaration in admin-routes.ts instead of the string literal manage_platform_settings. All three resolve as declarations in the shared resolver. The ',NNN' residue is what #13786's strip left of a two-range list. No clause, step or other field changed",
+          "ref": "#24788"
         }
       ]
     },
@@ -3397,7 +3415,7 @@
       "title": "Under a walled posture (group / isolated) environment metadata and the security catalog belong to the platform operator: an org owner holding manage_metadata is refused 403 on every /meta write verb, every /packages write, install-local of a catalog-carrying package, _migrate-stored and POST /automation — and the single posture is unchanged",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -3413,7 +3431,7 @@
           "on the walled boot: a second organization whose owner is granted manage_metadata but not the platform_admin position"
         ],
         "knownGaps": [
-          "Every live leg here needs the walled boot fixtures.requires[1] names and the second organization fixtures.requires[2] names. Since 18.x step 4 (#24580) os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): the 18.0 refusal (serve.ts walledPostureRefusal) is deleted. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. On that boot the second organization is created through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records acceptance[1], acceptance[2] and negative[0] blocked(fixture) naming those entries, never fail. steps[3]'s single-posture admit is only the control for the walled refusal and proves nothing alone. acceptance[0]'s pins boot the walled posture at kernel level and stay the item's pinned evidence"
+          "Every live leg here needs the walled boot fixtures.requires[1] names and the second organization fixtures.requires[2] names. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. On that boot the second organization is created through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records acceptance[1], acceptance[2] and negative[0] blocked(fixture) naming those entries, never fail. steps[3]'s single-posture admit is only the control for the walled refusal and proves nothing alone. acceptance[0]'s pins boot the walled posture at kernel level and stay the item's pinned evidence"
         ]
       },
       "steps": [
@@ -3476,6 +3494,12 @@
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0] re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal: the walled boot fixtures.requires[1] names now boots once provisioned per RUNNER.md's 'A walled boot is a fixture of its own', and the second organization is created on it through the auth API. Unprovisioned legs are blocked(fixture), no longer skipped. No clause changed",
           "ref": "#24580"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
+          "ref": "#24788"
         }
       ]
     },
@@ -3720,7 +3744,7 @@
       "title": "Grant-table write contract (sys_user_permission_set / sys_user_position): the retired permission_set_id column is refused, a duplicate grant is 409, an inverted validity window is 400, granted_by is stamped with the caller, and (walled) a grant to a non-member is refused",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3734,7 +3758,7 @@
           "the member's user id and a showcase permission-set NAME"
         ],
         "knownGaps": [
-          "acceptance[4] and steps[4] are written for a walled boot holding a second organization A, which a stock showcase boot is not. Since 18.x step 4 (#24580) os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): the 18.0 refusal (serve.ts walledPostureRefusal) is deleted. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. The second organization is created on that boot through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records acceptance[4] blocked(fixture) naming those entries, never fail. Its refusal is pinned through acceptance[0] (grant-holder-membership-refusal.test.ts in automated.ref). ⚠️ The refusal itself does not read the posture — that pin's case 'the predicate is the same on every posture' refuses an organization-scoped row naming a non-member under single too (packages/plugins/plugin-security/src/grant-holder-membership-refusal.ts#registerGrantHolderMembershipRefusal) — so the leg is walled by its wording, not by its mechanism. A single-posture rig with a grantee who holds no membership in the writer's organization is not measured here"
+          "acceptance[4] and steps[4] are written for a walled boot holding a second organization A, which a stock showcase boot is not. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. The second organization is created on that boot through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records acceptance[4] blocked(fixture) naming those entries, never fail. Its refusal is pinned through acceptance[0] (grant-holder-membership-refusal.test.ts in automated.ref). ⚠️ The refusal itself does not read the posture — that pin's case 'the predicate is the same on every posture' refuses an organization-scoped row naming a non-member under single too (packages/plugins/plugin-security/src/grant-holder-membership-refusal.ts#registerGrantHolderMembershipRefusal) — so the leg is walled by its wording, not by its mechanism. A single-posture rig with a grantee who holds no membership in the writer's organization is not measured here"
         ]
       },
       "steps": [
@@ -3809,6 +3833,12 @@
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0] re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal, so acceptance[4]'s walled boot with a second organization is provisioned per RUNNER.md's 'A walled boot is a fixture of its own'; unprovisioned, it is blocked(fixture). The posture-independence note is kept. No clause changed",
           "ref": "#24580"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
+          "ref": "#24788"
         }
       ]
     },
@@ -3817,7 +3847,7 @@
       "title": "Write guards tightened on v18: a walled update cannot null out organization_id, a detail write naming an unreadable header is reference_not_found, a validation rule reading an unreadable header answers like a missing one, and a controlled_by_parent child's attachments / comments / explain follow the master's edit grant",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3832,7 +3862,7 @@
           "for the organization leg: the walled boot"
         ],
         "knownGaps": [
-          "acceptance[1] and steps[0] (the organization leg, on fixtures.requires[2]'s walled boot) need a walled posture: the Layer 0 write wall refuses an update that empties organization_id only under one, and its pin's control says the single posture is unchanged (tenant-wall-organization-removal.test.ts in automated.ref). Since 18.x step 4 (#24580) os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): the 18.0 refusal (serve.ts walledPostureRefusal) is deleted. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. A run that does not provision it records acceptance[1] blocked(fixture) naming that entry, never fail; acceptance[0]'s pin carries the leg. acceptance[2] and acceptance[3] are not walled legs and run as written"
+          "acceptance[1] and steps[0] (the organization leg, on fixtures.requires[2]'s walled boot) need a walled posture: the Layer 0 write wall refuses an update that empties organization_id only under one, and its pin's control says the single posture is unchanged (tenant-wall-organization-removal.test.ts in automated.ref). On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses the boot naming itself. A run that does not provision it records acceptance[1] blocked(fixture) naming that entry, never fail; acceptance[0]'s pin carries the leg. acceptance[2] and acceptance[3] are not walled legs and run as written"
         ]
       },
       "steps": [
@@ -3901,6 +3931,12 @@
           "date": "2026-10-20",
           "change": "fixtures.knownGaps[0] re-pointed — 18.x step 4 (#24580) deletes serve.ts walledPostureRefusal, so the organization leg's walled boot is provisioned per RUNNER.md's 'A walled boot is a fixture of its own'; unprovisioned, it is blocked(fixture). No clause changed",
           "ref": "#24580"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[0]'s release attribution corrected — round 10 of wave anchor #24579. The line said the walled boot refusal was 18.0's ('the 18.0 refusal') and that 18.x step 4 (#24580) deleted it, so a runner on 18.0.0 could not tell whether its release boots the walled posture. Under ruling record 6282882793 on the v18 epic (items 1 and 2), 18.0.0 is published only after step 4 has merged, and a walled posture boots on it. Of the published @objectstack/cli prereleases only 18.0.0-next.5 carries serve.ts walledPostureRefusal: next.0 to next.3 predate it, measured in each npm tarball and at each version tag, and no next.4 was published. Only that attribution changed: no clause, step or other knownGap moved",
+          "ref": "#24788"
         }
       ]
     },

@@ -39,13 +39,13 @@ export const SysOauthAccessToken = ObjectSchema.create({
   highlightFields: ['client_id', 'user_id', 'expires_at'],
 
   // [ADR-0095 D1, 2026-10-18 note] This object's default row scope: the one policy
-  // plugin-security's shipped permission sets spread for it today (the `_self`
-  // carve-outs in `default-permission-sets.ts`), moved here verbatim. Layer 0 is inert
-  // on this table (no organization column), so Layer 1 silence means this scope, not no
-  // filter. The security plugin's row-policy collection applies it when no set the
-  // caller holds carries a row policy for the object and operation; the shipped sets
-  // still carry it, so their holders read as before. An `extend` contribution cannot set
-  // or loosen it (refused at registration).
+  // plugin-security's shipped permission sets used to spread for it, moved here
+  // verbatim; the sets no longer carry a copy (#24164 ruling E′ item 3's follow-up).
+  // Layer 0 is inert on this table (no organization column), so Layer 1 silence means
+  // this scope, not no filter. The security plugin's row-policy collection applies it
+  // when no set the caller holds carries a row policy for the object and operation —
+  // so to every shipped set's holder, whose reads and explain name this scope. An
+  // `extend` contribution cannot set or loosen it (refused at registration).
   defaultRowScope: {
     name: 'sys_oauth_access_token_self',
     operation: 'select',
