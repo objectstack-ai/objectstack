@@ -21,7 +21,7 @@ import {
   type TenancyPostureSource,
   type TenancyServiceResolver,
 } from '@objectstack/core';
-import type { TenancyPosture } from '@objectstack/spec/security';
+import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import type { IHttpServer, IDataEngine, IHttpRequest, IAuthService } from '@objectstack/spec/contracts';
 import type { SettingsContext } from './settings-service.types.js';
 import type { SettingsManifest } from '@objectstack/spec/system';
@@ -51,13 +51,42 @@ import {
 } from './manifests/index.js';
 import { settingsBuiltinTranslations } from './translations/index.js';
 
+/**
+ * Namespaces offered only where no organization wall stands (#24766, the
+ * maintainer's ruling B′ and its amendment).
+ *
+ * `branding` is the one member. Its values reach the console through the
+ * runtime-config door (`GET /api/v1/runtime/config`), which is anonymous and
+ * resolves no organization before sign-in. Under `single` the one organization
+ * IS the deployment, so its saved name, logo and colour are the deployment's.
+ * Under a walled posture (`group` / `isolated`) there is no such thing as "the"
+ * organization's branding on that door, and the ruling keeps tenant data off
+ * it: the Branding page is not offered there at all, and the deployment's
+ * branding is the operator's, through `OS_PRODUCT_NAME` / `OS_LOGO_URL` /
+ * `OS_BRAND_COLOR`.
+ *
+ * "Not offered" is the registry's own answer, so every door agrees without a
+ * second rule: the namespace is absent from `GET /api/settings`, a read or
+ * write of it is refused `404 UNKNOWN_NAMESPACE` by the path every unknown
+ * namespace takes, and the runtime-config door finds nothing to read.
+ *
+ * Such a manifest is held back at `init()` and registered from the
+ * `kernel:ready` hook once the posture IN FORCE is known: during `init()` the
+ * `tenancy` service may not be registered yet, and the `isolated` posture is
+ * only in force once `org-scoping` has registered, so a verdict taken there
+ * could be contradicted later in the same boot.
+ */
+const UNWALLED_ONLY_NAMESPACES: ReadonlySet<string> = new Set(['branding']);
+
 /** Configuration options for the SettingsServicePlugin. */
 export interface SettingsServicePluginOptions {
   /**
    * Pre-register these manifests at boot. When omitted, the bundled
    * builtin manifests (mail / branding / feature_flags) are loaded so
    * a host gets a working Settings hub out of the box. Pass an empty
-   * array to opt out entirely.
+   * array to opt out entirely. A `branding` manifest, bundled or passed
+   * here, is offered only where no organization wall stands (see
+   * `UNWALLED_ONLY_NAMESPACES` in this file).
    */
   manifests?: SettingsManifest[];
   /** Override the default crypto adapter. */
@@ -122,6 +151,11 @@ export class SettingsServicePlugin implements Plugin {
 
   private readonly opts: SettingsServicePluginOptions;
   private service: SettingsService | null = null;
+  /**
+   * Manifests in {@link UNWALLED_ONLY_NAMESPACES}, held back by `init()` until
+   * the `kernel:ready` hook knows the posture in force.
+   */
+  private readonly heldUntilPostureKnown: SettingsManifest[] = [];
 
   constructor(opts: SettingsServicePluginOptions = {}) {
     this.opts = {
@@ -159,11 +193,17 @@ export class SettingsServicePlugin implements Plugin {
       // `console.error` fallback instead.
       logger: ctx.logger,
     });
-    for (const m of this.opts.manifests ?? []) this.service.registerManifest(m);
-    for (const [ns, handlers] of Object.entries(this.opts.actionHandlers ?? {})) {
-      for (const [id, fn] of Object.entries(handlers)) {
-        this.service.registerAction(ns, id, fn);
+    for (const m of this.opts.manifests ?? []) {
+      if (UNWALLED_ONLY_NAMESPACES.has(m.namespace)) {
+        this.heldUntilPostureKnown.push(m);
+        continue;
       }
+      this.service.registerManifest(m);
+    }
+    for (const ns of Object.keys(this.opts.actionHandlers ?? {})) {
+      // A held namespace's handlers register with its manifest, or not at all.
+      if (UNWALLED_ONLY_NAMESPACES.has(ns)) continue;
+      this.registerActionHandlers(ns);
     }
 
     ctx.registerService('settings', this.service);
@@ -186,6 +226,10 @@ export class SettingsServicePlugin implements Plugin {
     if (!this.service) return;
 
     ctx.hook('kernel:ready', async () => {
+      // First, before the engine binds (its change event names every
+      // registered namespace) and before any later `kernel:ready` reader runs.
+      await this.offerUnwalledOnlyNamespaces(ctx);
+
       // Contribute built-in settings translations into the i18n service.
       // Done in `kernel:ready` (not `init`) because the i18n service plugin
       // is typically registered AFTER capability-loaded service plugins.
@@ -479,6 +523,57 @@ export class SettingsServicePlugin implements Plugin {
   ): Promise<TenancyPosture | undefined> {
     const tenancy = this.tenancyServiceResolver(ctx);
     return tenancy ? classifyAdmissionTenancyPosture(tenancy) : undefined;
+  }
+
+  /** Register the configured action handlers of one namespace. */
+  private registerActionHandlers(namespace: string): void {
+    for (const [id, fn] of Object.entries(this.opts.actionHandlers?.[namespace] ?? {})) {
+      this.service!.registerAction(namespace, id, fn);
+    }
+  }
+
+  /**
+   * Offer the held {@link UNWALLED_ONLY_NAMESPACES} manifests, or withhold them
+   * for the life of the process, by the posture IN FORCE.
+   *
+   * Read the way this plugin's door and service read it
+   * ({@link resolveAdmissionTenancyPosture}): no `tenancy` service, or a host
+   * with no async registry, is a deployment with no wall this plugin can know
+   * of, and offers them — the reading every lean kernel has always had. Read
+   * once, here: by `kernel:ready` every `init()` has run, so the `tenancy`
+   * service and `org-scoping` are as registered as they will ever be.
+   *
+   * A posture that cannot be read withholds them. Offering a namespace whose
+   * values the anonymous runtime-config door would then serve is the one
+   * direction a guess must not take; the line says what is missing and why.
+   */
+  private async offerUnwalledOnlyNamespaces(ctx: PluginContext): Promise<void> {
+    if (this.heldUntilPostureKnown.length === 0) return;
+    const names = this.heldUntilPostureKnown.map((m) => `'${m.namespace}'`).join(', ');
+    let posture: TenancyPosture | undefined;
+    try {
+      posture = await this.resolveAdmissionTenancyPosture(ctx);
+    } catch (err: any) {
+      ctx.logger?.warn?.(
+        `SettingsServicePlugin: the tenancy posture could not be read (${err?.message ?? err}) — ` +
+          `settings namespace(s) ${names} are NOT offered on this boot: they are offered only where no ` +
+          'organization wall stands, and that could not be established. The deployment branding ' +
+          '(OS_PRODUCT_NAME / OS_LOGO_URL / OS_BRAND_COLOR) still applies.',
+      );
+      return;
+    }
+    if (posture !== undefined && postureEnforcesWall(posture)) {
+      ctx.logger?.info?.(
+        `SettingsServicePlugin: tenancy posture '${posture}' walls organizations apart — settings ` +
+          `namespace(s) ${names} are not offered. The deployment branding is the operator's: ` +
+          'OS_PRODUCT_NAME / OS_LOGO_URL / OS_BRAND_COLOR.',
+      );
+      return;
+    }
+    for (const m of this.heldUntilPostureKnown) {
+      this.service!.registerManifest(m);
+      this.registerActionHandlers(m.namespace);
+    }
   }
 
   /**

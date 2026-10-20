@@ -45,6 +45,40 @@
  * Host option only, no env var: the value belongs to the distribution whose
  * control plane serves the page, and the cloud subclass fills it.
  *
+ * ## `branding` — the Branding settings, then the deployment's own (#24766)
+ *
+ * Three fields read the `branding` settings namespace on EVERY request, so a
+ * save in Setup → Branding shows on the console's and the sign-in page's next
+ * load (the maintainer's ruling B′):
+ *
+ *   productName ← branding.workspace_name
+ *   logoUrl     ← branding.logo_url
+ *   brandColor  ← branding.accent_color
+ *
+ * A value somebody set (any `source` but `'default'`: saved in Setup, or
+ * pinned by the settings layer's own `OS_BRANDING_*` override) wins. A key
+ * nobody set falls back to the deployment's branding exactly as before — the
+ * host's constructor option, then `OS_PRODUCT_NAME` / `OS_LOGO_URL` /
+ * `OS_BRAND_COLOR`, then the built-in default — so the settings layer's
+ * manifest default is never served. The derived fields follow the served
+ * values unless configured themselves: `productShortName` and `pwaDescription`
+ * the name, `pwaThemeColor` the colour. `brandColor` keeps its one meaning:
+ * the console's browser and installed-app theme colour, beside each app's own
+ * `AppBranding` colours, with no precedence between them.
+ *
+ * ⛔ No tenant data reaches this anonymous door under a walled posture. The
+ * settings service offers the namespace only where no organization wall
+ * stands (`service-settings`' `UNWALLED_ONLY_NAMESPACES`), and this door reads
+ * it only when the service lists it — absent, there is nothing to read and the
+ * deployment's branding is all that is served. Present, the read names no
+ * organization, which under `single` resolves the deployment's one
+ * organization, the same read `plugin-auth` makes for `workspace_name`. No
+ * organization is resolved from the request before sign-in.
+ *
+ * A read that fails is not this door's failure: the deployment's branding is
+ * served and one `warn` names the cause, so the sign-in page never 500s over a
+ * settings outage.
+ *
  * ## `branding.stage` — a documented knob that this runtime never sent (#9252)
  *
  * The Console's `PreviewBadge` reads `branding.stage` to decide whether to show
@@ -241,6 +275,38 @@ import type { IHttpServer } from '@objectstack/spec/contracts';
 interface EnvRegistrySurface {
     resolveByHostname?(hostname: string): Promise<any>;
     resolveHostname?(hostname: string): Promise<any>;
+}
+
+/** The settings namespace three `branding` fields read (#24766). */
+const BRANDING_SETTINGS_NAMESPACE = 'branding';
+
+/** Which `branding` settings key each served field reads (#24766, ruling B′). */
+const BRANDING_SETTINGS_KEYS = {
+    productName: 'workspace_name',
+    logoUrl: 'logo_url',
+    brandColor: 'accent_color',
+} as const;
+
+type SettingsBrandedField = keyof typeof BRANDING_SETTINGS_KEYS;
+
+/** The served fields a saved Branding setting supplied, each only when one was set. */
+type SavedBranding = Partial<Record<SettingsBrandedField, string>>;
+
+/**
+ * The slice of the `settings` service this door reads. Declared structurally,
+ * as `plugin-auth` declares its own: this package does not depend on
+ * `@objectstack/service-settings`, and a host may register any settings
+ * service. `listManifests` is how the door learns whether the namespace is
+ * offered at all; a service without it is treated as not offering it, which is
+ * the direction that serves no tenant data.
+ */
+interface BrandingSettingsSurface {
+    listManifests?(): ReadonlyArray<{ namespace?: unknown; specifiers?: ReadonlyArray<{ key?: unknown }> }>;
+    getMany?(
+        namespace: string,
+        keys: readonly string[],
+        ctx?: Record<string, unknown>,
+    ): Promise<Record<string, { value?: unknown; source?: unknown } | undefined>>;
 }
 
 /**
@@ -580,7 +646,8 @@ export interface RuntimeConfigPluginConfig {
      * Product name shown in browser title, splash screen, and other
      * client chrome. Operators can override per-deployment (white-label,
      * regional rebrands). Falls back to `OS_PRODUCT_NAME` env var, then
-     * to the default `'ObjectOS'`.
+     * to the default `'ObjectOS'`. A saved `branding.workspace_name`
+     * setting outranks all three, read per request (#24766).
      */
     productName?: string;
     /** Short product name (PWA shortName, compact spots). Defaults to productName. */
@@ -602,11 +669,17 @@ export interface RuntimeConfigPluginConfig {
      * refused and warned about at mount time — never forwarded.
      */
     stage?: PlatformStage;
-    /** Absolute or relative URL for the product logo. Falls back to OS_LOGO_URL env var. */
+    /**
+     * Absolute or relative URL for the product logo. Falls back to OS_LOGO_URL env var.
+     * A saved `branding.logo_url` setting outranks both, read per request (#24766).
+     */
     logoUrl?: string;
     /** Absolute or relative URL for the favicon. Falls back to OS_FAVICON_URL env var. */
     faviconUrl?: string;
-    /** Primary brand hex color (e.g. '#4F46E5'). Falls back to OS_BRAND_COLOR env var. */
+    /**
+     * Primary brand hex color (e.g. '#4F46E5'). Falls back to OS_BRAND_COLOR env var.
+     * A saved `branding.accent_color` setting outranks both, read per request (#24766).
+     */
     brandColor?: string;
     /** PWA manifest description. Falls back to OS_PWA_DESCRIPTION env var. Default: "<productName> — runtime console". */
     pwaDescription?: string;
@@ -679,8 +752,16 @@ export class RuntimeConfigPlugin implements Plugin {
     private readonly installLocalCeiling: boolean;
     private readonly aiStudio: boolean;
     private readonly singleEnvironment: boolean;
+    /**
+     * The deployment's product name — host option, `OS_PRODUCT_NAME`, then
+     * `'ObjectOS'`. Served when no Branding setting names one (#24766).
+     */
     private readonly productName: string;
-    private readonly productShortName: string;
+    /**
+     * The configured short name (host option or `OS_PRODUCT_SHORT_NAME`), or
+     * `undefined` to derive it from the product name actually served.
+     */
+    private readonly configuredShortName: string | undefined;
     /** Resolved stage, or `undefined` for "send no key" (unset or refused). */
     private readonly stage: PlatformStage | undefined;
     /**
@@ -695,11 +776,20 @@ export class RuntimeConfigPlugin implements Plugin {
     private readonly upgradeUrl: string | undefined;
     /** The refused spelling, kept so `start()` can name it once — same reason as `refusedStage`. */
     private readonly refusedUpgradeUrl: string | undefined;
+    /** The deployment's logo (host option, then `OS_LOGO_URL`); a Branding setting outranks it. */
     private readonly logoUrl: string | undefined;
     private readonly faviconUrl: string | undefined;
+    /** The deployment's brand colour (host option, then `OS_BRAND_COLOR`); a Branding setting outranks it. */
     private readonly brandColor: string | undefined;
-    private readonly pwaDescription: string;
-    private readonly pwaThemeColor: string;
+    /** Configured (host option or env), or `undefined` to derive from the served product name. */
+    private readonly configuredPwaDescription: string | undefined;
+    /** Configured (host option or env), or `undefined` to derive from the served brand colour. */
+    private readonly configuredPwaThemeColor: string | undefined;
+    /**
+     * Whether the last Branding settings read failed and was reported — one
+     * `warn` per run of failures, not one per request.
+     */
+    private reportedBrandingReadFailure = false;
     /**
      * The resolved sink served as `telemetry.errorReporting`, or `undefined`
      * for "serve no block" — unset, refused, or lowered by the posture.
@@ -727,7 +817,7 @@ export class RuntimeConfigPlugin implements Plugin {
         const envName = (typeof process !== 'undefined' ? process.env?.OS_PRODUCT_NAME : undefined)?.trim();
         const envShort = (typeof process !== 'undefined' ? process.env?.OS_PRODUCT_SHORT_NAME : undefined)?.trim();
         this.productName = (config.productName ?? envName ?? 'ObjectOS').trim() || 'ObjectOS';
-        this.productShortName = (config.productShortName ?? envShort ?? this.productName).trim() || this.productName;
+        this.configuredShortName = config.productShortName ?? envShort;
         // Same precedence as every branding key above — the HOST's explicit
         // option wins, the env var is the operator's fallback — but resolved
         // through the closed set, so an unrecognised spelling from either door
@@ -758,8 +848,10 @@ export class RuntimeConfigPlugin implements Plugin {
         this.logoUrl = config.logoUrl ?? envLogoUrl;
         this.faviconUrl = config.faviconUrl ?? envFaviconUrl;
         this.brandColor = config.brandColor ?? envBrandColor;
-        this.pwaDescription = config.pwaDescription ?? envPwaDescription ?? `${this.productName} — runtime console`;
-        this.pwaThemeColor = config.pwaThemeColor ?? envPwaThemeColor ?? this.brandColor ?? '#4f46e5';
+        // The two derived defaults are computed per request (`brandingBlock`),
+        // from the name and colour actually served (#24766).
+        this.configuredPwaDescription = config.pwaDescription ?? envPwaDescription;
+        this.configuredPwaThemeColor = config.pwaThemeColor ?? envPwaThemeColor;
 
         // Client error reporting (#12681). Same precedence as every branding
         // key above — the HOST's explicit option wins, the env var is the
@@ -992,22 +1084,9 @@ export class RuntimeConfigPlugin implements Plugin {
                         // aiStudio + autoPublishAiBuilds + any distribution keys.
                         ...features,
                     },
-                    branding: {
-                        productName: this.productName,
-                        productShortName: this.productShortName,
-                        // Spread, not `stage: this.stage` — the sibling keys
-                        // below may serialize as `undefined` (JSON.stringify
-                        // drops them) but this one is asserted on by KEY
-                        // PRESENCE, so it must never exist as a
-                        // present-and-undefined property on the object handed
-                        // to a non-JSON consumer or a test.
-                        ...(this.stage !== undefined ? { stage: this.stage } : {}),
-                        logoUrl: this.logoUrl,
-                        faviconUrl: this.faviconUrl,
-                        brandColor: this.brandColor,
-                        pwaDescription: this.pwaDescription,
-                        pwaThemeColor: this.pwaThemeColor,
-                    },
+                    // Read per request (#24766): a Branding save shows on the
+                    // next load, with no restart.
+                    branding: this.brandingBlock(await this.readSavedBranding(ctx)),
                     // Its OWN namespace, deliberately not a member of
                     // `features` (#12681). That map is open-ended and a host's
                     // `resolveFeatures` hook merges arbitrary keys into it
@@ -1037,4 +1116,86 @@ export class RuntimeConfigPlugin implements Plugin {
             rawApp.get('/api/v1/studio/runtime-config', handler);
         });
     };
+
+    /**
+     * The served `branding` block: each settings-backed field from `saved` when
+     * a Branding setting supplied it, else the deployment's own value; the
+     * derived fields follow what is served unless configured themselves.
+     */
+    private brandingBlock(saved: SavedBranding) {
+        const productName = saved.productName ?? this.productName;
+        const brandColor = saved.brandColor ?? this.brandColor;
+        return {
+            productName,
+            productShortName: (this.configuredShortName ?? productName).trim() || productName,
+            // Spread, not `stage: this.stage` — the sibling keys
+            // below may serialize as `undefined` (JSON.stringify
+            // drops them) but this one is asserted on by KEY
+            // PRESENCE, so it must never exist as a
+            // present-and-undefined property on the object handed
+            // to a non-JSON consumer or a test.
+            ...(this.stage !== undefined ? { stage: this.stage } : {}),
+            logoUrl: saved.logoUrl ?? this.logoUrl,
+            faviconUrl: this.faviconUrl,
+            brandColor,
+            pwaDescription: this.configuredPwaDescription ?? `${productName} — runtime console`,
+            pwaThemeColor: this.configuredPwaThemeColor ?? brandColor ?? '#4f46e5',
+        };
+    }
+
+    /**
+     * The Branding settings somebody set, for this request (#24766).
+     *
+     * Empty — the deployment's branding is served — when there is no `settings`
+     * service, when it does not list the `branding` namespace (it withholds it
+     * under a walled posture, so nothing tenant-owned can reach this anonymous
+     * door), when no key was set (`source: 'default'`: the manifest default is
+     * the settings page's, never this door's), and when the read fails. Only
+     * the keys the registered manifest declares are asked for: `getMany`
+     * refuses a whole batch over one undeclared key.
+     *
+     * The read names no organization. Under `single` that resolves the one
+     * organization's row; it is the read `plugin-auth` already makes for
+     * `workspace_name`.
+     */
+    private async readSavedBranding(ctx: PluginContext): Promise<SavedBranding> {
+        let settings: BrandingSettingsSurface | undefined;
+        try { settings = ctx.getService<BrandingSettingsSurface>('settings'); } catch { return {}; }
+        if (typeof settings?.listManifests !== 'function' || typeof settings.getMany !== 'function') return {};
+        try {
+            const manifest = settings.listManifests().find((m) => m?.namespace === BRANDING_SETTINGS_NAMESPACE);
+            if (!manifest) return {};
+            const declared = new Set((manifest.specifiers ?? []).map((s) => s?.key));
+            const fields = (Object.keys(BRANDING_SETTINGS_KEYS) as SettingsBrandedField[])
+                .filter((field) => declared.has(BRANDING_SETTINGS_KEYS[field]));
+            if (fields.length === 0) return {};
+            const resolved = await settings.getMany(
+                BRANDING_SETTINGS_NAMESPACE,
+                fields.map((field) => BRANDING_SETTINGS_KEYS[field]),
+                {},
+            );
+            const saved: SavedBranding = {};
+            for (const field of fields) {
+                const entry = resolved?.[BRANDING_SETTINGS_KEYS[field]];
+                if (!entry || entry.source === 'default') continue;
+                const value = typeof entry.value === 'string' ? entry.value.trim() : '';
+                if (value !== '') saved[field] = value;
+            }
+            this.reportedBrandingReadFailure = false;
+            return saved;
+        } catch (err: any) {
+            // A functional degradation, so `warn`: the sign-in page shows the
+            // deployment's branding, visibly, and nothing claimed-persisted is
+            // lost. Once per run of failures — this door answers every page load.
+            if (!this.reportedBrandingReadFailure) {
+                this.reportedBrandingReadFailure = true;
+                ctx.logger?.warn?.(
+                    `[RuntimeConfigPlugin] could not read the Branding settings (${err?.message ?? err}) — `
+                    + 'runtime/config serves the deployment branding (the host options, OS_PRODUCT_NAME / '
+                    + 'OS_LOGO_URL / OS_BRAND_COLOR) until a read succeeds.',
+                );
+            }
+            return {};
+        }
+    }
 }
