@@ -1081,6 +1081,18 @@ jobs:
         continue-on-error: true
         run: pnpm check:watch-hint-literal
 
+      # No shipped refusal, upgrade text or pending changeset says the
+      # organization-ownership ceremony is closed (#24581). The 18.0
+      # pre-releases refused the command and taught a family of surfaces to say
+      # "fresh installs only / keep it on 17.x"; the ceremony is open, and one
+      # such sentence left anywhere sends an operator away from the command
+      # that upgrades their database. Tests are out of the population (they
+      # spell the sentence to pin its absence). Repo-wide text sweep; ~1s.
+      - name: No shipped text says the ownership ceremony is closed
+        id: closed-ceremony-text
+        continue-on-error: true
+        run: pnpm check:closed-ceremony-text
+
       # ADR-0087 D4's per-release correctness gate (#17080). The REAL run needs
       # two published tarballs and npm, so it lives in the release lane and
       # cannot run on a PR; what runs here is its `--self-test`, which is

@@ -186,6 +186,10 @@ export default defineConfig({
         replacement: path.join(path.resolve(__dirname, '..'), 'spec/src/$1/index.ts'),
       },
       { find: /^@objectstack\/spec$/, replacement: path.resolve(__dirname, '../spec/src/index.ts') },
+      // [ADR-0131 D10] `organization-ownership-boot-guard.turso-remote.kernel.test.ts`
+      // boots the guard over the Turso REMOTE face: the face's schema-sync count
+      // is the pin's subject, so the driver is the checkout's source.
+      { find: /^@objectstack\/driver-turso$/, replacement: path.resolve(__dirname, '../drivers/driver-turso/src/index.ts') },
       // Subpath BEFORE the bare package, same prefix-match reason: `./node` is a
       // published subpath served by a FILE (`types/src/node.ts` — the node-only slice
       // the root export deliberately excludes), so the bare entry would resolve it to
