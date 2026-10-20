@@ -30,6 +30,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { VerifyStack } from '@objectstack/verify';
 import { ceremoniedFixture } from './upgrade-harness/ceremony.js';
 import { bootFixture } from './upgrade-harness/populate-fixture.js';
+import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
 const fixtureSql = readFileSync(new URL('./upgrade-harness/fixture-18.0/database.sql', import.meta.url), 'utf8');
 
@@ -173,6 +174,85 @@ describe('[18.x step 7b] the organization key part across the 18.0 → HEAD upgr
       expect(declared).toHaveLength(12);
       const after = new Map(organizationUniqueIndexes(restored).map((i) => [i.name, i.sql]));
       for (const index of declared) expect(after.get(index.name), index.name).toBe(index.sql);
+    });
+  });
+
+  describe('a store 18.0.0 created from empty: birth-marked, nullable tenant columns, COALESCE organization indexes', () => {
+    // 18.0.0 (published) births a store with its ownership marker at shape
+    // generation 1 — the generation HEAD still requires — while it still built
+    // every tenant column nullable and keyed organization uniques through the
+    // COALESCE form. Measured on the published 18.0.0 for this part: 34 tenant
+    // columns, none NOT NULL; 10 of 14 organization uniques in the COALESCE
+    // form; then HEAD booted it with no refusal and `os migrate plan` read
+    // 0 changes. This leg models that store from a HEAD birth (same marker),
+    // the tenant columns relaxed through the drift door and the indexes
+    // re-spelled exactly as 18.0.0 wrote them, so the CERTIFICATION is the
+    // only witness: no tenant column here is NOT NULL.
+    const born = join(dir, 'born-18.0.0.db');
+    let stack: VerifyStack | undefined;
+    let respelled: Array<{ name: string; sql: string }> = [];
+
+    beforeAll(async () => {
+      const first = await bootFixture(born);
+      try {
+        const ql = (await first.kernel.getServiceAsync('objectql')) as { getDriverForObject(object: string): unknown };
+        // The tables whose organization unique 18.0.0 keyed through COALESCE —
+        // the ones whose equivalence is under test. (`sys_setting`'s identity
+        // index is its runtime migration's, rebuilt every boot.)
+        const tenantTables = [
+          ...new Set(organizationUniqueIndexes(born).map((i) => i.table).filter((t) => t !== 'sys_setting')),
+        ];
+        await relaxTenantColumns(ql, tenantTables);
+      } finally {
+        await first.stop();
+      }
+      const db = new DatabaseSync(born);
+      try {
+        for (const index of organizationUniqueIndexes(born)) {
+          // `sys_setting`'s identity index is its runtime migration's, rebuilt every boot.
+          if (index.table === 'sys_setting') continue;
+          const sql = index.sql.replace(/\(\s*([`"]?)organization_id\1\s*([,)])/, "(COALESCE($1organization_id$1, '__global__')$2")
+            .replace(/,\s*([`"]?)organization_id\1\s*([,)])/, ", COALESCE($1organization_id$1, '__global__')$2");
+          if (sql === index.sql) continue;
+          db.exec(`DROP INDEX "${index.name}"`);
+          db.exec(sql);
+          respelled.push({ name: index.name, sql });
+        }
+      } finally {
+        db.close();
+      }
+      stack = await bootFixture(born);
+    }, 600_000);
+
+    afterAll(async () => {
+      await stack?.stop();
+    });
+
+    it('is the 18.0.0 shape: a verified generation-1 birth marker, no NOT NULL tenant column, COALESCE indexes', () => {
+      const db = new DatabaseSync(born, { readOnly: true });
+      try {
+        const marker = db.prepare('SELECT verified_at, details FROM sys_migration WHERE id = ?').get(
+          'adr-0131-organization-ownership',
+        ) as { verified_at: unknown; details: string } | undefined;
+        expect(marker?.verified_at).toBeTruthy();
+        expect(JSON.parse(marker!.details).birth?.shapeGeneration).toBe(1);
+      } finally {
+        db.close();
+      }
+      expect(respelled.length, 'the store holds COALESCE organization indexes').toBeGreaterThanOrEqual(10);
+      for (const index of respelled) {
+        const table = organizationUniqueIndexes(born).find((i) => i.name === index.name)!.table;
+        expect(organizationNotNull(born, table), `${table}.organization_id`).toBe(false);
+      }
+    });
+
+    it("HEAD boots it, and its differ reports zero recreate_index and zero destructive drift", async () => {
+      expectNoDestructiveIndexDrift(await managedDrift(stack!));
+    });
+
+    it('every COALESCE index survives the HEAD boot byte for byte', () => {
+      const after = new Map(organizationUniqueIndexes(born).map((i) => [i.name, i.sql]));
+      for (const index of respelled) expect(after.get(index.name), index.name).toBe(index.sql);
     });
   });
 
