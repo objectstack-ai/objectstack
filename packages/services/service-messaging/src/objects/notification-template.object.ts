@@ -109,7 +109,7 @@ export const NotificationTemplate = ObjectSchema.create({
             // [#24924] The accepted values are TEMPLATE_CHANNELS, enforced by
             // the `channel_renders_template` rule below. The field stays `text`
             // on purpose — see that rule for why a `select` is not the spelling.
-            description: 'Which channel uses this template: email or sms. The in-app inbox never does; for in-app content, write an email template and name it in the notification\'s template.',
+            description: 'Which channel uses this template: email or sms. The in-app inbox never does; for in-app content, write an email template and name it in a notify step\'s template.',
         }),
 
         locale: Field.text({

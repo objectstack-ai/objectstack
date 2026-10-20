@@ -286,7 +286,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_template: {
     label: "Notification Template",
     pluralLabel: "Notification Templates",
-    description: "The subject and body each notification topic sends, per channel and language.",
+    description: "El texto de correo electrónico y SMS que envía cada tema de notificación, por idioma. La bandeja de entrada de la aplicación nunca usa estas plantillas.",
     fields: {
       id: {
         label: "Template ID"
@@ -296,7 +296,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Channel",
-        help: "Channel id this template renders for (email/inbox/push/…)."
+        help: "Qué canal usa esta plantilla: email o sms. La bandeja de entrada de la aplicación nunca la usa; para el contenido de la aplicación, escribe una plantilla de correo electrónico e indícala en el template de un paso de notificación."
       },
       locale: {
         label: "Locale",
@@ -307,7 +307,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       subject: {
         label: "Subject / Title",
-        help: "Rendered into the email subject / inbox title. Supports {{ payload.x }}."
+        help: "El asunto del correo electrónico; un SMS lo envía solo cuando el cuerpo está vacío. Admite {{ payload.x }}."
       },
       body: {
         label: "Body",
@@ -338,8 +338,13 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Todas",
         emptyState: {
           title: "Aún no hay plantillas",
-          message: "Añade una plantilla por tema, canal e idioma; mientras tanto, la notificación se envía con el título y el cuerpo que proporciona su remitente."
+          message: "Añade una plantilla por tema, canal (correo electrónico o SMS) e idioma; mientras tanto, esos canales envían el título y el cuerpo que lleva la notificación. El contenido de la aplicación procede de una plantilla de correo electrónico: una notificación que indica una la envía por correo electrónico y a la bandeja de entrada, y el SMS sigue usando la plantilla de aquí."
         }
+      }
+    },
+    _validations: {
+      channel_renders_template: {
+        message: "El canal debe ser email o sms: solo esos canales usan una plantilla de notificación, y una plantilla para cualquier otro canal nunca se envía. Para el contenido de la aplicación (bandeja de entrada), escribe una plantilla de correo electrónico (email_template) e indícala en el template del paso de notificación; el correo electrónico y la bandeja de entrada la muestran."
       }
     }
   },
