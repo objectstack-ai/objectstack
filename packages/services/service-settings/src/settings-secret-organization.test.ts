@@ -1,15 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0131 D3/D9] The two rows a settings write lands BESIDE its `sys_setting`
- * row — the `sys_secret` ciphertext of an encrypted value and the per-key
- * `sys_setting_audit` history row — belong to the organization the setting
- * row does: the caller's, for a `tenant` or `user` value. A `global` value is
- * deployment-level (its row lives in `sys_platform_setting`, which has no
- * organization), so neither row names one. Its history row goes to
- * `sys_platform_setting_audit`, the audit trail's deployment-level global rung
- * (ADR-0131 D7, ruling record 6257510973 · Q4 A); the secret's fate is the
- * 18.x ceremony's.
+ * [ADR-0131 D3/D7/D9] The two rows a settings write lands BESIDE its
+ * `sys_setting` row. The per-key `sys_setting_audit` history row belongs to the
+ * organization the setting row does: the caller's, for a `tenant` or `user`
+ * value. The `sys_secret` ciphertext of an encrypted value names no
+ * organization under any rung: the cipher store is deployment-level (18.x step
+ * 6, `systemFields.tenant: false`) and is read by its id, so the owning
+ * `sys_setting` row alone carries the organization. A `global` value is
+ * deployment-level throughout (its row lives in `sys_platform_setting`), and its
+ * history row goes to `sys_platform_setting_audit`, the audit trail's
+ * deployment-level global rung (ADR-0131 D7, ruling record 6257510973 · Q4 A).
  */
 
 import { randomBytes } from 'node:crypto';
@@ -57,12 +58,13 @@ function boot() {
 }
 
 describe('[ADR-0131 D3/D9] settings secret and history rows name their setting\'s organization', () => {
-  it('a tenant value: the ciphertext and the history row carry the caller\'s organization', async () => {
+  it('a tenant value: the history row carries the caller\'s organization; the ciphertext names none', async () => {
     const { svc, secrets, history } = boot();
     await svc.setMany('tenant_vault', { token: 's3cret' }, { tenantId: 'org-1', userId: 'usr-1' });
 
     expect(secrets).toHaveLength(1);
-    expect(secrets[0]).toMatchObject({ namespace: 'tenant_vault', key: 'token', organization_id: 'org-1' });
+    expect(secrets[0]).toMatchObject({ namespace: 'tenant_vault', key: 'token' });
+    expect('organization_id' in secrets[0]).toBe(false);
     expect(history.filter((e) => e.key === 'token')).toEqual([
       expect.objectContaining({ scope: 'tenant', encrypted: true, organizationId: 'org-1' }),
     ]);

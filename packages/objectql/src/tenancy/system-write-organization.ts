@@ -84,9 +84,6 @@
  *    (`seed-tenancy-backfill.ts`) still carries the NAMESPACE form; its
  *    residue attribution is C7's. Read the three together before changing any
  *    of them.
- *  - **Under a walled posture only, `sys_secret` and `sys_flow_credential`** —
- *    a cited, temporary bridge ({@link WALLED_ORGANIZATION_LESS_BRIDGE}) until
- *    the steps 5+6 landing flips both tables column-less.
  *  - **Writes that already carry an organization** — on the execution context
  *    or on the row itself. That IS "carrying an explicit organization"; the
  *    ruling asks for nothing more.
@@ -170,34 +167,6 @@ export const DEFAULT_TENANT_FIELD = 'organization_id';
  * to it. Read the three together before changing any of them.
  */
 const PLATFORM_NAMESPACE = /^(sys_|cloud_|ai_)/;
-
-/**
- * [ADR-0131 C8 stage 8b, BRIDGE — delete it with the flips] The two platform
- * tables whose organization-less SYSTEM inserts keep landing under a walled
- * posture, as they did before the walled half of the lift.
- *
- * Their deployment-level rows (a global-scope encrypted setting's and a
- * datasource credential's `sys_secret` ciphertext, a flow's
- * `sys_flow_credential`) are organization-less by ruling until those tables
- * drop the column: epic ruling record 6270035914 on #15194, item 2, moved the
- * deferred `sys_secret` / `sys_flow_credential` `systemFields: { tenant: false }`
- * flips into the steps 5+6 landing (#24582), because declaring them column-less
- * any earlier refuses every 18.0 database at boot. Until then the walled lift
- * would turn each of those writes into a 500 `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`.
- *
- * It is a walled-posture bridge only: under `single` these inserts take the
- * Default Organization like any other. ⛔ Add no table here. When the flips
- * land, the tables have no tenant column, the engine exits on that before this
- * list is read, and the tripwire pin in `@objectstack/service-automation`
- * (`walled-organization-less-bridge.test.ts`) turns red until this list, its
- * reader in `Engine.resolveSystemInsertOrganization` and that pin are deleted.
- */
-export const WALLED_ORGANIZATION_LESS_BRIDGE: readonly string[] = Object.freeze(['sys_flow_credential', 'sys_secret']);
-
-/** Is `object` one of {@link WALLED_ORGANIZATION_LESS_BRIDGE}'s two tables? */
-export function isWalledOrganizationLessBridgeObject(object: string): boolean {
-  return WALLED_ORGANIZATION_LESS_BRIDGE.includes(object);
-}
 
 /**
  * Is this object in one of the platform namespaces?
@@ -306,7 +275,7 @@ function buildRefusalMessage(
     `carrying the organization the way a session write does: pass it on the execution context ` +
     `({ context: { isSystem: true, tenantId: '<organization id>' } }), or set ${DEFAULT_TENANT_FIELD} ` +
     `on the record itself. If rows of '${object}' are genuinely platform-global and belong to no ` +
-    `organization, declare that on the OBJECT — tenancy: { enabled: false } (ADR-0066) — so it is ` +
+    `organization, declare that on the OBJECT — systemFields: { tenant: false } (ADR-0131) — so it is ` +
     `stated once and checkable, rather than decided per write.`
   );
 }

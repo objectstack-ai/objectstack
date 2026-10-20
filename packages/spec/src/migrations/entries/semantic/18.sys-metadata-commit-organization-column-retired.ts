@@ -18,15 +18,15 @@ export const entry: SemanticMigration = {
   replacement:
     'nothing on this table — metadata is the environment\'s (ADR-0131 D6), and no organization owns '
     + 'a row. Delete any authored filter, list-view column, report grouping, formula or seed key that '
-    + 'names `organization_id` on `sys_metadata_commit`. Existing databases: 18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path. '
-    + 'In that 18.x release, run its ceremony: `os migrate organization-ownership --out PLAN` to write its plan for review, then '
+    + 'names `organization_id` on `sys_metadata_commit`. Existing databases: run the v18 ceremony, '
+    + '`os migrate organization-ownership --out PLAN` to write its plan for review, then '
     + '`os migrate organization-ownership --apply --plan-file PLAN`, which promotes or reports the legacy '
     + 'organization rows and then drops the physical column',
   reason:
     'ADR-0131 D6 retired the per-organization overlay axis: every metadata write now lands '
     + 'environment-wide with a NULL organization, every read is environment then code, and a legacy '
-    + 'organization row is served by no read, and the v18 runtime refuses to start on a database still holding the column (18.0 on every such database; the 18.x release that carries the upgrade path until its ceremony has run). The column therefore only holds '
-    + 'the legacy rows the 17.x organization layer wrote, and the 18.x ceremony owns those: under '
+    + 'organization row is served by no read, and the v18 runtime refuses to start on a database still holding the column until the ceremony has run. The column therefore only holds '
+    + 'the legacy rows the 17.x organization layer wrote, and the v18 ceremony owns those: under '
     + 'single it promotes the presentational customizations to environment rows and carries every '
     + 'public-form withdrawal onto the environment, fail-closed (the maintainer rulings on organization customizations and form withdrawals), and '
     + 'it reports the rest. Only then does its column-drops step drop the column, through the '
@@ -40,7 +40,6 @@ export const entry: SemanticMigration = {
   acceptanceCriteria:
     'No authored metadata names `organization_id` on `sys_metadata_commit`: the field resolver (lint and the data '
     + 'door) answers it as an unknown field. A fresh database creates `sys_metadata_commit` with no organization '
-    + 'column. 18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x release that carries the upgrade path. '
-    + 'In that 18.x release, after `os migrate organization-ownership --apply --plan-file PLAN` on a legacy database the column is '
+    + 'column. On a legacy database, after `os migrate organization-ownership --apply --plan-file PLAN` the column is '
     + 'gone and the boot no longer reports it orphaned.',
 };

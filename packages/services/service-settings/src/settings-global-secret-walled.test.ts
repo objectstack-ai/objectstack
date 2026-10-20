@@ -1,18 +1,19 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0131 C8 stage 8b, BRIDGE] A global-scope encrypted setting under a
+ * [ADR-0131 C8 stage 8b; #24582] A global-scope encrypted setting under a
  * walled posture, through a REAL ObjectQL engine.
  *
  * A global value is deployment-level, so its `sys_secret` ciphertext names no
  * organization (`settings-secret-organization.test.ts` pins the row shape,
- * over a fake engine). `sys_secret` keeps its organization column until the
- * steps 5+6 landing flips it (epic ruling record 6270035914 on #15194, item
- * 2), so under `group` / `isolated` that organization-less system insert must
- * keep landing: the walled organization-less bridge in
- * `Engine.resolveSystemInsertOrganization` holds it. Without the bridge the
- * operator's global encrypted setting is a 500
- * `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`, and nothing is written.
+ * over a fake engine). `sys_secret` declares no organization column
+ * (`systemFields: { tenant: false }`, the steps 5+6 flip; epic ruling record
+ * 6270035914 on #15194, item 2), so under `group` / `isolated` that
+ * organization-less system insert lands on the engine's own rule: with no
+ * tenant field, `Engine.resolveSystemInsertOrganization` has nothing to stamp
+ * or refuse. If the table took an organization column back, the operator's
+ * global encrypted setting would be a 500 `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`,
+ * and nothing would be written.
  *
  * The writer is the production pair: `SettingsService` building the row and
  * the plugin's own secret store (`SettingsServicePlugin` → `buildSecretStore`)

@@ -42,7 +42,8 @@ describe('bootSchemaStack + migrate engine (integration)', () => {
             name: 'mig_biz_unit',
             fields: {
               name: { type: 'text', required: true },
-              organization_id: { type: 'text', required: false }, // optional now
+              organization_id: { type: 'text', required: false },
+              region: { type: 'text', required: false }, // optional now
               code: { type: 'text', unique: true }, // tenant-scoped since #3696
             },
           },
@@ -50,8 +51,10 @@ describe('bootSchemaStack + migrate engine (integration)', () => {
       }),
     );
 
-    // Seed a "legacy" DB: organization_id NOT NULL (the #2178 shape) plus the
-    // platform-wide unique index on `code` the pre-#3696 driver emitted.
+    // Seed a "legacy" DB: an optional field's column NOT NULL (the #2178 shape,
+    // re-keyed off `organization_id`, whose NOT NULL is the ownership
+    // ceremony's and never drift) plus the platform-wide unique index on
+    // `code` the pre-#3696 driver emitted.
     const seed = new SqlDriver({ client: 'better-sqlite3', connection: { filename: dbFile }, useNullAsDefault: true });
     const k = (seed as any).knex;
     await k.schema.createTable('mig_biz_unit', (t: any) => {
@@ -59,11 +62,12 @@ describe('bootSchemaStack + migrate engine (integration)', () => {
       t.timestamp('created_at');
       t.timestamp('updated_at');
       t.string('name').notNullable();
-      t.string('organization_id').notNullable();
+      t.string('organization_id');
+      t.string('region').notNullable();
       t.string('code');
     });
     await k.raw('CREATE UNIQUE INDEX mig_biz_unit_code_unique ON mig_biz_unit (code)');
-    await k('mig_biz_unit').insert({ id: '1', name: 'Acme', organization_id: 'org1', code: 'BU-00001' });
+    await k('mig_biz_unit').insert({ id: '1', name: 'Acme', organization_id: 'org1', region: 'emea', code: 'BU-00001' });
     await k.destroy();
 
     savedEnv.OS_ARTIFACT_PATH = process.env.OS_ARTIFACT_PATH;
@@ -87,8 +91,8 @@ describe('bootSchemaStack + migrate engine (integration)', () => {
       // Boot changed nothing — this is exactly what `os migrate plan` renders.
       const drift = await stack.driver!.detectManagedDrift();
 
-      const org = drift.find((d) => d.table === 'mig_biz_unit' && d.column === 'organization_id');
-      expect(org, 'expected drift on mig_biz_unit.organization_id').toBeDefined();
+      const org = drift.find((d) => d.table === 'mig_biz_unit' && d.column === 'region');
+      expect(org, 'expected drift on mig_biz_unit.region').toBeDefined();
       // ADR-0113: a column stricter than its declaration is needs_confirm —
       // reported by plan, applied by an explicit `os migrate apply` (the human
       // IS the confirmation), but never by dev auto-reconcile.
@@ -111,7 +115,7 @@ describe('bootSchemaStack + migrate engine (integration)', () => {
       expect(skipped).toHaveLength(0);
 
       const after = await stack.driver!.detectManagedDrift();
-      expect(after.find((d) => d.table === 'mig_biz_unit' && d.column === 'organization_id')).toBeUndefined();
+      expect(after.find((d) => d.table === 'mig_biz_unit' && d.column === 'region')).toBeUndefined();
       expect(after.find((d) => d.op.type === 'replace_unique_index')).toBeUndefined();
 
       // The seeded row survived the reconcile.

@@ -16,10 +16,12 @@ it generalizes the two-valued *tenancy mode* of
 whose `tenancy` service, membership lifecycle and degraded-tenancy boot guard all
 still apply — widened to the three postures.
 
-<Callout type="warn" title="Upgrades arrive in a later 18.x release">
+<Callout type="warn" title="An existing database takes the ownership ceremony">
 Fresh installs are supported under every posture: `single`, `group` and
-`isolated`. The upgrade path for an existing database arrives in a later 18.x
-release, and a database an 18.0 install created takes the same path as a v17 one.
+`isolated`. A database with no birth marker, which 17.x and the 18.0
+pre-releases (`18.0.0-next.*`) created, is refused at boot until
+[`os migrate organization-ownership`](/docs/deployment/cli#os-migrate-organization-ownership)
+has upgraded it.
 </Callout>
 
 <Callout type="info" title="Renamed, not re-configured">

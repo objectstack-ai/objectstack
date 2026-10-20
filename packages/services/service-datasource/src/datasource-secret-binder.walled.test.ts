@@ -1,17 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0131 C8 stage 8b, BRIDGE] Binding a datasource credential under a
+ * [ADR-0131 C8 stage 8b; #24582] Binding a datasource credential under a
  * walled posture, through a REAL ObjectQL engine over SQLite.
  *
  * The binder persists the ciphertext as a `sys_secret` row with the system
  * context and no organization: a datasource is deployment-level. `sys_secret`
- * keeps its organization column until the steps 5+6 landing flips it (epic
- * ruling record 6270035914 on #15194, item 2), so under `group` / `isolated`
- * that organization-less system insert must keep landing: the walled
- * organization-less bridge in `Engine.resolveSystemInsertOrganization` holds
- * it. Without the bridge the admin door's credential bind is a 500
- * `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`, and nothing is written.
+ * declares no organization column (`systemFields: { tenant: false }`, the
+ * steps 5+6 flip; epic ruling record 6270035914 on #15194, item 2), so under
+ * `group` / `isolated` that organization-less system insert lands on the
+ * engine's own rule: with no tenant field, `Engine.resolveSystemInsertOrganization`
+ * has nothing to stamp or refuse. If the table took an organization column
+ * back, the admin door's credential bind would be a 500
+ * `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`, and nothing would be written.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
