@@ -96,6 +96,7 @@ export interface CrudRouteHost {
     resolveExecCtx: RestServer['resolveExecCtx'];
     enforceAuth: RestServer['enforceAuth'];
     enforceApiAccess: RestServer['enforceApiAccess'];
+    labelNotNullRefusal: RestServer['labelNotNullRefusal'];
 }
 
 /**
@@ -242,10 +243,13 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
             method: 'POST',
             path: `${dataPath}/:object`,
             handler: async (req: any, res: any) => {
+                // [#24715] Declared out here so the catch can read the
+                // caller's locale off it.
+                let context: any;
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const p = await this.resolveProtocol(environmentId, req);
-                    const context = await this.resolveExecCtx(environmentId, req);
+                    context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
                     if (await this.enforceApiAccess(req, res, p, environmentId, 'create')) return;
                     // [#3899] The wire body IS the record. Validate the
@@ -291,7 +295,14 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                     applyDroppedFieldsHeader(res, result);
                     res.status(201).json(result);
                 } catch (error: any) {
-                    const mapped = mapDataError(error, req.params?.object);
+                    // [#24715] A NOT NULL refusal names the field by its label,
+                    // in the caller's locale; every other answer is unchanged.
+                    const mapped = await this.labelNotNullRefusal(
+                        mapDataError(error, req.params?.object),
+                        req,
+                        isScoped ? req.params?.environmentId : undefined,
+                        context,
+                    );
                     logUnexpectedRouteError(error, mapped);
                     res.status(mapped.status).json(mapped.body);
                 }
@@ -382,10 +393,12 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
             method: 'PATCH',
             path: `${dataPath}/:object/:id`,
             handler: async (req: any, res: any) => {
+                // [#24715] As on the create: read by the catch.
+                let context: any;
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const p = await this.resolveProtocol(environmentId, req);
-                    const context = await this.resolveExecCtx(environmentId, req);
+                    context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
                     // OCC: clients opt in by sending either the standard
                     // `If-Match` header or an `expectedVersion` field in
@@ -472,7 +485,13 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                     applyDroppedFieldsHeader(res, result);
                     res.json(result);
                 } catch (error: any) {
-                    const mapped = mapDataError(error, req.params?.object);
+                    // [#24715] The create's relabel, on the update.
+                    const mapped = await this.labelNotNullRefusal(
+                        mapDataError(error, req.params?.object),
+                        req,
+                        isScoped ? req.params?.environmentId : undefined,
+                        context,
+                    );
                     logUnexpectedRouteError(error, mapped);
                     res.status(mapped.status).json(mapped.body);
                 }
