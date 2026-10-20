@@ -36,7 +36,7 @@ import { SysMetadataActivation } from '@objectstack/platform-objects/system';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { namesWithoutCatalogRow, positionNotInCatalogMessage } from './position-catalog-refusal.js';
-import { installDefaultOrganization } from './default-organization.testkit.js';
+import { relaxEveryTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -123,9 +123,9 @@ async function boot(opts: { walled?: boolean } = {}) {
     objects: [SysUserPosition, SysUserPermissionSet, SysMember, SysMetadataActivation, QA_INQUIRY],
   } as any);
   await engine.syncSchemas();
-  // A real `single` install's Default Organization: the system writes below
-  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
-  await installDefaultOrganization(engine);
+  // The organization-less holdings and rows below exist only on a store built
+  // before 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is it.
+  await relaxEveryTenantColumn(engine, [SysUserPosition, SysUserPermissionSet, SysMember, SysMetadataActivation, QA_INQUIRY]);
   // [#21516] The authz resolver reads these on every grant resolution; in a
   // deployment the auth and security plugins register them. This harness
   // composes neither, so the ones its app does not declare are registered

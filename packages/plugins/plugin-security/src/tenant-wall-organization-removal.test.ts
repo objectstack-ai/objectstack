@@ -53,7 +53,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { SysUserPosition, SysUserPermissionSet } from './objects/index.js';
-import { installDefaultOrganization } from './default-organization.testkit.js';
+import { relaxEveryTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 /** The organization the caller holds (its active organization). */
 const OWN_ORG = 'org_a';
@@ -146,9 +146,9 @@ async function boot(makeDriver: () => unknown, posture: Posture = 'isolated'): P
     objects: OBJECTS,
   } as never);
   await engine.syncSchemas();
-  // A real `single` install's Default Organization: the system writes below
-  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
-  await installDefaultOrganization(engine);
+  // The organization-less holdings and rows below exist only on a store built
+  // before 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is it.
+  await relaxEveryTenantColumn(engine, OBJECTS);
   engines.push(engine);
 
   // The stored-row half: a hook that clears the column when asked to by name.

@@ -43,7 +43,7 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
-import { installDefaultOrganization } from './default-organization.testkit.js';
+import { relaxEveryTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const MEMBER_DEFAULT = { name: 'member_default', label: 'Member', objects: {} } as unknown as PermissionSet;
 const QA_ADMIN = {
@@ -87,9 +87,9 @@ async function boot() {
     objects: [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet, SysMember],
   } as any);
   await engine.syncSchemas();
-  // A real `single` install's Default Organization: the system writes below
-  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
-  await installDefaultOrganization(engine);
+  // The organization-less holdings and rows below exist only on a store built
+  // before 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is it.
+  await relaxEveryTenantColumn(engine, [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet, SysMember]);
   for (const o of [SysUser, SysMember]) {
     if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as never, 'qa.authz-read-set');
   }

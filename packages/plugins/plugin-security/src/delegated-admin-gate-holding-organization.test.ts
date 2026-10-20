@@ -33,7 +33,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
-import { installDefaultOrganization } from './default-organization.testkit.js';
+import { relaxEveryTenantColumn } from './pre-18-tenant-column.testkit.js';
 
 const ORG_A = 'org_a_acme';
 /** Sorts BEFORE every `org_a` / `*_a_*` id, like the sibling suites. */
@@ -87,9 +87,9 @@ async function bootEngine() {
     objects: OBJECTS,
   } as any);
   await engine.syncSchemas();
-  // A real `single` install's Default Organization: the system writes below
-  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
-  await installDefaultOrganization(engine);
+  // The organization-less holdings and rows below exist only on a store built
+  // before 18.x (ADR-0131 D1 makes a fresh tenant column NOT NULL): this is it.
+  await relaxEveryTenantColumn(engine, OBJECTS);
   engines.push(engine);
   return engine;
 }
