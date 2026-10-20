@@ -1406,7 +1406,7 @@
       "title": "OWD save gate: the retired external dial is refused on every object write, and a packaged object's OWD cannot be changed at runtime — the managed-content seal refuses the write before any OWD rule judges it — server-side",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1465,8 +1465,7 @@
       ],
       "negative": [
         "a Studio panel that greys the save while a direct meta PUT widens is a FAIL — the server gate is the authority (ADR-0124 D1 both-sides)",
-        "a stock-deploy packaged-object widening PUT that answers 2xx (or leaves the object widened) is a FAIL",
-        "do NOT tick external-principal read/write enforcement: an external principal reaches explicitly shared rows only (ADR-0095) — this item is the save/authoring gate only"
+        "a stock-deploy packaged-object widening PUT that answers 2xx (or leaves the object widened) is a FAIL"
       ],
       "variants": [
         "the retired externalSharingModel (the object schema's tombstone, all object writes, draft included)",
@@ -1494,7 +1493,8 @@
         { "revision": 3, "date": "2026-08-19", "change": "the R1 knownGap, step 5 and clause 4 named the WRONG answering layer, and #9453 CF-3 was RIGHT — re-measured on a genuinely stock showcase boot and OVERTURNING the revision-2 note above (#9477). Proven stock from the server process's own /proc/<pid>/environ: zero METADATA_WRITABLE occurrences among 147 vars. Target artifact-backed, proven by GET ?layers=true returning a populated `code` layer (_packageId com.example.showcase) with `overlay: null`. A widening PUT then answered 403 declaredCode owd_widening_forbidden — reproduced twice, object byte-identical after. The mechanism the old text missed: saveMetaItem runs runAuthoringGate BEFORE the overlay/package doors on the host-config kernel the showcase boots (environmentId undefined, so protocol.ts's env-partitioned NOT_OVERRIDABLE branch never arms — the #7674 note in that file says the showcase is exactly that shape). So the deploy posture does not select the layer; the body's DIRECTION does. Control leg (same boot, same object, tightened body) passed R1 and answered 403 NOT_OVERRIDABLE, i.e. the door the knownGap called 'earlier' is in fact LATER. Six legs measured (widen/tighten x stock/hatch x ?package= present/absent) and WRITABLE_PACKAGE_REQUIRED appeared on none. ⛔ Not a product defect: every widening leg refused and the object never changed — object-posture-gate.ts behaved exactly as its executable guard (if (!ctx.isArtifactBacked) return) specifies; only the prose parenthetical in that file's header, and this item, mispredicted the door order", "ref": "#9477" },
         { "revision": 4, "date": "2026-10-13", "change": "clause 4, acceptance[3], re-pointed to the managed-content seal, with step 5, the R1 knownGap, the first knownGap's packaged tighten-only parenthetical, the R1 variant, the title and two new source notes (stale spec, #23104 A3). Revision 3 measured, at #9477, that a widening PUT on showcase_announcement met R1 first and answered 403 PERMISSION_DENIED with declaredCode owd_widening_forbidden. Two later changes reorder that. #22338 made saveMetaItem ask the package door on every kernel topology, ahead of the checks that judge the body. ADR-0131 D6 (#22401, e02833c24) made the OS_METADATA_WRITABLE hatch stop opening an item a managed package ships. A packaged object, whose type opens no overlay channel, is now refused 403 NOT_OVERRIDABLE (ITEM_LOCKED with ?package=) whatever the body says, so R1 is unreachable on this door on stock. The protection holds: nothing widens. Per the #23121 triage, no fixture package is built to reach R1. Its oracle is its unit pins, named in the clause: plugin-security object-posture-gate.test.ts for the verdict, and rest meta-object-owd-gate.test.ts, whose R1 block now pins the package door answering first, hatch open", "ref": "#23121" },
         { "revision": 5, "date": "2026-10-14", "change": "the external clauses retired with the key (#23268, ruling of record 6159300530, letter A): externalSharingModel was removed from the object schema (ADR-0049), so the Studio external-wider clause goes and the external-wider refusal, admit and shipped-declarations clauses and the D11 knownGap are rewritten: clause 1 now asserts the tombstone's 422 refusal on every object write, draft included, clause 2 the admit without the key, and the last clause that the showcase ships no retired key. The packaged-object seal clauses are unchanged (the seal is now clause 3, and step 4 names it so). surface mixed → api: no browser step remains", "ref": "#23268" },
-        { "revision": 6, "date": "2026-10-20", "change": "acceptance[0] (verify, evidence) adds the draft re-read — carried finding 3 of round 12's report on PR #24824 (wave anchor #24579 round 13), from QA run #24779: 'a follow-up GET finds no qa_owd_probe' named no read for the ?mode=draft PUT leg, and a GET with ?mode=draft answers 400. A GET takes state (META_ITEM_READ_PARAMS, meta-item-read-gate.ts at base 7697ddcf94), so the verify now re-reads the probe with ?state=draft beside the plain GET, and 'nothing is stored' holds for both legs. No clause changed", "ref": "#24850" }
+        { "revision": 6, "date": "2026-10-20", "change": "acceptance[0] (verify, evidence) adds the draft re-read — carried finding 3 of round 12's report on PR #24824 (wave anchor #24579 round 13), from QA run #24779: 'a follow-up GET finds no qa_owd_probe' named no read for the ?mode=draft PUT leg, and a GET with ?mode=draft answers 400. A GET takes state (META_ITEM_READ_PARAMS, meta-item-read-gate.ts at base 7697ddcf94), so the verify now re-reads the probe with ?state=draft beside the plain GET, and 'nothing is stored' holds for both legs. No clause changed", "ref": "#24850" },
+        { "revision": 7, "date": "2026-10-20", "change": "negative[2] removed. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4): it stated a scope rule ('do NOT tick external-principal read/write enforcement … this item is the save/authoring gate only') with no product expectation, so it could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). Its text already stands, unchanged in substance, in fixtures.knownGaps[0] (this item tests the save gate, NOT external-principal enforcement; do not tick an external-principal read/write result; an external principal reaches explicitly shared rows only, ADR-0095), so nothing was added. No acceptance clause changed", "ref": "#PENDING-24579R16" }
       ]
     },
     {
@@ -2677,7 +2677,7 @@
       "title": "Write-door parity on a packaged flow: PUT/DELETE /automation/:name must refuse the same packaged artifact that PUT /meta/flow/:name refuses (ADR-0126 §2 locked base)",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2699,7 +2699,8 @@
         "probe leg 1: PUT /api/v1/automation/showcase_urgent_task_alert with the same trivially modified definition — capture status and, if 2xx, GET the flow back to prove the live registration mutated",
         "probe leg 2: DELETE /api/v1/automation/showcase_urgent_task_alert — capture status and, if 2xx, confirm GET /api/v1/automation/showcase_urgent_task_alert now 404s (the shipped flow is gone from the live engine)",
         "RESTORE, only if a probe mutated anything: diff GET /api/v1/automation/showcase_urgent_task_alert against the stored capture; if it differs (or 404s), restore with a cold restart over the same database (the boot flow pull re-registers the packaged body — a restore PUT is itself refused 403 once the door is locked) and diff again — byte-identical",
-        "verify the flow still fires: trigger its record-change mutation once and confirm a run appears (the restore must revive the trigger binding, not just the definition read)"
+        "verify the flow still fires: trigger its record-change mutation once and confirm a run appears (the restore must revive the trigger binding, not just the definition read)",
+        "scope, not a probe: the toggle door is NOT this item. POST /:name/toggle is the sanctioned activation switch (access-security.activation-write-operator-gate); this item is about DEFINITION writes and deletion of the locked base (ADR-0126 §2/§6: sole definition ledger, never silent override), so the toggle is neither driven nor scored here"
       ],
       "acceptance": [
         {
@@ -2729,8 +2730,7 @@
       ],
       "negative": [
         "a 403 on the /automation probes coming from a MISSING manage_metadata capability is the wrong tier and proves nothing about the lock — this item's persona holds the capability precisely so any refusal observed is the package lock; quote the refusal message to prove which gate answered",
-        "do NOT read clause 1's /meta refusal as covering the /automation door — two doors onto one artifact are the item; scoring one door twice is the mistake",
-        "the toggle door is NOT this item: POST /:name/toggle is the sanctioned activation switch (access-security.activation-write-operator-gate); this item is about DEFINITION writes and deletion of the locked base (ADR-0126 §2/§6 — sole definition ledger, never silent override)"
+        "a 2xx from PUT or DELETE /api/v1/automation/showcase_urgent_task_alert on the artifact the /meta door refused (acceptance[0]) is a FAIL of door parity, whatever the /meta trace shows: each /automation door is scored from its own trace (steps[2] and steps[3]), because two doors onto one artifact are the item"
       ],
       "traps": [
         "destructive-in-place",
@@ -2751,7 +2751,8 @@
           "change": "new — #12438 measured that PUT/DELETE /automation/:name re-register/unregister a PACKAGED flow on manage_metadata alone while PUT /meta/flow/:name refuses the same artifact: the ADR-0126 §2 lock is unimplemented at the /automation door. Authored as a door-parity item with the parity promise as the acceptance and the present-day 200 recorded as an expected fail (tracked centrally in FOLLOW-UPS), plus a mandatory restore step because the probe mutates a live engine registration",
           "ref": "#12438"
         },
-        { "revision": 2, "date": "2026-10-02", "change": "retired the expected-fail framing: 4b45afae (#20817) locked the /automation write doors against the packaged base, and the 17.6.0 release-verification run measured PUT and DELETE /automation/showcase_urgent_task_alert answering 403 NOT_OVERRIDABLE with the /meta door's lock message, the flow unchanged and still firing. Title, knownGaps and clauses 2-3 now state the parity as holding; the restore step is conditional (a restore PUT is itself refused), and the knownGap names the permanent pin packaged-flow-write-door-parity.dogfood.test.ts", "ref": "#21330" }
+        { "revision": 2, "date": "2026-10-02", "change": "retired the expected-fail framing: 4b45afae (#20817) locked the /automation write doors against the packaged base, and the 17.6.0 release-verification run measured PUT and DELETE /automation/showcase_urgent_task_alert answering 403 NOT_OVERRIDABLE with the /meta door's lock message, the flow unchanged and still firing. Title, knownGaps and clauses 2-3 now state the parity as holding; the restore step is conditional (a restore PUT is itself refused), and the knownGap names the permanent pin packaged-flow-write-door-parity.dogfood.test.ts", "ref": "#21330" },
+        { "revision": 3, "date": "2026-10-20", "change": "negative[1] rewritten as the product outcome it guarded, and negative[2] moved to steps[6]. Checklist-accuracy finding of QA run #24841 (18.0 sweep round 4 at 307ce4c4): both stated a runner rule with no product expectation, so they could only score not-run and held the item at partial. A negative names a product outcome whose occurrence is the FAIL (the README's item anatomy: the other side of every gate, its deny/absence cases). negative[1]'s 'do not read the /meta refusal as covering the /automation door' guarded one: an /automation write door answering 2xx on the artifact /meta refused, which is now the FAIL. negative[2] (the toggle door is not this item) guards none, so its text moved, unchanged in substance, to steps[6]. No acceptance clause changed", "ref": "#PENDING-24579R16" }
       ]
     },
     {
