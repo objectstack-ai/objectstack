@@ -1,34 +1,29 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * An organization-scoped seed load over a row whose natural key a
- * NULL-organization row already holds REFUSES that seed row, by name, in the
- * seed result. It never inserts a twin beside the unowned row, and it never
- * adopts it.
+ * [ADR-0131 D8] An organization-scoped seed load on a CERTIFIED database reads
+ * its own organization's rows and nothing else: no `organization_id IS NULL`
+ * read on any path, no twin of a row it already holds, and another
+ * organization's row invisible to it.
  *
- * ## The defect, as measured
+ * ## What retired
  *
- * A database whose rows predate organization stamping (a single-posture 17.x
- * install, every business row `organization_id` NULL) took an
- * organization-scoped load: the per-organization replay, the walled install or
- * the reseed, all of which ask `SeedLoaderService` for `defaultMode: 'upsert'`
- * with `config.organizationId`. The scoped pre-load read only
- * `organization_id = ORG`, so the NULL row holding each natural key was
- * invisible, the upsert decided `insert`, and every such row got a twin that
- * carried the organization: 0 errors, nothing logged. On this file's fixture
- * (two NULL events, one NULL task), before the fix, the scoped load inserted
- * all five seed rows, a twin for each of the three NULL-held keys
- * (`tw_event` 2 → 5, `tw_task` 1 → 3).
+ * Until step 7 of the organization-ownership line the scoped pre-load also
+ * read the natural keys held by rows with NO organization — a 17.x
+ * single-posture install's rows — and refused to twin or adopt them (#24301).
+ * A database is certified before it boots now: the ownership ceremony
+ * attributes every such row (D10), an uncertified database is refused at boot,
+ * and a new write without an organization is stamped or refused (D9). So the
+ * NULL read had no row left to find, and it retired. What these cases hold is
+ * its absence, and the behaviour a certified database keeps without it.
  *
  * ## Why a real engine and real drivers
  *
- * The scoped lookup's NULL comparison is a driver's answer, not the loader's:
- * `{ organization_id: null }` is `IS NULL` on the SQL family. An engine double
- * would encode the very predicate under test. So this file runs the real
- * `SeedLoaderService` behind a real `ObjectQL`, over a real `SqlDriver` on a
- * better-sqlite3 FILE, and asserts on the stored rows. The
- * per-organization replay is the production closure AppPlugin registers on a
- * walled boot; the walled install and the reseed are pinned with the request
+ * The scoped lookup's comparison is a driver's answer, not the loader's. So
+ * this file runs the real `SeedLoaderService` behind a real `ObjectQL`, over a
+ * real `SqlDriver` on a better-sqlite3 FILE, and asserts on the stored rows.
+ * The per-organization replay is the production closure AppPlugin registers on
+ * a walled boot; the walled install and the reseed are pinned with the request
  * `MarketplaceInstallLocalPlugin.runInlineSeed` builds for both.
  */
 
@@ -141,11 +136,11 @@ async function boot() {
   return { engine, all, plant };
 }
 
-/** The 17.x shape: every row of the seed already present, `organization_id` NULL. */
-async function plantUnowned(plant: (o: string, r: Record<string, unknown>) => Promise<unknown>) {
-  await plant('tw_event', { id: 'ev_kickoff', subject: 'Kickoff', notes: 'first', organization_id: null });
-  await plant('tw_event', { id: 'ev_review', subject: 'Review', notes: 'second', organization_id: null });
-  await plant('tw_task', { id: 'tk_room', title: 'Book room', event_id: 'ev_kickoff', organization_id: null });
+/** A certified database: part of the seed already present, stamped with the organization. */
+async function plantOwn(plant: (o: string, r: Record<string, unknown>) => Promise<unknown>) {
+  await plant('tw_event', { id: 'ev_kickoff', subject: 'Kickoff', notes: 'first', organization_id: ORG });
+  await plant('tw_event', { id: 'ev_review', subject: 'Review', notes: 'second', organization_id: ORG });
+  await plant('tw_task', { id: 'tk_room', title: 'Book room', event_id: 'ev_kickoff', organization_id: ORG });
 }
 
 /** The request the per-organization replay and `runInlineSeed` (install, reseed) both build. */
@@ -156,72 +151,40 @@ function scopedRequest(organizationId: string, seeds: unknown = SEEDS) {
   });
 }
 
-/**
- * The per-row refusal, told apart structurally: the existing
- * `ReferenceResolutionError` shape with `field: 'organization_id'` searched on
- * the object itself (the unowned-row refusal of an unscoped load searches
- * `sys_organization` instead).
- */
-const isNullHolderRefusal = (e: { field: string; sourceObject: string; targetObject: string }) =>
-  e.field === 'organization_id' && e.targetObject === e.sourceObject;
+/** Every engine read that names `organization_id` with a NULL value — the retired arm. */
+function spyNullReads(engine: ObjectQL): () => unknown[] {
+  const seen: unknown[] = [];
+  const realFind = engine.find.bind(engine);
+  vi.spyOn(engine, 'find').mockImplementation(async (object: string, query?: any) => {
+    const where = query?.where;
+    if (where && typeof where === 'object' && 'organization_id' in where && where.organization_id == null) seen.push({ object, where });
+    return realFind(object, query);
+  });
+  return () => seen;
+}
 
-describe('scoped seed load over NULL-organization holders (sqlite-file)', () => {
-  it('refuses each NULL-held natural key by name, inserts no twin, adopts nothing, and still loads the rest', async () => {
+describe('scoped seed load on a certified database (sqlite-file)', () => {
+  it('matches its own rows, inserts no twin, and issues no NULL read', async () => {
     const { engine, all, plant } = await boot();
-    await plantUnowned(plant);
-    const eventsBefore = await all('tw_event');
-    const tasksBefore = await all('tw_task');
-    expect(eventsBefore).toHaveLength(2);
-    expect(tasksBefore).toHaveLength(1);
+    await plantOwn(plant);
+    const nullReads = spyNullReads(engine);
 
-    const logger = createLogger();
-    const svc = new SeedLoaderService(engine as never, metadataFor(OBJECTS), logger as never);
+    const svc = new SeedLoaderService(engine as never, metadataFor(OBJECTS), createLogger() as never);
     const result = await svc.load(scopedRequest(ORG) as never);
 
+    expect(result.errors).toEqual([]);
+    expect(nullReads()).toEqual([]);
     const events = await all('tw_event');
     const tasks = await all('tw_task');
-    // No twin: the two NULL-held events and the NULL-held task were refused;
-    // only the keys nothing held ('Retro', 'Send notes') were inserted.
+    // Only the keys the organization did not hold ('Retro', 'Send notes') were inserted.
+    expect(result.summary.totalInserted).toBe(2);
     expect(events).toHaveLength(3);
     expect(tasks).toHaveLength(2);
-    expect(result.summary.totalInserted).toBe(2);
     expect(events.filter((r) => r.subject === 'Kickoff')).toHaveLength(1);
-    expect(events.filter((r) => r.subject === 'Review')).toHaveLength(1);
     expect(tasks.filter((r) => r.title === 'Book room')).toHaveLength(1);
-    // The rows that loaded are the organization's.
-    expect(events.find((r) => r.subject === 'Retro')?.organization_id).toBe(ORG);
-    expect(tasks.find((r) => r.title === 'Send notes')?.organization_id).toBe(ORG);
-
-    // Never adopted: each unowned row is byte-for-byte what was planted.
-    for (const before of [...eventsBefore, ...tasksBefore]) {
-      const after = [...events, ...tasks].find((r) => r.id === before.id);
-      expect(after?.organization_id ?? null).toBeNull();
-      expect(after).toEqual(before);
-    }
-
-    // Each refusal is a named per-row error in the seed result.
-    const refusals = result.errors.filter(isNullHolderRefusal);
-    expect(refusals.map((e) => `${e.sourceObject}#${e.recordIndex}`).sort()).toEqual(['tw_event#0', 'tw_event#1', 'tw_task#0']);
-    // The only other errors are the cascade the refusals cause: both tasks
-    // name an event this organization does not hold ('Kickoff' and 'Review'
-    // were refused), and a reference never resolves to an unowned row, so
-    // pass 2 reports each link as dropped.
-    expect(result.errors.filter((e) => !isNullHolderRefusal(e)).map((e) => `${e.sourceObject}.${e.field}#${e.recordIndex}`).sort())
-      .toEqual(['tw_task.event_id#0', 'tw_task.event_id#1']);
-    expect(tasks.find((r) => r.title === 'Send notes')?.event_id ?? null).toBeNull();
-    const kickoff = refusals.find((e) => e.sourceObject === 'tw_event' && e.recordIndex === 0)!;
-    expect(kickoff.targetObject).toBe('tw_event');
-    expect(kickoff.targetField).toBe('subject');
-    expect(kickoff.attemptedValue).toBe('Kickoff');
-    // The message names the key, the unowned holder and the remedy's command.
-    expect(kickoff.message).toContain('subject=Kickoff');
-    expect(kickoff.message).toContain("'ev_kickoff'");
-    expect(kickoff.message).toContain('os migrate organization-ownership --out PLAN');
-    expect(kickoff.message).not.toMatch(/fresh installs only|on a 17\.x release|carries the upgrade path/);
-    expect(result.success).toBe(false);
-    // Loud: said at `error`, once per dataset.
-    const lines = logger.error.mock.calls.map((c) => String(c[0])).filter((m) => refusals.some((e) => m.includes(e.message)));
-    expect(lines).toHaveLength(2);
+    expect([...events, ...tasks].every((r) => r.organization_id === ORG)).toBe(true);
+    // The new task's reference resolved to the organization's own event.
+    expect(tasks.find((r) => r.title === 'Send notes')?.event_id).toBe('ev_review');
   });
 
   it('a fully stamped database still loads with 0 inserts and 0 errors', async () => {
@@ -253,24 +216,13 @@ describe('scoped seed load over NULL-organization holders (sqlite-file)', () => 
     expect(kickoffs.map((r) => r.organization_id).sort()).toEqual([OTHER_ORG, ORG].sort());
     expect(kickoffs.find((r) => r.id === 'ev_other')).toEqual(theirsBefore);
   });
-
-  it('an unscoped (single-posture) load keeps its behaviour: it matches the NULL rows and inserts no twin', async () => {
-    const { engine, all, plant } = await boot();
-    await plantUnowned(plant);
-    const result = await new SeedLoaderService(engine as never, metadataFor(OBJECTS), createLogger() as never)
-      .load(SeedLoaderRequestSchema.parse({ seeds: SEEDS, config: { defaultMode: 'upsert', multiPass: true } }) as never);
-
-    expect(result.errors).toEqual([]);
-    expect(result.summary.totalInserted).toBe(2);
-    expect((await all('tw_event')).filter((r) => r.subject === 'Kickoff')).toHaveLength(1);
-    expect((await all('tw_task')).filter((r) => r.title === 'Book room')).toHaveLength(1);
-  });
 });
 
-describe('every scoped caller refuses the NULL-held row (sqlite-file)', () => {
+describe('every scoped caller reads the same way (sqlite-file)', () => {
   it('per-organization replay: the replayer a walled boot registers', async () => {
     const { engine, all, plant } = await boot();
-    await plantUnowned(plant);
+    await plantOwn(plant);
+    const nullReads = spyNullReads(engine);
     const services = new Map<string, unknown>([['tenancy', { posture: 'isolated' }]]);
     const metadata = metadataFor(OBJECTS);
     const ctx = {
@@ -286,9 +238,9 @@ describe('every scoped caller refuses the NULL-held row (sqlite-file)', () => {
     expect(typeof replayer).toBe('function');
 
     const out = await replayer(ORG);
+    expect(out.errors).toEqual([]);
     expect(out.inserted).toBe(2);
-    expect(out.errors.filter(isNullHolderRefusal).map((e) => `${e.sourceObject}#${e.recordIndex}`).sort())
-      .toEqual(['tw_event#0', 'tw_event#1', 'tw_task#0']);
+    expect(nullReads()).toEqual([]);
     expect(await all('tw_event')).toHaveLength(3);
     expect(await all('tw_task')).toHaveLength(2);
   });
@@ -298,11 +250,13 @@ describe('every scoped caller refuses the NULL-held row (sqlite-file)', () => {
   // caller's organization.
   it('walled install and reseed: the request runInlineSeed builds for both', async () => {
     const { engine, all, plant } = await boot();
-    await plantUnowned(plant);
+    await plantOwn(plant);
+    const nullReads = spyNullReads(engine);
     const result = await new SeedLoaderService(engine as never, metadataFor(OBJECTS), createLogger() as never)
       .load(scopedRequest(ORG) as never);
+    expect(result.errors).toEqual([]);
     expect(result.summary.totalInserted).toBe(2);
-    expect(result.errors.filter(isNullHolderRefusal)).toHaveLength(3);
+    expect(nullReads()).toEqual([]);
     expect(await all('tw_event')).toHaveLength(3);
     expect(await all('tw_task')).toHaveLength(2);
   });

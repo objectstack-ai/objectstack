@@ -2780,9 +2780,11 @@ export class TursoDriver extends SqlDriver {
     scope: string,
     suffix: string,
   ): Promise<number> {
+    // The bucket first, as the local face resolves it: an organization-less
+    // row on a tenant table is refused (ADR-0131 D9) before any DDL or read.
+    const resolvedTenantId = this.resolveSequenceTenantId(tenantField, tenantId, tableName, field);
     await this.ensureRemoteSequencesTable();
     const table = this.sequencesTableName;
-    const resolvedTenantId = this.resolveSequenceTenantId(tenantField, tenantId);
     const keyHash = this.sequenceKeyHash(tableName, resolvedTenantId, field, scope);
 
     const bumped = await this.remoteSequenceRows(
@@ -2883,7 +2885,12 @@ export class TursoDriver extends SqlDriver {
   ): Promise<void> {
     if (!this.isRemote) return super.resyncSequenceToDataMax(reservation);
     await this.ensureRemoteSequencesTable();
-    const resolvedTenantId = this.resolveSequenceTenantId(reservation.tenantField, reservation.tenantId);
+    const resolvedTenantId = this.resolveSequenceTenantId(
+      reservation.tenantField,
+      reservation.tenantId,
+      reservation.tableName,
+      reservation.field,
+    );
     const keyHash = this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope);
     const observedMax = await this.scanRemoteMaxCounter(
       reservation.tableName,

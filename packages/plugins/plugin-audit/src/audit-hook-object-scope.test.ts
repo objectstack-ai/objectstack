@@ -590,6 +590,9 @@ describe('[#5860] the skip list is declared on the registration face', () => {
     const { engine, storeFor } = await boot([...BASE_OBJECTS, sysComment]);
     installAuditWriters(engine, 'com.objectstack.audit', {
       getMessaging: () => ({ emit } as any),
+      // Registration scope is pinned here, not recipient admission
+      // (`mention-recipient-gate.integration.test.ts`): every mention passes.
+      admitMentionRecipients: async ({ mentions }) => [...mentions],
     });
 
     await engine.insert('sys_comment', {

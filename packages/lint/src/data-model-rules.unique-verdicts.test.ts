@@ -138,7 +138,10 @@ describe('[#22161] one-line verdicts — the ADR-0120 uniqueness rules', () => {
       [UNIQUE_LEGACY_ORGANIZATION_COMPOSITE]: [
         'ADR-0120 S6',
         '`tenancy.tenantField`',
-        'single-organization deployment is every row',
+        // [ADR-0131 D9] The NULL rows the composite admits are what 17.x wrote,
+        // not what a new write produces.
+        'every row a 17.x single-organization deployment',
+        'ADR-0131 D9',
         "`COALESCE(organization_id, '__global__')`",
         'ADR-0120 D5c',
         'D4 ceremony',

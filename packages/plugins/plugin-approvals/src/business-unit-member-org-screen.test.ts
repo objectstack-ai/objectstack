@@ -4,15 +4,15 @@
  * organization, with a STRICT equality.
  *
  * `expandBusinessUnitUsers` screens the `sys_business_unit` rows with
- * `businessUnitOrgScope` — null-inclusive since #3807, because a seeded unit
- * carries `organization_id = null` by construction and is admitted on purpose.
+ * `businessUnitOrgScope` — a strict equality since ADR-0131 D8 retired the
+ * NULL arm #3807 gave it for seeded units.
  * The `sys_business_unit_member` read that follows carried NO organization
  * predicate at all, under `SYSTEM_CTX`, which carries no tenant either. A
  * seeded unit id exists identically in every tenant, so tenant A's request
  * resolved that unit and then collected EVERY tenant's membership rows off it.
  *
- * Why the member screen is strict where the unit screen is not — measured on
- * this tree, not inherited from the sibling card:
+ * Why the member screen is strict — measured on this tree, not inherited from
+ * the sibling card:
  *
  *   - `sys_business_unit_member` declares no `organization_id`
  *     (`packages/platform-objects/src/identity/sys-business-unit-member.object.ts`);
@@ -29,13 +29,13 @@
  *   tenancy is the same cross-tenant hole by the other door. The screen fails
  *   CLOSED, exactly as `plugin-sharing`'s `memberScope` does for the same rows.
  *
- * Every anchor unit below is SEEDED (`organization_id: null`) unless a case
- * says otherwise. That is load-bearing: on an org-stamped unit the assertions
- * would hold even if the member screen were deleted, because the unit screen
- * would answer first. Anchoring on a seeded unit is what makes each case a pin
- * on the MEMBER screen.
+ * Every anchor unit below belongs to the REQUEST's organization (`org_a`) —
+ * re-stamped from `organization_id: null` when the unit screen's NULL arm
+ * retired (ADR-0131 D8), so the unit screen admits it and each case stays a
+ * pin on the MEMBER screen: the other tenant's membership rows hang off the
+ * same unit ids, and only the member screen drops them.
  *
- *   B1  — THE LEAK: a seeded unit with two tenants' membership rows resolves
+ *   B1  — THE LEAK: a unit with two tenants' membership rows resolves
  *         ONLY the request organization's users, at both depths of the walk.
  *   B2  — THE CONTROL: an org-stamped unit still routes its own members —
  *         strict, not broken — and still drops the other tenant's row.
@@ -138,13 +138,13 @@ const CTX_NO_ORG = { userId: 'u_sub', positions: [], permissions: [] } as any;
 const DEPT_SEEDED = { type: 'department', value: 'bu_seeded' };
 
 /**
- * The org chart the card describes: a SEEDED unit tree (`organization_id:
- * null`, which `businessUnitOrgScope` admits by design) — the same unit ids
- * in every tenant.
+ * The org chart the card describes, attributed to the request's organization
+ * as the ownership ceremony leaves a seeded tree (ADR-0131 D10). The ids keep
+ * their `seeded` spelling: the other tenant's membership rows still name them.
  */
 const SEEDED_TREE = [
-  { id: 'bu_seeded', organization_id: null, active: true },
-  { id: 'bu_seeded_child', parent_business_unit_id: 'bu_seeded', organization_id: null, active: true },
+  { id: 'bu_seeded', organization_id: ORG_A, active: true },
+  { id: 'bu_seeded_child', parent_business_unit_id: 'bu_seeded', organization_id: ORG_A, active: true },
 ];
 
 /**
@@ -249,8 +249,8 @@ describe('#14946 business-unit MEMBER org screen', () => {
     const where = reads[0].options?.where ?? reads[0].options?.filter ?? {};
     console.log('[PROBE B5] sys_business_unit_member where =', JSON.stringify(where));
     expect(where.organization_id).toBe(ORG_A);
-    // ⛔ Not `businessUnitOrgScope`'s `$or: [{organization_id}, {organization_id: null}]`.
-    // A null arm here would re-admit every org-less row — the B3 population —
+    // ⛔ No `$or: [{organization_id}, {organization_id: null}]` (the arm the unit
+    // screen carried until ADR-0131 D8). A null arm here would re-admit every org-less row — the B3 population —
     // and re-open the hole for the elevated-write case.
     expect(where).not.toHaveProperty('$or');
     expect([...(where.business_unit_id?.$in ?? [])].sort()).toEqual(['bu_seeded', 'bu_seeded_child']);
