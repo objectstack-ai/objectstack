@@ -43,8 +43,14 @@ import type { RuntimeIndexPreflight, SeedTenancyExec } from '@objectstack/metada
  *     schema, no rows written, nothing left behind.
  *  4. **The live CONDITION is reported too** — an install still holding a
  *     `__global__` counter beside an organization-scoped one for the same
- *     object is about to mint more duplicates. The only forward-looking line in
- *     the report.
+ *     object. Under 17.x that install was about to mint more duplicates, and
+ *     this was the only forward-looking line in the report. Since ADR-0131 D9
+ *     (stage 8d) the counter refuses an organization-less row on a tenant
+ *     table wherever the organization object is registered, so such a
+ *     `__global__` row is no longer drawn from: the line now names the residue
+ *     the split left in `_objectstack_sequences` — the evidence of which
+ *     counter minted the duplicates above — rather than a forecast. The report
+ *     shape is unchanged.
  *  5. **A data-side probe** — `GROUP BY <field> HAVING COUNT(*) > 1` within the
  *     object's own table, never an enumeration of `_objectstack_sequences`. A
  *     duplicate on an object whose counter was since merged is therefore still
@@ -154,10 +160,12 @@ export interface DuplicateIdentifier {
 }
 
 /**
- * One object/field still running two counters — the live condition (point 4).
+ * One object/field still holding two counters — the live condition (point 4).
  *
- * Not damage: a prediction. While both counters stand, each allocates within
- * its own partition and neither can see the other's numbers.
+ * Not damage. Under 17.x it was a prediction: while both counters stood, each
+ * allocated within its own partition and neither could see the other's
+ * numbers. Since ADR-0131 D9 the `__global__` one is residue the counter no
+ * longer draws from on a tenant table (point 4 above).
  */
 export interface DuplicateLiveCondition {
   object: string;
