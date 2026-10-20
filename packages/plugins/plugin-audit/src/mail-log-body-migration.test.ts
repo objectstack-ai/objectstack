@@ -133,6 +133,27 @@ describe('planMailLogBodyActivityRowPatch', () => {
   });
 });
 
+/**
+ * The fake engine's WHERE matcher: the Filter Protocol subset the runner's page
+ * query speaks — equality, `$in`, `$gt` and `$and`. Any other combinator or
+ * operator is REFUSED, never read as a field name or as an equality on an object.
+ */
+function matchesWhere(r: Row, w: Record<string, any>): boolean {
+  return Object.entries(w).every(([key, cond]) => {
+    if (key === '$and') return (cond as Record<string, any>[]).every((c) => matchesWhere(r, c));
+    if (key.startsWith('$')) throw new Error(`fake engine: combinator ${key} is not implemented`);
+    if (cond && typeof cond === 'object') {
+      const ops = Object.keys(cond);
+      if (ops.length !== 1 || !['$in', '$gt'].includes(ops[0]!)) {
+        throw new Error(`fake engine: operator ${ops.join(',')} is not implemented`);
+      }
+      if ('$in' in cond) return (cond.$in as unknown[]).includes(r[key]);
+      return String(r[key]) > String(cond.$gt);
+    }
+    return r[key] === cond;
+  });
+}
+
 describe('migrateMailLogBodyCopies (driven, paged)', () => {
   /** A fake engine over two in-memory tables, answering the runner's keyset page query. */
   function fakeEngine(tables: Record<string, Row[]>, opts: { failRead?: string } = {}) {
@@ -143,17 +164,8 @@ describe('migrateMailLogBodyCopies (driven, paged)', () => {
         if (object === opts.failRead) throw new Error('read refused');
         const q = (query ?? {}) as { where?: any; limit?: number };
         reads.push({ object, limit: q.limit });
-        // The Filter Protocol subset the runner's page query speaks: equality,
-        // `$in`, `$gt` and `$and`.
-        const matches = (r: Row, w: Record<string, any>): boolean =>
-          Object.entries(w).every(([key, cond]) => {
-            if (key === '$and') return (cond as Record<string, any>[]).every((c) => matches(r, c));
-            if (cond && typeof cond === 'object' && '$in' in cond) return (cond.$in as unknown[]).includes(r[key]);
-            if (cond && typeof cond === 'object' && '$gt' in cond) return String(r[key]) > String(cond.$gt);
-            return r[key] === cond;
-          });
         const rows = (tables[object] ?? [])
-          .filter((r) => matches(r, q.where ?? {}))
+          .filter((r) => matchesWhere(r, q.where ?? {}))
           .sort((a, b) => String(a.id).localeCompare(String(b.id)));
         // The caller's bound, applied AFTER the filter, by presence.
         const page = typeof q.limit === 'number' ? rows.slice(0, q.limit) : rows;
