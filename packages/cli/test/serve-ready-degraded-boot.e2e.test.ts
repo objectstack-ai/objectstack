@@ -39,22 +39,28 @@ import {
  *
  * ## Why `bin/run.js` with `NODE_ENV` unset, and not `runServe()`
  *
- * The degradation has to be REACHED, not injected, and the only reachable
- * spelling is production posture. `serve` auto-registers `AuthPlugin` when a
- * secret resolves; outside `--dev` there is no fallback secret, so a production
- * boot with no `OS_AUTH_SECRET` skips auth by the command's own documented rule
- * (`⚠ AuthPlugin skipped — set OS_AUTH_SECRET …`) and `auth` — a `core` service
- * with no in-memory fallback — is genuinely absent. That is the end state both
- * incidents reached by other routes: a plugin that did not load, and a core
- * service that is not there.
+ * The degradation has to be REACHED, not injected. The degraded leg's stack
+ * mounts its own plugin under AuthPlugin's registered name that never
+ * registers the `auth` service: `serve` then composes no AuthPlugin of its own
+ * (the stack supplies one) and `auth` — a `core` service with no in-memory
+ * fallback — is genuinely absent. That is the end state both incidents reached:
+ * a plugin that did not deliver, and a core service that is not there.
+ *
+ * [ADR-0131 D9] This leg used to reach the same end state with no plugin at
+ * all — a production boot with no `OS_AUTH_SECRET`, where `serve` skipped auth
+ * with a warning. That boot is now refused before the kernel starts
+ * (`serve-no-auth-secret-refusal.e2e.test.ts`), so it no longer reaches any
+ * banner; the stand-in plugin is the remaining honest route to a served boot
+ * with `auth` missing.
  *
  * ⛔ `runServe()` cannot reach it. That helper spawns `bin/run-dev.js`, which
  * sets `NODE_ENV = 'development'` before argv is parsed, so `isDev` is true,
  * the dev fallback secret applies, auth ALWAYS loads and the boot is never
  * degraded. Measured: switching this file to `runServe()` makes both legs
  * healthy and the degraded assertions unreachable — a green that measures
- * nothing. `bin/run.js` with `NODE_ENV` genuinely unset is the only shape that
- * reaches the gate, which is also why {@link requireBuiltCli} guards the file.
+ * nothing. `bin/run.js` with `NODE_ENV` genuinely unset is the production
+ * posture both legs are pinned in, which is also why {@link requireBuiltCli}
+ * guards the file.
  *
  * ⚠️ The degraded leg is ALSO the negative control for the acceptance rule that
  * start and exit behaviour must not change: it is a machine deliberately
@@ -72,6 +78,14 @@ const CLI = resolve(HERE, '../bin/run.js');
 
 const BARE_CONFIG = 'export default {};\n';
 
+/**
+ * The degraded leg's stack: a plugin under AuthPlugin's registered name
+ * (`stackSuppliesAuthPlugin` reads it) whose lifecycle registers nothing.
+ */
+const STAND_IN_AUTH_CONFIG =
+  "export default { plugins: [{ name: 'com.objectstack.auth', version: '0.0.0', " +
+  'init: async () => {}, start: async () => {} }] };\n';
+
 /** What `spawn(…, { stdio: ['ignore', 'pipe', 'pipe'] })` returns — no `stdin`. */
 type BootChild = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -88,11 +102,11 @@ interface Boot {
  * Spawn `os serve` in production posture and resolve once the COMPLETE banner
  * is on the stream. Extra `env` entries override the base; `undefined` unsets.
  */
-async function boot(env: Record<string, string | undefined> = {}): Promise<Boot> {
+async function boot(config: string, env: Record<string, string | undefined> = {}): Promise<Boot> {
   // A kernel-assigned port (#24295): production posture refuses to auto-shift,
   // so a port drawn and released beforehand is a red whenever another process
   // takes it in the gap. Nothing here talks to the port.
-  const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '--port', KERNEL_ASSIGNED_PORT], {
+  const child = spawn(process.execPath, [CLI, 'serve', config, '--port', KERNEL_ASSIGNED_PORT], {
     cwd: fixtureDir,
     stdio: ['ignore', 'pipe', 'pipe'],
     // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
@@ -144,6 +158,7 @@ beforeAll(() => {
   requireBuiltCli(RUN_JS_RESOLVES_FROM_DIST);
   fixtureDir = mkdtempSync(join(tmpdir(), 'os-ready-degraded-'));
   writeFileSync(join(fixtureDir, 'objectstack.config.ts'), BARE_CONFIG, 'utf8');
+  writeFileSync(join(fixtureDir, 'stand-in-auth.config.ts'), STAND_IN_AUTH_CONFIG, 'utf8');
 });
 
 afterAll(() => {
@@ -157,7 +172,7 @@ describe('os serve — the ready line reports a degraded boot (#16630)', () => {
   it(
     'prints ready AND the missing core service in the same output, with no unconditional tick',
     async () => {
-      const { out, err, child } = await boot();
+      const { out, err, child } = await boot('stand-in-auth.config.ts');
       const seen = `\n--- stdout ---\n${out}\n--- stderr ---\n${err}`;
       const output = out + err;
 
@@ -189,10 +204,10 @@ describe('os serve — the ready line reports a degraded boot (#16630)', () => {
   it(
     'leaves a healthy boot printing exactly the tick it always printed',
     async () => {
-      // Same fixture, same entrypoint, same posture — the ONLY difference is
-      // that auth can now register, so nothing is missing. An "always append a
+      // Same entrypoint, same posture — the difference is that the platform's
+      // own AuthPlugin registers, so nothing is missing. An "always append a
       // status line" implementation passes the degraded leg and fails here.
-      const { out, err } = await boot({
+      const { out, err } = await boot('objectstack.config.ts', {
         OS_AUTH_SECRET: 'os-16630-healthy-leg-secret-not-a-real-credential',
       });
       const seen = `\n--- stdout ---\n${out}\n--- stderr ---\n${err}`;
