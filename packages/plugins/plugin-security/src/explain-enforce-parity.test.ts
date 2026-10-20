@@ -1010,7 +1010,8 @@ const TABLE: Row[] = [
     })),
   },
   {
-    card: '#24647 probe', shape: 'private OWD, the same writer, a row owned by someone else the policy admits, transfer',
+    // A transfer's door is the by-id update of `owner_id`, deferred as an update.
+    card: '#24647', shape: 'private OWD, an `own` writer holding the transfer grant whose authored update policy admits a row owned by someone else, transfer',
     position: 'record.visible',
     enforced: 'admitted',
     run: withSharing({ authored: true }, async (r) => ({

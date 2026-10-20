@@ -393,7 +393,9 @@ export interface ExplainEngineDeps {
    *
    * Asked on the same condition here: for a by-id `update` or `delete` whose
    * gate above ({@link canEditRecord} / {@link canDeleteRecord}) answered
-   * `false`, with that gate's verb and the context being EXPLAINED. Every
+   * `false`, with that gate's verb and the context being EXPLAINED, and for a
+   * `transfer` as an `update` (its door is the by-id update of `owner_id`,
+   * which the update gate judges). Every
    * other answer leaves the refusal standing, and so does a rejection: the
    * door's probe catches its own failure and keeps its refusal, so a failing
    * probe is not a failing request and is not reported as one.
@@ -1592,9 +1594,13 @@ async function applyRecordAttribution(
   // pre-image gate (the `rls` layer below). Asked on that condition alone, so
   // a row the gate admits, abstains on or faulted on is explained as before;
   // every answer but `admit`, and a rejection, keeps the refusal, as at the door.
-  const authoredRowWriteAdmits = canEdit === false && (engineOp === 'update' || engineOp === 'delete')
-    && deps.probeAuthoredRowWrite
-    ? (await deps.probeAuthoredRowWrite(object, recordId, engineOp, context).catch(() => 'abstain')) === 'admit'
+  // A transfer's door is the by-id update of `owner_id`, so it is deferred as
+  // an update; restore and purge have no by-id door (the object gate refuses
+  // both), so nothing defers them.
+  const authoredDeferralVerb: AuthoredRowWriteOperation | undefined =
+    engineOp === 'update' || engineOp === 'transfer' ? 'update' : engineOp === 'delete' ? 'delete' : undefined;
+  const authoredRowWriteAdmits = canEdit === false && authoredDeferralVerb && deps.probeAuthoredRowWrite
+    ? (await deps.probeAuthoredRowWrite(object, recordId, authoredDeferralVerb, context).catch(() => 'abstain')) === 'admit'
     : false;
   // [ADR-0055] A by-id write of a `controlled_by_parent` record (an update, a
   // delete, a transfer: {@link MASTER_CHECKED_BY_ID_WRITES}) is judged by the
@@ -1737,7 +1743,7 @@ async function applyRecordAttribution(
                     : 'The sharing service grants write on this record (ownership or an edit/full share).')
                 : 'No ownership and no edit/full share grants write on this record.' +
                   (authoredRowWriteAdmits
-                    ? ` The by-id ${engineOp} does not stop at that refusal: an app-authored row-level ${engineOp} ` +
+                    ? ` The by-id ${engineOp} does not stop at that refusal: an app-authored row-level ${authoredDeferralVerb} ` +
                       'policy admits this record, so the write gate defers to row-level security (see the rls layer).'
                     : ''))
             : depthAdmitsRow
