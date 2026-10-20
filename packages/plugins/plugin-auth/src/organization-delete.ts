@@ -1,0 +1,202 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#24948] Organization delete: refused while the organization still owns
+ * records, and otherwise one unit of work that removes the organization's own
+ * auth structure with it.
+ *
+ * ## What better-auth does, and what it leaves
+ *
+ * `POST /organization/delete` (better-auth 1.7.3,
+ * `plugins/organization/routes/crud-org.mjs`) authorizes the caller, clears the
+ * caller's active organization, calls `organizationHooks.beforeDeleteOrganization`,
+ * and then `adapter.deleteOrganization`, which deletes `member`, then
+ * `invitation`, then the organization row. It deletes no team, no team member
+ * and nothing it does not own. The engine's referential cascade then ran on
+ * the organization row and applied the tenant column's `set_null` default to
+ * every row the organization still owned: a 500 halfway through on a store
+ * whose tenant column is NOT NULL (members and invitations already gone, the
+ * organization left with no owner), or a 200 that orphaned the rows to NULL on
+ * a store born nullable. Every organization created through the door owns a
+ * default team, so on a NOT NULL store even an empty one could not be deleted.
+ *
+ * ## The contract (maintainer ruling on #24948, letter B)
+ *
+ * 1. **Refused while the organization owns records.** {@link
+ *    organizationDeleteRefusal} counts, per table, the rows that name the
+ *    organization in their tenant column, leaving out the organization's own
+ *    auth structure. Any count above zero refuses with 409
+ *    `DELETE_RESTRICTED` and `dependents: [{ object, count }]`: counts, never a
+ *    row value. It runs in `hooks.before`, ahead of the vendor's handler, and
+ *    only for a caller the vendor itself would admit (a member holding the
+ *    `organization: ['delete']` permission), so a refused delete writes
+ *    nothing at all — not even the caller's active organization — and a caller
+ *    the vendor would refuse learns no count.
+ * 2. **The organization's own auth structure goes with it.** That is
+ *    {@link ORGANIZATION_AUTH_STRUCTURE}: members and invitations (better-auth
+ *    deletes them), teams and team members ({@link removeOrganizationTeams},
+ *    from `beforeDeleteOrganization`), and the organization-admin grants its
+ *    owners and admins hold (plugin-security's member-delete hook revokes them
+ *    when better-auth deletes the members). Any other grant the organization
+ *    holds is counted as a record.
+ * 3. **One unit of work.** `AuthManager.handleRequest` runs the whole request
+ *    inside one engine transaction and rolls it back on any 4xx/5xx answer, the
+ *    subject-erasure wrapper's posture. On a driver without transactions the
+ *    refusal above is the guarantee, since it runs before the first write.
+ * 4. **The engine never clears the tenant column.** Under all of this,
+ *    `ObjectQL.cascadeDeleteRelations` refuses a `sys_organization` delete
+ *    while any row still names it, whatever path reaches it.
+ *
+ * The Default Organization is not judged here: the last-administrator guard
+ * keeps answering for it exactly as before ({@link isDefaultOrganizationTarget}).
+ */
+
+import { ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';
+import type { IDataEngine } from '@objectstack/spec/contracts';
+import { GRANT_SET_NAME_FIELD } from './grant-set-name.js';
+
+/** The better-auth endpoint this module guards. */
+export const ORGANIZATION_DELETE_PATH = '/organization/delete';
+
+/** The grant table; partly the organization's own structure (see {@link ORGANIZATION_AUTH_STRUCTURE}). */
+const GRANT_OBJECT = 'sys_user_permission_set';
+
+/**
+ * The objects an organization delete removes as the organization's OWN auth
+ * structure, and which therefore are not records it "still owns". Each is
+ * removed by the delete itself:
+ *
+ * - `sys_member`, `sys_invitation`: better-auth's `adapter.deleteOrganization`;
+ * - `sys_team`, `sys_team_member`: {@link removeOrganizationTeams};
+ * - `sys_user_permission_set`, ONLY the grants of the organization-admin sets
+ *   ({@link ORGANIZATION_ADMIN_SET_NAMES}): plugin-security's member-delete
+ *   hook revokes the grant a membership grade conferred once the membership is
+ *   gone. Every other grant scoped to the organization is counted.
+ */
+export const ORGANIZATION_AUTH_STRUCTURE: readonly string[] = [
+  'sys_member',
+  'sys_invitation',
+  'sys_team',
+  'sys_team_member',
+  GRANT_OBJECT,
+];
+
+/** The permission sets a membership grade grants, by name (ADR-0131 D4). */
+export const ORGANIZATION_ADMIN_SET_NAMES: readonly string[] = [ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS];
+
+/** One table the organization still owns rows in, and how many. */
+export interface OrganizationOwnedRows {
+  object: string;
+  count: number;
+}
+
+/** The engine reads this module needs; `organizationOwnedRowCounts` is ObjectQL's. */
+type CountingEngine = IDataEngine & {
+  organizationOwnedRowCounts?: (
+    organizationId: string,
+    options?: { exclude?: Iterable<string> },
+  ) => Promise<OrganizationOwnedRows[]>;
+};
+
+const SYSTEM_CTX = { isSystem: true } as const;
+
+function rowsOf(result: unknown): any[] {
+  if (Array.isArray(result)) return result;
+  const records = (result as { records?: unknown } | null | undefined)?.records;
+  return Array.isArray(records) ? records : [];
+}
+
+/**
+ * The tables in which `organizationId` still owns records, each with its row
+ * count; empty when the organization holds nothing but its own auth
+ * structure. `undefined` when the engine cannot answer the question (an engine
+ * that is not ObjectQL): the caller then leaves the decision to the engine's
+ * own cascade, which refuses on its own.
+ */
+export async function organizationDeleteRefusal(
+  engine: IDataEngine,
+  organizationId: string,
+): Promise<OrganizationOwnedRows[] | undefined> {
+  const counting = engine as CountingEngine;
+  if (typeof counting.organizationOwnedRowCounts !== 'function') return undefined;
+  const owned = await counting.organizationOwnedRowCounts(organizationId, { exclude: ORGANIZATION_AUTH_STRUCTURE });
+
+  // The grants: every grant scoped to the organization, less those of the
+  // organization-admin sets. Two counts rather than one `$nin`, so a grant
+  // whose set name is NULL (written before the column existed) is counted
+  // too: a NULL never matches `NOT IN`.
+  const tenantGrants = await engine.count(GRANT_OBJECT, {
+    where: { organization_id: organizationId },
+    context: SYSTEM_CTX,
+  } as any);
+  if (tenantGrants > 0) {
+    const adminGrants = await engine.count(GRANT_OBJECT, {
+      where: { organization_id: organizationId, [GRANT_SET_NAME_FIELD]: { $in: [...ORGANIZATION_ADMIN_SET_NAMES] } },
+      context: SYSTEM_CTX,
+    } as any);
+    const others = tenantGrants - adminGrants;
+    if (others > 0) owned.push({ object: GRANT_OBJECT, count: others });
+  }
+  return owned;
+}
+
+/**
+ * The 409 body for a refused delete: the standard catalog's
+ * `DELETE_RESTRICTED`, every table with its count, and the remedy.
+ */
+export function organizationNotEmptyBody(owned: readonly OrganizationOwnedRows[]): {
+  message: string;
+  code: 'DELETE_RESTRICTED';
+  dependents: OrganizationOwnedRows[];
+} {
+  const named = owned.map((o) => `${o.object} (${o.count})`).join(', ');
+  return {
+    message:
+      `This organization still owns records in ${named}. ` +
+      'Delete or move those records first, then delete the organization.',
+    code: 'DELETE_RESTRICTED',
+    dependents: owned.map((o) => ({ object: o.object, count: o.count })),
+  };
+}
+
+/**
+ * Is `organizationId` the Default Organization: the one with `slug = 'default'`,
+ * else the deployment's only organization? The last-administrator guard's own
+ * reading of the anchor (`last-admin-guard.ts`). Its delete is that guard's to
+ * answer, as before, so the refusal above does not run for it.
+ */
+export async function isDefaultOrganizationTarget(
+  engine: IDataEngine,
+  organization: { id?: unknown; slug?: unknown } | undefined,
+): Promise<boolean> {
+  if (!organization) return false;
+  if (organization.slug === 'default') return true;
+  const total = await engine.count('sys_organization', { context: SYSTEM_CTX } as any);
+  return total <= 1;
+}
+
+/**
+ * Delete the organization's teams and their members: the part of its auth
+ * structure better-auth leaves behind. Called from `beforeDeleteOrganization`,
+ * inside the request's transaction, so a later failure rolls it back.
+ *
+ * Team members first, by their team: `sys_team_member` reaches the
+ * organization only through `team_id`, and a multi-row delete runs no cascade.
+ * Then each team by id, so the engine's cascade clears what still points at it
+ * (a session's active team).
+ */
+export async function removeOrganizationTeams(engine: IDataEngine, organizationId: string): Promise<void> {
+  const teams = rowsOf(
+    await engine.find('sys_team', { where: { organization_id: organizationId }, fields: ['id'], context: SYSTEM_CTX } as any),
+  );
+  const teamIds = teams.map((t) => t?.id).filter((id): id is string | number => id != null);
+  if (teamIds.length === 0) return;
+  await engine.delete('sys_team_member', {
+    where: { team_id: { $in: teamIds } },
+    multi: true,
+    context: SYSTEM_CTX,
+  } as any);
+  for (const id of teamIds) {
+    await engine.delete('sys_team', { where: { id }, context: SYSTEM_CTX } as any);
+  }
+}

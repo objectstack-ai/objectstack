@@ -19498,6 +19498,11 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<void> {
     // Entered before the first nested `delete()` can come back here.
     cascadeSetAdd(cascadeSet.entered, object, id);
+    // [#24948] An organization that still owns rows is refused here, whole,
+    // before the first relation below is cascaded or cleared.
+    if (object === ORGANIZATION_OBJECT) {
+      await this.refuseOrganizationDeleteWhileOwned(id, context, objects, cascadeSet);
+    }
     for (const child of objects) {
       const childName = (child as any)?.name as string | undefined;
       const fields = (child as any)?.fields as Record<string, any> | undefined;
@@ -19505,6 +19510,10 @@ export class ObjectQL implements IObjectQLEngine {
       for (const [fieldName, fdef] of Object.entries(fields)) {
         const resolvedBehavior = this.cascadeRelationBehavior(object, child, fieldName, fdef);
         if (resolvedBehavior === undefined) continue;
+        // [#24948] Judged by `refuseOrganizationDeleteWhileOwned` above, which
+        // found no row outside the cascade set: there is nothing to clear, and
+        // clearing is not on offer for this column anyway.
+        if (this.isTenantColumnSetNull(object, child, fieldName, resolvedBehavior)) continue;
         let behavior: string = resolvedBehavior;
 
         // [#9689] (maintainer ruling 2026-08-19, Q3 = B): the judgement the
@@ -19854,6 +19863,148 @@ export class ObjectQL implements IObjectQLEngine {
         }
       }
     }
+  }
+
+  /**
+   * [#24948] Is `fieldName` on `child` the TENANT column of `child`, pointing at
+   * the organization being deleted with the `set_null` behaviour?
+   *
+   * The tenant column is the one `resolveTenantFieldName` names: the column
+   * the engine stamps and scopes by, whether the registry injected it
+   * (`TENANT_SCOPE_FIELD_DEF`) or the object declared its own, as the identity
+   * tables do. Every such lookup resolves to `set_null` unless its author wrote
+   * something else, and ADR-0131 D1 leaves NULL nothing to mean: a cleared
+   * tenant column is an orphan, and on a store whose column is already NOT
+   * NULL the clear is a constraint failure halfway through a delete. So the
+   * engine never clears one. {@link refuseOrganizationDeleteWhileOwned} refuses
+   * the delete instead. An authored `cascade` or `restrict` keeps its own
+   * meaning.
+   */
+  private isTenantColumnSetNull(
+    object: string,
+    child: ServiceObject,
+    fieldName: string,
+    behavior: string | undefined,
+  ): boolean {
+    return (
+      object === ORGANIZATION_OBJECT &&
+      behavior === 'set_null' &&
+      resolveTenantFieldName(child) === fieldName
+    );
+  }
+
+  /**
+   * [#24948] The engine half of organization delete: refuse while any row
+   * outside the cascade set still names the organization in its tenant column.
+   *
+   * Runs before the walk touches the first relation, and reads every tenant
+   * relation before it throws, so the one refusal names every table that holds
+   * rows, each with its count. It is the safety net under plugin-auth's own
+   * refusal, which answers the same question before better-auth deletes the
+   * organization's members: whatever path reaches a `sys_organization` delete,
+   * no row is orphaned to NULL, on a store born with a nullable tenant column
+   * or anywhere else.
+   *
+   * The probe is the walk's own ({@link probeReferencingRows}: system
+   * identity, its elevation filed first, a missing table read as no rows). A
+   * count reaches the refusal only when the caller could see every row it
+   * counts ({@link dependentCountIsDisclosable}); otherwise the table is named
+   * without one. The wire code is the standard catalog's `DELETE_RESTRICTED`,
+   * because that is the condition: a delete refused while dependents exist.
+   */
+  private async refuseOrganizationDeleteWhileOwned(
+    id: string | number,
+    context: ExecutionContext | undefined,
+    objects: ServiceObject[],
+    cascadeSet: CascadeDeleteSet,
+  ): Promise<void> {
+    const owned: Array<{ object: string; count?: number }> = [];
+    for (const child of objects) {
+      const childName = (child as any)?.name as string | undefined;
+      const fields = (child as any)?.fields as Record<string, any> | undefined;
+      if (!childName || !fields) continue;
+      for (const [fieldName, fdef] of Object.entries(fields)) {
+        const behavior = this.cascadeRelationBehavior(ORGANIZATION_OBJECT, child, fieldName, fdef);
+        if (!this.isTenantColumnSetNull(ORGANIZATION_OBJECT, child, fieldName, behavior)) continue;
+        const probeWhere = this.referenceProbeFilter(fieldName, fdef, id);
+        this.fileReferenceCheckElevation(cascadeSet, ORGANIZATION_OBJECT, id, childName, fieldName, context);
+        const probed = await this.probeReferencingRows(childName, fieldName, fdef, id, probeWhere, context);
+        const outside = probed.filter((row) => !cascadeSetHas(cascadeSet.members, childName, row?.id));
+        if (outside.length === 0) continue;
+        const disclose = await this.dependentCountIsDisclosable(
+          childName, probeWhere, probed.map((row: any) => String(row?.id)), fieldName, false, id, context,
+        );
+        owned.push(disclose ? { object: childName, count: outside.length } : { object: childName });
+      }
+    }
+    if (owned.length === 0) return;
+    const named = owned
+      .map((o) => (o.count === undefined ? o.object : `${o.object} (${o.count})`))
+      .join(', ');
+    const err: any = new Error(
+      `Cannot delete this organization: it still owns records in ${named}. ` +
+        'Delete or move those records first, then delete the organization.',
+    );
+    err.developerMessage =
+      `Cannot delete ${ORGANIZATION_OBJECT} (${id}): rows still reference it through their tenant column ` +
+      `in ${named}. The engine never clears a tenant column (ADR-0131 D1), so the delete is refused ` +
+      'until those rows are deleted or moved to another organization.';
+    err.code = 'DELETE_RESTRICTED';
+    err.status = 409;
+    err.httpStatus = 409;
+    err.object = ORGANIZATION_OBJECT;
+    // The first table in the `DELETE_RESTRICTED` envelope's own two keys, and
+    // every table in `dependents`.
+    err.dependentObject = owned[0].object;
+    if (owned[0].count !== undefined) err.dependentCount = owned[0].count;
+    err.dependents = owned;
+    throw err;
+  }
+
+  /**
+   * [#24948] How many rows each object holds for `organizationId` in its tenant
+   * column: the question plugin-auth's organization delete asks before
+   * anything is deleted. Only objects holding at least one row are listed.
+   *
+   * The relations read are the ones {@link refuseOrganizationDeleteWhileOwned}
+   * judges, through the same reader ({@link cascadeRelationBehavior}: a
+   * federated object's unprovisioned injected column is no relation), widened
+   * to every behaviour: a tenant column its author declared `restrict` blocks
+   * the delete too, and one declared `cascade` would delete records, which is
+   * not the organization's own structure either. A count, never a row: the
+   * read is a system-identity `count`, and a table never provisioned holds no
+   * row.
+   *
+   * `exclude` names the objects the caller removes as part of the delete
+   * itself.
+   */
+  async organizationOwnedRowCounts(
+    organizationId: string,
+    options?: { exclude?: Iterable<string>; context?: ExecutionContext },
+  ): Promise<Array<{ object: string; count: number }>> {
+    const exclude = new Set(options?.exclude ?? []);
+    const counts: Array<{ object: string; count: number }> = [];
+    for (const child of this._registry.getAllObjects()) {
+      const childName = (child as any)?.name as string | undefined;
+      const fields = (child as any)?.fields as Record<string, any> | undefined;
+      if (!childName || !fields || exclude.has(childName)) continue;
+      const tenantField = resolveTenantFieldName(child);
+      if (!tenantField || !fields[tenantField]) continue;
+      const fdef = fields[tenantField];
+      if (this.cascadeRelationBehavior(ORGANIZATION_OBJECT, child, tenantField, fdef) === undefined) continue;
+      let count: number;
+      try {
+        count = await this.count(childName, {
+          where: this.referenceProbeFilter(tenantField, fdef, organizationId),
+          context: ObjectQL.referenceCheckContext(options?.context),
+        });
+      } catch (error) {
+        if (isMissingTableError(error, childName)) continue;
+        throw error;
+      }
+      if (count > 0) counts.push({ object: childName, count });
+    }
+    return counts;
   }
 
   async delete(object: string, options?: EngineDeleteOptions): Promise<boolean | number> {
