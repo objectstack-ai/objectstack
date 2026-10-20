@@ -21,7 +21,7 @@ Clause-②: yes (narrowing)
 **Unchanged.**
 
 - A list view bound to an object inside the closure (the package's own, a declared dependency's, a platform/system object, an overlay row): same field verdicts, same refusals.
-- A write that names no package (an overlay write) is judged against the whole collection, exactly as before. An object that exists nowhere stays unjudged there.
+- A write that names no package (an overlay write) is judged against the whole collection, exactly as before. An object that exists nowhere gets no closure verdict there; #24668 refuses it as `list-view-object-unknown` (see that changeset).
 - The flow door: `flow-trigger-unknown-object` stays an advisory.
 - `os validate`, `os build` and `os lint`: no closure is stated, so the rule skips an unresolvable binding as before.
 - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.

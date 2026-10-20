@@ -1666,7 +1666,7 @@
       "title": "POST /actions/_activation/:object/:action — the activation door's ordered arms: authority before body and lookup, the exact 400 shapes, 404 undeclared, 409 ambiguity, 501/503 honesty, and the reserved segment surviving the real mount",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1683,7 +1683,7 @@
         "knownGaps": [
           "The AMBIGUITY arm (409 RESOURCE_CONFLICT from refuseAmbiguousActionActivation — two objects declaring one action name) has NO stock fixture: every showcase action name is unique across both action files (verified — the machine names are all showcase_-prefixed and declared once), so the live leg needs an authored scratch package declaring the SAME action name on two objects. Do not fake it; the arm is pinned at unit level (action-activation-posture-gate.test.ts: 409 RESOURCE_CONFLICT naming both owners, and setActionActive NEVER called — no row on refusal), and a run without the scratch package scores the clause from that pin, recorded as such.",
           "The 501 arm (engine without setActionActive) and the 503 arm (attached store that throws / no ledger attached) are unreachable on a stock boot — the stock engine implements the projection and the plugin attaches the store. Both are pinned at unit level (action-activation-posture-gate.test.ts: 501 naming ADR-0126 §8; 503 SERVICE_UNAVAILABLE rather than a 200 for a write that did not persist). #12359 measured the 503 live once (actions-without-automation composition) and the registration MOVE closed it — packaged-activation-ledger-reach.dogfood.test.ts keeps that composition green.",
-          "The group/isolated POSTURE legs of the §5 operator gate need an enterprise tenancy runtime no example app composes — the gate itself (both tiers, all postures) is access-security territory (activation-write-operator-gate); this item asserts only the ORDER (authority before body/lookup), which the stock single-posture boot can prove through the manage_metadata tier.",
+          "The group/isolated POSTURE legs of the §5 operator gate run on a walled boot provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own' (a scratch app declaring the open @objectstack/organizations, which no example app declares). The gate itself (both tiers, all postures) is access-security territory (activation-write-operator-gate); this item asserts only the ORDER, authority before body and lookup (packages/runtime/src/domains/actions.ts#handleActionActivationWrite), which the stock single-posture boot proves through the manage_metadata tier and a walled boot through the operator tier: on both postures QA run #24783's org admin holding manage_metadata got the posture/operator 403 for the mis-bodied, undeclared probe, never the 400 or the 404.",
           "acceptance[4]'s metadata-plane 503 arm — the declaration lookup reports `degraded` (packages/runtime/src/domains/actions.ts, the 'Cannot verify the declaration … the metadata plane is unavailable' refusal) — is unreachable on a stock boot and pinned by no file in automated.ref: action-activation-posture-gate.test.ts's 503 is the store that cannot persist the row, a different arm, and http-dispatcher.actions-type-dispatch.test.ts '503s rather than running ungated when the metadata plane cannot answer' pins the DISPATCH door's use of the same lookup, not this door. Record that arm as not covered — no live door, no pin — never as a pass carried by the 404"
         ]
       },
@@ -1790,6 +1790,12 @@
           "date": "2026-10-19",
           "change": "knownGaps and acceptance[4].verify record the one arm nothing covers — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.action-activation-door-contract acceptance[4]; wave anchor #24579 §3): the metadata-plane-degraded 503 arm is named in the clause but is neither stock-reachable nor pinned by any file in automated.ref. Re-derived at base 9a7838edf5: the arm is actions.ts's declaration.degraded branch; action-activation-posture-gate.test.ts pins the non-durable store 503 instead, and the metadata-plane 503 pin that exists (http-dispatcher.actions-type-dispatch.test.ts) drives the dispatch door. No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-20",
+          "change": "fixtures.knownGaps[2] re-pointed — QA run #24783 (finding F5), round 11 of wave anchor #24579. 'Needs an enterprise tenancy runtime no example app composes' is stale since 18.x step 4 (#24580): a scratch app declaring the open @objectstack/organizations composes the walled posture (RUNNER.md 'A walled boot is a fixture of its own'), and QA run #24783 measured the authority-first order on both walled postures. The line now points at that entry and names the handler whose order it asserts. No clause changed",
+          "ref": "#24801"
         }
       ]
     },

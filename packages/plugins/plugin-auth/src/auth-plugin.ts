@@ -71,6 +71,7 @@ import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js
 import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
+import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import type { CounterStore } from './rate-limit-storage.js';
 import { authIdentityManifest } from './manifest.js';
@@ -3546,6 +3547,30 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sys-oauth-application/register failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // Revoke ONE session, named by its `sys_session.id` — the door behind the
+    // `sys_session` Revoke Session row action (Setup → Sessions, Account →
+    // Active Sessions). The server resolves the session from the id, so the
+    // session token never travels to or from the console. The owner lane
+    // re-dispatches to better-auth's own `/revoke-session`; another user's
+    // session is revocable by a platform administrator only (ADR-0068 D2
+    // judge). Same family as `sys-oauth-application/register` above: an
+    // object-scoped mount outside `/admin/`, because it admits the owner.
+    // See `sys-session-revoke.ts` for the lanes and refusals.
+    rawApp.post(`${basePath}/sys-session/revoke`, async (c: any) => {
+      try {
+        const { status, body } = await runSysSessionRevoke(
+          sysSessionRevokeDepsFor(this.authManager!, basePath),
+          c.req.raw,
+        );
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sys-session/revoke failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });
