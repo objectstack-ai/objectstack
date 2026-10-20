@@ -35,7 +35,7 @@ import { AutoEnqueuer } from './auto-enqueuer.js';
 import { DeclaredWebhookSource, declaredWebhookRefId } from './declared-webhooks.js';
 import { SysWebhook } from './sys-webhook.object.js';
 
-const SYSTEM = { context: { isSystem: true } } as const;
+const SYSTEM = { context: { isSystem: true } };
 
 function driverUnderTest(): SqlDriver {
     return new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
@@ -110,14 +110,14 @@ describe('#24835 — a webhook delivery is stored for an update on a real SqlDri
             declaredWebhooks: new DeclaredWebhookSource(engine, { list: (type: string) => (type === 'webhook' ? [DECLARED] : []) }),
             logger,
         });
-        const deliveries = async () => (await engine.find('sys_http_delivery', {}, SYSTEM as any)) as any[];
+        const deliveries = async () => (await engine.find('sys_http_delivery', {}, SYSTEM)) as any[];
 
         try {
             await enqueuer.start();
             const created: any = await engine.insert('probe_task', { title: 'seed' });
             await waitFor(async () => (await deliveries()).length >= 1);
             const patch = { title: 'webhook probe' };
-            await engine.update('probe_task', patch, { where: { id: created.id } } as any);
+            await engine.update('probe_task', patch, { where: { id: created.id } });
             await waitFor(async () => (await deliveries()).length >= 2);
 
             const rows = await deliveries();
