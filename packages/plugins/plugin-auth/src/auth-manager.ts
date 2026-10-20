@@ -79,9 +79,14 @@ import { permissionSetInEffect } from './catalog-set-in-effect.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
 import {
+  accountLockedEventFor,
   emitAuthSessionAuditEvent,
   loginEventFor,
   logoutEventFor,
+  refusalCodeOf,
+  signInClientFingerprint,
+  signInFailureEventFor,
+  SIGN_IN_EMAIL_PATH,
   type AuthEventAuditSurface,
 } from './auth-session-audit.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
@@ -2733,9 +2738,11 @@ export class AuthManager {
           // ── ADR-0069 D2: account lockout (gate) ─────────────────────
           // Reject a sign-in for a locked identity BEFORE better-auth checks
           // the password — a lock must hold even against the correct password.
-          if (ctx?.path === '/sign-in/email') {
+          // The refusal is a refused sign-in, so it writes its `login_failed`
+          // row (`auth-session-audit.ts`, account events) before it throws.
+          if (ctx?.path === SIGN_IN_EMAIL_PATH) {
             const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
-            if (email) await this.assertAccountNotLocked(email);
+            if (email) await this.assertAccountNotLocked(email, ctx);
             return;
           }
 
@@ -2823,7 +2830,7 @@ export class AuthManager {
           // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
           // the after-hook with it on `ctx.context.returned`; a success leaves
           // the session payload there. Count failures, reset on success.
-          if (ctx?.path === '/sign-in/email') {
+          if (ctx?.path === SIGN_IN_EMAIL_PATH) {
             const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
             if (email) {
               let succeeded = true;
@@ -2833,7 +2840,11 @@ export class AuthManager {
               } catch {
                 succeeded = !(ctx?.context?.returned instanceof Error);
               }
-              await this.recordSignInOutcome(email, succeeded);
+              const lockStamped = await this.recordSignInOutcome(email, succeeded);
+              // A refused sign-in writes `login_failed`, and the one that
+              // stamped the lockout also writes `account_locked`. A successful
+              // one is recorded as `login` by the session hook, unchanged.
+              if (!succeeded) await this.auditRefusedSignIn(ctx, email, lockStamped);
               if (succeeded) {
                 const uid = ctx?.context?.returned?.user?.id;
                 if (typeof uid === 'string') await this.enforceConcurrentCap(uid);
@@ -9213,13 +9224,18 @@ export class AuthManager {
    * out (brute-force protection). No-op when lockout is disabled
    * (`lockoutThreshold <= 0`) or no data engine is wired. Fails OPEN on a
    * lookup error: an infra hiccup must never block every login.
+   *
+   * The refusal is a refused sign-in of the account it names, so — given the
+   * endpoint context `ctx` — it writes that account's `login_failed` row with
+   * the refusal's own code before throwing (`auth-session-audit.ts`).
    */
-  private async assertAccountNotLocked(email: string): Promise<void> {
+  private async assertAccountNotLocked(email: string, ctx?: unknown): Promise<void> {
     const threshold = Number(this.config.lockoutThreshold) || 0;
     if (threshold <= 0) return;
     const engine = this.getDataEngine();
     if (!engine) return;
     let locked = false;
+    let lockedUserId: string | undefined;
     try {
       const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
       const u = await engine.findOne('sys_user', {
@@ -9227,10 +9243,21 @@ export class AuthManager {
       } as any);
       const lu = u?.locked_until;
       locked = !!(lu && new Date(lu).getTime() > Date.now());
+      if (locked && typeof u?.id === 'string' && u.id) lockedUserId = u.id;
     } catch {
       return; // fail-open
     }
     if (locked) {
+      if (ctx !== undefined && lockedUserId) {
+        await emitAuthSessionAuditEvent(
+          this.config.getAuditSink?.(),
+          signInFailureEventFor(lockedUserId, {
+            path: SIGN_IN_EMAIL_PATH,
+            reason: 'ACCOUNT_LOCKED',
+            fingerprint: signInClientFingerprint(ctx),
+          }),
+        );
+      }
       const { APIError } = await import('better-auth/api');
       throw new APIError('FORBIDDEN', {
         message:
@@ -9248,12 +9275,21 @@ export class AuthManager {
    * both (only writing when there is something to clear, to avoid a no-op
    * history row on every login). No-op when lockout is disabled. Never throws —
    * a counter write must not turn a valid login into an error.
+   *
+   * Resolves to the lock it stamped — the account, the expiry and the
+   * threshold — when THIS call wrote `locked_until` and the write landed, and
+   * to `undefined` otherwise. That is the lockout transition the
+   * `account_locked` row records, so a lock that was never written is never
+   * reported as one.
    */
-  private async recordSignInOutcome(email: string, success: boolean): Promise<void> {
+  private async recordSignInOutcome(
+    email: string,
+    success: boolean,
+  ): Promise<{ userId: string; lockedUntil: Date; threshold: number } | undefined> {
     const threshold = Number(this.config.lockoutThreshold) || 0;
-    if (threshold <= 0) return;
+    if (threshold <= 0) return undefined;
     const engine = this.getDataEngine();
-    if (!engine) return;
+    if (!engine) return undefined;
     try {
       const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
       const u = await engine.findOne('sys_user', {
@@ -9261,7 +9297,7 @@ export class AuthManager {
         fields: ['id', 'failed_login_count', 'locked_until'],
         context: SYSTEM_CTX,
       } as any);
-      if (!u?.id) return;
+      if (!u?.id) return undefined;
       if (success) {
         if ((Number(u.failed_login_count) || 0) !== 0 || u.locked_until) {
           await engine.update(
@@ -9270,15 +9306,20 @@ export class AuthManager {
             { context: SYSTEM_CTX } as any,
           );
         }
-        return;
+        return undefined;
       }
       const next = (Number(u.failed_login_count) || 0) + 1;
       const patch: Record<string, unknown> = { id: u.id, failed_login_count: next };
+      let lockedUntil: Date | undefined;
       if (next >= threshold) {
         const mins = Number(this.config.lockoutDurationMinutes) || 15;
-        patch.locked_until = new Date(Date.now() + mins * 60_000);
+        lockedUntil = new Date(Date.now() + mins * 60_000);
+        patch.locked_until = lockedUntil;
       }
       await engine.update('sys_user', patch, { context: SYSTEM_CTX } as any);
+      return lockedUntil && typeof u.id === 'string'
+        ? { userId: u.id, lockedUntil, threshold }
+        : undefined;
     } catch (e) {
       // Never break the auth response. [#12981] But lockout accounting that
       // silently stops accounting is brute-force protection that is OFF.
@@ -9293,6 +9334,81 @@ export class AuthManager {
         e,
         { object: 'sys_user', threshold, success },
       );
+      return undefined;
+    }
+  }
+
+  /**
+   * Write the account events for a refused `/sign-in/email`: one
+   * `login_failed` row for the account the sign-in named, carrying the
+   * refusal's machine code, and — when this attempt stamped the ADR-0069 D2
+   * lockout (`lockStamped`, from {@link recordSignInOutcome}) — one
+   * `account_locked` row. Independent of the lockout configuration: a refused
+   * sign-in is recorded whether or not a threshold is set.
+   *
+   * ⛔ The submitted identifier is used only to FIND the account and is never
+   * recorded; an identifier that resolves to no account writes nothing
+   * (`auth-session-audit.ts`, account events). The password is never read.
+   * Never throws — the refusal is already decided and the sink swallows.
+   */
+  private async auditRefusedSignIn(
+    ctx: any,
+    email: string,
+    lockStamped: { userId: string; lockedUntil: Date; threshold: number } | undefined,
+  ): Promise<void> {
+    const sink = this.config.getAuditSink?.();
+    if (!sink) return;
+    const userId = lockStamped?.userId ?? (await this.resolveSignInAccountId(email));
+    if (!userId) return;
+    const fingerprint = signInClientFingerprint(ctx);
+    await emitAuthSessionAuditEvent(
+      sink,
+      signInFailureEventFor(userId, {
+        path: SIGN_IN_EMAIL_PATH,
+        reason: refusalCodeOf(ctx?.context?.returned),
+        fingerprint,
+      }),
+    );
+    if (lockStamped) {
+      await emitAuthSessionAuditEvent(
+        sink,
+        accountLockedEventFor(lockStamped.userId, {
+          path: SIGN_IN_EMAIL_PATH,
+          lockedUntil: lockStamped.lockedUntil,
+          threshold: lockStamped.threshold,
+          fingerprint,
+        }),
+      );
+    }
+  }
+
+  /**
+   * The id of the account a password sign-in for `email` is checked against,
+   * or `undefined`. Resolved the way better-auth's `/sign-in/email` resolves
+   * it — the address lower-cased (`findUserByEmail(email.toLowerCase())`),
+   * matching the lower-cased identifier the adapter stores — so the
+   * `login_failed` row names the account the credential check actually judged.
+   */
+  private async resolveSignInAccountId(email: string): Promise<string | undefined> {
+    const engine = this.getDataEngine();
+    if (!engine) return undefined;
+    try {
+      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
+      const u = await engine.findOne('sys_user', {
+        where: { email: email.toLowerCase() }, fields: ['id'], context: SYSTEM_CTX,
+      } as any);
+      return typeof u?.id === 'string' && u.id ? u.id : undefined;
+    } catch (e) {
+      // The refusal stands either way; what is lost is its ledger row.
+      this.logDurabilityDegradation(
+        'AuthManager: a refused sign-in was NOT recorded in sys_audit_log — the account it named '
+          + 'could not be resolved, so its `login_failed` row was not written. The refusal itself was '
+          + 'answered normally, so nothing looks broken, and the Auth preset of Setup → Audit Log is '
+          + 'missing this attempt. Remedy: make the sys_user read land — check driver connectivity.',
+        e,
+        { object: 'sys_user', action: 'login_failed' },
+      );
+      return undefined;
     }
   }
 
