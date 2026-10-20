@@ -309,7 +309,7 @@ describe('#24978 — end to end: a real messaging service renders each approver\
   const inboxOf = async (userId: string) => {
     const rows = (await engine.find('sys_inbox_message', {
       where: { user_id: userId }, fields: ['topic', 'title', 'body_md'],
-    }, { context: SYSTEM } as any)) as any[];
+    }, { context: SYSTEM })) as any[];
     return rows.map((r) => ({ topic: r.topic, title: r.title, body: r.body_md }));
   };
 

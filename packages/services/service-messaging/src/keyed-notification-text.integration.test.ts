@@ -157,10 +157,11 @@ function countingData(ql: ObjectQL) {
     const data = new Proxy(ql as any, {
         get(target, prop, receiver) {
             if (prop === 'findOne') {
-                return async (object: string, query: any, options?: any) => {
+                return async (...args: Parameters<ObjectQL['findOne']>) => {
+                    const [object, query] = args;
                     const fields: unknown = query?.fields;
                     if (object === 'sys_user' && Array.isArray(fields) && fields.length === 1 && fields[0] === 'locale') localeReads += 1;
-                    return target.findOne(object, query, options);
+                    return target.findOne(...args);
                 };
             }
             const value = Reflect.get(target, prop, receiver);
