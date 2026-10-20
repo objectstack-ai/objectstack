@@ -453,8 +453,9 @@ describe('#24925 CONTROL: the plan as it always was', () => {
     boot.mockResolvedValueOnce(ceremonyStackWith([INDEX, ORG_JOB, LEGACY, ORG_SECRET], engine).stack);
     const { lines, exitCode } = await run([]);
     expect(exitCode, lines.join('\n')).toBe(0);
-    expect(engine.findOne).toHaveBeenCalledTimes(1);
     expectTodaysPlan(lines, [INDEX, ORG_JOB, LEGACY, ORG_SECRET]);
+    // …and the marker WAS read: this control is not passing for want of a read.
+    expect(engine.findOne).toHaveBeenCalledTimes(1);
   }, CASE_TIMEOUT_MS);
 
   it('no organization_id drop: the plan is the one it always was, and the marker is never read', async () => {
