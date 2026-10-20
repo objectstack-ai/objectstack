@@ -47,6 +47,7 @@ import {
   type AttachmentSecurityLike,
   type AttachmentSharingLike,
 } from './attachment-access-hooks.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const DAY_MS = 86_400_000;
 const SYS = { context: { isSystem: true } } as const;
@@ -106,6 +107,9 @@ async function boot(opts: { verdict?: Verdict; master?: MasterOutcome; sharing?:
   } as any, 'test-22466');
   ql.registry.registerObject({ name: 'att_parent', fields: { name: { type: 'text' } } } as any, 'test-22466');
   await ql.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(ql);
 
   installAttachmentLifecycleHooks(ql as any, logger);
   const sharing: AttachmentSharingLike | null =

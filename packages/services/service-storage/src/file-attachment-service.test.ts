@@ -125,6 +125,16 @@ async function engineWithParents(): Promise<ObjectQL> {
   );
   ql.registry.registerObject({ name: 'att_memo', fields: { name: { type: 'text' } } } as any, 'test-23306');
   await ql.syncSchemas();
+  // `case_global` belongs to no organization, a row only a store built before
+  // 18.x can hold (ADR-0131 D1 makes a fresh tenant column NOT NULL): `att_case`
+  // is that store's table, relaxed through the driver's own drift apply door.
+  const relaxed = await (ql.getDriverForObject('att_case') as any).applyMigrationEntries([
+    {
+      kind: 'nullability_mismatch', remoteName: 'att_case', table: 'att_case', column: 'organization_id', category: 'needs_confirm',
+      op: { type: 'relax_not_null', table: 'att_case', column: 'organization_id' },
+    },
+  ]);
+  expect(relaxed.applied).toHaveLength(1);
   // plugin-audit's REAL `enable.files` gate (and the rest of its writers), as
   // AuditPlugin installs them on the composed engine.
   installAuditWriters(ql as any);
