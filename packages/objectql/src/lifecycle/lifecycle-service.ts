@@ -245,11 +245,18 @@ const ATTRIBUTION_PARTITION_COLUMNS: Readonly<Record<string, string>> = Object.f
 interface TenantPartition {
   column: string;
   windows: Array<{ tenantId: string; maxAge?: string; expireAfter?: string }>;
+  /**
+   * Whether a row with no value in `column` is a live row the global pass must
+   * still cover: `true` for an attribution field only (see
+   * {@link globalPassSelector}).
+   */
+  nullIsLive: boolean;
 }
 
 /**
  * The global pass's selector over a partitioned object: every row no override
- * claimed.
+ * claimed. Which reading applies is decided once, by `tenantWindowsFor`, as
+ * {@link TenantPartition.nullIsLive}.
  *
  * - On `organization_id`, the rows of every other organization. [ADR-0131 D1,
  *   D14] NULL is not an owner, and after the 18.x upgrade ceremony no row of a
@@ -263,10 +270,9 @@ interface TenantPartition {
  *   there satisfies no positive comparison (#5298/#5299). That NULL arm stays.
  */
 function globalPassSelector(partition: TenantPartition): Record<string, unknown> {
-  const { column, windows } = partition;
+  const { column, windows, nullIsLive } = partition;
   const others = { [column]: { $nin: windows.map((t) => t.tenantId) } };
-  if (column === 'organization_id') return others;
-  return { $or: [others, { [column]: null }] };
+  return nullIsLive ? { $or: [others, { [column]: null }] } : others;
 }
 
 /**
@@ -1623,11 +1629,11 @@ export class LifecycleService {
       !isFederatedUnprovisionedInjectedColumn(obj, 'organization_id')
       && resolveInjectedColumnProvenance(obj, 'organization_id') !== 'absent'
     ) {
-      return { column: 'organization_id', windows };
+      return { column: 'organization_id', windows, nullIsLive: false };
     }
     const attribution = ATTRIBUTION_PARTITION_COLUMNS[obj.name];
     if (attribution !== undefined && resolveInjectedColumnProvenance(obj, attribution) === 'author') {
-      return { column: attribution, windows };
+      return { column: attribution, windows, nullIsLive: true };
     }
     return null;
   }

@@ -1315,8 +1315,8 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
     const error = vi.fn();
     const stores = governedStores({
       sys_audit_log: [
-        { id: 'old', created_at: at(-200 * DAY), organization_id: null },
-        { id: 'young', created_at: at(-2 * DAY), organization_id: null },
+        { id: 'old', created_at: at(-200 * DAY), organization_id: 'org_plain' },
+        { id: 'young', created_at: at(-2 * DAY), organization_id: 'org_plain' },
       ],
     });
     const { engine } = captureEngine([AUDIT_OBJ], {
@@ -1363,7 +1363,7 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
   it('DEFECT CONTROL (floor): reports a DECLARED archive window below the floor, and still enforces it', async () => {
     const error = vi.fn();
     const stores = governedStores({
-      sys_audit_log: [{ id: 'old', created_at: at(-200 * DAY), organization_id: null }],
+      sys_audit_log: [{ id: 'old', created_at: at(-200 * DAY), organization_id: 'org_plain' }],
     });
     const { engine } = captureEngine([AUDIT_OBJ], {
       driver: stores.hot,
@@ -1400,8 +1400,8 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
     const error = vi.fn();
     const stores = governedStores({
       sys_audit_log: [
-        { id: 'past-60d', created_at: at(-70 * DAY), organization_id: null },
-        { id: 'within-60d', created_at: at(-40 * DAY), organization_id: null },
+        { id: 'past-60d', created_at: at(-70 * DAY), organization_id: 'org_plain' },
+        { id: 'within-60d', created_at: at(-40 * DAY), organization_id: 'org_plain' },
       ],
     });
     const { engine } = captureEngine([AUDIT_OBJ], {
@@ -1430,10 +1430,10 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
   it('DEFECT CONTROL (override): a global maxAge override moves the archive cutoff', async () => {
     const stores = governedStores({
       sys_audit_log: [
-        { id: 'past-1y', created_at: at(-400 * DAY), organization_id: null },
+        { id: 'past-1y', created_at: at(-400 * DAY), organization_id: 'org_plain' },
         // Past the DECLARED 90d but inside the overridden 1y: the row that
         // separates the two policies. Pre-fix it is archived.
-        { id: 'past-90d-only', created_at: at(-200 * DAY), organization_id: null },
+        { id: 'past-90d-only', created_at: at(-200 * DAY), organization_id: 'org_plain' },
       ],
     });
     const { engine } = captureEngine([AUDIT_OBJ], {
@@ -1457,8 +1457,8 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
     // (commit 530c1df65). A fix that always consulted `maxAge` would leave this red.
     const stores = governedStores({
       sys_audit_log: [
-        { id: 'expired-400d', created_at: at(-2 * DAY), expires_at: at(-400 * DAY), organization_id: null },
-        { id: 'expired-200d', created_at: at(-2 * DAY), expires_at: at(-200 * DAY), organization_id: null },
+        { id: 'expired-400d', created_at: at(-2 * DAY), expires_at: at(-400 * DAY), organization_id: 'org_plain' },
+        { id: 'expired-200d', created_at: at(-2 * DAY), expires_at: at(-200 * DAY), organization_id: 'org_plain' },
       ],
     });
     const { engine } = captureEngine([TTL_ARCHIVE_OBJ], {
@@ -1479,7 +1479,7 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
     // age-selected one. Both must leave the declared window standing — the
     // two keys are two windows, not two spellings of one.
     const ttlStores = governedStores({
-      sys_audit_log: [{ id: 'r', created_at: at(-400 * DAY), expires_at: at(-100 * DAY), organization_id: null }],
+      sys_audit_log: [{ id: 'r', created_at: at(-400 * DAY), expires_at: at(-100 * DAY), organization_id: 'org_plain' }],
     });
     const ttlEngine = captureEngine([TTL_ARCHIVE_OBJ], {
       driver: ttlStores.hot,
@@ -1491,7 +1491,7 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
     expect(ttlStores.readsFor('sys_audit_log')).toEqual([{ expires_at: { $lt: isoCutoff('90d') } }]);
 
     const ageStores = governedStores({
-      sys_audit_log: [{ id: 'r', created_at: at(-100 * DAY), organization_id: null }],
+      sys_audit_log: [{ id: 'r', created_at: at(-100 * DAY), organization_id: 'org_plain' }],
     });
     const ageEngine = captureEngine([AUDIT_OBJ], {
       driver: ageStores.hot,
@@ -1508,8 +1508,8 @@ describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
     // retention + archive at 90d, both sweep in the same pass, and only the
     // named one may move.
     const stores = governedStores({
-      sys_audit_log: [{ id: 'audit-200d', created_at: at(-200 * DAY), organization_id: null }],
-      sys_metadata_audit: [{ id: 'meta-200d', created_at: at(-200 * DAY), organization_id: null }],
+      sys_audit_log: [{ id: 'audit-200d', created_at: at(-200 * DAY), organization_id: 'org_plain' }],
+      sys_metadata_audit: [{ id: 'meta-200d', created_at: at(-200 * DAY), organization_id: 'org_plain' }],
     });
     const { engine } = captureEngine([AUDIT_OBJ, METADATA_AUDIT_OBJ], {
       driver: stores.hot,
