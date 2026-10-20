@@ -497,6 +497,9 @@ describe('an authored policy for one of these objects is used as authored (rulin
     shipped = await boot(SHAPES[0], [...defaultPermissionSets, AUTHORED_ACCOUNT_SET]);
   });
 
+  // While `member_default` carried its `sys_account_self` copy, that copy was
+  // OR-ed in beside the authored policy and this holder read its own row: an
+  // authored scope leaving out the holder's own rows was widened back to them.
   it('a member holding a set that authors a `sys_account` scope is served what that scope admits — the object default is not added beside it', async () => {
     const holder = { ...PERSONAS.member_default, permissions: ['member_default', AUTHORED_ACCOUNT_SET.name] };
     expect(await shipped.served('sys_account', holder)).toEqual([]);
