@@ -546,6 +546,10 @@ interface RulePredicate {
   raw: unknown;
   /** 0 for the rule itself; 1 inside its `then` / `otherwise`, and so on down. */
   depth: number;
+  /** The key the predicate is written under on its own rule. */
+  slot: 'condition' | 'when';
+  /** The name of the rule that carries it (the nested rule's own, below depth 0). */
+  ruleName: string;
 }
 
 /**
@@ -566,9 +570,9 @@ function rulePredicates(rule: AnyRec, path: string, depth = 0): RulePredicate[] 
   // author who wrote both `condition` and a rejected alias had their canonical
   // predicate short-circuited away and the alias validated instead (#5017).
   const main = rule.condition;
-  if (main != null) out.push({ label: `validation rule ${here}`, raw: main, depth });
+  if (main != null) out.push({ label: `validation rule ${here}`, raw: main, depth, slot: 'condition', ruleName: name });
   if (rule.when != null) {
-    out.push({ label: `validation rule ${here} when-predicate`, raw: rule.when, depth });
+    out.push({ label: `validation rule ${here} when-predicate`, raw: rule.when, depth, slot: 'when', ruleName: name });
   }
   for (const branch of ['then', 'otherwise'] as const) {
     const nested = rule[branch];
@@ -1705,6 +1709,61 @@ function optionVisibleWhenUserMemberIssue(
 }
 
 /**
+ * [#24720] The root verdict for a `validations[]` rule's own predicates — a
+ * `script` / `cross_field` rule's `condition`, a `conditional` rule's `when`,
+ * and the same two slots on every rule nested in its `then` / `otherwise`: a
+ * predicate that reads `parent` is refused.
+ *
+ * ## Why it is refused
+ *
+ * ObjectQL evaluates every one of those predicates in `ruleScope(record,
+ * previous)` (`rule-validator.ts`: `checkPredicate`, `checkConditional`), which
+ * binds `record` and `previous` and no master-detail header. The header is
+ * bound as `parent` for a field's own `readonlyWhen` / `requiredWhen` only
+ * ({@link FIELD_RULE_BOUND_ROOTS}), on an object with exactly one
+ * `master_detail`. So the predicate faults (`Unknown variable: parent`) on
+ * every write it judges, and an unevaluable rule fails closed: the write is
+ * refused, the seed's own rows at boot included. A rule the runtime cannot
+ * evaluate must not pass a door (ADR-0049); nothing else refused it, because
+ * `parent` is in `SCOPE_ROOTS`, which the strict env declares, so the
+ * bare-reference check stays silent. The field-rule slots one level up accept
+ * the same text, which is what makes it the shape an author copies.
+ *
+ * ## Why `parent` alone
+ *
+ * This is the one root the record's own field rules bind and its validation
+ * rules do not: the credible copy, the one the runtime's own diagnostics name.
+ * Whether the other platform-wide roots the rule evaluator binds no more of
+ * (the acting user's among them) earn the same verdict is not decided here,
+ * because neither the runtime nor its callers were measured for them.
+ *
+ * ⛔ This verdict is withdrawn in the same change that binds `parent` for a
+ * `validations[]` rule, never before.
+ *
+ * `null` = nothing to report: the source does not parse (the syntax pass owns
+ * that), or it reads no `parent`.
+ */
+function validationRuleParentIssue(
+  objectName: string | undefined,
+  ruleName: string,
+  slot: 'condition' | 'when',
+  source: string,
+): string | null {
+  if (!readsParentRoot(source)) return null;
+  const owner = objectName ? `'${objectName}'` : 'this object';
+  return (
+    `\`${slot}\` of validation rule '${ruleName}' reads \`parent\`, but the server evaluates a ` +
+    `\`validations[]\` rule against \`record\` and \`previous\` only, so \`parent\` is unbound there. ` +
+    `The rule can never be evaluated, and the server REFUSES every write it judges — a rule that ` +
+    `cannot be evaluated fails closed, seed rows included. The master-detail header is bound as ` +
+    `\`parent\` only for a field's own \`readonlyWhen\` and \`requiredWhen\`, on an object with exactly ` +
+    `one \`master_detail\`: to lock or require a field on the header's state, write the predicate on ` +
+    `that field's \`readonlyWhen\` or \`requiredWhen\` instead. For any other check, read a column ` +
+    `${owner} declares (denormalise the header value you need onto ${owner}).`
+  );
+}
+
+/**
  * [#20078] The master object of an object with exactly ONE `master_detail`
  * relationship — the record the field level binds as `parent` — or `undefined`
  * when there is not exactly one (the #4889 gate above owns that verdict).
@@ -2808,6 +2867,20 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       for (const p of predicates) {
         if (p.depth === 0) continue;
         check(`object '${objectName}' · ${p.label}`, p.raw, objectName, 'record', undefined, true);
+      }
+      // [#24720] The rule's root verdict, over every predicate it carries,
+      // located where `check()` above located the same predicate. `parent` is
+      // a `SCOPE_ROOTS` member, so `check()` never reports a bare reference to
+      // it and the two verdicts stay disjoint; see
+      // {@link validationRuleParentIssue}.
+      for (const p of predicates) {
+        const source = celSourceOf(p.raw);
+        const message = source ? validationRuleParentIssue(objectName, p.ruleName, p.slot, source) : null;
+        if (!message) continue;
+        const at = p.depth > 0
+          ? `object '${objectName}' · ${p.label}`
+          : p.slot === 'when' ? `${where} when` : where;
+        issues.push({ where: at, message, source: source!, severity: 'error' });
       }
       // #4763 — null-guard gate over every predicate the rule carries, nested
       // `then`/`otherwise` branches included.
