@@ -9,8 +9,13 @@
  *   node scripts/gen-upgrade-harness-fixture.mjs --ref <ref>
  *   node scripts/gen-upgrade-harness-fixture.mjs --ref <ref> --checkout <dir>
  *
- * `--ref` names the release the fixture stands for: the 18.0 release tag once
- * it exists, until then `main` at or after `f8ef14487` (the card's rule).
+ * `--ref` names the release the fixture stands for. Two fixtures exist:
+ *
+ *   - `fixture-18.0/`, the pre-release shape (`main` at or after `f8ef14487`,
+ *     the card's rule), written by default;
+ *   - `fixture-18.0.0/`, the GA: a database the published 18.0.0 created
+ *     (#24884), written with
+ *     `--ref @objectstack/cli@18.0.0 --out packages/qa/dogfood/test/upgrade-harness/fixture-18.0.0`.
  *
  * ## What it does
  *
