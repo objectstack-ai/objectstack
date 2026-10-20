@@ -415,13 +415,10 @@ read is environment → code, whatever organization a caller names. An overlay
 row an earlier release stored under an organization is served by no read. On a
 SQL database (SQLite, PostgreSQL, MySQL) still holding one, a v18 `os serve`
 refuses to start, because the `sys_metadata` family there still carries its
-`organization_id` column. 18.0 supports fresh installs only and does not
-upgrade a v17 database: keep a v17 database on a 17.x release until the 18.x
-release that carries the upgrade path. In that release, the v18 migration
-ceremony (ADR-0131 C7) carries such a row to the environment layer. The
-anonymous form doors read the environment alone too; in that release the
-ceremony carries every organization-layer public-form withdrawal onto the
-environment, fail-closed. The per-user,
+`organization_id` column, until the v18 migration ceremony (ADR-0131 C7) has
+carried such a row to the environment layer. The anonymous form doors read the
+environment alone too; the ceremony carries every organization-layer
+public-form withdrawal onto the environment, fail-closed. The per-user,
 per-field patch overlay a previous revision of this page taught here was
 removed in #13135 — it was never served by any route.
 

@@ -13,11 +13,12 @@
  *     column still carries a physical `organization_id`) is refused, with the
  *     refusal's code, and the kernel never reaches `running`;
  *  2. the same database with the ceremony's marker verified boots;
- *  3. a fresh database boots;
+ *  3. a fresh database boots, the guard writing its birth marker, and boots
+ *     again on that marker; a database an earlier boot created WITHOUT the
+ *     guard (an 18.0 pre-release install's: no retired column, no marker) is refused;
  *  4. a database the ceremony ran on to the end (no column left) whose marker
  *     is NOT verified — its post-check found rows still without their
- *     organization — is refused, saying what 18.0 supports (it cannot re-run
- *     the ceremony);
+ *     organization — is refused, naming the re-run;
  *  5. ⭐ a refused boot writes nothing: the plugins that write rows in their
  *     own `start()` — `AppPlugin` (the inline seed) and plugin-auth's
  *     identity-objects plugin (the Default Organization, `AuthPlugin`'s twin
@@ -35,6 +36,7 @@ import { ObjectKernel } from '@objectstack/core';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
+import { ORGANIZATION_OWNERSHIP_SHAPE_GENERATION } from '@objectstack/spec/system';
 import { createIdentityObjectsPlugin } from '@objectstack/plugin-auth';
 import { AppPlugin } from './app-plugin.js';
 import { DriverPlugin } from './driver-plugin.js';
@@ -88,10 +90,12 @@ function seedV17Shape(file: string, marker?: { verifiedAt: string | null }): voi
   db.close();
 }
 
+/** The ceremony's marker, its checkpoint at this release's shape generation. */
 function writeMarker(db: DatabaseSync, verifiedAt: string | null, blocking = 0): void {
-  db.exec('CREATE TABLE IF NOT EXISTS sys_migration (id TEXT PRIMARY KEY, last_run_at TEXT, verified_at TEXT, applied_at TEXT, blocking INTEGER)');
-  db.prepare('INSERT INTO sys_migration (id, last_run_at, verified_at, applied_at, blocking) VALUES (?, ?, ?, ?, ?)')
-    .run(MARKER, '2026-10-14T00:00:00.000Z', verifiedAt, '2026-10-14T00:00:00.000Z', blocking);
+  db.exec('CREATE TABLE IF NOT EXISTS sys_migration (id TEXT PRIMARY KEY, last_run_at TEXT, verified_at TEXT, applied_at TEXT, blocking INTEGER, details TEXT)');
+  const details = JSON.stringify({ checkpoint: { ceremony: 'ADR-0131 D10', inventoryDigest: 'x', completed: {}, shapeGeneration: ORGANIZATION_OWNERSHIP_SHAPE_GENERATION } });
+  db.prepare('INSERT INTO sys_migration (id, last_run_at, verified_at, applied_at, blocking, details) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(MARKER, '2026-10-14T00:00:00.000Z', verifiedAt, '2026-10-14T00:00:00.000Z', blocking, details);
 }
 
 /** An app whose inline seed writes two rows of an organization-owned object. */
@@ -167,22 +171,38 @@ describe('the v18 boot refusal on a real kernel (ADR-0131 D10 item 5)', () => {
     expect(refusalIn(error)?.code).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
   });
 
-  it('⭐ a fresh database boots: the guard reads the ledger, finds no marker (absent, never unreadable), and starts', async () => {
-    const { kernel, error } = await boot(databaseFile());
+  it('⭐ R1: a fresh database boots, the guard writing its birth marker; the next boot reads it and boots', async () => {
+    const file = databaseFile();
+    const { kernel, error } = await boot(file);
     expect(error).toBeNull();
     expect(kernel.getState()).toBe('running');
-    // The read the guard made is a real one: the ledger object is registered and
-    // its table answers, so the guard took the read, not the "no ledger" branch,
-    // and a throwing read would have refused the boot as 'unreadable'.
-    const engine = kernel.getService('objectql') as {
-      getObject(name: string): unknown;
-      findOne(object: string, query: Record<string, unknown>): Promise<unknown>;
-    };
-    expect(engine.getObject('sys_migration')).toBeTruthy();
-    await expect(engine.findOne('sys_migration', { where: { id: MARKER }, context: { isSystem: true } })).resolves.toBeNull();
+    const [row] = sql<{ verified_at: string | null; blocking: number; details: string }>(
+      file,
+      `SELECT verified_at, blocking, details FROM sys_migration WHERE id = '${MARKER}'`,
+    );
+    expect(row?.verified_at).toBeTruthy();
+    expect(row?.blocking).toBe(0);
+    expect(JSON.parse(String(row!.details)).birth).toMatchObject({ shapeGeneration: ORGANIZATION_OWNERSHIP_SHAPE_GENERATION });
+    await kernel.shutdown();
+    // The same store, found this time: the marker carries it.
+    expect((await boot(file)).error).toBeNull();
+    expect(sql(file, `SELECT id FROM sys_migration WHERE id = '${MARKER}'`)).toHaveLength(1);
   });
 
-  it('⭐ a ceremony that ran every step and did not verify (no v17 column left, marker unverified) is refused, saying what 18.0 supports', async () => {
+  it('⭐ a database an earlier boot created without the guard (an 18.0 pre-release install: no retired column, no marker) is refused', async () => {
+    const file = databaseFile();
+    const db = new DatabaseSync(file);
+    db.exec('CREATE TABLE sys_migration (id TEXT PRIMARY KEY, last_run_at TEXT, verified_at TEXT, applied_at TEXT, blocking INTEGER)');
+    db.close();
+    const { kernel, error } = await boot(file);
+    const refusal = refusalIn(error);
+    expect(refusal?.code, String(error)).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
+    expect(refusal?.message).toMatch(/^This database carries no organization-ownership marker/);
+    expect(kernel.getState()).not.toBe('running');
+    expect(sql(file, `SELECT id FROM sys_migration`)).toEqual([]);
+  });
+
+  it('⭐ a ceremony that ran every step and did not verify (no v17 column left, marker unverified) is refused, naming the re-run', async () => {
     const file = databaseFile();
     const db = new DatabaseSync(file);
     writeMarker(db, null, 602);
@@ -192,10 +212,7 @@ describe('the v18 boot refusal on a real kernel (ADR-0131 D10 item 5)', () => {
     expect(refusal?.code, String(error)).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
     expect(refusal?.tables).toEqual([]);
     expect(refusal?.message).toMatch(/^The organization-ownership ceremony has not finished on this database: its marker/);
-    // 18.0 cannot re-run the ceremony (its `os migrate organization-ownership` refuses on every
-    // database), so the refusal names no step of it and says what 18.0 supports instead.
-    expect(refusal?.message).toContain('18.0 supports fresh installs only and does not upgrade a v17 database');
-    expect(refusal?.message).not.toMatch(/os migrate organization-ownership|--plan-file|--out PLAN|--backup-taken/);
+    expect(refusal?.message).toContain("os migrate organization-ownership --apply --plan-file PLAN --backup-taken");
     expect(kernel.getState()).not.toBe('running');
   });
 

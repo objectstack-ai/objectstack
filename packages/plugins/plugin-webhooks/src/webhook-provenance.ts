@@ -49,6 +49,8 @@
  * stamp exists to remember.
  */
 
+import { isSeededProvenance } from './declared-webhooks.js';
+
 interface MinimalEngine {
   registerHook(event: string, handler: (ctx: any) => any, options?: Record<string, any>): void;
   unregisterHooksByPackage(packageId: string): number;
@@ -80,7 +82,7 @@ export function bindWebhookProvenanceStamp(engine: MinimalEngine, logger?: Minim
       // had just read.
       const previous = ctx?.previous as Record<string, any> | undefined;
       if (!previous || typeof previous !== 'object') return;
-      if ((previous.managed_by === 'package' || previous.managed_by === 'platform') && previous.customized !== true) {
+      if (isSeededProvenance(previous.managed_by) && previous.customized !== true) {
         (data as any).customized = true;
       }
     },

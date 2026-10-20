@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1541 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1542 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -32,9 +32,9 @@ counts are sums of the rows they head. Regenerate with
 | [Security Protocol](/docs/references/security) | 5 | 31 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 36 | 284 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [System Protocol](/docs/references/system) | 36 | 285 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 169 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **197** | **1541** | 14 protocol modules |
+| **Total** | **197** | **1542** | 14 protocol modules |
 
 ---
 
@@ -317,7 +317,7 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **36 pages, 284 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **36 pages, 285 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
@@ -344,7 +344,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`logging.zod.ts`](/docs/references/system/logging) | `ConsoleDestinationConfig`, `ExtendedLogLevel`, `ExternalServiceDestinationConfig`, `FileDestinationConfig`, `HttpDestinationConfig`, `LogDestination`, `LogDestinationType`, `LogEnrichmentConfig`, `LogEntry`, `LogFormat`, `LogLevel`, `LoggerConfig`, `LoggingConfig`, `StructuredLogEntry` |
 | [`metadata-persistence.zod.ts`](/docs/references/system/metadata-persistence) | `MetadataCollectionInfo`, `MetadataDiffResult`, `MetadataFallbackStrategy`, `MetadataFormat`, `MetadataHistoryQueryOptions`, `MetadataHistoryQueryResult`, `MetadataHistoryRecord`, `MetadataHistoryRetentionPolicy`, `MetadataLoadOptions`, `MetadataLoadResult`, `MetadataLoaderContract`, `MetadataManagerConfig`, `MetadataRecord`, `MetadataSaveOptions`, `MetadataSaveResult`, `MetadataScope`, `MetadataSource`, `MetadataState`, `MetadataStats`, `MetadataWatchEvent`, `PackagePublishResult` |
 | [`metrics.zod.ts`](/docs/references/system/metrics) | `HistogramBucketConfig`, `MetricAggregationConfig`, `MetricAggregationType`, `MetricDataPoint`, `MetricDefinition`, `MetricExportConfig`, `MetricLabels`, `MetricType`, `MetricUnit`, `MetricsConfig`, `ServiceLevelIndicator`, `ServiceLevelObjective`, `TimeSeries`, `TimeSeriesDataPoint` |
-| [`migration.zod.ts`](/docs/references/system/migration) | `AddFieldOperation`, `ChangeSet`, `CreateObjectOperation`, `DataMigrationFlag`, `DeleteObjectOperation`, `ExecuteSqlOperation`, `MigrationDependency`, `MigrationJournalEvent`, `MigrationOperation`, `ModifyFieldOperation`, `RemoveFieldOperation`, `RenameObjectOperation` |
+| [`migration.zod.ts`](/docs/references/system/migration) | `AddFieldOperation`, `ChangeSet`, `CreateObjectOperation`, `DataMigrationFlag`, `DeleteObjectOperation`, `ExecuteSqlOperation`, `MigrationDependency`, `MigrationJournalEvent`, `MigrationOperation`, `ModifyFieldOperation`, `OrganizationOwnershipBirthMarker`, `RemoveFieldOperation`, `RenameObjectOperation` |
 | [`notification.zod.ts`](/docs/references/system/notification) | `NotificationChannel` |
 | [`object-storage.zod.ts`](/docs/references/system/object-storage) | `AccessControlConfig`, `BucketConfig`, `FileMetadata`, `LifecycleAction`, `LifecyclePolicyConfig`, `LifecyclePolicyRule`, `MultipartUploadConfig`, `ObjectMetadata`, `ObjectStorageConfig`, `PresignedUrlConfig`, `StorageAcl`, `StorageClass`, `StorageConnection`, `StorageProvider`, `StorageScope` |
 | [`registry-config.zod.ts`](/docs/references/system/registry-config) | `RegistryConfig`, `RegistrySyncPolicy`, `RegistryUpstream` |
