@@ -9,8 +9,13 @@
  *   node scripts/gen-upgrade-harness-fixture.mjs --ref <ref>
  *   node scripts/gen-upgrade-harness-fixture.mjs --ref <ref> --checkout <dir>
  *
- * `--ref` names the release the fixture stands for: the 18.0 release tag once
- * it exists, until then `main` at or after `f8ef14487` (the card's rule).
+ * `--ref` names the release the fixture stands for. Two fixtures exist:
+ *
+ *   - `fixture-18.0/`, the pre-release shape (`main` at or after `f8ef14487`,
+ *     the card's rule), written by default;
+ *   - `fixture-18.0.0/`, the GA: a database the published 18.0.0 created
+ *     (#24884), written with
+ *     `--ref @objectstack/cli@18.0.0 --out packages/qa/dogfood/test/upgrade-harness/fixture-18.0.0`.
  *
  * ## What it does
  *
@@ -44,7 +49,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -114,7 +119,10 @@ try {
   // The populator comes from HEAD; copy it in when the checkout's differs.
   const from = join(REPO_ROOT, HARNESS_DIR);
   const to = join(checkout, HARNESS_DIR);
-  if (resolve(from) !== resolve(to)) cpSync(from, to, { recursive: true, filter: (src) => !relative(from, src).startsWith('fixture-') });
+  // The fixture DIRECTORIES stay the checkout's own; `fixture-manifest.ts`
+  // is populator code and comes from HEAD like the rest.
+  const isFixtureDir = (src) => /^fixture-[^/]*$/.test(relative(from, src)) && statSync(src).isDirectory();
+  if (resolve(from) !== resolve(to)) cpSync(from, to, { recursive: true, filter: (src) => !isFixtureDir(src) });
 
   const work = mkdtempSync(join(tmpdir(), 'upgrade-harness-run-'));
   try {
