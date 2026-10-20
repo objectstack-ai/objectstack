@@ -156,13 +156,12 @@ import {
   type UndeliveredAttribute,
 } from './builtin-column-collision.js';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
-import { makeDatabaseDirectory, SqliteDatabaseFileError } from './sqlite-database-file.js';
+import { makeDatabaseDirectory, probeAbsentSqliteDatabaseFile, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { currentPerfTiming, perfNow, type PerfTiming } from '@objectstack/observability';
 // [#21007] The JSON-column gate's operator set and refusal text — shared with
 // `@objectstack/objectql`'s per-aggregation `filter`, which refuses the same
@@ -5182,6 +5181,23 @@ export type SqliteAbsentFileMode = 'create' | 'empty-in-memory';
  *
  * Pseudo-filenames (`:memory:` and anything else `:`-prefixed) and non-file
  * dialects are already fileless, so they are returned untouched.
+ *
+ * ## Absent is not the same as unopenable (#24961)
+ *
+ * Only a file a boot that may write could bring into existence is absent. One
+ * that can be neither opened nor created — a path under a regular file, a
+ * directory this process may not write — is refused here with the
+ * `SqliteDatabaseFileError` naming the file and the operating system's answer,
+ * the refusal `SqlDriver.connect()` gives the same path on a boot that writes.
+ * The judgement writes nothing: see {@link probeAbsentSqliteDatabaseFile},
+ * which also names the one shape it cannot see without a write. It used to be
+ * `existsSync`, which answers `false` for every path it cannot stat, so a
+ * read-only boot opened an empty in-memory database over a file that cannot
+ * exist and reported the datasource connected.
+ *
+ * @throws SqliteDatabaseFileError under `'empty-in-memory'`, for a file that
+ *   can be neither opened nor created. Both callers get the same answer: the
+ *   driver's constructor, and the service layer's wasm rung.
  */
 export function resolveSqliteAbsentFileTarget(
   filename: string,
@@ -5191,7 +5207,7 @@ export function resolveSqliteAbsentFileTarget(
   if (typeof filename !== 'string' || filename === '' || filename.startsWith(':')) {
     return { filename, openedEmptyInMemory: false };
   }
-  if (existsSync(filename)) return { filename, openedEmptyInMemory: false };
+  if (probeAbsentSqliteDatabaseFile(filename) === 'exists') return { filename, openedEmptyInMemory: false };
   return { filename: ':memory:', openedEmptyInMemory: true };
 }
 
@@ -6437,12 +6453,22 @@ export class SqlDriver implements IDataDriver {
    * the Knex instance at construction, and better-sqlite3 opens (and therefore
    * creates) the file on the first statement — which for this driver is the
    * `PRAGMA auto_vacuum` in {@link connect}.
+   *
+   * A file the judgement refuses — one that can be neither opened nor created
+   * (#24961) — throws its `SqliteDatabaseFileError` out of the constructor, so
+   * no Knex instance is ever built over it.
+   *
+   * Only a SQLite client is asked (#24961). A server dialect's `connection`
+   * string is a URL, never a filename: handed to the judgement it read as an
+   * absent file, and a `pg` driver given this option had its connection string
+   * rewritten to `:memory:` — against {@link SqlDriverConfig.sqliteAbsentFile}'s
+   * "ignored for non-SQLite dialects".
    */
   private knexConfigFor(
     knexConfig: Knex.Config,
     mode: SqliteAbsentFileMode | undefined,
   ): Knex.Config {
-    if (mode !== 'empty-in-memory') return knexConfig;
+    if (mode !== 'empty-in-memory' || !this.isSqlite) return knexConfig;
     const conn = (knexConfig as { connection?: unknown }).connection;
     const declared = typeof conn === 'string' ? conn : (conn as { filename?: unknown })?.filename;
     if (typeof declared !== 'string') return knexConfig;
