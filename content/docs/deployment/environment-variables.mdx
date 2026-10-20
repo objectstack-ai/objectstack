@@ -129,13 +129,28 @@ Auth settings precedence:
 
 ---
 
-## Branding (single-tenant)
+## Branding
+
+The console's product name, logo, favicon and colours are served by `RuntimeConfigPlugin` (`@objectstack/cloud-connection`) as the `branding` block of `GET /api/v1/runtime/config`, which the console reads on every page load. A host that constructs its own `RuntimeConfigPlugin` with an option of the same name (`productName`, `logoUrl`, …) outranks the variable. The first eight variables below are read **once, when that plugin is constructed at boot**: changing one takes a restart. A value saved in **Setup → Branding** is read per request instead (see the precedence below). Mail and auth are named separately, by `OS_APP_NAME`.
 
 | Variable | Type | Default | Description |
 |:---|:---|:---|:---|
-| `OS_PRODUCT_NAME` | string | `ObjectStack` | Product name shown in the UI chrome and emails. |
-| `OS_PRODUCT_SHORT_NAME` | string | `OS` | Short name used in compact UI surfaces (favicons, mobile titles). |
-| `OS_APP_NAME` | string | — | The deployment's product name under `objectstack serve`: `{{appName}}` in every email template (auth emails included), the issuer an authenticator app lists a TOTP enrollment under, and the MCP OAuth resource name. Wins over `config.email.appName`, `config.email.defaultTemplateContext.appName` and `config.appName`; with none of them set the name is `ObjectStack`. An explicitly set `branding.workspace_name` setting outranks it in auth. |
+| `OS_PRODUCT_NAME` | string | `ObjectOS` | The console's product name (`branding.productName`): the browser-tab title (alone, or after the open app's label), the header's product mark, the sign-in pages, the loading screen and the installed-app (PWA) manifest's `name`. It does **not** name emails, the authenticator app entry or the MCP sign-in — `OS_APP_NAME` does — so an unconfigured deployment reads `ObjectOS` in the console and `ObjectStack` in its mail. Empty reads as unset. |
+| `OS_PRODUCT_SHORT_NAME` | string | the product name served | The PWA manifest's `short_name` (`branding.productShortName`). Unset, it is the product name actually served, which under `single` may be a saved Branding name. |
+| `OS_PRODUCT_STAGE` | enum | — (no `stage` key) | `preview` \| `beta` \| `ga`, matched exactly. Drives the console's top-bar chip (`branding.stage`): "Preview" for `preview`, "Beta" for `beta`, none for `ga`. Unset sends no `stage` key and the console keeps its own `preview` default, so the chip shows. Any other value (`GA`, `general-availability`) is refused with one `warn` at boot and treated as unset. |
+| `OS_LOGO_URL` | url | — | The product logo, absolute or relative (`branding.logoUrl`): the sign-in pages, the loading screen and the header's product mark. Unset, the console draws its built-in mark. |
+| `OS_FAVICON_URL` | url | — | The favicon, absolute or relative (`branding.faviconUrl`): the browser-tab icon and the PWA manifest's icon. While an app with its own `branding.favicon` is open, that icon replaces it. No Branding setting overrides this variable, on any posture. |
+| `OS_BRAND_COLOR` | string | — | The brand colour as hex, e.g. `#4F46E5` (`branding.brandColor`). The console uses it as the installed-app theme colour, through `OS_PWA_THEME_COLOR`'s default; each app's own `AppBranding` colours are separate. |
+| `OS_PWA_DESCRIPTION` | string | `<product name> — runtime console` | The PWA manifest's `description` (`branding.pwaDescription`). Unset, it is built from the product name actually served. |
+| `OS_PWA_THEME_COLOR` | string | the brand colour served, else `#4f46e5` | The PWA manifest's `theme_color` (`branding.pwaThemeColor`), as hex. Unset, it is the brand colour actually served, else `#4f46e5`. |
+| `OS_APP_NAME` | string | — | The deployment's product name under `objectstack serve` for mail and auth: `{{appName}}` in every email template (auth emails included), the issuer an authenticator app lists a TOTP enrollment under, and the MCP OAuth resource name. Wins over `config.email.appName`, `config.email.defaultTemplateContext.appName` and `config.appName`; with none of them set the name is `ObjectStack`. Under `single`, an explicitly set `branding.workspace_name` setting outranks it in auth (the authenticator issuer takes a change only when the auth instance is rebuilt, such as at a restart); under `group` / `isolated` nothing does. It never names the console — that is `OS_PRODUCT_NAME`. |
+
+Branding precedence, by tenancy posture (`OS_TENANCY_POSTURE`):
+
+- **`single`** — three fields read the `branding` settings namespace on every request, so a save in **Setup → Branding** shows on the next page load with no restart: `workspace_name` → `productName`, `logo_url` → `logoUrl`, `accent_color` → `brandColor`. Each takes the first source that is set: the setting (a value saved in Setup, or the settings layer's own `OS_BRANDING_WORKSPACE_NAME` / `OS_BRANDING_LOGO_URL` / `OS_BRANDING_ACCENT_COLOR`, which outranks a saved value and locks the field), then the host's `RuntimeConfigPlugin` option, then `OS_PRODUCT_NAME` / `OS_LOGO_URL` / `OS_BRAND_COLOR`, then the built-in default. The Branding page's own default for `workspace_name` (`ObjectStack`) is never served to the console. A set `workspace_name` also names sign-in emails, the authenticator app entry and the MCP sign-in, ahead of `OS_APP_NAME`.
+- **`group` / `isolated`** — the `branding` namespace is not offered: it is absent from `GET /api/settings`, `GET` and `PUT /api/settings/branding` answer `404 UNKNOWN_NAMESPACE`, and Setup lists no Branding entry. The `OS_BRANDING_*` variables are not read. The console's branding is the host option, then the variables in this table, then the default, and the auth product name is the `OS_APP_NAME` chain alone. A walled deployment that set `OS_BRANDING_WORKSPACE_NAME` moves the value to `OS_APP_NAME`.
+
+On every posture `productShortName`, `pwaDescription` and `pwaThemeColor` follow the name and colour actually served unless set themselves, and `OS_PRODUCT_STAGE` and `OS_FAVICON_URL` have no setting above them.
 
 ---
 

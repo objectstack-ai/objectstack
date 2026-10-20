@@ -13018,6 +13018,297 @@ const actionBlockEndpointToTarget: MetadataConversion = {
 };
 
 /**
+ * Every `addRecord` block a stack can carry, mapped immutably (#24692).
+ *
+ * `AddRecordConfigSchema` is reached from three doors, and this walks all three:
+ *
+ * - every list payload in `stack.views[]`, in all three persisted spellings
+ *   ({@link mapViewPayloads}: the ViewItem record's `config`, a container's
+ *   `list` / `listViews.*`, the flattened list overlay);
+ * - every object's `listViews.*` in `stack.objects[]` (`ObjectListViewSchema`
+ *   carries the block too, and a stored object row is replayed as
+ *   `{ objects: [row] }`);
+ * - every page's `interfaceConfig.addRecord` in `stack.pages[]`
+ *   (`InterfacePageConfigSchema`, the list page's own configuration), and
+ *   every page `list-view` node's `properties` ({@link mapPageComponents},
+ *   every position a component can sit in — its props row is built from
+ *   `ListViewSchema`'s shape).
+ *
+ * `mapper` receives the block and the path of the KEY that holds it
+ * (`….addRecord`) and returns the same reference (no change) or a new dict;
+ * every container above it is copied only when the block changed. A non-dict
+ * `addRecord` is not this walker's: it passes through untouched, and the
+ * parse refuses it.
+ */
+function mapAddRecordBlocks(stack: Dict, mapper: (block: Dict, path: string) => Dict): Dict {
+  const inPayload = (payload: Dict, path: string): Dict => {
+    const block = payload.addRecord;
+    if (!isDict(block)) return payload;
+    const mapped = mapper(block, `${path}.addRecord`);
+    return mapped === block ? payload : { ...payload, addRecord: mapped };
+  };
+
+  let next = mapViewPayloads(stack, (payload, kind, path) => (kind === 'list' ? inPayload(payload, path) : payload));
+
+  next = mapCollection(next, 'objects', (obj, path) => {
+    const listViews = obj.listViews;
+    if (!isDict(listViews)) return obj;
+    let changed = false;
+    const rebuilt: Dict = { ...listViews };
+    for (const [name, entry] of Object.entries(listViews)) {
+      if (!isDict(entry)) continue;
+      const mapped = inPayload(entry, `${path}.listViews.${name}`);
+      if (mapped === entry) continue;
+      rebuilt[name] = mapped;
+      changed = true;
+    }
+    return changed ? { ...obj, listViews: rebuilt } : obj;
+  });
+
+  next = mapPages(next, (page, path) => {
+    const cfg = page.interfaceConfig;
+    if (!isDict(cfg)) return page;
+    const mapped = inPayload(cfg, `${path}.interfaceConfig`);
+    return mapped === cfg ? page : { ...page, interfaceConfig: mapped };
+  });
+
+  return mapPageComponents(next, (component, path) => {
+    if (component.type !== 'list-view' || !isDict(component.properties)) return component;
+    const props = component.properties;
+    const mapped = inPayload(props, `${path}.properties`);
+    return mapped === props ? component : { ...component, properties: mapped };
+  });
+}
+
+/**
+ * `addRecord` with `enabled` OMITTED → `enabled: true` (protocol 18, #24692 —
+ * ADR-0049 enforce-or-remove, ruling letter B′; the data-at-rest half of making
+ * `enabled` REQUIRED, the D3 semantic entry `add-record-enabled-required`).
+ *
+ * Ruling B′ made `AddRecordConfigSchema.enabled` required with no default, so
+ * `addRecord: {}` is refused at authoring and at publish instead of drawing
+ * nothing. Before it, the key carried `.default(true)`: the contract every
+ * author and every AI read said an `addRecord` block without `enabled` SHOWS
+ * the Add button, while the renderer drew it only for an explicit
+ * `enabled: true`. Under the standing 18.x rule for breaking narrowings (a
+ * narrowing an ADR-0087 conversion carries ships in an 18.x minor), this entry
+ * is what carries it: a stored row, a built artifact inside its declared-floor
+ * window and `os migrate meta --from 17` all get the old default written in,
+ * so no body that parsed under 18.0 is refused by this narrowing.
+ *
+ * **Lossless against the contract, NOT in pixels — stated, not hidden.** The
+ * value written is exactly the one the 18.0 parse produced for the same body
+ * (`.default(true)`), so the converted row means what the published spec said
+ * it meant. The renderer read the RAW stored body, though, so a row that
+ * omitted `enabled` drew no Add button and now draws one. That is the author's
+ * declared intent, and the measured population is zero: every in-tree
+ * producer (the showcase's two blocks, the lint fixture) and objectui's Studio
+ * design surface write `enabled` explicitly; production databases were not
+ * measured.
+ *
+ * **Deliberately narrow.** Only a dict `addRecord` with no `enabled` key is
+ * touched. An explicit value — `false`, `null`, a string — is the author's and
+ * is left for the parse to judge. `position` is never written: its default
+ * moved from `bottom` to `top`, where the renderer has always placed an absent
+ * position, so an omitted position keeps the placement it rendered with.
+ *
+ * **Retired from the load path, from day one.** The authoring funnel does not
+ * replay it, so a live author meets the parse's refusal and its prescription
+ * (`addRecord.enabled` is required). Idempotent by construction: a converted
+ * block carries `enabled`, which this transform never touches again.
+ */
+const addRecordEnabledDefaulted: MetadataConversion = {
+  id: 'add-record-enabled-defaulted',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '18.0.0',
+  surface: 'view.list.addRecord.enabled / object.listViews.*.addRecord.enabled / page.interfaceConfig.addRecord.enabled / page.component.list-view.addRecord.enabled — omitted',
+  summary:
+    "an `addRecord` block that omits `enabled` → `enabled: true` (ADR-0049 enforce-or-remove: `enabled` "
+    + 'is now required with no default; `true` is the default the 18.0 spec declared, so the block means '
+    + 'what it always declared — note the renderer drew no button for such a block and now draws one; '
+    + 'an explicit value is never touched)',
+  apply(stack, emit) {
+    return mapAddRecordBlocks(stack, (block, path) => {
+      if ('enabled' in block) return block;
+      emit({ from: '(omitted)', to: 'true', path: `${path}.enabled` });
+      return { ...block, enabled: true };
+    });
+  },
+  fixture: {
+    before: {
+      views: [
+        // A container: the default `list` omits `enabled` and converts; the
+        // named entry declares it off and rides through untouched.
+        {
+          object: 'arx_ticket',
+          list: { type: 'grid', columns: ['subject'], addRecord: {} },
+          listViews: {
+            closed: { type: 'grid', columns: ['subject'], addRecord: { enabled: false } },
+          },
+        },
+        // A ViewItem record: the payload hangs off `config`; `position` survives.
+        {
+          name: 'arx_ticket.queue',
+          object: 'arx_ticket',
+          viewKind: 'list',
+          config: { type: 'grid', columns: ['subject'], addRecord: { position: 'bottom' } },
+        },
+      ],
+      objects: [
+        { name: 'arx_ticket', label: 'Ticket', listViews: { mine: { type: 'grid', columns: ['subject'], addRecord: {} } } },
+      ],
+      pages: [
+        { name: 'arx_desk', label: 'Desk', type: 'list', interfaceConfig: { source: 'arx_ticket', addRecord: { position: 'top' } } },
+        {
+          name: 'arx_home',
+          label: 'Home',
+          regions: [{ name: 'main', components: [{ type: 'list-view', properties: { addRecord: {} } }] }],
+        },
+      ],
+    },
+    after: {
+      views: [
+        {
+          object: 'arx_ticket',
+          list: { type: 'grid', columns: ['subject'], addRecord: { enabled: true } },
+          listViews: {
+            closed: { type: 'grid', columns: ['subject'], addRecord: { enabled: false } },
+          },
+        },
+        {
+          name: 'arx_ticket.queue',
+          object: 'arx_ticket',
+          viewKind: 'list',
+          config: { type: 'grid', columns: ['subject'], addRecord: { position: 'bottom', enabled: true } },
+        },
+      ],
+      objects: [
+        { name: 'arx_ticket', label: 'Ticket', listViews: { mine: { type: 'grid', columns: ['subject'], addRecord: { enabled: true } } } },
+      ],
+      pages: [
+        { name: 'arx_desk', label: 'Desk', type: 'list', interfaceConfig: { source: 'arx_ticket', addRecord: { position: 'top', enabled: true } } },
+        {
+          name: 'arx_home',
+          label: 'Home',
+          regions: [{ name: 'main', components: [{ type: 'list-view', properties: { addRecord: { enabled: true } } }] }],
+        },
+      ],
+    },
+    // One notice per block filled: the container's `list`, the record's
+    // `config`, the object's `listViews.mine`, the page's `interfaceConfig`,
+    // the page `list-view` node's `properties`.
+    expectedNotices: 5,
+  },
+};
+
+/**
+ * `addRecord.mode` / `addRecord.formView` leave the authorable surface
+ * (protocol 18, #24692 — ADR-0049 enforce-or-remove, ruling letter B′).
+ *
+ * Both keys parsed, were stored, and changed nothing: no renderer ever read
+ * either. objectui's list Add button opens the object's create form, the one
+ * the object list's New opens, whatever `mode` said (`inline`, its default,
+ * was never built), and it never opened the form `formView` named. The create
+ * form is chosen by convention instead — `formViews.create` when the object's
+ * view container declares one, else `form` / `formViews.default` — and how it
+ * opens stays the renderer's.
+ *
+ * **Retired from the load path** — both keys are `retiredKey()` tombstones on
+ * `AddRecordConfigSchema`, so a live author is refused at parse with the
+ * prescription. The entry exists because a stored row CAN carry them: every
+ * list-view door, the object door and the page door accepted and persisted
+ * them until this release, the Studio forms offered them, and the 18.0 parse
+ * materialized `mode: 'inline'` into every built `addRecord`. Without it such a
+ * row or artifact would carry a retired key back to a strict door. It also
+ * lets `os migrate meta --from 17` list the mechanical edits for existing
+ * sources.
+ *
+ * The delete is lossless in pixels: no renderer read either key, so removing
+ * them changes no screen. A `formView` that named the object's `create` form
+ * keeps opening it, by the convention above. `stripKeys` deletion is
+ * idempotent by construction.
+ */
+const addRecordModeFormViewRemoved: MetadataConversion = {
+  id: 'add-record-mode-form-view-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '18.0.0',
+  surface: 'view.list.addRecord.mode / view.list.addRecord.formView / object.listViews.*.addRecord.mode / object.listViews.*.addRecord.formView / page.interfaceConfig.addRecord.mode / page.interfaceConfig.addRecord.formView / page.component.list-view.addRecord.mode / page.component.list-view.addRecord.formView',
+  summary:
+    "add-record keys 'mode'/'formView' removed (ADR-0049 enforce-or-remove — parsed and stored, read by "
+    + 'no renderer: the Add button always opens the create form, chosen by convention as '
+    + '`formViews.create` when declared, else the default form)',
+  apply(stack, emit) {
+    return mapAddRecordBlocks(stack, (block, path) => stripKeys(block, ['mode', 'formView'], emit, path));
+  },
+  fixture: {
+    before: {
+      views: [
+        // A container: the default `list` carries both keys, the named entry
+        // only `mode`, the other named entry neither and rides through.
+        {
+          object: 'arx_contact',
+          list: { type: 'grid', columns: ['name'], addRecord: { enabled: true, mode: 'form', formView: 'create' } },
+          listViews: {
+            recent: { type: 'grid', columns: ['name'], addRecord: { enabled: true, position: 'both', mode: 'inline' } },
+            all: { type: 'grid', columns: ['name'], addRecord: { enabled: false } },
+          },
+        },
+      ],
+      objects: [
+        { name: 'arx_contact', label: 'Contact', listViews: { mine: { type: 'grid', columns: ['name'], addRecord: { enabled: true, formView: 'default' } } } },
+      ],
+      pages: [
+        {
+          name: 'arx_contacts',
+          label: 'Contacts',
+          type: 'list',
+          interfaceConfig: { source: 'arx_contact', addRecord: { enabled: true, position: 'top', mode: 'modal', formView: 'default' } },
+        },
+        {
+          name: 'arx_people',
+          label: 'People',
+          regions: [{ name: 'main', components: [{ type: 'list-view', properties: { addRecord: { enabled: true, mode: 'form' } } }] }],
+        },
+      ],
+    },
+    after: {
+      views: [
+        {
+          object: 'arx_contact',
+          list: { type: 'grid', columns: ['name'], addRecord: { enabled: true } },
+          listViews: {
+            recent: { type: 'grid', columns: ['name'], addRecord: { enabled: true, position: 'both' } },
+            all: { type: 'grid', columns: ['name'], addRecord: { enabled: false } },
+          },
+        },
+      ],
+      objects: [
+        { name: 'arx_contact', label: 'Contact', listViews: { mine: { type: 'grid', columns: ['name'], addRecord: { enabled: true } } } },
+      ],
+      pages: [
+        {
+          name: 'arx_contacts',
+          label: 'Contacts',
+          type: 'list',
+          interfaceConfig: { source: 'arx_contact', addRecord: { enabled: true, position: 'top' } },
+        },
+        {
+          name: 'arx_people',
+          label: 'People',
+          regions: [{ name: 'main', components: [{ type: 'list-view', properties: { addRecord: { enabled: true } } }] }],
+        },
+      ],
+    },
+    // One notice per key removed: `list` (2), `listViews.recent` (1), the
+    // object's `listViews.mine` (1), the page's `interfaceConfig` (2), the
+    // page `list-view` node's `properties` (1).
+    expectedNotices: 7,
+  },
+};
+
+/**
  * An agent's conversation state machine — `agent.lifecycle` — leaves the spec
  * (protocol 18, #21320; ADR-0049 enforce-or-remove, ruled D (retire) on
  * objectstack-ai/cloud#2569).
@@ -17641,6 +17932,8 @@ function inApplicationOrder(entries: readonly OrderedConversion[]): readonly Met
 const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: actionAriaRemoved, order: 43 },
   { conversion: actionBlockEndpointToTarget, order: 52 },
+  { conversion: addRecordEnabledDefaulted, order: 73 },
+  { conversion: addRecordModeFormViewRemoved, order: 72 },
   { conversion: agentLifecycleRemoved, order: 57 },
   { conversion: agentMemoryLongTermStoreRemoved, order: 56 },
   { conversion: agentStructuredOutputRefusedMembersRemoved, order: 55 },

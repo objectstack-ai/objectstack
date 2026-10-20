@@ -7,7 +7,7 @@ import { definePage } from '@objectstack/spec/ui';
  *   • `filterBy` — an ALWAYS-ON base filter (hide completed) the end user
  *     cannot remove (distinct from userFilters, which they toggle).
  *   • `sort` — a default sort order defined on the page (budget, high → low).
- *   • `addRecord` — a toolbar "add" entry point that opens a FORM.
+ *   • `addRecord` — a toolbar "add" entry point that opens the create form.
  *   • dropdown user-filters layered on top of the base filter.
  */
 export const ActiveProjectsPage = definePage({
@@ -32,8 +32,8 @@ export const ActiveProjectsPage = definePage({
       fields: [{ field: 'health', showCount: true }, { field: 'status' }],
     },
     userActions: { sort: true, search: true, filter: true, rowHeight: false, addRecordForm: false },
-    // Add-record entry point: a toolbar button that opens the default form.
-    addRecord: { enabled: true, position: 'top', mode: 'form', formView: 'default' },
+    // Add-record entry point: a toolbar button that opens the create form.
+    addRecord: { enabled: true, position: 'top' },
     showRecordCount: true,
   },
 });
