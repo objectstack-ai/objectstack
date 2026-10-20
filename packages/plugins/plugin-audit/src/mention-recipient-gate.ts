@@ -7,11 +7,9 @@
  * The notification carries the comment's body preview and a deep link to the
  * record, so it is a copy of what the comment thread shows. The thread itself
  * is readable exactly when its record is (`comment-access-hooks.ts`); the bell
- * copy must not reach anyone the thread would not. Before this gate the
- * writer emitted one notification per id in `mentions` verbatim, so a
- * mentioned user who could not read the record — a user of another
- * organization under a walled posture, or a member the record's own sharing
- * excludes — still received the preview.
+ * copy must not reach anyone the thread would not: not a user of another
+ * organization under a walled posture, and not a member the record's own
+ * sharing excludes.
  *
  * ⛔ Nothing here derives readability. Each mentioned user's envelope is built
  * by the resolver every request is built by (`resolveUserAuthzGrants`), their
