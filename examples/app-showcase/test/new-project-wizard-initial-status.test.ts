@@ -37,6 +37,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import stack from '../objectstack.config.js';
 import { Account, Project } from '../src/data/objects/index.js';
 import { NewProjectWizardPage } from '../src/ui/pages/new-project-wizard.page.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 type Rule = {
   type?: string;
@@ -82,6 +83,9 @@ async function bootShowcase(): Promise<ObjectQL> {
     engine.registry.registerObject(def as never, PACKAGE_ID, 'showcase');
   }
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   return engine;
 }
 

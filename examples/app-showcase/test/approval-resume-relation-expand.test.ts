@@ -58,6 +58,7 @@ import {
   TaskDoneNotifyOwnerFlow,
   NotifyOwnerSubflow,
 } from '../src/automation/flows/index.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** Everything the approvals service treats as an unconditional actor. */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as any;
@@ -128,6 +129,9 @@ async function bootShowcaseApprovals(
     objectql.registry.registerObject(obj, 'showcase', 'showcase');
   }
   await objectql.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(objectql);
 
   for (const flow of flows) automation.registerFlow(flow.name, flow);
 

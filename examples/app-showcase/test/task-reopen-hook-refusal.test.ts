@@ -38,6 +38,7 @@ import {
 import { Account, Project, Task } from '../src/data/objects/index.js';
 import { allHooks, TASK_REOPEN_REFUSAL } from '../src/data/hooks/index.js';
 import { ReopenTaskAction } from '../src/ui/actions/index.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const APP_ID = 'com.objectstack.showcase';
 const PACKAGE_ID = `app:${APP_ID}`;
@@ -65,6 +66,9 @@ async function bootShowcase(hooks: unknown[] = allHooks): Promise<ObjectQL> {
     engine.registry.registerObject(def as never, PACKAGE_ID, 'showcase');
   }
   await engine.syncSchemas();
+  // A real `single` install's Default Organization: the system writes below
+  // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
+  await installDefaultOrganization(engine);
   engine.bindHooks(hooks as never[], {
     packageId: PACKAGE_ID,
     bodyRunner: hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql: engine, appId: APP_ID }),
