@@ -86,20 +86,19 @@ export interface FileRecord {
  *  - **insert** — `injectTenantOnInsert` STAMPS `options.tenantId` onto the
  *    row when the column is unset. The context supplies a VALUE.
  *  - **update / delete** — `applyTenantScope` SCOPES the statement: the
- *    predicate becomes `(organization_id = :tenantId OR organization_id IS
- *    NULL)`. The context supplies a REACH.
+ *    predicate becomes `organization_id = :tenantId` (ADR-0131 D8 — no NULL
+ *    arm). The context supplies a REACH.
  *
  * So threading it here buys two distinct things. A row stamped for ANOTHER
  * organization stops being reachable through these doors — the isolation the
- * insert-side repair could not give a door it does not run through. And the
- * org-less rows stay reachable: the `OR … IS NULL` arm is #2734's deliberate
- * global-row fail-open, so every `sys_upload_session` row written before
- * #12928 (deliberately not backfilled — they age out through the object's own
- * ADR-0057 TTL sweep) and every `sys_file` row #12745's backfill did not reach
- * keeps updating and deleting exactly as it did. ⛔ This file does not restate
- * that read semantics as a rule, still less change it — it is
- * `applyTenantScope`'s, and it is named here only because it is what makes the
- * narrowing safe for legacy rows.
+ * insert-side repair could not give a door it does not run through. An
+ * org-less row is out of that reach too: ADR-0131 D8 retired the driver's
+ * `OR … IS NULL` arm, so a `sys_upload_session` row written before #12928 or
+ * a `sys_file` row #12745's backfill did not reach is no tenant-scoped write's
+ * to update or delete — under ADR-0131 such a row is invalid state on a
+ * walled deployment, and the 18.x upgrade ceremony (D10) gives it its fate
+ * before boot. ⛔ This file does not restate that read semantics as a rule,
+ * still less change it — it is `applyTenantScope`'s.
  *
  * Third, and the reason this card exists: it silences the `[tenant-audit]`
  * warning on the `update` and `delete` verbs, which raise it from the same
@@ -654,13 +653,14 @@ export class StorageMetadataStore {
    * {@link updateFile}. Same channel, same chokepoint, and the same split
    * between stamping and scoping that {@link StorageWriteContext} records.
    *
-   * ⚠️ This object is the one where the `OR … IS NULL` arm of the driver's
-   * scope is load-bearing rather than incidental: #12928 was ruled FORWARD
-   * STAMP ONLY, so every session row written before it carries
-   * `organization_id` NULL by decision. Narrowing this statement with strict
-   * equality would have stranded exactly those rows mid-upload. It does not,
-   * because the tenant term the driver composes keeps org-less rows in reach
-   * (#2734).
+   * ⚠️ This object is the one where the driver's old `OR … IS NULL` arm was
+   * load-bearing rather than incidental: #12928 was ruled FORWARD STAMP ONLY,
+   * so every session row written before it carried `organization_id` NULL by
+   * decision, and that arm kept those rows in reach of this statement
+   * mid-upload. ADR-0131 D8 retired the arm — the tenant term is strict
+   * equality now — and under ADR-0131 such a row is invalid state on a walled
+   * deployment, given its fate by the 18.x upgrade ceremony (D10) before
+   * boot.
    */
   async updateSession(
     id: string,
@@ -784,8 +784,11 @@ export class StorageMetadataStore {
  *  - the engine-absent stand-in does not scope → `null`, always;
  *  - no organization threaded (`writeOptionsFor` → `undefined`) → the write is
  *    unscoped → `null`;
- *  - a row stamped with no organization → `null`: the driver's scope keeps
- *    org-less rows in reach (#2734's global-row arm);
+ *  - a row stamped with no organization → `null`. This branch predates
+ *    ADR-0131 D8: the driver's scope no longer keeps org-less rows in reach
+ *    (the v17 NULL arm is retired), so for such a row the answer is the
+ *    pre-D8 one; under ADR-0131 the row is invalid state on a walled
+ *    deployment, which the 18.x upgrade ceremony (D10) clears before boot;
  *  - otherwise the row is in reach exactly when its organization is the acting
  *    one.
  *

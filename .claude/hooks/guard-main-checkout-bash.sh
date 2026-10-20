@@ -38,7 +38,8 @@
 #
 # Fails open, deliberately, on:
 #   - wrapped invocations: bash -c '…', xargs, ssh host '…', make, a shell script that
-#     writes (the target is one indirection away from any token this hook can see);
+#     writes, a command inside a QUOTED "$(…)" (the target is one indirection away from any
+#     token this hook can see);
 #   - programs whose writes live inside their own source text: python -c "open(p,'w')",
 #     node -e, awk > (the target is not a shell token, so there is nothing to read);
 #   - any target containing an expansion or glob ($VAR, `…`, $(…), *, ?, ~) — unresolvable
@@ -51,6 +52,8 @@
 # Writing ABOUT the ban must never trip the ban (#4890's lesson). Four layers:
 #   1. quote-aware segmentation + tokenisation — a `>` or a `sed -i` inside '…' or "…" is
 #      literal text, so `grep -n "sed -i" .claude/` and `echo "never sed -i in main"` pass;
+#      a `$(…)` or backtick inside "…" is a quoting context of its own, so a `"` in its body
+#      nests instead of closing the outer string (subst_end(), shared by every pass);
 #   2. heredoc bodies are stripped before analysis — the LINES of a `cat > /tmp/notes <<EOF`
 #      body are documentation, not commands, and segmentation alone (which splits on
 #      newlines) would happily read them as such;
@@ -118,6 +121,48 @@ fi
 
 [ -n "$cmd" ] || exit 0
 
+# --- a command substitution inside "…" is its own quoting context ---------------------
+# Inside "…", `$(` or a backtick opens a NEW quoting context: a `"` in the body starts a string
+# of its own and does not close the outer one. Each scanner below used to read that `"` as the
+# closer, so the rest of the body became bare shell, and a `>` in a quoted curl body was taken
+# for a redirect whose "target" was the next fragment — a false BLOCK (#24812). All three
+# quote-aware scanners hand such a body to this ONE function, so they agree on where it ends.
+#
+# subst_end S I: S[I] is the `$` of a `$(`, or a backtick, met inside "…". Sets SUBST_END to
+# the index of the character that closes the substitution, reading the body with its own
+# quotes, escapes and nested `(…)` / `$(…)` / backticks; when the input ends first, to the
+# last index — the rest is one inert run (bash refuses such a command anyway). The body is
+# kept verbatim as part of the word, so a target holding it still fails open on its `$`.
+# Boundary: a `(` or `)` bash would not count (a `case` pattern, a comment) moves the end —
+# too early, and the rest is read as it was before this function existed; too late, and the
+# text swallowed with the body is inert, i.e. fails open.
+SUBST_END=0
+subst_end() {
+  local s="$1" i="$2" n=${#1} st ch top
+  if [ "${s:i:1}" = '`' ]; then st='`'; else st=')' ; i=$((i + 1)); fi
+  for ((i = i + 1; i < n; i++)); do
+    ch="${s:i:1}" ; top="${st:${#st}-1:1}"
+    if [ "$top" = "'" ]; then [ "$ch" = "'" ] && st="${st%?}"; continue; fi
+    if [ "$ch" = '\' ]; then i=$((i + 1)); continue; fi
+    if [ "$top" = '"' ]; then
+      case "$ch" in
+        '"') st="${st%?}" ;;
+        '`') st+='`' ;;
+        '$') if [ "${s:i+1:1}" = '(' ]; then st+=')' ; i=$((i + 1)); fi ;;
+      esac
+      continue
+    fi
+    case "$ch" in
+      "'" | '"') st+="$ch" ;;
+      '(') st+=')' ;;
+      ')') [ "$top" = ')' ] && st="${st%?}" ;;
+      '`') if [ "$top" = '`' ]; then st="${st%?}"; else st+='`'; fi ;;
+    esac
+    if [ -z "$st" ]; then SUBST_END=$i; return; fi
+  done
+  SUBST_END=$((n - 1))
+}
+
 # --- heredoc bodies are text, not commands ---------------------------------------------
 # `cat > /tmp/notes.md <<EOF` … `EOF` carries prose over several lines. Segmentation splits
 # on newlines, so without this pass a documented example inside the body ("sed -i … main
@@ -148,6 +193,9 @@ strip_line_comment() {
     ch="${s:i:1}"
     if [ -n "$q" ]; then
       if [ "$q" = '"' ] && [ "$ch" = '\' ] && [ $((i + 1)) -lt "$n" ]; then i=$((i + 1)); continue; fi
+      if [ "$q" = '"' ] && { [ "$ch" = '`' ] || [ "${s:i:2}" = '$(' ]; }; then
+        subst_end "$s" "$i" ; i=$SUBST_END ; continue
+      fi
       [ "$ch" = "$q" ] && q=""
       continue
     fi
@@ -217,6 +265,9 @@ split_segments() {
             seg+="$ch" ; i=$((i + 1)) ; seg+="${s:i:1}" ; continue ;;
         esac
       fi
+      if [ "$q" = '"' ] && { [ "$ch" = '`' ] || [ "${s:i:2}" = '$(' ]; }; then
+        subst_end "$s" "$i" ; seg+="${s:i:SUBST_END-i+1}" ; i=$SUBST_END ; continue
+      fi
       seg+="$ch"
       [ "$ch" = "$q" ] && q=""
       continue
@@ -273,6 +324,9 @@ tokenize() {
           '"' | '\' | '$' | '`')
             i=$((i + 1)) ; tok+="${s:i:1}" ; have=1 ; continue ;;
         esac
+      fi
+      if [ "$q" = '"' ] && { [ "$ch" = '`' ] || [ "${s:i:2}" = '$(' ]; }; then
+        subst_end "$s" "$i" ; tok+="${s:i:SUBST_END-i+1}" ; i=$SUBST_END ; have=1 ; continue
       fi
       if [ "$ch" = "$q" ]; then q=""; else tok+="$ch"; fi
       have=1

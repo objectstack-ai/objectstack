@@ -79,6 +79,7 @@ import {
   tenantLayer0FilterOf,
   andComposeLayers,
   intersectTenantLayer0Verdicts,
+  type TenantLayer0Input,
 } from './tenant-layer.js';
 import {
   PLATFORM_OWNER_WALL_BYPASS_EVENT,
@@ -4001,6 +4002,9 @@ export class SecurityPlugin implements Plugin {
         // A member WITH a membership set but no active organization passes this
         // pre-test and still has nowhere for a NEW row to land; that insert is
         // refused with this same answer on its stored image, below ([#24784]).
+        // So is the insert of a platform operator crossing the wall with no
+        // active organization: crossing exempts it from this pre-test, not
+        // from needing somewhere to land ([#24821]).
         //
         // The cheap posture/context pre-test comes first on purpose: the common
         // deployment is `single` (Layer 0 inert), and the common caller HAS an
@@ -4079,14 +4083,20 @@ export class SecurityPlugin implements Plugin {
         // not apply to it (a non-tenant object, a phantom anchor, a platform
         // operator crossing on a posture-permitting object, `single`).
         let callerTenantCheck: Record<string, unknown> | null = null;
+        // Whether that `null` is a platform operator CROSSING the wall on a
+        // posture-permitting object (ADR-0095 D3) — the wall stands for every
+        // other caller on the object.
+        let callerCrossesTenantWall = false;
         if (suppliedRows.length > 0 || this.orgScopingEnabled) {
-          const tenantCheck = await this.computeWriteTenantCheckFilter(
+          const callerWall = await this.computeWriteTenantWall(
             permissionSets,
             opCtx.object,
             opCtx.operation,
             opCtx.context,
           );
+          const tenantCheck = callerWall.layer0;
           callerTenantCheck = tenantCheck;
+          callerCrossesTenantWall = callerWall.crossedByPlatformAdmin;
           // [ADR-0090 D10] The post-image must also satisfy the delegator's tenant
           // wall — an on-behalf-of write may not land a row in a tenant the
           // delegator itself could not reach.
@@ -4150,13 +4160,39 @@ export class SecurityPlugin implements Plugin {
         // covers exactly the rows that would have met that 500, and nothing the
         // store admitted before is refused now. Only the CALLER's own wall
         // decides whether the object is walled for it — a platform operator
-        // crossing on a posture-permitting object keeps its answer — and the
+        // crossing on a posture-permitting object is the arm below — and the
         // delegator keeps the pre-test's leg, unchanged. `isolated` never
         // reaches this: its pre-test reads the active organization itself.
         const insertLacksActiveOrganization =
           opCtx.operation === 'insert' &&
           postureUsesUnionScope(this.tenancyPosture) &&
           callerTenantCheck != null &&
+          !carriesActiveOrganization(opCtx.context);
+        // ── [ADR-0123 D2/D4 · ADR-0131 D9 · ADR-0095 D3 · #24821] …and a platform operator's ──
+        //
+        // A true `PLATFORM_ADMIN` CROSSES the wall on a posture-permitting
+        // object (ADR-0095 D3): its Layer 0 is `null` there, so neither the
+        // pre-test nor the arm above reaches it, under `isolated` or `group`.
+        // Crossing lets the operator read every organization's rows and update
+        // them where they are; it does not give a NEW row an organization. The
+        // row lands where the session's does — the engine stamps it from
+        // `tenantId` and strips the column from a session payload — and with
+        // no active organization it has none. ADR-0131 D9 refuses that write in
+        // every walled posture ("nothing defaults to any owner other than the
+        // derivable one"), and the engine did refuse it, as an
+        // organization-less SYSTEM write: `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`,
+        // status 500, its prose withheld from the wire. The condition is the
+        // member's — no active organization, a row with nowhere to land — so
+        // the answer is the member's too: one refusal, one spelling (ADR-0112
+        // D3), naming what is missing (ADR-0123 D4).
+        //
+        // On the same STORED image as the arm above, for the same reason: a
+        // row a hook places, or one that names its organization where the
+        // engine keeps a session's value, carries one and lands as before.
+        // Reads and updates by the operator are untouched.
+        const operatorInsertLacksActiveOrganization =
+          opCtx.operation === 'insert' &&
+          callerCrossesTenantWall &&
           !carriesActiveOrganization(opCtx.context);
         // EVERY supplied row must clear the wall — one forged row in a bulk
         // payload denies the whole write (fail closed, no partial landing).
@@ -4211,17 +4247,36 @@ export class SecurityPlugin implements Plugin {
         // leaves the column alone hands over the row's own organization — the
         // one the pre-image or the composed AST selected it under — so it
         // clears this exactly as before.
-        if (tenantParts.length > 0 && (opCtx.operation === 'insert' || !Array.isArray(opCtx.data))) {
+        //
+        // [#24821] A crossing platform operator's insert with no active
+        // organization installs the seam too: its own Layer 0 is `null`, so
+        // `tenantParts` can be empty while its rows still need somewhere to
+        // land. With no wall part the per-row loop below admits every row.
+        if (
+          (tenantParts.length > 0 || operatorInsertLacksActiveOrganization) &&
+          (opCtx.operation === 'insert' || !Array.isArray(opCtx.data))
+        ) {
           const businessCheck = writeImageCheckSeam;
           writeImageCheckSeam = {
             evaluate: (rows) => {
               // First, as the pre-test's refusal is first: the session's state
               // is the actionable half. One row with nowhere to land refuses
               // the whole write — no partial landing.
-              if (
-                insertLacksActiveOrganization &&
-                rows.some((row) => !!row && typeof row === 'object' && !namesOrganization(row))
-              ) {
+              const someRowHasNowhereToLand = (): boolean =>
+                rows.some((row) => !!row && typeof row === 'object' && !namesOrganization(row));
+              if (operatorInsertLacksActiveOrganization && someRowHasNowhereToLand()) {
+                refuseNoActiveOrganization(
+                  'caller',
+                  `[ADR-0123 D2 · ADR-0131 D9] Tenant-scoped inserts are refused when the execution context carries ` +
+                    `no active organization: tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', and ` +
+                    `this caller is a platform operator crossing the wall there (ADR-0095 D3). Crossing lets it read ` +
+                    `every organization's rows and update them where they are; a new row still lands in the active ` +
+                    `organization, and the caller's context carries no \`tenantId\` while the stored row names no ` +
+                    `organization, so this insert has none to land in. It is refused rather than reaching the engine ` +
+                    `as an organization-less system write. System contexts are unaffected.`,
+                );
+              }
+              if (insertLacksActiveOrganization && someRowHasNowhereToLand()) {
                 refuseNoActiveOrganization(
                   'caller',
                   `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
@@ -7443,6 +7498,12 @@ export class SecurityPlugin implements Plugin {
      * reads the wall's decision instead of re-deriving the wall.
      */
     tenantLayer0Verdict: TenantLayer0Verdict;
+    /**
+     * [ADR-0095 D3 · #24821] True only when a true `PLATFORM_ADMIN` crossing on
+     * a posture-permitting object is what made {@link tenantLayer0Verdict}
+     * `none` — the wall stands for every other caller on this object.
+     */
+    crossedByPlatformAdmin: boolean;
   }> {
     // [ADR-0095 D1] Effective filter = Layer0(tenant) AND Layer1(business RLS).
     // The two are computed independently and never share a compiler, a merge
@@ -7732,7 +7793,7 @@ export class SecurityPlugin implements Plugin {
     // global object correctly contributes nothing (ADR-0095 delta c).
     // [#15813] The verdict is computed ONCE; the filter injected below is its
     // projection. Recording the verdict costs no second computation.
-    const tenantLayer0Verdict = computeTenantLayer0Verdict({
+    const tenantLayer0Input: TenantLayer0Input = {
       tenancyPosture: this.tenancyPosture,
       organizationId: context?.tenantId,
       // [ADR-0105 D2] The `group` wall's predicate. Resolved by
@@ -7760,8 +7821,20 @@ export class SecurityPlugin implements Plugin {
       tenancyDisabled,
       posturePermitsCrossTenant: posturePermits,
       isPlatformAdmin,
-    });
+    };
+    const tenantLayer0Verdict = computeTenantLayer0Verdict(tenantLayer0Input);
     const layer0 = tenantLayer0FilterOf(tenantLayer0Verdict);
+    // [ADR-0095 D3 · ADR-0123 D2 · #24821] Did the platform operator's crossing,
+    // and nothing else, make this verdict `none`? Asked of the ONE ladder a
+    // second time with only the exemption's own fact withheld, so no rung —
+    // posture, tenant object, phantom anchor — is re-derived here. A `single`
+    // posture or a non-tenant object answers `none` both ways and is not a
+    // crossing. Step 3.7 reads it: crossing lets an operator read and update
+    // every organization's rows, and does not give a NEW row an organization.
+    const crossedByPlatformAdmin =
+      tenantLayer0Verdict.kind === 'none' &&
+      isPlatformAdmin &&
+      computeTenantLayer0Verdict({ ...tenantLayer0Input, isPlatformAdmin: false }).kind !== 'none';
 
     // [#12974] Verified platform OWNER crosses the Layer 0 org wall — READS
     // ONLY. Maintainer ruling 2026-08-29, verbatim and untranslated: 「能不能
@@ -7817,10 +7890,10 @@ export class SecurityPlugin implements Plugin {
       // [#15813] The recorded verdict follows the wall as APPLIED: lifted here,
       // so `none` — a reader must not learn an organization from a wall that
       // was not appended.
-      return { layer0: null, layer1, tenantLayer0Verdict: { kind: 'none' } };
+      return { layer0: null, layer1, tenantLayer0Verdict: { kind: 'none' }, crossedByPlatformAdmin };
     }
 
-    return { layer0, layer1, tenantLayer0Verdict };
+    return { layer0, layer1, tenantLayer0Verdict, crossedByPlatformAdmin };
   }
 
   /**
@@ -8079,8 +8152,28 @@ export class SecurityPlugin implements Plugin {
     operation: string,
     context: any,
   ): Promise<Record<string, unknown> | null> {
-    const { layer0 } = await this.computeLayeredRlsFilter(permissionSets, object, operation, context);
-    return layer0;
+    return (await this.computeWriteTenantWall(permissionSets, object, operation, context)).layer0;
+  }
+
+  /**
+   * The caller's Layer 0 for a write — {@link computeWriteTenantCheckFilter}'s
+   * filter — together with whether a platform operator's crossing is why it
+   * is `null` (ADR-0095 D3). One computation answers both, so step 3.7 never
+   * pays for the layered compile twice.
+   */
+  private async computeWriteTenantWall(
+    permissionSets: PermissionSet[],
+    object: string,
+    operation: string,
+    context: any,
+  ): Promise<{ layer0: Record<string, unknown> | null; crossedByPlatformAdmin: boolean }> {
+    const { layer0, crossedByPlatformAdmin } = await this.computeLayeredRlsFilter(
+      permissionSets,
+      object,
+      operation,
+      context,
+    );
+    return { layer0, crossedByPlatformAdmin };
   }
 
   /**

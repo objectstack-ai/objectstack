@@ -442,6 +442,15 @@ const manifest = {
     // is the runtime's own default for an undeclared toggle, and a deployment
     // signing in with env credentials relies on it; the help text carries the
     // conjunction, so ON beside two empty fields reads as "not offered yet".
+    //
+    // The two credential keys below are therefore NOT `required`. `required`
+    // is judged by `setMany` against the stored value, and the runtime needs
+    // the pair to RESOLVE, not to be stored: on a deployment that sets
+    // GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET, a `required` here refused
+    // `google_enabled: true` (the save touches both through `visible`), so an
+    // admin who switched Google off could not switch it back on, although
+    // the server held valid credentials. Saving ON with nothing resolving is
+    // the same runtime state as the default: no Google button.
     {
       type: 'toggle',
       key: 'google_enabled',
@@ -455,7 +464,7 @@ const manifest = {
       type: 'text',
       key: 'google_client_id',
       label: 'Google client ID',
-      required: true,
+      required: false,
       description:
         'OAuth client ID from Google Cloud Console. GOOGLE_CLIENT_ID can also be set on the server.',
       visible: "${data.google_enabled !== false}",
@@ -464,7 +473,7 @@ const manifest = {
       type: 'password',
       key: 'google_client_secret',
       label: 'Google client secret',
-      required: true,
+      required: false,
       encrypted: true,
       description:
         'Stored encrypted at rest. GOOGLE_CLIENT_SECRET can also be set on the server.',

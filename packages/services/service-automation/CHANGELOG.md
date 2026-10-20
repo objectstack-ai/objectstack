@@ -1,5 +1,1661 @@
 # @objectstack/service-automation
 
+## 18.0.0
+
+### Major Changes
+
+- f66fdc7: The maps a flow node hands to a CALLEE are value slots now: a `subflow` node's `input`, a `map` node's `input` (evaluated once per item) and a `script` node's `inputs`. Each value is a CEL value envelope, `{ dialect: 'cel', source: '…' }`, evaluated in the calling flow's scope and handed over as the value it computes, or a literal written as it is. A `{…}` template token there is refused at `objectstack validate`, at `registerFlow` and by the executor, naming its CEL spelling, as in every other value slot.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered flow-value-slot-template-dialect-refused) The value-slot retirement's step-18 D3 entry, registered on this line before this change, is amended in this diff: its surface widens to the three callee maps, and its replacement and reason gain what a guarded form's null does to a child flow's defaultValue. No new D3 entry and no D2 conversion: every whole-path spelling answers differently for an absent value. -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** ADR-0032 Decision 2 makes a computed value whole-field CEL, and Decision 3 deletes the single brace. These three maps are computed values: each one becomes the callee's input. Until now each executor handed its map to the single-brace interpolator, so a `{token}` resolved there, and a CEL envelope written there reached the callee as the object `{ dialect: 'cel', source: '…' }` it spells, with the run reporting success.
+  
+  **What changes for a value that may be absent.** Where a whole token resolved to nothing, the template handed the callee nothing. A child flow then seeded its input variable from the variable's `defaultValue`. Under CEL an absent variable or key fails the run, and the guarded form `has(vars.x) ? vars.x : null` hands `null`. A `null` the caller supplies is a value: it wins over the child's `defaultValue`. To keep the default for an absent value, write it in the guard, `has(vars.x) ? vars.x : 'standard'`. Leave the key out where the value is never meant to be supplied. A `script` function is handed `null` where the template handed `undefined`. The refusal at those positions says this.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `input: { ownerId: '{record.owner}' }` on a `subflow` | `input: { ownerId: { dialect: 'cel', source: 'record.owner' } }` | an absent `owner` fails the run; guarded, it hands `null`, which wins over the child's `defaultValue` |
+  | `input: { ownerId: '{x}' }` where the child's default should apply when `x` is absent | `input: { ownerId: { dialect: 'cel', source: "has(vars.x) ? vars.x : 'standard'" } }` | the default is written in the guard, because a supplied `null` is not absent |
+  | `input: { row: '{item}' }` on a `map` | `input: { row: { dialect: 'cel', source: 'item' } }` | evaluated once per item, with the item variable bound; a list or a record is handed over with its type |
+  | `inputs: { lines: '{lines}' }` on a `script` | `inputs: { lines: { dialect: 'cel', source: 'lines' } }` | the function receives the list; guarded, an absent value is `null` where it was `undefined` |
+  | `input: { message: 'Task "{record.title}" is done.' }` | `input: { message: { dialect: 'cel', source: "'Task \"' + record.title + '\" is done.'" } }` | one CEL concatenation; wrap a hole that may be null in `coalesce(…, '')` |
+  
+  **The one-line fix: write each value of a `subflow` / `map` `input` and a `script`'s `inputs` as a CEL value envelope, and write a child's default into the guard where it should apply.**
+  
+  **Who is affected, measured.** In this repository: 5 values in 3 nodes of the showcase example (`showcase_task_completed`'s `script`, and the `subflow` nodes of `showcase_task_done_notify_owner` and `showcase_project_closure`), 3 values in the todo example's `task_completion` `script`, 2 docs pages, the service-automation README, 2 dogfood fixtures and the test fixtures; all are migrated in this change. hotcrm's sites at these positions were not measured.
+  
+  **Still accepted, unchanged.** A CEL value envelope and every literal.
+  
+  ### The kit
+  
+  - **The contract.** `SubflowConfigSchema.input`, `ScriptConfigSchema.inputs` and `MapConfigSchema.input` take `FlowValueSlotSchema` per value (`@objectstack/spec/automation`), so the executor's contract parse refuses a token as a guard. Each published JSON Schema declares the dropped refinement (`dropped-refinements.baseline.json`).
+  - **The ledger.** `FLOW_NODE_EXPRESSION_PATHS` gains `subflow.input.*`, `map.input.*` and `script.inputs.*` (role `value`), and `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` carries `MapConfigSchema`. `registerFlow`, `objectstack validate` and `flow-bare-dollar-reference` / `flow-double-brace-interpolation`'s value-slot hints follow the ledger, so all of them cover the three maps.
+  - **The executor.** One per-key resolver, shared with the CRUD `fields` map, evaluates an envelope through `AutomationEngine.evaluateValueEnvelope` in the parent's scope and run context.
+  - **ADR-0087.** The step-18 D3 entry `flow-value-slot-template-dialect-refused` is amended. No key is removed, so there is no tombstone, and there is no D2 conversion.
+- 9fdb127: A `loop`'s (with a `body`) and a `map`'s `collection` is a value slot now: the list the node iterates is a CEL value envelope, `{ dialect: 'cel', source: 'tasks' }`, that the executor evaluates in the run's scope, or the items written as an inline array, iterated as written. A string there is refused at `objectstack validate`, at `registerFlow` and by the executor: a `{…}` template token, naming its CEL spelling, and a variable's bare name, naming that variable in an envelope. The envelope is newly accepted there; the contract refused it before this change.
+  
+  Clause-②: yes (narrowing: a string is refused at loop.collection and map.collection, a {…} token and a variable's bare name alike; widening: both accept a CEL value envelope they refused, their published JSON Schema and inferred types gain the envelope arm, and FlowCollectionSlotSchema is a new export)
+  
+  <!-- adr-0087: not-required (already-registered flow-value-slot-template-dialect-refused) The value-slot retirement's step-18 D3 entry, registered on this line before this change, is amended in this diff: its surface widens to a loop's and a map's collection, and its replacement, reason and acceptance criteria say what the list must evaluate to, what an absent one does, and why the bare name is refused rather than rewritten. No new D3 entry and no D2 conversion: an absent variable fails the node as a returned failure under the template and as an evaluation fault under CEL, and a bare name that never iterated would iterate as an envelope. -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, beside one widening (both slots accept a CEL value envelope), shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** ADR-0032 Decision 2 makes a computed value whole-field CEL, and Decision 3 deletes the single brace. The list a `loop` or `map` iterates is a computed value. Until now the executors ran a string `collection` through the single-brace interpolator. The contract also declared a variable's bare name there (`collection: 'tasks'`), but the structured `loop` and `map` never read one: the interpolator handed the name back unchanged, the value was no list, and every run failed at the node ("collection 'tasks' did not resolve to an array"), although `registerFlow` and `objectstack validate` accepted the flow. That arm retires with the token, and the refusal names the envelope that iterates.
+  
+  **What changes where the list may be absent.** The envelope must evaluate to a list, and anything else fails the node, `null` included, as a token that resolved to nothing did. One difference remains on an absent variable: the template failed the node with a returned failure (the step's `NODE_FAILURE`), and CEL fails it with an evaluation fault naming the variable (`EXECUTION_ERROR`). A `fault` edge routes both. To iterate nothing when the list may be absent, guard it to answer `[]`: `has(vars.tasks) ? vars.tasks : []`.
+  
+  **What does not change.** An inline array is iterated as written, and its elements are data: a `{…}` inside one was never interpolated, and is not judged now. A `loop` with no `body` is the legacy flat-graph form: it still reads `collection` as a bare variable name and sets `$loopItems` and `$loopIndex`, and no door judges it.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `collection: '{tasks}'` | `collection: { dialect: 'cel', source: 'tasks' }` | an absent `tasks` fails the node with an evaluation fault instead of a returned failure |
+  | `collection: '{record.items}'` | `collection: { dialect: 'cel', source: 'record.items' }` | as above |
+  | `collection: '{tasks}'` where an absent list should iterate nothing | `collection: { dialect: 'cel', source: 'has(vars.tasks) ? vars.tasks : []' }` | the node iterates nothing where the template failed it |
+  | `collection: 'tasks'` (a bare name, on a `loop` with a `body` or a `map`) | `collection: { dialect: 'cel', source: 'tasks' }` | the node iterates; it failed every run before, so decide whether it should |
+  | `collection: ['a', 'b']` | unchanged | an inline array is the list |
+  | `collection: 'tasks'` on a `loop` with no `body` | unchanged | the legacy flat-graph loop is untouched |
+  
+  **The one-line fix: write a `loop`'s or a `map`'s `collection` as a CEL value envelope naming the list, `{ dialect: 'cel', source: 'tasks' }`, or as an inline array.**
+  
+  **Who is affected, measured.** In this repository: the showcase example (two `loop` collections and one `map` collection), the todo example (two `loop` collections), the flows guide, the service-automation README, and test fixtures; all are migrated in this change. hotcrm writes a `{…}` collection on eleven structured loops in nine flow files (and one test fixture) and no bare name; it is on spec 17.7.0, so nothing there moves until it upgrades.
+  
+  **Newly accepted.** A CEL value envelope at `loop.collection` and `map.collection`: the published JSON Schema for both gains the envelope arm (a list, or the envelope object), and so do the inferred `LoopConfig['collection']` and `MapConfig['collection']`, which lose `string`. `FlowCollectionSlotSchema` (`@objectstack/spec/automation`) is the contract both take.
+  
+  **Still accepted, unchanged.** An inline array at both, and on a body-less `loop` any `collection` its legacy form reads.
+  
+  ### The kit
+  
+  - **The contract.** `LoopConfigSchema.collection` and `MapConfigSchema.collection` take `FlowCollectionSlotSchema`: a list or a CEL value envelope, so the executor's contract parse refuses a string as a guard, in the words above.
+  - **The ledger.** `FLOW_NODE_EXPRESSION_PATHS`' `loop.collection` and `map.collection` rows take the `value` role, and `loop.collection` is read only on a `loop` with a `body` (`onlyWithKey`). The `loop` and `map` descriptors declare the slot with `xExpression: 'value'`. The single-brace `flow-template` role, which recorded these two slots and no other, is gone from `FlowNodeExpressionRole`, so a descriptor marker `'template'` fails the reconciliation ratchet as unknown.
+  - **The executors.** The `loop` and `map` nodes evaluate an envelope through `AutomationEngine.evaluateValueEnvelope`, as every value slot does, and iterate an inline array as written. A value that is not a list fails the node, naming what it evaluated to and its source.
+  - **The lint.** `validate-flow-template-paths` reads a loop iterator's object off an envelope `collection` that names a variable, as it read the token before.
+  - **ADR-0087.** The step-18 D3 entry `flow-value-slot-template-dialect-refused` is amended. No key is removed, so there is no tombstone, and there is no D2 conversion.
+- 615c696: Each operand of a `get_record`, `update_record` or `delete_record` node's `filter` is a value slot now. A field's value, an operator's comparand and each element of a list comparand take a CEL value envelope, `{ id: { dialect: 'cel', source: 'record.id' } }`, which the executor evaluates in the run's scope before the query, or a literal handed to the query as written. A query placeholder — `{current_user_id}`, `{current_org_id}`, `{today}`, `{30_days_ago}` and the rest of the date macros — is such a literal: the query engine resolves it, and it passes untouched, as before. Every other single-brace `{…}` token at an operand is refused with its envelope: at `objectstack validate`, at `registerFlow`, at the metadata save door and by the executor's parse. An operand envelope that evaluates to `null` refuses the node, as a token that resolved to nothing did.
+  
+  Clause-②: yes (narrowing: a flow {…} token at a get_record, update_record or delete_record filter operand is refused, a whole-string query placeholder excepted, an object naming a string dialect at an operand must be a valid CEL value envelope, an operand envelope that evaluates to null refuses the node, and @objectstack/lint no longer exports validateFlowFilterTokens, FLOW_FILTER_TOKEN_UNKNOWN or FlowFilterTokenFinding and retires the flow-filter-token-unknown rule id; widening: a filter operand gains the CEL value envelope arm, the exported FlowNodeExpressionPath type gains the optional filterOperands field, ValueSlotTemplateOptions gains filterOperand, FLOW_NODE_EXPRESSION_PATHS gains the three filter rows, LEDGER_DECLARED_NODE_CONFIG_SCHEMAS gains get_record and delete_record, the published GetRecordConfig, UpdateRecordConfig and DeleteRecordConfig JSON Schemas mark filter as a value slot, and flowFilterOperands, FlowFilterOperand, classifyFlowFilterOperandString and FlowFilterOperandStringKind are new exports)
+  
+  <!-- adr-0087: not-required (already-registered flow-value-slot-template-dialect-refused) The value-slot retirement's step-18 D3 entry, registered on this line before this change, is amended in this diff: its surface widens to each operand of a get_record, update_record and delete_record filter, and its replacement, reason and acceptance criteria say what an operand evaluates to, that the query placeholders stay as written, and that an operand evaluating to null refuses the node. No new D3 entry and no D2 conversion: a whole token that resolved to nothing erased its condition and refused the node under the template, where under CEL an absent variable or key fails the run before the query; and a flow variable named like a query placeholder shadowed it under the template, where the placeholder is now always the query engine's. -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** ADR-0032 Decision 2 makes a computed value whole-field CEL — its contract table names "filter values" — and Decision 3 deletes the single brace. A CRUD filter was the last value position that read the single-brace dialect: the executor interpolated the whole filter, resolving a flow token against the run's variables and handing a token no variable resolved on to the query engine when it was a query placeholder. Two `{…}` vocabularies met in one string. The query placeholders are the query-filter surface, which ADR-0032 puts out of its scope, so they stay; the flow token goes.
+  
+  **One classifier.** `classifyFlowFilterOperandString` (`@objectstack/spec/automation`) draws the line: a string that is one whole wrapped token the query engine resolves on the server (`isKnownFilterToken`) is a placeholder and passes; any other string carrying a `{…}` token is refused; the rest is a literal. The node contracts, `registerFlow`, `objectstack validate` and the executor's parse all read it, through the value-slot judge.
+  
+  **What an operand is.** The operands are the positions a value sits at, read the way the filter grammar reads a `FilterCondition` (`flowFilterOperands`): a field's value, each entry of an operator map (`$gt`, `$in`, `$between`, …), each element of a list comparand, inside `$and`, `$or` and `$not` and inside a nested-relation condition. An envelope there is one operand, and may evaluate to a list (`{ id: { $in: { dialect: 'cel', source: 'record.ids' } } }`). The filter's keys, operators and combinators are its structure, never evaluated. The top-level `filter` is never an operand.
+  
+  **What changes where a value may be absent.** The template erased a condition whose token resolved to nothing, and the node was refused. Under CEL an absent variable or key fails the run before any query, naming it, and an envelope that evaluates to `null` — a guarded form, a field that holds no value — refuses the node with the guard's message: a condition whose comparand is `null` or nothing does not narrow a query, it widens it. So route around the node with a `decision` where the value may be absent, rather than guarding it to `null`. To match an empty field, write the literal `null` (or `{ $null: true }`), never a computed one.
+  
+  **A flow variable named like a placeholder no longer shadows it.** Under the template a flow variable named `today` or `current_user_id` won over the placeholder of the same name. No flow token is read at an operand now, so the placeholder is always the query engine's; read the variable with an envelope, `{ dialect: 'cel', source: 'today' }`. No flow, variable or output variable in this repository is named like a placeholder.
+  
+  **A related field named `dialect`.** An object at a field's value that names a string `dialect` is read as an envelope. A nested-relation condition on a related object's field named `dialect` is written through an operator map, `{ rel: { dialect: { $eq: 'x' } } }`. No object in this repository declares such a field.
+  
+  **The lint rule `flow-filter-token-unknown` retires.** It reported a `{FUNC()}` token neither the flow template dialect nor the query placeholders define at a flow filter. Every token it reported is refused now by the value-slot judge at the same position and severity, with the envelope that replaces it, so the rule, its `os explain` entry and its exports (`validateFlowFilterTokens`, `FLOW_FILTER_TOKEN_UNKNOWN`, `FlowFilterTokenFinding`) are removed rather than left reporting the same defect a second time with the retired dialect's remedy. A consumer moves to the value-slot judge's findings: rule id `flow-filter-token-unknown` → `expression-invalid` (`EXPRESSION_INVALID`); `validateFlowFilterTokens(stack)` → `validateStackExpressions(stack)`, which reports each refused operand located at its node and `config.filter.<path>`; `FlowFilterTokenFinding` → `ExprIssue`; `FLOW_FILTER_TOKEN_UNKNOWN` → `EXPRESSION_INVALID`.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `filter: { id: '{record.id}' }` | `filter: { id: { dialect: 'cel', source: 'record.id' } }` | an absent `record.id` fails the run before the query instead of refusing the node |
+  | `filter: { amount: { $gt: '{record.cap}' } }` | `filter: { amount: { $gt: { dialect: 'cel', source: 'record.cap' } } }` | a `null` cap refuses the node, as before |
+  | `filter: { id: { $in: ['{a}', '{b}'] } }` | `filter: { id: { $in: [{ dialect: 'cel', source: 'a' }, { dialect: 'cel', source: 'b' }] } }`, or one envelope evaluating to the list | — |
+  | `filter: { owner: '{$User.Id}' }` | `filter: { owner: { dialect: 'cel', source: 'current_user.id' } }` | in a run with no user `current_user` is `null` and the read fails: skip the node with a `decision` on `current_user != null` |
+  | `filter: { due: { $lt: '{TODAY() - 3}' } }` | `filter: { due: { $lt: { dialect: 'cel', source: 'isoDate(daysAgo(3))' } } }` | none for a whole number of days |
+  | `filter: { owner: '{current_user_id}' }`, `{ due: { $lt: '{today}' } }` | unchanged | a query placeholder stays the query engine's |
+  | `filter: { owner: '{today}' }` meaning a flow variable named `today` | `filter: { owner: { dialect: 'cel', source: 'today' } }` | the placeholder no longer shadows the variable |
+  
+  **The one-line fix: write each filter operand the flow computes as a CEL value envelope, and keep the query placeholders as they are.**
+  
+  **Who is affected, measured.** In this repository, at the base: seven flow tokens at a filter operand in the shipped examples (`app-crm` 2, `app-showcase` 3, `app-todo` 2 — `app-todo`'s two query placeholders stay), five in the docs (`getting-started/common-patterns`, `kernel/runtime-services/examples` 2, the `service-automation` README 2), the flows guide's and the spec's own remedy texts (a `$User.Email` read named `filter: { id: '{uid}' }`; a `recordId` refusal named `filter: { id: '{record.id}' }`) and the `FlowSchema` example; all are migrated in this change. hotcrm was not measured.
+  
+  **Still accepted, unchanged.** Every literal operand, every query placeholder, a filter's keys, operators and combinators, an empty filter, and a filter on `create_record`, which has none. The `filters` alias still converts to `filter` at load.
+  
+  ### The kit
+  
+  - **The contract.** `GetRecordConfigSchema`, `UpdateRecordConfigSchema` and `DeleteRecordConfigSchema` judge each filter operand: an envelope must be a valid CEL value envelope, and a `{…}` token in a literal is refused by the value-slot judge in its filter mode, naming the operand's envelope and what `null` does there. Each `filter`'s `describe()` and TSDoc is restated, and so are the `recordId` guidance and the run-user remedy, which named a single-brace filter value.
+  - **The ledger.** `FLOW_NODE_EXPRESSION_PATHS` gains a `filter` row per node, with the new `filterOperands` flag: both walks emit each operand at its own path (`filter.amount.$gt`, `filter.id.$in[0]`), never the filter itself. `GetRecordConfigSchema` and `DeleteRecordConfigSchema` join `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`.
+  - **The executor.** The CRUD executors parse their config as authored, evaluate each operand envelope through `AutomationEngine.evaluateValueEnvelope` before the query, hand every other operand on as written, and refuse the node — as a guard a `fault` edge cannot route — when an operand evaluates to `null`. The single-brace `interpolateFilter` is deleted.
+  - **The lint.** `objectstack validate` refuses a token at each operand position and judges an operand envelope as CEL through the shared judges; the wrong-syntax hints at a filter operand name its envelope; `flow-filter-token-unknown` retires.
+  - **ADR-0087.** The step-18 D3 entry `flow-value-slot-template-dialect-refused` is amended. No key is removed, so there is no tombstone, and there is no D2 conversion.
+- 968acc8: An `http` node reads each config key by what it is now. Its `url` and every `headers` value are text slots, like a notify `title`: they render `{{ }}` holes, `'https://api.example.com/v1/orders/{{ record.id }}'`. Its `body` is a value slot: a CEL value envelope, `{ dialect: 'cel', source: "{'id': record.id, 'status': dyn('done')}" }`, that the executor evaluates in the run's scope to the payload, or a literal sent as written. Its `method`, `durable`, `timeoutMs` and `signingSecret` are literals, read as written. A single-brace `{…}` token at any of them is refused, naming its `{{ }}` spelling at a text slot, its CEL spelling in the body, and at a literal the remedy to write the value: at `objectstack validate`, at `registerFlow` and by the executor, except at `signingSecret`, which the build doors leave to the run because the flow credential store may hold the secret it signs with, and which the executor's parse refuses there.
+  
+  Clause-②: yes (narrowing: a {…} token is refused at http url, each headers value, any string of a literal body, method, durable, timeoutMs and signingSecret, and as a whole headers map, and a body value that names a dialect must be a valid CEL value envelope; widening: the exported FlowNodeTextSlot type gains the optional eachValue field, LEDGER_DECLARED_NODE_CONFIG_SCHEMAS gains http, and the published HttpConfig JSON Schema marks body as a value slot)
+  
+  <!-- adr-0087: not-required (already-registered flow-value-slot-template-dialect-refused, flow-text-slot-single-brace-refused, flow-text-slot-unbound-dollar-root-refused, flow-builtin-node-config-values-refused) The value-slot retirement's step-18 D3 entry, registered on this line before this change, is amended in this diff: its surface widens to an http node's body and to its four literals, and its replacement, reason and acceptance criteria say what the body evaluates to and that a literal takes the value itself. The two text-slot D3 entries widen their surface to the http node's url and headers values, and the builtin-values D3 entry stops saying that http parses after interpolating. No new D3 entry and no D2 conversion: an absent value in the body wrote null or nothing under the template and fails the run under CEL, a whole token at timeoutMs or durable resolved to its value's type under the template and is read as text now, and a Date in a url or a header rendered JSON-quoted under the interpolator and as its ISO text under the template engine. -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** ADR-0032 Decision 2 makes a computed value whole-field CEL, and Decision 3 deletes the single brace; a url and a header are text. Until now the executor handed its whole config to the single-brace interpolator and parsed the result, so every key read the retired dialect, a whole token in a typed key (`timeoutMs: '{t}'`) resolved to its value's type, and a CEL envelope written as the body was sent to the endpoint as the object it spells.
+  
+  **The request is rendered once.** The executor parses the config as authored — after the flow credential store's `signingSecret`, unchanged — then renders the url and the headers and evaluates the body, before either mode. The durable outbox enqueues exactly the request the inline call would send, and nothing renders at delivery.
+  
+  **What changes where a value may be absent.** A url that renders to no text refuses the node, as an empty one did. A header that renders to no text is not sent, where the template sent it empty. In the body an absent variable or key fails the run under CEL, naming it, where the template wrote `null` for a whole token and nothing inside text; guard a value that may be unset, `has(record.owner) ? record.owner : null`. CEL holds a map's values to one type, so in a CEL map literal a literal or a text beside a field read is wrapped in `dyn(…)`.
+  
+  **The literals.** `method`, `durable`, `timeoutMs` and `signingSecret` passed through the interpolator too, but no shipped flow computed one: the census found no `{…}` token at any of them in this repository's examples, docs or dogfood fixtures, only in the tests that pinned the interpolation itself. So no value slot is built there. They are read as written, and a `{…}` token in one is refused with the literal's remedy; an envelope there is refused too, since nothing evaluates it. A token written as the whole `headers` map, which the template resolved to a map, is refused the same way. A signing secret that arrived through a template (`signingSecret: '{signing_key}'`) is refused: write the secret itself, which a flow saved through the metadata API keeps in the write-only flow credential store, or `''` to send unsigned on purpose.
+  
+  **What does not change.** Every literal is sent as written. The method still defaults to `GET` inline and `POST` durable. An authored `signingSecret: ''` still sends unsigned, and a secret the credential store holds still takes the literal's place. A url or header with no token, and a body with no token, behave as before.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `url: 'https://api.example.com/v1/orders/{record.id}'` | `url: 'https://api.example.com/v1/orders/{{ record.id }}'` | a `Date` in the url renders as its ISO text, not JSON-quoted |
+  | `headers: { 'X-Ref': 'r-{record.id}' }` | `headers: { 'X-Ref': 'r-{{ record.id }}' }` | a header that renders to no text is not sent |
+  | `body: { id: '{record.id}', status: 'done' }` | `body: { dialect: 'cel', source: "{'id': record.id, 'status': dyn('done')}" }` | an absent `id` fails the run instead of sending `null` |
+  | `body: { text: 'Done: {record.title}' }` | `body: { dialect: 'cel', source: "{'text': 'Done: ' + record.title}" }` | an absent `title` fails the run instead of sending `'Done: '` |
+  | `body: '{payload}'` | `body: { dialect: 'cel', source: 'payload' }` | an absent `payload` fails the run instead of sending no body |
+  | `timeoutMs: '{timeout}'`, `durable: '{flag}'`, `method: '{verb}'` | the value itself: `timeoutMs: 5000`, `durable: true`, `method: 'POST'` | the key is a literal now; nothing computes it |
+  | `headers: '{headers}'` | the map itself: `headers: { 'X-Ref': '{{ record.id }}' }` | a map is not computed into `headers` |
+  | `signingSecret: '{signing_key}'` | the secret itself, or `''` to send unsigned | a secret read from a flow variable is refused at the run |
+  
+  **The one-line fix: double the braces in `url` and the `headers` values, write `body` as one CEL value envelope that builds the payload, and write `method`, `durable`, `timeoutMs` and `signingSecret` as the values themselves.**
+  
+  **Who is affected, measured.** In this repository, at the base: the showcase example (three bodies holding four tokens) and the flows guide (one body); both are migrated in this change. No url, header, method, `durable`, `timeoutMs` or `signingSecret` in the examples, docs or dogfood fixtures carries a token. hotcrm was not measured at these keys.
+  
+  **Newly refused in the body.** An object naming a `dialect` was data before and was sent as written; it is an expression now, evaluated per run, and a malformed one is refused. An envelope nested inside a literal body is still data, sent as written.
+  
+  **Still accepted, unchanged.** Every literal at these keys, and the published shapes of `url` (a string), `headers` (a map of strings), `method`, `durable`, `timeoutMs` and `signingSecret`.
+  
+  ### The kit
+  
+  - **The contract.** `HttpConfigSchema`: `url` and each `headers` value refuse a single-brace token through the text-slot judge; `body` takes `FlowValueSlotSchema`; `method`, `durable`, `timeoutMs` and `signingSecret` keep their literal types, and the contract refuses a token or an envelope there with the literal's remedy. The token refusals at `method`, `durable`, `timeoutMs` and a whole `headers` map are marked read-as-written, so the build doors' value arm reports them at `FlowSchema.parse`, `objectstack validate` and `registerFlow` as the executor's parse does. Each `describe()` is restated.
+  - **The ledger.** `FLOW_NODE_EXPRESSION_PATHS` gains the `http` body row. `FLOW_NODE_TEXT_SLOTS` gains `http.url` and `http.headers`, whose new `eachValue` flag reads each value of the map at its own path (`headers.X-Ref`). `HttpConfigSchema` joins `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`, which carries the body's marker to the reconciliation ratchet. The build doors' carve-out for a config parsed after interpolation is gone with the interpolation.
+  - **The executor.** The `http` node parses its config as authored, renders the url and headers through the text renderer, evaluates the body through the shared value-slot resolver, and reads the literals as written; it no longer imports the single-brace interpolator.
+  - **The lint.** The `flow-double-brace-interpolation` hint names the http url and headers among the text slots, and at an http literal both wrong-syntax hints say that neither brace dialect resolves there and name the value itself; `objectstack validate` refuses a token at each position through the value-slot and text-slot judges and the contract.
+  - **ADR-0087.** The step-18 D3 entries `flow-value-slot-template-dialect-refused`, `flow-text-slot-single-brace-refused`, `flow-text-slot-unbound-dollar-root-refused` and `flow-builtin-node-config-values-refused` are amended. No key is removed, so there is no tombstone, and there is no D2 conversion.
+- 111ffff: A `notify` node's computed values are value slots now: `recipients`, `sourceId` and the values of `templateData` take a CEL value envelope, `{ dialect: 'cel', source: 'record.owner' }`, that the executor evaluates in the run's scope, or a literal written as it is. `recipients` holds one recipient or a list of them, each entry a string or an envelope, and an entry that evaluates to a list adds each of its recipients. The node's link, `actionUrl`, is a text slot like `title`: it renders `{{ }}` holes, `'/crm_case/{{ record.id }}'`. Its `sourceObject`, `actorId` and `payload` are literals, read as written: no flow computed one, so nothing is evaluated there. A single-brace `{…}` token at any of these positions is refused at `objectstack validate`, at `registerFlow` and by the executor, naming its CEL spelling at a value slot, its `{{ }}` spelling at `actionUrl`, and, at a literal, the remedy to write the value.
+  
+  Clause-②: yes (narrowing: a {…} token is refused at notify recipients (the value or a list entry), templateData values, sourceId, actionUrl, sourceObject, actorId and any string of a payload value, a templateData value that names a dialect must be a valid CEL value envelope, and a CEL value envelope written as a payload value is refused; widening: recipients and sourceId accept a CEL value envelope they refused, a recipients list accepts envelope entries, and their published JSON Schema and inferred types gain the envelope arm)
+  
+  <!-- adr-0087: not-required (already-registered flow-value-slot-template-dialect-refused, flow-text-slot-single-brace-refused, flow-text-slot-unbound-dollar-root-refused) The value-slot retirement's step-18 D3 entry, registered on this line before this change, is amended in this diff: its surface widens to a notify node's computed values and to its three literals, and its replacement, reason and acceptance criteria say what a recipient evaluates to, that a list adds each recipient and null none, why the list token is not rewritten, and that a literal takes the value itself. The two text-slot D3 entries widen their surface to the notify node's actionUrl. No new D3 entry and no D2 conversion: an absent variable dropped a recipient under the template and fails the run under CEL, a list token written as a list entry reached nobody under the template and reaches each recipient as an envelope, and a Date in a link rendered JSON-quoted under the interpolator and as its ISO text under the template engine. -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, beside one widening (four positions accept a CEL value envelope), shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** ADR-0032 Decision 2 makes a computed value whole-field CEL, and Decision 3 deletes the single brace; a link with holes is text. Until now the executor ran each of these positions through the single-brace interpolator, and one of its answers reached nobody: a whole token holding a list, written as an entry of a `recipients` list — `recipients: ['{owners}']` with `owners = ['u1', 'u2']` — was handed to the messaging service as ONE recipient, `'u1,u2'`, and the run reported success. A token holding a record there became the recipient `'[object Object]'`, and so did one in a link or a `sourceId`.
+  
+  **What changes where a value may be absent.** A recipient envelope that evaluates to `null` or a blank string adds no recipient, as a token that resolved to nothing did, and a node left with none fails, naming the expressions that evaluated to nothing. An absent variable or key fails the run under CEL, naming it, where the template dropped the recipient; guard a field that may be unset, `has(record.assignee) ? record.assignee : null`. A relation hop on a scalar id (`record.account.owner` without the start node's `expand`) fails the evaluation itself, naming the key it could not read, where the template resolved it to nothing. `sourceId` must evaluate to a string; `null` leaves the key unset, and a half-specified click-through pair is still dropped. A recipient, or a `sourceId`, that evaluates to anything else — a map, a number — fails the node, naming what it evaluated to.
+  
+  **The literals.** `sourceObject`, `actorId` and the values of `payload` passed through the single-brace interpolator too, but no flow computed one: the census found no `{…}` token at any of them, in this repository or in hotcrm. So no value slot is built there. They are read as written, and a `{…}` token in one — in any string of a `payload` value, at any depth — is refused with the literal's remedy: a single-brace token is not resolved here; write the value. An envelope written there is refused too, since nothing evaluates it (a deeper one inside a `payload` value is data, as it always was).
+  
+  **What does not change.** A literal at every value slot is written as it is: a recipient string (`'team:ops'`, a user id, an email address) is one recipient, as before, and is not split. `template`, `topic`, `channels` and `severity` are read raw, as before. An explicit `actionUrl` still wins over the link synthesized from `sourceObject` / `sourceId`, and a link that renders no text yields to it, as an empty one did.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `recipients: '{record.owner}'` | `recipients: { dialect: 'cel', source: 'record.owner' }` | an absent `owner` fails the run instead of leaving the node without a recipient |
+  | `recipients: ['{record.assignee}']` where it may be unset | `recipients: [{ dialect: 'cel', source: 'has(record.assignee) ? record.assignee : null' }]` | none: the `null` is dropped, as the unresolved token was |
+  | `recipients: ['{owners}']` (a list variable) | `recipients: [{ dialect: 'cel', source: 'owners' }]` | each of its recipients is notified, where the template sent one joined string |
+  | `recipients: ['{$User.Id}']` | `recipients: [{ dialect: 'cel', source: 'current_user != null ? current_user.id : null' }]` | none: a run with no user adds no recipient |
+  | `sourceId: '{record.id}'` | `sourceId: { dialect: 'cel', source: 'record.id' }` | an absent id fails the run instead of dropping the link |
+  | `sourceObject: '{record.object_name}'`, `actorId: '{record.owner}'`, `payload: { who: '{record.owner}' }` | the value itself: `sourceObject: 'crm_case'` | the key is a literal now; nothing computes it |
+  | `templateData: { name: '{record.name}' }` | `templateData: { name: { dialect: 'cel', source: 'record.name' } }` | the template gets `null` (a guard's answer) where the key was absent |
+  | `actionUrl: '/crm_case/{record.id}'` | `actionUrl: '/crm_case/{{ record.id }}'` | a `Date` in the link renders as its ISO text, not JSON-quoted |
+  
+  **The one-line fix: write each `notify` value position as a CEL value envelope, `{ dialect: 'cel', source: 'record.owner' }`, double the braces in `actionUrl`, and write `sourceObject`, `actorId` and `payload` as the values themselves.**
+  
+  **Who is affected, measured.** In this repository, at the base: the showcase example (16 recipient strings, 7 `sourceId`s and 4 links), the todo example (2 recipients and 2 `sourceId`s), the flows guide, the email-templates and common-patterns guides, two dogfood fixtures and test fixtures; all are migrated in this change, and a recipient field that may be unset is guarded. hotcrm at `1d7148bf2d` writes 19 notify nodes in 15 flow files, each with one `{…}` recipient (2 of them `{$User.Id}`), 35 `{…}` `templateData` values and a link with holes; it is on spec 17.7.0, so nothing there moves until it upgrades.
+  
+  **Newly accepted.** A CEL value envelope at `recipients` (the value, or each entry of a list) and `sourceId`: their published JSON Schema gains the envelope arm, and so do the inferred `NotifyConfig` types. At a `templateData` key an object naming a `dialect` was data before; it is an expression now, evaluated per run, and a malformed one is refused. `sourceObject`, `actorId` and `payload` keep their published shapes (a string, a string, a map of any values), with no envelope arm.
+  
+  **Newly refused at the literals.** A `{…}` token in `sourceObject`, in `actorId` or in any string of a `payload` value, and a CEL value envelope written as a `payload` value, which was handed on as the object it spells.
+  
+  **Still accepted, unchanged.** Every literal at these positions.
+  
+  ### The kit
+  
+  - **The contract.** `NotifyConfigSchema`: `recipients` takes a string, a list of strings and envelopes, or one envelope; `templateData` takes `FlowValueSlotSchema` per key; `sourceId` takes a string or an envelope; `actionUrl` refuses a single-brace token through the text-slot judge; `sourceObject`, `actorId` and `payload` keep their literal types, and the contract refuses a token or an envelope there with the literal's remedy. That refusal is marked read-as-written, so the build doors' value arm reports it at `FlowSchema.parse`, `objectstack validate` and `registerFlow` as the executor's parse does. Each `describe()` is restated.
+  - **The ledger.** `FLOW_NODE_EXPRESSION_PATHS` gains three `notify` value rows. `recipients` carries `eachElement`: a list is read entry by entry, at its index (`recipients[1]`). `FLOW_NODE_TEXT_SLOTS` gains `notify.actionUrl`. `NotifyConfigSchema` joins `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS`, which carries the markers to the reconciliation ratchet.
+  - **The executor.** The `notify` node evaluates each envelope through the shared value-slot resolver, renders `actionUrl` through the text renderer and reads the literals as written; it no longer imports the single-brace interpolator.
+  - **The lint.** The `flow-double-brace-interpolation` hint names `actionUrl` among the text slots, and at a notify literal both wrong-syntax hints say that neither brace dialect resolves there and name the value itself; `objectstack validate` refuses a token at each position through the value-slot and text-slot judges and the contract.
+  - **ADR-0087.** The step-18 D3 entries `flow-value-slot-template-dialect-refused`, `flow-text-slot-single-brace-refused` and `flow-text-slot-unbound-dollar-root-refused` are amended. No key is removed, so there is no tombstone, and there is no D2 conversion.
+- 12b9daf: A `screen` node's three positions that hand a value to the client are value slots now: an object form's `defaults` (each field's prefill), a field's `defaultValue`, and an object form's `recordId` (the record an `edit` form opens). Each value is a CEL value envelope, `{ dialect: 'cel', source: '…' }`, that the executor evaluates in the run's scope before the screen goes on the wire, so the client receives the value it computes, never the envelope; or a literal, served as written. A `{…}` template token there is refused at `objectstack validate`, at `registerFlow` and by the executor, naming its CEL spelling, as in every other value slot. `recordId` gains the envelope arm, which it refused before this change, and its literal stays a string.
+  
+  Clause-②: yes (narrowing: a {…} token is refused at screen.defaults.*, a field's defaultValue and screen.recordId; widening: screen.recordId accepts a CEL value envelope it refused, and its published JSON Schema and inferred type gain the envelope arm)
+  
+  <!-- adr-0087: not-required (already-registered flow-value-slot-template-dialect-refused) The value-slot retirement's step-18 D3 entry, registered on this line before this change, is amended in this diff: its surface widens to a screen's defaults map, a field's defaultValue and recordId, and its replacement, reason and acceptance criteria say what each serves where the template served nothing. No new D3 entry and no D2 conversion: every whole-path spelling answers differently for an absent value. -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, beside one widening (`recordId` accepts a CEL value envelope), shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** ADR-0032 Decision 2 makes a computed value whole-field CEL, and Decision 3 deletes the single brace. A screen's prefill and its record id are computed values handed to the client. Until now the executor ran each through the single-brace interpolator: a `{token}` resolved there, an envelope written in `defaults` or a `defaultValue` went to the client as the object `{ dialect: 'cel', source: '…' }` it spells, and `recordId` was the text of whatever the token found, so a token that found a record served the id `[object Object]`.
+  
+  **What changes where a value may be absent.** Where a whole token resolved to nothing, the template served nothing there. Under CEL an absent variable or key fails the run at the screen, with its source, and the guarded form `has(vars.x) ? vars.x : null` serves `null`:
+  
+  - In an object form's `defaults`, the form keeps a `null` prefill as a value and opens the field blank, over the object field's own `defaultValue`, which it applied when the prefill left the field out. To keep that default for an absent value, write it in the guard: `has(vars.x) ? vars.x : 'prospecting'`.
+  - A field's `defaultValue` seeds the field with `null`.
+  - `recordId` must evaluate to the record's id, a non-blank string. Anything else, `null` included, fails the run at the screen. The template served such a screen with no record id, and its `edit` form opened with no record and could not save. Where the record may be absent, route around the screen with a `decision` on the value instead of guarding the id.
+  
+  The refusal at each position says what it serves.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `defaults: { account: '{account_id}' }` | `defaults: { account: { dialect: 'cel', source: 'account_id' } }` | an absent `account_id` fails the run; guarded, it prefills `null` and the field opens blank over the object field's `defaultValue` |
+  | `defaults: { stage: '{x}' }` where the object field's default should apply when `x` is absent | `defaults: { stage: { dialect: 'cel', source: "has(vars.x) ? vars.x : 'prospecting'" } }` | the default is written in the guard, because a `null` prefill is a value |
+  | `defaults: { parent: '{rec}' }` | `defaults: { parent: { dialect: 'cel', source: 'rec' } }` | the record is served as a map, a list as a list |
+  | `fields: [{ name: 'email', defaultValue: '{lead.email}' }]` | `fields: [{ name: 'email', defaultValue: { dialect: 'cel', source: 'lead.email' } }]` | guarded, it prefills `null` |
+  | `recordId: '{record.id}'` | `recordId: { dialect: 'cel', source: 'record.id' }` | the envelope must evaluate to a non-blank string id: `null`, a map or a list fails the run at the screen |
+  | `recordId: 'acc_1'` | unchanged | a string literal is the id |
+  
+  **The one-line fix: write each value of a screen's `defaults`, each field's `defaultValue` and an object form's `recordId` as a CEL value envelope; write the object field's default into the guard where it should apply, and route around a screen whose record may be absent.**
+  
+  **Who is affected, measured.** In this repository: the CRM example's lead conversion (`crm_convert_lead_wizard`: 3 `defaults` values in its two object-form steps), the object-form example in the flows guide, and test fixtures; all are migrated in this change. hotcrm's sites at these positions were not measured.
+  
+  **Newly accepted.** A CEL value envelope at `recordId`, which `z.string()` refused before this change: the published JSON Schema for `recordId` gains the envelope arm (a string, or the envelope object), and so does the inferred `ScreenConfig['recordId']`.
+  
+  **Still accepted, unchanged.** A CEL value envelope at `defaults` and at a field's `defaultValue`, and every literal at all three, a string `recordId` included.
+  
+  ### The kit
+  
+  - **The contract.** `ScreenConfigSchema.defaults` and a field's `defaultValue` take `FlowValueSlotSchema`, and `recordId` takes a string or a CEL value envelope (`@objectstack/spec/automation`), so the executor's contract parse refuses a token as a guard. Each published JSON Schema declares the dropped refinement (`dropped-refinements.baseline.json`).
+  - **The ledger.** `FLOW_NODE_EXPRESSION_PATHS` gains `screen.defaults.*`, `screen.fields[].defaultValue` and `screen.recordId` (role `value`), and `LEDGER_DECLARED_NODE_CONFIG_SCHEMAS` carries `ScreenConfigSchema`. `registerFlow`, `objectstack validate` and `flow-bare-dollar-reference` / `flow-double-brace-interpolation`'s value-slot hints follow the ledger, so all of them cover the three positions. The build doors keep refusing a `recordId` literal that is not a string, as before.
+  - **The executor.** The `screen` node resolves each position through the value-slot resolver the CRUD `fields` map and a callee's input share: an envelope is evaluated by `AutomationEngine.evaluateValueEnvelope` in the run's scope, before the screen is served. A screen that passes through without pausing goes on no wire, and evaluates nothing.
+  - **ADR-0087.** The step-18 D3 entry `flow-value-slot-template-dialect-refused` is amended. No key is removed, so there is no tombstone, and there is no D2 conversion.
+- 7958bdf: No flow position reads the single-brace `{…}` template dialect any more, and its resolver is deleted (ADR-0032 Sequencing 6: "delete the single-brace resolver"). `AutomationEngine.evaluateCondition` evaluates every condition as CEL: a condition carrying a `{var}` hole is refused as the CEL brace trap, naming its source, and a `template` or `flow` envelope is refused before evaluation, where the deleted path substituted the variables and compared the text. A literal in a value slot is handed on as written: a `Date` in a code-defined flow reaches the write as the `Date`, where the deleted interpolator wrote `{}`.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered flow-value-slot-template-dialect-refused, flow-text-slot-single-brace-refused) The two step-18 D3 entries, registered on this line before this change, record the retirement of the single-brace dialect from every value and text position; this change deletes the resolver behind those positions and the condition path no registered flow reached. No authorable flow surface changes: registerFlow and objectstack validate already refused a braced condition and a template or flow envelope at every condition slot (ADR-0032 §1a), and the residual calls the resolver kept saw literals only. No new D3 entry and no D2 conversion. -->
+  
+  **BREAKING**: a narrowing of a published runtime method and of published lint exports, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** ADR-0032 Decision 3 keeps one template delimiter, `{{ }}`, and its Sequencing 6 deletes the single-brace resolver. The earlier changes on this line retired the dialect position by position — every value slot, the text slots, each CRUD filter operand — so the resolver's last readers were two calls that saw literals only and a condition path that only a direct call reached.
+  
+  **What changes.**
+  
+  - **Conditions.** `AutomationEngine.evaluateCondition(condition, variables, context?)` reads every condition as CEL — bare text, an envelope with `dialect: 'cel'`, or one naming no dialect. The template path it kept for a string carrying a `{var}` hole is deleted: such a string is refused as a CEL fault that names its source and says not to wrap field references in `{…}`, and an envelope with `dialect: 'template'` or `dialect: 'flow'` is refused before evaluation. `registerFlow` already refused both at every condition slot (a start node's `condition`, an edge `condition`, a `decision` branch's `expression`, a screen field's `visibleWhen`), so no registered flow changes. What changes is a direct caller: a plugin calling the method, or `@objectstack/verify`'s `stack.automation.evaluateCondition`, which hands the condition over as given.
+  - **Value-slot literals.** A literal in a value slot — a `fields`, `input` or `templateData` value, an `assignment` value in any of its three shapes, a `notify` recipient, an `http` `body`, a screen's `defaults`, `defaultValue` or `recordId` — is handed on as a copy of what was written (arrays and plain objects copied, every other value as it is). The deleted interpolator walked every object's own entries, so a `Date` written in a code-defined flow reached the write as `{}`; it reaches it as the `Date`.
+  - **`@objectstack/lint`.** `validateFlowTemplatePaths` reads the `{{ }}` holes of a node's strings and no single-brace token; a CRUD node's `filter` is not scanned, since each operand is a value slot that renders no template. So `flow-template-unknown-field` and `flow-template-lookup-traversal` report only `warning` now: their `error` at a filter operand, and every finding on a single-brace token, are gone, and the value-slot and text-slot judges refuse those tokens at the same doors as `expression-invalid`. Messages and hints spell a hole `{{ record.x }}`. `flow-double-brace-interpolation` and `flow-bare-dollar-reference`, at a string outside every value slot, text slot and declared literal (a plugin node's own config, a `connector_action` input), say the value is read as written, where they prescribed a `{var}` token nothing reads. The lint's mirror of the retired grammar is removed with its exports.
+  - **`@objectstack/spec`.** The `FlowSchema` example's `connector_action` input holds a literal, since nothing reads a token there. The upgrade guide's step-18 text-slot entry says no other flow string reads the single-brace dialect, where it said every other one kept it, and its value-slot entry names every value slot the retirement reached on this line, where it named only the `assignment` values and the CRUD `fields` map.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `engine.evaluateCondition('{amount} > 100', vars)` | `engine.evaluateCondition('amount > 100', vars)` | the template substituted text and compared it; CEL compares the values and fails the run on an absent variable |
+  | `"{status} == 'open'"`, `'{status} == open'` | `"status == 'open'"` | a string literal is quoted |
+  | `{ dialect: 'template', source: "{flag} == true" }`, `dialect: 'flow'` | `{ dialect: 'cel', source: 'flag == true' }` | — |
+  | `classifyFlowTemplateToken(inner)` (`@objectstack/lint`) | `valueSlotTemplateRefusals(value)` / `textSlotTemplateRefusal(text)` (`@objectstack/spec/automation`), which refuse a token with the spelling that replaces it | the grammar it classified is read by nothing |
+  | `FLOW_TEMPLATE_DATE_FUNCTIONS`, `FLOW_TEMPLATE_VALUE_FUNCTIONS` | the CEL stdlib: `isoDate(today())`, `isoDatetime(now())`, `round`, `floor`, `ceil`, `abs`, `min`, `max` | — |
+  | `FlowTemplateTokenVerdict` | nothing: the judges' reading of the retired grammar is internal to `@objectstack/spec` | — |
+  
+  **The one-line fix: write a condition as CEL, without `{…}` around a reference.**
+  
+  **Who is affected, measured.** In this repository at the base: no braced condition and no `template` or `flow` condition envelope in `examples/`, the docs or any package source; the deleted path's own pins in `@objectstack/service-automation` (`engine.test.ts`, `nested-region-parity.test.ts`) and `@objectstack/verify`'s door test are re-pinned to the refusal here. No authored `Date` literal in a flow was found; a compiled artifact serialises one to text, so only a flow handed to `registerFlow` in code carried one. Neither repository imports the removed lint exports. hotcrm at `0f84c9c` carries no braced condition and no `connector_action` input; its flows still author the single-brace dialect at value and text positions earlier changes on this line refuse, which its own upgrade migrates.
+  
+  ### The kit
+  
+  - **The engine.** `AutomationEngine.evaluateCondition` (`@objectstack/service-automation`): the template path, its hole discriminator and its text comparison are deleted. The value-slot resolvers' literal arm and the `assignment` executor copy a literal (`copyLiteral`, `builtin/value-slot-map.ts`). The single-brace interpolator (`interpolate`, `interpolateString`, `resolveToken`, its function table and `FlowExpressionFunctionError`), which the package did not export, is deleted with its tests.
+  - **The lint.** `validateFlowTemplatePaths` and the two wrong-syntax hints (`lint-flow-patterns.ts`); `classifyFlowTemplateToken`, `FLOW_TEMPLATE_DATE_FUNCTIONS`, `FLOW_TEMPLATE_VALUE_FUNCTIONS` and `FlowTemplateTokenVerdict` are removed.
+  - **The verify handle.** `stack.automation.evaluateCondition`'s documentation states the engine's reading: CEL, a `{var}` hole refused.
+  - **ADR-0087.** No new entry: the step-18 D3 entries `flow-value-slot-template-dialect-refused` and `flow-text-slot-single-brace-refused` record the retirement.
+- d85615d: A flow VALUE slot now refuses the date macros as well — `{TODAY()}`, `{NOW()}`, with an optional `± N` day offset — so it reads no single-brace `{…}` token at all. Each is refused at `objectstack validate`, at `registerFlow` and by the executor, naming its CEL string form: `isoDate(today())`, `isoDate(daysFromNow(N))` / `isoDate(daysAgo(N))`, `isoDatetime(now())`, `isoDatetime(addDays(now(), N))`.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered flow-value-slot-template-dialect-refused, flow-text-slot-single-brace-refused) The value-slot retirement's step-18 D3 entry, registered on this line before this change, is amended in this diff to refuse the date macros and name their CEL string forms; the text-slot entry is amended where its remedy computed a date macro through the value-slot spelling this change refuses. No new D3 entry and no D2 conversion. -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** The template dialect is retired from the value slots: one dialect per slot, with a remedy for every spelling. The date macros were the last spelling kept, because CEL had no string form for a timestamp: `today()` and `now()` reach the data engine as a `Date` object, not the ISO text the macros wrote. The CEL stdlib now has one — `isoDate(t)` (`YYYY-MM-DD`) and `isoDatetime(t)` (`YYYY-MM-DDTHH:mm:ss.sssZ`), on the UTC calendar the macros rendered on — so the macros can be refused with a remedy that writes the same text.
+  
+  **What is refused.** In every value slot — `create_record` / `update_record` `fields`, the `assignment` node's `assignments` map, and both legacy `assignment` shapes — a string carrying a date macro, alone or beside other text and tokens. A string that mixed a date macro with another token used to be kept whole, the run-user token included (`'Due {TODAY()} by {$User.Id}'`); it is refused now, with a remedy for every token.
+  
+  **Where the remedy parts from the template.** For no offset or a whole number of days the CEL form writes the template's text byte for byte, at every instant (measured live through both engines over DST transitions, month and year ends and a leap day). The refusal names the three places it does not:
+  
+  - a fractional offset: the template added it to the day of the month and truncated the sum, `addDays` truncates the offset itself — going back, a day apart on most days of a month — and `daysFromNow(1.5)` / `daysAgo(1.5)` are refused at build;
+  - a variable offset (`{TODAY() + days}`): the template looked the offset up as one variable name and added 0 days, without a word, when it found none or the value was not a number; CEL reads the path, and fails the run on an absent variable or a value that is not a number;
+  - an offset that is neither a number nor a variable name (`{TODAY() + 3d}`): the template added 0 days.
+  
+  **Where an envelope is literal data, the remedy names none there.** The refusal used to prescribe an envelope at whatever position it refused a token. Inside an object or list value, and in the legacy `assignment` shapes, the executor reads an envelope as data: the prescribed metadata registered and stored the envelope object. The refusal there now names what evaluates — the whole value built as one CEL map or list literal (mixed values each wrapped in `dyn(…)`), or the assignment moved into the `assignments` map. This holds for every token, not only the date macros. An envelope-shaped object in those positions is still data, unchanged.
+  
+  **The `has()` guard a refusal names now holds for an absent variable.** For a path that may be absent, the refusal named a guard on its last key, `has(source.id) ? source.id : null`. `has()` evaluates everything but its last selection, so where the variable itself was never bound — an `isInput` variable the caller left out, with no default — that guard failed the run (`Unknown variable: source`). The guard now tests each step off `vars`, which holds only the variables the run has bound: `has(vars.source) && has(vars.source.id) ? vars.source.id : null` answers `null` there, and where a key on the way is absent or `null`. `flow-bare-dollar-reference`'s value-slot hint carries the same guard.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `'{TODAY()}'` | `{ dialect: 'cel', source: 'isoDate(today())' }` | nothing |
+  | `'{TODAY() + 7}'`, `'{TODAY() - 3}'` | `{ dialect: 'cel', source: 'isoDate(daysFromNow(7))' }`, `{ dialect: 'cel', source: 'isoDate(daysAgo(3))' }` | nothing for a whole number of days; a fraction truncates differently, and `daysFromNow` / `daysAgo` refuse one at build |
+  | `'{NOW()}'` | `{ dialect: 'cel', source: 'isoDatetime(now())' }` | nothing |
+  | `'{NOW() + 2}'`, `'{NOW() - 1}'` | `{ dialect: 'cel', source: 'isoDatetime(addDays(now(), 2))' }`, `{ dialect: 'cel', source: 'isoDatetime(addDays(now(), -1))' }` | nothing — `addDays` keeps the time of day, where `daysFromNow` would land on midnight |
+  | `'{TODAY() + days}'` | `{ dialect: 'cel', source: 'isoDate(addDays(today(), days))' }` | an absent `days`, or one that is not a number, fails the run where the template silently added 0 |
+  | `'Due {TODAY()} by {$User.Id}'` | `{ dialect: 'cel', source: "'Due ' + isoDate(today()) + ' by ' + current_user.id" }` | guard the run user where a flow can run without one |
+  | `payload: { due: '{TODAY()}' }` (a string inside an object value) | `payload: { dialect: 'cel', source: "{'due': isoDate(today())}" }` | an envelope written at `payload.due` would be stored as an object |
+  | the guard an earlier refusal named, `has(source.id) ? source.id : null` | `has(vars.source) && has(vars.source.id) ? vars.source.id : null` | `null` where `source` was never bound, where the last-key guard failed the run |
+  | a text slot's `assignments: { due: '{TODAY() + 7}' }`, then `'Due {{ due }}'` | `assignments: { due: { dialect: 'cel', source: 'isoDate(daysFromNow(7))' } }`, then `'Due {{ due }}'` | nothing for a whole number of days |
+  
+  **The one-line fix: write a date macro as `isoDate(…)` / `isoDatetime(…)` in a CEL envelope, with a whole number of days.**
+  
+  **Who is affected, measured.** This repository's examples carry no date macro in a value slot; its own test fixtures and docs that did are migrated in this change. The census taken for this retirement's first change measured 15 date-macro value-slot sites in hotcrm at `c529de2` (8 `{NOW()}`, 3 `{TODAY()}`, 3 `{TODAY() + N}`, 1 `{TODAY() + var}`); they migrate there. Deployed metadata and other repositories were not measured here.
+  
+  **Still accepted, unchanged.** A CEL value envelope and every literal.
+  
+  ### The kit
+  
+  - **The refusal.** `valueSlotTemplateRefusals` / `flowNodeValueTemplateRefusals` (`@objectstack/spec/automation`) keep no token; the text-slot judge's date-macro remedy (`textSlotTemplateRefusal`) names the CEL envelope. `FlowValueSlotSchema` / `AssignmentValueSchema` say so in their descriptions.
+  - **The ledger.** The step-18 D3 entries `flow-value-slot-template-dialect-refused` (amended to refuse the date macros and name their forms) and `flow-text-slot-single-brace-refused` (its date remedy). No key is removed, so there is no tombstone, and there is no D2 conversion.
+  - **`@objectstack/lint`.** `flow-double-brace-interpolation`'s hint in a value slot names the CEL envelope for the holes the author meant, where it named `{record.title}`, which the slot refuses; `flow-bare-dollar-reference`'s value-slot hint asks the judge at the string's own position, so a nested or legacy-shape string gets the spelling that evaluates there, and carries the judge's step-by-step `has()` guard.
+  - **`@objectstack/service-automation`'s README.** Its *Expressions* section names the date macros' CEL forms.
+- 6a06e3b: A flow VALUE slot now refuses the run-user template token `{$User.<path>}` as well, and every CEL expression in a flow sees **`current_user`**, the run's user. `{$User.Id}` in a `create_record` / `update_record` `fields` value or an `assignment` value is refused at `objectstack validate`, at `registerFlow` and by the executor, naming `current_user.id` and, for a flow that can run without a user, its guard; every other `$User` path is refused saying it never resolved.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered flow-value-slot-template-dialect-refused, flow-text-slot-single-brace-refused, flow-text-slot-unbound-dollar-root-refused) The value-slot retirement's step-18 D3 entry, registered on this line before this change, is amended in this diff to refuse the run-user paths and name their remedies; the two text-slot entries are amended where their remedy computed the run user through the value-slot spelling this change refuses. No new D3 entry and no D2 conversion: a user-less run answers the template's nothing with null or a fault, which no conversion can make lossless. -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** The template dialect is retired from the value slots, one dialect per slot, with a remedy for every spelling. The run user was the one path spelling kept, because the flow CEL scope bound no user: `current_user.id` passed `objectstack validate` and `registerFlow`, then failed the run with `Unknown variable: current_user`. The scope now binds it, so the token can be refused with a remedy that evaluates.
+  
+  **What `current_user` is.** In every flow CEL expression — a start-node `condition`, an edge `condition`, a `decision` condition, a screen field's `visibleWhen`, an `assignment` or `fields` value envelope — `current_user` is the run's user, built through `createEvalUser` from what the run context holds: `id` (the run's `userId`), `positions`, `organizationId` (the run's `tenantId`) and the derived `isPlatformAdmin`. No run carries an email or a name, so neither is bound. A run with no user — a schedule, a record change made by a system write — sees `null`, never a stand-in user: `current_user.id` then fails the run loudly, and `current_user != null` can guard it. A `runAs: 'system'` run sees the user that triggered it, as `{$User.Id}` did. A flow variable named `current_user` is shadowed by the binding, as one named `vars` is by the variables namespace; both are read as `vars["current_user"]` / `vars["vars"]`, and the refusal of a `{vars.…}` or `{current_user.…}` path token prints that spelling.
+  
+  **The expression remedy.** A refused `{…}` arithmetic token's CEL spelling now reads every variable path in it the way a lone path token's does — `{int * 2}` is `vars["int"] * 2`, `{items.0 * 2}` is `items[0] * 2` — instead of rewriting only its divisors, which printed envelopes that did not evaluate.
+  
+  **Still accepted, unchanged.** A CEL value envelope and every literal.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `'{$User.Id}'` | `{ dialect: 'cel', source: 'current_user.id' }` | nothing when the run has a user |
+  | `'{$User.Id}'`, in a flow that can run without a user | `{ dialect: 'cel', source: 'current_user != null ? current_user.id : null' }` — or skip the node with `current_user != null` as a start condition or a `decision` | the guarded form writes `null` where the template wrote nothing, so on `update_record` it clears a stored value the template left alone |
+  | `'{$User.Email}'`, `'{$User.Name}'`, any other `$User` path | a `get_record` on `sys_user` with `filter: { id: { dialect: 'cel', source: 'current_user.id' } }` and `outputVariable: 'me'`, then `{ dialect: 'cel', source: 'me.email' }` | these never resolved in any shipped run: they wrote nothing |
+  | `'Owner: {$User.Id}'` | `{ dialect: 'cel', source: "'Owner: ' + current_user.id" }` | in a user-less run, write the hole as `(current_user != null ? current_user.id : '')` |
+  | a text slot's `assignments: { by: '{$User.Id}' }`, then `'By {{ by }}'` | `assignments: { by: { dialect: 'cel', source: 'current_user.id' } }`, then `'By {{ by }}'` | nothing when the run has a user; where the flow can run without one, compute `current_user != null ? current_user.id : null`, which renders nothing where the template did |
+  
+  **The one-line fix: write `current_user.id` where you wrote `{$User.Id}`, and guard it where the flow can run without a user.**
+  
+  **Who is affected, measured.** This repository's two authored value-slot sites are migrated in this change: the `examples/app-todo` quick-add screen flow (a screen flow always has a user, so the bare read) and the `os explain flow` catalog example, an `update_record` under a record-after-create trigger, which a system write fires with no user; it now gates on `current_user != null` in its start condition, so the stored value is left alone there as before. `examples/app-showcase`'s `{$User.Id}`, a `notify` `recipients` entry, is migrated to `current_user` with the `notify` value slots on this line. Other repositories and deployed metadata were not measured here.
+  
+  ### The kit
+  
+  - **The binding.** `AutomationEngine.celScope` (`@objectstack/service-automation`); `evaluateCondition` and `evaluateValueEnvelope` take the run context as an optional last argument, which every engine site and the `assignment`, `decision`, `create_record` and `update_record` executors pass. Without one, `current_user` is `null`.
+  - **The refusal.** `valueSlotTemplateRefusals` / `flowNodeValueTemplateRefusals` (`@objectstack/spec/automation`); the text-slot judge's run-user remedy (`textSlotTemplateRefusal`) now computes the id with the CEL envelope.
+  - **The ledger.** The step-18 D3 entries `flow-value-slot-template-dialect-refused` (amended to refuse the run-user paths), `flow-text-slot-single-brace-refused` and `flow-text-slot-unbound-dollar-root-refused` (their run-user remedy). No key is removed, so there is no tombstone, and there is no D2 conversion.
+  - **`@objectstack/cli`.** `os explain flow`'s example writes `current_user.id` and gates on `current_user != null`.
+  - **`@objectstack/lint`.** `flow-bare-dollar-reference`'s hint for a bare `$name.path` in a value slot names the CEL envelope the value-slot refusal writes for it — `current_user.id` and its guard for `$User.Id`, the variable the reference names for any other — where it named `{source.id}` and `{$User.Id}`, both refused there. A text slot's hint keeps the `{{ }}` hole, and the hint at a node's literal, or at any other position, names the value itself.
+  - **`@objectstack/service-automation`'s README.** Its *Expressions* section states the value-slot envelope and `current_user`.
+- 0e9e7b7: A flow VALUE slot no longer reads the single-brace `{…}` template dialect: a `create_record` / `update_record` `fields` value or an `assignment` value that carries a `{…}` token is refused at `objectstack validate`, at `registerFlow` and by the executor, with the CEL spelling of each token. A computed value is a CEL value envelope, `{ dialect: 'cel', source: '…' }`; a string is the literal text it spells.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered flow-value-slot-template-dialect-refused -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** Since #19938 the value slots also evaluate a CEL value envelope, so a flow had two dialects for one job — two function sets, two meanings of `/`, and a template that wrote nothing where CEL refuses. The maintainer's ruling D on the flow expression dialects put the template's retirement from these slots on the v18 train, with a remedy for every spelling and an automatic conversion only where one is lossless (ADR-0087 D2).
+  
+  **What is refused.** In every value slot — `create_record.fields.*`, `update_record.fields.*`, the `assignment` node's `assignments` map, and the two legacy `assignment` shapes the executor still reads (the `assignments: [{ variable, value }]` array and the bare `{ <variable>: <value> }` config) — a string, or a string at any depth of an array or object value, that carries a `{…}` token the interpolator would resolve. One judge says it everywhere (`flowNodeValueTemplateRefusals` / `valueSlotTemplateRefusals` in `@objectstack/spec/automation`): `FlowValueSlotSchema`, `AssignmentValueSchema`, `CreateRecordConfigSchema`, `UpdateRecordConfigSchema` and `AssignmentConfigSchema` refuse it at the value's path; `objectstack validate` reports it as `expression-invalid` at `error`, located at the node and `config.<path>`, which also refuses it at the metadata save door; `registerFlow` refuses the flow (a stored flow carrying one is skipped at boot with a warn naming it); and the `create_record` / `update_record` / `assignment` executors refuse the node before writing anything. Each refusal leads with `VALUE_SLOT_TEMPLATE_REFUSAL` and then names the CEL spelling of the string's tokens.
+  
+  **Not converted.** No D2 conversion rewrites any spelling: every token spelling authored in flows answers differently under CEL for some input (measured through both engines over the same variables, 13 of 25 probes the same, 12 different), so a rewrite would change what some flow writes. Where a value may be absent, whether the field should take nothing, `null` or a default was decided silently by the template; it is now the author's decision.
+  
+  **What is still accepted, unchanged.** A CEL value envelope and every literal (a token-free string, numbers, booleans, `null`, arrays, objects). A text slot (`notify` `title` / `message`, a screen `description`, …) reads `{{ }}` holes and refuses a single-brace token.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `'{record.owner}'`, `'{x}'` | `{ dialect: 'cel', source: 'record.owner' }` | CEL refuses an absent variable or key where the template wrote nothing — guard one that may be absent a step at a time from `vars`: `has(vars.record) && has(vars.record.owner) ? vars.record.owner : null`, `has(vars.x) ? vars.x : null` (writes `null`) |
+  | `'{items.0}'` | `{ dialect: 'cel', source: 'items[0]' }` | an empty list fails the run |
+  | `'{$error.message}'` | `{ dialect: 'cel', source: 'vars["$error"].message' }` | a `$`-named variable is read through `vars` |
+  | `'{round(x * 100) / 100}'` | `{ dialect: 'cel', source: 'round(x * 100) / 100.0' }` | CEL divides two integers as integers: keep a decimal operand on every division, or `123.46` becomes `123` |
+  | `'Renewal — {contract.number}'` | `{ dialect: 'cel', source: "'Renewal — ' + contract.number" }` | wrap a non-string hole in `string(…)`, one that may be null in `coalesce(…, '')` |
+  | braces meant literally, `'{"a": 1}'` | `{ dialect: 'cel', source: "'{\"a\": 1}'" }` | a CEL string literal |
+  
+  **The one-line fix: write the CEL spelling the refusal names, and guard a value that may be absent.**
+  
+  **Who is affected, measured.** A TypeScript-AST census of every `create_record` / `update_record` `fields` value and `assignment` value (all three shapes, same-file spreads included): this repository at `959c209d5` carried 21 authored sites (`examples/**` and `packages/verify/src`) — 20 refused by this change (9 bare references, 10 dotted paths, 1 `$error` path, all migrated in this change) and 1 `{$User.Id}` (`examples/app-todo`), which the run-user refusal on this line refuses and migrates; hotcrm at `c529de2` carries 91 (2 of them through a same-file spread) — 71 refused by this change (31 bare references, 36 dotted paths, 4 text with holes) and 20 that the date-macro and run-user refusals on this line refuse (15 date macros, 5 `{$User.Id}`). Deployed metadata and other repositories were not measured.
+  
+  ### The kit
+  
+  - **The refusal.** `automation/flow-value-slot-template.ts` (`VALUE_SLOT_TEMPLATE_REFUSAL`, `valueSlotTemplateRefusals`, `flowNodeValueTemplateRefusals`), composed into the value-slot contracts in `automation/builtin-node-config.zod.ts`; one new dropped-refinement site (`automation/AssignmentConfig` `out.catchall`, the bare legacy shape's values).
+  - **The doors.** `AutomationEngine.registerFlow` and the `create_record` / `update_record` / `assignment` executors (`@objectstack/service-automation`); `validateStackExpressions` (`@objectstack/lint`), whose `warning` hint pointing a template expression at the envelope this refusal replaces.
+  - **The ledger.** The D3 semantic entry `flow-value-slot-template-dialect-refused` (protocol 18). No key is removed, so there is no tombstone, and there is no D2 conversion: no authored spelling maps losslessly.
+- 2b61f2d: A flow TEXT slot — a `notify` node's `title` and `message`, a `screen` node's `title` and `description`, a refusing `end` node's `message` — reads ADR-0032 §3's `{{ }}` template holes, rendered by the formula template engine over the flow's variables. A single-brace `{…}` token in one is refused at `objectstack validate`, at `registerFlow` and by the node's contract, with the `{{ }}` spelling of each token.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered flow-text-slot-single-brace-refused -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** ADR-0032 Decision 3 fixes one template delimiter: "One delimiter, `{{ }}`; single `{ }` deleted." The notify pair was already typed as `template` slots, while the executor read the single brace, so a flow carried two template dialects and an author who met both mixed them.
+  
+  **What changes.**
+  
+  - **The renderer.** The text slots render through one renderer inside `@objectstack/service-automation` (package-internal; the package's public exports do not change): `{{ path }}` and `{{ path | formatter[:arg] }}` holes, every other character literal. A hole reads a flow variable by name (`{{ record.name }}`, a node output `{{ lookup.result }}`, an index `{{ rows.0.subject }}` or `{{ rows[0].subject }}`, and a `$`-named one: `{{ $error.message }}`). `null` and an absent path render nothing, an object or array renders as JSON, a `Date` as its ISO text; the ADR-0032 formatters make the rest explicit (`{{ amount | currency }}`, `{{ due | date:long }}`). A hole holds no logic.
+  - **The refusal.** One judge in `@objectstack/spec/automation` (`textSlotTemplateRefusal`, `flowNodeTextSlotSources`, `FLOW_NODE_TEXT_SLOTS`, `TEXT_SLOT_TEMPLATE_REFUSAL`): `NotifyConfigSchema`, `ScreenConfigSchema` and `EndConfigSchema` refuse a single-brace token at the slot's key; `registerFlow` and `objectstack validate` (`expression-invalid`, `error`) refuse it with the same words and also compile every slot's holes, so `{{ a + b }}` or an unknown formatter is refused before a run. A stored flow carrying one is skipped at boot with a warn naming it. Past the doors, a hole that does not compile fails the node with a guard refusal, which a `fault` edge does not route.
+  - **`@objectstack/formula`.** A template hole's path may contain `$` (`{{ $error.message }}`): a widening of the hole grammar, so a host scope's `$`-named variable has a template spelling. An unbound one renders nothing, like any unknown path.
+  - **`flow-double-brace-interpolation`** no longer flags `{{ }}` on the text slots, and its hint names them as the only `{{ }}` positions; a bare `$ref.x` outside the holes of a text slot is flagged with the hole spelling.
+  - **Unchanged:** the value slots are CEL's.
+  
+  **Not converted.** No ADR-0087 D2 conversion rewrites `{x}` to `{{ x }}`. The two renderers were run over the same variables: a path renders the same text for a string, a number, a boolean, `null`, an absent key or variable, an ISO date string, an object or an array, but a `Date` value rendered JSON-quoted under the 17.x interpolator (`"2026-10-08T09:30:00.000Z"`, quotes included) and as its ISO text now, and a screen or `end` text that was one token holding an object, an array or a `Date` rendered `String(value)` (`[object Object]`). So the rewrite is the author's to check; the D3 record is the semantic entry `flow-text-slot-single-brace-refused`.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `title: 'Deal won: {record.name}'` | `title: 'Deal won: {{ record.name }}'` |
+  | `message: 'Failed: {$error.message}'` | `message: 'Failed: {{ $error.message }}'` |
+  | `message: 'Total {amount * 2}'`, `'{round(x)}'` | compute it first — `assignments: { v: { dialect: 'cel', source: 'amount * 2' } }` — then `'Total {{ v }}'` (a number format is a formatter: `{{ v \| number:2 }}`) |
+  | `message: 'Due {TODAY() + 7}'`, `'By {$User.Id}'` | compute it first with an `assignment` node's CEL value envelope — `assignments: { due: { dialect: 'cel', source: 'isoDate(daysFromNow(7))' }, by: { dialect: 'cel', source: 'current_user.id' } }` — then `'Due {{ due }}'`, `'By {{ by }}'` |
+  
+  **The one-line fix: double the braces of every path token in a text slot (`{x}` → `{{ x }}`), and compute anything else into a variable first.**
+  
+  **Who is affected, measured.** This repository's in-tree text-slot sites — `examples/app-showcase` (24 strings, 30 tokens) and `examples/app-todo` (5 strings, 7 tokens), all of them paths — are rewritten in this change, with the docs pages that taught the single brace (`content/docs/automation/flows.mdx`, `content/docs/getting-started/common-patterns.mdx`). Other repositories and deployed metadata were not measured here.
+
+### Minor Changes
+
+- 1b40780: feat(automation)!: an approval decision resumes a flow as the person who decided
+  
+  Clause-②: yes (narrowing). The narrowing: under `runAs: 'user'`, a post-decision node that the submitter's rights admitted and the decider's do not is now refused (ruling A item 3). The widening: three published interfaces each gain one optional member, `ResumeSignal.resumedBy` (`@objectstack/spec/contracts`) and the `resumedBy` field on `ApprovalResumeSurface`'s resume signal and on `StrandedContinuationSignal` (`@objectstack/plugin-approvals`). No schema shape moves: `flow.runAs` keeps its two values and only its describe changes.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime semantics change of the declared key flow.runAs (both values) after an approval decision, not a metadata shape change. No spec key, enum value, export, option, config field, response field or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is whose rights a runAs 'user' run's nodes after an approval decision carry: the decider's instead of the trigger user's, so a node the decider may not perform is refused where it used to run. A runAs 'system' run keeps its elevation and only its attribution user moves to the decider. The other categories are closed on facts: the three packages publish (not unpublished); no ADR-0087 id covers this behaviour and this diff adds none (not registered / already-registered); and the change is a behaviour change, not only an interface or type change (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A resumed flow run kept its trigger user for its whole life. In an approval flow that meant the nodes after the manager's decision wrote as the rep who submitted: the record's Last Modified By (`updated_by`) and the audit log named someone who did not act, and under `runAs: 'user'` the writes ran under the rep's grants.
+  
+  `flow.runAs: 'user'` now means the human whose act is running the current segment: the trigger user until a human decision, the decider after it. `runAs: 'system'` flows keep system privileges; after the decision their attribution user is the decider.
+  
+  - **Now, `runAs: 'user'`:** after an approval decision (approve or reject), the nodes that follow run with the decider's identity and permissions together. Their positions, permission sets and organization peers are resolved for them through the same resolver that seeds the trigger user's run, never copied from the trigger user. `updated_by` and `sys_audit_log` name the decider for those writes. The nodes before the decision keep the submitter. A second decision moves the segment to its own decider, a later pause keeps the identity the segment had, and the run's history still names the user who triggered it.
+  - **Now, `runAs: 'system'`:** after an approval decision, the flow keeps system privileges and its nodes run as `{ isSystem: true, userId: DECIDER }`, the shape the approvals verdict mirror already writes with. No permission is resolved and elevation is unchanged, so a read-only column still lands. Their writes, `sys_audit_log`, and `ctx.user` in the hooks those writes fire name the decider; the nodes before the decision keep the submitter.
+  - **Refused now:** under `runAs: 'user'`, a node after the decision that the decider may not perform (an object or field they may not edit, a record outside their reach) is refused, the run stops at that node as a repairable strand, and the decision door answers `RESUME_FAILED` (`repairable: true`) naming the run, the node and the refusal, as for any other failed post-decision node. Before, the same node ran with the submitter's rights. A repair replay (`continueRestoredRun`) continues as the decider too.
+  - **Unchanged:** a flow with no human decision node; an SLA auto-decision, which names no human, so the run keeps the identity it had (on both postures); a subflow parent's own nodes; and the send-back, resubmit and recall doors.
+  
+  `@objectstack/plugin-approvals` hands the decider to the engine on the service-stamped resume signal: the person the verdict mirror already writes as. The engine honours a decider only on a signal that carries the owning service's `RESUME_AUTHORITY_SERVICE` marker, so a resume built from an HTTP body cannot name one. The published types gain one optional member each: `ResumeSignal.resumedBy` (`@objectstack/spec/contracts`), and the `resumedBy` field on `ApprovalResumeSurface`'s resume signal and on `StrandedContinuationSignal` (`@objectstack/plugin-approvals`).
+  
+  What changes for you: if a `runAs: 'user'` flow's nodes after an approval decision must write something the approver may not, such as a read-only field or a field the approver's permission set marks non-editable, the flow needs `runAs: 'system'`; its writes then keep system privileges and are attributed to the approver. A hook that reads `ctx.user` on a write a `runAs: 'system'` approval flow makes after the decision now sees the decider instead of the submitter. A run that was suspended before this release and is decided after it continues as the decider.
+- f72ce93: **Shipped in 18.0.0-next.5**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(service-automation): a `runAs: 'user'` flow now sees the acting user's organization members in `sys_user`, as the same user's own request does
+  
+  A `runAs: 'user'` flow's data nodes ran without `current_user.org_user_ids`, the peer list the request path resolves for every user. The shipped `sys_user_org_members` policy (`id in current_user.org_user_ids`) therefore dropped out, and a `get_record` on `sys_user` returned the acting user's own row only, while the same user's REST read returned their organization's members too.
+  
+  Run setup now seeds the peer list through the resolver the request path uses (`resolveUserAuthzGrants` from `@objectstack/core`), and every data node passes it on:
+  
+  - It is the members of the run's organization (`tenantId`) plus the acting user. A run with no organization gets the acting user alone, which is what an organization-less request gets. A user who belongs only to other organizations is never in it, even one who shares another organization with the acting user.
+  - It is seeded for every trigger shape: the record-change shape (`userId` and `tenantId` only) and the REST and action doors' shape (positions and permission sets already resolved). For the second shape only the peer list is taken from the resolver; the forwarded positions and permission sets stay exactly as they were, so an agent's narrowed ceiling is not re-broadened.
+  - A `subflow` or `map` child and a resumed leg keep the list their run was seeded with.
+  - If the resolver fails, the run proceeds without the list, as before, and the `[runAs]` warning now says which half degraded. Policies that read `org_user_ids` then drop out: the run sees less, never more.
+  - A run suspended before this release resumes without the list and keeps today's answer (its own `sys_user` row) until it ends.
+  
+  A `runAs: 'system'` flow is unchanged. The exported `RunIdentityContext` type gains an optional `org_user_ids` member.
+  
+  Clause-②: yes (widening: the exported RunIdentityContext / RunDataContext type gains the optional org_user_ids member, the key ExecutionContext already declares; no accepted input moves)
+- 12d1476: feat(cli,runtime)!: `os migrate organization-ownership` upgrades a database 17.x or an 18.0 pre-release created; a server serves only a database it created or one the ceremony certified
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any metadata schema is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. The data migration this change prescribes is the operator's ceremony, `os migrate organization-ownership`, stated below; the boot refusal names it. Two `@objectstack/objectql` exports are removed, `WALLED_ORGANIZATION_LESS_BRIDGE` and `isWalledOrganizationLessBridgeObject`: they named the two tables whose organization-less inserts were let through under a wall while those tables still carried an organization column, and both tables now declare none. Neither is a metadata key and no stored row or stack names them, so a caller has nothing to migrate: drop the import, since a deployment-level table is recognised by `systemFields: { tenant: false }`. -->
+  
+  **BREAKING** for a database with no birth marker — one 17.x or an 18.0 pre-release (`18.0.0-next.*`) created — shipped as `minor` under the repo's launch-window convention for breaking changes (ADR-0131 D10).
+  
+  - **The ceremony is open.** `os migrate organization-ownership` runs again (the 18.0 pre-releases refused it with `NOT_IMPLEMENTED`): a bare run writes the plan, and `--apply --plan-file PLAN --backup-taken` applies that reviewed plan. Its new steps carry what an 18.0 pre-release database still owes, each selected by the rows' shape, never by a NULL organization:
+    - `sibling-moves`: the global settings-audit rows move to `sys_platform_setting_audit`, and identity mail (reset, verification, account invitation, change-email notice, magic link) to `sys_identity_email`, id for id. Their queued mail jobs and their activity rows follow them. The organization invitation stays in `sys_email`.
+    - `declared-webhooks`: each `sys_webhook` copy a package's seeder wrote under a name a package still declares is settled. A pristine copy is deleted once its deliveries name the declaration (`declared:NAME`), with the cipher it referenced. A copy customized only in its switch becomes the declaration's activation row. Any other edit becomes the administrator's own webhook under a new name (`NAME_custom`), and the declaration is switched off.
+    - `declared-rule-copies`: each stored sharing rule under a declared rule's name becomes a clone under a new name, its grants kept, and the declaration is switched off.
+    - `not-null`: after the column drops, every table the post-step plan clears takes `organization_id` NOT NULL. The ceremony owns that nullability, so the schema differ no longer reports it as `relax_not_null` drift.
+  - **The boot guard decides on a marker.** The first boot that creates a datastore from empty writes a birth marker (`sys_migration` row `adr-0131-organization-ownership`, `details.birth.shapeGeneration`). Every CLI data boot writes it too, so a fresh install whose first command is `os migrate apply` or `os seed` still boots. On the Turso remote face (`libsql://`), `getSchemaSyncStats` now answers what its schema doors created and found (it answered `{ created: 0, existing: 0 }` before), so a fresh remote database is observed as one and gets its marker. The ceremony's verified marker carries the same `shapeGeneration` (now `1`, `ORGANIZATION_OWNERSHIP_SHAPE_GENERATION` in `@objectstack/spec/system`). A server refuses a database with no marker (one 17.x or an 18.0 pre-release created), one certified at an older generation, or an uncertified one. The refusal names the command and no longer says to stay on 17.x. The v17-shape probe also reads `tenancy: { enabled: false }` and `systemFields: false`.
+  - **`sys_secret` and `sys_flow_credential` are deployment-level** (`systemFields: { tenant: false }`). Their `organization_id` is dropped by the ceremony's column-drops step. The settings service no longer writes one, and `SettingsSecretStore.insert` no longer takes it. With no organization column, their organization-less system inserts land under a walled posture on the engine's own rule, so `@objectstack/objectql` no longer exports `WALLED_ORGANIZATION_LESS_BRIDGE` or `isWalledOrganizationLessBridgeObject`, and the system-write refusal's remedy names `systemFields: { tenant: false }`.
+  
+  **What an operator does.** Fresh installs are supported under every tenancy posture and need nothing. Before serving a database 17.x or an 18.0 pre-release created with this release: start this release against it once (the boot is refused, and its schema sync has already created the tables this release adds, which the ceremony moves rows into), take a backup, run `os migrate organization-ownership --out plan.json`, review the plan, then run `os migrate organization-ownership --apply --plan-file plan.json --backup-taken`, and start the server. `os dev` does this for a local SQLite development database. On a walled database, a customized copy of a declared webhook or sharing rule blocks its step, naming the row: rename it to a name no package declares, or delete it, then re-run.
+- 14ccb1d: fix(service-automation): a `runAs: 'user'` flow now carries its user's email, so a row policy on `current_user.email` admits the run on the rows it admits for the same user's own request
+  
+  Clause-②: yes (widening)
+  
+  A `runAs: 'user'` flow's data nodes ran without the acting user's email, which the request path resolves for every user. The row-level security compiler reads `current_user.email` from the execution context's `email` and nothing else, so every owner policy keyed on it (such as `assignee == current_user.email`) dropped out inside the run. A record-change flow triggered by a member whose only access to a row is such a policy was refused on the row the member had just written, and could read and update with their own request.
+  
+  Run setup now seeds the email through the resolver the request path uses (`resolveUserAuthzGrants` from `@objectstack/core`, the user's stored `sys_user` email), and every data node passes it on:
+  
+  - It is seeded for every trigger shape that names a user and carries no email: the record-change shape (`userId` and `tenantId` only) and the REST and action doors' shape (positions and permission sets already resolved). Only the missing facts are taken from the resolver; forwarded positions and permission sets stay exactly as they were.
+  - A context that already carries an email keeps it verbatim, as a request's session email wins over the stored one. A `subflow` or `map` child and a suspended run keep the email their run was seeded with.
+  - After an approval decision, the nodes that run as the decider carry the decider's own email, resolved for them. The submitter's email is removed with the rest of the submitter's grants, on both `runAs` postures.
+  - A user with no stored email, or a resolver failure, leaves the run without one: policies that read it drop out, and the run sees less, never more. The `[runAs]` warning on a resolver failure now names the email beside the peer list.
+  - A run suspended before this release resumes without the email until it ends.
+  
+  A `runAs: 'system'` flow is unchanged. The flow CEL scope's `current_user` is unchanged too: it still binds no email.
+  
+  Published types: `AutomationContext` (`@objectstack/spec/contracts`) gains an optional `email` member, and `RunIdentityContext` / `RunDataContext` and `FlowUserGrants` (`@objectstack/service-automation`) each gain an optional `email` member.
+- 8fd3944: fix(service-automation)!: a `runAs: 'user'` hook fired by a user-triggered `runAs: 'system'` flow's write runs on that user's own grants
+  
+  Clause-②: no (narrowing) — a `runAs: 'user'` hook fired by a write of a `runAs: 'system'` flow that names a user now runs on that user's own grants instead of the member baseline, so for a user whose own grants admit less than the baseline its reads narrow; the published `RunIdentityContext` / `RunDataContext` types make `positions` and `permissions` optional, and no published schema or export moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime semantics change of the data context a runAs 'system' flow run hands ObjectQL when it names a user, not a metadata shape change. No spec key, enum value, export, option, config field, response field or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is whose grants a runAs 'user' hook fired by such a run's write carries: the named user's own, resolved in the run's organization, instead of the member baseline, so for a user whose own grants admit less than the baseline that hook reads less. The run's own operations keep full system privileges. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this behaviour and this diff adds none (not registered / already-registered); and the change is a behaviour change, not only an interface or type change (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A `runAs: 'system'` flow run that names a user (a manual run, a record change fired by a user's write, and every post-decision node of a `runAs: 'system'` approval flow, where the user is the decider) handed ObjectQL `{ isSystem: true, userId, tenantId, positions: [], permissions: [] }`. Its own operations never read the two arrays: elevation short-circuits every gate before they are read. But a `runAs: 'user'` hook fired by one of its writes de-elevates to that context, and the engine keeps the arrays a context carries, resolving the user's grants only when none are carried. So that hook ran on the member baseline, whoever the user was.
+  
+  - **Now:** a `runAs: 'system'` run that names a user carries no `positions` or `permissions` in its data context. A `runAs: 'user'` hook its writes fire resolves the named user's own positions, permission sets and organization peers in the run's organization, exactly as that user's own request resolves them. After an approval decision that user is the decider, so the hooks the post-decision writes fire run on the decider's grants.
+  - **Wider:** for a user granted more than the baseline, such a hook now reads and writes what the user may, where it was refused on objects the baseline does not grant.
+  - **Narrower:** for a user whose own grants admit less than the baseline, such a hook now reads only what that user's own request reads.
+  - **Unchanged:** the run's own elevation, `isSystem`, its `actor` label, its `userId` and its `tenantId`; a user-less `runAs: 'system'` run (a schedule), which keeps `positions: []` and `permissions: []`, and a `runAs: 'user'` hook it fires is still refused for want of a user; hooks declaring `runAs: 'system'` or `'inherit'`; and `runAs: 'user'` flows.
+  
+  The published `RunIdentityContext` and `RunDataContext` types of `@objectstack/service-automation` declare `positions` and `permissions` optional, because a `runAs: 'system'` envelope that names a user no longer carries them. Code that reads either member from `resolveRunDataContext`'s answer must allow for its absence.
+  
+  What changes for you: a `runAs: 'user'` hook that a user-triggered `runAs: 'system'` flow fires now sees exactly what that user sees. If such a hook must read or write something the user may not, declare it `runAs: 'system'`.
+- 67b669e: The security catalog's activation door switches a position or permission set the environment authored, and a ledger write it refuses answers with the status its code means
+  
+  Clause-②: yes (widening)
+  
+  - **The door accepts environment-authored items** (`@objectstack/runtime`). `POST /api/v1/security/_activation/:type/:name` switched a position or permission set off and on only when a package shipped it. FROM: an item saved through the metadata door (`PUT /api/v1/meta/position/:name`, `PUT /api/v1/meta/permission/:name`) was refused `503` with `{ code: 'VALIDATION_FAILED', message: 'Package is required' }`, and nothing was written. TO: it is switched like a packaged one, `200`, and the resolver honours the row: a switched-off position stops granting its permission sets, and a switched-off set stops granting by every path. Who may call the door is unchanged (`manage_metadata`; the platform operator under a `group` or `isolated` posture), and so are its other refusals (an undeclared name `404`, a type with no switch or an audience anchor `400`, the last administrator `403`).
+  - **A refused ledger write keeps its code and its status together** (`@objectstack/runtime`, ADR-0112). FROM: the door kept a thrown `code` but answered `503` whenever the error declared no status, so a record validation refusal was served as `503 VALIDATION_FAILED`. TO: the door answers through the dispatcher's one thrown-error rule: a record validation refusal is `400 VALIDATION_FAILED`, a hook's refusal keeps its own pair (the last-admin guard's `403 PERMISSION_DENIED`), and an error that declares no status is `503 SERVICE_UNAVAILABLE`.
+  - **The ledger row of an item no package ships carries no package** (`@objectstack/platform-objects`, `@objectstack/core`). `sys_metadata_activation.package_id` is no longer required. It is empty exactly when no package ships the item. It is not part of the row identity (`metadata_type`, `name`), and no reader decides anything from it. The column was already nullable on disk (ADR-0113: `required` is a write-time check), so there is nothing to migrate.
+  - **One spelling for "no package"** (`@objectstack/core`). `MetadataActivationRow.packageId` is optional. FROM: `packageId: string`, with `''` the only way to say "no package". TO: omit `packageId` for an item no package ships, and the store writes no value. `ObjectStoreMetadataActivationStore.setActive` refuses `packageId: ''` with a `TypeError` before it reads or writes anything, and `list()` returns `packageId` only when the row names a package. If your code passes `''`, omit the key instead.
+  - **The flow row follows the shared row** (`@objectstack/service-automation`). `FlowActivationRow.packageId` is optional to match. Every flow row still names its package, because the flow toggle refuses a flow no package ships before it writes.
+  - **The action activation door's answer for an action no package ships changes; the action is still refused.** `POST /api/v1/actions/_activation/:object/:action` still passes `''` as the package of such an action. The write is still refused and still writes nothing, but the store's `TypeError` refuses it now, with the store's sentence. FROM: `503 VALIDATION_FAILED`. TO: `503 SERVICE_UNAVAILABLE`. An environment-authored action could not be switched on `main` before this change and cannot after it.
+- b389e43: feat(metadata-protocol,runtime,service-automation,spec)!: the metadata protocol refuses every organization-scoped write, and an uninstall is environment-wide (ADR-0131 D6/D12)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered metadata-write-organization-scope-refused, package-uninstall-environment-wide -->
+  
+  **BREAKING, in both directions.** It narrows: an organization-scoped metadata write is refused, and request keys retire. It widens one refusal: a package uninstall naming neither `organizationId` nor `allTenants`, refused before with `400 TENANT_SCOPE_REQUIRED`, is now accepted and runs environment-wide. Graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N`.
+  
+  ADR-0131 D6 retires the per-organization overlay axis. The `/meta` doors already carry no organization; now the metadata protocol itself refuses an organization-scoped write from every door, and the per-organization write path behind it is deleted.
+  
+  **What changes.**
+  
+  - Every protocol write that names an organization is refused with `403 NOT_OVERRIDABLE`, before anything is read or written, for every metadata type and every tenancy posture. This covers `saveMetaItem` (draft and publish), `publishMetaItem`, `deleteMetaItem`, `rollbackMetaItem`, `revertCommit`, `rollbackToPackageCommit`, `publishPackageDrafts`, `discardPackageDrafts`, `revertStoredPackage`, `duplicatePackage` and `reassignOrphanedMetadata`. The message's first sentence names the tenancy posture in force. The five types that declared `allowOrgOverride` (`view`, `dashboard`, `report`, `translation`, `email_template`) and the `OS_METADATA_WRITABLE` hatch no longer open an organization scope.
+  - The audit ledger (`sys_metadata_audit`) and the commit ledger (`sys_metadata_commit`) record `organization_id` NULL.
+  - The `/packages` doors of the runtime dispatcher thread no organization into any verb: publish-drafts, discard-drafts, the commit list, commit revert, rollback, revert, adopt-orphans, duplicate, delete, and the package manifest read.
+  - `deletePackage` retires its `organizationId` and `allTenants` request keys and both `400 TENANT_SCOPE_REQUIRED` refusals. The dispatcher's `DELETE /api/v1/packages/:id` no longer refuses an operator with no active organization. An uninstall removes every row bound to the package in this environment. Who may uninstall is the door's operator gate, as before.
+  - A seed published with a package no longer takes the publisher's active organization: a seed dataset names the organization it populates (ADR-0131 D9).
+  
+  **What moves for consumers.**
+  
+  | From | To |
+  |:--|:--|
+  | `organizationId` on a `SaveMetaItem` / `PublishMetaItem` / `DeleteMetaItem` request (`@objectstack/spec`) | drop it: the write lands environment-wide. The key is stripped at a spec parse (the schemas are not strict) and refused at the protocol: a request still naming one answers `403 NOT_OVERRIDABLE` |
+  | `organizationId` on any other protocol write verb's request | drop it, same refusal |
+  | `deletePackage({ packageId, organizationId })` or `deletePackage({ packageId, allTenants: true })` | `deletePackage({ packageId })`; either retired key answers `400 INVALID_REQUEST` and removes nothing |
+  | `DeletePackageRequest.organizationId` / `.allTenants` (`@objectstack/metadata-protocol`) | gone from the type |
+  | `UninstallCleanup`'s `organizationId` argument | gone; a cleanup receives `{ packageId, actor? }` |
+  | `TENANT_SCOPE_REQUIRED` in the error-code ledger | retired; no producer emits it |
+  | `findPlatformScheduleOrgGaps`' `organizationId` input | gone: every write is platform-level |
+  | a `seed` draft whose records carry no `organization_id`, relying on the publisher's active organization under `group` | set `organization_id` on each record (ADR-0131 D12, item 12); under `group` a seed record that names no organization is refused at load, and under `single` the loader still derives the Default Organization |
+  
+  **What a deployment observes.**
+  
+  - Rows stored organization-scoped before this release are not touched by any write. `POST /meta/_migrate-stored` reports each one as `skipped` and names the promotion ceremony (ADR-0131 C7); the stored-flow credential move reports such a flow as not moved (`NOT_OVERRIDABLE`) and logs that its credential is still in cleartext in that row — rotate it. A legacy organization-scoped draft is no longer promoted, discarded or reverted by a package verb, a commit recorded in a legacy organization layer is refused by `revertCommit`, and `duplicatePackage` and adopt-orphans copy or adopt the environment's rows only.
+  - An uninstall removes the package's legacy organization-scoped rows with it, as the declared cross-tenant uninstall did.
+  
+  **What does not change.** The protocol's reads still accept an organization and still serve legacy organization rows; that narrowing is a later stage. The anonymous form doors' read of the Default Organization's layer is unchanged.
+- 1920cf3: feat(platform-objects,service-automation,service-realtime)!: seven deployment-level platform tables lose their injected organization column, and reading them needs `manage_platform_settings` (ADR-0131 D7)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered sys-flow-dispatch-organization-column-retired, sys-job-organization-column-retired, sys-job-queue-organization-column-retired, sys-job-run-organization-column-retired, sys-migration-journal-organization-column-retired, sys-migration-organization-column-retired, sys-presence-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes (Changesets pre mode is not on yet).
+  
+  `sys_job`, `sys_job_run`, `sys_job_queue`, `sys_flow_dispatch`, `sys_migration`, `sys_migration_journal` and `sys_presence` hold deployment-level state. No writer attributes a row of any of them to an organization: every write is a system-context write whose row names none, and nothing writes `sys_presence` through ObjectQL at all. So the injected `organization_id` column only ever held NULL. ADR-0131 D7 takes it off: each object now declares `systemFields: { tenant: false }`.
+  
+  With no column there is no tenant wall, so these tables are governed by object permission. Each also declares `requiredPermissions: ['manage_platform_settings']`. Without that gate, a walled deployment's `organization_admin`, whose grant carries the superuser bits on every object, would read every other organization's job errors, queued payloads, dispatch keys and migration traces.
+  
+  **What moves for consumers.**
+  
+  - **The column.** `organization_id` is no longer a field of these seven objects. A filter, list-view column, report grouping, formula or seed key naming it on one of them is now an unknown field. Delete the reference: no organization owns a row of these tables.
+  - **Who reads, on a walled posture** (`group` or `isolated`). Before: the wall compared the NULL column to the caller's organization, so every reader got zero rows, platform administrators included (unless the deployment declared the table platform-global, which stood the wall down). Now: a principal holding `manage_platform_settings` (platform administrators hold it) lists every row; anyone else is refused `403 PERMISSION_DENIED`.
+  - **Who reads, on the `single` posture.** Before: any principal with a read grant on the object read every row, an organization administrator included. Now: only a principal holding `manage_platform_settings` reads; an organization administrator who is not a platform administrator is refused `403 PERMISSION_DENIED`. Grant the capability to an operator who needs these tables.
+  
+  **Unchanged.** Every platform writer and reader of these tables uses a system context, which no capability gate applies to, so job scheduling, the queue, flow dispatch, migration flags and the migration journal behave as before. The physical unique indexes are unchanged: none of these objects declares an organization-scoped one.
+  
+  **Existing databases.** Schema sync only adds, so the physical `organization_id` column stays on each existing table (with its index, where the deployment indexed it), and the boot drift report names it orphaned. By the writer census it holds only NULL, so dropping it loses nothing: `os migrate apply --allow-destructive` drops it, the remedy the drift report names.
+- 746637e: fix(service-automation)!: retire the `RunProvenanceContext` type; `RunDataContext` names only what `resolveRunDataContext` returns
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/services/service-automation/src/runtime-identity.ts#RunDataContext) Two TypeScript-only declarations in one runtime file move, and neither is metadata: `RunDataContext` loses its `RunProvenanceContext` arm, and the `RunProvenanceContext` interface declared beside it in the same file is removed together with its type export. No spec key, authorable spelling, Zod schema or stored shape moves, and no stored row is read or rewritten, so `objectstack migrate meta` has nothing to rewrite. The channel that reaches an affected consumer is the compiler, at the consumer's own import. -->
+  
+  **BREAKING** for TypeScript code that imports from `@objectstack/service-automation`: one type export is removed and one type narrows. It ships as `minor` under the launch-window convention for breaking changes. No runtime behaviour changes in any package.
+  
+  **What is removed.** The `RunProvenanceContext` type export, the `{ flowRunId }`-only "provenance" envelope, and its arm of `RunDataContext`. No code in this repository builds or reads one. Since ADR-0096 D5, the data engine's security middleware refuses a context that carries no principal and is not a system context (`403 PERMISSION_DENIED`, for every verb). So the type described a context the engine refuses, while its docstring said such a context was "indistinguishable from passing no context at all" and was let through.
+  
+  **What `RunDataContext` is now.** Exactly what `resolveRunDataContext` returns: `isSystem: true` for a `runAs: 'system'` run, and the triggering user's principal for a `runAs: 'user'` run. A run that resolves no principal is refused before any data operation (`AUTOMATION_UNSCOPED_RUN_DATA_ACCESS`), as before.
+  
+  **If your code named the type.** There is no replacement, because the context it described is refused. A custom data node builds its context with `resolveRunDataContext(context)`, typed `RunDataContext`.
+  
+  **`@objectstack/plugin-security`, `@objectstack/runtime`, `@objectstack/service-analytics`, `@objectstack/platform-objects`:** comment and docstring text only. Shipped comments that said the security middleware hands through, skips or falls open for a context with no principal now say that it used to, and that ADR-0096 D5 refuses such a context. Nothing these packages do changes.
+- b2549a8: feat(spec): `ConnectorProviderContext.resolvePackagePath` — a connector provider factory can resolve a path against the declaring app's root
+  
+  Clause-②: yes (widening)
+  
+  - **What is new.** `ConnectorProviderContext` gains one optional, host-provided member, `resolvePackagePath(relativePath): Promise<string>`, beside `loadPackageFile`. It resolves a relative path against the root of the stack or package that declared the connector entry and returns the absolute path. `'.'` returns the root itself. It refuses (throws on) an empty path, an absolute path, and a path that escapes the root after resolution, such as `../x` or `a/../../x`. That is the same rule `loadPackageFile` follows. It reads nothing and does not check that the path exists.
+  - **Who hands it.** The connector materializer in `@objectstack/service-automation` hands it to every provider factory. It is anchored at the plugin's `packageRoot` option, the same root `loadPackageFile` reads under, and falls back to `process.cwd()` the same way. The two members now share one confinement check, so they cannot disagree about what is inside the root. `loadPackageFile`'s behaviour and error messages are unchanged.
+  - **Who reads it.** Nothing yet. `@objectstack/connector-mcp` is next: a declarative stdio transport will use it as the launched process's working directory, so a relative command or argument resolves against the app's root instead of the directory the server was started from.
+  - **What does not change.** Which commands a declarative stdio transport may launch is untouched. A factory that does not read the member behaves as before.
+  - **Nothing to migrate.** A host that builds its own `ConnectorProviderContext` may leave the member out. A factory must then keep its existing behaviour, or fail with a clear message if it needs the root.
+- faf6348: feat(i18n): a refused `end` node's message translates in the run's locale (`flows.<flow>.refusals.<node_id>.message`)
+  
+  Clause-②: yes (widening)
+  
+  - **What is new.** An `end` node declaring `outcome: 'refused'` shows its `message` to the person who started the run. Translate it under `flows.<flow_name>.refusals.<node_id>.message`, keyed by the flow's `name` and the `end` node's `id`, the same addressing the `screens` keys use. Before this key, a refusal rendered in the source language on every console.
+  - **Keep the holes.** The translation is a `{{ }}` template like the message it translates (`'已拒绝:{{ record.name }} 是重复记录'`). A single-brace `{token}` in a translation is refused when the bundle is parsed, with the same text-slot refusal the source message gets.
+  - **Where it is read.** The engine picks the translated template before it renders the holes, through the `i18n` service, in the run's locale, and the run stores and returns that text (`refusalMessage`). With no translation for that locale, the authored message renders. `flowRefusalMessageKey(flowName, nodeId)` (`@objectstack/spec/system`) spells the key.
+  - **The run's locale.** `AutomationContext.locale` (`@objectstack/spec/contracts`) is new and optional. The trigger door (`POST /api/v1/automation/:name/trigger`, the legacy trigger route, a `type: 'flow'` endpoint) and the action door (`POST /api/v1/actions/...`, the MCP `run_action` bridge) set it from the request's resolved locale: `Accept-Language` first, then the `localization` settings. It is persisted with a paused run, so a resumed leg renders in the locale the run was started in. A run no person started (a record-change or schedule trigger) has no locale and stores the authored message.
+  - **`objectstack validate`** refuses a refusal key over an unknown flow, an unknown node, a completed `end` node, or a node of another type (`translation-target-unknown`, error).
+  - **`os i18n extract` and the coverage gate** now scaffold and demand the refusal message of every refusing `end` node in the `flow` bucket (`i18n/missing-flow`). A project that declares `supportedLocales` and has a refusing `end` with no translation now gets one missing-key issue per locale for it.
+  - **`AutomationEngine.setI18nServiceSource()`** (`@objectstack/service-automation`) attaches the `i18n` reader. The automation plugin wires it, so a host using `AutomationServicePlugin` needs no change. A host constructing the engine directly gets the authored message until it attaches one.
+- d25b187: feat(automation): a screen's heading and body text render in the run's locale
+  
+  Clause-②: yes (widening)
+  
+  - **What is new.** The `screen` executor serves a screen's `title` and `description` in the language of the person who started the run. For each, it asks the engine for the translated template at `flows.<flow>.screens.<node_id>.title` / `.description` through the `i18n` service, in `AutomationContext.locale`, and fills the `{{ }}` holes of that template. This is the same pick a refusing `end` node's message already makes, through the same channel (`setI18nServiceSource`).
+  - **When the authored text renders.** With no locale on the run (a record-change, schedule or webhook trigger), no `i18n` service, no entry or an empty one, or a translation that does not compile, the authored template renders as before. A translation that does not compile also logs a `warn` naming the key. A resumed leg renders in the locale the run was started in.
+  - **The heading key covers the node label.** A screen with no `config.title` shows its node label, and a translated `title` replaces whichever heading the screen shows. The body text is translated only where the screen authors one.
+  - **`AutomationEngine.renderFlowTextSlot(slot, variables, context)`** is the one translated-template pick, now shared by the refusing `end` node and the `screen` executor. Its argument type, `FlowTextSlotTranslation`, is exported.
+- 243dd3c: fix(service-automation)!: in flow CEL, `record` is the record the run was handed, or unbound — never the run's variables
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered flow-cel-record-variables-alias-retired -->
+  
+  **BREAKING**, graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, and the fixed group is already majored by the line's opening marker, so this ships in an `18.0.0-next.N`.
+  
+  **What changed.** A flow CEL expression — a node's or an edge's `condition`, a `decision` branch `expression`, a screen field's `visibleWhen`, and the CEL value envelopes of an `assignment` and of a `create_record` / `update_record` `fields` map — evaluates in the scope `AutomationEngine.celScope` builds. That scope used to bind `record` to the run's variables map whenever the run held no record, so `record.assignee` read a flow variable named `assignee` instead of failing. Now `record` is bound only when:
+  
+  - an entrance handed the run a record: a record-change trigger's row, a time-relative sweep's row, the inbound hook's request body, a `type: 'flow'` action's record (the loaded row, or an empty record carrying at most the id it was given), a `subflow` or `map` parent's record, or a `map` item that carries a string `id`;
+  - or the flow binds a variable named `record` itself (a declared variable with a value, or an assignment target).
+  
+  With neither — a run started through the REST trigger route or a declared endpoint, a cron schedule, or a child of such a run — `record.X` fails the run with `Unknown variable: record` and the expression's source, as every other unbound root does.
+  
+  **What does not change.** A run that was handed a record reads `record.X` from that record, as before, over any variable of the same name. A bare variable name (`assignee`) and the `vars` namespace (`vars.assignee`) resolve as before. `$record`, `previous`, `vars` and `current_user` are untouched.
+  
+  ## Migration: FROM → TO
+  
+  In a flow whose run holds no record, read a variable by its name:
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `record.assignee` (a flow variable `assignee`) | `assignee`, or `vars.assignee` |
+  | `has(record.assignee) ? record.assignee : null` | `has(vars.assignee) ? vars.assignee : null` |
+  
+  **The one-line fix: read a flow variable by its name or through `vars`; `record` is only ever the record the run was handed.** A flow that is also launched with a record (an action on a row, a record trigger) keeps reading that record's fields as `record.X`.
+  
+  **Who is affected, measured.** Read statically over every flow CEL slot — 0 flows read `record` with no record entrance:
+  
+  - this repository at `0ec4268972` (`examples/**`, `packages/platform-objects`, `packages/qa/dogfood`): 64 flows, 51 CEL slots, no flow in `packages/platform-objects`; the 2 flows that read `record` are an `api` hook flow and a record-change flow;
+  - `objectstack-ai/hotcrm` at `f0afcbda07` (`src/`, `test/`): 45 flows, 57 CEL slots; the 12 flows that read `record` are all record-change flows.
+  
+  Deployed metadata and other repositories were not measured. `objectstack validate` refuses such a `record` read too, naming the root (see `@objectstack/lint`'s note).
+- 572ecfb: fix: `os migrate meta --stored` lists every stored row that protocol 18 refuses and no conversion rewrites. Before, the preview counted each such row as already on protocol.
+  
+  Clause-②: yes (widening: `IAutomationService.canonicalizeStoredFlow(...).todos?` in `@objectstack/spec`, `AutomationEngine.canonicalizeStoredFlow(...).todos` in `@objectstack/service-automation` and `StoredFlowCanonicalization.todos?` in `@objectstack/metadata-protocol`, each a new output member; nothing narrows, and no door accepts or refuses anything it did not before)
+  
+  Three step-18 retirements refuse a stored shape that has no lossless rewrite. Upgrading a v17 database left those rows refused at load or at boot, and the stored preview read them as `canonical`. Each shape now has exactly one fate: **refused and listed**. The preview and `--apply` print one `TODO` line per site under its row. The line names the step-18 entry that refuses the shape, the site, and the choice the owner has to make. Nothing is rewritten, and the run's verdict does not change, because no run of the pass could clear these rows.
+  
+  **#23269, a flow value slot carrying a `{…}` token, including a `get_record` / `update_record` / `delete_record` filter operand: refuse and list.** A whole-path token maps mechanically to `{ dialect: 'cel', source: '<path>' }`, but the rewrite is not lossless. A token the template resolved to nothing (an erased condition, so the node was refused) is a CEL fault on an absent root, and a flow variable named like a query placeholder used to shadow it. ADR-0087 D2 conversions run on the load path and must be lossless, so this one is not a D2. The chain also has no operator-applied rewrite of stored rows separate from the load path: `--stored` writes back the read path's own pass, and `--from 17` rewrites authored sources, not rows. So the flow is listed by flow, node and path (`flow-value-slot-template-dialect-refused`), and `registerFlow` goes on refusing it until the value is rewritten as its CEL envelope. A flow already in the CEL form, or using a query placeholder such as `{current_user_id}`, is not listed.
+  
+  **#23270, a `controlled_by_parent` object without exactly one required `master_detail`: refuse and list, by object (`cbp-master-relation-tiers-retired`).** No shape here converts losslessly. The upgrade never picks between two masters, either both required or neither. An explicit `required: false` is a contradiction the builder refuses. Turning a required `lookup` into a `master_detail` changes what deleting the master does. An object with no master has nothing to convert. Leaving `controlled_by_parent` changes who can read the rows, so that is the owner's choice and never a silent rewrite. The listing reads the same predicate `ObjectSchema` refuses with, so the preview and the parse refuse one set. The one lossless shape, a single `master_detail` with `required` omitted, is still converted by `cbp-master-detail-required-defaulted` and is not listed.
+  
+  **#23271, a view whose `data` binds the retired view-level API source: refuse and list, by view (`view-data-api-provider-retired`).** There is no mechanical move. The replacement is a page component's `dataSource`, so a page must exist to carry it. Deleting the view's `data` would make the view query its object instead. Views in every stored body spelling are covered, and so are an object's own `listViews`. The line shows the request URL and method and withholds every other request key, so a credential stored in a view's headers never reaches the report. A view on the `object`, `value` or `schema` provider is not listed.
+  
+  How it is wired: `applyConversions` reports these shapes through its existing `onTodo` sink, after the conversions run. Each TODO's `conversionId` is the id of the D3 entry that refuses the shape, so the published `ConversionTodoNotice.conversionId` now names either a conversion or a D3 entry. The published flow-canonicalization result gains one member, a widening in three packages:
+  
+  - `@objectstack/spec`: the contract `IAutomationService.canonicalizeStoredFlow(...)` declares an optional `todos?: ConversionTodoNotice[]` beside `notices` and `conflicts`. An implementation that reports none still conforms.
+  - `@objectstack/service-automation`: `AutomationEngine.canonicalizeStoredFlow(...)` returns `todos`. `registerFlow` ignores them, because its own refusal names the same sites.
+  - `@objectstack/metadata-protocol`: `StoredFlowCanonicalization` gains the matching optional `todos?`, and the stored pass lists a flow row's TODOs the way it lists any other row's.
+  
+  The authoring funnel and the read seams pass no sink, so nothing changes for them.
+- 24e064f: fix(objectql,service-messaging,service-automation,plugin-approvals)!: a notification carries the organization of what it is about, and one no organization owns is refused instead of stored with `organization_id` NULL
+  
+  Clause-②: no (narrowing) — notification rows gain the organization they should already carry; what narrows is an emit that names no organization on an install where none is derivable, which the engine now refuses where it used to store the event row with `organization_id` NULL.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime narrowing of which notification writes the engine accepts, not a metadata change. No spec key, authorable spelling, export, option, config field or stored shape is added, removed, renamed or re-shaped, and no stored row is rewritten: rows already stored with organization_id NULL keep it until the v18 ownership ceremony attributes them, which already lists sys_notification with the attribution fate. The only type change is an additive optional `organizationId` on the input of `ApprovalMessagingSurface.emit`, the approvals service's messaging surface: the interface is not listed in the package index, but it is published surface, reachable through the exported `ApprovalServiceOptions.messaging` and the public `ApprovalService.attachMessaging`, so it is an additive widening that no existing implementation has to change for. The other categories are closed on facts: the four packages publish (not unpublished); no ADR-0087 id covers notification ownership and this diff adds none (not registered / already-registered); nothing is removed or narrowed on an interface or type (not runtime-interface-only / type-surface-only); and no runtime export is retired (not runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Every notification emitted from a system-context run — a scheduled flow, a record change written by a system context, an approval node — was stored in `sys_notification` with `organization_id` NULL, so reports and cleanup that filter by organization did not see it. Each emit also logged a `[notify] no organization in scope` warning. On an install holding several organizations, the deliveries of the same emit were refused while the flow step reported success, so nothing reached the inbox.
+  
+  **Who owns a notification now:**
+  
+  - **The run's organization.** A run that carries one emits exactly as before.
+  - **Else the record it is about.** A `notify` node in a run with no organization reads the organization of the record the notification is about. That is the declared click-through record (`sourceObject` + `sourceId`), else the run's trigger record. It is read from the stored row by id, never from the record snapshot the run carries.
+  - **Approvals.** Every approval notification carries its request's organization: `approval.requested`, reminders, comments, send-backs, reassignments, escalations and out-of-office notices.
+  - **Else the owner the engine derives for a system write** (ADR-0131 D9). `sys_notification` is now in the platform-object tenancy ledger, so an emit that names no organization gets the install's sole organization under the `single` posture.
+  - **The rows below follow the event.** `emit()` stamps the stored event row's organization on its delivery, inbox row and receipt, on both the inline and the outbox path.
+  
+  **Refused now:** where no organization is derivable (a walled posture, or a `single` install holding more than one organization), an emit that names none is refused with `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`. Nothing is written for it. A `notify` step that hits the refusal fails with `notify failed: ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED: …` instead of succeeding. `MessagingService.emit()` rejects with the engine's error for any other producer.
+  
+  **What to do when it refuses:** give the notification an owner. Name the record it is about on the `notify` node (`sourceObject` + `sourceId`), declare the scheduled flow's acting organization (`organization` on its start node), or pass `organizationId` to `emit()` from your own code.
+  
+  The `[notify] no organization in scope` warning is gone, because the NULL row it predicted is no longer written. Rows already stored with `organization_id` NULL are not rewritten here. The v18 organization-ownership ceremony attributes them from their source record.
+- d89f491: A stored flow the automation engine refuses is no longer served as running: the flow meta read serves the engine's verdict beside the item as `registration`, an envelope sibling of `lock`, and the flow list serves it as `registrations` keyed by flow name, so a refused flow reads `{ state: 'refused', reason: { code?, message } }` beside its stored `status`, which stays as authored.
+  
+  Clause-②: yes (widening)
+  
+  - **The shape** (`@objectstack/spec`). `FlowRegistrationSchema` is a closed set: `registered` (the engine holds the flow), `refused` (it refused the stored flow and holds nothing under the name; `reason` carries the engine's own `message` and, when the thrown error set one, its `code`, verbatim), and `unregistered` (it holds nothing and refused nothing: a read during boot, between a save and the engine following it, or after a deliberate unregister). `GetMetaItemResponseSchema` gains `registration` and `GetMetaItemsResponseSchema` gains `registrations`, both optional. New exports: `FlowRegistrationSchema`, `FlowRegistrationRefusalSchema` and the types `FlowRegistration` and `FlowRegistrationRefusal`. `IAutomationService` gains the optional member `getFlowRegistration(name)`.
+  - **Where the verdict comes from** (`@objectstack/service-automation`). The `kernel:ready` cold-boot bind records each flow it refuses, with what the engine threw, after it withdraws the flow; the `metadata:reloaded` re-sync and the metadata-change sync record a refusal that leaves the name unregistered. A later successful registration of the name, or its withdrawal, ends the record. `AutomationEngine` answers `getFlowRegistration(name)` and takes `recordFlowRefusal(name, error)`. The refusal's warn line, its level and the withdrawal are unchanged.
+  - **Where it is served** (`@objectstack/metadata-protocol`). The protocol reads the engine through the kernel's service table by name, as it already reads the engine's stored-flow canonicalizer; it does not import the automation service. The field is absent where no automation service declares the member, on every type other than `flow`, on a draft read and on the execution face the engine binds from: absence means no engine judged the flow, never `registered`. The verdict is the engine of the process that answered the read.
+  - **The default door** (`@objectstack/rest`, `@objectstack/metadata-protocol`, `@objectstack/spec`). `GET /api/v1/meta/flow/:name` on a default deployment (`metadata.enableCache: true`) is answered by the cached item branch, which now carries `registration` too. `getMetaItemCached` returns it beside `data`, read live from its delegate read on every call, and `GetMetaItemCachedResponseSchema` declares it. It is never part of the ETag, so a cached read that carries it is never answered `304 Not Modified`: a judged flow is always served in full. The cached branch's other envelope keys are unchanged.
+- dc39326: fix: `os migrate meta --stored` lists the two families of stored rows it still read as on protocol: a page component whose `data` prop binds the retired view-level API source, and every other site `registerFlow` refuses in a stored flow the parse accepts.
+  
+  Clause-②: yes (widening: `ConversionTodoNotice.conversionId` in `@objectstack/spec` may now name `registerFlow`, the refusing door; `IAutomationService.canonicalizeStoredFlow(...).todos?` in `@objectstack/spec` and `AutomationEngine.canonicalizeStoredFlow(...).todos` in `@objectstack/service-automation` now also carry each site flow registration refuses; the `onTodo` sink of `applyConversions` now also receives a page component bound to the retired API source; nothing narrows, and no door accepts or refuses anything it did not before)
+  
+  **A page component bound to the retired view-level API source: refuse and list, by page and component (`view-data-api-provider-retired`).** `object-grid`, `object-map`, `object-gantt` and `object-tree` take a view data source in their `data` prop, so the step-18 retirement of the `provider: 'api'` arm reaches them through the same schema. The listing judges each stored page component with its own props row, the one the component-props gate parses, and lists it only when that row refuses the binding with the retirement's prescription; a component whose `data` is a row array, a custom type and a component's own `dataSource` binding are not listed. The line names the page, the component and its position, shows the request URL and method, and withholds every other request key. Nothing is rewritten: deleting `data` would make the component query its object instead. Left as stored, the page still loads and saves, because the page parse does not judge a component's properties, while `os validate`, `os build` and `os lint` refuse the binding in source. The D3 entry `view-data-api-provider-retired` now names these components in its scope.
+  
+  **A stored flow refused by `registerFlow` after the parse: refuse and list, by site (`registerFlow`).** The stored pass ran only one of registration's judges, the value-slot one. `canonicalizeStoredFlow` now runs registration's whole validation without registering: every check `registerFlow` runs once the parse has accepted the flow, through the one list `registerFlow` itself throws from. Each refused site is a `TODO registerFlow` line under its row, in the check's own words: a text slot still on the single-brace dialect or with a hole that does not compile, a decision's `mode`, a malformed node or edge predicate, a plugin node's undeclared config key, an `api` flow with no secret. A check added to registration later is listed the same way, with no second change. A site the chain already lists under a step-18 entry is not repeated. What the parse itself refuses, the builtin config contracts' value arm among it, is not a TODO: `canonicalizeStoredFlow` throws it, and the preview reports the row among those that could not be rewritten, in the parse's words.
+  
+  `registerFlow` refuses exactly what it refused before, with the same message: its checks now return their refusal instead of throwing it, and `registerFlow` throws the first one. The doors that canonicalize a flow without registering it (the metadata save door, a package duplication) read no `todos`, and the stored pass's run of the checks logs nothing, so they behave as before.
+- dd29bbe: feat(metadata-core,metadata-protocol)!: the `sys_metadata` family declares no organization column — `sys_metadata`, `sys_metadata_audit`, `sys_metadata_commit` and `sys_metadata_history` (ADR-0131 D6/D7)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered sys-metadata-organization-column-retired, sys-metadata-audit-organization-column-retired, sys-metadata-commit-organization-column-retired, sys-metadata-history-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Metadata is the environment's (ADR-0131 D6). The four tables of the metadata family no longer declare `organization_id`, and each sets `systemFields.tenant: false`, so the engine injects none back. The engine refuses an undeclared field, so nothing reads or writes the column any more.
+  
+  FROM → TO:
+  
+  - An authored filter, list-view column, report grouping, formula or seed key naming `organization_id` on one of the four tables → delete it; no organization owns a row. The field resolver answers it as an unknown field.
+  - `new SysMetadataRepository({ engine, organizationId, orgLabel })` → `new SysMetadataRepository({ engine, orgLabel })`. The `organizationId` option is gone: every repository reads and writes the environment's rows.
+  - `DatabaseLoader`'s `organizationId` option (and so `MetadataManager.setDatabaseDriver` / `setDataEngine`'s `organizationId` argument) → accepted and ignored, like `environmentId`: no write stamps it and no read filters on it. Drop the argument.
+  - `@objectstack/spec`: the published `ApiError.code` / `ErrorCode` enum widens by `LEGACY_ORGANIZATION_ROWS_UNREADABLE`, registered under `@objectstack/metadata-core`.
+  - `isLegacyOrganizationRow(row)` (`@objectstack/metadata-core`) → `readLegacyOrganizationRows(driver, table?)`. The row-value test read a key the engine no longer returns, so it is removed. The new read answers from the physical column, through the table's driver (`engine.getDriverForObject`): id → organization, empty on a migrated or fresh database. A seam that cannot answer is refused (`LegacyOrganizationRowsUnreadable`), never read as "none".
+  - An existing database → run `os migrate organization-ownership` (review its plan), then `os migrate organization-ownership --apply --plan-file FILE` with that plan file. The ceremony promotes or reports the legacy organization rows, then drops the physical column. Until it has run, the v18 runtime refuses to start against the database.
+  
+  The indexes are re-keyed with the column:
+  
+  - The overlay unique key is (`type`, `name`, `package_id`, `bundle_member`): the declared `idx_sys_metadata_overlay_active` and the runtime partial indexes of the same names. Removing the organization TIGHTENS uniqueness. On a database the ceremony has not cleared, two legacy organizations' rows, or an organization's row and the environment's, can share a key. There the runtime index migration keeps the previous index and names the duplicates (ADR-0120 D4); it never drops a row. `os migrate duplicates` and the boot report group by the same key.
+  - `sys_metadata_history` is unique on (`event_seq`) and on (`type`, `name`, `version`). Its other indexes, and those of `sys_metadata_audit` and `sys_metadata_commit`, lose their organization prefix.
+  - `idx_sys_metadata_org_type` is gone.
+  
+  What else changes:
+  
+  - The boot line `[metadata_org_scoped_unserved]` is gone with the column it read. A database still holding legacy organization rows is refused at boot instead, until the ceremony has run.
+  - The package uninstall no longer removes a legacy organization's row of the package's name: no row carries an organization.
+  - Who reads the family through the generic data door (`/data/sys_metadata_*`), before → after:
+    - `sys_metadata_audit`, `sys_metadata_history`, `sys_metadata_commit`, **under a wall** (`isolated` / `group`): before, the tenant wall filtered each caller to its own organization's rows, and an `organization_admin` read its organization's. With the column gone the wall has nothing to filter on, so without a gate that admin would read every organization's trail, history bodies and commit ranges. After: each requires `studio.access` (`requiredPermissions`, the #22107 precedent). The capability is platform-scoped, so an `organization_admin` holding it by role does not exist, and that admin is refused.
+    - The same three, **under `single`**: before, any caller whose grant covered the table (a read wildcard) read it. After: `studio.access` is required there too. A Studio author (the platform admin among them) reads as before; a plain member is refused.
+    - Every `/meta` door serving these rows admits `studio.access`: `/meta/:type/:name/history`, `/audit` and `/diff` admit `studio.access` or `manage_metadata`, and `/packages/:id/commits` admits `studio.access` alone; `setup.access` alone is refused at all four. `requiredPermissions` is an AND-gate and cannot name an any-of set, and `setup.access` is held by organization admins, so it could not be the gate. A caller holding only `manage_metadata` therefore still reads the history and audit rows through `/meta`, but not the commit rows, and none of them through the data door.
+    - `sys_metadata` stays ungated, before and after: its rows are what `/meta` already serves to every organization.
+  - On a database the ceremony has not migrated (which `os serve` refuses, but every `os migrate` boot opens, the ceremony's own among them), the legacy organization rows are still told apart, off the physical column:
+    - every read the metadata protocol makes of the family goes through one seam that leaves them out. That covers boot hydration; the `/meta` list, by-name, layered and draft-preview reads; the item lock (`_lock`) the reads report and the save and delete gates enforce; the package-less write and read address; and the package, commit, audit, history and diff reads. Two reads keep them on purpose and read the column themselves: `os migrate meta --stored` reports such a row, and the commit revert refuses a legacy commit by name. The authored hook and action binders leave them out too;
+    - the metadata repository's write never resolves to one: before, a save of an address that only a legacy organization's row held rewrote that row in place (measured on the ceremony's template promotion). Now the write targets the environment's row, and with none it creates one, which the re-keyed unique index refuses beside the organization's row until the ceremony settles it;
+    - `os migrate meta --stored` reports such a row `skipped` and never re-saves it;
+    - `os migrate security-catalog-overlays` neither lists nor deletes it;
+    - a commit recorded in a legacy organization's layer is still refused by the revert;
+    - the runtime-datasource reads, the packaged permission-set overlay reading, the kernel:ready security-catalog echo, the stored flow-credential move and a `DatabaseLoader` (engine- or driver-backed) leave them out.
+  - `SqlDriver.listPhysicalColumns(object, options?)` (new, read-only): a table's physical column names, from the catalog, joining `options.transaction`. `TursoDriver`'s remote face answers it from the remote catalog. Every boot asks whether the family still carries the retired column, and it asks this way, not through `execute()`. So `os migrate plan` keeps its "a plan writes nothing" line on a migrated or fresh database. The legacy rows themselves are read with a raw statement only where the column exists.
+  - `GET /forms/:slug` and `POST /forms/:slug/submit` no longer read the Default Organization's legacy layer. Every metadata read is now environment → code. The doors judge each candidate against the environment's view list, which holds one item per package of a view name. So a withdrawal in one package still closes that name's form in every package. On a deployment with no organization this closes more than before, which is the fail-closed direction. A withdrawal saved only at the organization layer is carried onto the environment by the ceremony's `metadata-promotion` step, which the runtime requires before it starts.
+  - The protocol's `getMetaItems` drops its undocumented `legacyFormOrganizationId` request key. It was never in the spec's `GetMetaItemsRequest`, and only those doors passed it. A caller that still passes it now gets the environment's list.
+- f901746: feat(spec)!: the retired callout node types `http_request`, `http_call` and `webhook` are reserved inside the open flow-node namespace; `flow-node-http-callout-rename` leaves the load path
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (authoring):** ADR-0018 unified the three outbound callout node types `http_request`, `http_call` and `webhook` into the one `http` node, and through 17 the loader rewrote an authored node typed with one of them to `http` with a notice. A flow node's `type` is an open namespace (a plugin registers its own node types), so nothing refused the old names. At 18 they are reserved: the flow parse refuses each as a node's `type` by name, the automation engine refuses to register a node executor under one, and the ADR-0087 D2 conversion `flow-node-http-callout-rename` (protocol 11) is retired from the load path (`retiredAfter: '17.7.0'`). A wait node's `waitEventConfig.eventType: 'webhook'` is a different field and is not affected.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | a flow node `type: 'http_request'` | `type: 'http'` |
+  | a flow node `type: 'http_call'` | `type: 'http'` |
+  | a flow node `type: 'webhook'` | `type: 'http'` |
+  | a plugin's `engine.registerNodeExecutor({ type: 'webhook', … })` (or either other name) | a type of your own, e.g. `'acme_webhook'` |
+  
+  **The one-line fix:** change the node's `type` to `'http'`; the node's `id`, `label` and `config` stay as they are (the conversion never touched `config`, so the `http` contract judges it as written).
+  
+  **What an author who still writes it sees.** The parse refuses the node at its own `type` path — a top-level node and a node inside a `loop`, `parallel` or `try_catch` region alike. `defineStack` throws `STACK_SCHEMA_INVALID` (422), `os validate`, `os build` and `os lint` (whose config calls `defineStack`) print the issue, and the metadata save door answers a NEW flow with `422 INVALID_METADATA` at the node's `type`, with or without an automation service, and stores nothing:
+  
+  > Flow node `type: 'http_request'` was removed in @objectstack/spec 18 (ADR-0087 D2) — it is one of the three callout node types ADR-0018 unified into `http`, the loader rewrote it to `http` until this release, and the name stays reserved inside the open node namespace so no plugin can claim it (ADR-0018). Use `type: 'http'`. Change the value; the conversion never touched the node's `config`, so the `http` contract judges it as written.
+  
+  The refusal is a `pattern` on `FlowNodeSchema.type`, so the published JSON Schema carries it too.
+  
+  **`@objectstack/service-automation`:** `AutomationEngine.registerNodeExecutor` (and `registerNodeAlias`, which calls it) throws when the executor's `type` or its descriptor's `type` is one of the three names, and registers nothing. No node could ever reach such an executor: an authored node with the name is refused at parse, and a stored one is rewritten to `http` before it parses. A plugin that registered its own executor under one of these names fails at that call and needs a type of its own.
+  
+  **No tool makes the rename.** The conversion belongs to protocol 11, below the migration floor, so `objectstack migrate meta` applies no edit for it and `--write` writes none: it prints each such node among the refusals the migrated stack still has, at `flows.N.nodes.M.type`, and lists the D3 entry `flow-node-http-callout-types-reserved` as the hand edit.
+  
+  **Stored metadata needs no edit.** Stored-row rehydration, the automation engine's flow rehydration and the artifact-ingestion door inside its window still replay the conversion, so a `sys_metadata` flow row written with an old name keeps loading as an `http` node. The rewrite there is now unconditional: until 18 it skipped a node whose old name a live executor owned and reported a conflict, and the engine no longer lets such an executor exist.
+  
+  ## The retirement kit
+  
+  - **The reserved-name table** `FLOW_RESERVED_NODE_TYPES` and its refusal `reservedFlowNodeTypeRefusal` (`@objectstack/spec/automation`), read by the flow parse, the engine's registration refusal and the conversion itself.
+  - **The conversion** is `retiredFromLoadPath: true`, `retiredAfter: '17.7.0'`; its ADR-0078 conflict guard is gone.
+  - **The D3 entry `flow-node-http-callout-types-reserved`.**
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` and `@objectstack/service-automation` are published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered flow-node-http-callout-types-reserved -->
+- cf07168: feat(metadata-protocol)!: the metadata save door refuses a retired flow spelling on a NEW flow, and a stored flow keeps re-saving
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (API save door):** a flow saved through `saveMetaItem` (`PUT /api/v1/meta/flow/:name`, the runtime dispatcher, and every caller of the protocol) with no stored row of that name at the save's address is now judged as authored input. It is canonicalized without the ADR-0087 D2 conversions retired from the authoring funnel, so a spelling the loader stopped lifting at 18 is no longer rewritten and stored: it meets the flow parse's refusal, `422 INVALID_METADATA`, with an issue located at the key and the same prescription `os validate` and `os build` print. Draft and publish mode alike. Before, the door lifted the old spelling, stored the new one and said nothing, so the client that wrote it (an AI writing flows through MCP or REST above all) was never told and wrote it again.
+  
+  What counts as a stored row: the row the save overwrites, at its state and package, and for a draft save with no draft yet the active row the draft overlays, so Studio's first draft edit of a stored flow is a re-save.
+  
+  Not changed:
+  
+  - A re-save of a stored flow keeps replaying the full chain, retired entries included, so a legacy row stays editable and is healed by the save, exactly as before.
+  - The server's own writes of bodies at rest keep the full chain: the stored-metadata migration (`os migrate meta --stored`), a package duplicate and an unmanaged package import.
+  - The automation engine's flow rehydration (`registerFlow`) and the read path, which still serves a stored flow verbatim.
+  
+  Migration, for a client that creates flows through the API:
+  
+  - `wait` node loose `config.duration` / `config.timerDuration` → `waitEventConfig.timerDuration`; `config.signal` / `config.signalName` → `waitEventConfig.signalName`; `config.eventType` → `waitEventConfig.eventType`. On the block itself, `timeoutMs` → `timerDuration` and `onTimeout` is removed.
+  - `connector_action` node loose `config.connectorId` / `config.actionId` / `config.input` → its `connectorConfig` block.
+  - CRUD node `config.filters` → `config.filter`; `config.object` → `config.objectName`.
+  - `map` and `subflow` node `config.flow` → `config.flowName`.
+  - `notify` node `config.to` → `recipients`, `subject` → `title`, `body` → `message`, `url` → `actionUrl`, `source: { object, id }` → `sourceObject` / `sourceId`.
+  - `script` node `config.functionName` → `function`, `input` → `inputs`; `actionType` / `template` / `recipients` / `variables` / `script` are removed.
+  - `errorHandling.retryDelayMs` and a `try_catch` node's `retry.retryDelayMs` → `backoffMs`; the flow keys `active` / `template`, a node's `outputSchema` and `errorHandling.fallbackNodeId` are removed.
+  
+  Each refusal names the key to write. `os migrate meta --from 16` lists the same edits for source files. Rows already stored need nothing.
+  
+  `@objectstack/service-automation`: `AutomationEngine.canonicalizeStoredFlow(name, definition, options?)` takes `{ includeRetired?: boolean }`. Omitted, it is `true` (the full chain, as every caller holding a body at rest wants). `false` is the authoring posture the save door asks for. `registerFlow` does not take the option.
+  
+  <!-- adr-0087: not-required (already-registered flow-node-crud-filter-alias, flow-node-crud-object-alias, flow-node-notify-config-aliases, flow-node-wait-event-config-lift, flow-node-map-flow-alias, flow-node-subflow-flow-alias, flow-node-connector-config-lift, flow-node-script-config-aliases, flow-inert-keys-removed, flow-node-wait-timeout-keys-removed, flow-node-script-branch-keys-removed, retry-policy-converged) these D2 entries already record every spelling the save door now refuses on a new flow; this change only stops the door replaying them for authored input, and their own migrations are the ones above -->
+- 6422da5: feat(automation): `getFlowRuntimeStates()` stamps `unboundCause` beside `reason`
+  
+  Clause-②: yes (widening)
+  
+  Each branch that decides why an enabled, triggered flow is not armed now answers its closed `FlowUnboundCause` together with its sentence: `deployment_policy`, `disabled_subflow`, `missing_trigger` or `binding_failure`. `GET /automation/_status` passes the rows through unchanged, so the field reaches the console with no route change. Bound, disabled and trigger-less rows carry neither `reason` nor `unboundCause`. The sentences and `getTriggerBindingAudit()` are unchanged.
+- a65a59b: feat(spec)!: the ADR-0078 conversion-conflict channel is retired — `CONVERSION_CONFLICT_CODE`, `ConversionConflictNotice`, `ConversionConflictDetail`, the `onConflict` / `reservedNodeTypes` conversion options, the `conflicts` arrays and the `FLOW_CONVERSION_CONFLICT` 409
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (published API):** the ADR-0087 conversion API carried a channel for a rename REFUSED because its old token was a live name in the environment: a conversion reported it through `ConversionContext.reportConflict`, `applyConversions` handed it to an `onConflict` sink as a `ConversionConflictNotice` (code `OS_METADATA_CONVERSION_CONFLICT`), the automation engine collected it in `canonicalizeStoredFlow`'s `conflicts` array, and the metadata protocol answered it with `409 FLOW_CONVERSION_CONFLICT`. Its only producer was the live-executor guard inside the flow-node HTTP callout rename. Protocol 18 reserved those three names (`FLOW_RESERVED_NODE_TYPES`), so the engine refuses an executor under one, no live owner can exist, and the guard went. Nothing can raise a conversion conflict any more, so the channel leaves the published surface rather than staying as a live-looking failure mode nothing triggers.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  | --- | --- |
+  | `import { CONVERSION_CONFLICT_CODE, type ConversionConflictNotice, type ConversionConflictDetail } from '@objectstack/spec'` | delete the import — no replacement |
+  | `applyConversions(stack, { onConflict, reservedNodeTypes, … })` (likewise `applyConversionsToFlow`, `applyConversionsToStoredItem`, `collectConversionNotices`) | delete both options; keep `onNotice` / `onTodo` |
+  | a conversion's `apply` reading `context.reservedNodeTypes` or calling `context.reportConflict` | a rename over an open namespace reserves its old names instead (the `FLOW_RESERVED_NODE_TYPES` pattern), so the refusal happens at registration; a site with no lossless rewrite goes to `context.reportTodo` |
+  | an `IAutomationService.canonicalizeStoredFlow` implementation returning `conflicts: […]` (or a `StoredFlowCanonicalization` from `@objectstack/metadata-protocol` carrying one) | drop the member; return `parsed`, `storable`, `notices` and optionally `todos` |
+  | a client branch on `error.code === 'FLOW_CONVERSION_CONFLICT'` / HTTP 409 from a flow save, a package duplication or an unmanaged package import | delete the branch — no request can produce it |
+  
+  **The one-line fix:** delete every reference; the branch it guarded was already dead, so deleting it changes no behaviour.
+  
+  **What an upgrader sees.** Importing a removed name is `TS2305`; passing a removed option, or returning a `conflicts` member from a typed canonicalizer, is an excess-property `tsc` error. `ErrorCode` no longer parses `FLOW_CONVERSION_CONFLICT`.
+  
+  **Runtime behaviour is unchanged.** The removed branches could not fire: a stored flow carrying a reserved callout name still loads as `http` (the rewrite has been unconditional since the names were reserved), and `saveMetaItem`, `duplicatePackage`, `importUnmanagedPackage` and `os migrate meta --stored` answer exactly as before. No metadata document needs editing.
+  
+  ## The retirement kit
+  
+  - **`@objectstack/spec`:** the three exports leave the root; `ApplyConversionsOptions` loses `onConflict` and `reservedNodeTypes`, `ConversionContext` loses `reservedNodeTypes` and `reportConflict`, the `IAutomationService.canonicalizeStoredFlow` result loses `conflicts`; the error-code ledger drops `FLOW_CONVERSION_CONFLICT` by its own "Retiring a code" rule (a row comes out with its last emitter).
+  - **`@objectstack/service-automation`:** `AutomationEngine.canonicalizeStoredFlow` no longer returns `conflicts`, and the engine no longer builds a live-name set for the conversion pass.
+  - **`@objectstack/metadata-protocol`:** `StoredFlowCanonicalization` loses `conflicts`; the flow save door's 409, the stored-migration pass's `failed` row for a refused rename, `duplicatePackage`'s failed item and `importUnmanagedPackage`'s 409 are gone with it.
+  - **The D3 entry `conversion-conflict-channel-removed`.** No D2 conversion and no tombstone: no metadata document ever carried any of it.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** The three packages are published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered conversion-conflict-channel-removed -->
+
+### Patch Changes
+
+- 31e0735: The flow inspector's Error Variable help for a Try / Catch node describes the caught error in words
+  
+  Clause-②: no (help text only: the `try_catch` descriptor's `configSchema` accepts exactly what it accepted before, and the value bound to the error variable is unchanged)
+  
+  - The `errorVariable` description no longer names a TypeScript type (`TryCatchErrorValue`). It now says what the bound value carries, in plain language: the id of the Try / Catch node (`nodeId`), the failure message (`message`), the platform error code when the failing step reported one (`code`), and, for a failure inside a loop, the zero-based pass number (`iteration`) and the item being processed (`item`). The default variable `$error` is named.
+  - The old text also left out `code`, which the engine has bound since the classified-code change; an author reading the inspector had no way to learn that a catch region can branch on it.
+- 7de0265: feat(plugin-email)!: email templates resolve from the registry; the built-in seed, the declared-template boot sweep and the live projector retire
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is removed, renamed or re-shaped, and no stored row is rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What changes is where @objectstack/plugin-email reads a template (the email_template metadata in the registry instead of the sys_email_template rows it used to copy there) and which runtime exports and plugin options exist. The retired names are runtime functions, two types, a string constant and two EmailServicePluginOptions members of @objectstack/plugin-email, each with its one-line fix below; measured consumers in this repository outside the package (a showcase test and three dogfood tests) are rewritten here. The legacy sys_email_template rows stay where they are, untouched: promoting the customized ones to environment-level templates is the v18 migration ceremony's (ADR-0131 C7), not this change's. The other categories are closed on facts: every bumped package publishes (not unpublished); no ADR-0087 id covers these paths and this diff adds none (not registered / already-registered); and the retired names include runtime functions, not only a type surface (not runtime-interface-only / type-surface-only). The body does carry a FROM → TO block for the retired runtime exports and plugin options, but that is a code change the compiler carries to each caller, not a metadata migration for `objectstack migrate meta`, and ADR-0087's disposition vocabulary has no category that fits this shape exactly, so the maintainer is asked to rule the reading. -->
+  
+  **BREAKING** (retired exports and plugin options of `@objectstack/plugin-email`), graded `minor` on the v18 prerelease line: Changesets is in pre mode with the tag `next`, so this ships in an `18.0.0-next.N`. It carries ADR-0131 D6/D10 and the maintainer's ruling C on ADR-0131 §6 Q1.
+  
+  **What changes.**
+  
+  - **Templates resolve from the registry.** `sendTemplate` and `renderTemplate` read `email_template` metadata by `(name, locale)` at every send: the protocol's layered list (`GET /meta/email_template`'s items — the environment's item over each code package's declaration), or the ObjectQL registry on a host with no metadata door. The locale ladder is unchanged: the named locale exactly, then `en-US`, then — only for a call that named none — the bundle's lowest locale tag.
+  - **The built-in auth templates are code-declared items** of the email plugin's own package (`com.objectstack.service.email`), registered at plugin init, so they now appear in Studio's email-template list. An app that declares the same `(name, locale)` wins over the built-in; the built-in still serves the locales the app leaves out; a Studio save overrides either at environment level. Every built-in renders byte-identical to the row it used to be seeded into, in every locale (pinned on the rendered subject, HTML and text).
+  - **A Studio save is live on the next send**, with no projection and no restart. The `PUT /meta/email_template/:name` response no longer carries `projectionApplied`, because nothing is projected.
+  - **No `sys_email_template` row is written at boot or read at send.** The table and its rows stay; the organization door stays closed.
+  - **A malformed template fails its send loudly** with the schema's own message, instead of falling through to the built-in copy of the same slot.
+  
+  **What moves for consumers.**
+  
+  - FROM `createSysEmailTemplateLoader(engine, options?)` TO `createRegistryEmailTemplateLoader(sources)`, where `sources` is `{ protocol?, registry? }` (type `EmailTemplateRegistrySources`) or a function returning it. FROM the types `TemplateLoaderEngine` / `CreateTemplateLoaderOptions` TO `EmailTemplateRegistrySources`.
+  - FROM `bootstrapDeclaredEmailTemplates(...)`, `upsertDeclaredEmailTemplate(...)` or `deactivateDeclaredEmailTemplate(...)` TO nothing: templates are not copied into rows any more. Delete the call.
+  - FROM `mapTemplateToRow(tpl)` TO nothing: there is no row projection. To resolve a template the way the mailer does, call `createRegistryEmailTemplateLoader(...).load(name, locale)`.
+  - FROM `EMAIL_TEMPLATE_OBJECT` TO the literal `'sys_email_template'`, only if you still address the legacy table. FROM the type `BootstrapDeclaredEmailTemplatesResult` TO nothing.
+  - FROM `new EmailServicePlugin({ seedTemplates: false })` TO `new EmailServicePlugin()`: there is no seed to switch off. Delete the option.
+  - FROM `new EmailServicePlugin({ templates: [...] })` TO the stack's `emailTemplates: [...]` (or a `*.email-template.ts` file): declared templates resolve from the registry. Delete the option.
+  
+  **What a deployment observes.** A `sys_email_template` row an organization customized before its door closed is no longer what sends: the template's code declaration (or an environment-level Studio save) is. The v18 migration ceremony promotes those rows to environment-level templates; to make such an edit live before it runs, re-save the template in Studio.
+  
+  **`@objectstack/spec`** (patch): the `email_template` liveness ledger is re-anchored to the registry loader, and `category` and `isSystem` are graded `dead` — their only consumer was the retired row projection. The `notify` node's `template` description and refusal messages, and the `IEmailService` contract's documentation, name the email templates rather than `sys_email_template` rows. No schema shape changes.
+  
+  **`@objectstack/service-automation`** (patch): the notify node's `template` help text served at `GET /api/v1/automation/actions` names the email templates rather than `sys_email_template` rows.
+- 2f70c22: A key a builtin flow node's executor contract does not declare is refused at parse, with a location, on every builtin but `try_catch`: a `notify` `bogusKey`, a screen field's `visibleIf`, a `create_record` `fieldValues`, an `http` `outputVariable` and the like no longer pass `objectstack validate` and `objectstack compile` and then get the whole flow refused at registration.
+  
+  Clause-②: yes (narrowing: an undeclared config key on 10 more builtins, every strict-contract builtin but try_catch, is refused at the build doors and the save door, where it passed; widening: a save door with no flow canonicalizer judges the D2-converted body, so a D2 alias spelling it refuses today, script functionName / input and subflow flow, is accepted again, as at every other door)
+  
+  <!-- adr-0087: registered flow-builtin-node-config-undeclared-keys-refused -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `minor` under the launch-window convention for accept-set narrowings.
+  
+  **Why.** Each of these executors parses the node's `config` against a strict contract before it acts. The build doors' executor-contract arm judged required keys and present values on these types, but held key membership back, because `registerFlow`'s undeclared-key walk judged it against the node type descriptor's `configSchema`. So a `notify` node carrying `bogusKey` passed `FlowSchema.parse`, `objectstack validate` and `objectstack compile` (compile copied the key into `dist/objectstack.json`), and then registration refused the whole flow: at boot it was skipped with a warn, and a flow saved from Studio was stored and then silently not registered.
+  
+  **What is refused.** A `get_record`, `create_record`, `update_record`, `delete_record`, `notify`, `http`, `screen`, `map`, `loop` or `parallel` node, at any depth, whose config carries a key its executor contract does not declare: at the config itself, on a `screen` field, or on one of a field's `options`. That includes a body-less legacy `loop`, which is judged on key membership alone. The refusal is the existing closed-set code `node-config-refused-by-contract`, `params: { nodeType, key }`, one per undeclared key, anchored at the key (`nodes.N.config.bogusKey`, `nodes.N.config.fields.0.visibleIf`). It comes from the one judge `flowNodeConfigRefusals` that `FlowSchema.parse`, `AutomationEngine.registerFlow` (which parses first), `objectstack validate` and the metadata save door share. Its message carries the contract's own sentence, with the contract's prescription for a known slip (`fieldValues` → `fields`, `bulk` → `multi: true`, `visibleIf` → `visibleWhen`, a did-you-mean for a near miss), and closes with the remedy: rename the key to one the contract declares there, or remove it. The issue's `code` is `custom`. That covers `FlowSchema`, `defineFlow()`, `defineStack` (`STACK_SCHEMA_INVALID`, 422, at `flows.N.nodes.M.config.<key>`), `os validate`, `os compile`, an artifact's parse, `registerFlow` and the save door. `script` and `subflow` keys were already refused this way. The new `builtinNodeConfigKeysJudged(nodeType)` export names exactly the builtins the spec judges.
+  
+  **`@objectstack/service-automation`.** `registerFlow`'s descriptor walk (`validateNodeConfigKeys`) stands aside for every type `builtinNodeConfigKeysJudged` names, so each node type has one judge. Before the move, the declared key sets were measured equal: on each of these types the descriptor's declared keys, at every position the walk descends to, equal the keys the contract accepts there. So registration refuses exactly what it refused before. The refusal now arrives as the parse's located issue instead of the walk's `Flow '…' rejected: N undeclared config key(s)` text.
+  
+  **`@objectstack/metadata-protocol`.** The save door judges a flow in its canonical spelling on every path. When no flow canonicalizer resolved (a host with no automation service), or the canonicalizer threw (a draft with a temporary cycle), the schema gate and the runtime authoring gate now judge the body with the ADR-0087 D2 conversions applied (`applyConversionsToFlow`), for the verdict only. The stored body stays the raw request body, exactly as before. A D2 spelling the load path still rewrites (`filters` on a CRUD node; `to`, `subject`, `body` and `url` on a `notify`; `flow` on a `map`; `functionName` and `input` on a `script`; `flow` on a `subflow`) is therefore accepted at that door, as at every other one, and an undeclared key that no conversion rewrites is refused there, located. This widens the fallback path back for the `script` and `subflow` aliases the previous key arm had begun refusing there. `duplicatePackage` re-saves through the same gate.
+  
+  **What stays as it was.**
+  
+  - `try_catch`: its undeclared keys stay registration's, judged by the walk. Its contract's `retry` is the shared `RetryPolicySchema`, which strips an unknown key, while its descriptor closes `retry` to `maxRetries`, `backoffMs`, `backoffMultiplier`, `maxRetryDelayMs` and `jitter`. Moving the judge would have widened registration.
+  - Every plugin node type (the spec does not declare its contract): judged by the walk against its descriptor's `configSchema`, with the walk's own prescriptions.
+  - A key at or under a region slot (a `loop` body or a `parallel` branch, and their nodes and edges): judged at registration by the region check, as before.
+  - A key inside a free-form map (`filter`, `fields`, `headers`, `defaults`, `input`, `payload`, `templateData`): author data, never judged.
+  - `assignment`, whose top-level keys are the author's variable names, and `decision`, which parses no contract: unjudged.
+  - A spelling an ADR-0087 D2 conversion still rewrites at load (`object` and `filters` on a CRUD node; `to`, `subject`, `body` and `url` on a `notify`; `flow` on a `map`) is converted before the judge at every door that converts first (`defineStack`, `os validate`, `os compile`, `registerFlow`, the save door). Met by a direct `FlowSchema.parse` or `defineFlow()`, it is refused like any other undeclared key.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | a typo of a declared key (`titl`, `outputVariabel`) | the declared key the refusal's did-you-mean names |
+  | `fieldValues` on `create_record` / `update_record` | `fields` |
+  | `bulk`, `all`, `multiple` or `options: { multi: true }` on `update_record` / `delete_record` | `multi: true` at the top level of `config` |
+  | `visibleIf` on a screen field | `visibleWhen` |
+  | `itemVariable` on a `loop` | `iteratorVariable` |
+  | `outputVariable` on an `http` node | delete it: the http executor binds no output variable |
+  | a key nothing reads | delete it |
+  
+  **The one-line fix: rename or delete the key the refusal names.** Registration already refused such a flow, so the fix changes nothing a running flow does.
+  
+  **Who is affected, measured.** At `fbcbcf124`, every builtin flow node authored in this repository's examples, platform objects, apps, scaffolding templates, skills and docs (95 nodes) carries only keys its contract declares. The Studio flow designer at the pinned objectui `a58626c88d` writes only declared keys whenever the engine publishes the node's descriptor. Its fallback form (while the descriptor list is loading, or when it cannot be read) offers `outputVariable` on an `http` node and the `url` alias on a `notify` node. Registration already refused the first and the conversion rewrites the second; the designer fix is tracked in objectui. hotcrm, deployed metadata and other repositories were not measured.
+  
+  ### The kit
+  
+  - **The refusal.** The key half of the executor-contract arm of `flowNodeConfigRefusals` in `automation/flow-node-config-refusals.ts`, over every builtin in `getBuiltinNodeConfigContracts()` but `try_catch`, named by the new export `builtinNodeConfigKeysJudged`; no new code joins `FLOW_SLOT_REFUSAL_CODES`.
+  - **The ledger.** The D3 semantic entry `flow-builtin-node-config-undeclared-keys-refused` (protocol 18). No key is removed, so there is no tombstone, and there is no D2 conversion: the platform cannot know what an undeclared key was meant to be.
+- d4680d2: feat(spec)!: `NotifyConfigSchema.title` and `NotifyConfigSchema.message` are template slots: each takes a bare string or a `{ dialect: 'template', source }` envelope (the `tmpl` helper), as the expression dialect table already listed notification subjects and bodies among the `template` slots, and a blank bare string is now refused there
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is renamed, retired or re-shaped for an author: `title` and `message` still take every non-blank bare string they took before, and now also the `template` envelope. The one newly refused input is a blank bare string (`''` or whitespace-only) at either key, and it was measured, not assumed. Census: the 31 files in this repo that author a `notify` node at the merge base (examples, docs, skills, the ADR, tests and fixtures) carry zero blank `title` / `message` values. The objectui pin (`a58626c8`) has 9 files that name a `notify` type and zero blank `title` / `message` literals. Not covered by either count: objectui's flow inspector deletes a cleared key only when the committed value is `''` (`setAtPath`), so a whitespace-only entry typed into the Studio form IS stored, and a stored flow carrying one is refused at its next run; hosted tenants' stored flows were not measured. No conversion can repair such a value, because an empty title or body has no intended text to recover: the remedy is authoring intent (write the text, or delete the key), so the ledger has nothing to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at two authorable keys (`automation/NotifyConfig:title`, `automation/NotifyConfig:message`), shipped as `minor` under the repo's launch-window convention for breaking changes. It is the grade `TemplateExpressionInputSchema`'s blank-string rule shipped with when it reached the first twelve typed keys.
+  
+  - **What widens.** Both keys are typed with `TemplateExpressionInputSchema`, the input every other `template` slot uses. Before, both were `z.string()`, so a notify node written with `` tmpl`…` `` passed `defineFlow` and registration and then failed every run at the execute-time contract parse (`expected string, received object`). It now parses and runs.
+  - **What narrows.** A blank bare string (`''` or whitespace-only) at either key is newly refused, by the shared template input's non-blank rule (`invalid_union`, with the `TYPED_EXPRESSION_SOURCE_REQUIRED.template` sentence). Before, every blank value parsed:
+    - `title: ''` then failed every run at the executor's guard ("notify: title is required"), so it fails either way, now earlier;
+    - a whitespace-only `title` passed that guard and was delivered as the notification title, and it is now refused;
+    - `message: ''` or a whitespace-only `message` was delivered as an empty or blank body, and it is now refused.
+  
+    The fix is to write the text, or to delete the key (`message` is optional).
+  - **Parse output.** `NotifyConfigSchema.parse(...).title` and `.message` go from `string` to `{ dialect: 'template', source }`, for both spellings, because the parse normalizes a bare string to that envelope. The exported `NotifyConfigParsed` type changes with them. Code that reads parse output reads `.source`. The `notify` executor, the one reader in this repo, now does, so both spellings of one text deliver the same `payload.title` and `payload.body`, and a bare string renders exactly what it rendered before.
+  - **Still refused, with a new sentence.** A value that is neither a string nor a template envelope (a number, an array, a `cel` envelope) was refused before (`invalid_type`). It is refused now as `invalid_union`, with the `TYPED_EXPRESSION_DIALECT_ONLY.template` sentence.
+  - **New, notify-only.** A template envelope on either key must carry a non-blank `source`. The executor renders `source` and has nothing to render from `ast` alone, so such an envelope is refused at the key instead of failing every run (`title`) or sending an empty body (`message`). An envelope never parsed at these keys before, so this refuses nothing that used to parse.
+  - **Placeholder spelling.** These two slots render `{{ }}` holes (`{{ record.name }}`), for a bare string and an envelope alike, and a single-brace `{token}` in them is refused. The `.describe()` on both keys now says so, and no longer says the text is "sent verbatim".
+  - `@objectstack/service-automation`: the `notify` executor reads `source` from the two template slots, and the descriptor's `title` / `message` descriptions state the `{{ }}` holes in place of "sent verbatim".
+- 51290bc: Form help and refusals an author reads no longer carry service-interface names, ruling dates or another product's ids
+  
+  Clause-②: no
+  
+  Wording only: no schema, key, type, export or error-code change.
+  
+  - The notify node's Template help (the `NotifyConfigSchema.template` describe and the Studio
+    inspector's copy in `@objectstack/service-automation`) names the deployment's default locale in
+    product words instead of `II18nService.getDefaultLocale()`, and drops its ruling date.
+  - `MANIFEST_ID_EXAMPLES` is now `com.acme.crm` and `org.example.help-desk` (was `com.steedos.crm`
+    and `org.apache.superset`). The package-id refusal opens with the headline
+    "Invalid package id 'VALUE'." and names the key in the sentence after it, so the headline alone
+    carries no JSON path; the rule, the examples and the suggestion follow unchanged in substance. A
+    caller that matched the old "on KEY. Expected reverse-domain notation" wording matches the
+    headline, or compares against `manifestIdRefusal()` by reference, instead.
+  - Ruling dates leave the describes Studio renders as form help: field `required` and `multiple`,
+    form-view field and section `visibleWhen`, section `collapsible` / `collapsed`, the redirect
+    arm's `submitBehavior.url`, and page `kind` / `source` (the ADR citations stay). They also
+    leave the refusals for padded grouping field names, `submitBehavior.url`, `features.*` in a
+    form-view predicate, and the four filter comparand refusals (null ordering comparand,
+    `{ $field }` in a list position, null list member, blank `$between` bound). Each sentence still
+    states the rule, why it exists and the repair.
+  - The email-template form's Identity section help says how senders address a template instead of
+    naming `IEmailService.sendTemplate`, in all four shipped locales.
+  - The action `description` help no longer ends in a dangling dash left behind by an earlier
+    strip: "(one dialog, not two —)" now reads "(one dialog, not two)".
+- 43fc500: fix(service-automation): a `get_record` whose `fields` leave out `id` answers the row's id as its `id` output on the SQL drivers
+  
+  Clause-②: no
+  
+  - **What was wrong.** On its single-row branch (no `limit` above 1) a `get_record` node answers `output: { record, id, object }`, and a later node reads that `id` as `{read.id}` (for a node whose id is `read`). The node handed the author's `fields` to the engine unchanged, and the SQL drivers return exactly the columns a projection names. So a `get_record` with `fields: ['title']` read a row with no `id` column, and `{read.id}` was empty with no error. A later `update_record` filtering on it was refused for a filter condition that resolved to nothing, and any other reference read nothing.
+  - **What it does now.** That branch names `id` in the projection it hands the engine, so `{read.id}` is the row's id whatever `fields` names, on every driver. The record the node serves, and binds to its `outputVariable`, carries that `id` beside the columns the author named, so the variable's `id` reads the same value. The stored-metadata tables (`sys_metadata`, `sys_metadata_history`) are read the same way: the served row is the named columns plus `id`.
+  - **Unchanged.** A `get_record` with no `fields`, or an empty list, still reads the whole row. A projection that already names `id` is handed over as written. The multi-row branch (`limit` above 1) answers `records` only and is untouched.
+- fdfdd7e: fix(service-automation, objectql): the `runAs: 'user'` refusals and the run-setup warning say what a principal-less operation meets on both kernels
+  
+  Clause-②: no
+  
+  Three author-facing texts told a flow or hook author that a `runAs: 'user'` data operation with no trigger user "would execute UNSCOPED (elevated, RLS-bypassing)" if it were not refused. That holds only on a kernel with no security plugin. Since ADR-0096 D5, a kernel with `@objectstack/plugin-security` refuses an operation that carries no principal (`403 PERMISSION_DENIED`). Each text now says both: without a user the operation would carry no principal, refused by the security plugin where one is composed, unscoped where none is.
+  
+  - `@objectstack/service-automation`: the `UnscopedRunDataAccessError` message, and the `[runAs]` warning logged at run setup for a flow whose trigger resolved no user.
+  - `@objectstack/objectql`: the `HookUnscopedDataAccessError` message.
+  
+  Only the wording changes. The refusals, their order, their codes (`AUTOMATION_UNSCOPED_RUN_DATA_ACCESS`, `HOOK_UNSCOPED_DATA_ACCESS` with its `403` status) and their remedy are unchanged: declare `runAs: 'system'` to make the elevation explicit and intended, or arrange for the trigger to supply a user.
+- 1b99388: fix(service-automation): the `sys_automation_run` row's highlight set now shows `unmeasured_count` beside `selected_count` and `acted_count`. That puts all three operands of the broken-sweep first filter (`selected_count > 0 AND acted_count = 0 AND unmeasured_count = 0`) on the run row itself. The field's description now also lists a notification queued for delivery as an uncountable effect.
+  
+  Why: on a stack composed as `serve` composes it, reliable delivery is on, so a `notify` step's in-app message is enqueued. The outbox dispatcher writes it after the run settles, and the node reports `unmeasuredEffect`. A notify sweep that did its job therefore reads `acted 0, unmeasured 1`. With only `selected` and `acted` on the row, it read the same as a sweep with nothing to do. No counter changes: an enqueued delivery stays uncountable, never a fabricated `acted`.
+  
+  For operators: read the triple (`selected`, `acted`, `unmeasured`), never `acted` alone. `acted 0` with `unmeasured` above 0 means "cannot tell", not "did nothing".
+- d176b0a: feat(spec)!: the loose `config` keys of a `wait` or `connector_action` flow node are refused, naming the `waitEventConfig` / `connectorConfig` key they belong on, and `flow-node-wait-event-config-lift` and `flow-node-connector-config-lift` leave the load path
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (authoring):** neither node type has a `config` contract: the `wait` executor reads only `waitEventConfig` and the `connector_action` executor only `connectorConfig`. Through 17 the loader lifted settings written under the node's `config` into that block with a notice. At 18 both ADR-0087 D2 conversions are retired from the load path (`retiredAfter: '17.7.0'`), and the flow parse refuses each such key where it is written, at every door that judges a flow (`defineStack`, `os validate`, `os build`, and `os lint` when the config calls it), a node inside a loop / parallel / try-catch region body included: "A `wait` node's `config.duration` was removed in @objectstack/spec 18 (ADR-0087 D2) … Move it to `waitEventConfig.timerDuration` …". The refused keys are exactly the ones the lifts moved: `eventType`, `timerDuration`, `duration`, `signalName`, `signal` and `timeoutMs` on `wait`; `connectorId`, `actionId` and `input` on `connector_action`. Any other `config` key on these node types is judged as before.
+  
+  Migration:
+  
+  - `wait` node `config.eventType` / `config.timerDuration` / `config.signalName` → the same key under `waitEventConfig`.
+  - `wait` node `config.duration` → `waitEventConfig.timerDuration`, and `config.signal` → `waitEventConfig.signalName`.
+  - `wait` node `config.timeoutMs` → `waitEventConfig.timerDuration`, as a string (`60000` → `'60000'`, or `'PT1M'`): it was only ever read as the timer duration.
+  - `connector_action` node `config.connectorId` / `config.actionId` / `config.input` → the same key under `connectorConfig`.
+  - If the block already sets the same key, the block's value is the one the node always ran with: delete the loose key.
+  
+  Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. The D3 entry `flow-sibling-block-loose-config-keys-refused` states the edit for upgraders.
+  
+  Stored metadata needs no edit. The automation engine's flow rehydration (`registerFlow`), stored-row rehydration and the metadata save door's flow verdict still replay both conversions, and each now DELETES a loose key its block already shadows (and a loose key holding `null`) instead of leaving it in place, so a `sys_metadata` flow carrying either shape keeps loading with the block alone. A `connector_action` node whose `connectorId` / `actionId` pair is complete in neither place is refused as before: no conversion can complete it.
+  
+  `@objectstack/service-automation`: comment-only changes in the `wait` and `connector_action` executors, which already read only their declared blocks.
+  
+  <!-- adr-0087: registered flow-sibling-block-loose-config-keys-refused -->
+- 099cc9d: Clause-②: no
+  
+  The approval, security, automation and sharing objects describe their records in plain admin
+  sentences. Approval Delegations now reads "While someone is away, approvals assigned to them
+  personally go to their delegate.", Record Shares "Records shared beyond their owner, one row per
+  grant.", User Positions "Which positions each user holds, one row per assignment.", Audience
+  Binding Suggestions "A package's suggestion to give one of its permission sets to everyone who
+  signs in, and the decision taken on it." and Automation Runs "Paused automation runs waiting to
+  resume, and the recent history of finished runs." Field help on Approval Requests, Approval
+  Delegations, User Positions, User Permission Sets and Audience Binding Suggestions, the
+  descriptions of the `organization_admin_no_bypass`, `mcp_agent_data_read` and
+  `mcp_agent_data_write` permission sets, the flow-dispatch ledger's description and the
+  reserved-position refusal no longer carry design-record numbers or runtime vocabulary; those
+  references stay in the code comments. The zh-CN, ja-JP and es-ES translations follow. Wording
+  only: no field, permission or behaviour changes.
+- 2054a08: Clause-②: no
+  
+  A failed `parallel` run now shows what its branches did. Under the block's own `failure` step, the run's step log lists every branch's steps, each tagged with `parentNodeId`, `regionKind: 'parallel-branch'` and its `branch` index: a branch that completed, with its `success` step, and the failing branch's steps up to and including the one that failed, with its error. The run summary counts what those steps did. A fan-out whose notify branch delivered and whose http branch failed now reports `acted: 1` and `failed: 2` (the http step and the block), the way a failed `loop` already does. Before, the log held only the block's failure step and the summary read `acted: 0`. That reads as "nothing happened, safe to re-run" over a notification that had already been sent.
+  
+  The block now reports its failure once every branch has settled, not at the first branch to fail, so a branch that finishes later keeps its step and its effect is counted. Routing is unchanged. The failure is still the block's returned failure, so a `fault` edge on the `parallel` routes it with the same step code, error text and `$error`. A durable pause refused inside a branch still fails the run.
+- 19955fb: Clause-②: no
+  
+  fix(service-automation): a resume refused because the run's flow or parked node is gone now settles the run's `sys_automation_run` row
+  
+  - **What changed.** A resume refused with `RUN_NOT_FOUND` because the run's flow is no longer registered, or because the node it parked on was edited away, now settles the run in the same call. The paused row is consumed and a `failed` history row records the refusal's own text in `error`. Before, the row kept `status: 'paused'` through every later resume, an uninstall and a cold restart. Run lists and paused-run counts kept showing a run the engine already knew could never continue, and retention never aged the row out, because it prunes terminal statuses only.
+  - **Unchanged:** the answer. It has the same code and the same text, and a transport still answers 404. A second resume answers `RUN_NOT_FOUND` again (`No suspended run`) and writes nothing. Retention is unchanged: `failed` was already in its scope, and paused rows are still never pruned.
+  - **When nothing is recorded.** Before the host seals the boot, a missing flow may be one that is not registered yet. `AutomationServicePlugin` re-arms overdue wait timers in `start()`, before flows bound at `kernel:ready` arrive. So before the seal the refusal records nothing, as before. The host seals with `sealNodeTypeVocabulary()`, which the plugin calls at `kernel:bootstrapped`. An embedded host that never calls it keeps the previous behaviour.
+  - **Concurrency.** The settle consumes the row through the same compare-and-set a resume takes. If a concurrent resume or cancel consumed the row first, the call writes nothing. If the store cannot answer the compare-and-set, the resume answers `STORE_UNAVAILABLE` (503), and a retry settles the run.
+- ef1fcb2: A declared index states its uniqueness scope: bare `unique: true` on `indexes[]` is refused (protocol 18, ADR-0120 D1/D7), stored metadata converts it to `unique: 'global'` with zero drift, and `VISIBILITY_STRICT_OPTIONS` leaves `@objectstack/spec`'s public surface.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered declared-index-bare-unique-true-retired, visibility-strict-options-unexported -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface and one export removal, shipped as `minor` under the launch-window convention for accept-set narrowings (Changesets pre mode is not in on `main`).
+  
+  **Why.** On a declared index, bare `unique: true` was the one `unique` spelling whose scope was positional. It built the index over exactly `fields`, one holder across the whole installation, while reading like "unique per organization" to an author who knew the field-level meaning. 17.x warned (lint `unique/unscoped-declared-index`). Protocol 18 refuses it, so the scope is always stated.
+  
+  **What is refused.** A declared index (`objects[].indexes[]`, `objectExtensions[].indexes[]`) whose `unique` is bare `true`. The refusal names both replacements, and says which one keeps the index bare `true` built. It is raised by:
+  
+  - the schema (`IndexSchema.unique`, now `false | 'global' | 'organization'`), at every door that parses: `ObjectSchema.create()` and `ObjectSchema.parse()`, `defineStack`, `os validate`, `os build`, and the runtime save door (`422 INVALID_METADATA`). `tsc` refuses it too, because the input type no longer admits `true`;
+  - lint `unique/unscoped-declared-index`, now an `error` and a gating rule on all three commands. It is what refuses the spelling under `os lint`, which never parses.
+  
+  **What converts.** The protocol-18 ADR-0087 conversion `declared-index-unique-scope` rewrites a declared index's bare `true` to `'global'` on every data-at-rest seam: stored `sys_metadata` rows (`applyConversionsToStoredItem`), built artifacts inside their declared-floor window, and `os migrate meta --from 17`. `'global'` is exactly the index bare `true` built, so the physical index is byte-identical and the drift plan is empty. It is retired from the authoring funnel, so a live author is refused and taught instead of converted silently.
+  
+  **What stays accepted.** Field-level `unique: true` still means one holder per organization and stays valid indefinitely. On a declared index, `unique: false` or omitted, `'global'` and `'organization'` parse exactly as before.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `indexes: [{ fields: [...], unique: true }]` | `indexes: [{ fields: [...], unique: 'global' }]`: the same index, nothing on disk changes |
+  | …the same, when you meant one holder per organization | `unique: 'organization'`: the driver prepends the NULL-safe organization key part at registration, and `os migrate plan` shows the index change |
+  | `import { VISIBILITY_STRICT_OPTIONS } from '@objectstack/spec/shared'` (or the root entry) | delete the import: it was an internal option bag for the spec's own visibility-carrying schemas, and those schemas are unchanged |
+  
+  **The one-line fix: on every declared index, write `unique: 'global'` where you wrote `unique: true`.** Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.
+  
+  **Who is affected, measured.** At `e67ba80049`, an AST census found 48 declared indexes with bare `unique: true` in 39 source files of this repository, all platform and plugin objects. Every one is respelled `'global'` in this change, and the nine-key S5 corpus is pinned to build byte-identical indexes before and after (`driver-sql`'s `sql-driver-unique-tenancy.test.ts`). `examples/**` and `apps/**` carry none. Deployed metadata and other repositories were not measured.
+  
+  ### The kit
+  
+  - **The refusal.** `IndexSchema.unique` in `data/object.zod.ts`, with its own prescription. The lint rule moved from `warning` to `error` and from advisory to gating.
+  - **The conversion.** `declared-index-unique-scope` (`toMajor: 18`, retired from the load path, `retiredAfter: '17.7.0'`), with its S4/S5 fixture.
+  - **The ledger.** The D3 semantic entries `declared-index-bare-unique-true-retired` (the scope each respelled index really meant is the author's call) and `visibility-strict-options-unexported`, plus a step-18 rationale fragment.
+  - **The export.** `VISIBILITY_STRICT_OPTIONS` moved to the unbarrelled `shared/visibility-strict-options.ts`, beside its type `StrictObjectOptions`. `check:api-surface` counts the removal.
+  - **The pins.** The "`'global'` is a synonym of `true`" driver pin retired with the bare spelling. The verbatim pin is stated in `'global'`.
+- Updated dependencies [5a871e4]
+- Updated dependencies [5a871e4]
+- Updated dependencies [ffba02e]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [29d0ed3]
+- Updated dependencies [1b40780]
+- Updated dependencies [78b1a63]
+- Updated dependencies [d11fa8c]
+- Updated dependencies [ca426cb]
+- Updated dependencies [4ad3ce5]
+- Updated dependencies [8016a9d]
+- Updated dependencies [df9d07e]
+- Updated dependencies [3ae0b77]
+- Updated dependencies [8eac321]
+- Updated dependencies [a5a781b]
+- Updated dependencies [9a7838e]
+- Updated dependencies [191e043]
+- Updated dependencies [b12e16a]
+- Updated dependencies [fbafb85]
+- Updated dependencies [35450f0]
+- Updated dependencies [6464df3]
+- Updated dependencies [4840720]
+- Updated dependencies [0b4be0b]
+- Updated dependencies [1e8b628]
+- Updated dependencies [4ff18d3]
+- Updated dependencies [3566c08]
+- Updated dependencies [12d1476]
+- Updated dependencies [bd6dab0]
+- Updated dependencies [14ccb1d]
+- Updated dependencies [c0803b0]
+- Updated dependencies [758c77d]
+- Updated dependencies [d117382]
+- Updated dependencies [4bc3bec]
+- Updated dependencies [1f949da]
+- Updated dependencies [ecb7b44]
+- Updated dependencies [41edf73]
+- Updated dependencies [1c1144f]
+- Updated dependencies [014863d]
+- Updated dependencies [f7005cb]
+- Updated dependencies [3983965]
+- Updated dependencies [3230d66]
+- Updated dependencies [0c910d5]
+- Updated dependencies [9d13b5f]
+- Updated dependencies [317cddd]
+- Updated dependencies [b2e7870]
+- Updated dependencies [fec87e7]
+- Updated dependencies [34dba5a]
+- Updated dependencies [c28f317]
+- Updated dependencies [2e10c9a]
+- Updated dependencies [dac99c2]
+- Updated dependencies [0d3ea29]
+- Updated dependencies [67b669e]
+- Updated dependencies [0253192]
+- Updated dependencies [0253192]
+- Updated dependencies [48cca4a]
+- Updated dependencies [bfc15d2]
+- Updated dependencies [2ff0825]
+- Updated dependencies [7aa8d51]
+- Updated dependencies [95a8435]
+- Updated dependencies [c8a9783]
+- Updated dependencies [60bcfe7]
+- Updated dependencies [66949b7]
+- Updated dependencies [d112087]
+- Updated dependencies [4806b18]
+- Updated dependencies [1802315]
+- Updated dependencies [06cc45d]
+- Updated dependencies [8c5aa50]
+- Updated dependencies [7de0265]
+- Updated dependencies [8c105e3]
+- Updated dependencies [e02833c]
+- Updated dependencies [7895671]
+- Updated dependencies [b389e43]
+- Updated dependencies [c8b062f]
+- Updated dependencies [117d34d]
+- Updated dependencies [6729e10]
+- Updated dependencies [1920cf3]
+- Updated dependencies [41d0d40]
+- Updated dependencies [c52bfb4]
+- Updated dependencies [f9b4217]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [c7d6037]
+- Updated dependencies [72b26ed]
+- Updated dependencies [2d21b9c]
+- Updated dependencies [f66fdc7]
+- Updated dependencies [9fdb127]
+- Updated dependencies [615c696]
+- Updated dependencies [968acc8]
+- Updated dependencies [111ffff]
+- Updated dependencies [12b9daf]
+- Updated dependencies [7958bdf]
+- Updated dependencies [d85615d]
+- Updated dependencies [6a06e3b]
+- Updated dependencies [0e9e7b7]
+- Updated dependencies [0af4f66]
+- Updated dependencies [9a0401f]
+- Updated dependencies [9c93ce6]
+- Updated dependencies [77a94d8]
+- Updated dependencies [ac9f8bd]
+- Updated dependencies [879bd38]
+- Updated dependencies [b88c356]
+- Updated dependencies [a3bcbcf]
+- Updated dependencies [1abfc58]
+- Updated dependencies [db87a02]
+- Updated dependencies [04e776b]
+- Updated dependencies [1c563af]
+- Updated dependencies [a7df552]
+- Updated dependencies [6befe19]
+- Updated dependencies [8caa131]
+- Updated dependencies [2f70c22]
+- Updated dependencies [78f841b]
+- Updated dependencies [1fb274e]
+- Updated dependencies [c565813]
+- Updated dependencies [d5a14dd]
+- Updated dependencies [f85a83b]
+- Updated dependencies [2015c54]
+- Updated dependencies [73a0a6b]
+- Updated dependencies [f2a45db]
+- Updated dependencies [aa9447c]
+- Updated dependencies [3d91885]
+- Updated dependencies [8fc50b7]
+- Updated dependencies [93125ae]
+- Updated dependencies [56c8844]
+- Updated dependencies [5cfd866]
+- Updated dependencies [d4680d2]
+- Updated dependencies [ae97841]
+- Updated dependencies [cdeabec]
+- Updated dependencies [d7c5c33]
+- Updated dependencies [a87d8be]
+- Updated dependencies [15ec50e]
+- Updated dependencies [db4c45b]
+- Updated dependencies [a543e24]
+- Updated dependencies [51290bc]
+- Updated dependencies [ad381fd]
+- Updated dependencies [4e4111c]
+- Updated dependencies [2b61f2d]
+- Updated dependencies [8f2e808]
+- Updated dependencies [3b49318]
+- Updated dependencies [4e9fe9f]
+- Updated dependencies [9ad3d24]
+- Updated dependencies [bb4f5cc]
+- Updated dependencies [326a90a]
+- Updated dependencies [9fe7448]
+- Updated dependencies [2e11d90]
+- Updated dependencies [0b7ba4d]
+- Updated dependencies [4578c56]
+- Updated dependencies [c512c25]
+- Updated dependencies [35afb15]
+- Updated dependencies [215e662]
+- Updated dependencies [3d886ee]
+- Updated dependencies [f4069c5]
+- Updated dependencies [d8d0711]
+- Updated dependencies [a45d5d8]
+- Updated dependencies [b15f8a1]
+- Updated dependencies [f6e1d49]
+- Updated dependencies [b1f7a7a]
+- Updated dependencies [345d3f3]
+- Updated dependencies [e9a1f5c]
+- Updated dependencies [40a6ee5]
+- Updated dependencies [3f80f17]
+- Updated dependencies [5910b5e]
+- Updated dependencies [7098aca]
+- Updated dependencies [97610a5]
+- Updated dependencies [081e6a0]
+- Updated dependencies [1884948]
+- Updated dependencies [3089848]
+- Updated dependencies [e23eccb]
+- Updated dependencies [ac8f2c5]
+- Updated dependencies [746637e]
+- Updated dependencies [db9cf80]
+- Updated dependencies [e75dced]
+- Updated dependencies [9af0005]
+- Updated dependencies [9af0005]
+- Updated dependencies [46692c1]
+- Updated dependencies [440bed6]
+- Updated dependencies [3ca71b6]
+- Updated dependencies [94379f4]
+- Updated dependencies [b2549a8]
+- Updated dependencies [ee8751d]
+- Updated dependencies [96e4be4]
+- Updated dependencies [194a42d]
+- Updated dependencies [35ef501]
+- Updated dependencies [faf6348]
+- Updated dependencies [557ae7c]
+- Updated dependencies [6a3fe25]
+- Updated dependencies [7731d70]
+- Updated dependencies [3073b72]
+- Updated dependencies [c76edeb]
+- Updated dependencies [5b12503]
+- Updated dependencies [514bf3c]
+- Updated dependencies [20e7d52]
+- Updated dependencies [b3a3634]
+- Updated dependencies [3e72f93]
+- Updated dependencies [f89b5f5]
+- Updated dependencies [d25b187]
+- Updated dependencies [0e00d36]
+- Updated dependencies [d748ae8]
+- Updated dependencies [dab6bf4]
+- Updated dependencies [ed1de8c]
+- Updated dependencies [a00cf99]
+- Updated dependencies [a00cf99]
+- Updated dependencies [5fb1746]
+- Updated dependencies [29a163f]
+- Updated dependencies [e223152]
+- Updated dependencies [9f5eca5]
+- Updated dependencies [9963322]
+- Updated dependencies [b27b894]
+- Updated dependencies [874a38d]
+- Updated dependencies [cb3bb93]
+- Updated dependencies [ad14957]
+- Updated dependencies [02d9f69]
+- Updated dependencies [f53f14b]
+- Updated dependencies [a800912]
+- Updated dependencies [d973c34]
+- Updated dependencies [156ddfa]
+- Updated dependencies [5081090]
+- Updated dependencies [c63028e]
+- Updated dependencies [615cba8]
+- Updated dependencies [b6eb25f]
+- Updated dependencies [165587e]
+- Updated dependencies [3b5475a]
+- Updated dependencies [e04759d]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [b32ee3e]
+- Updated dependencies [91f46d0]
+- Updated dependencies [e5899a6]
+- Updated dependencies [d7b26df]
+- Updated dependencies [490cb6d]
+- Updated dependencies [e865300]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [ec7c7e0]
+- Updated dependencies [c74d843]
+- Updated dependencies [6d5191e]
+- Updated dependencies [85edd61]
+- Updated dependencies [e84aeb3]
+- Updated dependencies [322ff1e]
+- Updated dependencies [7b0a9c9]
+- Updated dependencies [5fc57b3]
+- Updated dependencies [fe58bbc]
+- Updated dependencies [c4e7fa5]
+- Updated dependencies [581ca7d]
+- Updated dependencies [3f0b6f2]
+- Updated dependencies [b7cd1af]
+- Updated dependencies [9814035]
+- Updated dependencies [55382dc]
+- Updated dependencies [b1d701b]
+- Updated dependencies [efcbac7]
+- Updated dependencies [51f36e7]
+- Updated dependencies [31b5a5f]
+- Updated dependencies [20028df]
+- Updated dependencies [69d4218]
+- Updated dependencies [5ce6773]
+- Updated dependencies [8532783]
+- Updated dependencies [9432bac]
+- Updated dependencies [3f69471]
+- Updated dependencies [87e902d]
+- Updated dependencies [8bc7836]
+- Updated dependencies [e5687cb]
+- Updated dependencies [1e62f71]
+- Updated dependencies [777eed2]
+- Updated dependencies [ec7f7f8]
+- Updated dependencies [038d4c9]
+- Updated dependencies [5677add]
+- Updated dependencies [147a0d1]
+- Updated dependencies [1959aac]
+- Updated dependencies [ed03834]
+- Updated dependencies [e1deaef]
+- Updated dependencies [3071d3e]
+- Updated dependencies [6a6a4d3]
+- Updated dependencies [1badd31]
+- Updated dependencies [58f5c90]
+- Updated dependencies [55828c5]
+- Updated dependencies [7856110]
+- Updated dependencies [9b37edb]
+- Updated dependencies [4216796]
+- Updated dependencies [a22e67b]
+- Updated dependencies [5f37d36]
+- Updated dependencies [62ce45d]
+- Updated dependencies [c5b43b6]
+- Updated dependencies [39e93ef]
+- Updated dependencies [0a29bec]
+- Updated dependencies [02bec6c]
+- Updated dependencies [719183f]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [8464380]
+- Updated dependencies [8c10776]
+- Updated dependencies [252a582]
+- Updated dependencies [abf8655]
+- Updated dependencies [f931e76]
+- Updated dependencies [1912af4]
+- Updated dependencies [e5f9f01]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [aa5bfdf]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [c6139f2]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [87d0619]
+- Updated dependencies [78c13bd]
+- Updated dependencies [9543e9c]
+- Updated dependencies [4e0838d]
+- Updated dependencies [60f9baf]
+- Updated dependencies [f5ef054]
+- Updated dependencies [584e737]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [301eec6]
+- Updated dependencies [572ecfb]
+- Updated dependencies [5547ad4]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [0f05907]
+- Updated dependencies [47d569e]
+- Updated dependencies [2de9c03]
+- Updated dependencies [5b68524]
+- Updated dependencies [5e725b8]
+- Updated dependencies [086fa46]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [3b28905]
+- Updated dependencies [1baf976]
+- Updated dependencies [222293f]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [daafae6]
+- Updated dependencies [7cb33cf]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [56147a8]
+- Updated dependencies [23e689d]
+- Updated dependencies [a869ea6]
+- Updated dependencies [7b64a3d]
+- Updated dependencies [8226755]
+- Updated dependencies [cdc42eb]
+- Updated dependencies [7ffc578]
+- Updated dependencies [bc0538a]
+- Updated dependencies [f606ba2]
+- Updated dependencies [d176b0a]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [ee0e115]
+- Updated dependencies [c2bb302]
+- Updated dependencies [e67ac4b]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [7dc7d22]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [954bf72]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [0a052e6]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [cad343e]
+- Updated dependencies [cbe7712]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [c03077e]
+- Updated dependencies [9bb9370]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [14aff67]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [cf07168]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [f7af839]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [6e18016]
+- Updated dependencies [d050a8f]
+- Updated dependencies [a237d7f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [077b75f]
+- Updated dependencies [d6bd98a]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [45e6001]
+- Updated dependencies [f3174ef]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [9f024d8]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [ec749fb]
+- Updated dependencies [fa26308]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [01fafde]
+- Updated dependencies [41c7405]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [26501ae]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [94e60c0]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [1827571]
+- Updated dependencies [adb7910]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [33a45cc]
+- Updated dependencies [b7a688e]
+- Updated dependencies [ef1fcb2]
+- Updated dependencies [ace0a53]
+- Updated dependencies [8311650]
+- Updated dependencies [de70e97]
+- Updated dependencies [74c4b34]
+- Updated dependencies [e040b8c]
+- Updated dependencies [f451a59]
+- Updated dependencies [ba95607]
+- Updated dependencies [b53b949]
+- Updated dependencies [ea9fd99]
+- Updated dependencies [1e44436]
+- Updated dependencies [2acff87]
+- Updated dependencies [299a2c6]
+- Updated dependencies [325a92e]
+- Updated dependencies [e23eccb]
+- Updated dependencies [bf492c8]
+- Updated dependencies [c7a3234]
+  - @objectstack/core@18.0.0
+  - @objectstack/metadata-protocol@18.0.0
+  - @objectstack/spec@18.0.0
+  - @objectstack/platform-objects@18.0.0
+  - @objectstack/metadata-core@18.0.0
+  - @objectstack/formula@18.0.0
+  - @objectstack/types@18.0.0
+
 ## 18.0.0-next.5
 
 ### Patch Changes

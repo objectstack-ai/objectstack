@@ -109,7 +109,8 @@ export interface HttpDelivery {
      * [#13546] Organization this delivery row belongs to — the read-back of
      * the row's kernel-provisioned `organization_id` tenant column, which is
      * the column the cross-organization wall on {@link IHttpOutbox.redeliver}
-     * scopes by (#10740). Absent for a global row (`organization_id = NULL`).
+     * scopes by (#10740). Absent for a row of no organization
+     * (`organization_id = NULL`).
      * Mirrors `NotificationDeliveryRecord.organizationId` on the sibling
      * notification outbox.
      */
@@ -173,10 +174,11 @@ export interface EnqueueHttpInput {
      * [#13546] Organization this delivery belongs to. Lands on the row's
      * kernel-provisioned `organization_id` tenant column — the column the
      * cross-organization wall on {@link IHttpOutbox.redeliver} scopes by
-     * (#10740). The driver's tenant term is
-     * `(organization_id = :tenantId OR organization_id IS NULL)`, so a row
-     * enqueued WITHOUT one lands in the deliberate global-row arm: visible
-     * to — and replayable by — every organization on a walled deployment.
+     * (#10740). The driver's tenant term is `organization_id = :tenantId`
+     * (ADR-0131 D8 — no NULL arm), so a row enqueued WITHOUT one is reached
+     * by no tenant-scoped read or redeliver on a walled deployment: an
+     * organization-less row on a tenant table is invalid state there
+     * (ADR-0131 D1).
      * Producers MUST thread the organization they are acting for whenever
      * they have one: the flow `http` node passes its run's acting tenant
      * (`AutomationContext.tenantId`, the same source as the `notify` node's
@@ -184,7 +186,8 @@ export interface EnqueueHttpInput {
      * organization (`sys_webhook.organization_id`). Threaded, never
      * fabricated: a producer with genuinely no organization — a
      * `single`-posture deployment, a stack before its first organization —
-     * leaves it absent, and the row lands NULL, the honest global-row shape.
+     * leaves it absent, and the row lands NULL — honest under `single`, where
+     * there is no wall and no organization for it to belong to.
      *
      * Deliberately OPTIONAL, mirroring `EnqueueDeliveryInput.organizationId`
      * — the sibling notification outbox's identical repair — so the two

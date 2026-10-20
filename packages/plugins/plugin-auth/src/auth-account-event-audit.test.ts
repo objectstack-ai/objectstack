@@ -56,17 +56,20 @@ function deployment(config: Record<string, unknown> = {}) {
   return { engine, manager, events };
 }
 
+// The client is the connection's peer address, handed over the way the auth
+// route hands the transport's peer: the address the client-address trust rule
+// (`client-address.ts`) establishes when no proxy is declared trusted.
 const post = (manager: AuthManager, path: string, body: unknown) =>
   manager.handleRequest(
     new Request(`${BASE}${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-forwarded-for': CLIENT_IP,
         'user-agent': CLIENT_UA,
       },
       body: JSON.stringify(body),
     }),
+    { remoteAddress: CLIENT_IP },
   );
 
 async function signUp(manager: AuthManager): Promise<void> {
