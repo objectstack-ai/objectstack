@@ -1,0 +1,250 @@
+---
+title: 18.0.0
+description: "The v18 GA release, published 2026-10-20: organization ownership is total (ADR-0131), so a database 17.x created takes the ownership ceremony before 18.0.0 serves it; protocol 18; a flow reads one expression dialect per slot; the security catalog is metadata; API keys expire; the CORS default admits no cross-origin caller. With its upgrade checklist, walked once from 17.7.0."
+---
+
+## Highlights — 18.0.0
+
+- **A database 17.x created is upgraded by a ceremony before 18.0.0 serves it.**
+  ADR-0131 makes organization ownership total: no NULL `organization_id`.
+  `os serve` 18.0.0 starts on a database it created itself, or on one that
+  `os migrate organization-ownership` certified, and refuses any other before it
+  listens (`dd29bbe`, `12d1476`). The ceremony's plan reads only, and `--apply`
+  runs only the plan you reviewed (`f9b4217`). ⚠️ **Read [step 2 of the upgrade
+  checklist](#2-upgrade-the-database) before the first 18.0.0 boot of a 17.x
+  database.**
+- **Protocol 18.** `PROTOCOL_VERSION` is `18.0.0`: the handshake admits
+  `engines.protocol: '^18'` and refuses `'^17'` (`4e9fe9f`). The ADR-0087
+  conversions whose one-major window ran out leave the load path, so a retired
+  spelling is refused with its rename instead of being rewritten (`5fd2c76`,
+  `c5dd7fc`, `bc0538a`, `105902f`, `8693110`, `d176b0a`, `f606ba2`, `f901746`).
+- **A flow reads one expression dialect per slot** (ADR-0032). A value slot takes
+  a CEL value envelope and refuses the single-brace `{…}` template; a text slot
+  takes `{{ }}` holes; a CEL root the flow does not bind is refused at
+  `os validate`; `$` names belong to the engine; and every builtin node's
+  `config` is held to its executor's contract (`0e9e7b7`, `2b61f2d`, `7958bdf`,
+  `5fb1746`, `2f70c22`).
+- **Positions, permission sets and capabilities are metadata.** The four catalog
+  row objects retire (`sys_position`, `sys_permission_set`,
+  `sys_position_permission_set`, `sys_capability`), a position names its sets in
+  `permissionSets`, a grant names its set by name, and a name has one holder per
+  deployment (ADR-0131 D3/D4; `66949b7`, `bfc15d2`, `6f21216`, `fe98cc6`).
+  Declared sharing rules, webhooks and email templates are read from the registry
+  and are read-only (`5e97907`, `191e043`, `7de0265`).
+- **Page components are judged as errors.** An undeclared prop, a value its row
+  refuses or a missing binding fails `os validate`, `os build`, `os lint` and the
+  metadata save door, where 17.7.0 printed an advisory (`4f68ba1`, `32fa194`,
+  `d0c09e4`). An element binds its data through `dataSource` only (`317cddd`).
+- **Credentials and origins close by default.** A key created without an expiry
+  lives 90 days, a key unused for 90 days is refused, and a key that existed
+  with no expiry has one year from the upgrade (`1d79556`). The CORS default
+  admits no cross-origin caller, and `'*'` with credentials fails the boot
+  (`f7546a4`). The inbound `api` hook verifies only the timestamped signature
+  (`5ce6773`).
+- **The AI skills ship with the packages,** as `@objectstack/skills`, on the same
+  version as every other `@objectstack/*` package.
+
+---
+
+## Release facts, as measured
+
+Read with `npm view` and `npm pack` on 2026-10-20, after the publish:
+
+| | Measured |
+| :--- | :--- |
+| `latest` | `18.0.0`, on every `@objectstack/*` package read (`spec`, `cli`, `runtime`, `core`, `objectql`, `skills`, `organizations`) and on `create-objectstack` |
+| `next` | `18.0.0-next.5`, which is **older** than `latest`. ⛔ Never install `@next` for 18: it resolves a prerelease that 18.0.0 supersedes |
+| `rc` | `17.0.0-rc.6` (`@objectstack/skills` and `@objectstack/organizations` carry no `rc` tag) |
+| Published | `@objectstack/cli@18.0.0` at 2026-10-20 12:44 UTC |
+| Prereleases | `18.0.0-next.0` … `next.3` and `next.5`. `next.4` was never published, although the CHANGELOG carries a section for it |
+
+Install 18 by its exact version (`18.0.0`) or a caret range (`^18.0.0`); both
+resolve `latest`. Moving the stale `next` tag is a release act, outside these
+notes.
+
+### How to read the 18.0.0 CHANGELOG
+
+The `## 18.0.0` section of each package's `CHANGELOG.md` is the whole v18 line:
+every changeset of every `18.0.0-next.N`, in landing order. In
+`@objectstack/spec` it holds 341 entries; across the 53 packages whose
+CHANGELOG has an `18.0.0` section it holds 1,115 distinct entries, 340 of them
+marked breaking or narrowing. Read it with two cautions:
+
+- **A later entry can undo an earlier one.** `ae6bd1a` says "18.0 supports fresh
+  `single` installs only — `os migrate organization-ownership` refuses, and
+  `os serve` refuses a walled posture at boot"; `12d1476` and `fc34d00`, later in
+  the same section, open the ceremony and lift the walled refusal, and the
+  18.0.0 tarball does what the later entries say. `record:json` is declared by
+  `97b8e7a` and retired by `030a7b8`; it shipped only in `18.0.0-next.3`.
+- **The refusal is the authority.** Every refusal this page quotes was read off
+  the published 18.0.0 packages, not off the CHANGELOG: where the two differ,
+  the package's own message says what the package does.
+
+The checklist below is curated from that record, not copied from it: it keeps
+the changes an application must edit for, and leaves out the ones that move only
+the platform's internals, its own tooling and the Console's code (the Console's
+changes are in the `@objectstack/console` CHANGELOG).
+
+---
+
+## Upgrade checklist
+
+⚠️ One checklist per release, for the release you are landing on **and** every
+release you cross to get there: a 17.4.0 app reads the
+[17.5.0](/docs/releases/v17/17-5#upgrade-checklist),
+[17.6.0](/docs/releases/v17/17-6#upgrade-checklist) and
+[17.7.0](/docs/releases/v17/17-7#upgrade-checklist) lists before this one. On an
+`18.0.0-next.N` prerelease, read the CHANGELOG entries after your prerelease
+instead: this list is written for 17.x.
+
+### 18.0.0
+
+<Callout type="warn">
+**How far this list has been walked.** Once, on 2026-10-20, from 17.7.0: an app
+scaffolded with `create-objectstack@17.7.0` (the `blank` template, pnpm, its
+skills installed by `skills add`), booted once on 17.7.0 with
+`objectstack start` so that it created a SQLite database holding one admin and
+three records, then moved to 18.0.0 from npm by following steps 1 and 2 below.
+Each line says how it was measured:
+
+- **Measured in the walk** — the step was run, and the quoted text is what 18.0.0
+  printed.
+- **Probed on 18.0.0** — the walk's app carries none of it, so a probe stack was
+  refused by the installed 18.0.0 packages (`defineStack`, or `os validate`
+  exiting `1`), and the quoted text is that refusal.
+- **Read off the 18.0.0 tarball** — the code or the message was found in the
+  published package (`npm pack @objectstack/PKG@18.0.0`), and nothing was run.
+
+⛔ The walk was one small app on SQLite under the `single` posture. A walled
+database (`group` / `isolated`), Postgres, MySQL and Turso were not walked, and
+no upgrade of a production application was run for this page.
+</Callout>
+
+#### 1. Move the pins
+
+- **Move every `@objectstack/*` dependency to 18.0.0 together**,
+  `devDependencies` included, and regenerate the lockfile —
+  [Moving the dependency pins](/docs/upgrading#moving-the-dependency-pins). The
+  walk edited six `^17.7.0` ranges and `@objectstack/cli` to `^18.0.0`; the
+  install moved all seven to 18.0.0 and printed no peer-dependency warning.
+  *Measured in the walk.*
+- **Move the protocol declarations to 18.** `engines.protocol` in your
+  `defineStack` manifest becomes `'^18'`, and `specVersion` in
+  `objectstack.manifest.json` becomes `'^18.0.0'` — what
+  `create-objectstack@18.0.0` stamps. `os migrate meta --from 17 --write`
+  rewrites `engines.protocol` for you (it printed
+  `objectstack.config.ts:38 manifest.engines.protocol: '^17' → '^18'`);
+  `specVersion` is a hand edit, and neither `os validate` nor the boot reads it.
+  Left on `'^17'`, `os validate` and `os build` still pass with a warning, and
+  the boot refuses before it serves (exit `1`):
+
+  ```text
+  ⚠ Installed @objectstack/spec is v18.0.0 but this app declares engines.protocol '^17', which targets protocol v17.
+  ✗ package 'com.example.v17app' targets protocol ^17 (engines.protocol) but this runtime is protocol 18.0.0. This is a major-version break. Run: objectstack migrate meta --from 17
+  ```
+
+  *Measured in the walk.*
+- **Read `os migrate meta --from 17` as a list to search, not a list to do.** On
+  the walk's app — one object, two fields, no flow, page or permission set — it
+  printed `406 manual change(s) require your judgment`: every protocol-18 manual
+  entry it could not prove absent from the stack. Step 3 below is the curated
+  version for an application. *Measured in the walk.*
+- **Move the AI skills.** From v18 the catalog is the `@objectstack/skills`
+  package. A 17.x project has none: its skills were installed with
+  `skills add` from the repository. Remove those, add the package at your
+  `@objectstack/spec` version with **your project's package manager**, and copy
+  it into your agent's directory:
+
+  ```bash
+  npx skills remove objectstack-ai objectstack-api objectstack-automation \
+    objectstack-data objectstack-formula objectstack-i18n objectstack-platform \
+    objectstack-pm-dispatch objectstack-query objectstack-ui objectstack-upgrade -y
+  pnpm add -D "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+  #   npm: npm install --save-dev "@objectstack/skills@…"   ·   yarn: yarn add -D "@objectstack/skills@…"
+  npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
+  ```
+
+  Measured in the walk: before the removal, the sync printed
+  `Skipped objectstack-ai from @objectstack/skills: installed with 'skills add' from objectstack-ai/objectstack`
+  for each of the ten skills, then `Nothing to sync.`, and exited `0` — so
+  bumping the packages alone keeps the 17.x-era skill text. After it, the sync
+  printed `Synced 10 skills`. In the walk's pnpm project,
+  `npm install --save-dev` exited `1` with
+  `npm error Cannot read properties of null (reading 'edgesOut')`, so use the
+  manager that installed the project (`create-objectstack` uses pnpm when it is
+  available). The command writes the exact version, `"@objectstack/skills": "18.0.0"`:
+  move it with the other pins at the next upgrade. *Measured in the walk.*
+- **Run `os validate`, then `os build`.** On the walk's app both passed on 18.0.0
+  once the declarations read `'^18'`. Step 3 lists what fails a richer app.
+  *Measured in the walk.*
+
+#### 2. Upgrade the database
+
+A database that 17.x (or an `18.0.0-next.N` prerelease) created carries no
+organization-ownership marker, and 18.0.0 does not serve it until the ownership
+ceremony has certified it. A database 18.0.0 creates from empty writes its own
+birth marker and needs none of this. The command's reference is
+[`os migrate organization-ownership`](/docs/deployment/cli#os-migrate-organization-ownership).
+
+- **Before the first 18.0.0 boot, clear the security-catalog overlays:**
+  `os migrate security-catalog-overlays` lists the environment's stored
+  permission-set and position rows whose name a package now holds, which a v18
+  cold boot refuses with `422 NAMESPACE_CONFLICT`; the preview exits `1` when it
+  lists a row, and `--apply` deletes them (`db9cf80`, `e030d43`).
+  *Measured in the walk — see the note under this list.*
+- **Start 18.0.0 against the database once.** It is refused before it listens,
+  exit `1`, from the `com.objectstack.organization-ownership-boot-guard` plugin
+  (error code `ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED`):
+
+  ```text
+  ✗ This database carries no organization-ownership marker: 17.x or an 18.0 pre-release (18.0.0-next.*) created it, and this release serves only a database it created itself or one its ownership ceremony upgraded. sys_audit_log, sys_flow_credential, sys_flow_dispatch, sys_job, sys_job_queue, sys_job_run, sys_metadata, sys_metadata_audit, sys_metadata_commit, sys_metadata_history, sys_migration, sys_migration_journal, sys_secret still carry a physical organization_id column its object no longer declares. The server refuses to start rather than serve it in a shape it was never migrated to. Run 'os migrate organization-ownership --out PLAN' to write and review its plan, take a backup, then run 'os migrate organization-ownership --apply --plan-file PLAN --backup-taken', and start again.
+  ```
+
+  The refused boot is not wasted: its schema sync creates the tables 18.0.0
+  adds, which the ceremony moves rows into. In the walk, a plan drawn before
+  that boot covered 77 tables and one drawn after it 81. *Measured in the walk.*
+- **Do not reach for `os migrate apply --allow-destructive` first.** Before the
+  ceremony, the boot log and `os migrate plan` list the `organization_id`
+  columns as orphaned and name `os migrate apply --allow-destructive` (28
+  destructive changes in the walk, with no word of the ceremony). Run on a copy
+  of the walk's database, that apply exited `1` and dropped nothing:
+  `✗ Refusing to drop sys_comment.reactions: the emoji reactions stored in it are not yet carried into sys_comment_reaction records …`.
+  The ceremony comes first. *Measured in the walk, on a copy.*
+- **Take a backup.** The platform takes none, and `--apply` asks you to state
+  that you took one. For SQLite, stop the server and copy the database file
+  with its `-wal` and `-shm` files, or use `sqlite3 FILE ".backup …"`.
+  *Measured in the walk (a stopped-server copy).*
+- **Write the plan and review it:**
+  `os migrate organization-ownership --out plan.json`. It reads only; per table
+  it prints the fate (`attribution`, `column-drop`, `mirror-deletion`,
+  `report`), the row count, the rows with no organization, and whether the
+  table will receive `NOT NULL`. The walk's plan: 81 tables, 34 to receive
+  `NOT NULL`, `unattributableRows: 0`. A row whose owner cannot be derived
+  blocks certification until you give it an organization or delete it.
+  *Measured in the walk.*
+- **Apply the reviewed plan:**
+  `os migrate organization-ownership --apply --plan-file plan.json --backup-taken`.
+  The walk's run attributed 32 rows, rewrote 2 grants to name their permission
+  set, deleted 49 mirror rows (the retired catalog rows and the seeded email
+  templates), dropped 14 `organization_id` columns, set `NOT NULL` on 32 tables,
+  and ended `✓ The ceremony is complete; recorded as adr-0131-organization-ownership.`
+  It refuses to run beside a process that holds the SQLite file open
+  (`0b9391b`): stop the server first. *Measured in the walk.*
+- **Start the server.** In the walk 18.0.0 served the database: the 17.7.0
+  admin signed in with the same password, kept `platform_admin`, `org_owner`
+  and `admin_full_access`, read the three notes with their organization, and
+  wrote a fourth. *Measured in the walk.*
+- **Then clear the drift that remains.** The first served boot still logged
+  three orphaned columns (`sys_comment.reactions`,
+  `sys_sso_provider.created_by` / `updated_by`). Carry the reactions first —
+  `os migrate comment-reactions` to preview, `os migrate comment-reactions --apply --yes`
+  to record a verified run (`9963322`, `6673c80`) — then
+  `os migrate apply --allow-destructive --yes`, which dropped the three. The next
+  boot logged no drift. *Measured in the walk.*
+
+`os migrate security-catalog-overlays` was run in the walk against the
+17.7.0-created database before its first 18.0.0 boot; see the walk record in the
+pull request that wrote this page for its output. `os dev` runs the ceremony on
+its own for a local SQLite development database, according to the
+[CLI reference](/docs/deployment/cli#os-migrate-organization-ownership); the
+walk used `objectstack start` and did not exercise that path.
