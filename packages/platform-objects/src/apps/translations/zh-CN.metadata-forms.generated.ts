@@ -226,7 +226,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.expression": {
         label: "表达式",
-        helpText: "CEL 公式表达式"
+        helpText: "计算此字段值所用的 CEL 表达式。公式字段：读取时计算，不存储列。其他字段：由引擎根据每次写入所存储的行计算并存储，因此客户端提交的值不会生效。"
       },
       "fields.returnType": {
         label: "返回类型",
@@ -763,7 +763,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       expression: {
         label: "表达式",
-        helpText: "用 CEL 表达式计算此字段的值（自动设为只读）"
+        helpText: "计算此字段值所用的 CEL 表达式。公式字段：读取时计算，不存储列。其他字段：由引擎根据每次写入所存储的行计算并存储，因此客户端提交的值不会生效。"
       },
       returnType: {
         label: "公式返回类型",

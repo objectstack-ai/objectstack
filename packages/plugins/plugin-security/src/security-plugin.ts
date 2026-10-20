@@ -652,12 +652,28 @@ const AUTHORED_ROW_WRITE_PROBE_CONTEXT = { isSystem: true, positions: [], permis
  * {@link isTenantWallDenial} over the Layer 0 filter, which is the one place
  * that knows about platform-admin exemptions, non-tenant objects and phantom
  * anchors.
+ *
+ * It answers the SCOPE question only. Under a union-scope posture a caller
+ * scoped by membership can still lack the organization a NEW row lands in —
+ * the active one ({@link carriesActiveOrganization}) — and step 3.7 judges
+ * that separately, on the stored image of an insert.
  */
 function callerHasOrganizationScope(context: any, posture: TenancyPosture): boolean {
   if (postureUsesUnionScope(posture)) {
     const orgIds = context?.accessible_org_ids;
     return Array.isArray(orgIds) && orgIds.length > 0;
   }
+  return carriesActiveOrganization(context);
+}
+
+/**
+ * [ADR-0105 D5 · ADR-0123 D2] Does this execution context carry an ACTIVE
+ * organization (`tenantId`)? In every posture that is where a new row lands:
+ * the engine stamps an insert's organization from it. Under `isolated` it is
+ * also the whole read scope; under `group` the membership set is the read
+ * scope and the active organization stays the write target (ADR-0105 D2).
+ */
+function carriesActiveOrganization(context: any): boolean {
   const tenantId = context?.tenantId;
   return tenantId != null && tenantId !== '';
 }
@@ -3982,6 +3998,9 @@ export class SecurityPlugin implements Plugin {
         // System / boot writes never reach this line at all (`isSystem`
         // short-circuits the middleware). Under `group`, "no organization scope"
         // means an EMPTY membership set — ADR-0105 D2's own fail-closed rule.
+        // A member WITH a membership set but no active organization passes this
+        // pre-test and still has nowhere for a NEW row to land; that insert is
+        // refused with this same answer on its stored image, below ([#24784]).
         //
         // The cheap posture/context pre-test comes first on purpose: the common
         // deployment is `single` (Layer 0 inert), and the common caller HAS an
@@ -3996,16 +4015,13 @@ export class SecurityPlugin implements Plugin {
         // tenant, so its target is selected through the Layer 0 ROW wall, which
         // already resolves to nothing (ADR-0123 D2, stated there as a boundary
         // rather than left as an omission).
-        const denied = await this.organizationWallRefusal(
-          permissionSets,
-          opCtx.object,
-          opCtx.operation,
-          opCtx.context,
-          delegatorSets,
-          delegatorContext,
-        );
-        if (denied) {
-          const principal = denied === 'delegator' ? 'the delegating principal' : 'this session';
+        //
+        // The refusal has ONE spelling, thrown from two points: here on the
+        // scope pre-test, and on the stored image of a union-scope insert with
+        // no active organization (below). Only the operator half differs,
+        // because the two say different things about the context.
+        const refuseNoActiveOrganization = (refused: 'caller' | 'delegator', developerMessage: string): never => {
+          const principal = refused === 'delegator' ? 'the delegating principal' : 'this session';
           this.logger.warn?.(
             `[Security] Layer 0 tenant wall REFUSED ${opCtx.operation} '${opCtx.object}' — ` +
               `${principal} has no active organization to place the record in (ADR-0123 D2, fail-closed)`,
@@ -4015,6 +4031,20 @@ export class SecurityPlugin implements Plugin {
               `${principal} has no active organization — so this ${opCtx.operation} has no ` +
               `organization to place the record in. Join or select an active organization and retry.`,
             { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+            developerMessage,
+          );
+        };
+        const denied = await this.organizationWallRefusal(
+          permissionSets,
+          opCtx.object,
+          opCtx.operation,
+          opCtx.context,
+          delegatorSets,
+          delegatorContext,
+        );
+        if (denied) {
+          refuseNoActiveOrganization(
+            denied,
             `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
               `organization: tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', and ` +
               `${denied === 'delegator' ? "the delegator's" : "the caller's"} context resolved neither ` +
@@ -4045,6 +4075,10 @@ export class SecurityPlugin implements Plugin {
         // below). The `single` posture composes no Layer 0 at all, so it pays
         // for nothing it did not already pay for.
         let tenantParts: Record<string, unknown>[] = [];
+        // The CALLER's own Layer 0 for this write — `null` where the wall does
+        // not apply to it (a non-tenant object, a phantom anchor, a platform
+        // operator crossing on a posture-permitting object, `single`).
+        let callerTenantCheck: Record<string, unknown> | null = null;
         if (suppliedRows.length > 0 || this.orgScopingEnabled) {
           const tenantCheck = await this.computeWriteTenantCheckFilter(
             permissionSets,
@@ -4052,6 +4086,7 @@ export class SecurityPlugin implements Plugin {
             opCtx.operation,
             opCtx.context,
           );
+          callerTenantCheck = tenantCheck;
           // [ADR-0090 D10] The post-image must also satisfy the delegator's tenant
           // wall — an on-behalf-of write may not land a row in a tenant the
           // delegator itself could not reach.
@@ -4093,6 +4128,36 @@ export class SecurityPlugin implements Plugin {
               `every organization. System contexts and platform operators on posture-permitting objects are unaffected.`,
           );
         };
+        // ── [ADR-0123 D2 · ADR-0105 D2/D5 · #24784] A union-scope INSERT with no active organization ──
+        //
+        // Under a union-scope posture (`group`) the scope pre-test above reads
+        // the MEMBERSHIP SET, so a member whose session has no active
+        // organization passes it — rightly, for everything the set bounds:
+        // reads, and updates and deletes, whose rows the membership wall
+        // selected and which keep the organization they already have. An
+        // insert is the one write that needs somewhere NEW to land, and that is
+        // the ACTIVE organization: the engine stamps a new row from `tenantId`
+        // (ADR-0105 D5), and the column is read-only to a session payload. So
+        // that member's row had no organization to land in, and the engine met
+        // it as an organization-less SYSTEM write and refused it
+        // `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` with a 500. ADR-0123 D2's
+        // answer for the state is the 403 `isolated` gives the same session;
+        // this gives it here, before the engine is reached.
+        //
+        // Judged on the STORED image (the seam below), not on the payload: the
+        // image is the row after the `beforeInsert` chain, the same rows the
+        // engine's own organization check reads one step later. So the refusal
+        // covers exactly the rows that would have met that 500, and nothing the
+        // store admitted before is refused now. Only the CALLER's own wall
+        // decides whether the object is walled for it — a platform operator
+        // crossing on a posture-permitting object keeps its answer — and the
+        // delegator keeps the pre-test's leg, unchanged. `isolated` never
+        // reaches this: its pre-test reads the active organization itself.
+        const insertLacksActiveOrganization =
+          opCtx.operation === 'insert' &&
+          postureUsesUnionScope(this.tenancyPosture) &&
+          callerTenantCheck != null &&
+          !carriesActiveOrganization(opCtx.context);
         // EVERY supplied row must clear the wall — one forged row in a bulk
         // payload denies the whole write (fail closed, no partial landing).
         if (tenantParts.length > 0 && !suppliedRows.every(clearsWall)) denyTenantPlacement('a supplied');
@@ -4150,6 +4215,24 @@ export class SecurityPlugin implements Plugin {
           const businessCheck = writeImageCheckSeam;
           writeImageCheckSeam = {
             evaluate: (rows) => {
+              // First, as the pre-test's refusal is first: the session's state
+              // is the actionable half. One row with nowhere to land refuses
+              // the whole write — no partial landing.
+              if (
+                insertLacksActiveOrganization &&
+                rows.some((row) => !!row && typeof row === 'object' && !namesOrganization(row))
+              ) {
+                refuseNoActiveOrganization(
+                  'caller',
+                  `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
+                    `organization: tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', and the ` +
+                    `caller's context carries no \`tenantId\`. Under this posture the membership set ` +
+                    `(\`accessible_org_ids\`) bounds what the caller reads, while a new row lands in the active ` +
+                    `organization (ADR-0105 D5), so this insert has none to land in. Reads under this state keep ` +
+                    `spanning the membership set; the insert is refused rather than reaching the engine as an ` +
+                    `organization-less system write. System contexts and platform operators are unaffected.`,
+                );
+              }
               businessCheck?.evaluate(rows);
               for (const row of rows) {
                 if (!row || typeof row !== 'object') continue;
@@ -6375,8 +6458,9 @@ export class SecurityPlugin implements Plugin {
    *  - **Row-level and post-image refusals — the preview names no stored row.**
    *    The step 2.7 `using` pre-image, the ADR-0055 controlled-by-parent master
    *    edit (2.8), the RLS `check` post-image (3.6) and the Layer 0 tenant
-   *    post-image (3.7), none of which this method can judge because it is
-   *    asked about no ROW.
+   *    post-image (3.7) — its union-scope no-active-organization insert arm
+   *    included, which judges the row a hook may still place — none of which
+   *    this method can judge because it is asked about no ROW.
    *  - **Payload-VALUE refusals the same caller passes by not sending the
    *    value** — the masked echo (2.5a) and the `owner_id` forge (3.5), which
    *    therefore widen the caller class by nothing.

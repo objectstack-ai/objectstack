@@ -682,7 +682,12 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 89 today, an ADDITION of ONE: #23735 offered the field form's
     // `referenceDeletedWhen` composite row, gated like `referenceVia` on
     // `data.type == 'text'`. It reaches the literal-comparison census below.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(89);
+    // It is 88 today, a REMOVAL of ONE: #24735 dropped the object form's
+    // `object :: expression :: data.type == 'formula'` gate. `FieldSchema`
+    // accepts `expression` on every type and the engine computes and stores it
+    // on a non-formula field, so the formula-only row hid a live key; the row
+    // is now shown for every type, as the field form's own row already was.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(88);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -793,7 +798,9 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `data.type == 'email'`, a single-quoted literal comparison.
     // It is 66 today: #23735's `field :: referenceDeletedWhen` row is gated on
     // `data.type == 'text'`, a single-quoted literal comparison.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(66);
+    // It is 65 today: #24735 removed the object form's `expression` gate,
+    // `data.type == 'formula'`, one single-quoted literal comparison.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(65);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);
@@ -822,7 +829,9 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // tree adds over its merge base — the two corpora were enumerated and
     // differenced by `<form>::<field>::<source>`, and the object-form half of
     // the two-entry delta is exactly it. #6254's own measurement was 16 and
-    // stays 16 — that number is history, this one is a census.
+    // stays 16 — that number is history, this one is a census. It is 18 today:
+    // #24735 removed the `expression` row's `data.type == 'formula'` gate, so
+    // that row is shown for every field type.
     const objectForm = structuredClone(METADATA_FORM_REGISTRY.object) as Record<string, unknown>;
     let restored = 0;
     const debare = (node: unknown): void => {
@@ -852,10 +861,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     expect(
       restored,
       "the object form's `data.type`-rooted predicates are no longer where this test looks",
-    ).toBe(19);
+    ).toBe(18);
 
     const findings = validatePredicatePathRefs({ views: [objectForm] });
-    expect(findings).toHaveLength(19);
+    expect(findings).toHaveLength(18);
     expect(new Set(findings.map((f) => f.rule))).toEqual(new Set([PREDICATE_PATH_UNROOTED]));
     expect(findings[0].message).toContain('`type`');
   });

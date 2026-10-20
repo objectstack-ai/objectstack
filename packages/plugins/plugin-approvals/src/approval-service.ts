@@ -4477,11 +4477,35 @@ export class ApprovalService implements IApprovalService {
    * reached. `decideNode`'s pre-flight means the common case (the run died
    * before the decision) never gets this far; what survives here is a genuine
    * race, and it names the stranded run.
+   *
+   * [#24753] A decision that ends the approval process tells the submitter its
+   * outcome (`approval.approved` / `approval.rejected`,
+   * {@link ApprovalService.notifyDecisionOutcome}).
    */
   async decide(
     requestId: string,
     input: ApprovalDecisionInput,
     context: ExecutionContext,
+  ): Promise<ApprovalDecisionResult> {
+    return this.decideAndResume(requestId, input, context, 'outcome');
+  }
+
+  /**
+   * {@link ApprovalService.decide}'s body, with WHO TELLS THE SUBMITTER named by
+   * the caller (#24753). `'outcome'` — every human door: the decision tells the
+   * submitter itself, once the resume has shown whether it ended the process.
+   * `'escalation'` — the SLA sweep's auto-decision only: the escalation's own
+   * submitter notice tells them, under the node's declared
+   * `escalation.notifySubmitter` switch ({@link ApprovalService.escalateRequest}),
+   * so `notifySubmitter: false` keeps meaning that the submitter hears nothing
+   * about it. A parameter rather than a reading of the actor: the sweep's
+   * {@link SLA_ACTOR_ID} is an acting identity, never a discriminator.
+   */
+  private async decideAndResume(
+    requestId: string,
+    input: ApprovalDecisionInput,
+    context: ExecutionContext,
+    submitterToldBy: 'outcome' | 'escalation',
   ): Promise<ApprovalDecisionResult> {
     const result = await this.decideNode(requestId, input, context);
 
@@ -4521,6 +4545,14 @@ export class ApprovalService implements IApprovalService {
       resumeFailure = outcome.resumeFailure;
     }
 
+    // [#24753] After the resume, never before it: only the continuation shows
+    // whether this decision ended the process or moved it to a further
+    // approval step. A resume that strands has thrown above, so — as on the
+    // send-back — a stranded decision tells no one.
+    if (result.finalized && submitterToldBy === 'outcome') {
+      await this.notifyDecisionOutcome(result.request, result.decision, input.comment, context);
+    }
+
     return {
       request: result.request,
       finalized: result.finalized,
@@ -4534,6 +4566,80 @@ export class ApprovalService implements IApprovalService {
       // in result` reads presence correctly.
       ...(resumeFailure ? { resumeFailure } : {}),
     };
+  }
+
+  /**
+   * [#24753] Tell the submitter how their approval ended. A send-back
+   * (`approval.returned`) and a question (`approval.request_info`) already
+   * reached them; the decision itself reached no one, so a submitter learned
+   * their request was approved or rejected only by opening the inbox.
+   *
+   * ONE TOPIC PER OUTCOME — `approval.approved`, `approval.rejected`. Every
+   * topic in the `approval.*` vocabulary names what happened to the request
+   * (`requested`, `returned`, `reassigned`, `escalated`), and these two are the
+   * request's own terminal statuses, as `returned` is. So the payload stays the
+   * closed {@link ApprovalNotificationPayload} with no outcome field, and the
+   * preference matrix — matched on the exact topic or `*` — can mute one
+   * outcome and keep the other.
+   *
+   * The shape is the sibling notices': addressed to the request's own
+   * `submitter_id`, the record named by {@link ApprovalService.nameSubjectRecord}
+   * (#23556), a non-empty body (#21847), deep-linked to the request by
+   * `notify()`, the decider as the actor. The body is one English sentence,
+   * like every approval notification — none of them reads the caller's locale;
+   * the decider's comment, when they wrote one, follows it as its own paragraph.
+   *
+   * Told nothing:
+   *  - a submitter who made the decision themselves — they already know;
+   *  - anyone, when the decision ENDS A STEP and not the process: a resume that
+   *    opened a further approval step on the same run (the next approval node
+   *    down the edge this decision took) leaves the outcome to that step's
+   *    decision. Measured after the resume, never read off the graph, because a
+   *    decision gateway can skip a later step and only the run knows whether it
+   *    did. A co-sign vote that leaves the request pending never gets here;
+   *  - anyone, for the SLA sweep's auto-decision ({@link ApprovalService.decideAndResume}).
+   *
+   * Best-effort like every `notify()`: the decision is durable before this runs,
+   * so nothing here can fail it.
+   */
+  private async notifyDecisionOutcome(
+    request: ApprovalRequestRow,
+    decision: 'approve' | 'reject',
+    comment: string | undefined,
+    context: ExecutionContext,
+  ): Promise<void> {
+    const submitter = request.submitter_id != null ? String(request.submitter_id) : '';
+    if (!submitter || recordedActor(context) === submitter) return;
+    if (request.flow_run_id) {
+      let nextStepOpened: boolean;
+      try {
+        const next = await this.engine.find('sys_approval_request', {
+          where: { flow_run_id: request.flow_run_id, status: 'pending' }, limit: 1, context: SYSTEM_CTX,
+        });
+        nextStepOpened = Array.isArray(next) && next.length > 0;
+      } catch (err: any) {
+        this.logger?.warn?.('[approvals] could not tell whether a decision ended its approval process — its submitter is not told the outcome', {
+          request: request.id, run: request.flow_run_id, error: err?.message ?? String(err),
+        });
+        return;
+      }
+      if (nextStepOpened) return;
+    }
+    const approved = decision === 'approve';
+    const sentence = `Your ${this.nameSubjectRecord(request.object_name, request.record_id)} was ${approved ? 'approved' : 'rejected'}.`;
+    const note = comment?.trim();
+    await this.notify({
+      topic: approved ? 'approval.approved' : 'approval.rejected',
+      organizationId: request.organization_id,
+      audience: [submitter],
+      actorContext: context,
+      source: { object: 'sys_approval_request', id: request.id },
+      payload: {
+        title: approved ? 'Request approved' : 'Request rejected',
+        body: note ? `${sentence}\n\n${note}` : sentence,
+        actionUrl: '/system/approvals',
+      },
+    });
   }
 
   /**
@@ -6770,11 +6876,14 @@ export class ApprovalService implements IApprovalService {
         },
       });
     } else if (action === 'auto_approve' || action === 'auto_reject') {
-      await this.decide(raw.id, {
+      // [#24753] The submitter hears this outcome from the submitter notice
+      // below (`notifySubmitter`), which names the action taken — not a second
+      // time from the decision's `approval.approved` / `approval.rejected`.
+      await this.decideAndResume(raw.id, {
         decision: action === 'auto_approve' ? 'approve' : 'reject',
         actorId: SLA_ACTOR_ID,
         comment: 'SLA escalation',
-      }, SYSTEM_CTX);
+      }, SYSTEM_CTX, 'escalation');
     } else {
       // 'notify' (and the reassign-without-target fallback)
       await this.notify({

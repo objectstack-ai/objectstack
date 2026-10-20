@@ -145,20 +145,28 @@ describe('knowledgeTestActionHandler', () => {
     expect(message).not.toMatch(/Mount @objectstack\/knowledge-turso to exercise live calls/);
   });
 
-  // Contrast, so the assertion above cannot be satisfied by blanket-rewording every
-  // hint: ragflow's plugin IS built here, and its hint stays the plain mount line.
-  it('ragflow live-call hint stays a plain mount line (its plugin is built here)', async () => {
-    const r = await knowledgeTestActionHandler({
-      values: {
-        adapter: 'ragflow',
-        ragflow_base_url: 'http://localhost:9380',
-        ragflow_api_key: 'k',
-      },
-    } as any);
-    expect(r.ok).toBe(true);
-    expect(String(r.message)).toContain(
-      'Mount @objectstack/knowledge-ragflow to exercise live calls',
-    );
+  // #24769 — "Test connection" is now answered (the handler is in the plugin's
+  // default map), and what it answers is a form check: no package in this repo
+  // reads this namespace or registers `knowledge/test`, so nothing replaces it
+  // with a live probe. Every green answer on a remote adapter must say no
+  // connection was attempted. Ragflow's hint used to be "Mount
+  // @objectstack/knowledge-ragflow to exercise live calls" — followable (the
+  // plugin IS built here) but false for this button, which mounting it never
+  // made live; no answer may carry that promise.
+  it('every green answer on a remote adapter says no connection was attempted', async () => {
+    const remote: Array<[string, Record<string, unknown>]> = [
+      ['turso, no URL', { adapter: 'turso' }],
+      ['turso, local file', { adapter: 'turso', turso_url: 'file:./knowledge.db' }],
+      ['turso, managed', { adapter: 'turso', turso_url: 'libsql://x.turso.io', turso_auth_token: 't' }],
+      ['ragflow', { adapter: 'ragflow', ragflow_base_url: 'http://localhost:9380', ragflow_api_key: 'k' }],
+    ];
+    for (const [label, values] of remote) {
+      const r = await knowledgeTestActionHandler({ values } as any);
+      expect(r.ok, label).toBe(true);
+      const message = String(r.message);
+      expect(message, label).toMatch(/no connection was attempted/);
+      expect(message, label).not.toMatch(/to exercise live calls/);
+    }
   });
 
   it('rejects ragflow without base URL', async () => {
