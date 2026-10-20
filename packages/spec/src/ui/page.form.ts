@@ -162,7 +162,15 @@ export const pageForm = defineForm({
             },
             // ── User actions ──
             { field: 'userActions', type: 'composite', disclosure: 'popover', helpText: 'Toolbar toggles (search, sort, filter, row height)' },
-            { field: 'addRecord', type: 'composite', disclosure: 'popover', helpText: 'Add-record entry point' },
+            // [#24692] The two live keys only: `mode` / `formView` are tombstones
+            // on `AddRecordConfigSchema`, and `enabled` is required.
+            {
+              field: 'addRecord',
+              type: 'composite',
+              disclosure: 'popover',
+              helpText: 'Add-record entry point',
+              fields: [{ field: 'enabled' }, { field: 'position' }],
+            },
             // The list page's own empty state — the list view's `EmptyStateSchema`,
             // by reference, so the same popover shape as `appearance` above. The
             // console's list page draws it in place of the source view's, whole

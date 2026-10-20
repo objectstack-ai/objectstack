@@ -3143,7 +3143,7 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'external or introspected schema), a hop through a registry-injected system column, a list ' +
       'view bound to a provider other than `object`, and the positions other rules own: `sort` ' +
       '(`sort-field-unknown`), `searchableFields` (`searchable-field-unknown`), the `chart` ' +
-      'bindings, action names, `conditionalFormatting` predicates and `addRecord.formView`. An ' +
+      'bindings, action names and `conditionalFormatting` predicates. An ' +
       'unresolvable binding skips the whole list view on `os validate`, `os build` and `os lint`, so one ' +
       'typo yields one finding; the runtime save door refuses it once instead, as `list-view-object-unknown` ' +
       'or, for a write into a package, `list-view-object-outside-closure`.',

@@ -180,7 +180,17 @@ export const viewForm = defineForm({
         // entries, each a tab in the saved-view switcher.
         { field: 'appearance', type: 'composite', helpText: 'allowedVisualizations: which renderers users may switch between' },
         { field: 'userActions', type: 'composite', helpText: 'Toolbar toggles: sort / search / filter / row height' },
-        { field: 'addRecord', type: 'composite' },
+        // [#24692] Spelled out so the form offers exactly the two live keys:
+        // `mode` and `formView` are `retiredKey()` tombstones on
+        // `AddRecordConfigSchema` (no renderer ever read them — the Add button
+        // opens the create form, `formViews.create` when declared), and
+        // `enabled` is required, so an Add-record block always says whether it
+        // is on.
+        {
+          field: 'addRecord',
+          type: 'composite',
+          fields: [{ field: 'enabled' }, { field: 'position' }],
+        },
         { field: 'showRecordCount' },
       ],
     },

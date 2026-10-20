@@ -622,6 +622,31 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
   ],
   18: [
     {
+      key: 'ui/AddRecordConfig:enabled',
+      from: 'true',
+      to: '(none)',
+      reason:
+        'A RULED narrowing (#24692, ruling letter B′, shipped in 18.x under the standing rule for '
+        + 'breaking narrowings): `addRecord.enabled` is now REQUIRED with no default, so a block that '
+        + 'omits it is refused at parse with a prescription instead of silently meaning `true`. The '
+        + 'old default promised an Add button the renderer never drew — it draws one only for an '
+        + 'explicit `enabled: true`. A stored row or built artifact is not refused: the D2 conversion '
+        + '`add-record-enabled-defaulted` writes the old default (`enabled: true`) onto it, and that '
+        + 'block now draws the button it always declared. To keep a list without one, write '
+        + '`enabled: false` or drop the block.',
+    },
+    {
+      key: 'ui/AddRecordConfig:position',
+      from: '"bottom"',
+      to: '"top"',
+      reason:
+        'A RULED default change (#24692, ruling letter B′): the spec now says what the renderer has '
+        + 'always drawn. objectui places an `addRecord` block with no `position` in the toolbar, at '
+        + 'the top, so the declared `bottom` was never what rendered; no screen moves. A consumer that '
+        + 'reads the PARSED value sees `top` where it saw `bottom`. To put the Add button under the '
+        + 'list, write `position: \'bottom\'` (or `\'both\'`).',
+    },
+    {
       key: 'ui/FormSection:columns',
       from: '1',
       to: '(none)',
