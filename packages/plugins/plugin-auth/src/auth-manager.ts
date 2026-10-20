@@ -134,6 +134,7 @@ import {
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { readAccountInvitation, settleImportResetDelivery } from './account-invitation-marker.js';
 import { resolveClientAddress } from './client-address.js';
+import { vendorClientAddressOptions, withVendorClientAddress } from './client-address-vendor.js';
 import { clientAddressStateEntries, readRequestClientAddress } from './request-client-address.js';
 import {
   REVOKE_SESSION_NOT_FOUND_CODE,
@@ -1058,9 +1059,13 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * The deployment's `server.trustProxy`: believe `X-Forwarded-For` /
    * `X-Real-IP` when establishing a request's client address for the ADR-0069
    * D5 allow-list ({@link allowedIpRanges}) and the D7 login audit
-   * (`last_login_ip`). The same authored value the runtime's inbound rate
-   * limiter reads; `objectstack serve` passes it to both. A host that composes
-   * `AuthPlugin` itself passes the value it gives the dispatcher.
+   * (`last_login_ip`) — and for what the vendored auth library records and
+   * keys on by client address (session `ip_address`, the sign-in audit
+   * fingerprint, its own per-address {@link rateLimit}), which is handed that
+   * same address (`client-address-vendor.ts`). The same authored value the
+   * runtime's inbound rate limiter reads; `objectstack serve` passes it to
+   * both. A host that composes `AuthPlugin` itself passes the value it gives
+   * the dispatcher.
    * @default false
    */
   trustProxy?: boolean;
@@ -3075,19 +3080,23 @@ export class AuthManager {
         return origins.length ? { trustedOrigins: origins } : {};
       })(),
 
-      // Advanced options (cross-subdomain cookies, secure cookies, CSRF, etc.)
-      ...(this.config.advanced ? {
-        advanced: {
-          ...(this.config.advanced.crossSubDomainCookies
-            ? { crossSubDomainCookies: this.config.advanced.crossSubDomainCookies } : {}),
-          ...(this.config.advanced.useSecureCookies != null
-            ? { useSecureCookies: this.config.advanced.useSecureCookies } : {}),
-          ...(this.config.advanced.disableCSRFCheck != null
-            ? { disableCSRFCheck: this.config.advanced.disableCSRFCheck } : {}),
-          ...(this.config.advanced.cookiePrefix != null
-            ? { cookiePrefix: this.config.advanced.cookiePrefix } : {}),
-        },
-      } : {}),
+      // Advanced options (cross-subdomain cookies, secure cookies, CSRF, etc.),
+      // and — always — the library's own client-address source: the one
+      // platform-owned header `handleRequest` writes from the address the
+      // client-address trust rule established (`client-address-vendor.ts`).
+      // Never left at the library's default reader, which knows neither the
+      // transport's peer address nor `server.trustProxy`.
+      advanced: {
+        ...(this.config.advanced?.crossSubDomainCookies
+          ? { crossSubDomainCookies: this.config.advanced.crossSubDomainCookies } : {}),
+        ...(this.config.advanced?.useSecureCookies != null
+          ? { useSecureCookies: this.config.advanced.useSecureCookies } : {}),
+        ...(this.config.advanced?.disableCSRFCheck != null
+          ? { disableCSRFCheck: this.config.advanced.disableCSRFCheck } : {}),
+        ...(this.config.advanced?.cookiePrefix != null
+          ? { cookiePrefix: this.config.advanced.cookiePrefix } : {}),
+        ipAddress: vendorClientAddressOptions(),
+      },
     };
 
     const auth = betterAuth(betterAuthConfig);
@@ -6490,7 +6499,8 @@ export class AuthManager {
    *   `Request` does not carry: `remoteAddress` is its peer address
    *   (`IHttpRequest.remoteAddress`). Omitted, the request's client address is
    *   established from trusted forwarded headers alone, and is undetermined
-   *   when `trustProxy` is not declared.
+   *   when `trustProxy` is not declared. Either way the vendored library is
+   *   handed that address and no other (`client-address-vendor.ts`).
    * @returns Web standard Response object
    */
   async handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
@@ -6506,6 +6516,14 @@ export class AuthManager {
       headers: clientHeaders,
       ...(transport?.remoteAddress ? { remoteAddress: transport.remoteAddress } : {}),
     });
+
+    // The vendored library's OWN client-address reader (session `ip_address`,
+    // the sign-in audit fingerprint, its per-address rate limiter) reads only
+    // the platform-owned header (`vendorClientAddressOptions`, composed in
+    // `createAuthInstance`). Written HERE, from the address just established,
+    // after dropping any copy the caller sent — so the library answers the same
+    // address the D5 allow-list judged, or none. See `client-address-vendor.ts`.
+    request = withVendorClientAddress(request, clientAddress);
 
     // Dev DX: better-auth's CSRF protection rejects state-changing requests
     // (e.g. `/sign-in/email`) with a 403 when neither `Origin` nor `Referer`
